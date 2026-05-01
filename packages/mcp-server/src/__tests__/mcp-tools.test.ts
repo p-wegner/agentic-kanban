@@ -1,4 +1,4 @@
-import { test, expect, beforeAll, afterAll } from "@playwright/test";
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { spawn, type ChildProcess } from "node:child_process";
 import { resolve } from "node:path";
 
@@ -16,7 +16,6 @@ function sendAndReceive(proc: ChildProcess, request: string): Promise<any> {
     let buffer = "";
     const onStdout = (data: Buffer) => {
       buffer += data.toString();
-      // Try to parse a complete JSON message
       const lines = buffer.split("\n");
       for (const line of lines) {
         if (line.trim()) {
@@ -40,19 +39,17 @@ function sendAndReceive(proc: ChildProcess, request: string): Promise<any> {
   });
 }
 
-test.describe("MCP Server Tools", () => {
+describe("MCP Server Tools", () => {
   let proc: ChildProcess;
   let projectId: string;
 
   beforeAll(async () => {
-    // Spawn the MCP server
     proc = spawn("pnpm", ["--filter", "@agentic-kanban/mcp-server", "dev"], {
       cwd: MONOREPO_ROOT,
       stdio: ["pipe", "pipe", "pipe"],
       env: { ...process.env },
     });
 
-    // Wait for server to be ready
     await new Promise<void>((resolve, reject) => {
       const timeout = setTimeout(() => reject(new Error("MCP server didn't start")), 10000);
       proc.stderr!.on("data", (data: Buffer) => {
@@ -63,7 +60,6 @@ test.describe("MCP Server Tools", () => {
       });
     });
 
-    // Initialize
     const initResp = await sendAndReceive(proc, makeRequest("initialize", {
       protocolVersion: "2024-11-05",
       capabilities: {},
@@ -71,7 +67,6 @@ test.describe("MCP Server Tools", () => {
     }));
     expect(initResp.result.serverInfo.name).toBe("agentic-kanban");
 
-    // Send initialized notification
     proc.stdin!.write(JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }) + "\n");
   });
 
@@ -81,7 +76,7 @@ test.describe("MCP Server Tools", () => {
     }
   });
 
-  test("get_context returns project info", async () => {
+  it("get_context returns project info", async () => {
     const resp = await sendAndReceive(proc, makeRequest("tools/call", {
       name: "get_context",
       arguments: {},
@@ -93,7 +88,7 @@ test.describe("MCP Server Tools", () => {
     projectId = data.project.id;
   });
 
-  test("list_issues returns issues array", async () => {
+  it("list_issues returns issues array", async () => {
     const resp = await sendAndReceive(proc, makeRequest("tools/call", {
       name: "list_issues",
       arguments: { projectId },
@@ -103,7 +98,7 @@ test.describe("MCP Server Tools", () => {
     expect(Array.isArray(data)).toBe(true);
   });
 
-  test("create_issue creates a new issue", async () => {
+  it("create_issue creates a new issue", async () => {
     const resp = await sendAndReceive(proc, makeRequest("tools/call", {
       name: "create_issue",
       arguments: {
@@ -118,7 +113,7 @@ test.describe("MCP Server Tools", () => {
     expect(data.title).toBe("MCP test issue");
   });
 
-  test("list_issues shows the created issue", async () => {
+  it("list_issues shows the created issue", async () => {
     const resp = await sendAndReceive(proc, makeRequest("tools/call", {
       name: "list_issues",
       arguments: { projectId },
@@ -129,8 +124,7 @@ test.describe("MCP Server Tools", () => {
     expect(found.priority).toBe("high");
   });
 
-  test("update_issue changes the status", async () => {
-    // First find the issue
+  it("update_issue changes the status", async () => {
     const listResp = await sendAndReceive(proc, makeRequest("tools/call", {
       name: "list_issues",
       arguments: { projectId },
@@ -138,7 +132,6 @@ test.describe("MCP Server Tools", () => {
     const issues = JSON.parse(listResp.result.content[0].text);
     const issue = issues.find((i: any) => i.title === "MCP test issue");
 
-    // Update it
     const resp = await sendAndReceive(proc, makeRequest("tools/call", {
       name: "update_issue",
       arguments: {
@@ -152,7 +145,7 @@ test.describe("MCP Server Tools", () => {
     expect(data.updated).toContain("priority");
   });
 
-  test("get_issue returns issue with workspaces", async () => {
+  it("get_issue returns issue with workspaces", async () => {
     const listResp = await sendAndReceive(proc, makeRequest("tools/call", {
       name: "list_issues",
       arguments: { projectId },
@@ -171,7 +164,7 @@ test.describe("MCP Server Tools", () => {
     expect(Array.isArray(data.workspaces)).toBe(true);
   });
 
-  test("list_workspaces returns array", async () => {
+  it("list_workspaces returns array", async () => {
     const resp = await sendAndReceive(proc, makeRequest("tools/call", {
       name: "list_workspaces",
       arguments: {},

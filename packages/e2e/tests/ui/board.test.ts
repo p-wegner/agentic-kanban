@@ -48,9 +48,9 @@ test.describe("Board interactions", () => {
     await form.locator("select").selectOption("high");
     await form.locator('button:has-text("Add")').click();
 
-    // Verify the issue appears
+    // Verify the issue appears (use .first() to avoid strict mode with title + description match)
     await expect(
-      page.locator("p", { hasText: "E2E Test Issue Unique 123" }),
+      page.locator("p", { hasText: "E2E Test Issue Unique 123" }).first(),
     ).toBeVisible();
   });
 
@@ -335,7 +335,7 @@ test.describe("Board interactions", () => {
       .fill("Should Fail");
     await form.locator('button:has-text("Add")').click();
 
-    // Error banner should appear
-    await expect(page.locator("text=API error: 500")).toBeVisible();
+    // Toast notification should appear
+    await expect(page.locator("text=Failed to create issue")).toBeVisible();
   });
 });
