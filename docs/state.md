@@ -64,6 +64,7 @@
 | D1 | Python (FastAPI) or TypeScript (Hono/Next)? | RESOLVED: TypeScript | `docs/decisions/001-initial-scope.md` |
 | D2 | Claude Agent SDK directly or subprocess CLI? | RESOLVED: subprocess CLI (claude CLI via child_process.spawn) | `docs/prd/04-agent-integration.md` |
 | D3 | Docker isolation or bare-metal git worktrees? | RESOLVED: bare-metal git worktrees | `docs/prd/04-agent-integration.md` |
+| D4 | Schema vs docs alignment — fix code or docs? | RESOLVED: mixed — fix docs for tags/workspace/repo, add exit_code + is_default + tag filter + tag CRUD to code | `docs/decisions/002-align-docs-and-schema.md` |
 
 ### Stage Progress
 | Stage | Description | Status |
@@ -112,6 +113,8 @@ packages/
 | GET | /ws/sessions/:sessionId | WebSocket: stream agent output |
 | GET | /api/tags | List all tags |
 | POST | /api/tags | Create a tag |
+| PATCH | /api/tags/:id | Update a tag (name, color) |
+| DELETE | /api/tags/:id | Delete a tag (removes issue associations) |
 | GET | /api/issues/:id/tags | Get tags for an issue |
 | POST | /api/issues/:id/tags | Assign tag to issue |
 | DELETE | /api/issues/:id/tags/:tagId | Remove tag from issue |
@@ -120,7 +123,7 @@ packages/
 | Tool | Description |
 |------|-------------|
 | get_context | Project info, issue counts by status, active workspaces |
-| list_issues | List issues with status/priority filters |
+| list_issues | List issues with status/priority/tag filters |
 | get_issue | Issue detail with associated workspaces |
 | create_issue | Create issue with title, description, priority |
 | update_issue | Update issue title, description, status, priority |

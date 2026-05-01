@@ -7,6 +7,7 @@ export const projectStatuses = sqliteTable("project_statuses", {
   projectId: text("project_id").notNull().references(() => projects.id),
   name: text("name").notNull(),
   sortOrder: integer("sort_order").notNull().default(0),
+  isDefault: integer("is_default", { mode: "boolean" }).notNull().default(false),
   createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
 });
 

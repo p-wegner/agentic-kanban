@@ -7,15 +7,12 @@ Core data entities and relationships for the reimplementation.
 ```
 Project 1──* Issue
 Project 1──* ProjectStatus (columns/lanes)
-Project 1──* Tag
 Project 1──* Repo
-Issue   *──* Tag
+Issue   *──* Tag (global, not project-scoped)
 Issue   1──* IssueRelationship
 Issue   1──* Workspace
-Issue   1──  IssuePriority
 Workspace 1──* Session
 Workspace 1──* Repo
-Session 1──* ExecutionProcess
 ```
 
 ## Core Entities
@@ -40,7 +37,6 @@ ProjectStatus {
   id: UUID
   project_id: UUID        // FK → Project
   name: String            // "To Do", "In Progress", etc.
-  color: String?
   sort_order: Int         // Column position
   is_default: Boolean     // New issues land here
   created_at: DateTime
@@ -78,17 +74,18 @@ enum IssuePriority {
 ```
 
 ### Tag
-Labels for categorizing issues.
+Labels for categorizing issues. Global across all projects (not project-scoped).
 ```
 Tag {
   id: UUID
-  project_id: UUID        // FK → Project
   name: String
   color: String?
+  created_at: DateTime
 }
 
 // Many-to-many
 IssueTag {
+  id: UUID
   issue_id: UUID
   tag_id: UUID
 }
@@ -112,25 +109,15 @@ An isolated execution environment linked to an issue.
 ```
 Workspace {
   id: UUID
-  issue_id: UUID?         // FK → Issue (optional)
+  issue_id: UUID          // FK → Issue
 
-  name: String?
   branch: String          // Git branch name
-  working_dir: String     // Absolute path to working directory
+  working_dir: String?    // Absolute path to working directory
 
-  status: WorkspaceStatus
-  archived: Boolean
-  pinned: Boolean
+  status: WorkspaceStatus // active, running, stopped, error
 
   created_at: DateTime
   updated_at: DateTime
-}
-
-enum WorkspaceStatus {
-  Created       // Just created, not started
-  Running       // Agent is executing
-  Stopped       // Agent finished or was stopped
-  Error         // Agent crashed
 }
 ```
 
@@ -144,10 +131,9 @@ Repo {
 
   path: String            // Absolute path to repo
   name: String            // Display name
-  remote_url: String?     // Origin URL
+  scripts: String?        // JSON blob for setup/cleanup scripts
 
-  setup_script: String?   // Run after clone
-  cleanup_script: String? // Run before cleanup
+  created_at: DateTime
 }
 ```
 
@@ -162,7 +148,7 @@ Session {
   status: SessionStatus
 
   started_at: DateTime
-  stopped_at: DateTime?
+  ended_at: DateTime?
 
   exit_code: Int?
 }

@@ -4,11 +4,11 @@ import { eq } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 
 const DEFAULT_STATUSES = [
-  { name: "Todo", sortOrder: 0 },
-  { name: "In Progress", sortOrder: 1 },
-  { name: "In Review", sortOrder: 2 },
-  { name: "Done", sortOrder: 3 },
-  { name: "Cancelled", sortOrder: 4 },
+  { name: "Todo", sortOrder: 0, isDefault: true },
+  { name: "In Progress", sortOrder: 1, isDefault: false },
+  { name: "In Review", sortOrder: 2, isDefault: false },
+  { name: "Done", sortOrder: 3, isDefault: false },
+  { name: "Cancelled", sortOrder: 4, isDefault: false },
 ];
 
 async function seed() {
@@ -37,6 +37,7 @@ async function seed() {
       projectId,
       name: status.name,
       sortOrder: status.sortOrder,
+      isDefault: status.isDefault,
       createdAt: now,
     });
   }

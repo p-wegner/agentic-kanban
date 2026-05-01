@@ -9,6 +9,7 @@ export const sessions = sqliteTable("sessions", {
   status: text("status").notNull().default("running"),
   startedAt: text("started_at").notNull().$defaultFn(() => new Date().toISOString()),
   endedAt: text("ended_at"),
+  exitCode: text("exit_code"),
 });
 
 export const sessionsRelations = relations(sessions, ({ one }) => ({

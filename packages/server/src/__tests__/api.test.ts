@@ -11,20 +11,23 @@ import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const MIGRATION_SQL = readFileSync(
-  resolve(__dirname, "../../../shared/drizzle/0000_flawless_trauma.sql"),
-  "utf-8",
-);
+const MIGRATION_FILES = [
+  "../../../shared/drizzle/0000_flawless_trauma.sql",
+  "../../../shared/drizzle/0001_magical_johnny_storm.sql",
+];
 
 function createTestApp() {
   const client = createClient({ url: ":memory:" });
-  // Execute migration statements
-  const statements = MIGRATION_SQL
-    .split("--> statement-breakpoint")
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0);
-  for (const stmt of statements) {
-    client.execute(stmt);
+  // Execute all migration statements
+  for (const file of MIGRATION_FILES) {
+    const sql = readFileSync(resolve(__dirname, file), "utf-8");
+    const statements = sql
+      .split("--> statement-breakpoint")
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
+    for (const stmt of statements) {
+      client.execute(stmt);
+    }
   }
 
   const database = drizzle(client, { schema });

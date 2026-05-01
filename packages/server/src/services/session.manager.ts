@@ -77,7 +77,7 @@ function createSessionManager(
         if (event.type === "exit") {
           const endNow = new Date().toISOString();
           db.update(sessions)
-            .set({ status: "completed", endedAt: endNow })
+            .set({ status: "completed", endedAt: endNow, exitCode: String(event.exitCode ?? 0) })
             .where(eq(sessions.id, sessionId))
             .catch((err) => console.error("Failed to update session:", err));
         }

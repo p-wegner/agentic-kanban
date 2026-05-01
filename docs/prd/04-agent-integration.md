@@ -22,7 +22,7 @@ Key simplification: MCP server and app server can be the **same process**, elimi
 | Tool | Input | Output | Purpose |
 |------|-------|--------|---------|
 | `get_context` | `{project_id?}` | Project, issue, workspace metadata | Agent knows current state |
-| `list_issues` | `{status?, priority?, tag?}` | Issue[] | See what needs doing |
+| `list_issues` | `{project_id, status?, priority?, tag?}` | Issue[] | See what needs doing |
 | `get_issue` | `{issue_id}` | Issue detail | Understand the task |
 | `create_issue` | `{title, description?, priority?}` | Issue | Create new tasks |
 | `update_issue` | `{issue_id, title?, description?, status?, priority?}` | Issue | Move between columns |
