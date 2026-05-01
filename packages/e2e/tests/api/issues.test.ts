@@ -21,8 +21,14 @@ test.describe("Issues API", () => {
   test("GET /api/issues returns empty array for new project", async ({
     request,
   }) => {
+    // Create a fresh project so we know it has no issues
+    const projRes = await request.post("http://localhost:3001/api/projects", {
+      data: { name: "Empty Project" },
+    });
+    const freshProjectId = (await projRes.json()).id;
+
     const res = await request.get(
-      `http://localhost:3001/api/issues?projectId=${projectId}`,
+      `http://localhost:3001/api/issues?projectId=${freshProjectId}`,
     );
     expect(res.ok()).toBeTruthy();
     const body = await res.json();
