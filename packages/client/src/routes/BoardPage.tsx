@@ -2,17 +2,6 @@ import { useEffect, useState } from "react";
 import { Layout } from "../components/Layout.js";
 import { apiFetch } from "../lib/api.js";
 
-interface Project {
-  id: string;
-  name: string;
-}
-
-interface Status {
-  id: string;
-  name: string;
-  sortOrder: number;
-}
-
 interface Issue {
   id: string;
   title: string;
@@ -22,13 +11,21 @@ interface Issue {
   sortOrder: number;
 }
 
-interface ColumnData {
-  status: Status;
+interface StatusWithIssues {
+  id: string;
+  name: string;
+  projectId: string;
+  sortOrder: number;
   issues: Issue[];
 }
 
+interface Project {
+  id: string;
+  name: string;
+}
+
 export function BoardPage() {
-  const [columns, setColumns] = useState<ColumnData[]>([]);
+  const [columns, setColumns] = useState<StatusWithIssues[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -38,17 +35,11 @@ export function BoardPage() {
         if (projects.length === 0) return;
 
         const projectId = projects[0].id;
-        const [statuses, issues] = await Promise.all([
-          apiFetch<Status[]>(`/api/projects/${projectId}/statuses`),
-          apiFetch<Issue[]>(`/api/issues?projectId=${projectId}`),
-        ]);
+        const board = await apiFetch<StatusWithIssues[]>(
+          `/api/projects/${projectId}/board`,
+        );
 
-        const cols: ColumnData[] = statuses.map((s) => ({
-          status: s,
-          issues: issues.filter((i) => i.statusId === s.id),
-        }));
-
-        setColumns(cols);
+        setColumns(board);
       } catch (err) {
         console.error("Failed to load board:", err);
       } finally {
@@ -73,11 +64,11 @@ export function BoardPage() {
       <div className="flex gap-4 p-6 overflow-x-auto min-h-[calc(100vh-57px)]">
         {columns.map((col) => (
           <div
-            key={col.status.id}
+            key={col.id}
             className="flex-shrink-0 w-72 bg-gray-100 rounded-lg p-3"
           >
             <h2 className="font-medium text-sm text-gray-700 mb-3 px-1">
-              {col.status.name}
+              {col.name}
               <span className="ml-2 text-gray-400">{col.issues.length}</span>
             </h2>
             <div className="space-y-2">
