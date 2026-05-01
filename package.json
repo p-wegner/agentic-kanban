@@ -12,6 +12,7 @@
     "build": "pnpm --filter shared build && pnpm --filter server build && pnpm --filter client build",
     "test": "pnpm --filter server test",
     "test:e2e": "pnpm --filter e2e test",
+    "cli": "pnpm --filter @agentic-kanban/server exec tsx src/cli.ts",
     "db:generate": "pnpm --filter shared db:generate",
     "db:migrate": "pnpm --filter server db:migrate",
     "db:seed": "pnpm --filter server db:seed"

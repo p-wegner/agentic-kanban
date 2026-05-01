@@ -18,8 +18,6 @@ export const workspacesRelations = relations(workspaces, ({ one, many }) => ({
     references: [issues.id],
   }),
   sessions: many(sessions),
-  repos: many(repos),
 }));
 
 import { sessions } from "./sessions.js";
-import { repos } from "./repos.js";

@@ -1,7 +1,8 @@
 // API request/response types
 
 export interface CreateProjectRequest {
-  name: string;
+  name?: string;
+  repoPath: string;
   description?: string;
   color?: string;
 }
@@ -10,6 +11,19 @@ export interface UpdateProjectRequest {
   name?: string;
   description?: string;
   color?: string;
+}
+
+export interface ProjectResponse {
+  id: string;
+  name: string;
+  description: string | null;
+  color: string | null;
+  repoPath: string;
+  repoName: string;
+  defaultBranch: string;
+  remoteUrl: string | null;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface CreateIssueRequest {
@@ -80,7 +94,7 @@ export interface WorkspaceWithIssue extends WorkspaceResponse {
 // Stage 3 types
 
 export interface SetupWorkspaceRequest {
-  repoPath: string;
+  repoPath?: string;
 }
 
 export interface LaunchAgentRequest {

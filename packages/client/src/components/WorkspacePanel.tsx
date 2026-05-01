@@ -9,8 +9,18 @@ import type {
   DiffResponse,
 } from "@agentic-kanban/shared";
 
+interface Project {
+  id: string;
+  name: string;
+  repoPath: string;
+  repoName: string;
+  defaultBranch: string;
+  remoteUrl: string | null;
+}
+
 interface WorkspacePanelProps {
   issue: IssueWithStatus;
+  project: Project | null;
   onClose: () => void;
   onWorkspaceChange?: () => void;
 }
@@ -21,7 +31,7 @@ const STATUS_COLORS: Record<string, string> = {
   closed: "bg-gray-100 text-gray-500",
 };
 
-export function WorkspacePanel({ issue, onClose, onWorkspaceChange }: WorkspacePanelProps) {
+export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange }: WorkspacePanelProps) {
   const [workspaces, setWorkspaces] = useState<WorkspaceResponse[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
@@ -33,7 +43,6 @@ export function WorkspacePanel({ issue, onClose, onWorkspaceChange }: WorkspaceP
 
   // Create form
   const [branchName, setBranchName] = useState("");
-  const [repoPath, setRepoPath] = useState("");
   const [prompt, setPrompt] = useState("");
 
   const { state: wsState, messages, disconnect } = useWebSocket(activeSession);
@@ -84,16 +93,12 @@ export function WorkspacePanel({ issue, onClose, onWorkspaceChange }: WorkspaceP
   }
 
   async function handleSetup(wsId: string) {
-    if (!repoPath.trim()) {
-      setError("Repository path is required for setup");
-      return;
-    }
     setActionLoading(true);
     setError(null);
     try {
       await apiFetch(`/api/workspaces/${wsId}/setup`, {
         method: "POST",
-        body: JSON.stringify({ repoPath: repoPath.trim() }),
+        body: JSON.stringify({}),
       });
       await fetchWorkspaces();
     } catch (err) {
@@ -154,16 +159,12 @@ export function WorkspacePanel({ issue, onClose, onWorkspaceChange }: WorkspaceP
   }
 
   async function handleMerge(wsId: string) {
-    if (!repoPath.trim()) {
-      setError("Repository path is required for merge");
-      return;
-    }
     setActionLoading(true);
     setError(null);
     try {
       await apiFetch(`/api/workspaces/${wsId}/merge`, {
         method: "POST",
-        body: JSON.stringify({ repoPath: repoPath.trim() }),
+        body: JSON.stringify({}),
       });
       await fetchWorkspaces();
       onWorkspaceChange?.();
@@ -200,19 +201,16 @@ export function WorkspacePanel({ issue, onClose, onWorkspaceChange }: WorkspaceP
             </div>
           )}
 
-          {/* Repo path (shared for setup/merge) */}
-          <div>
-            <label className="text-xs font-medium text-gray-600 block mb-1">
-              Repository Path
-            </label>
-            <input
-              type="text"
-              value={repoPath}
-              onChange={(e) => setRepoPath(e.target.value)}
-              placeholder="e.g. F:\projects\my-project"
-              className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
-            />
-          </div>
+          {/* Read-only repo info from project */}
+          {project && (
+            <div className="text-xs text-gray-500 space-y-0.5">
+              <div><span className="font-medium text-gray-600">Repo:</span> {project.repoPath}</div>
+              <div><span className="font-medium text-gray-600">Branch:</span> {project.defaultBranch}</div>
+              {project.remoteUrl && (
+                <div><span className="font-medium text-gray-600">Remote:</span> {project.remoteUrl}</div>
+              )}
+            </div>
+          )}
 
           {loading ? (
             <div className="text-sm text-gray-500">Loading workspaces...</div>

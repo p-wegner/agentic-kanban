@@ -11,7 +11,7 @@ export function registerStartWorkspace(server: McpServer) {
     "Create a workspace for an issue: creates a git worktree and returns workspace info",
     {
       issueId: z.string().describe("The issue ID to create a workspace for"),
-      repoPath: z.string().describe("Absolute path to the git repository"),
+      repoPath: z.string().optional().describe("Absolute path to the git repository (auto-detected from project if omitted)"),
       branch: z.string().optional().describe("Branch name (defaults to 'workspace/{issueId-short}')"),
     },
     async ({ issueId, repoPath, branch }) => {
@@ -21,12 +21,28 @@ export function registerStartWorkspace(server: McpServer) {
         return { content: [{ type: "text" as const, text: `Issue ${issueId} not found` }] };
       }
 
+      // Resolve repoPath from issue → project chain if not provided
+      let resolvedRepoPath = repoPath;
+      if (!resolvedRepoPath) {
+        const issue = issues[0];
+        const projectRows = await db
+          .select({ repoPath: schema.projects.repoPath })
+          .from(schema.projects)
+          .where(eq(schema.projects.id, issue.projectId))
+          .limit(1);
+
+        if (projectRows.length === 0 || !projectRows[0].repoPath) {
+          return { content: [{ type: "text" as const, text: `Project has no repo path configured. Provide repoPath explicitly.` }] };
+        }
+        resolvedRepoPath = projectRows[0].repoPath;
+      }
+
       const branchName = branch || `workspace/${issueId.slice(0, 8)}`;
       const id = randomUUID();
       const now = new Date().toISOString();
 
       try {
-        const worktreePath = await gitService.createWorktree(repoPath, branchName);
+        const worktreePath = await gitService.createWorktree(resolvedRepoPath, branchName);
 
         await db.insert(schema.workspaces).values({
           id,

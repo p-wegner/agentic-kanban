@@ -17,12 +17,17 @@ import type {
 interface Project {
   id: string;
   name: string;
+  repoPath: string;
+  repoName: string;
+  defaultBranch: string;
+  remoteUrl: string | null;
 }
 
 export function BoardPage() {
   const [columns, setColumns] = useState<StatusWithIssues[]>([]);
   const [loading, setLoading] = useState(true);
-  const [projectId, setProjectId] = useState<string | null>(null);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
   const [creatingInColumnId, setCreatingInColumnId] = useState<string | null>(null);
   const [selectedIssue, setSelectedIssue] = useState<IssueWithStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -32,21 +37,47 @@ export function BoardPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [priorityFilter, setPriorityFilter] = useState("");
 
-  const refetchBoard = useCallback(async () => {
-    const projects = await apiFetch<Project[]>("/api/projects");
-    if (projects.length === 0) return;
-    const pid = projects[0].id;
-    setProjectId(pid);
+  const refetchBoard = useCallback(async (projectId?: string) => {
+    const pid = projectId || activeProjectId;
+    if (!pid) return;
     const board = await apiFetch<StatusWithIssues[]>(
       `/api/projects/${pid}/board`,
     );
     setColumns(board);
+  }, [activeProjectId]);
+
+  const loadProjects = useCallback(async () => {
+    const projs = await apiFetch<Project[]>("/api/projects");
+    setProjects(projs);
+    if (projs.length === 0) return;
+
+    // Get active project preference
+    try {
+      const pref = await apiFetch<{ projectId: string | null }>("/api/preferences/active-project");
+      if (pref.projectId && projs.some((p) => p.id === pref.projectId)) {
+        setActiveProjectId(pref.projectId);
+        return pref.projectId;
+      }
+    } catch {
+      // Ignore — fall back to first project
+    }
+
+    // Fallback to first project
+    const firstId = projs[0].id;
+    setActiveProjectId(firstId);
+    return firstId;
   }, []);
 
   useEffect(() => {
     async function load() {
       try {
-        await refetchBoard();
+        const pid = await loadProjects();
+        if (pid) {
+          const board = await apiFetch<StatusWithIssues[]>(
+            `/api/projects/${pid}/board`,
+          );
+          setColumns(board);
+        }
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to load board");
       } finally {
@@ -54,7 +85,20 @@ export function BoardPage() {
       }
     }
     load();
-  }, [refetchBoard]);
+  }, [loadProjects]);
+
+  async function handleProjectChange(id: string) {
+    setActiveProjectId(id);
+    try {
+      await apiFetch("/api/preferences/active-project", {
+        method: "PUT",
+        body: JSON.stringify({ projectId: id }),
+      });
+      await refetchBoard(id);
+    } catch (err) {
+      showToast("Failed to switch project", "error");
+    }
+  }
 
   async function handleCreateIssue(data: CreateIssueRequest) {
     setMutating(true);
@@ -207,18 +251,18 @@ export function BoardPage() {
     );
   }
 
-  // No project found
-  if (!projectId) {
+  // No projects registered
+  if (projects.length === 0 || !activeProjectId) {
     return (
       <Layout>
         <div className="flex items-center justify-center h-96 text-gray-500">
           <div className="text-center">
             <p className="text-lg font-medium text-gray-700 mb-2">
-              No project found
+              No projects registered
             </p>
             <p className="text-sm text-gray-500">
-              Run <code className="bg-gray-100 px-1 rounded">pnpm db:seed</code>{" "}
-              to create a default project.
+              Run <code className="bg-gray-100 px-1 rounded">pnpm cli -- register &lt;path&gt;</code>{" "}
+              to register a git repo as a project.
             </p>
           </div>
         </div>
@@ -226,8 +270,13 @@ export function BoardPage() {
     );
   }
 
+  const activeProject = projects.find((p) => p.id === activeProjectId);
+
   return (
     <Layout
+      projects={projects}
+      activeProjectId={activeProjectId}
+      onProjectChange={handleProjectChange}
       searchQuery={searchQuery}
       onSearchChange={setSearchQuery}
       priorityFilter={priorityFilter}
@@ -275,7 +324,7 @@ export function BoardPage() {
           <BoardColumn
             key={col.id}
             column={col}
-            projectId={projectId}
+            projectId={activeProjectId}
             creatingInColumn={creatingInColumnId}
             onCreateClick={setCreatingInColumnId}
             onCreateCancel={() => setCreatingInColumnId(null)}
@@ -292,7 +341,7 @@ export function BoardPage() {
             issuesWithWorkspaces={issuesWithWorkspaces}
           >
             <CreateIssueForm
-              projectId={projectId}
+              projectId={activeProjectId}
               statusId={col.id}
               onSubmit={handleCreateIssue}
               onCancel={() => setCreatingInColumnId(null)}
@@ -312,8 +361,9 @@ export function BoardPage() {
       {workspaceIssue && (
         <WorkspacePanel
           issue={workspaceIssue}
+          project={activeProject ?? null}
           onClose={() => setWorkspaceIssue(null)}
-          onWorkspaceChange={refetchBoard}
+          onWorkspaceChange={() => refetchBoard()}
         />
       )}
       <ToastContainer />

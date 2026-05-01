@@ -4,4 +4,5 @@ export { issues, issuesRelations } from "./issues.js";
 export { tags, issueTags, tagsRelations, issueTagsRelations } from "./tags.js";
 export { workspaces, workspacesRelations } from "./workspaces.js";
 export { sessions, sessionsRelations } from "./sessions.js";
-export { repos, reposRelations } from "./repos.js";
+export { repos } from "./repos.js";
+export { preferences } from "./preferences.js";

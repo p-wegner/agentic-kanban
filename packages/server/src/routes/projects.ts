@@ -3,6 +3,7 @@ import { db } from "../db/index.js";
 import { projects, projectStatuses, issues } from "@agentic-kanban/shared/schema";
 import { eq } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
+import { detectRepoInfo } from "../services/git-info.service.js";
 import type { Database } from "../db/index.js";
 
 export function createProjectsRoute(database: Database = db) {
@@ -20,16 +21,36 @@ export function createProjectsRoute(database: Database = db) {
     const now = new Date().toISOString();
     const id = randomUUID();
 
+    if (!body.repoPath) {
+      return c.json({ error: "repoPath is required" }, 400);
+    }
+
+    let repoInfo;
+    try {
+      repoInfo = await detectRepoInfo(body.repoPath);
+    } catch (err) {
+      return c.json(
+        { error: `Invalid repo: ${err instanceof Error ? err.message : String(err)}` },
+        400,
+      );
+    }
+
+    const name = body.name || repoInfo.repoName;
+
     await database.insert(projects).values({
       id,
-      name: body.name,
+      name,
       description: body.description ?? null,
       color: body.color ?? null,
+      repoPath: repoInfo.repoPath,
+      repoName: repoInfo.repoName,
+      defaultBranch: repoInfo.defaultBranch,
+      remoteUrl: repoInfo.remoteUrl,
       createdAt: now,
       updatedAt: now,
     });
 
-    return c.json({ id, name: body.name }, 201);
+    return c.json({ id, name, repoPath: repoInfo.repoPath }, 201);
   });
 
   // GET /api/projects/:id/statuses

@@ -3,7 +3,7 @@
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Project Status
-This project is **MVP complete** (Stages 0-5 done). Tech stack: TypeScript monorepo — Hono + Drizzle + React + MCP SDK. Progress tracked in `docs/state.md`.
+This project is **Stage 6 complete** (Stages 0-6 done). Tech stack: TypeScript monorepo — Hono + Drizzle + React + MCP SDK. Progress tracked in `docs/state.md`.
 
 All documented features have been visually verified (2026-05-01):
 - Board renders 5 columns (Todo, In Progress, In Review, Done, Cancelled) with empty states
@@ -13,9 +13,11 @@ All documented features have been visually verified (2026-05-01):
 - Tags: CRUD via dropdown in detail panel, removable badges, 4 seed tags (bug, feature, improvement, docs)
 - Search/filter: real-time text search in header, priority dropdown filter, keyboard shortcut `/` to focus, Escape to clear
 - Drag-and-drop: HTML5 DnD between columns (mouse-based, use `run-code` for `/` key on Windows/MSYS)
-- Workspace panel: slide-in with repo path input, "New Workspace" button
-- API routes: health, projects, board aggregation, issues (CRUD), workspaces (CRUD + actions), tags (CRUD), sessions (WebSocket)
+- Workspace panel: slide-in with read-only repo info, "New Workspace" button (repo resolved from project)
+- Project switcher: dropdown in header when multiple projects registered
+- API routes: health, projects (with git info), preferences, board aggregation, issues (CRUD), workspaces (CRUD + actions), tags (CRUD), sessions (WebSocket)
 - MCP server: 8 tools via stdio JSON-RPC
+- CLI: `pnpm cli -- register <path>` to register a git repo as a project
 
 ## What This Is
 Cleanroom reimplementation of [vibe-kanban](https://github.com/BloopAI/vibe-kanban) — a kanban board for managing AI-driven coding tasks. Personal use only, single user, local-first. The original (being sunset) is 34 Rust crates; we're building a focused alternative.
@@ -56,13 +58,17 @@ Every feature that has a UI component must be visually verified using the `playw
 
 ## Monorepo Commands
 - `pnpm dev` — start server + client concurrently
-- `pnpm --filter @agentic-kanban/server test` — Vitest unit tests (37 tests)
+- `pnpm --filter @agentic-kanban/server test` — Vitest unit tests (27 tests)
 - `pnpm test:e2e` — Playwright E2E tests
 - `pnpm --filter @agentic-kanban/mcp-server dev` — run MCP server for testing
-- `pnpm db:migrate && pnpm db:seed` — reset DB to clean state
+- `pnpm db:migrate && pnpm db:seed` — reset DB to clean state (tags only, no default project)
+- `pnpm cli -- register <path>` — register a git repo as a project
+- `pnpm cli -- list` — list registered projects
+- `pnpm cli -- unregister <name>` — remove a project
+- `pnpm cli -- cleanup` — show stale worktrees for closed workspaces
 
 ## MVP Core Loop
-Create issue → Start workspace (git branch) → Launch Claude Code → View diff → Merge
+Register repo (`pnpm cli -- register <path>`) → Create issue → Start workspace (auto-resolves git branch from project) → Launch Claude Code → View diff → Merge
 
 ## Reference Codebase
 The original vibe-kanban is at `F:/projects/vibe-kanban` for reference. Key files:

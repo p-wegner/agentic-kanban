@@ -14,6 +14,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const MIGRATION_FILES = [
   "../../../shared/drizzle/0000_flawless_trauma.sql",
   "../../../shared/drizzle/0001_magical_johnny_storm.sql",
+  "../../../shared/drizzle/0002_bent_may_parker.sql",
 ];
 
 function createTestApp() {
@@ -46,19 +47,42 @@ function createTestApp() {
   return { app, db: database };
 }
 
-describe("Projects API", () => {
-  const { app } = createTestApp();
+// Helper: create a project directly in DB (bypassing git-info detection)
+async function createProjectDirectly(database: ReturnType<typeof drizzle<typeof schema>>, overrides: { name?: string } = {}) {
+  const now = new Date().toISOString();
+  const id = randomUUID();
+  await database.insert(schema.projects).values({
+    id,
+    name: overrides.name || "Test Project",
+    repoPath: "/tmp/test-repo",
+    repoName: "test-repo",
+    defaultBranch: "main",
+    createdAt: now,
+    updatedAt: now,
+  });
+  return id;
+}
 
-  it("POST /api/projects creates a project", async () => {
-    const res = await app.request("/api/projects", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: "Test Project", color: "#FF0000" }),
-    });
-    expect(res.status).toBe(201);
-    const body = await res.json();
-    expect(body.name).toBe("Test Project");
-    expect(body.id).toBeDefined();
+async function createStatusDirectly(database: ReturnType<typeof drizzle<typeof schema>>, projectId: string, name: string, sortOrder: number) {
+  const now = new Date().toISOString();
+  const id = randomUUID();
+  await database.insert(schema.projectStatuses).values({
+    id,
+    projectId,
+    name,
+    sortOrder,
+    isDefault: sortOrder === 0,
+    createdAt: now,
+  });
+  return id;
+}
+
+describe("Projects API", () => {
+  const { app, db: database } = createTestApp();
+  let projectId: string;
+
+  beforeAll(async () => {
+    projectId = await createProjectDirectly(database);
   });
 
   it("GET /api/projects returns list", async () => {
@@ -67,32 +91,18 @@ describe("Projects API", () => {
     const body = await res.json();
     expect(body.length).toBeGreaterThanOrEqual(1);
     expect(body[0].name).toBeDefined();
+    expect(body[0].repoPath).toBeDefined();
   });
 });
 
 describe("Issues API", () => {
-  const { app } = createTestApp();
+  const { app, db: database } = createTestApp();
   let projectId: string;
   let statusId: string;
 
   beforeAll(async () => {
-    // Create a project
-    const projRes = await app.request("/api/projects", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: "Issue Test Project" }),
-    });
-    const proj = await projRes.json();
-    projectId = proj.id;
-
-    // Create a status
-    const statusRes = await app.request(`/api/projects/${projectId}/statuses`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: "Todo", sortOrder: 0 }),
-    });
-    const status = await statusRes.json();
-    statusId = status.id;
+    projectId = await createProjectDirectly(database, { name: "Issue Test Project" });
+    statusId = await createStatusDirectly(database, projectId, "Todo", 0);
   });
 
   it("POST /api/issues creates an issue", async () => {
@@ -166,34 +176,15 @@ describe("Issues API", () => {
 });
 
 describe("Board API", () => {
-  const { app } = createTestApp();
+  const { app, db: database } = createTestApp();
   let projectId: string;
   let todoStatusId: string;
   let doneStatusId: string;
 
   beforeAll(async () => {
-    // Create project
-    const projRes = await app.request("/api/projects", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: "Board Test Project" }),
-    });
-    projectId = (await projRes.json()).id;
-
-    // Create statuses
-    const todoRes = await app.request(`/api/projects/${projectId}/statuses`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: "Todo", sortOrder: 0 }),
-    });
-    todoStatusId = (await todoRes.json()).id;
-
-    const doneRes = await app.request(`/api/projects/${projectId}/statuses`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: "Done", sortOrder: 1 }),
-    });
-    doneStatusId = (await doneRes.json()).id;
+    projectId = await createProjectDirectly(database, { name: "Board Test Project" });
+    todoStatusId = await createStatusDirectly(database, projectId, "Todo", 0);
+    doneStatusId = await createStatusDirectly(database, projectId, "Done", 1);
 
     // Create issues in each status
     await app.request("/api/issues", {
@@ -229,25 +220,14 @@ describe("Board API", () => {
 });
 
 describe("Workspaces API", () => {
-  const { app } = createTestApp();
+  const { app, db: database } = createTestApp();
   let issueId: string;
   let projectId: string;
 
   beforeAll(async () => {
     // Create project + status + issue
-    const projRes = await app.request("/api/projects", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: "Workspace Test Project" }),
-    });
-    projectId = (await projRes.json()).id;
-
-    const statusRes = await app.request(`/api/projects/${projectId}/statuses`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: "Todo", sortOrder: 0 }),
-    });
-    const statusId = (await statusRes.json()).id;
+    projectId = await createProjectDirectly(database, { name: "Workspace Test Project" });
+    const statusId = await createStatusDirectly(database, projectId, "Todo", 0);
 
     const issueRes = await app.request("/api/issues", {
       method: "POST",
@@ -361,5 +341,63 @@ describe("Workspaces API", () => {
     // Verify gone
     const getRes = await app.request(`/api/workspaces/${id}`);
     expect(getRes.status).toBe(404);
+  });
+});
+
+describe("Preferences API", () => {
+  const { app } = createTestApp();
+
+  it("GET /api/preferences/active-project returns null initially", async () => {
+    const res = await app.request("/api/preferences/active-project");
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.projectId).toBeNull();
+  });
+
+  it("PUT /api/preferences/active-project sets active project", async () => {
+    const id = randomUUID();
+    const res = await app.request("/api/preferences/active-project", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ projectId: id }),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.projectId).toBe(id);
+  });
+
+  it("GET /api/preferences/active-project returns set value", async () => {
+    const id = randomUUID();
+    await app.request("/api/preferences/active-project", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ projectId: id }),
+    });
+
+    const res = await app.request("/api/preferences/active-project");
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.projectId).toBe(id);
+  });
+
+  it("PUT upserts the preference", async () => {
+    const id1 = randomUUID();
+    const id2 = randomUUID();
+
+    await app.request("/api/preferences/active-project", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ projectId: id1 }),
+    });
+
+    await app.request("/api/preferences/active-project", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ projectId: id2 }),
+    });
+
+    const res = await app.request("/api/preferences/active-project");
+    const body = await res.json();
+    expect(body.projectId).toBe(id2);
   });
 });

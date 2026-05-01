@@ -6,22 +6,21 @@ test.describe("Board API", () => {
   let doneStatusId: string;
 
   test.beforeAll(async ({ request }) => {
-    // Create a dedicated project for board tests
-    const projRes = await request.post("http://localhost:3001/api/projects", {
-      data: { name: "Board Test Project" },
-    });
-    projectId = (await projRes.json()).id;
+    // Get the project created by global setup
+    const projectsRes = await request.get("http://localhost:3001/api/projects");
+    const projects = await projectsRes.json();
+    projectId = projects[0].id;
 
     // Create statuses
     const todoRes = await request.post(
       `http://localhost:3001/api/projects/${projectId}/statuses`,
-      { data: { name: "Todo", sortOrder: 0 } },
+      { data: { name: "Board Todo", sortOrder: 0 } },
     );
     todoStatusId = (await todoRes.json()).id;
 
     const doneRes = await request.post(
       `http://localhost:3001/api/projects/${projectId}/statuses`,
-      { data: { name: "Done", sortOrder: 1 } },
+      { data: { name: "Board Done", sortOrder: 1 } },
     );
     doneStatusId = (await doneRes.json()).id;
 
@@ -43,13 +42,15 @@ test.describe("Board API", () => {
     expect(res.ok()).toBeTruthy();
     const body = await res.json();
 
-    expect(body.length).toBe(2);
-    expect(body[0].name).toBe("Todo");
-    expect(body[0].issues.length).toBe(1);
-    expect(body[0].issues[0].title).toBe("Board task 1");
-    expect(body[0].issues[0].statusName).toBe("Todo");
-    expect(body[1].name).toBe("Done");
-    expect(body[1].issues.length).toBe(1);
+    expect(body.length).toBeGreaterThanOrEqual(2);
+    const todoCol = body.find((s: { name: string }) => s.name === "Board Todo");
+    const doneCol = body.find((s: { name: string }) => s.name === "Board Done");
+    expect(todoCol).toBeDefined();
+    expect(todoCol.issues.length).toBe(1);
+    expect(todoCol.issues[0].title).toBe("Board task 1");
+    expect(todoCol.issues[0].statusName).toBe("Board Todo");
+    expect(doneCol).toBeDefined();
+    expect(doneCol.issues.length).toBe(1);
   });
 
   test("GET /api/projects/:id/board returns 404 for missing project", async ({
@@ -74,8 +75,6 @@ test.describe("Board API", () => {
       `http://localhost:3001/api/projects/${projectId}/board`,
     );
     const body = await res.json();
-    expect(body.length).toBe(3);
-
     const reviewCol = body.find(
       (s: { name: string }) => s.name === "Review",
     );

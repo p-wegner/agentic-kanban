@@ -1,24 +1,63 @@
 import { Hono } from "hono";
 import { db } from "../db/index.js";
-import { workspaces, sessions } from "@agentic-kanban/shared/schema";
+import { workspaces, sessions, issues, projects } from "@agentic-kanban/shared/schema";
 import { eq } from "drizzle-orm";
 import * as gitService from "../services/git.service.js";
 import type { SessionManager } from "../services/session.manager.js";
+import type { Database } from "../db/index.js";
 
-export function createWorkspaceActionsRoute(getSessionManager: () => SessionManager) {
+/**
+ * Resolve repo info from workspace → issue → project chain.
+ */
+async function resolveProjectRepo(
+  workspaceId: string,
+  database: Database = db,
+): Promise<{ repoPath: string; defaultBranch: string }> {
+  const wsRows = await database
+    .select()
+    .from(workspaces)
+    .where(eq(workspaces.id, workspaceId))
+    .limit(1);
+  if (wsRows.length === 0) {
+    throw new Error("Workspace not found");
+  }
+
+  const issueRows = await database
+    .select({ projectId: issues.projectId })
+    .from(issues)
+    .where(eq(issues.id, wsRows[0].issueId))
+    .limit(1);
+  if (issueRows.length === 0) {
+    throw new Error("Issue not found");
+  }
+
+  const projectRows = await database
+    .select({ repoPath: projects.repoPath, defaultBranch: projects.defaultBranch })
+    .from(projects)
+    .where(eq(projects.id, issueRows[0].projectId))
+    .limit(1);
+  if (projectRows.length === 0) {
+    throw new Error("Project not found");
+  }
+
+  return {
+    repoPath: projectRows[0].repoPath,
+    defaultBranch: projectRows[0].defaultBranch,
+  };
+}
+
+export function createWorkspaceActionsRoute(
+  getSessionManager: () => SessionManager,
+  database: Database = db,
+) {
   const router = new Hono();
 
   // POST /api/workspaces/:id/setup — create git worktree
   router.post("/:id/setup", async (c) => {
     const id = c.req.param("id");
-    const body = await c.req.json();
-
-    if (!body.repoPath) {
-      return c.json({ error: "repoPath is required" }, 400);
-    }
 
     // Look up workspace
-    const rows = await db.select().from(workspaces).where(eq(workspaces.id, id)).limit(1);
+    const rows = await database.select().from(workspaces).where(eq(workspaces.id, id)).limit(1);
     if (rows.length === 0) {
       return c.json({ error: "Workspace not found" }, 404);
     }
@@ -26,10 +65,12 @@ export function createWorkspaceActionsRoute(getSessionManager: () => SessionMana
     const workspace = rows[0];
 
     try {
-      const worktreePath = await gitService.createWorktree(body.repoPath, workspace.branch);
+      const { repoPath } = await resolveProjectRepo(id, database);
+
+      const worktreePath = await gitService.createWorktree(repoPath, workspace.branch);
 
       const now = new Date().toISOString();
-      await db
+      await database
         .update(workspaces)
         .set({ workingDir: worktreePath, updatedAt: now })
         .where(eq(workspaces.id, id));
@@ -52,7 +93,7 @@ export function createWorkspaceActionsRoute(getSessionManager: () => SessionMana
       return c.json({ error: "prompt is required" }, 400);
     }
 
-    const rows = await db.select().from(workspaces).where(eq(workspaces.id, id)).limit(1);
+    const rows = await database.select().from(workspaces).where(eq(workspaces.id, id)).limit(1);
     if (rows.length === 0) {
       return c.json({ error: "Workspace not found" }, 404);
     }
@@ -61,7 +102,7 @@ export function createWorkspaceActionsRoute(getSessionManager: () => SessionMana
       const sessionId = await getSessionManager().startSession(id, body.prompt, body.agentCommand);
 
       const now = new Date().toISOString();
-      await db.update(workspaces).set({ status: "active", updatedAt: now }).where(eq(workspaces.id, id));
+      await database.update(workspaces).set({ status: "active", updatedAt: now }).where(eq(workspaces.id, id));
 
       return c.json({ sessionId }, 201);
     } catch (err) {
@@ -77,7 +118,7 @@ export function createWorkspaceActionsRoute(getSessionManager: () => SessionMana
     const id = c.req.param("id");
 
     // Find running sessions for this workspace
-    const runningSessions = await db
+    const runningSessions = await database
       .select()
       .from(sessions)
       .where(eq(sessions.workspaceId, id));
@@ -91,7 +132,7 @@ export function createWorkspaceActionsRoute(getSessionManager: () => SessionMana
     }
 
     const now = new Date().toISOString();
-    await db.update(workspaces).set({ status: "idle", updatedAt: now }).where(eq(workspaces.id, id));
+    await database.update(workspaces).set({ status: "idle", updatedAt: now }).where(eq(workspaces.id, id));
 
     return c.json({ stopped });
   });
@@ -100,7 +141,7 @@ export function createWorkspaceActionsRoute(getSessionManager: () => SessionMana
   router.get("/:id/diff", async (c) => {
     const id = c.req.param("id");
 
-    const rows = await db.select().from(workspaces).where(eq(workspaces.id, id)).limit(1);
+    const rows = await database.select().from(workspaces).where(eq(workspaces.id, id)).limit(1);
     if (rows.length === 0) {
       return c.json({ error: "Workspace not found" }, 404);
     }
@@ -111,7 +152,8 @@ export function createWorkspaceActionsRoute(getSessionManager: () => SessionMana
     }
 
     try {
-      const diff = await gitService.getDiff(workspace.workingDir);
+      const { defaultBranch } = await resolveProjectRepo(id, database);
+      const diff = await gitService.getDiff(workspace.workingDir, defaultBranch);
       const stats = parseDiffStats(diff);
       return c.json({ diff, stats });
     } catch (err) {
@@ -125,20 +167,16 @@ export function createWorkspaceActionsRoute(getSessionManager: () => SessionMana
   // POST /api/workspaces/:id/merge — merge branch, cleanup, close
   router.post("/:id/merge", async (c) => {
     const id = c.req.param("id");
-    const body = await c.req.json();
 
-    const rows = await db.select().from(workspaces).where(eq(workspaces.id, id)).limit(1);
+    const rows = await database.select().from(workspaces).where(eq(workspaces.id, id)).limit(1);
     if (rows.length === 0) {
       return c.json({ error: "Workspace not found" }, 404);
     }
 
     const workspace = rows[0];
-    const repoPath = body.repoPath;
-    if (!repoPath) {
-      return c.json({ error: "repoPath is required" }, 400);
-    }
 
     try {
+      const { repoPath } = await resolveProjectRepo(id, database);
       const result = await gitService.mergeBranch(repoPath, workspace.branch);
 
       // Cleanup worktree if it exists
@@ -151,7 +189,7 @@ export function createWorkspaceActionsRoute(getSessionManager: () => SessionMana
       }
 
       const now = new Date().toISOString();
-      await db
+      await database
         .update(workspaces)
         .set({ status: "closed", workingDir: null, updatedAt: now })
         .where(eq(workspaces.id, id));
@@ -169,7 +207,7 @@ export function createWorkspaceActionsRoute(getSessionManager: () => SessionMana
   router.get("/:id/sessions", async (c) => {
     const id = c.req.param("id");
 
-    const result = await db
+    const result = await database
       .select()
       .from(sessions)
       .where(eq(sessions.workspaceId, id));

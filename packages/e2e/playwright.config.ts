@@ -4,6 +4,7 @@ export default defineConfig({
   testDir: "./tests",
   fullyParallel: false,
   retries: 0,
+  globalSetup: "./global-setup.ts",
   use: {
     baseURL: "http://localhost:5173",
   },

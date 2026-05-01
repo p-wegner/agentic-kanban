@@ -32,7 +32,7 @@ app.get(
 app.route("/api", routes);
 
 // Workspace action routes (separate mount with lazy session manager access)
-app.route("/api/workspaces", createWorkspaceActionsRoute(() => sessionManager));
+app.route("/api/workspaces", createWorkspaceActionsRoute(() => sessionManager, db));
 
 // Start server
 const port = Number(process.env.PORT) || 3001;
