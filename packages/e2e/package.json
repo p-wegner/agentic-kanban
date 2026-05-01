@@ -1,0 +1,14 @@
+{
+  "name": "@agentic-kanban/e2e",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "playwright test",
+    "test:headed": "playwright test --headed"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.59.0",
+    "typescript": "^5.8.3"
+  }
+}

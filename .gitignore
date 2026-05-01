@@ -1,0 +1,14 @@
+node_modules/
+dist/
+*.db
+*.db-journal
+*.sqlite
+.env
+.env.local
+.DS_Store
+Thumbs.db
+*.tsbuildinfo
+test-results/
+playwright-report/
+blob-report/
+coverage/

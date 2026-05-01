@@ -1,0 +1,23 @@
+{
+  "name": "agentic-kanban",
+  "private": true,
+  "packageManager": "pnpm@10.12.1",
+  "pnpm": {
+    "onlyBuiltDependencies": ["esbuild"]
+  },
+  "scripts": {
+    "dev": "concurrently \"pnpm --filter server dev\" \"pnpm --filter client dev\"",
+    "dev:server": "pnpm --filter server dev",
+    "dev:client": "pnpm --filter client dev",
+    "build": "pnpm --filter shared build && pnpm --filter server build && pnpm --filter client build",
+    "test": "pnpm --filter server test",
+    "test:e2e": "pnpm --filter e2e test",
+    "db:generate": "pnpm --filter shared db:generate",
+    "db:migrate": "pnpm --filter server db:migrate",
+    "db:seed": "pnpm --filter server db:seed"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2",
+    "typescript": "^5.8.3"
+  }
+}
