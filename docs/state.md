@@ -1,6 +1,13 @@
 # Project State
 
-## Current Stage: Stage 5 — Polish
+## Current Stage: Stage 5 — Polish (DONE)
+
+### Stage 5 Checklist
+- [x] Keyboard shortcuts (/ to search, Escape to close/clear)
+- [x] Side-by-side diff viewer (unified/split toggle with paired line display)
+- [x] Search/filter (search bar in header, priority dropdown, real-time filtering)
+- [x] Tags (CRUD API, assign/remove from issues, tag badges on cards + detail panel, default seed tags)
+- [x] Error handling and loading states (skeleton board, toast notifications for CRUD actions)
 
 ### Stage 4 Checklist
 - [x] MCP server binary (agentic-kanban-mcp via @modelcontextprotocol/sdk + stdio transport)
@@ -66,7 +73,7 @@
 | 2 | Kanban UI | DONE |
 | 3 | Workspace + Agent | DONE |
 | 4 | MCP Integration | DONE |
-| 5 | Polish | READY |
+| 5 | Polish | DONE |
 | 6+ | Post-MVP | NOT STARTED |
 
 ## Monorepo Structure
@@ -103,6 +110,11 @@ packages/
 | POST | /api/workspaces/:id/merge | Merge branch and close workspace |
 | GET | /api/workspaces/:id/sessions | List sessions for workspace |
 | GET | /ws/sessions/:sessionId | WebSocket: stream agent output |
+| GET | /api/tags | List all tags |
+| POST | /api/tags | Create a tag |
+| GET | /api/issues/:id/tags | Get tags for an issue |
+| POST | /api/issues/:id/tags | Assign tag to issue |
+| DELETE | /api/issues/:id/tags/:tagId | Remove tag from issue |
 
 ## MCP Tools
 | Tool | Description |

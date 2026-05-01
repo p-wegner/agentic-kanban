@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { db } from "../db/index.js";
-import { issues, projectStatuses, workspaces } from "@agentic-kanban/shared/schema";
-import { eq } from "drizzle-orm";
+import { issues, projectStatuses, workspaces, tags, issueTags } from "@agentic-kanban/shared/schema";
+import { eq, and } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import type { Database } from "../db/index.js";
 
@@ -90,6 +90,38 @@ export function createIssuesRoute(database: Database = db) {
       .from(workspaces)
       .where(eq(workspaces.issueId, issueId));
     return c.json(result);
+  });
+
+  // GET /api/issues/:id/tags
+  router.get("/:id/tags", async (c) => {
+    const issueId = c.req.param("id");
+    const result = await database
+      .select({ id: tags.id, name: tags.name, color: tags.color })
+      .from(issueTags)
+      .innerJoin(tags, eq(issueTags.tagId, tags.id))
+      .where(eq(issueTags.issueId, issueId));
+    return c.json(result);
+  });
+
+  // POST /api/issues/:id/tags — assign tag to issue
+  router.post("/:id/tags", async (c) => {
+    const issueId = c.req.param("id");
+    const body = await c.req.json();
+    if (!body.tagId) {
+      return c.json({ error: "tagId is required" }, 400);
+    }
+    const id = randomUUID();
+    await database.insert(issueTags).values({ id, issueId, tagId: body.tagId });
+    return c.json({ id }, 201);
+  });
+
+  // DELETE /api/issues/:id/tags/:tagId — remove tag from issue
+  router.delete("/:id/tags/:tagId", async (c) => {
+    const issueId = c.req.param("id");
+    const tagId = c.req.param("tagId");
+    await database.delete(issueTags)
+      .where(and(eq(issueTags.issueId, issueId), eq(issueTags.tagId, tagId)));
+    return c.json({ success: true });
   });
 
   return router;

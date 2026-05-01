@@ -1,5 +1,5 @@
 import { db } from "./index.js";
-import { projects, projectStatuses } from "@agentic-kanban/shared/schema";
+import { projects, projectStatuses, tags } from "@agentic-kanban/shared/schema";
 import { eq } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 
@@ -42,6 +42,23 @@ async function seed() {
   }
 
   console.log(`Seeded project "${projectId}" with ${DEFAULT_STATUSES.length} statuses.`);
+
+  // Seed default tags
+  const DEFAULT_TAGS = [
+    { name: "bug", color: "#EF4444" },
+    { name: "feature", color: "#3B82F6" },
+    { name: "improvement", color: "#8B5CF6" },
+    { name: "docs", color: "#10B981" },
+  ];
+  for (const tag of DEFAULT_TAGS) {
+    await db.insert(tags).values({
+      id: randomUUID(),
+      name: tag.name,
+      color: tag.color,
+      createdAt: now,
+    });
+  }
+  console.log(`Seeded ${DEFAULT_TAGS.length} default tags.`);
 }
 
 seed().catch((err) => {

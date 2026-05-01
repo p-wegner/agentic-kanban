@@ -73,11 +73,11 @@ A local web application where you can:
 - [x] **E2E test: agent creates and updates issue via MCP**
 
 ### Stage 5: Polish
-- [ ] Keyboard shortcuts
-- [ ] Better diff viewer (side-by-side)
-- [ ] Search/filter
-- [ ] Tags
-- [ ] Error handling and loading states
+- [x] Keyboard shortcuts
+- [x] Better diff viewer (side-by-side)
+- [x] Search/filter
+- [x] Tags
+- [x] Error handling and loading states
 
 ### Stage 6+: Post-MVP
 - [ ] Multi-project support

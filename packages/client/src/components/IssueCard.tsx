@@ -7,14 +7,21 @@ const priorityColors: Record<string, string> = {
   critical: "bg-red-100 text-red-700",
 };
 
+interface TagBadge {
+  id: string;
+  name: string;
+  color: string | null;
+}
+
 interface IssueCardProps {
   issue: IssueWithStatus;
   onClick: (issue: IssueWithStatus) => void;
   onDragStart: (e: React.DragEvent, issue: IssueWithStatus) => void;
   hasWorkspaces?: boolean;
+  tags?: TagBadge[];
 }
 
-export function IssueCard({ issue, onClick, onDragStart, hasWorkspaces }: IssueCardProps) {
+export function IssueCard({ issue, onClick, onDragStart, hasWorkspaces, tags }: IssueCardProps) {
   const badgeColor = priorityColors[issue.priority] ?? "bg-gray-200 text-gray-700";
 
   return (
@@ -35,11 +42,22 @@ export function IssueCard({ issue, onClick, onDragStart, hasWorkspaces }: IssueC
           {issue.description}
         </p>
       )}
-      <span
-        className={`inline-block text-xs font-medium px-1.5 py-0.5 rounded mt-1.5 ${badgeColor}`}
-      >
-        {issue.priority}
-      </span>
+      <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
+        <span
+          className={`inline-block text-xs font-medium px-1.5 py-0.5 rounded ${badgeColor}`}
+        >
+          {issue.priority}
+        </span>
+        {tags?.map((tag) => (
+          <span
+            key={tag.id}
+            className="inline-block text-xs px-1.5 py-0.5 rounded bg-gray-100 text-gray-600"
+            style={tag.color ? { backgroundColor: tag.color + "22", color: tag.color } : undefined}
+          >
+            {tag.name}
+          </span>
+        ))}
+      </div>
     </div>
   );
 }

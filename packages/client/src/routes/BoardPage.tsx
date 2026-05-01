@@ -4,6 +4,8 @@ import { BoardColumn } from "../components/BoardColumn.js";
 import { CreateIssueForm } from "../components/CreateIssueForm.js";
 import { IssueDetailPanel } from "../components/IssueDetailPanel.js";
 import { WorkspacePanel } from "../components/WorkspacePanel.js";
+import { SkeletonBoard } from "../components/SkeletonBoard.js";
+import { ToastContainer, showToast } from "../components/Toast.js";
 import { apiFetch } from "../lib/api.js";
 import type {
   CreateIssueRequest,
@@ -27,6 +29,8 @@ export function BoardPage() {
   const [mutating, setMutating] = useState(false);
   const [workspaceIssue, setWorkspaceIssue] = useState<IssueWithStatus | null>(null);
   const [issuesWithWorkspaces, setIssuesWithWorkspaces] = useState<Set<string>>(new Set());
+  const [searchQuery, setSearchQuery] = useState("");
+  const [priorityFilter, setPriorityFilter] = useState("");
 
   const refetchBoard = useCallback(async () => {
     const projects = await apiFetch<Project[]>("/api/projects");
@@ -62,8 +66,9 @@ export function BoardPage() {
       });
       setCreatingInColumnId(null);
       await refetchBoard();
+      showToast("Issue created", "success");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to create issue");
+      showToast("Failed to create issue", "error");
     } finally {
       setMutating(false);
     }
@@ -87,8 +92,9 @@ export function BoardPage() {
         }
       }
       setSelectedIssue(null);
+      showToast("Issue updated", "success");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to update issue");
+      showToast("Failed to update issue", "error");
     } finally {
       setMutating(false);
     }
@@ -101,8 +107,9 @@ export function BoardPage() {
       await apiFetch(`/api/issues/${id}`, { method: "DELETE" });
       setSelectedIssue(null);
       await refetchBoard();
+      showToast("Issue deleted", "success");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to delete issue");
+      showToast("Failed to delete issue", "error");
     } finally {
       setMutating(false);
     }
@@ -141,7 +148,7 @@ export function BoardPage() {
       });
       await refetchBoard();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to move issue");
+      showToast("Failed to move issue", "error");
     }
   }
 
@@ -154,33 +161,48 @@ export function BoardPage() {
     setWorkspaceIssue(issue);
   }
 
+  // Filter columns by search query and priority
+  const filteredColumns = columns.map((col) => ({
+    ...col,
+    issues: col.issues.filter((issue) => {
+      if (priorityFilter && issue.priority !== priorityFilter) return false;
+      if (searchQuery) {
+        const q = searchQuery.toLowerCase();
+        return (
+          issue.title.toLowerCase().includes(q) ||
+          (issue.description?.toLowerCase().includes(q) ?? false)
+        );
+      }
+      return true;
+    }),
+  }));
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      // "/" to focus search
+      if (e.key === "/" && !e.ctrlKey && !e.metaKey) {
+        const target = e.target as HTMLElement;
+        if (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT") return;
+        e.preventDefault();
+        document.getElementById("search-input")?.focus();
+      }
+      // Escape to clear search / close panels
+      if (e.key === "Escape") {
+        if (searchQuery) {
+          setSearchQuery("");
+          document.getElementById("search-input")?.blur();
+        }
+      }
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [searchQuery]);
+
   if (loading) {
     return (
       <Layout>
-        <div className="flex items-center justify-center h-96 text-gray-500">
-          <div className="flex items-center gap-2">
-            <svg
-              className="animate-spin h-5 w-5 text-gray-400"
-              viewBox="0 0 24 24"
-            >
-              <circle
-                className="opacity-25"
-                cx="12"
-                cy="12"
-                r="10"
-                stroke="currentColor"
-                strokeWidth="4"
-                fill="none"
-              />
-              <path
-                className="opacity-75"
-                fill="currentColor"
-                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-              />
-            </svg>
-            Loading...
-          </div>
-        </div>
+        <SkeletonBoard />
       </Layout>
     );
   }
@@ -205,7 +227,12 @@ export function BoardPage() {
   }
 
   return (
-    <Layout>
+    <Layout
+      searchQuery={searchQuery}
+      onSearchChange={setSearchQuery}
+      priorityFilter={priorityFilter}
+      onPriorityFilterChange={setPriorityFilter}
+    >
       {error && (
         <div className="mx-6 mt-4 p-3 bg-red-50 border border-red-200 rounded-md flex items-center justify-between">
           <span className="text-sm text-red-700">{error}</span>
@@ -244,7 +271,7 @@ export function BoardPage() {
         </div>
       )}
       <div className="flex gap-4 p-6 overflow-x-auto min-h-[calc(100vh-57px)]">
-        {columns.map((col) => (
+        {filteredColumns.map((col) => (
           <BoardColumn
             key={col.id}
             column={col}
@@ -289,6 +316,7 @@ export function BoardPage() {
           onWorkspaceChange={refetchBoard}
         />
       )}
+      <ToastContainer />
     </Layout>
   );
 }

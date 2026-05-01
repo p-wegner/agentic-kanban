@@ -24,19 +24,25 @@ export function IssueDetailPanel({
   const [saving, setSaving] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [workspaceCount, setWorkspaceCount] = useState(0);
+  const [issueTags, setIssueTags] = useState<{ id: string; name: string; color: string | null }[]>([]);
+  const [allTags, setAllTags] = useState<{ id: string; name: string; color: string | null }[]>([]);
 
   useEffect(() => {
-    async function loadWorkspaceCount() {
+    async function loadData() {
       try {
-        const ws = await apiFetch<{ id: string }[]>(
-          `/api/issues/${issue.id}/workspaces`,
-        );
+        const [ws, tags, available] = await Promise.all([
+          apiFetch<{ id: string }[]>(`/api/issues/${issue.id}/workspaces`),
+          apiFetch<{ id: string; name: string; color: string | null }[]>(`/api/issues/${issue.id}/tags`),
+          apiFetch<{ id: string; name: string; color: string | null }[]>(`/api/tags`),
+        ]);
         setWorkspaceCount(ws.length);
+        setIssueTags(tags);
+        setAllTags(available);
       } catch {
         // Ignore — non-critical
       }
     }
-    loadWorkspaceCount();
+    loadData();
   }, [issue.id]);
 
   useEffect(() => {
@@ -197,6 +203,60 @@ export function IssueDetailPanel({
                   >
                     Manage
                   </button>
+                </div>
+              </div>
+
+              {/* Tags section */}
+              <div>
+                <label className="text-xs font-medium text-gray-600 block mb-1">
+                  Tags
+                </label>
+                <div className="flex flex-wrap gap-1.5">
+                  {issueTags.map((tag) => (
+                    <span
+                      key={tag.id}
+                      className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-700"
+                      style={tag.color ? { backgroundColor: tag.color + "22", color: tag.color } : undefined}
+                    >
+                      {tag.name}
+                      <button
+                        onClick={async () => {
+                          try {
+                            await apiFetch(`/api/issues/${issue.id}/tags/${tag.id}`, { method: "DELETE" });
+                            setIssueTags((prev) => prev.filter((t) => t.id !== tag.id));
+                          } catch {}
+                        }}
+                        className="text-gray-400 hover:text-gray-600"
+                      >
+                        &times;
+                      </button>
+                    </span>
+                  ))}
+                  {allTags.filter((t) => !issueTags.some((it) => it.id === t.id)).length > 0 && (
+                    <select
+                      className="text-xs border border-gray-300 rounded px-1 py-0.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                      value=""
+                      onChange={async (e) => {
+                        const tagId = e.target.value;
+                        if (!tagId) return;
+                        try {
+                          await apiFetch(`/api/issues/${issue.id}/tags`, {
+                            method: "POST",
+                            body: JSON.stringify({ tagId }),
+                          });
+                          const tag = allTags.find((t) => t.id === tagId);
+                          if (tag) setIssueTags((prev) => [...prev, tag]);
+                        } catch {}
+                      }}
+                    >
+                      <option value="">+ Add tag</option>
+                      {allTags
+                        .filter((t) => !issueTags.some((it) => it.id === t.id))
+                        .map((tag) => (
+                          <option key={tag.id} value={tag.id}>{tag.name}</option>
+                        ))}
+                    </select>
+                  )}
                 </div>
               </div>
             </>

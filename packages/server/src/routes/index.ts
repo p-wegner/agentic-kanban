@@ -3,6 +3,7 @@ import { createProjectsRoute, projectsRoute } from "./projects.js";
 import { createIssuesRoute, issuesRoute } from "./issues.js";
 import { createWorkspacesRoute, workspacesRoute } from "./workspaces.js";
 import { createWorkspaceActionsRoute } from "./workspace-actions.js";
+import { createTagsRoute, tagsRoute } from "./tags.js";
 import type { Database } from "../db/index.js";
 import type { SessionManager } from "../services/session.manager.js";
 
@@ -12,6 +13,7 @@ export function createRoutes(database: Database, getSessionManager: () => Sessio
   routes.route("/issues", createIssuesRoute(database));
   routes.route("/workspaces", createWorkspacesRoute(database));
   routes.route("/workspaces", createWorkspaceActionsRoute(getSessionManager));
+  routes.route("/tags", createTagsRoute());
   return routes;
 }
 
@@ -33,4 +35,5 @@ export const routes = new Hono();
 routes.route("/projects", projectsRoute);
 routes.route("/issues", issuesRoute);
 routes.route("/workspaces", workspacesRoute);
+routes.route("/tags", tagsRoute);
 // Note: workspace-actions route is mounted separately in index.ts to avoid circular imports
