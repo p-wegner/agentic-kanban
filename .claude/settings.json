@@ -5,5 +5,28 @@
       "args": ["--filter", "@agentic-kanban/mcp-server", "dev"],
       "cwd": "F:\\projects\\agentic_kanban"
     }
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/post_tool_use/track-edits.js\""
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/stop/remind-visual-verify.js\""
+          }
+        ]
+      }
+    ]
   }
 }
