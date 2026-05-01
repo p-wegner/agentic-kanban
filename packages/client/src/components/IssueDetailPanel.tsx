@@ -1,11 +1,13 @@
 import { useEffect, useState } from "react";
 import type { IssueWithStatus, UpdateIssueRequest } from "@agentic-kanban/shared";
+import { apiFetch } from "../lib/api.js";
 
 interface IssueDetailPanelProps {
   issue: IssueWithStatus;
   onUpdate: (id: string, data: UpdateIssueRequest) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
   onClose: () => void;
+  onManageWorkspaces: (issue: IssueWithStatus) => void;
 }
 
 export function IssueDetailPanel({
@@ -13,6 +15,7 @@ export function IssueDetailPanel({
   onUpdate,
   onDelete,
   onClose,
+  onManageWorkspaces,
 }: IssueDetailPanelProps) {
   const [editing, setEditing] = useState(false);
   const [title, setTitle] = useState(issue.title);
@@ -20,6 +23,21 @@ export function IssueDetailPanel({
   const [priority, setPriority] = useState(issue.priority);
   const [saving, setSaving] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [workspaceCount, setWorkspaceCount] = useState(0);
+
+  useEffect(() => {
+    async function loadWorkspaceCount() {
+      try {
+        const ws = await apiFetch<{ id: string }[]>(
+          `/api/issues/${issue.id}/workspaces`,
+        );
+        setWorkspaceCount(ws.length);
+      } catch {
+        // Ignore — non-critical
+      }
+    }
+    loadWorkspaceCount();
+  }, [issue.id]);
 
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
@@ -161,6 +179,24 @@ export function IssueDetailPanel({
                   <span className="text-sm text-gray-900">
                     {issue.statusName}
                   </span>
+                </div>
+              </div>
+
+              {/* Workspaces section */}
+              <div>
+                <label className="text-xs font-medium text-gray-600 block mb-1">
+                  Workspaces
+                </label>
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-gray-900">
+                    {workspaceCount} workspace{workspaceCount !== 1 ? "s" : ""}
+                  </span>
+                  <button
+                    onClick={() => onManageWorkspaces(issue)}
+                    className="text-xs text-blue-600 hover:text-blue-700"
+                  >
+                    Manage
+                  </button>
                 </div>
               </div>
             </>

@@ -1,6 +1,22 @@
 # Project State
 
-## Current Stage: Stage 3 — Workspace + Agent
+## Current Stage: Stage 4 — MCP Integration
+
+### Stage 3 Checklist
+- [x] WebSocket infrastructure (@hono/node-ws, WS proxy in Vite)
+- [x] Git service (worktree create/remove, diff, merge via execFile)
+- [x] Agent service (subprocess launch/kill, AGENT_COMMAND test substitution)
+- [x] Session manager (DB row lifecycle, WS subscriber broadcast)
+- [x] Workspace action routes (setup, launch, stop, diff, merge, sessions)
+- [x] Shared types (SetupWorkspaceRequest, LaunchAgentRequest, SessionResponse, DiffResponse, AgentOutputMessage)
+- [x] Client: WorkspacePanel (slide-in, create/setup/launch/stop/diff/merge workflow)
+- [x] Client: TerminalView (auto-scroll, connection status, color-coded output)
+- [x] Client: DiffViewer (unified diff parsing, color-coded hunks, stats)
+- [x] Client: useWebSocket hook (connection lifecycle, message accumulation)
+- [x] IssueDetailPanel: workspaces section with count + Manage button
+- [x] IssueCard: workspace indicator dot
+- [x] Server tests: 37 passing (including git service unit tests with temp repos)
+- [x] E2E tests: workspace lifecycle API test, workspace panel UI test
 
 ### Stage 0 Checklist
 - [x] Clone and analyze original repo (vibe-kanban)
@@ -32,8 +48,8 @@
 | ID | Question | Status | Doc |
 |----|----------|--------|-----|
 | D1 | Python (FastAPI) or TypeScript (Hono/Next)? | RESOLVED: TypeScript | `docs/decisions/001-initial-scope.md` |
-| D2 | Claude Agent SDK directly or subprocess CLI? | OPEN | `docs/prd/04-agent-integration.md` |
-| D3 | Docker isolation or bare-metal git worktrees? | OPEN | `docs/prd/04-agent-integration.md` |
+| D2 | Claude Agent SDK directly or subprocess CLI? | RESOLVED: subprocess CLI (claude CLI via child_process.spawn) | `docs/prd/04-agent-integration.md` |
+| D3 | Docker isolation or bare-metal git worktrees? | RESOLVED: bare-metal git worktrees | `docs/prd/04-agent-integration.md` |
 
 ### Stage Progress
 | Stage | Description | Status |
@@ -41,8 +57,8 @@
 | 0 | Foundation | DONE |
 | 1 | Data Layer + API | DONE |
 | 2 | Kanban UI | DONE |
-| 3 | Workspace + Agent | READY |
-| 4 | MCP Integration | NOT STARTED |
+| 3 | Workspace + Agent | DONE |
+| 4 | MCP Integration | READY |
 | 5 | Polish | NOT STARTED |
 | 6+ | Post-MVP | NOT STARTED |
 
@@ -73,6 +89,13 @@ packages/
 | GET | /api/workspaces/:id | Get workspace with issue info |
 | PATCH | /api/workspaces/:id | Update workspace status |
 | DELETE | /api/workspaces/:id | Delete a workspace |
+| POST | /api/workspaces/:id/setup | Create git worktree for workspace |
+| POST | /api/workspaces/:id/launch | Launch agent session |
+| POST | /api/workspaces/:id/stop | Stop running agent session |
+| GET | /api/workspaces/:id/diff | Get git diff for workspace |
+| POST | /api/workspaces/:id/merge | Merge branch and close workspace |
+| GET | /api/workspaces/:id/sessions | List sessions for workspace |
+| GET | /ws/sessions/:sessionId | WebSocket: stream agent output |
 
 ## Session Log
 | Date | Session | Summary |
@@ -81,3 +104,4 @@ packages/
 | 2026-05-01 | Stage 0 | Set up TypeScript monorepo: 6 packages, Drizzle schema (8 tables), Hono API server with CRUD routes, React+Vite+Tailwind client, MCP server stub, Playwright e2e scaffold. Migrated from better-sqlite3 to @libsql/client (no VS build tools needed). Verified: /health, /api/projects, /api/issues, Vite proxy, board UI loads. |
 | 2026-05-01 | Stage 1 | Added board aggregation endpoint, workspace CRUD routes, Vitest unit test setup (17 tests, in-memory DB), updated client to use single board API call, added Playwright e2e tests for workspaces and board. Refactored routes to use factory functions for testability. |
 | 2026-05-01 | Stage 2 | Full Kanban UI interactivity: extracted BoardColumn + IssueCard + CreateIssueForm + IssueDetailPanel components. HTML5 DnD with drag counter pattern and sortOrder midpoint arithmetic. Error banner, loading spinner, empty state, Escape key. E2E tests expanded from 2 to 24 (10 UI + 14 API), all passing. Used shared types from workspace package. |
+| 2026-05-01 | Stage 3 | Workspace + Agent infrastructure: WebSocket via @hono/node-ws, git worktree management (create/remove/diff/merge), agent subprocess launch with AGENT_COMMAND test substitution, session manager with WS subscriber broadcast, workspace action routes (setup/launch/stop/diff/merge/sessions), WorkspacePanel with TerminalView + DiffViewer + useWebSocket hook. Server tests: 37 passing (3 new git service tests). Resolved circular import by lazy session manager injection. |

@@ -11,6 +11,7 @@ interface BoardColumnProps {
   onIssueClick: (issue: IssueWithStatus) => void;
   onDragStart: (e: React.DragEvent, issue: IssueWithStatus) => void;
   onDrop: (statusId: string, sortOrder?: number) => void;
+  issuesWithWorkspaces?: Set<string>;
   children?: React.ReactNode;
 }
 
@@ -23,6 +24,7 @@ export function BoardColumn({
   onIssueClick,
   onDragStart,
   onDrop,
+  issuesWithWorkspaces,
   children,
 }: BoardColumnProps) {
   const [dragOver, setDragOver] = useState(false);
@@ -111,6 +113,7 @@ export function BoardColumn({
               issue={issue}
               onClick={onIssueClick}
               onDragStart={onDragStart}
+              hasWorkspaces={issuesWithWorkspaces?.has(issue.id)}
             />
           </div>
         ))}

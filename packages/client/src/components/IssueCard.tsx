@@ -11,9 +11,10 @@ interface IssueCardProps {
   issue: IssueWithStatus;
   onClick: (issue: IssueWithStatus) => void;
   onDragStart: (e: React.DragEvent, issue: IssueWithStatus) => void;
+  hasWorkspaces?: boolean;
 }
 
-export function IssueCard({ issue, onClick, onDragStart }: IssueCardProps) {
+export function IssueCard({ issue, onClick, onDragStart, hasWorkspaces }: IssueCardProps) {
   const badgeColor = priorityColors[issue.priority] ?? "bg-gray-200 text-gray-700";
 
   return (
@@ -23,7 +24,12 @@ export function IssueCard({ issue, onClick, onDragStart }: IssueCardProps) {
       onClick={() => onClick(issue)}
       className="bg-white rounded-md shadow-sm p-3 border border-gray-200 cursor-pointer hover:shadow-md hover:border-gray-300 transition-shadow"
     >
-      <p className="text-sm text-gray-900">{issue.title}</p>
+      <div className="flex items-start justify-between gap-2">
+        <p className="text-sm text-gray-900">{issue.title}</p>
+        {hasWorkspaces && (
+          <span className="shrink-0 w-2 h-2 mt-1.5 rounded-full bg-green-500" title="Has workspaces" />
+        )}
+      </div>
       {issue.description && (
         <p className="text-xs text-gray-500 mt-1 line-clamp-2">
           {issue.description}

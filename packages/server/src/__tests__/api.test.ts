@@ -3,6 +3,7 @@ import { Hono } from "hono";
 import { drizzle } from "drizzle-orm/libsql";
 import { createClient } from "@libsql/client";
 import { createRoutes } from "../routes/index.js";
+import type { SessionManager } from "../services/session.manager.js";
 import * as schema from "@agentic-kanban/shared/schema";
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -28,7 +29,17 @@ function createTestApp() {
 
   const database = drizzle(client, { schema });
   const app = new Hono();
-  app.route("/api", createRoutes(database));
+
+  // Mock session manager for tests
+  const mockSessionManager = {
+    startSession: async () => "mock-session-id",
+    stopSession: async () => true,
+    subscribe: () => {},
+    unsubscribe: () => {},
+    wsRoute: () => () => {},
+  } as unknown as SessionManager;
+
+  app.route("/api", createRoutes(database, () => mockSessionManager));
   return { app, db: database };
 }
 

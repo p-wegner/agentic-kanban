@@ -2,17 +2,35 @@ import { Hono } from "hono";
 import { createProjectsRoute, projectsRoute } from "./projects.js";
 import { createIssuesRoute, issuesRoute } from "./issues.js";
 import { createWorkspacesRoute, workspacesRoute } from "./workspaces.js";
+import { createWorkspaceActionsRoute } from "./workspace-actions.js";
 import type { Database } from "../db/index.js";
+import type { SessionManager } from "../services/session.manager.js";
 
-export function createRoutes(database: Database) {
+export function createRoutes(database: Database, getSessionManager: () => SessionManager) {
   const routes = new Hono();
   routes.route("/projects", createProjectsRoute(database));
   routes.route("/issues", createIssuesRoute(database));
   routes.route("/workspaces", createWorkspacesRoute(database));
+  routes.route("/workspaces", createWorkspaceActionsRoute(getSessionManager));
   return routes;
+}
+
+// Lazy getter for the default session manager (avoids circular imports at module load)
+let _sessionManager: SessionManager | null = null;
+function getDefaultSessionManager(): SessionManager {
+  if (!_sessionManager) {
+    // Dynamic import to avoid circular dependency at module load time
+    throw new Error("Session manager not initialized. Server must be started first.");
+  }
+  return _sessionManager;
+}
+
+export function setSessionManager(sm: SessionManager) {
+  _sessionManager = sm;
 }
 
 export const routes = new Hono();
 routes.route("/projects", projectsRoute);
 routes.route("/issues", issuesRoute);
 routes.route("/workspaces", workspacesRoute);
+// Note: workspace-actions route is mounted separately in index.ts to avoid circular imports

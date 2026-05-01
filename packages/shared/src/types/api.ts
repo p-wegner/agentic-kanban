@@ -76,3 +76,39 @@ export interface WorkspaceWithIssue extends WorkspaceResponse {
     priority: string;
   };
 }
+
+// Stage 3 types
+
+export interface SetupWorkspaceRequest {
+  repoPath: string;
+}
+
+export interface LaunchAgentRequest {
+  prompt: string;
+  agentCommand?: string;
+}
+
+export interface SessionResponse {
+  id: string;
+  workspaceId: string;
+  executor: string;
+  status: string;
+  startedAt: string;
+  endedAt: string | null;
+}
+
+export interface DiffResponse {
+  diff: string;
+  stats: {
+    filesChanged: number;
+    insertions: number;
+    deletions: number;
+  };
+}
+
+export interface AgentOutputMessage {
+  type: "stdout" | "stderr" | "exit";
+  sessionId: string;
+  data?: string;
+  exitCode?: number | null;
+}

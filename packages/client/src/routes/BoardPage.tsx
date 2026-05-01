@@ -3,6 +3,7 @@ import { Layout } from "../components/Layout.js";
 import { BoardColumn } from "../components/BoardColumn.js";
 import { CreateIssueForm } from "../components/CreateIssueForm.js";
 import { IssueDetailPanel } from "../components/IssueDetailPanel.js";
+import { WorkspacePanel } from "../components/WorkspacePanel.js";
 import { apiFetch } from "../lib/api.js";
 import type {
   CreateIssueRequest,
@@ -24,6 +25,8 @@ export function BoardPage() {
   const [selectedIssue, setSelectedIssue] = useState<IssueWithStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [mutating, setMutating] = useState(false);
+  const [workspaceIssue, setWorkspaceIssue] = useState<IssueWithStatus | null>(null);
+  const [issuesWithWorkspaces, setIssuesWithWorkspaces] = useState<Set<string>>(new Set());
 
   const refetchBoard = useCallback(async () => {
     const projects = await apiFetch<Project[]>("/api/projects");
@@ -146,6 +149,11 @@ export function BoardPage() {
     setSelectedIssue(issue);
   }
 
+  function handleManageWorkspaces(issue: IssueWithStatus) {
+    setSelectedIssue(null);
+    setWorkspaceIssue(issue);
+  }
+
   if (loading) {
     return (
       <Layout>
@@ -254,6 +262,7 @@ export function BoardPage() {
               handleDragStart(e, issue);
             }}
             onDrop={handleDrop}
+            issuesWithWorkspaces={issuesWithWorkspaces}
           >
             <CreateIssueForm
               projectId={projectId}
@@ -270,6 +279,14 @@ export function BoardPage() {
           onUpdate={handleUpdateIssue}
           onDelete={handleDeleteIssue}
           onClose={() => setSelectedIssue(null)}
+          onManageWorkspaces={handleManageWorkspaces}
+        />
+      )}
+      {workspaceIssue && (
+        <WorkspacePanel
+          issue={workspaceIssue}
+          onClose={() => setWorkspaceIssue(null)}
+          onWorkspaceChange={refetchBoard}
         />
       )}
     </Layout>

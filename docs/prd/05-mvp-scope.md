@@ -27,7 +27,7 @@ A local web application where you can:
 | Issue relationships | NO | Flat issue list only |
 | Inline code comments | NO | View-only diff |
 | PR creation | NO | Manual merge |
-| Real-time WebSocket | NO | Poll or refresh |
+| Real-time WebSocket | YES | Agent output streaming |
 | Multi-project | NO | Single project |
 | Dark/light theme | NO | One theme |
 | Command palette | NO | Standard UI |
@@ -60,11 +60,11 @@ A local web application where you can:
 - [x] **E2E tests for board interactions**
 
 ### Stage 3: Workspace + Agent
-- [ ] Git worktree management
-- [ ] Claude Code subprocess launch
-- [ ] Terminal output streaming (xterm.js or similar)
-- [ ] Basic diff viewer
-- [ ] **E2E tests for workspace lifecycle**
+- [x] Git worktree management
+- [x] Claude Code subprocess launch
+- [x] Terminal output streaming (WebSocket)
+- [x] Basic diff viewer
+- [x] **E2E tests for workspace lifecycle**
 
 ### Stage 4: MCP Integration
 - [ ] MCP server binary
