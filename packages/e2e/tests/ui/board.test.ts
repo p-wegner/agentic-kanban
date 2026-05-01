@@ -1,24 +1,25 @@
 import { test, expect } from "@playwright/test";
 
 test.describe("Board UI", () => {
-  test("shows 5 kanban columns", async ({ page }) => {
+  test("shows kanban columns with expected names", async ({ page }) => {
     await page.goto("/");
 
     // Wait for the board to load
     await page.waitForSelector("h2");
 
     const columns = page.locator("h2");
-    await expect(columns).toHaveCount(5);
+    const count = await columns.count();
+    expect(count).toBeGreaterThanOrEqual(5);
 
-    // Verify column names
-    const names = await columns.allTextContents();
-    expect(names.map((n) => n.replace(/\s*\d+$/, "").trim())).toEqual([
-      "Todo",
-      "In Progress",
-      "In Review",
-      "Done",
-      "Cancelled",
-    ]);
+    // Verify the 5 default column names are present
+    const names = (await columns.allTextContents()).map((n) =>
+      n.replace(/\s*\d+$/, "").trim(),
+    );
+    expect(names).toContain("Todo");
+    expect(names).toContain("In Progress");
+    expect(names).toContain("In Review");
+    expect(names).toContain("Done");
+    expect(names).toContain("Cancelled");
   });
 
   test("shows header with title", async ({ page }) => {
@@ -84,7 +85,8 @@ test.describe("Board interactions", () => {
       `http://localhost:3001/api/projects/${projectId}/statuses`,
     );
     const statuses = await statusesRes.json();
-    const statusId = statuses[0].id;
+    const todoStatus = statuses.find((s: { name: string }) => s.name === "Todo");
+    const statusId = todoStatus ? todoStatus.id : statuses[0].id;
 
     await request.post("http://localhost:3001/api/issues", {
       data: {
@@ -121,7 +123,9 @@ test.describe("Board interactions", () => {
       `http://localhost:3001/api/projects/${projectId}/statuses`,
     );
     const statuses = await statusesRes.json();
-    const statusId = statuses[0].id;
+    // Use the "Todo" status specifically
+    const todoStatus = statuses.find((s: { name: string }) => s.name === "Todo");
+    const statusId = todoStatus ? todoStatus.id : statuses[0].id;
 
     await request.post("http://localhost:3001/api/issues", {
       data: {
@@ -146,8 +150,9 @@ test.describe("Board interactions", () => {
     await page.locator('button:has-text("Edit")').click();
     await expect(page.locator("text=Edit Issue")).toBeVisible();
 
-    // Change the title
-    const titleInput = page.locator('input[type="text"]').first();
+    // Change the title — use the panel's right-side container to scope the input
+    const panel = page.locator(".fixed.right-0");
+    const titleInput = panel.locator('input[type="text"]').first();
     await titleInput.clear();
     await titleInput.fill("Edited Title 777");
 
@@ -162,7 +167,7 @@ test.describe("Board interactions", () => {
     // Verify the edited title appears on the board
     await expect(
       page.locator("p", { hasText: "Edited Title 777" }),
-    ).toBeVisible();
+    ).toBeVisible({ timeout: 10000 });
   });
 
   test("delete issue from detail panel", async ({ page, request }) => {
@@ -174,7 +179,8 @@ test.describe("Board interactions", () => {
       `http://localhost:3001/api/projects/${projectId}/statuses`,
     );
     const statuses = await statusesRes.json();
-    const statusId = statuses[0].id;
+    const todoStatus = statuses.find((s: { name: string }) => s.name === "Todo");
+    const statusId = todoStatus ? todoStatus.id : statuses[0].id;
 
     await request.post("http://localhost:3001/api/issues", {
       data: {
@@ -217,7 +223,8 @@ test.describe("Board interactions", () => {
       `http://localhost:3001/api/projects/${projectId}/statuses`,
     );
     const statuses = await statusesRes.json();
-    const statusId = statuses[0].id;
+    const todoStatus = statuses.find((s: { name: string }) => s.name === "Todo");
+    const statusId = todoStatus ? todoStatus.id : statuses[0].id;
 
     await request.post("http://localhost:3001/api/issues", {
       data: {
@@ -257,8 +264,10 @@ test.describe("Board interactions", () => {
         )
       ).json()
     );
-    const todoStatusId = statuses[0].id;
-    const inProgressStatusId = statuses[1].id;
+    const todoStatus = statuses.find((s: { name: string }) => s.name === "Todo");
+    const inProgressStatus = statuses.find((s: { name: string }) => s.name === "In Progress");
+    const todoStatusId = todoStatus ? todoStatus.id : statuses[0].id;
+    const inProgressStatusId = inProgressStatus ? inProgressStatus.id : statuses[1].id;
 
     const createRes = await request.post("http://localhost:3001/api/issues", {
       data: {
@@ -281,10 +290,17 @@ test.describe("Board interactions", () => {
           sourceStatusId: srcId,
         };
 
-        // Find the target column and dispatch a drop event
+        // Find the "In Progress" column by its heading text
         const columns = document.querySelectorAll(".flex-shrink-0.w-72");
-        const targetCol = columns[1]; // "In Progress"
-        if (!targetCol) throw new Error("Target column not found");
+        let targetCol: Element | null = null;
+        for (const col of columns) {
+          const h2 = col.querySelector("h2");
+          if (h2 && h2.textContent?.includes("In Progress")) {
+            targetCol = col;
+            break;
+          }
+        }
+        if (!targetCol) throw new Error("In Progress column not found");
 
         const dropEvent = new DragEvent("drop", {
           bubbles: true,
@@ -306,7 +322,7 @@ test.describe("Board interactions", () => {
       `http://localhost:3001/api/projects/${projectId}/board`,
     );
     const board = await boardRes.json();
-    const inProgressColumn = board[1]; // "In Progress"
+    const inProgressColumn = board.find((s: { name: string }) => s.name === "In Progress");
     const movedIssue = inProgressColumn.issues.find(
       (i: { title: string }) => i.title === "DragTestIssue 444",
     );

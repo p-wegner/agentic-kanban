@@ -32,14 +32,6 @@ test.describe("Issues API", () => {
     expect(Array.isArray(body)).toBe(true);
   });
 
-    const res = await request.get(
-      `http://localhost:3001/api/issues?projectId=${freshProjectId}`,
-    );
-    expect(res.ok()).toBeTruthy();
-    const body = await res.json();
-    expect(body).toEqual([]);
-  });
-
   test("POST /api/issues creates an issue", async ({ request }) => {
     const res = await request.post("http://localhost:3001/api/issues", {
       data: {

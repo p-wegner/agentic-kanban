@@ -17,7 +17,8 @@ test.describe("Workspace lifecycle API", () => {
       `http://localhost:3001/api/projects/${projectId}/statuses`,
     );
     const statuses = await statusesRes.json();
-    statusId = statuses[0].id;
+    const todoStatus = statuses.find((s: { name: string }) => s.name === "Todo");
+    statusId = todoStatus ? todoStatus.id : statuses[0].id;
 
     // Create an issue for workspace tests
     const issueRes = await request.post("http://localhost:3001/api/issues", {
