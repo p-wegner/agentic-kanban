@@ -59,7 +59,7 @@ Every feature that has a UI component must be visually verified using the `playw
 ## Monorepo Commands
 - `pnpm dev` — start server + client concurrently
 - `pnpm --filter @agentic-kanban/server test` — Vitest unit tests (27 tests)
-- `pnpm test:e2e` — Playwright E2E tests
+- `pnpm test:e2e` — Playwright E2E tests (30 tests)
 - `pnpm --filter @agentic-kanban/mcp-server dev` — run MCP server for testing
 - `pnpm db:migrate && pnpm db:seed` — reset DB to clean state (tags only, no default project)
 - `pnpm cli -- register <path>` — register a git repo as a project
