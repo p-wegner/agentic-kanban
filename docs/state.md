@@ -1,6 +1,6 @@
 # Project State
 
-## Current Stage: Stage 2 — Kanban UI
+## Current Stage: Stage 3 — Workspace + Agent
 
 ### Stage 0 Checklist
 - [x] Clone and analyze original repo (vibe-kanban)
@@ -17,6 +17,17 @@
 - [x] Playwright e2e tests for workspaces and board endpoints
 - [x] Shared types for workspace request/response
 
+### Stage 2 Checklist
+- [x] Shared types dependency wired into client package
+- [x] BoardColumn component extracted from BoardPage
+- [x] IssueCard component with priority badges and description preview
+- [x] CreateIssueForm inline per column (+ title, description, priority, add/cancel)
+- [x] IssueDetailPanel slide-in with view/edit/delete modes
+- [x] HTML5 Drag-and-drop between columns (no library, drag counter pattern)
+- [x] Reorder within column via drop-gap divs + sortOrder midpoint arithmetic
+- [x] Error banner, loading spinner, empty state, Escape key handling
+- [x] E2E tests: create, edit, delete, drag, cancel, escape, error banner (24 tests total)
+
 ### Open Decisions
 | ID | Question | Status | Doc |
 |----|----------|--------|-----|
@@ -29,8 +40,8 @@
 |-------|-------------|--------|
 | 0 | Foundation | DONE |
 | 1 | Data Layer + API | DONE |
-| 2 | Kanban UI | READY |
-| 3 | Workspace + Agent | NOT STARTED |
+| 2 | Kanban UI | DONE |
+| 3 | Workspace + Agent | READY |
 | 4 | MCP Integration | NOT STARTED |
 | 5 | Polish | NOT STARTED |
 | 6+ | Post-MVP | NOT STARTED |
@@ -69,3 +80,4 @@ packages/
 | 2026-05-01 | Discovery | Cloned repo, ran 4 parallel analysis agents, produced 10 PRD docs, defined MVP scope and staging plan |
 | 2026-05-01 | Stage 0 | Set up TypeScript monorepo: 6 packages, Drizzle schema (8 tables), Hono API server with CRUD routes, React+Vite+Tailwind client, MCP server stub, Playwright e2e scaffold. Migrated from better-sqlite3 to @libsql/client (no VS build tools needed). Verified: /health, /api/projects, /api/issues, Vite proxy, board UI loads. |
 | 2026-05-01 | Stage 1 | Added board aggregation endpoint, workspace CRUD routes, Vitest unit test setup (17 tests, in-memory DB), updated client to use single board API call, added Playwright e2e tests for workspaces and board. Refactored routes to use factory functions for testability. |
+| 2026-05-01 | Stage 2 | Full Kanban UI interactivity: extracted BoardColumn + IssueCard + CreateIssueForm + IssueDetailPanel components. HTML5 DnD with drag counter pattern and sortOrder midpoint arithmetic. Error banner, loading spinner, empty state, Escape key. E2E tests expanded from 2 to 24 (10 UI + 14 API), all passing. Used shared types from workspace package. |

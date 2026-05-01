@@ -47,17 +47,17 @@ A local web application where you can:
 - [ ] Set up project skeleton with test infrastructure
 
 ### Stage 1: Data Layer + API
-- [ ] SQLite schema + migrations
-- [ ] CRUD API for projects, issues, statuses
-- [ ] Basic workspace model
-- [ ] **E2E tests for API from day one**
+- [x] SQLite schema + migrations
+- [x] CRUD API for projects, issues, statuses
+- [x] Basic workspace model
+- [x] **E2E tests for API from day one**
 
 ### Stage 2: Kanban UI
-- [ ] Kanban board with columns
-- [ ] Issue cards with create/edit
-- [ ] Drag-and-drop between columns
-- [ ] Issue detail view (title, description, priority)
-- [ ] **E2E tests for board interactions**
+- [x] Kanban board with columns
+- [x] Issue cards with create/edit
+- [x] Drag-and-drop between columns
+- [x] Issue detail view (title, description, priority)
+- [x] **E2E tests for board interactions**
 
 ### Stage 3: Workspace + Agent
 - [ ] Git worktree management

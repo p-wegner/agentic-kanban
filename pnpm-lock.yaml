@@ -17,6 +17,9 @@ importers:
 
   packages/client:
     dependencies:
+      '@agentic-kanban/shared':
+        specifier: workspace:*
+        version: link:../shared
       react:
         specifier: ^19.1.0
         version: 19.2.5
