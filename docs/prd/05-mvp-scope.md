@@ -67,10 +67,10 @@ A local web application where you can:
 - [x] **E2E tests for workspace lifecycle**
 
 ### Stage 4: MCP Integration
-- [ ] MCP server binary
-- [ ] Core tools: get_context, list_issues, get_issue, update_issue
-- [ ] Claude Code config integration
-- [ ] **E2E test: agent creates and updates issue via MCP**
+- [x] MCP server binary
+- [x] Core tools: get_context, list_issues, get_issue, update_issue
+- [x] Claude Code config integration
+- [x] **E2E test: agent creates and updates issue via MCP**
 
 ### Stage 5: Polish
 - [ ] Keyboard shortcuts

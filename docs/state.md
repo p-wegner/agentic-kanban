@@ -1,6 +1,13 @@
 # Project State
 
-## Current Stage: Stage 4 — MCP Integration
+## Current Stage: Stage 5 — Polish
+
+### Stage 4 Checklist
+- [x] MCP server binary (agentic-kanban-mcp via @modelcontextprotocol/sdk + stdio transport)
+- [x] Core tools: get_context, list_issues, get_issue, create_issue, update_issue, list_workspaces, start_workspace, get_workspace_diff
+- [x] Claude Code config integration (.claude/settings.json with project-scoped MCP server)
+- [x] E2E test: MCP tools round-trip (create → list → update → get_issue → list_workspaces via stdio)
+- [x] DB auto-resolution (import.meta.dirname relative path to server/kanban.db)
 
 ### Stage 3 Checklist
 - [x] WebSocket infrastructure (@hono/node-ws, WS proxy in Vite)
@@ -58,8 +65,8 @@
 | 1 | Data Layer + API | DONE |
 | 2 | Kanban UI | DONE |
 | 3 | Workspace + Agent | DONE |
-| 4 | MCP Integration | READY |
-| 5 | Polish | NOT STARTED |
+| 4 | MCP Integration | DONE |
+| 5 | Polish | READY |
 | 6+ | Post-MVP | NOT STARTED |
 
 ## Monorepo Structure
@@ -68,7 +75,7 @@ packages/
   shared/     - Drizzle schema (8 tables) + TypeScript types
   server/     - Hono API + @libsql/client + SQLite (port 3001)
   client/     - React + Vite + Tailwind v4 (port 5173)
-  mcp-server/ - MCP stdio server (stub, deferred to Stage 4)
+  mcp-server/ - MCP stdio server (8 tools: get_context, list/get/create/update_issue, list/start_workspace, get_workspace_diff)
   e2e/        - Playwright tests (API + UI)
 ```
 
@@ -97,6 +104,18 @@ packages/
 | GET | /api/workspaces/:id/sessions | List sessions for workspace |
 | GET | /ws/sessions/:sessionId | WebSocket: stream agent output |
 
+## MCP Tools
+| Tool | Description |
+|------|-------------|
+| get_context | Project info, issue counts by status, active workspaces |
+| list_issues | List issues with status/priority filters |
+| get_issue | Issue detail with associated workspaces |
+| create_issue | Create issue with title, description, priority |
+| update_issue | Update issue title, description, status, priority |
+| list_workspaces | List workspaces filtered by issue or status |
+| start_workspace | Create git worktree + workspace for an issue |
+| get_workspace_diff | Get git diff for a workspace |
+
 ## Session Log
 | Date | Session | Summary |
 |------|---------|---------|
@@ -105,3 +124,4 @@ packages/
 | 2026-05-01 | Stage 1 | Added board aggregation endpoint, workspace CRUD routes, Vitest unit test setup (17 tests, in-memory DB), updated client to use single board API call, added Playwright e2e tests for workspaces and board. Refactored routes to use factory functions for testability. |
 | 2026-05-01 | Stage 2 | Full Kanban UI interactivity: extracted BoardColumn + IssueCard + CreateIssueForm + IssueDetailPanel components. HTML5 DnD with drag counter pattern and sortOrder midpoint arithmetic. Error banner, loading spinner, empty state, Escape key. E2E tests expanded from 2 to 24 (10 UI + 14 API), all passing. Used shared types from workspace package. |
 | 2026-05-01 | Stage 3 | Workspace + Agent infrastructure: WebSocket via @hono/node-ws, git worktree management (create/remove/diff/merge), agent subprocess launch with AGENT_COMMAND test substitution, session manager with WS subscriber broadcast, workspace action routes (setup/launch/stop/diff/merge/sessions), WorkspacePanel with TerminalView + DiffViewer + useWebSocket hook. Server tests: 37 passing (3 new git service tests). Resolved circular import by lazy session manager injection. |
+| 2026-05-01 | Stage 4 | MCP server implementation: 8 tools using @modelcontextprotocol/sdk over stdio transport, connected to same SQLite DB as web server. Tools: get_context, list_issues, get_issue, create_issue, update_issue, list_workspaces, start_workspace, get_workspace_diff. Project-level .claude/settings.json configures MCP server for Claude Code. E2E test via stdio JSON-RPC. |

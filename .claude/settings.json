@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "agentic-kanban": {
+      "command": "pnpm",
+      "args": ["--filter", "@agentic-kanban/mcp-server", "dev"],
+      "cwd": "F:\\projects\\agentic_kanban"
+    }
+  }
+}

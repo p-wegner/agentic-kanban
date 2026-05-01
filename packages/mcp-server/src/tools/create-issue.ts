@@ -1,0 +1,65 @@
+import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { z } from "zod";
+import { db, schema } from "../db.js";
+import { eq } from "drizzle-orm";
+import { randomUUID } from "node:crypto";
+
+export function registerCreateIssue(server: McpServer) {
+  server.tool(
+    "create_issue",
+    "Create a new issue on the kanban board",
+    {
+      title: z.string().describe("Issue title"),
+      description: z.string().optional().describe("Issue description"),
+      priority: z.enum(["low", "medium", "high", "critical"]).optional().describe("Priority (default: medium)"),
+      projectId: z.string().optional().describe("Project ID (defaults to first project)"),
+      statusName: z.string().optional().describe("Status column name (default: 'Todo')"),
+    },
+    async ({ title, description, priority, projectId, statusName }) => {
+      let pid = projectId;
+
+      if (!pid) {
+        const projects = await db.select().from(schema.projects).limit(1);
+        if (projects.length === 0) {
+          return { content: [{ type: "text" as const, text: "No projects found. Run db:seed first." }] };
+        }
+        pid = projects[0].id;
+      }
+
+      // Find status ID by name or default to first
+      const statuses = await db.select().from(schema.projectStatuses)
+        .where(eq(schema.projectStatuses.projectId, pid))
+        .orderBy(schema.projectStatuses.sortOrder);
+
+      let statusId: string;
+      if (statusName) {
+        const found = statuses.find(s => s.name === statusName);
+        if (!found) {
+          return { content: [{ type: "text" as const, text: `Status '${statusName}' not found. Available: ${statuses.map(s => s.name).join(", ")}` }] };
+        }
+        statusId = found.id;
+      } else {
+        statusId = statuses[0].id;
+      }
+
+      const id = randomUUID();
+      const now = new Date().toISOString();
+
+      await db.insert(schema.issues).values({
+        id,
+        title,
+        description: description ?? null,
+        priority: priority ?? "medium",
+        sortOrder: 0,
+        statusId,
+        projectId: pid,
+        createdAt: now,
+        updatedAt: now,
+      });
+
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify({ id, title, status: statusName || "Todo", priority: priority || "medium" }, null, 2) }],
+      };
+    },
+  );
+}
