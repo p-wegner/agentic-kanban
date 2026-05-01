@@ -3,7 +3,19 @@
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Project Status
-This project is **post-MVP core** (Stages 0-4 done). Tech stack: TypeScript monorepo — Hono + Drizzle + React + MCP SDK. Progress tracked in `docs/state.md`.
+This project is **MVP complete** (Stages 0-5 done). Tech stack: TypeScript monorepo — Hono + Drizzle + React + MCP SDK. Progress tracked in `docs/state.md`.
+
+All documented features have been visually verified (2026-05-01):
+- Board renders 5 columns (Todo, In Progress, In Review, Done, Cancelled) with empty states
+- Create issue: inline form with title, description, priority, Add/Cancel
+- Issue detail panel: slide-in with view/edit/delete, description, priority badge, status, workspaces, tags
+- Edit issue: title/description/priority editable, Save/Cancel
+- Tags: CRUD via dropdown in detail panel, removable badges, 4 seed tags (bug, feature, improvement, docs)
+- Search/filter: real-time text search in header, priority dropdown filter, keyboard shortcut `/` to focus, Escape to clear
+- Drag-and-drop: HTML5 DnD between columns (mouse-based, use `run-code` for `/` key on Windows/MSYS)
+- Workspace panel: slide-in with repo path input, "New Workspace" button
+- API routes: health, projects, board aggregation, issues (CRUD), workspaces (CRUD + actions), tags (CRUD), sessions (WebSocket)
+- MCP server: 8 tools via stdio JSON-RPC
 
 ## What This Is
 Cleanroom reimplementation of [vibe-kanban](https://github.com/BloopAI/vibe-kanban) — a kanban board for managing AI-driven coding tasks. Personal use only, single user, local-first. The original (being sunset) is 34 Rust crates; we're building a focused alternative.
@@ -12,7 +24,7 @@ Cleanroom reimplementation of [vibe-kanban](https://github.com/BloopAI/vibe-kanb
 - **Claude Code only** as the AI agent (no multi-agent support)
 - **Local only** — no cloud, no multi-tenant, no OAuth
 - **Testability first** — E2E tests from day one, AI-runnable feedback loops
-- **Tech stack TBD** — see `docs/decisions/001-initial-scope.md` for options (Python/FastAPI or TypeScript leading)
+- **Tech stack TBD** — resolved: TypeScript (Hono + Drizzle + React + MCP SDK)
 - **PR creation is skipped** — manual merge only
 - Use `uv` and `uv venv` for any Python work (never global site-packages)
 - Windows environment
@@ -23,6 +35,7 @@ Cleanroom reimplementation of [vibe-kanban](https://github.com/BloopAI/vibe-kanb
 - **Git tests on Windows**: Use `.trim()` for file content assertions (CRLF vs LF); test git output for keywords, not exact strings
 - **WS setup**: `@hono/node-ws` requires `createNodeWebSocket({ app })` then `injectWebSocket(server)` after `serve()` returns
 - **Test agent substitution**: `AGENT_COMMAND` env var overrides the agent binary for E2E tests
+- **Hook paths on Windows**: Use relative paths (`.claude/hooks/...`) not `$CLAUDE_PROJECT_DIR` (env var not expanded) or absolute paths (not portable)
 
 ## Visual Verification
 Every feature that has a UI component must be visually verified using the `playwright-cli` skill (user-scoped). After implementing or modifying a feature:
