@@ -11,6 +11,9 @@ export function useWebSocket(sessionId: string | null) {
   const connect = useCallback(() => {
     if (!sessionId) return;
 
+    // Clear messages from previous session
+    setMessages([]);
+
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     const url = `${protocol}//${window.location.host}/ws/sessions/${sessionId}`;
 
