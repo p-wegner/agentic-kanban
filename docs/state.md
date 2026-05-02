@@ -19,6 +19,8 @@
 - [x] E2E tests: session history API (3), session history UI (2), board events API (3), board realtime UI (2), command palette UI (5)
 - [x] Workspace summary badges on board cards (workspaceSummary computed server-side in board endpoint)
 - [x] E2E test fixes: retry loops for session history workspace setup/output, unique suffixes for edit tests
+- [x] Chat-like agent interaction: persistent chat input with Send/Stop toggle, --resume support via claudeSessionId capture, auto-clear on agent exit
+- [x] Migration 0004: added claudeSessionId + resumeFromId columns to sessions table
 - [x] 28 unit tests + 60 E2E tests passing
 
 ### Stage 7 Checklist
@@ -147,7 +149,7 @@ Claude Code with `--output-format stream-json --verbose -p <prompt>` emits NDJSO
 ## Monorepo Structure
 ```
 packages/
-  shared/     - Drizzle schema (10 tables) + TypeScript types
+  shared/     - Drizzle schema (10 tables, 4 migrations) + TypeScript types
   server/     - Hono API + @libsql/client + SQLite (port 3001) + CLI (commander)
   client/     - React + Vite + Tailwind v4 (port 5173)
   mcp-server/ - MCP stdio server (8 tools: get_context, list/get/create/update_issue, list/start_workspace, get_workspace_diff)
@@ -173,7 +175,7 @@ packages/
 | PATCH | /api/workspaces/:id | Update workspace status |
 | DELETE | /api/workspaces/:id | Delete a workspace |
 | POST | /api/workspaces/:id/setup | Create git worktree for workspace |
-| POST | /api/workspaces/:id/launch | Launch agent session |
+| POST | /api/workspaces/:id/launch | Launch agent session (optional resumeFromId for --resume) |
 | POST | /api/workspaces/:id/stop | Stop running agent session |
 | GET | /api/workspaces/:id/diff | Get git diff for workspace |
 | POST | /api/workspaces/:id/merge | Merge branch and close workspace |
@@ -221,3 +223,4 @@ packages/
 | 2026-05-02 | Stage 7 complete | Settings + output parsing + mock agent improvements. Created standalone mock-agent.ts script that emits stream-json NDJSON. Moved mock agent toggle from WorkspacePanel to Settings panel. Added server-side MOCK_AGENT=1 env var for global override. Preferences API now accepts mock_agent key. E2E tests: 5 settings API tests, 6 settings UI tests, mock_agent preference integration test. 28 unit tests + 42 E2E tests passing. |
 | 2026-05-02 | Stage 8 complete | Session history + real-time board updates + command palette. New session_messages table (migration 0003). Messages persisted to DB for replay. Board events service (WS /ws/board/:projectId) broadcasts on issue/workspace mutations. Client auto-refreshes via useBoardEvents hook. Session history shows past sessions with replayable output. Command palette (Ctrl+K) with searchable actions grouped by category. 28 unit tests + 57 E2E tests passing (15 new Stage 8 tests). |
 | 2026-05-02 | Post-Stage 8 | Workspace summary badges on board cards — server-side aggregation via grouped query in board endpoint (workspaceSummary with count/status per issue). Replaced test.skip() with retry loops in session history E2E tests. Fixed flaky edit test with unique Date.now() suffixes. 28 unit tests + 60 E2E tests passing (3 new board-workspace-summary API tests). |
+| 2026-05-02 | Chat-like agent UI | Converted workspace panel from launch/stop model to persistent chat interface. Added claudeSessionId + resumeFromId columns to sessions table (migration 0004). Session manager captures Claude's session_id from system/init events and passes --resume flag for continued conversations. WorkspacePanel now has always-visible chat input (Message Claude Code...), Send/Stop toggle, persistent TerminalView between sessions, and Ctrl+Enter shortcut. 28 unit tests + 60 E2E tests passing. |

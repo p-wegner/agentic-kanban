@@ -18,6 +18,7 @@ All documented features have been visually verified (2026-05-02):
 - API routes: health, projects (with git info), preferences (active-project + settings), board aggregation, issues (CRUD), workspaces (CRUD + actions), tags (CRUD), sessions (WebSocket + output history)
 - Settings panel: gear icon in header, agent command/args, output parsing, mock agent toggle
 - Session history: past sessions with replayable output in workspace panel
+- Chat-like agent interaction: persistent chat input with Send/Stop toggle, --resume support, auto-clear on exit, Ctrl+Enter to send
 - Real-time board updates: board auto-refreshes via WebSocket when mutations happen
 - Command palette: Ctrl+K searchable action list, keyboard navigation
 - MCP server: 8 tools via stdio JSON-RPC
@@ -52,6 +53,8 @@ Cleanroom reimplementation of [vibe-kanban](https://github.com/BloopAI/vibe-kanb
 - **Session messages**: All agent output is persisted to `session_messages` table (fire-and-forget insert in `broadcast()`). Retrieved via `GET /api/sessions/:id/output`.
 - **Command palette**: Actions registered via `registerAction()` in `actions.ts`. BoardPage registers actions in `useEffect` with cleanup. Ctrl+K intercepted via `window` keydown listener (Playwright can't send Ctrl+K directly — Chromium intercepts it for address bar focus). E2E tests dispatch via `page.evaluate(() => window.dispatchEvent(...))`.
 - **Route factory options**: Routes that need board events receive `{ boardEvents }` via options object. The `createRoutes` function in `routes/index.ts` passes options down to `createIssuesRoute` and `createWorkspaceActionsRoute`.
+- **Chat-like agent UI**: WorkspacePanel uses `isRunning` derived from activeSession + exit message detection (not WS state). TerminalView persists via `completedMessages` state after session ends. `lastSessionPerWorkspace` tracks session IDs for `--resume` chains. Auto-clear `activeSession` on agent exit via useEffect watching messages array.
+- **Session resume chain**: Claude's internal `session_id` is captured from `system/init` stream-json events in `session.manager.ts` broadcast() and stored in `sessions.claudeSessionId`. On relaunch, `resumeFromId` looks up the previous session's `claudeSessionId` and passes `--resume <id>` to the agent.
 
 ## Visual Verification
 Every feature that has a UI component must be visually verified using the `playwright-cli` skill (user-scoped). After implementing or modifying a feature:
