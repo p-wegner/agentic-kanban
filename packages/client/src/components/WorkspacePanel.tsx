@@ -104,39 +104,54 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange }: W
   // Derive whether agent is currently running
   const isRunning = activeSession !== null && !messages.some(m => m.type === "exit");
 
-  // Auto-clear activeSession when agent completes (exit message received)
+  // Auto-clear activeSession when agent completes.
+  // Primary: detect exit via WS messages.
+  // Fallback: poll session output API (WS is unreliable via Vite proxy).
   useEffect(() => {
     if (!activeSession) return;
-    const exitMsg = messages.find(m => m.type === "exit");
-    if (!exitMsg) return;
 
-    // Agent has exited — store session for resume and clear active state
     const wsId = selectedWorkspace;
     const sid = activeSession;
-    if (wsId) {
-      setLastSessionPerWorkspace((prev) => ({ ...prev, [wsId]: sid }));
+    let completed = false;
 
-      // Use WS messages if we got meaningful output; otherwise fetch from API
-      const wsMessages = [...messages];
-      const hasOutput = wsMessages.some(m => m.type === "stdout");
-      if (hasOutput) {
-        setCompletedMessages(wsMessages);
-      } else {
-        // WS missed output (common for fast agents via Vite proxy) — fetch from API
-        apiFetch<AgentOutputMessage[]>(`/api/sessions/${sid}/output`)
-          .then((data) => setCompletedMessages(data))
-          .catch(() => setCompletedMessages(wsMessages));
+    function completeSession(output: AgentOutputMessage[]) {
+      if (completed) return;
+      completed = true;
+      clearInterval(pollInterval);
+      if (wsId) {
+        setLastSessionPerWorkspace((prev) => ({ ...prev, [wsId]: sid }));
+        setCompletedMessages(output);
+        setWorkspaceSessions((prev) => {
+          const next = { ...prev };
+          delete next[wsId];
+          return next;
+        });
       }
-
-      // Refresh sessions for current workspace
-      setWorkspaceSessions((prev) => {
-        const next = { ...prev };
-        delete next[wsId];
-        return next;
-      });
+      setActiveSession(null);
+      fetchWorkspaces();
     }
-    setActiveSession(null);
-    fetchWorkspaces();
+
+    // WS path: if exit message already in messages, complete immediately
+    const exitMsg = messages.find(m => m.type === "exit");
+    if (exitMsg) {
+      apiFetch<AgentOutputMessage[]>(`/api/sessions/${sid}/output`)
+        .then((data) => completeSession(data))
+        .catch(() => completeSession([...messages]));
+      return;
+    }
+
+    // Polling fallback: check session output every 1.5s
+    const pollInterval = setInterval(() => {
+      apiFetch<AgentOutputMessage[]>(`/api/sessions/${sid}/output`)
+        .then((data) => {
+          if (data.some(m => m.type === "exit")) {
+            completeSession(data);
+          }
+        })
+        .catch(() => { /* ignore poll errors */ });
+    }, 1500);
+
+    return () => clearInterval(pollInterval);
   }, [messages, activeSession]);
 
   async function fetchWorkspaces() {
