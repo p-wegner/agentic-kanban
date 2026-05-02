@@ -15,7 +15,8 @@
     "cli": "pnpm --filter @agentic-kanban/server exec tsx src/cli.ts",
     "db:generate": "pnpm --filter shared db:generate",
     "db:migrate": "pnpm --filter server db:migrate",
-    "db:seed": "pnpm --filter server db:seed"
+    "db:seed": "pnpm --filter server db:seed",
+    "db:reset": "pnpm --filter server db:reset"
   },
   "devDependencies": {
     "concurrently": "^9.1.2",

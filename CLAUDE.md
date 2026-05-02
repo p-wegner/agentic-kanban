@@ -75,7 +75,8 @@ Every feature that has a UI component must be visually verified using the `playw
 - `pnpm --filter @agentic-kanban/server test` — Vitest unit tests (28 tests)
 - `pnpm test:e2e` — Playwright E2E tests (60 tests)
 - `pnpm --filter @agentic-kanban/mcp-server dev` — run MCP server for testing
-- `pnpm db:migrate && pnpm db:seed` — reset DB to clean state (tags only, no default project)
+- `pnpm db:migrate && pnpm db:seed` — initialize DB (apply migrations + seed tags)
+- `pnpm db:reset` — wipe and recreate DB from scratch (deletes kanban.db, re-migrates, re-seeds; stop dev server first)
 - `pnpm cli -- register <path>` — register a git repo as a project
 - `pnpm cli -- list` — list registered projects
 - `pnpm cli -- unregister <name>` — remove a project by name or ID
