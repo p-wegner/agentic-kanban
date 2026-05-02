@@ -96,6 +96,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange }: W
 
   // Create form
   const [branchName, setBranchName] = useState("");
+  const [baseBranch, setBaseBranch] = useState("");
   const [prompt, setPrompt] = useState("");
   const [prefs, setPrefs] = useState<Record<string, string>>({});
 
@@ -216,33 +217,29 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange }: W
     if (!branchName.trim()) return;
     setActionLoading(true);
     setError(null);
+    setCompletedMessages([]);
     try {
-      await apiFetch("/api/workspaces", {
+      const body: Record<string, string> = { issueId: issue.id, branch: branchName.trim() };
+      if (baseBranch.trim()) {
+        body.baseBranch = baseBranch.trim();
+      }
+      const result = await apiFetch<WorkspaceResponse & { sessionId?: string }>("/api/workspaces", {
         method: "POST",
-        body: JSON.stringify({ issueId: issue.id, branch: branchName.trim() }),
+        body: JSON.stringify(body),
       });
       setBranchName("");
+      setBaseBranch("");
       setShowCreate(false);
+      // If auto-launched, set active session to show terminal immediately
+      if (result.sessionId) {
+        setSelectedWorkspace(result.id);
+        setActiveSession(result.sessionId);
+        setLastPrompt(`${issue.title}${issue.description ? `\n\n${issue.description}` : ""}`);
+      }
       await fetchWorkspaces();
       onWorkspaceChange?.();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create workspace");
-    } finally {
-      setActionLoading(false);
-    }
-  }
-
-  async function handleSetup(wsId: string) {
-    setActionLoading(true);
-    setError(null);
-    try {
-      await apiFetch(`/api/workspaces/${wsId}/setup`, {
-        method: "POST",
-        body: JSON.stringify({}),
-      });
-      await fetchWorkspaces();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Setup failed");
     } finally {
       setActionLoading(false);
     }
@@ -434,16 +431,29 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange }: W
                 placeholder="e.g. feature/new-thing"
                 className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
               />
+              <label className="text-xs font-medium text-gray-600 block mt-2">
+                Base Branch
+              </label>
+              <input
+                type="text"
+                value={baseBranch}
+                onChange={(e) => setBaseBranch(e.target.value)}
+                placeholder={project?.defaultBranch || "main"}
+                className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              />
+              <p className="text-[10px] text-gray-400">
+                Defaults to {project?.defaultBranch || "main"}
+              </p>
               <div className="flex gap-2">
                 <button
                   onClick={handleCreateWorkspace}
                   disabled={actionLoading || !branchName.trim()}
                   className="text-sm bg-blue-600 text-white px-3 py-1.5 rounded hover:bg-blue-700 disabled:opacity-50"
                 >
-                  Create
+                  {actionLoading ? "Creating..." : "Create & Launch"}
                 </button>
                 <button
-                  onClick={() => setShowCreate(false)}
+                  onClick={() => { setShowCreate(false); setBaseBranch(""); }}
                   className="text-sm text-gray-500 px-3 py-1.5 hover:text-gray-700"
                 >
                   Cancel
@@ -479,16 +489,6 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange }: W
 
                 {isSelected && (
                   <div className="space-y-2 pt-2 border-t border-gray-200" onClick={(e) => e.stopPropagation()}>
-                    {!ws.workingDir && ws.status === "active" && (
-                      <button
-                        onClick={() => handleSetup(ws.id)}
-                        disabled={actionLoading}
-                        className="text-sm bg-indigo-600 text-white px-3 py-1.5 rounded hover:bg-indigo-700 disabled:opacity-50 w-full"
-                      >
-                        Setup Worktree
-                      </button>
-                    )}
-
                     {/* TerminalView — shown whenever there's output (active or completed) */}
                     {(activeSession || completedMessages.length > 0) && ws.workingDir && ws.status !== "closed" && (
                       <TerminalView

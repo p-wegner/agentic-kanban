@@ -14,28 +14,34 @@ export function registerStartWorkspace(server: McpServer) {
       issueId: z.string().describe("The issue ID to create a workspace for"),
       repoPath: z.string().optional().describe("Absolute path to the git repository (auto-detected from project if omitted)"),
       branch: z.string().optional().describe("Branch name (defaults to 'workspace/{issueId-short}')"),
+      baseBranch: z.string().optional().describe("Base branch to create from (defaults to project's defaultBranch)"),
     },
-    async ({ issueId, repoPath, branch }) => {
+    async ({ issueId, repoPath, branch, baseBranch }) => {
       // Look up the issue
       const issues = await db.select().from(schema.issues).where(eq(schema.issues.id, issueId)).limit(1);
       if (issues.length === 0) {
         return { content: [{ type: "text" as const, text: `Issue ${issueId} not found` }] };
       }
 
-      // Resolve repoPath from issue → project chain if not provided
+      // Resolve repoPath and defaultBranch from issue → project chain if not provided
       let resolvedRepoPath = repoPath;
-      if (!resolvedRepoPath) {
-        const issue = issues[0];
-        const projectRows = await db
-          .select({ repoPath: schema.projects.repoPath })
-          .from(schema.projects)
-          .where(eq(schema.projects.id, issue.projectId))
-          .limit(1);
+      let resolvedBaseBranch = baseBranch;
+      const issue = issues[0];
+      const projectRows = await db
+        .select({ repoPath: schema.projects.repoPath, defaultBranch: schema.projects.defaultBranch })
+        .from(schema.projects)
+        .where(eq(schema.projects.id, issue.projectId))
+        .limit(1);
 
-        if (projectRows.length === 0 || !projectRows[0].repoPath) {
-          return { content: [{ type: "text" as const, text: `Project has no repo path configured. Provide repoPath explicitly.` }] };
-        }
+      if (projectRows.length === 0 || !projectRows[0].repoPath) {
+        return { content: [{ type: "text" as const, text: `Project has no repo path configured. Provide repoPath explicitly.` }] };
+      }
+
+      if (!resolvedRepoPath) {
         resolvedRepoPath = projectRows[0].repoPath;
+      }
+      if (!resolvedBaseBranch) {
+        resolvedBaseBranch = projectRows[0].defaultBranch;
       }
 
       const branchName = branch || `workspace/${issueId.slice(0, 8)}`;
@@ -43,13 +49,14 @@ export function registerStartWorkspace(server: McpServer) {
       const now = new Date().toISOString();
 
       try {
-        const worktreePath = await gitService.createWorktree(resolvedRepoPath, branchName);
+        const worktreePath = await gitService.createWorktree(resolvedRepoPath, branchName, resolvedBaseBranch);
 
         await db.insert(schema.workspaces).values({
           id,
           issueId,
           branch: branchName,
           workingDir: worktreePath,
+          baseBranch: resolvedBaseBranch,
           status: "active",
           createdAt: now,
           updatedAt: now,

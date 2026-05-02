@@ -27,7 +27,7 @@ export function registerGetWorkspaceDiff(server: McpServer) {
       }
 
       try {
-        const diff = await gitService.getDiff(ws.workingDir, baseBranch || "main");
+        const diff = await gitService.getDiff(ws.workingDir, baseBranch || ws.baseBranch || "main");
 
         if (!diff.trim()) {
           return { content: [{ type: "text" as const, text: "No changes detected." }] };

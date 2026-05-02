@@ -1,0 +1,1 @@
+ALTER TABLE `workspaces` ADD `base_branch` text;

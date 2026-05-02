@@ -74,6 +74,7 @@ export interface StatusWithIssues {
 export interface CreateWorkspaceRequest {
   issueId: string;
   branch: string;
+  baseBranch?: string;
   workingDir?: string;
 }
 
@@ -88,6 +89,8 @@ export interface WorkspaceResponse {
   branch: string;
   status: string;
   workingDir: string | null;
+  baseBranch: string | null;
+  sessionId?: string;
   createdAt: string;
   updatedAt: string;
 }

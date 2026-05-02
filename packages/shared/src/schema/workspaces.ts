@@ -7,6 +7,7 @@ export const workspaces = sqliteTable("workspaces", {
   issueId: text("issue_id").notNull().references(() => issues.id),
   branch: text("branch").notNull(),
   workingDir: text("working_dir"),
+  baseBranch: text("base_branch"),
   status: text("status").notNull().default("active"),
   createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
   updatedAt: text("updated_at").notNull().$defaultFn(() => new Date().toISOString()),

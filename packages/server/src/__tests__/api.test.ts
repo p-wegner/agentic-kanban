@@ -15,6 +15,9 @@ const MIGRATION_FILES = [
   "../../../shared/drizzle/0000_flawless_trauma.sql",
   "../../../shared/drizzle/0001_magical_johnny_storm.sql",
   "../../../shared/drizzle/0002_bent_may_parker.sql",
+  "../../../shared/drizzle/0003_tough_lightspeed.sql",
+  "../../../shared/drizzle/0004_boring_wind_dancer.sql",
+  "../../../shared/drizzle/0005_silky_frog_thor.sql",
 ];
 
 function createTestApp() {
