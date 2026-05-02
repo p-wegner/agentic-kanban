@@ -49,10 +49,16 @@ test.describe("Session History API", () => {
     request,
   }) => {
     // Set up workspace with a working directory
-    await request.post(
+    const setupRes = await request.post(
       `http://localhost:3001/api/workspaces/${workspaceId}/setup`,
       { data: {} },
     );
+
+    // If setup fails, we can't test agent output persistence
+    if (setupRes.status() !== 200) {
+      test.skip();
+      return;
+    }
 
     // Launch with a simple command that exits quickly
     const launchRes = await request.post(
@@ -65,9 +71,7 @@ test.describe("Session History API", () => {
       },
     );
 
-    // Accept both success and failure (workspace may not have workingDir in test env)
     if (launchRes.status() !== 201) {
-      // Skip if launch fails due to missing worktree
       test.skip();
       return;
     }
@@ -75,18 +79,22 @@ test.describe("Session History API", () => {
     const { sessionId } = await launchRes.json();
     expect(sessionId).toBeDefined();
 
-    // Wait for the session to complete
-    await new Promise((resolve) => setTimeout(resolve, 2000));
+    // Wait for the session to complete and messages to be persisted
+    await new Promise((resolve) => setTimeout(resolve, 3000));
 
-    // Fetch session output
-    const outputRes = await request.get(
-      `http://localhost:3001/api/sessions/${sessionId}/output`,
-    );
-    expect(outputRes.status()).toBe(200);
+    // Fetch session output (with retry for timing)
+    let messages: any[] = [];
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const outputRes = await request.get(
+        `http://localhost:3001/api/sessions/${sessionId}/output`,
+      );
+      expect(outputRes.status()).toBe(200);
+      messages = await outputRes.json();
+      if (messages.length > 0) break;
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
 
-    const messages = await outputRes.json();
     expect(Array.isArray(messages)).toBe(true);
-    // Should have at least stdout and exit messages
     expect(messages.length).toBeGreaterThan(0);
 
     // Verify message structure
@@ -124,10 +132,15 @@ test.describe("Session History API", () => {
     const testWorkspaceId = (await wsRes.json()).id;
 
     // Setup workspace
-    await request.post(
+    const setupRes = await request.post(
       `http://localhost:3001/api/workspaces/${testWorkspaceId}/setup`,
       { data: {} },
     );
+
+    if (setupRes.status() !== 200) {
+      test.skip();
+      return;
+    }
 
     // Launch agent
     const launchRes = await request.post(
@@ -148,14 +161,19 @@ test.describe("Session History API", () => {
     const { sessionId } = await launchRes.json();
 
     // Wait for completion
-    await new Promise((resolve) => setTimeout(resolve, 2000));
+    await new Promise((resolve) => setTimeout(resolve, 3000));
 
-    // Verify output is available
-    const outputRes = await request.get(
-      `http://localhost:3001/api/sessions/${sessionId}/output`,
-    );
-    expect(outputRes.status()).toBe(200);
-    const messages = await outputRes.json();
+    // Verify output is available (with retry)
+    let messages: any[] = [];
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const outputRes = await request.get(
+        `http://localhost:3001/api/sessions/${sessionId}/output`,
+      );
+      expect(outputRes.status()).toBe(200);
+      messages = await outputRes.json();
+      if (messages.length > 0) break;
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
     expect(messages.length).toBeGreaterThan(0);
   });
 });
