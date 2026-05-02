@@ -13,9 +13,9 @@ All documented features have been visually verified (2026-05-02):
 - Tags: CRUD via dropdown in detail panel, removable badges, 4 seed tags (bug, feature, improvement, docs)
 - Search/filter: real-time text search in header, priority dropdown filter, keyboard shortcut `/` to focus, Escape to clear
 - Drag-and-drop: HTML5 DnD between columns (mouse-based, use `run-code` for `/` key on Windows/MSYS)
-- Workspace panel: slide-in with read-only repo info, "New Workspace" button (repo resolved from project)
+- Workspace panel: slide-in with read-only repo info, "New Workspace" button (one-step: creates worktree + auto-launches agent with issue title/description as prompt)
 - Project switcher: dropdown in header when multiple projects registered
-- API routes: health, projects (with git info), preferences (active-project + settings), board aggregation, issues (CRUD), workspaces (CRUD + actions), tags (CRUD), sessions (WebSocket + output history)
+- API routes: health, projects (with git info), preferences (active-project + settings), board aggregation, issues (CRUD), workspaces (CRUD + one-step create with worktree+launch + actions), tags (CRUD), sessions (WebSocket + output history)
 - Settings panel: gear icon in header, agent command/args, output parsing, mock agent toggle
 - Session history: past sessions with replayable output in workspace panel
 - Chat-like agent interaction: persistent chat input with Send/Stop toggle, --resume support, auto-clear on exit, Ctrl+Enter to send
@@ -49,13 +49,15 @@ Cleanroom reimplementation of [vibe-kanban](https://github.com/BloopAI/vibe-kanb
 - **Pre-existing test failures**: Never dismiss failing tests as "pre-existing" without investigating. At minimum, determine root cause (data accumulation, race condition, API change) and assess fix complexity. Fix if straightforward; document as known issue if not.
 - **Board API data enrichment**: Workspace summaries are computed server-side in the board endpoint via a single grouped query, then attached to each issue as `workspaceSummary`. This eliminates the need for client-side state tracking (like `issuesWithWorkspaces` Set). Prefer server-side aggregation over client-side joins.
 - **E2E session/workspace tests**: Workspace `setup` (git worktree creation) and session message persistence can be flaky. Use retry loops (3 attempts, 500ms–1s delays) for both setup and output fetching instead of `test.skip()`. Setup retries go in `beforeAll`; output retries wrap the GET request. Avoid `test.skip()` unless there is truly no alternative.
-- **Board events**: WS `/ws/board/:projectId` broadcasts `board_changed` events. Server-side board events service (`board-events.ts`) is passed to routes via factory options. Session manager's `onSessionExit` callback triggers board broadcast via projectId resolution.
+- **Board events (dual path)**: WS `/ws/board/:projectId` broadcasts `board_changed` events for fast same-server updates. A 30s polling fallback in `useBoardEvents` catches mutations from MCP, CLI, second tabs, or WS failures. MCP tools call `notifyBoard()` (fire-and-forget `POST /api/internal/board-notify`) for instant updates instead of waiting for the next poll cycle. Server-side board events service (`board-events.ts`) is passed to routes via factory options. Session manager's `onSessionExit` callback triggers board broadcast via projectId resolution.
 - **Session messages**: All agent output is persisted to `session_messages` table (fire-and-forget insert in `broadcast()`). Retrieved via `GET /api/sessions/:id/output`.
 - **Command palette**: Actions registered via `registerAction()` in `actions.ts`. BoardPage registers actions in `useEffect` with cleanup. Ctrl+K intercepted via `window` keydown listener (Playwright can't send Ctrl+K directly — Chromium intercepts it for address bar focus). E2E tests dispatch via `page.evaluate(() => window.dispatchEvent(...))`.
-- **Route factory options**: Routes that need board events receive `{ boardEvents }` via options object. The `createRoutes` function in `routes/index.ts` passes options down to `createIssuesRoute` and `createWorkspaceActionsRoute`.
-- **Chat-like agent UI**: WorkspacePanel uses `isRunning` derived from activeSession + exit message detection (not WS state). TerminalView persists via `completedMessages` state after session ends. `lastSessionPerWorkspace` tracks session IDs for `--resume` chains. Auto-clear `activeSession` on agent exit via useEffect watching messages array.
+- **Route factory options**: Routes that need board events or session manager receive `{ boardEvents }` via options object and `getSessionManager` via argument. The `createRoutes` function in `routes/index.ts` passes both to `createWorkspacesRoute` and `createWorkspaceActionsRoute`. The internal `POST /api/internal/board-notify` route also uses `options.boardEvents` to broadcast — it lives inside `createRoutes` so it can access the same boardEvents instance.
+- **Chat-like agent UI**: WorkspacePanel uses `isRunning` derived from activeSession + exit message detection (not WS state). TerminalView persists via `completedMessages` state after session ends. `lastSessionPerWorkspace` tracks session IDs for `--resume` chains. Auto-clear `activeSession` on agent exit via useEffect watching messages array. On workspace creation, `activeSession` is set from the POST response's `sessionId` to show terminal output immediately.
+- **Workspace creation (one-step)**: `POST /api/workspaces` does everything: resolves issue → project → repoPath, creates git worktree (with optional `baseBranch`), inserts DB record with `workingDir` and `baseBranch`, then auto-launches agent. The `createWorkspacesRoute` receives `getSessionManager` and `boardEvents` via factory options. Error handling: if worktree/launch fails, still returns 201 with the workspace record and `error` field.
 - **Session resume chain**: Claude's internal `session_id` is captured from `system/init` stream-json events in `session.manager.ts` broadcast() and stored in `sessions.claudeSessionId`. On relaunch, `resumeFromId` looks up the previous session's `claudeSessionId` and passes `--resume <id>` to the agent.
 - **Mock agent tsx resolution**: The mock agent runs from the worktree CWD (no `node_modules`). It must use `pathToFileURL()` to resolve the absolute path to `packages/server/node_modules/tsx/dist/loader.mjs` as a `file://` URL in the `--import` flag. Bare `--import tsx` would fail with `ERR_MODULE_NOT_FOUND`.
+- **Git worktree base branch**: `createWorktree()` in both server and MCP git services accepts an optional `baseBranch` parameter. When creating a new branch, it runs `git branch <branch> <baseBranch>` instead of `git branch <branch>` (which defaults to HEAD). This ensures worktrees start from the correct base.
 - **DB file locations**: The server DB lives at `packages/server/kanban.db` (relative to `file:kanban.db` CWD resolution under pnpm). The MCP server has its own copy at `packages/mcp-server/kanban.db`. Scripts using `import.meta.dirname` relative paths must account for which package they run in — `../../../kanban.db` from `packages/server/src/scripts/` points to the repo root, not the actual DB.
 
 ## Visual Verification
@@ -104,13 +106,18 @@ Each project maps 1:1 to a git repo. The CLI reads git info automatically:
 The registered project gets 5 default statuses (Todo, In Progress, In Review, Done, Cancelled) and is set as the active project. Registering additional projects adds a dropdown switcher in the header.
 
 ## Workspace Flow
-Workspaces (git worktrees) no longer require manual repo path input. The server resolves the repo path from the chain: workspace → issue → project → repoPath/defaultBranch. This means:
-- `POST /api/workspaces/:id/setup` — creates worktree using project's repoPath
-- `GET /api/workspaces/:id/diff` — diffs against project's defaultBranch
-- `POST /api/workspaces/:id/merge` — merges into project's defaultBranch
+Workspaces are created in a single step: `POST /api/workspaces` accepts `issueId`, `branch`, and optional `baseBranch` (defaults to project's `defaultBranch`). The server creates the DB record, creates the git worktree, and auto-launches the agent with the issue title + description as the prompt. The response includes `sessionId` so the client can immediately show terminal output.
+
+- `POST /api/workspaces` — one-step: DB record + worktree + auto-launch agent
+- `POST /api/workspaces/:id/setup` — legacy no-op if worktree already exists (backward compat)
+- `GET /api/workspaces/:id/diff` — diffs against `workspace.baseBranch` (falls back to project's `defaultBranch`)
+- `POST /api/workspaces/:id/merge` — merges into project's `defaultBranch`
+- `DELETE /api/workspaces/:id` — cascade-deletes session messages, sessions, then workspace
+
+The `baseBranch` column on the workspaces table tracks which branch the worktree was created from, ensuring diff/merge use the correct base even if the project's default branch changes later.
 
 ## MVP Core Loop
-Register repo (`pnpm cli -- register <path>`) → Create issue → Start workspace (auto-resolves git branch from project) → Launch Claude Code → View diff → Merge
+Register repo (`pnpm cli -- register <path>`) → Create issue → Click "New Workspace" (one step: branch + worktree + agent launch) → View diff → Merge
 
 ## Reference Codebase
 The original vibe-kanban is at `F:/projects/vibe-kanban` for reference. Key files:
