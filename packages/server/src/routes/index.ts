@@ -21,6 +21,23 @@ export function createRoutes(database: Database, getSessionManager: () => Sessio
   routes.route("/workspaces", createWorkspaceActionsRoute(getSessionManager, database, options));
   routes.route("/tags", createTagsRoute());
   routes.route("/preferences", createPreferencesRoute(database));
+
+  // Internal endpoint for MCP/CLI tools to trigger immediate board refresh
+  routes.post("/internal/board-notify", async (c) => {
+    if (!options?.boardEvents) {
+      return c.json({ ok: true, note: "no boardEvents" }, 200);
+    }
+    try {
+      const body = await c.req.json<{ projectId?: string; reason?: string }>();
+      if (body.projectId) {
+        options.boardEvents.broadcast(body.projectId, body.reason ?? "internal_notify");
+      }
+      return c.json({ ok: true });
+    } catch {
+      return c.json({ ok: true, note: "invalid body" }, 200);
+    }
+  });
+
   return routes;
 }
 
