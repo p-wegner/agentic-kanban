@@ -2,6 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { db, schema } from "../db.js";
 import { eq } from "drizzle-orm";
+import { notifyBoard } from "../notify.js";
 
 export function registerUpdateIssue(server: McpServer) {
   server.tool(
@@ -38,6 +39,8 @@ export function registerUpdateIssue(server: McpServer) {
       }
 
       await db.update(schema.issues).set(updates).where(eq(schema.issues.id, issueId));
+
+      notifyBoard(existing[0].projectId, "mcp_update_issue");
 
       return {
         content: [{ type: "text" as const, text: JSON.stringify({ id: issueId, updated: Object.keys(updates).filter(k => k !== "updatedAt") }, null, 2) }],

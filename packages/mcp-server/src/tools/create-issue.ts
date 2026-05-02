@@ -3,6 +3,7 @@ import { z } from "zod";
 import { db, schema } from "../db.js";
 import { eq } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
+import { notifyBoard } from "../notify.js";
 
 export function registerCreateIssue(server: McpServer) {
   server.tool(
@@ -56,6 +57,8 @@ export function registerCreateIssue(server: McpServer) {
         createdAt: now,
         updatedAt: now,
       });
+
+      notifyBoard(pid, "mcp_create_issue");
 
       return {
         content: [{ type: "text" as const, text: JSON.stringify({ id, title, status: statusName || "Todo", priority: priority || "medium" }, null, 2) }],

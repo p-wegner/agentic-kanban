@@ -1,5 +1,7 @@
 import { useEffect, useRef, useCallback } from "react";
 
+const POLL_INTERVAL_MS = 30_000;
+
 interface BoardChangedEvent {
   type: "board_changed";
   projectId: string;
@@ -11,6 +13,7 @@ export function useBoardEvents(
   onBoardChange: (reason: string) => void,
 ) {
   const wsRef = useRef<WebSocket | null>(null);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const onBoardChangeRef = useRef(onBoardChange);
   onBoardChangeRef.current = onBoardChange;
 
@@ -50,6 +53,14 @@ export function useBoardEvents(
   useEffect(() => {
     const ws = connect();
 
+    // Periodic polling fallback — catches MCP mutations, second-tab changes,
+    // CLI edits, and any other mutations that bypass WS broadcast.
+    if (projectId) {
+      pollRef.current = setInterval(() => {
+        onBoardChangeRef.current("poll");
+      }, POLL_INTERVAL_MS);
+    }
+
     return () => {
       if (ws) {
         ws.close();
@@ -58,6 +69,10 @@ export function useBoardEvents(
         wsRef.current.close();
         wsRef.current = null;
       }
+      if (pollRef.current) {
+        clearInterval(pollRef.current);
+        pollRef.current = null;
+      }
     };
-  }, [connect]);
+  }, [connect, projectId]);
 }

@@ -4,6 +4,7 @@ import { db, schema } from "../db.js";
 import { eq } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import * as gitService from "../git-service.js";
+import { notifyBoard } from "../notify.js";
 
 export function registerStartWorkspace(server: McpServer) {
   server.tool(
@@ -53,6 +54,8 @@ export function registerStartWorkspace(server: McpServer) {
           createdAt: now,
           updatedAt: now,
         });
+
+        notifyBoard(issues[0].projectId, "mcp_start_workspace");
 
         const result = {
           id,
