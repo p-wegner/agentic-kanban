@@ -18,6 +18,7 @@
 - [x] Client: workspace panel shows read-only repo info, no repo path input
 - [x] Tests: 27 unit tests passing (including preferences API + git-info service tests)
 - [x] E2E tests updated: global setup creates project via API, board test uses project from global setup
+- [x] E2E test fixes: unique suffixed status names (board API), find Todo/In Progress by name (not index), scoped edit panel input selector, column-aware drag target
 
 ### Stage 5 Checklist
 - [x] Keyboard shortcuts (/ to search, Escape to close/clear)
@@ -101,7 +102,7 @@ packages/
   server/     - Hono API + @libsql/client + SQLite (port 3001) + CLI (commander)
   client/     - React + Vite + Tailwind v4 (port 5173)
   mcp-server/ - MCP stdio server (8 tools: get_context, list/get/create/update_issue, list/start_workspace, get_workspace_diff)
-  e2e/        - Playwright tests (API + UI)
+  e2e/        - Playwright tests (30 tests: API + UI, global setup creates project)
 ```
 
 ## API Routes
@@ -159,4 +160,4 @@ packages/
 | 2026-05-01 | Stage 2 | Full Kanban UI interactivity: extracted BoardColumn + IssueCard + CreateIssueForm + IssueDetailPanel components. HTML5 DnD with drag counter pattern and sortOrder midpoint arithmetic. Error banner, loading spinner, empty state, Escape key. E2E tests expanded from 2 to 24 (10 UI + 14 API), all passing. Used shared types from workspace package. |
 | 2026-05-01 | Stage 3 | Workspace + Agent infrastructure: WebSocket via @hono/node-ws, git worktree management (create/remove/diff/merge), agent subprocess launch with AGENT_COMMAND test substitution, session manager with WS subscriber broadcast, workspace action routes (setup/launch/stop/diff/merge/sessions), WorkspacePanel with TerminalView + DiffViewer + useWebSocket hook. Server tests: 37 passing (3 new git service tests). Resolved circular import by lazy session manager injection. |
 | 2026-05-01 | Stage 4 | MCP server implementation: 8 tools using @modelcontextprotocol/sdk over stdio transport, connected to same SQLite DB as web server. Tools: get_context, list_issues, get_issue, create_issue, update_issue, list_workspaces, start_workspace, get_workspace_diff. Project-level .claude/settings.json configures MCP server for Claude Code. E2E test via stdio JSON-RPC. |
-| 2026-05-01 | Stage 6 | Git repo management: each project IS a registered git repo. CLI (commander) with register/unregister/list/cleanup commands. Projects table gained repoPath/repoName/defaultBranch/remoteUrl columns. New preferences table for activeProjectId. Workspace actions (setup/diff/merge) now auto-resolve repoPath from project chain — no manual input needed. Client has project switcher in header, workspace panel shows read-only repo info. Seed no longer creates default project. 27 unit tests passing. |
+| 2026-05-01 | Stage 6 | Git repo management: each project IS a registered git repo. CLI (commander) with register/unregister/list/cleanup commands. Projects table gained repoPath/repoName/defaultBranch/remoteUrl columns. New preferences table for activeProjectId. Workspace actions (setup/diff/merge) now auto-resolve repoPath from project chain — no manual input needed. Client has project switcher in header, workspace panel shows read-only repo info. Seed no longer creates default project. 27 unit tests + 30 E2E tests passing. E2E tests use global setup for project creation, unique suffixed status names for isolation, and name-based status lookups for robustness. |
