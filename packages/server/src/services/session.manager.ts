@@ -40,6 +40,7 @@ function createSessionManager(
     workspaceId: string,
     prompt: string,
     agentCommand?: string,
+    agentArgs?: string,
   ) {
     // Look up workspace to get workingDir
     const wsRows = await db
@@ -77,7 +78,7 @@ function createSessionManager(
     }
 
     try {
-      agentService.launch(workspace.workingDir, sessionId, prompt, (event) => {
+      agentService.launch(workspace.workingDir, sessionId, prompt, agentArgs, (event) => {
         // Broadcast to WebSocket subscribers
         const message: AgentOutputMessage = event;
         broadcast(sessionId, message);

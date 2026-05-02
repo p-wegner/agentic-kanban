@@ -1,6 +1,23 @@
 # Project State
 
-## Current Stage: Stage 6 — Git Repo Management (DONE)
+## Current Stage: Stage 7 — Settings + Output Parsing (IN PROGRESS)
+
+### Stage 7 Checklist
+- [ ] Settings screen: gear icon in header, slide-in panel or page
+- [ ] Agent command setting: configurable binary name (e.g. `claude`, `claude-glm`)
+- [ ] Agent args setting: additional CLI arguments (e.g. `--settings`, `--model`)
+- [ ] Output parser: parse Claude's `stream-json` format in TerminalView
+  - `system/init` — show model, tools, MCP servers
+  - `assistant` — show text content
+  - `result` — show cost, duration, usage stats
+- [ ] Preferences API: generic GET/PUT for arbitrary key/value settings
+- [ ] Agent settings wired to launch flow (read from preferences)
+
+### Claude stream-json output reference
+Claude Code with `--output-format stream-json --verbose -p <prompt>` emits NDJSON lines:
+- `{"type":"system","subtype":"init",...}` — session init (cwd, session_id, tools, model, permissionMode, mcp_servers)
+- `{"type":"assistant","message":{...},"session_id":...}` — assistant messages (content array with type:text, type:tool_use)
+- `{"type":"result","subtype":"success","duration_ms":...,"result":"...","total_cost_usd":...,"usage":{...}}` — final result
 
 ### Stage 6 Checklist
 - [x] Schema: added repoPath, repoName, defaultBranch, remoteUrl to projects table
@@ -100,6 +117,7 @@
 | 4 | MCP Integration | DONE |
 | 5 | Polish | DONE |
 | 6 | Git Repo Management | DONE |
+| 7 | Settings + Output Parsing | IN PROGRESS |
 
 ## Monorepo Structure
 ```
@@ -169,3 +187,4 @@ packages/
 | 2026-05-01 | Stage 6 | Git repo management: each project IS a registered git repo. CLI (commander) with register/unregister/list/cleanup commands. Projects table gained repoPath/repoName/defaultBranch/remoteUrl columns. New preferences table for activeProjectId. Workspace actions (setup/diff/merge) now auto-resolve repoPath from project chain — no manual input needed. Client has project switcher in header, workspace panel shows read-only repo info. Seed no longer creates default project. 27 unit tests + 30 E2E tests passing. E2E tests use global setup for project creation, unique suffixed status names for isolation, and name-based status lookups for robustness. |
 | 2026-05-02 | Integration | Added structured logging across workspace/agent pipeline (agent.service, session.manager, workspace-actions). Added "Mock agent" checkbox to WorkspacePanel for integration testing without Claude Code — sends node one-liner as agentCommand. Fixed agent.service to skip claude-specific flags when AGENT_COMMAND is set. Verified full integration via playwright-cli: create issue → workspace → worktree → launch mock agent → see output in TerminalView via WebSocket. 28 unit tests + 30 E2E tests passing. |
 | 2026-05-02 | Bug fixes | Fixed worktree setup 500 error: createWorktree now reuses existing worktrees instead of throwing on duplicate branches. Path normalization for git --porcelain output on Windows (forward to backslash). Client apiFetch now reads JSON error body for actionable error messages. Fixed stop hook infinite loop by clearing client edits from state file on first block. 28 unit tests passing. |
+| 2026-05-02 | Agent launch fix | Fixed real Claude agent launch: added --verbose flag required by stream-json, use stdin:"ignore" to prevent Claude from hanging, restrict shell:true to custom commands only (claude.exe doesn't need cmd.exe). Session manager buffers broadcast messages for late-connecting WS clients. |

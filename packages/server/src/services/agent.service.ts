@@ -20,6 +20,7 @@ export function launch(
   worktreePath: string,
   sessionId: string,
   prompt: string,
+  agentArgs: string | undefined,
   onOutput: AgentOutputCallback,
 ): ChildProcess {
   const command = process.env.AGENT_COMMAND || "claude";
@@ -28,7 +29,17 @@ export function launch(
   console.log(`[agent] launching: command=${command} worktree=${worktreePath} sessionId=${sessionId}`);
 
   // Custom agent commands run directly; claude gets its specific flags
-  const args = isCustomCommand ? [] : ["--output-format", "stream-json", "--verbose", "-p", prompt];
+  let args: string[];
+  if (isCustomCommand) {
+    args = [];
+  } else {
+    args = ["--output-format", "stream-json", "--verbose"];
+    // Append extra args from settings (e.g. "--model opus", "--settings path")
+    if (agentArgs) {
+      args.push(...splitArgs(agentArgs));
+    }
+    args.push("-p", prompt);
+  }
 
   // On Windows, only use shell:true for custom commands (which may be one-liners).
   // The claude binary is a real .exe — shell:true causes cmd.exe to buffer stdout.
@@ -86,4 +97,31 @@ export function kill(sessionId: string): boolean {
 /** Get the active process for a session, if any. */
 export function getProcess(sessionId: string): ChildProcess | undefined {
   return activeProcesses.get(sessionId);
+}
+
+/** Split a shell-like args string into an array, respecting quoted segments. */
+function splitArgs(input: string): string[] {
+  const args: string[] = [];
+  let current = "";
+  let inQuote: string | null = null;
+  for (const ch of input) {
+    if (inQuote) {
+      if (ch === inQuote) {
+        inQuote = null;
+      } else {
+        current += ch;
+      }
+    } else if (ch === '"' || ch === "'") {
+      inQuote = ch;
+    } else if (ch === " " || ch === "\t") {
+      if (current) {
+        args.push(current);
+        current = "";
+      }
+    } else {
+      current += ch;
+    }
+  }
+  if (current) args.push(current);
+  return args;
 }
