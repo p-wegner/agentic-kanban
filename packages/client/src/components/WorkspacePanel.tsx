@@ -44,8 +44,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange }: W
   // Create form
   const [branchName, setBranchName] = useState("");
   const [prompt, setPrompt] = useState("");
-  const [mockAgent, setMockAgent] = useState(false);
-  const [outputParser, setOutputParser] = useState(true);
+  const [prefs, setPrefs] = useState<Record<string, string>>({});
 
   const { state: wsState, messages, disconnect } = useWebSocket(activeSession);
 
@@ -64,9 +63,9 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange }: W
 
   useEffect(() => {
     fetchWorkspaces();
-    // Load output_parser preference
+    // Load preferences (output_parser, mock_agent)
     apiFetch<Record<string, string>>("/api/preferences/settings")
-      .then((s) => setOutputParser(s.output_parser !== "false"))
+      .then((s) => setPrefs(s))
       .catch(() => {});
   }, [issue.id]);
 
@@ -120,9 +119,6 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange }: W
     setError(null);
     try {
       const body: Record<string, string> = { prompt: prompt.trim() };
-      if (mockAgent) {
-        body.agentCommand = "node -e \"console.log('Mock agent started'); setTimeout(() => { console.log('Mock agent work complete'); process.exit(0); }, 1000)\"";
-      }
       const result = await apiFetch<{ sessionId: string }>(
         `/api/workspaces/${wsId}/launch`,
         {
@@ -311,15 +307,6 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange }: W
                           className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none"
                           onClick={(e) => e.stopPropagation()}
                         />
-                        <label className="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer" onClick={(e) => e.stopPropagation()}>
-                          <input
-                            type="checkbox"
-                            checked={mockAgent}
-                            onChange={(e) => setMockAgent(e.target.checked)}
-                            className="rounded border-gray-300"
-                          />
-                          Mock agent
-                        </label>
                         <button
                           onClick={() => handleLaunch(ws.id)}
                           disabled={actionLoading || !prompt.trim()}
@@ -332,7 +319,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange }: W
 
                     {activeSession && (
                       <>
-                        <TerminalView messages={messages} connectionState={wsState} parseOutput={outputParser} />
+                        <TerminalView messages={messages} connectionState={wsState} parseOutput={prefs.output_parser !== "false"} />
                         <button
                           onClick={() => handleStop(ws.id)}
                           disabled={actionLoading}

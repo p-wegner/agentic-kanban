@@ -10,12 +10,14 @@ interface Settings {
   agent_command?: string;
   agent_args?: string;
   output_parser?: string;
+  mock_agent?: string;
 }
 
 const DEFAULT_SETTINGS: Settings = {
   agent_command: "",
   agent_args: "",
   output_parser: "true",
+  mock_agent: "false",
 };
 
 export function SettingsPanel({ onClose }: SettingsPanelProps) {
@@ -132,6 +134,25 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                 <p className="text-xs text-gray-500 mt-1">
                   When enabled, the terminal view parses Claude&apos;s JSON output
                   and displays structured info (model, tools, cost, etc.).
+                </p>
+              </div>
+
+              {/* Mock Agent */}
+              <div>
+                <label className="flex items-center gap-2 text-sm font-medium text-gray-700 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={settings.mock_agent === "true"}
+                    onChange={(e) =>
+                      setSettings((s) => ({ ...s, mock_agent: e.target.checked ? "true" : "false" }))
+                    }
+                    className="rounded border-gray-300"
+                  />
+                  Mock Agent
+                </label>
+                <p className="text-xs text-gray-500 mt-1">
+                  Use a mock agent that emits fake stream-json output instead of
+                  launching Claude Code. Useful for testing and development.
                 </p>
               </div>
 

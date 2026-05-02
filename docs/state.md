@@ -1,17 +1,22 @@
 # Project State
 
-## Current Stage: Stage 7 — Settings + Output Parsing (IN PROGRESS)
+## Current Stage: Stage 7 — Settings + Output Parsing (DONE)
 
 ### Stage 7 Checklist
-- [ ] Settings screen: gear icon in header, slide-in panel or page
-- [ ] Agent command setting: configurable binary name (e.g. `claude`, `claude-glm`)
-- [ ] Agent args setting: additional CLI arguments (e.g. `--settings`, `--model`)
-- [ ] Output parser: parse Claude's `stream-json` format in TerminalView
+- [x] Settings screen: gear icon in header, slide-in panel
+- [x] Agent command setting: configurable binary name (e.g. `claude`, `claude-glm`)
+- [x] Agent args setting: additional CLI arguments (e.g. `--settings`, `--model`)
+- [x] Output parser: parse Claude's `stream-json` format in TerminalView
   - `system/init` — show model, tools, MCP servers
   - `assistant` — show text content
   - `result` — show cost, duration, usage stats
-- [ ] Preferences API: generic GET/PUT for arbitrary key/value settings
-- [ ] Agent settings wired to launch flow (read from preferences)
+- [x] Preferences API: generic GET/PUT for settings (agent_command, agent_args, output_parser, mock_agent)
+- [x] Agent settings wired to launch flow (read from preferences)
+- [x] Mock agent: standalone script emitting stream-json NDJSON (packages/server/src/scripts/mock-agent.ts)
+- [x] Mock agent toggle moved from WorkspacePanel checkbox to Settings panel
+- [x] Server-side MOCK_AGENT=1 env var for global mock agent override
+- [x] E2E tests: settings API (5 tests), settings UI (6 tests), mock agent preference integration
+- [x] 28 unit tests + 42 E2E tests passing
 
 ### Claude stream-json output reference
 Claude Code with `--output-format stream-json --verbose -p <prompt>` emits NDJSON lines:
@@ -40,7 +45,7 @@ Claude Code with `--output-format stream-json --verbose -p <prompt>` emits NDJSO
 - [x] Worktree reuse: createWorktree returns existing worktree path instead of 500 error on duplicate
 - [x] Client error messages: apiFetch reads JSON error body instead of showing generic status text
 - [x] Stop hook fix: clear client edits from state on first block to prevent infinite loop
-- [x] Mock agent: checkbox in WorkspacePanel sends agentCommand for integration testing without Claude Code
+- [x] Mock agent: moved to Settings panel toggle (was WorkspacePanel checkbox)
 - [x] Custom agent fix: skip claude-specific flags (--output-format, -p) when AGENT_COMMAND is set
 
 ### Stage 5 Checklist
@@ -117,7 +122,7 @@ Claude Code with `--output-format stream-json --verbose -p <prompt>` emits NDJSO
 | 4 | MCP Integration | DONE |
 | 5 | Polish | DONE |
 | 6 | Git Repo Management | DONE |
-| 7 | Settings + Output Parsing | IN PROGRESS |
+| 7 | Settings + Output Parsing | DONE |
 
 ## Monorepo Structure
 ```
@@ -126,7 +131,7 @@ packages/
   server/     - Hono API + @libsql/client + SQLite (port 3001) + CLI (commander)
   client/     - React + Vite + Tailwind v4 (port 5173)
   mcp-server/ - MCP stdio server (8 tools: get_context, list/get/create/update_issue, list/start_workspace, get_workspace_diff)
-  e2e/        - Playwright tests (30 tests: API + UI, global setup creates project)
+  e2e/        - Playwright tests (42 tests: API + UI, global setup creates project)
 ```
 
 ## API Routes
@@ -162,6 +167,8 @@ packages/
 | DELETE | /api/issues/:id/tags/:tagId | Remove tag from issue |
 | GET | /api/preferences/active-project | Get active project ID |
 | PUT | /api/preferences/active-project | Set active project ID |
+| GET | /api/preferences/settings | Get agent settings (agent_command, agent_args, output_parser, mock_agent) |
+| PUT | /api/preferences/settings | Update agent settings |
 
 ## MCP Tools
 | Tool | Description |
@@ -188,3 +195,4 @@ packages/
 | 2026-05-02 | Integration | Added structured logging across workspace/agent pipeline (agent.service, session.manager, workspace-actions). Added "Mock agent" checkbox to WorkspacePanel for integration testing without Claude Code — sends node one-liner as agentCommand. Fixed agent.service to skip claude-specific flags when AGENT_COMMAND is set. Verified full integration via playwright-cli: create issue → workspace → worktree → launch mock agent → see output in TerminalView via WebSocket. 28 unit tests + 30 E2E tests passing. |
 | 2026-05-02 | Bug fixes | Fixed worktree setup 500 error: createWorktree now reuses existing worktrees instead of throwing on duplicate branches. Path normalization for git --porcelain output on Windows (forward to backslash). Client apiFetch now reads JSON error body for actionable error messages. Fixed stop hook infinite loop by clearing client edits from state file on first block. 28 unit tests passing. |
 | 2026-05-02 | Agent launch fix | Fixed real Claude agent launch: added --verbose flag required by stream-json, use stdin:"ignore" to prevent Claude from hanging, restrict shell:true to custom commands only (claude.exe doesn't need cmd.exe). Session manager buffers broadcast messages for late-connecting WS clients. |
+| 2026-05-02 | Stage 7 complete | Settings + output parsing + mock agent improvements. Created standalone mock-agent.ts script that emits stream-json NDJSON. Moved mock agent toggle from WorkspacePanel to Settings panel. Added server-side MOCK_AGENT=1 env var for global override. Preferences API now accepts mock_agent key. E2E tests: 5 settings API tests, 6 settings UI tests, mock_agent preference integration test. 28 unit tests + 42 E2E tests passing. |

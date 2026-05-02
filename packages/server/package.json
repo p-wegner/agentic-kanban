@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "bin": {
-    "agentic-kanban": "./dist/cli.js"
+    "agentic-kanban": "./dist/cli.js",
+    "mock-agent": "./dist/scripts/mock-agent.js"
   },
   "scripts": {
     "dev": "tsx watch src/index.ts",

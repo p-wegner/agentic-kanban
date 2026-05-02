@@ -5,6 +5,11 @@ import { eq } from "drizzle-orm";
 import * as gitService from "../services/git.service.js";
 import type { SessionManager } from "../services/session.manager.js";
 import type { Database } from "../db/index.js";
+import { resolve, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const MOCK_AGENT_PATH = resolve(__dirname, "../scripts/mock-agent.ts");
 
 /**
  * Resolve repo info from workspace → issue → project chain.
@@ -104,7 +109,17 @@ export function createWorkspaceActionsRoute(
       // Read agent settings from preferences
       const prefRows = await database.select().from(preferences);
       const prefMap = new Map(prefRows.map(r => [r.key, r.value]));
-      const agentCommand = body.agentCommand || prefMap.get("agent_command") || undefined;
+
+      // Determine agent command: explicit body > mock_agent pref / env > agent_command pref > default
+      let agentCommand = body.agentCommand || undefined;
+      if (!agentCommand) {
+        const useMock = prefMap.get("mock_agent") === "true" || process.env.MOCK_AGENT === "1";
+        if (useMock) {
+          agentCommand = `node --import tsx "${MOCK_AGENT_PATH}"`;
+        } else {
+          agentCommand = prefMap.get("agent_command") || undefined;
+        }
+      }
       const agentArgs = prefMap.get("agent_args") || undefined;
 
       const truncatedPrompt = body.prompt.length > 80 ? body.prompt.slice(0, 80) + "..." : body.prompt;
