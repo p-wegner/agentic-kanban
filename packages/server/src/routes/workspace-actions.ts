@@ -4,6 +4,7 @@ import { workspaces, sessions, issues, projects, preferences } from "@agentic-ka
 import { eq } from "drizzle-orm";
 import * as gitService from "../services/git.service.js";
 import type { SessionManager } from "../services/session.manager.js";
+import type { BoardEvents } from "../services/board-events.js";
 import type { Database } from "../db/index.js";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -51,9 +52,21 @@ async function resolveProjectRepo(
   };
 }
 
+async function resolveProjectId(
+  workspaceId: string,
+  database: Database = db,
+): Promise<string | null> {
+  const wsRows = await database.select().from(workspaces).where(eq(workspaces.id, workspaceId)).limit(1);
+  if (wsRows.length === 0) return null;
+  const issueRows = await database.select({ projectId: issues.projectId }).from(issues).where(eq(issues.id, wsRows[0].issueId)).limit(1);
+  if (issueRows.length === 0) return null;
+  return issueRows[0].projectId;
+}
+
 export function createWorkspaceActionsRoute(
   getSessionManager: () => SessionManager,
   database: Database = db,
+  options?: { boardEvents?: BoardEvents },
 ) {
   const router = new Hono();
 
@@ -81,6 +94,10 @@ export function createWorkspaceActionsRoute(
         .update(workspaces)
         .set({ workingDir: worktreePath, updatedAt: now })
         .where(eq(workspaces.id, id));
+
+      // Broadcast board event
+      const projectId = await resolveProjectId(id, database);
+      if (projectId) options?.boardEvents?.broadcast(projectId, "workspace_setup");
 
       return c.json({ id, workingDir: worktreePath });
     } catch (err) {
@@ -129,6 +146,10 @@ export function createWorkspaceActionsRoute(
       const now = new Date().toISOString();
       await database.update(workspaces).set({ status: "active", updatedAt: now }).where(eq(workspaces.id, id));
 
+      // Broadcast board event
+      const projectId = await resolveProjectId(id, database);
+      if (projectId) options?.boardEvents?.broadcast(projectId, "session_launched");
+
       return c.json({ sessionId }, 201);
     } catch (err) {
       return c.json(
@@ -159,6 +180,10 @@ export function createWorkspaceActionsRoute(
 
     const now = new Date().toISOString();
     await database.update(workspaces).set({ status: "idle", updatedAt: now }).where(eq(workspaces.id, id));
+
+    // Broadcast board event
+    const projectId = await resolveProjectId(id, database);
+    if (projectId) options?.boardEvents?.broadcast(projectId, "session_stopped");
 
     return c.json({ stopped });
   });
@@ -221,6 +246,10 @@ export function createWorkspaceActionsRoute(
         .update(workspaces)
         .set({ status: "closed", workingDir: null, updatedAt: now })
         .where(eq(workspaces.id, id));
+
+      // Broadcast board event
+      const projectId = await resolveProjectId(id, database);
+      if (projectId) options?.boardEvents?.broadcast(projectId, "workspace_merged");
 
       return c.json({ id, mergeOutput: result });
     } catch (err) {

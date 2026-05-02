@@ -1,18 +1,22 @@
 import type { WSContext } from "hono/ws";
 import { db } from "../db/index.js";
-import { sessions, workspaces } from "@agentic-kanban/shared/schema";
+import { sessions, workspaces, sessionMessages } from "@agentic-kanban/shared/schema";
 import { eq } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import * as agentService from "./agent.service.js";
-import * as gitService from "./git.service.js";
 import type { AgentOutputMessage } from "@agentic-kanban/shared";
 
 interface Subscriber {
   ws: WSContext;
 }
 
+interface SessionManagerOptions {
+  onSessionExit?: (workspaceId: string) => void;
+}
+
 function createSessionManager(
   upgradeWebSocket: (callback: (c: any) => any) => any,
+  options?: SessionManagerOptions,
 ) {
   const subscribers = new Map<string, Set<Subscriber>>();
   // Buffer messages per session so late-connecting WS clients get missed output
@@ -24,6 +28,14 @@ function createSessionManager(
       messageBuffer.set(sessionId, []);
     }
     messageBuffer.get(sessionId)!.push(message);
+
+    // Persist to database (fire-and-forget)
+    db.insert(sessionMessages).values({
+      sessionId,
+      type: message.type,
+      data: message.data ?? null,
+      exitCode: message.exitCode != null ? String(message.exitCode) : null,
+    }).catch((err) => console.error("Failed to persist session message:", err));
 
     const subs = subscribers.get(sessionId);
     if (!subs) return;
@@ -89,6 +101,10 @@ function createSessionManager(
           db.update(sessions)
             .set({ status: "completed", endedAt: endNow, exitCode: String(event.exitCode ?? 0) })
             .where(eq(sessions.id, sessionId))
+            .then(() => {
+              // Notify board that a session completed
+              options?.onSessionExit?.(workspaceId);
+            })
             .catch((err) => console.error("Failed to update session:", err));
         }
       });

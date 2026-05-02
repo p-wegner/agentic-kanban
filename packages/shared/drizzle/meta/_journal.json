@@ -22,6 +22,13 @@
       "when": 1777669420009,
       "tag": "0002_bent_may_parker",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1777724088318,
+      "tag": "0003_tough_lightspeed",
+      "breakpoints": true
     }
   ]
 }

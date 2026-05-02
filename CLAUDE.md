@@ -3,7 +3,7 @@
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Project Status
-This project is **Stage 7 complete** (Stages 0-7 done). Tech stack: TypeScript monorepo — Hono + Drizzle + React + MCP SDK. Progress tracked in `docs/state.md`.
+This project is **Stage 8 complete** (Stages 0-8 done). Tech stack: TypeScript monorepo — Hono + Drizzle + React + MCP SDK. Progress tracked in `docs/state.md`.
 
 All documented features have been visually verified (2026-05-02):
 - Board renders 5 columns (Todo, In Progress, In Review, Done, Cancelled) with empty states
@@ -15,8 +15,11 @@ All documented features have been visually verified (2026-05-02):
 - Drag-and-drop: HTML5 DnD between columns (mouse-based, use `run-code` for `/` key on Windows/MSYS)
 - Workspace panel: slide-in with read-only repo info, "New Workspace" button (repo resolved from project)
 - Project switcher: dropdown in header when multiple projects registered
-- API routes: health, projects (with git info), preferences (active-project + settings), board aggregation, issues (CRUD), workspaces (CRUD + actions), tags (CRUD), sessions (WebSocket)
+- API routes: health, projects (with git info), preferences (active-project + settings), board aggregation, issues (CRUD), workspaces (CRUD + actions), tags (CRUD), sessions (WebSocket + output history)
 - Settings panel: gear icon in header, agent command/args, output parsing, mock agent toggle
+- Session history: past sessions with replayable output in workspace panel
+- Real-time board updates: board auto-refreshes via WebSocket when mutations happen
+- Command palette: Ctrl+K searchable action list, keyboard navigation
 - MCP server: 8 tools via stdio JSON-RPC
 - CLI: `pnpm cli -- register <path>` to register a git repo as a project
 
@@ -42,6 +45,10 @@ Cleanroom reimplementation of [vibe-kanban](https://github.com/BloopAI/vibe-kanb
 - **Hook paths on Windows**: Use relative paths (`.claude/hooks/...`) not `$CLAUDE_PROJECT_DIR` (env var not expanded) or absolute paths (not portable)
 - **E2E locator specificity**: `page.locator("text=X")` can match multiple elements (labels, descriptions) causing strict mode violations. Use scoped selectors: `page.locator("label", { hasText: "X" })` or `.first()`
 - **E2E test data cleanup**: Use `test.afterAll` to reset preferences/settings state; accumulate-only test data (issues from prior runs) can cause duplicate text matches in unrelated tests
+- **Board events**: WS `/ws/board/:projectId` broadcasts `board_changed` events. Server-side board events service (`board-events.ts`) is passed to routes via factory options. Session manager's `onSessionExit` callback triggers board broadcast via projectId resolution.
+- **Session messages**: All agent output is persisted to `session_messages` table (fire-and-forget insert in `broadcast()`). Retrieved via `GET /api/sessions/:id/output`.
+- **Command palette**: Actions registered via `registerAction()` in `actions.ts`. BoardPage registers actions in `useEffect` with cleanup. Ctrl+K intercepted via `window` keydown listener (Playwright can't send Ctrl+K directly — Chromium intercepts it for address bar focus). E2E tests dispatch via `page.evaluate(() => window.dispatchEvent(...))`.
+- **Route factory options**: Routes that need board events receive `{ boardEvents }` via options object. The `createRoutes` function in `routes/index.ts` passes options down to `createIssuesRoute` and `createWorkspaceActionsRoute`.
 
 ## Visual Verification
 Every feature that has a UI component must be visually verified using the `playwright-cli` skill (user-scoped). After implementing or modifying a feature:
@@ -63,7 +70,7 @@ Every feature that has a UI component must be visually verified using the `playw
 ## Monorepo Commands
 - `pnpm dev` — start server (port 3001) + client (port 5173) concurrently
 - `pnpm --filter @agentic-kanban/server test` — Vitest unit tests (28 tests)
-- `pnpm test:e2e` — Playwright E2E tests (42 tests)
+- `pnpm test:e2e` — Playwright E2E tests (57 tests)
 - `pnpm --filter @agentic-kanban/mcp-server dev` — run MCP server for testing
 - `pnpm db:migrate && pnpm db:seed` — reset DB to clean state (tags only, no default project)
 - `pnpm cli -- register <path>` — register a git repo as a project

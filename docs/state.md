@@ -1,6 +1,23 @@
 # Project State
 
-## Current Stage: Stage 7 — Settings + Output Parsing (DONE)
+## Current Stage: Stage 8 — Session History + Real-time Board + Command Palette (DONE)
+
+### Stage 8 Checklist
+- [x] Session messages DB table (session_messages: id, sessionId, type, data, exitCode, createdAt)
+- [x] Migration: 0003_tough_lightspeed.sql (session_messages table)
+- [x] Messages persisted to DB in session.manager broadcast (fire-and-forget insert)
+- [x] onSessionExit callback on session manager (triggers board event broadcast)
+- [x] Session output API: GET /api/sessions/:sessionId/output
+- [x] Board event broadcaster: WS /ws/board/:projectId (subscribe/unsubscribe/broadcast)
+- [x] Board events wired into: issue create/update/delete, workspace setup/launch/stop/merge, session exit
+- [x] Client useBoardEvents hook (auto-refresh board on WS board_changed events)
+- [x] Session history UI: past sessions list in workspace panel, "View Output" button, read-only TerminalView
+- [x] Actions registry (registerAction, getActions with category/shortcut/handler)
+- [x] CommandPalette component (modal, search filter, keyboard nav, grouped by category)
+- [x] Ctrl+K keyboard shortcut to open command palette
+- [x] Registered actions: Create Issue, Search Issues, Switch Project, Open Settings, Go to column
+- [x] E2E tests: session history API (3), session history UI (2), board events API (3), board realtime UI (2), command palette UI (5)
+- [x] 28 unit tests + 57 E2E tests passing
 
 ### Stage 7 Checklist
 - [x] Settings screen: gear icon in header, slide-in panel
@@ -123,15 +140,16 @@ Claude Code with `--output-format stream-json --verbose -p <prompt>` emits NDJSO
 | 5 | Polish | DONE |
 | 6 | Git Repo Management | DONE |
 | 7 | Settings + Output Parsing | DONE |
+| 8 | Session History + Real-time + Command Palette | DONE |
 
 ## Monorepo Structure
 ```
 packages/
-  shared/     - Drizzle schema (9 tables) + TypeScript types
+  shared/     - Drizzle schema (10 tables) + TypeScript types
   server/     - Hono API + @libsql/client + SQLite (port 3001) + CLI (commander)
   client/     - React + Vite + Tailwind v4 (port 5173)
   mcp-server/ - MCP stdio server (8 tools: get_context, list/get/create/update_issue, list/start_workspace, get_workspace_diff)
-  e2e/        - Playwright tests (42 tests: API + UI, global setup creates project)
+  e2e/        - Playwright tests (57 tests: API + UI, global setup creates project)
 ```
 
 ## API Routes
@@ -158,6 +176,8 @@ packages/
 | POST | /api/workspaces/:id/merge | Merge branch and close workspace |
 | GET | /api/workspaces/:id/sessions | List sessions for workspace |
 | GET | /ws/sessions/:sessionId | WebSocket: stream agent output |
+| GET | /ws/board/:projectId | WebSocket: real-time board change events |
+| GET | /api/sessions/:sessionId/output | Get persisted session output messages |
 | GET | /api/tags | List all tags |
 | POST | /api/tags | Create a tag |
 | PATCH | /api/tags/:id | Update a tag (name, color) |
@@ -196,3 +216,4 @@ packages/
 | 2026-05-02 | Bug fixes | Fixed worktree setup 500 error: createWorktree now reuses existing worktrees instead of throwing on duplicate branches. Path normalization for git --porcelain output on Windows (forward to backslash). Client apiFetch now reads JSON error body for actionable error messages. Fixed stop hook infinite loop by clearing client edits from state file on first block. 28 unit tests passing. |
 | 2026-05-02 | Agent launch fix | Fixed real Claude agent launch: added --verbose flag required by stream-json, use stdin:"ignore" to prevent Claude from hanging, restrict shell:true to custom commands only (claude.exe doesn't need cmd.exe). Session manager buffers broadcast messages for late-connecting WS clients. |
 | 2026-05-02 | Stage 7 complete | Settings + output parsing + mock agent improvements. Created standalone mock-agent.ts script that emits stream-json NDJSON. Moved mock agent toggle from WorkspacePanel to Settings panel. Added server-side MOCK_AGENT=1 env var for global override. Preferences API now accepts mock_agent key. E2E tests: 5 settings API tests, 6 settings UI tests, mock_agent preference integration test. 28 unit tests + 42 E2E tests passing. |
+| 2026-05-02 | Stage 8 complete | Session history + real-time board updates + command palette. New session_messages table (migration 0003). Messages persisted to DB for replay. Board events service (WS /ws/board/:projectId) broadcasts on issue/workspace mutations. Client auto-refreshes via useBoardEvents hook. Session history shows past sessions with replayable output. Command palette (Ctrl+K) with searchable actions grouped by category. 28 unit tests + 57 E2E tests passing (15 new Stage 8 tests). |
