@@ -57,15 +57,37 @@ Every feature that has a UI component must be visually verified using the `playw
 - `docs/state.md` — current progress tracking (API routes, MCP tools, stage checklists)
 
 ## Monorepo Commands
-- `pnpm dev` — start server + client concurrently
+- `pnpm dev` — start server (port 3001) + client (port 5173) concurrently
 - `pnpm --filter @agentic-kanban/server test` — Vitest unit tests (27 tests)
 - `pnpm test:e2e` — Playwright E2E tests (30 tests)
 - `pnpm --filter @agentic-kanban/mcp-server dev` — run MCP server for testing
 - `pnpm db:migrate && pnpm db:seed` — reset DB to clean state (tags only, no default project)
 - `pnpm cli -- register <path>` — register a git repo as a project
 - `pnpm cli -- list` — list registered projects
-- `pnpm cli -- unregister <name>` — remove a project
+- `pnpm cli -- unregister <name>` — remove a project by name or ID
 - `pnpm cli -- cleanup` — show stale worktrees for closed workspaces
+
+## Getting Started (First Run)
+1. `pnpm install` — install dependencies
+2. `pnpm db:migrate && pnpm db:seed` — initialize database (creates 4 default tags)
+3. `pnpm cli -- register <repo-path>` — register a git repo as a project (auto-detects default branch and remote URL)
+4. `pnpm dev` — start the app
+5. Open `http://localhost:5173` — board loads with the registered project's columns
+
+## Project Registration
+Each project maps 1:1 to a git repo. The CLI reads git info automatically:
+- **repoPath**: resolved to absolute path
+- **repoName**: directory basename
+- **defaultBranch**: detected from `symbolic-ref refs/remotes/origin/HEAD`, falls back to `init.defaultBranch`, then `"main"`
+- **remoteUrl**: from `git remote get-url origin` (nullable — works without remote)
+
+The registered project gets 5 default statuses (Todo, In Progress, In Review, Done, Cancelled) and is set as the active project. Registering additional projects adds a dropdown switcher in the header.
+
+## Workspace Flow
+Workspaces (git worktrees) no longer require manual repo path input. The server resolves the repo path from the chain: workspace → issue → project → repoPath/defaultBranch. This means:
+- `POST /api/workspaces/:id/setup` — creates worktree using project's repoPath
+- `GET /api/workspaces/:id/diff` — diffs against project's defaultBranch
+- `POST /api/workspaces/:id/merge` — merges into project's defaultBranch
 
 ## MVP Core Loop
 Register repo (`pnpm cli -- register <path>`) → Create issue → Start workspace (auto-resolves git branch from project) → Launch Claude Code → View diff → Merge
