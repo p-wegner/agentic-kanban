@@ -91,6 +91,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange }: W
   const [lastSessionPerWorkspace, setLastSessionPerWorkspace] = useState<Record<string, string>>({});
   // Track messages from completed sessions so TerminalView stays visible after exit
   const [completedMessages, setCompletedMessages] = useState<AgentOutputMessage[]>([]);
+  const [lastPrompt, setLastPrompt] = useState<string>("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Create form
@@ -239,6 +240,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange }: W
         },
       );
       setActiveSession(result.sessionId);
+      setLastPrompt(prompt.trim());
       setPrompt("");
       await fetchWorkspaces();
     } catch (err) {
@@ -465,6 +467,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange }: W
                         messages={activeSession ? messages : completedMessages}
                         connectionState={activeSession ? wsState : "closed"}
                         parseOutput={prefs.output_parser !== "false"}
+                        prompt={lastPrompt}
                       />
                     )}
 

@@ -6,9 +6,10 @@ interface TerminalViewProps {
   messages: AgentOutputMessage[];
   connectionState: "connecting" | "open" | "closed" | "error";
   parseOutput?: boolean;
+  prompt?: string;
 }
 
-export function TerminalView({ messages, connectionState, parseOutput = true }: TerminalViewProps) {
+export function TerminalView({ messages, connectionState, parseOutput = true, prompt }: TerminalViewProps) {
   const preRef = useRef<HTMLPreElement>(null);
   const parserRef = useRef(new ClaudeOutputParser());
   const [displayEvents, setDisplayEvents] = useState<DisplayEvent[]>([]);
@@ -86,6 +87,12 @@ export function TerminalView({ messages, connectionState, parseOutput = true }: 
         ref={preRef}
         className="flex-1 overflow-auto p-3 text-xs text-green-400 font-mono whitespace-pre-wrap"
       >
+        {prompt && (
+          <div className="mb-2 pb-2 border-b border-gray-700">
+            <span className="text-blue-400">&gt; </span>
+            <span className="text-gray-200">{prompt}</span>
+          </div>
+        )}
         {isParsed
           ? displayEvents.map((event, i) => renderParsedEvent(event, i))
           : displayEvents.map((event, i) => (
