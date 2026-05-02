@@ -15,14 +15,55 @@ function execGit(args: string[], cwd: string): Promise<string> {
 }
 
 /**
+ * List current git worktrees as an array of { path, branch } objects.
+ */
+export async function listWorktrees(
+  repoPath: string,
+): Promise<{ path: string; branch: string }[]> {
+  const output = await execGit(["worktree", "list", "--porcelain"], repoPath);
+  const worktrees: { path: string; branch: string }[] = [];
+  let currentPath = "";
+  let currentBranch = "";
+
+  for (const line of output.split("\n")) {
+    if (line.startsWith("worktree ")) {
+      currentPath = line.slice("worktree ".length);
+    } else if (line.startsWith("branch ")) {
+      currentBranch = line.slice("branch ".length);
+    } else if (line === "" && currentPath) {
+      worktrees.push({ path: currentPath, branch: currentBranch });
+      currentPath = "";
+      currentBranch = "";
+    }
+  }
+  if (currentPath) {
+    worktrees.push({ path: currentPath, branch: currentBranch });
+  }
+
+  return worktrees;
+}
+
+/**
  * Create a git worktree for a branch. The worktree is created in a
  * `.worktrees/<branch>` directory sibling to the repo root.
  * If the branch doesn't exist yet, it is created from HEAD.
+ * Throws if a worktree for this branch already exists.
  */
 export async function createWorktree(
   repoPath: string,
   branch: string,
 ): Promise<string> {
+  // Check if a worktree for this branch already exists
+  const existing = await listWorktrees(repoPath);
+  const match = existing.find(
+    (wt) => wt.branch === branch || wt.branch === `refs/heads/${branch}`,
+  );
+  if (match) {
+    throw new Error(
+      `A worktree for branch '${branch}' already exists at: ${match.path}`,
+    );
+  }
+
   // Sanitize branch name for directory use
   const safeName = branch.replace(/[^a-zA-Z0-9._-]/g, "_");
   const worktreesDir = join(dirname(repoPath), ".worktrees");

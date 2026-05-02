@@ -14,7 +14,47 @@ function execGit(args: string[], cwd: string): Promise<string> {
   });
 }
 
+/**
+ * List current git worktrees as an array of { path, branch } objects.
+ */
+export async function listWorktrees(
+  repoPath: string,
+): Promise<{ path: string; branch: string }[]> {
+  const output = await execGit(["worktree", "list", "--porcelain"], repoPath);
+  const worktrees: { path: string; branch: string }[] = [];
+  let currentPath = "";
+  let currentBranch = "";
+
+  for (const line of output.split("\n")) {
+    if (line.startsWith("worktree ")) {
+      currentPath = line.slice("worktree ".length);
+    } else if (line.startsWith("branch ")) {
+      currentBranch = line.slice("branch ".length);
+    } else if (line === "" && currentPath) {
+      worktrees.push({ path: currentPath, branch: currentBranch });
+      currentPath = "";
+      currentBranch = "";
+    }
+  }
+  if (currentPath) {
+    worktrees.push({ path: currentPath, branch: currentBranch });
+  }
+
+  return worktrees;
+}
+
 export async function createWorktree(repoPath: string, branch: string): Promise<string> {
+  // Check if a worktree for this branch already exists
+  const existing = await listWorktrees(repoPath);
+  const match = existing.find(
+    (wt) => wt.branch === branch || wt.branch === `refs/heads/${branch}`,
+  );
+  if (match) {
+    throw new Error(
+      `A worktree for branch '${branch}' already exists at: ${match.path}`,
+    );
+  }
+
   const safeName = branch.replace(/[^a-zA-Z0-9._-]/g, "_");
   const worktreesDir = join(dirname(repoPath), ".worktrees");
   const worktreePath = join(worktreesDir, safeName);
