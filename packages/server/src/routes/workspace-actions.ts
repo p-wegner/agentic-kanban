@@ -7,10 +7,14 @@ import type { SessionManager } from "../services/session.manager.js";
 import type { BoardEvents } from "../services/board-events.js";
 import type { Database } from "../db/index.js";
 import { resolve, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const MOCK_AGENT_PATH = resolve(__dirname, "../scripts/mock-agent.ts");
+// Resolve tsx from server's node_modules so the mock agent works from any CWD (e.g. worktrees)
+const TSX_LOADER = resolve(__dirname, "../../node_modules/tsx/dist/loader.mjs");
+const TSX_URL = pathToFileURL(TSX_LOADER).href;
+const MOCK_AGENT_COMMAND = `node --import ${TSX_URL} "${MOCK_AGENT_PATH}"`;
 
 /**
  * Resolve repo info from workspace → issue → project chain.
@@ -132,7 +136,7 @@ export function createWorkspaceActionsRoute(
       if (!agentCommand) {
         const useMock = prefMap.get("mock_agent") === "true" || process.env.MOCK_AGENT === "1";
         if (useMock) {
-          agentCommand = `node --import tsx "${MOCK_AGENT_PATH}"`;
+          agentCommand = MOCK_AGENT_COMMAND;
         } else {
           agentCommand = prefMap.get("agent_command") || undefined;
         }
