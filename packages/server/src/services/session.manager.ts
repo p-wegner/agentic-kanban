@@ -37,6 +37,21 @@ function createSessionManager(
       exitCode: message.exitCode != null ? String(message.exitCode) : null,
     }).catch((err) => console.error("Failed to persist session message:", err));
 
+    // Detect system/init events to capture claudeSessionId
+    if (message.type === "stdout" && message.data) {
+      try {
+        const obj = JSON.parse(message.data);
+        if (obj.type === "system" && obj.subtype === "init" && obj.session_id) {
+          db.update(sessions)
+            .set({ claudeSessionId: obj.session_id })
+            .where(eq(sessions.id, sessionId))
+            .catch((err) => console.error("Failed to update claudeSessionId:", err));
+        }
+      } catch {
+        // Not JSON or not a system/init event — ignore
+      }
+    }
+
     const subs = subscribers.get(sessionId);
     if (!subs) return;
     const payload = JSON.stringify(message);
@@ -53,6 +68,7 @@ function createSessionManager(
     prompt: string,
     agentCommand?: string,
     agentArgs?: string,
+    resumeFromId?: string,
   ) {
     // Look up workspace to get workingDir
     const wsRows = await db
@@ -70,6 +86,20 @@ function createSessionManager(
       throw new Error("Workspace has no working directory; run setup first");
     }
 
+    // If resuming, look up the previous session's claudeSessionId
+    let claudeSessionId: string | undefined;
+    if (resumeFromId) {
+      const prevRows = await db
+        .select({ claudeSessionId: sessions.claudeSessionId })
+        .from(sessions)
+        .where(eq(sessions.id, resumeFromId))
+        .limit(1);
+      if (prevRows.length > 0 && prevRows[0].claudeSessionId) {
+        claudeSessionId = prevRows[0].claudeSessionId;
+        console.log(`[session] resuming: resumeFromId=${resumeFromId} claudeSessionId=${claudeSessionId}`);
+      }
+    }
+
     const sessionId = randomUUID();
     const now = new Date().toISOString();
     console.log(`[session] starting: workspaceId=${workspaceId} sessionId=${sessionId} workingDir=${workspace.workingDir}`);
@@ -81,6 +111,7 @@ function createSessionManager(
       status: "running",
       startedAt: now,
       endedAt: null,
+      resumeFromId: resumeFromId ?? null,
     });
 
     // Override agent command for testing if provided
@@ -107,7 +138,7 @@ function createSessionManager(
             })
             .catch((err) => console.error("Failed to update session:", err));
         }
-      });
+      }, claudeSessionId);
     } finally {
       // Always restore the previous env var (or delete it if it wasn't set)
       if (prevAgentCommand !== undefined) {

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { apiFetch } from "../lib/api.js";
 import { useWebSocket } from "../lib/useWebSocket.js";
 import { TerminalView } from "./TerminalView.js";
@@ -87,12 +87,43 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange }: W
   const [historySessionId, setHistorySessionId] = useState<string | null>(null);
   const [historyMessages, setHistoryMessages] = useState<AgentOutputMessage[]>([]);
 
+  // Chat-like state: tracks the last session per workspace for resume
+  const [lastSessionPerWorkspace, setLastSessionPerWorkspace] = useState<Record<string, string>>({});
+  // Track messages from completed sessions so TerminalView stays visible after exit
+  const [completedMessages, setCompletedMessages] = useState<AgentOutputMessage[]>([]);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
   // Create form
   const [branchName, setBranchName] = useState("");
   const [prompt, setPrompt] = useState("");
   const [prefs, setPrefs] = useState<Record<string, string>>({});
 
   const { state: wsState, messages, disconnect } = useWebSocket(activeSession);
+
+  // Derive whether agent is currently running
+  const isRunning = activeSession !== null && !messages.some(m => m.type === "exit");
+
+  // Auto-clear activeSession when agent completes (exit message received)
+  useEffect(() => {
+    if (!activeSession) return;
+    const exitMsg = messages.find(m => m.type === "exit");
+    if (!exitMsg) return;
+
+    // Agent has exited — store session for resume and clear active state
+    const wsId = selectedWorkspace;
+    if (wsId) {
+      setLastSessionPerWorkspace((prev) => ({ ...prev, [wsId]: activeSession }));
+      setCompletedMessages([...messages]);
+      // Refresh sessions for current workspace
+      setWorkspaceSessions((prev) => {
+        const next = { ...prev };
+        delete next[wsId];
+        return next;
+      });
+    }
+    setActiveSession(null);
+    fetchWorkspaces();
+  }, [messages, activeSession]);
 
   async function fetchWorkspaces() {
     try {
@@ -192,8 +223,14 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange }: W
     if (!prompt.trim()) return;
     setActionLoading(true);
     setError(null);
+    setCompletedMessages([]);
     try {
       const body: Record<string, string> = { prompt: prompt.trim() };
+      // Attach resumeFromId if we have a previous session for this workspace
+      const resumeId = lastSessionPerWorkspace[wsId];
+      if (resumeId) {
+        body.resumeFromId = resumeId;
+      }
       const result = await apiFetch<{ sessionId: string }>(
         `/api/workspaces/${wsId}/launch`,
         {
@@ -217,6 +254,11 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange }: W
     try {
       await apiFetch(`/api/workspaces/${wsId}/stop`, { method: "POST" });
       disconnect();
+      // Store session for resume before clearing
+      if (activeSession) {
+        setLastSessionPerWorkspace((prev) => ({ ...prev, [wsId]: activeSession }));
+        setCompletedMessages(messages);
+      }
       setActiveSession(null);
       await fetchWorkspaces();
       // Refresh sessions for this workspace
@@ -417,40 +459,60 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange }: W
                       </button>
                     )}
 
-                    {ws.workingDir && ws.status !== "closed" && !activeSession && (
-                      <>
+                    {/* TerminalView — shown whenever there's output (active or completed) */}
+                    {(activeSession || completedMessages.length > 0) && ws.workingDir && ws.status !== "closed" && (
+                      <TerminalView
+                        messages={activeSession ? messages : completedMessages}
+                        connectionState={activeSession ? wsState : "closed"}
+                        parseOutput={prefs.output_parser !== "false"}
+                      />
+                    )}
+
+                    {/* Chat input — always visible for active workspaces */}
+                    {ws.workingDir && ws.status !== "closed" && (
+                      <div className="flex gap-2">
                         <textarea
+                          ref={textareaRef}
                           value={prompt}
                           onChange={(e) => setPrompt(e.target.value)}
-                          placeholder="Enter prompt for Claude Code..."
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" && e.ctrlKey) {
+                              e.preventDefault();
+                              if (isRunning) {
+                                handleStop(ws.id);
+                              } else if (prompt.trim()) {
+                                handleLaunch(ws.id);
+                              }
+                            }
+                          }}
+                          placeholder={isRunning ? "Agent is running..." : "Message Claude Code..."}
                           rows={2}
-                          className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none"
+                          disabled={isRunning}
+                          className="flex-1 text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none disabled:bg-gray-50 disabled:text-gray-400"
                           onClick={(e) => e.stopPropagation()}
                         />
-                        <button
-                          onClick={() => handleLaunch(ws.id)}
-                          disabled={actionLoading || !prompt.trim()}
-                          className="text-sm bg-green-600 text-white px-3 py-1.5 rounded hover:bg-green-700 disabled:opacity-50 w-full"
-                        >
-                          Launch Agent
-                        </button>
-                      </>
+                        {isRunning ? (
+                          <button
+                            onClick={() => handleStop(ws.id)}
+                            disabled={actionLoading}
+                            className="text-sm bg-red-600 text-white px-3 py-1.5 rounded hover:bg-red-700 disabled:opacity-50 self-end"
+                          >
+                            Stop
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => handleLaunch(ws.id)}
+                            disabled={actionLoading || !prompt.trim()}
+                            className="text-sm bg-blue-600 text-white px-3 py-1.5 rounded hover:bg-blue-700 disabled:opacity-50 self-end"
+                          >
+                            Send
+                          </button>
+                        )}
+                      </div>
                     )}
 
-                    {activeSession && (
-                      <>
-                        <TerminalView messages={messages} connectionState={wsState} parseOutput={prefs.output_parser !== "false"} />
-                        <button
-                          onClick={() => handleStop(ws.id)}
-                          disabled={actionLoading}
-                          className="text-sm bg-red-600 text-white px-3 py-1.5 rounded hover:bg-red-700 disabled:opacity-50 w-full"
-                        >
-                          Stop Agent
-                        </button>
-                      </>
-                    )}
-
-                    {ws.workingDir && ws.status !== "closed" && !activeSession && (
+                    {/* Action buttons — only when idle */}
+                    {ws.workingDir && ws.status !== "closed" && !isRunning && (
                       <div className="flex gap-2">
                         <button
                           onClick={() => handleViewDiff(ws.id)}
@@ -469,8 +531,8 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange }: W
                       </div>
                     )}
 
-                    {/* Past Sessions */}
-                    {completedSessions.length > 0 && !activeSession && (
+                    {/* Past Sessions — only when idle */}
+                    {completedSessions.length > 0 && !isRunning && (
                       <div className="space-y-1 pt-2 border-t border-gray-200">
                         <h4 className="text-xs font-medium text-gray-500 uppercase tracking-wide">
                           Past Sessions ({completedSessions.length})

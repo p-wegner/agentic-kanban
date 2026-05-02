@@ -29,6 +29,13 @@
       "when": 1777724088318,
       "tag": "0003_tough_lightspeed",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1777741545105,
+      "tag": "0004_boring_wind_dancer",
+      "breakpoints": true
     }
   ]
 }
