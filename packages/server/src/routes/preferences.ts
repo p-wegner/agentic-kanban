@@ -42,6 +42,43 @@ export function createPreferencesRoute(database: Database = db) {
     return c.json({ projectId: body.projectId });
   });
 
+  // GET /api/preferences/settings — get all agent settings
+  router.get("/settings", async (c) => {
+    const keys = ["agent_command", "agent_args", "output_parser"];
+    const rows = await database
+      .select()
+      .from(preferences);
+
+    const settings: Record<string, string> = {};
+    for (const row of rows) {
+      if (keys.includes(row.key)) {
+        settings[row.key] = row.value;
+      }
+    }
+
+    return c.json(settings);
+  });
+
+  // PUT /api/preferences/settings — update agent settings
+  router.put("/settings", async (c) => {
+    const body = await c.req.json() as Record<string, string>;
+    const now = new Date().toISOString();
+    const allowedKeys = ["agent_command", "agent_args", "output_parser"];
+
+    for (const [key, value] of Object.entries(body)) {
+      if (!allowedKeys.includes(key)) continue;
+      await database
+        .insert(preferences)
+        .values({ key, value: value ?? "", updatedAt: now })
+        .onConflictDoUpdate({
+          target: preferences.key,
+          set: { value: value ?? "", updatedAt: now },
+        });
+    }
+
+    return c.json({ ok: true });
+  });
+
   return router;
 }
 

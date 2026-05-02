@@ -4,6 +4,7 @@ import { BoardColumn } from "../components/BoardColumn.js";
 import { CreateIssueForm } from "../components/CreateIssueForm.js";
 import { IssueDetailPanel } from "../components/IssueDetailPanel.js";
 import { WorkspacePanel } from "../components/WorkspacePanel.js";
+import { SettingsPanel } from "../components/SettingsPanel.js";
 import { SkeletonBoard } from "../components/SkeletonBoard.js";
 import { ToastContainer, showToast } from "../components/Toast.js";
 import { apiFetch } from "../lib/api.js";
@@ -36,6 +37,7 @@ export function BoardPage() {
   const [issuesWithWorkspaces, setIssuesWithWorkspaces] = useState<Set<string>>(new Set());
   const [searchQuery, setSearchQuery] = useState("");
   const [priorityFilter, setPriorityFilter] = useState("");
+  const [showSettings, setShowSettings] = useState(false);
 
   const refetchBoard = useCallback(async (projectId?: string) => {
     const pid = projectId || activeProjectId;
@@ -281,6 +283,7 @@ export function BoardPage() {
       onSearchChange={setSearchQuery}
       priorityFilter={priorityFilter}
       onPriorityFilterChange={setPriorityFilter}
+      onSettingsClick={() => setShowSettings(true)}
     >
       {error && (
         <div className="mx-6 mt-4 p-3 bg-red-50 border border-red-200 rounded-md flex items-center justify-between">
@@ -367,6 +370,9 @@ export function BoardPage() {
         />
       )}
       <ToastContainer />
+      {showSettings && (
+        <SettingsPanel onClose={() => setShowSettings(false)} />
+      )}
     </Layout>
   );
 }

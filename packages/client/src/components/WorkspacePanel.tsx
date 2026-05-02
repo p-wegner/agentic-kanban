@@ -45,6 +45,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange }: W
   const [branchName, setBranchName] = useState("");
   const [prompt, setPrompt] = useState("");
   const [mockAgent, setMockAgent] = useState(false);
+  const [outputParser, setOutputParser] = useState(true);
 
   const { state: wsState, messages, disconnect } = useWebSocket(activeSession);
 
@@ -63,6 +64,10 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange }: W
 
   useEffect(() => {
     fetchWorkspaces();
+    // Load output_parser preference
+    apiFetch<Record<string, string>>("/api/preferences/settings")
+      .then((s) => setOutputParser(s.output_parser !== "false"))
+      .catch(() => {});
   }, [issue.id]);
 
   useEffect(() => {
@@ -327,7 +332,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange }: W
 
                     {activeSession && (
                       <>
-                        <TerminalView messages={messages} connectionState={wsState} />
+                        <TerminalView messages={messages} connectionState={wsState} parseOutput={outputParser} />
                         <button
                           onClick={() => handleStop(ws.id)}
                           disabled={actionLoading}

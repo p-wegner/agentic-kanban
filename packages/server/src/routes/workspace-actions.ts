@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { db } from "../db/index.js";
-import { workspaces, sessions, issues, projects } from "@agentic-kanban/shared/schema";
+import { workspaces, sessions, issues, projects, preferences } from "@agentic-kanban/shared/schema";
 import { eq } from "drizzle-orm";
 import * as gitService from "../services/git.service.js";
 import type { SessionManager } from "../services/session.manager.js";
@@ -101,9 +101,15 @@ export function createWorkspaceActionsRoute(
     }
 
     try {
+      // Read agent settings from preferences
+      const prefRows = await database.select().from(preferences);
+      const prefMap = new Map(prefRows.map(r => [r.key, r.value]));
+      const agentCommand = body.agentCommand || prefMap.get("agent_command") || undefined;
+      const agentArgs = prefMap.get("agent_args") || undefined;
+
       const truncatedPrompt = body.prompt.length > 80 ? body.prompt.slice(0, 80) + "..." : body.prompt;
-      console.log(`[workspace-actions] launch: workspaceId=${id} prompt="${truncatedPrompt}"`);
-      const sessionId = await getSessionManager().startSession(id, body.prompt, body.agentCommand);
+      console.log(`[workspace-actions] launch: workspaceId=${id} prompt="${truncatedPrompt}" agentCommand=${agentCommand ?? "default"} agentArgs=${agentArgs ?? "none"}`);
+      const sessionId = await getSessionManager().startSession(id, body.prompt, agentCommand, agentArgs);
 
       const now = new Date().toISOString();
       await database.update(workspaces).set({ status: "active", updatedAt: now }).where(eq(workspaces.id, id));
