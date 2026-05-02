@@ -7,7 +7,10 @@ import { WorkspacePanel } from "../components/WorkspacePanel.js";
 import { SettingsPanel } from "../components/SettingsPanel.js";
 import { SkeletonBoard } from "../components/SkeletonBoard.js";
 import { ToastContainer, showToast } from "../components/Toast.js";
+import { CommandPalette } from "../components/CommandPalette.js";
 import { apiFetch } from "../lib/api.js";
+import { useBoardEvents } from "../lib/useBoardEvents.js";
+import { registerAction } from "../lib/actions.js";
 import type {
   CreateIssueRequest,
   IssueWithStatus,
@@ -38,6 +41,7 @@ export function BoardPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [priorityFilter, setPriorityFilter] = useState("");
   const [showSettings, setShowSettings] = useState(false);
+  const [showCommandPalette, setShowCommandPalette] = useState(false);
 
   const refetchBoard = useCallback(async (projectId?: string) => {
     const pid = projectId || activeProjectId;
@@ -47,6 +51,12 @@ export function BoardPage() {
     );
     setColumns(board);
   }, [activeProjectId]);
+
+  // Real-time board updates via WebSocket
+  useBoardEvents(activeProjectId, useCallback((reason: string) => {
+    console.log(`[board-events] board changed: ${reason}`);
+    refetchBoard();
+  }, [refetchBoard]));
 
   const loadProjects = useCallback(async () => {
     const projs = await apiFetch<Project[]>("/api/projects");
@@ -226,6 +236,13 @@ export function BoardPage() {
   // Keyboard shortcuts
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
+      // Ctrl+K to open command palette
+      if (e.key === "k" && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        e.stopPropagation();
+        setShowCommandPalette(true);
+        return;
+      }
       // "/" to focus search
       if (e.key === "/" && !e.ctrlKey && !e.metaKey) {
         const target = e.target as HTMLElement;
@@ -233,8 +250,12 @@ export function BoardPage() {
         e.preventDefault();
         document.getElementById("search-input")?.focus();
       }
-      // Escape to clear search / close panels
+      // Escape to close palette / clear search / close panels
       if (e.key === "Escape") {
+        if (showCommandPalette) {
+          setShowCommandPalette(false);
+          return;
+        }
         if (searchQuery) {
           setSearchQuery("");
           document.getElementById("search-input")?.blur();
@@ -243,7 +264,65 @@ export function BoardPage() {
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [searchQuery]);
+  }, [searchQuery, showCommandPalette]);
+
+  // Register command palette actions
+  useEffect(() => {
+    const unregisters: (() => void)[] = [];
+
+    unregisters.push(registerAction({
+      id: "create-issue",
+      label: "Create Issue",
+      shortcut: "/",
+      category: "issue",
+      handler: () => {
+        // Open create form in the first column (Todo)
+        if (filteredColumns.length > 0) {
+          setCreatingInColumnId(filteredColumns[0].id);
+        }
+      },
+    }));
+
+    unregisters.push(registerAction({
+      id: "switch-project",
+      label: "Switch Project",
+      category: "navigation",
+      handler: () => {
+        // Click the project switcher dropdown
+        document.querySelector<HTMLButtonElement>("[data-project-switcher]")?.click();
+      },
+    }));
+
+    unregisters.push(registerAction({
+      id: "open-settings",
+      label: "Open Settings",
+      category: "settings",
+      handler: () => setShowSettings(true),
+    }));
+
+    unregisters.push(registerAction({
+      id: "search-issues",
+      label: "Search Issues",
+      shortcut: "/",
+      category: "board",
+      handler: () => document.getElementById("search-input")?.focus(),
+    }));
+
+    // Register "Go to: [column]" for each column
+    for (const col of columns) {
+      unregisters.push(registerAction({
+        id: `goto-${col.id}`,
+        label: `Go to: ${col.name}`,
+        category: "navigation",
+        handler: () => {
+          const el = document.getElementById(`column-${col.id}`);
+          el?.scrollIntoView({ behavior: "smooth", inline: "center" });
+        },
+      }));
+    }
+
+    return () => unregisters.forEach((fn) => fn());
+  }, [columns, filteredColumns]);
 
   if (loading) {
     return (
@@ -372,6 +451,9 @@ export function BoardPage() {
       <ToastContainer />
       {showSettings && (
         <SettingsPanel onClose={() => setShowSettings(false)} />
+      )}
+      {showCommandPalette && (
+        <CommandPalette onClose={() => setShowCommandPalette(false)} />
       )}
     </Layout>
   );

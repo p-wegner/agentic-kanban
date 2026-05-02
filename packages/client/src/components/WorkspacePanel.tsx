@@ -4,6 +4,7 @@ import { useWebSocket } from "../lib/useWebSocket.js";
 import { TerminalView } from "./TerminalView.js";
 import { DiffViewer } from "./DiffViewer.js";
 import type {
+  AgentOutputMessage,
   IssueWithStatus,
   WorkspaceResponse,
   DiffResponse,
@@ -16,6 +17,16 @@ interface Project {
   repoName: string;
   defaultBranch: string;
   remoteUrl: string | null;
+}
+
+interface SessionInfo {
+  id: string;
+  workspaceId: string;
+  executor: string;
+  status: string;
+  startedAt: string;
+  endedAt: string | null;
+  exitCode: string | null;
 }
 
 interface WorkspacePanelProps {
@@ -31,6 +42,36 @@ const STATUS_COLORS: Record<string, string> = {
   closed: "bg-gray-100 text-gray-500",
 };
 
+const SESSION_STATUS_COLORS: Record<string, string> = {
+  running: "bg-blue-100 text-blue-700",
+  completed: "bg-green-100 text-green-700",
+  stopped: "bg-yellow-100 text-yellow-700",
+};
+
+function formatRelativeTime(dateStr: string): string {
+  const now = Date.now();
+  const then = new Date(dateStr).getTime();
+  const diffMs = now - then;
+  const diffSec = Math.floor(diffMs / 1000);
+  if (diffSec < 60) return "just now";
+  const diffMin = Math.floor(diffSec / 60);
+  if (diffMin < 60) return `${diffMin}m ago`;
+  const diffHr = Math.floor(diffMin / 60);
+  if (diffHr < 24) return `${diffHr}h ago`;
+  const diffDay = Math.floor(diffHr / 24);
+  return `${diffDay}d ago`;
+}
+
+function formatDuration(start: string, end: string | null): string {
+  if (!end) return "running";
+  const diffMs = new Date(end).getTime() - new Date(start).getTime();
+  const sec = Math.floor(diffMs / 1000);
+  if (sec < 60) return `${sec}s`;
+  const min = Math.floor(sec / 60);
+  const remSec = sec % 60;
+  return `${min}m ${remSec}s`;
+}
+
 export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange }: WorkspacePanelProps) {
   const [workspaces, setWorkspaces] = useState<WorkspaceResponse[]>([]);
   const [loading, setLoading] = useState(true);
@@ -40,6 +81,11 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange }: W
   const [diff, setDiff] = useState<DiffResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
+
+  // Session history state
+  const [workspaceSessions, setWorkspaceSessions] = useState<Record<string, SessionInfo[]>>({});
+  const [historySessionId, setHistorySessionId] = useState<string | null>(null);
+  const [historyMessages, setHistoryMessages] = useState<AgentOutputMessage[]>([]);
 
   // Create form
   const [branchName, setBranchName] = useState("");
@@ -71,11 +117,40 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange }: W
 
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") {
+        if (historySessionId) {
+          setHistorySessionId(null);
+          setHistoryMessages([]);
+          return;
+        }
+        onClose();
+      }
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onClose]);
+  }, [onClose, historySessionId]);
+
+  // Fetch sessions for a workspace when it's expanded
+  useEffect(() => {
+    if (!selectedWorkspace) return;
+    if (workspaceSessions[selectedWorkspace]) return;
+
+    apiFetch<SessionInfo[]>(`/api/workspaces/${selectedWorkspace}/sessions`)
+      .then((sessions) => {
+        setWorkspaceSessions((prev) => ({ ...prev, [selectedWorkspace!]: sessions }));
+      })
+      .catch(() => {});
+  }, [selectedWorkspace]);
+
+  async function handleViewHistory(sessionId: string) {
+    try {
+      const msgs = await apiFetch<AgentOutputMessage[]>(`/api/sessions/${sessionId}/output`);
+      setHistoryMessages(msgs);
+      setHistorySessionId(sessionId);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load session output");
+    }
+  }
 
   async function handleCreateWorkspace() {
     if (!branchName.trim()) return;
@@ -144,6 +219,12 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange }: W
       disconnect();
       setActiveSession(null);
       await fetchWorkspaces();
+      // Refresh sessions for this workspace
+      setWorkspaceSessions((prev) => {
+        const next = { ...prev };
+        delete next[wsId];
+        return next;
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Stop failed");
     } finally {
@@ -179,6 +260,43 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange }: W
     } finally {
       setActionLoading(false);
     }
+  }
+
+  // History overlay
+  if (historySessionId) {
+    return (
+      <>
+        <div className="fixed inset-0 bg-black/30 z-40" onClick={() => { setHistorySessionId(null); setHistoryMessages([]); }} />
+        <div className="fixed right-0 top-0 h-full w-[480px] bg-white shadow-xl z-50 flex flex-col border-l border-gray-200">
+          <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200">
+            <h2 className="text-sm font-semibold text-gray-900">
+              Session Output
+            </h2>
+            <button
+              onClick={() => { setHistorySessionId(null); setHistoryMessages([]); }}
+              className="text-gray-400 hover:text-gray-600 text-lg leading-none"
+            >
+              &times;
+            </button>
+          </div>
+          <div className="flex-1 overflow-y-auto p-4">
+            <TerminalView
+              messages={historyMessages}
+              connectionState="closed"
+              parseOutput={prefs.output_parser !== "false"}
+            />
+          </div>
+          <div className="px-4 py-3 border-t border-gray-200">
+            <button
+              onClick={() => { setHistorySessionId(null); setHistoryMessages([]); }}
+              className="text-sm text-gray-500 hover:text-gray-700"
+            >
+              Back to Workspaces
+            </button>
+          </div>
+        </div>
+      </>
+    );
   }
 
   return (
@@ -265,6 +383,8 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange }: W
           {workspaces.map((ws) => {
             const isSelected = selectedWorkspace === ws.id;
             const badgeColor = STATUS_COLORS[ws.status] ?? "bg-gray-100 text-gray-500";
+            const sessions = workspaceSessions[ws.id] ?? [];
+            const completedSessions = sessions.filter((s) => s.status !== "running");
 
             return (
               <div
@@ -346,6 +466,42 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange }: W
                         >
                           Merge
                         </button>
+                      </div>
+                    )}
+
+                    {/* Past Sessions */}
+                    {completedSessions.length > 0 && !activeSession && (
+                      <div className="space-y-1 pt-2 border-t border-gray-200">
+                        <h4 className="text-xs font-medium text-gray-500 uppercase tracking-wide">
+                          Past Sessions ({completedSessions.length})
+                        </h4>
+                        {completedSessions.map((session) => {
+                          const sessionBadge = SESSION_STATUS_COLORS[session.status] ?? "bg-gray-100 text-gray-500";
+                          return (
+                            <div
+                              key={session.id}
+                              className="flex items-center justify-between py-1 px-2 rounded hover:bg-gray-50"
+                            >
+                              <div className="flex items-center gap-2">
+                                <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${sessionBadge}`}>
+                                  {session.status}
+                                </span>
+                                <span className="text-xs text-gray-600">
+                                  {formatRelativeTime(session.startedAt)}
+                                </span>
+                                <span className="text-[10px] text-gray-400">
+                                  ({formatDuration(session.startedAt, session.endedAt)})
+                                </span>
+                              </div>
+                              <button
+                                onClick={() => handleViewHistory(session.id)}
+                                className="text-xs text-blue-600 hover:text-blue-700"
+                              >
+                                View Output
+                              </button>
+                            </div>
+                          );
+                        })}
                       </div>
                     )}
                   </div>

@@ -2,11 +2,14 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { serve } from "@hono/node-server";
 import { createNodeWebSocket } from "@hono/node-ws";
-import { routes } from "./routes/index.js";
-import { createWorkspaceActionsRoute } from "./routes/workspace-actions.js";
+import { createRoutes } from "./routes/index.js";
+import { createSessionsRoute } from "./routes/sessions.js";
 import { migrate } from "drizzle-orm/libsql/migrator";
 import { db } from "./db/index.js";
 import { createSessionManager } from "./services/session.manager.js";
+import { createBoardEvents } from "./services/board-events.js";
+import { workspaces, issues } from "@agentic-kanban/shared/schema";
+import { eq } from "drizzle-orm";
 
 const app = new Hono();
 
@@ -19,20 +22,40 @@ app.get("/health", (c) => c.json({ status: "ok" }));
 // WebSocket setup
 const { injectWebSocket, upgradeWebSocket } = createNodeWebSocket({ app });
 
-// Session manager
-const sessionManager = createSessionManager(upgradeWebSocket);
+// Board events service
+const boardEvents = createBoardEvents(upgradeWebSocket);
 
-// Mount WebSocket session route
+// Session manager with onSessionExit callback
+const sessionManager = createSessionManager(upgradeWebSocket, {
+  onSessionExit: async (workspaceId: string) => {
+    try {
+      // Resolve projectId from workspaceId → issue → project
+      const wsRows = await db.select().from(workspaces).where(eq(workspaces.id, workspaceId)).limit(1);
+      if (wsRows.length === 0) return;
+      const issueRows = await db.select({ projectId: issues.projectId }).from(issues).where(eq(issues.id, wsRows[0].issueId)).limit(1);
+      if (issueRows.length === 0) return;
+      boardEvents.broadcast(issueRows[0].projectId, "session_completed");
+    } catch (err) {
+      console.error("Failed to broadcast session exit:", err);
+    }
+  },
+});
+
+// Mount WebSocket routes
 app.get(
   "/ws/sessions/:sessionId",
   sessionManager.wsRoute(),
 );
+app.get(
+  "/ws/board/:projectId",
+  boardEvents.wsRoute(),
+);
 
-// API routes (CRUD only — no workspace actions to avoid circular deps)
-app.route("/api", routes);
+// API routes (with boardEvents for real-time updates)
+app.route("/api", createRoutes(db, () => sessionManager, { boardEvents }));
 
-// Workspace action routes (separate mount with lazy session manager access)
-app.route("/api/workspaces", createWorkspaceActionsRoute(() => sessionManager, db));
+// Session output route
+app.route("/api/sessions", createSessionsRoute(db));
 
 // Start server
 const port = Number(process.env.PORT) || 3001;

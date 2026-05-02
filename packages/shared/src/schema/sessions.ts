@@ -1,6 +1,7 @@
 import { sqliteTable, text } from "drizzle-orm/sqlite-core";
 import { relations } from "drizzle-orm";
 import { workspaces } from "./workspaces.js";
+import { sessionMessages } from "./session-messages.js";
 
 export const sessions = sqliteTable("sessions", {
   id: text("id").primaryKey(),
@@ -12,9 +13,10 @@ export const sessions = sqliteTable("sessions", {
   exitCode: text("exit_code"),
 });
 
-export const sessionsRelations = relations(sessions, ({ one }) => ({
+export const sessionsRelations = relations(sessions, ({ one, many }) => ({
   workspace: one(workspaces, {
     fields: [sessions.workspaceId],
     references: [workspaces.id],
   }),
+  messages: many(sessionMessages),
 }));

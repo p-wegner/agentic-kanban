@@ -7,13 +7,18 @@ import { createTagsRoute, tagsRoute } from "./tags.js";
 import { createPreferencesRoute, preferencesRoute } from "./preferences.js";
 import type { Database } from "../db/index.js";
 import type { SessionManager } from "../services/session.manager.js";
+import type { BoardEvents } from "../services/board-events.js";
 
-export function createRoutes(database: Database, getSessionManager: () => SessionManager) {
+interface RouteOptions {
+  boardEvents?: BoardEvents;
+}
+
+export function createRoutes(database: Database, getSessionManager: () => SessionManager, options?: RouteOptions) {
   const routes = new Hono();
   routes.route("/projects", createProjectsRoute(database));
-  routes.route("/issues", createIssuesRoute(database));
+  routes.route("/issues", createIssuesRoute(database, options));
   routes.route("/workspaces", createWorkspacesRoute(database));
-  routes.route("/workspaces", createWorkspaceActionsRoute(getSessionManager));
+  routes.route("/workspaces", createWorkspaceActionsRoute(getSessionManager, database, options));
   routes.route("/tags", createTagsRoute());
   routes.route("/preferences", createPreferencesRoute(database));
   return routes;

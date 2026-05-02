@@ -4,8 +4,9 @@ import { issues, projectStatuses, workspaces, tags, issueTags } from "@agentic-k
 import { eq, and } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import type { Database } from "../db/index.js";
+import type { BoardEvents } from "../services/board-events.js";
 
-export function createIssuesRoute(database: Database = db) {
+export function createIssuesRoute(database: Database = db, options?: { boardEvents?: BoardEvents }) {
   const router = new Hono();
 
   // GET /api/issues?projectId=...
@@ -54,6 +55,9 @@ export function createIssuesRoute(database: Database = db) {
       updatedAt: now,
     });
 
+    // Broadcast board event
+    if (body.projectId) options?.boardEvents?.broadcast(body.projectId, "issue_created");
+
     return c.json({ id, title: body.title }, 201);
   });
 
@@ -72,13 +76,28 @@ export function createIssuesRoute(database: Database = db) {
 
     await database.update(issues).set(updates).where(eq(issues.id, id));
 
+    // Resolve projectId for broadcast
+    const rows = await database.select({ projectId: issues.projectId }).from(issues).where(eq(issues.id, id)).limit(1);
+    if (rows.length > 0) {
+      options?.boardEvents?.broadcast(rows[0].projectId, "issue_updated");
+    }
+
     return c.json({ id });
   });
 
   // DELETE /api/issues/:id
   router.delete("/:id", async (c) => {
     const id = c.req.param("id");
+
+    // Resolve projectId before delete
+    const rows = await database.select({ projectId: issues.projectId }).from(issues).where(eq(issues.id, id)).limit(1);
+
     await database.delete(issues).where(eq(issues.id, id));
+
+    if (rows.length > 0) {
+      options?.boardEvents?.broadcast(rows[0].projectId, "issue_deleted");
+    }
+
     return c.json({ success: true });
   });
 
