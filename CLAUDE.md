@@ -44,7 +44,9 @@ Cleanroom reimplementation of [vibe-kanban](https://github.com/BloopAI/vibe-kanb
 - **Adding settings keys**: The preferences route uses a whitelist pattern — new settings require adding the key to both the GET `keys` array and PUT `allowedKeys` array in `packages/server/src/routes/preferences.ts`. The client `SettingsPanel.tsx` also needs the key added to its `Settings` interface and `DEFAULT_SETTINGS` object.
 - **Hook paths on Windows**: Use relative paths (`.claude/hooks/...`) not `$CLAUDE_PROJECT_DIR` (env var not expanded) or absolute paths (not portable)
 - **E2E locator specificity**: `page.locator("text=X")` can match multiple elements (labels, descriptions) causing strict mode violations. Use scoped selectors: `page.locator("label", { hasText: "X" })` or `.first()`
-- **E2E test data cleanup**: Use `test.afterAll` to reset preferences/settings state; accumulate-only test data (issues from prior runs) can cause duplicate text matches in unrelated tests
+- **E2E test data cleanup**: Use `test.afterAll` to reset preferences/settings state; accumulate-only test data (issues from prior runs) can cause duplicate text matches in unrelated tests. Hardcoded edited titles (e.g. `"Edited Title 777"`) accumulate across runs — use `Date.now()` suffixes. Known flaky test: `board.test.ts` "edit issue from detail panel" fails due to this.
+- **Pre-existing test failures**: Never dismiss failing tests as "pre-existing" without investigating. At minimum, determine root cause (data accumulation, race condition, API change) and assess fix complexity. Fix if straightforward; document as known issue if not.
+- **Board API data enrichment**: Workspace summaries are computed server-side in the board endpoint via a single grouped query, then attached to each issue as `workspaceSummary`. This eliminates the need for client-side state tracking (like `issuesWithWorkspaces` Set). Prefer server-side aggregation over client-side joins.
 - **E2E session/workspace tests**: Workspace `setup` (git worktree creation) and session message persistence can be flaky. Use retry loops (3 attempts, 500ms–1s delays) for both setup and output fetching instead of `test.skip()`. Setup retries go in `beforeAll`; output retries wrap the GET request. Avoid `test.skip()` unless there is truly no alternative.
 - **Board events**: WS `/ws/board/:projectId` broadcasts `board_changed` events. Server-side board events service (`board-events.ts`) is passed to routes via factory options. Session manager's `onSessionExit` callback triggers board broadcast via projectId resolution.
 - **Session messages**: All agent output is persisted to `session_messages` table (fire-and-forget insert in `broadcast()`). Retrieved via `GET /api/sessions/:id/output`.
@@ -71,7 +73,7 @@ Every feature that has a UI component must be visually verified using the `playw
 ## Monorepo Commands
 - `pnpm dev` — start server (port 3001) + client (port 5173) concurrently
 - `pnpm --filter @agentic-kanban/server test` — Vitest unit tests (28 tests)
-- `pnpm test:e2e` — Playwright E2E tests (57 tests)
+- `pnpm test:e2e` — Playwright E2E tests (60 tests)
 - `pnpm --filter @agentic-kanban/mcp-server dev` — run MCP server for testing
 - `pnpm db:migrate && pnpm db:seed` — reset DB to clean state (tags only, no default project)
 - `pnpm cli -- register <path>` — register a git repo as a project

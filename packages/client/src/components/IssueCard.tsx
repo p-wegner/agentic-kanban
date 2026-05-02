@@ -17,12 +17,12 @@ interface IssueCardProps {
   issue: IssueWithStatus;
   onClick: (issue: IssueWithStatus) => void;
   onDragStart: (e: React.DragEvent, issue: IssueWithStatus) => void;
-  hasWorkspaces?: boolean;
   tags?: TagBadge[];
 }
 
-export function IssueCard({ issue, onClick, onDragStart, hasWorkspaces, tags }: IssueCardProps) {
+export function IssueCard({ issue, onClick, onDragStart, tags }: IssueCardProps) {
   const badgeColor = priorityColors[issue.priority] ?? "bg-gray-200 text-gray-700";
+  const ws = issue.workspaceSummary;
 
   return (
     <div
@@ -33,9 +33,6 @@ export function IssueCard({ issue, onClick, onDragStart, hasWorkspaces, tags }: 
     >
       <div className="flex items-start justify-between gap-2">
         <p className="text-sm text-gray-900">{issue.title}</p>
-        {hasWorkspaces && (
-          <span className="shrink-0 w-2 h-2 mt-1.5 rounded-full bg-green-500" title="Has workspaces" />
-        )}
       </div>
       {issue.description && (
         <p className="text-xs text-gray-500 mt-1 line-clamp-2">
@@ -57,6 +54,21 @@ export function IssueCard({ issue, onClick, onDragStart, hasWorkspaces, tags }: 
             {tag.name}
           </span>
         ))}
+        {ws && ws.total > 0 && (
+          <span
+            className="inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded bg-gray-100 text-gray-600"
+            title={ws.active > 0 ? `${ws.active} active, ${ws.idle} idle` : `${ws.idle} idle`}
+          >
+            <span
+              className={`inline-block w-1.5 h-1.5 rounded-full ${
+                ws.active > 0
+                  ? "bg-green-500 animate-pulse"
+                  : "bg-gray-400"
+              }`}
+            />
+            {ws.total}
+          </span>
+        )}
       </div>
     </div>
   );

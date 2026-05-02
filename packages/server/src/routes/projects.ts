@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { db } from "../db/index.js";
-import { projects, projectStatuses, issues } from "@agentic-kanban/shared/schema";
-import { eq } from "drizzle-orm";
+import { projects, projectStatuses, issues, workspaces } from "@agentic-kanban/shared/schema";
+import { eq, inArray, sql } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { detectRepoInfo } from "../services/git-info.service.js";
 import type { Database } from "../db/index.js";
@@ -118,12 +118,52 @@ export function createProjectsRoute(database: Database = db) {
       .where(eq(issues.projectId, projectId))
       .orderBy(issues.sortOrder);
 
+    // Fetch workspace summaries grouped by issueId
+    const issueIds = projectIssues.map((i) => i.id);
+    const workspaceSummaryMap = new Map<string, { total: number; active: number; idle: number; branches: string[] }>();
+
+    if (issueIds.length > 0) {
+      const wsRows = await database
+        .select({
+          issueId: workspaces.issueId,
+          status: workspaces.status,
+          branch: workspaces.branch,
+          count: sql<number>`count(*)`.as("count"),
+        })
+        .from(workspaces)
+        .where(inArray(workspaces.issueId, issueIds))
+        .groupBy(workspaces.issueId, workspaces.status, workspaces.branch);
+
+      for (const row of wsRows) {
+        let summary = workspaceSummaryMap.get(row.issueId);
+        if (!summary) {
+          summary = { total: 0, active: 0, idle: 0, branches: [] };
+          workspaceSummaryMap.set(row.issueId, summary);
+        }
+        summary.total += row.count;
+        if (row.status === "active") {
+          summary.active += row.count;
+        } else {
+          summary.idle += row.count;
+        }
+        if (!summary.branches.includes(row.branch)) {
+          summary.branches.push(row.branch);
+        }
+      }
+    }
+
+    // Attach workspace summaries to issues
+    const issuesWithSummary = projectIssues.map((issue) => {
+      const wsSummary = workspaceSummaryMap.get(issue.id);
+      return wsSummary ? { ...issue, workspaceSummary: wsSummary } : issue;
+    });
+
     const result = statuses.map((s) => ({
       id: s.id,
       name: s.name,
       projectId: s.projectId,
       sortOrder: s.sortOrder,
-      issues: projectIssues.filter((i) => i.statusId === s.id),
+      issues: issuesWithSummary.filter((i) => i.statusId === s.id),
     }));
 
     return c.json(result);

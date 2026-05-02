@@ -37,7 +37,6 @@ export function BoardPage() {
   const [error, setError] = useState<string | null>(null);
   const [mutating, setMutating] = useState(false);
   const [workspaceIssue, setWorkspaceIssue] = useState<IssueWithStatus | null>(null);
-  const [issuesWithWorkspaces, setIssuesWithWorkspaces] = useState<Set<string>>(new Set());
   const [searchQuery, setSearchQuery] = useState("");
   const [priorityFilter, setPriorityFilter] = useState("");
   const [showSettings, setShowSettings] = useState(false);
@@ -420,7 +419,6 @@ export function BoardPage() {
               handleDragStart(e, issue);
             }}
             onDrop={handleDrop}
-            issuesWithWorkspaces={issuesWithWorkspaces}
           >
             <CreateIssueForm
               projectId={activeProjectId}
