@@ -18,14 +18,26 @@ function getProjectDir() {
   return process.env.CLAUDE_PROJECT_DIR || process.cwd();
 }
 
+function getStatePath() {
+  return path.join(getProjectDir(), ".claude", "hooks", ".edited-files.json");
+}
+
 function loadState() {
-  const p = path.join(getProjectDir(), ".claude", "hooks", ".edited-files.json");
+  const p = getStatePath();
   if (!fs.existsSync(p)) return { files: [] };
   try {
     return JSON.parse(fs.readFileSync(p, "utf8"));
   } catch {
     return { files: [] };
   }
+}
+
+function clearClientEdits(state) {
+  const remaining = state.files.filter(
+    (f) =>
+      !(f.startsWith("packages/client/") && /\.(tsx?|jsx?|css)$/.test(f)),
+  );
+  fs.writeFileSync(getStatePath(), JSON.stringify({ files: remaining }, null, 2));
 }
 
 function hasClientEdits(files) {
@@ -57,6 +69,9 @@ async function main() {
   if (!hasClientEdits(state.files)) process.exit(0);
 
   // Client files were edited — block and remind
+  // Clear client edits from state so the next stop attempt passes (prevents infinite loop)
+  clearClientEdits(state);
+
   const decision = {
     decision: "block",
     reason: [

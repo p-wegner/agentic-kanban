@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { mkdir } from "node:fs/promises";
-import { join, dirname } from "node:path";
+import { join, dirname, sep } from "node:path";
 
 function execGit(args: string[], cwd: string): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -53,15 +53,14 @@ export async function createWorktree(
   repoPath: string,
   branch: string,
 ): Promise<string> {
-  // Check if a worktree for this branch already exists
+  // Check if a worktree for this branch already exists — reuse it
   const existing = await listWorktrees(repoPath);
   const match = existing.find(
     (wt) => wt.branch === branch || wt.branch === `refs/heads/${branch}`,
   );
   if (match) {
-    throw new Error(
-      `A worktree for branch '${branch}' already exists at: ${match.path}`,
-    );
+    // Normalize to platform path separators (git --porcelain uses forward slashes)
+    return match.path.replace(/\//g, sep);
   }
 
   // Sanitize branch name for directory use
