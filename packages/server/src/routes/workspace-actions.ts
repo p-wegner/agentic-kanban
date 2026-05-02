@@ -140,8 +140,8 @@ export function createWorkspaceActionsRoute(
       const agentArgs = prefMap.get("agent_args") || undefined;
 
       const truncatedPrompt = body.prompt.length > 80 ? body.prompt.slice(0, 80) + "..." : body.prompt;
-      console.log(`[workspace-actions] launch: workspaceId=${id} prompt="${truncatedPrompt}" agentCommand=${agentCommand ?? "default"} agentArgs=${agentArgs ?? "none"}`);
-      const sessionId = await getSessionManager().startSession(id, body.prompt, agentCommand, agentArgs);
+      console.log(`[workspace-actions] launch: workspaceId=${id} prompt="${truncatedPrompt}" agentCommand=${agentCommand ?? "default"} agentArgs=${agentArgs ?? "none"} resumeFromId=${body.resumeFromId ?? "none"}`);
+      const sessionId = await getSessionManager().startSession(id, body.prompt, agentCommand, agentArgs, body.resumeFromId);
 
       const now = new Date().toISOString();
       await database.update(workspaces).set({ status: "active", updatedAt: now }).where(eq(workspaces.id, id));

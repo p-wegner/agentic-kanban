@@ -108,6 +108,7 @@ export interface SetupWorkspaceRequest {
 export interface LaunchAgentRequest {
   prompt: string;
   agentCommand?: string;
+  resumeFromId?: string;
 }
 
 export interface SessionResponse {
@@ -117,6 +118,8 @@ export interface SessionResponse {
   status: string;
   startedAt: string;
   endedAt: string | null;
+  claudeSessionId?: string | null;
+  resumeFromId?: string | null;
 }
 
 export interface DiffResponse {

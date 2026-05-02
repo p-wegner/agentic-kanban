@@ -22,11 +22,12 @@ export function launch(
   prompt: string,
   agentArgs: string | undefined,
   onOutput: AgentOutputCallback,
+  claudeSessionId?: string,
 ): ChildProcess {
   const command = process.env.AGENT_COMMAND || "claude";
   const isCustomCommand = !!process.env.AGENT_COMMAND;
   const isWindows = process.platform === "win32";
-  console.log(`[agent] launching: command=${command} worktree=${worktreePath} sessionId=${sessionId}`);
+  console.log(`[agent] launching: command=${command} worktree=${worktreePath} sessionId=${sessionId} resume=${claudeSessionId ?? "none"}`);
 
   // Custom agent commands run directly; claude gets its specific flags
   let args: string[];
@@ -37,6 +38,10 @@ export function launch(
     // Append extra args from settings (e.g. "--model opus", "--settings path")
     if (agentArgs) {
       args.push(...splitArgs(agentArgs));
+    }
+    // Resume previous Claude session if available
+    if (claudeSessionId) {
+      args.push("--resume", claudeSessionId);
     }
     args.push("-p", prompt);
   }
