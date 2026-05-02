@@ -3,9 +3,9 @@
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Project Status
-This project is **Stage 6 complete** (Stages 0-6 done). Tech stack: TypeScript monorepo — Hono + Drizzle + React + MCP SDK. Progress tracked in `docs/state.md`.
+This project is **Stage 7 complete** (Stages 0-7 done). Tech stack: TypeScript monorepo — Hono + Drizzle + React + MCP SDK. Progress tracked in `docs/state.md`.
 
-All documented features have been visually verified (2026-05-01):
+All documented features have been visually verified (2026-05-02):
 - Board renders 5 columns (Todo, In Progress, In Review, Done, Cancelled) with empty states
 - Create issue: inline form with title, description, priority, Add/Cancel
 - Issue detail panel: slide-in with view/edit/delete, description, priority badge, status, workspaces, tags
@@ -15,7 +15,8 @@ All documented features have been visually verified (2026-05-01):
 - Drag-and-drop: HTML5 DnD between columns (mouse-based, use `run-code` for `/` key on Windows/MSYS)
 - Workspace panel: slide-in with read-only repo info, "New Workspace" button (repo resolved from project)
 - Project switcher: dropdown in header when multiple projects registered
-- API routes: health, projects (with git info), preferences, board aggregation, issues (CRUD), workspaces (CRUD + actions), tags (CRUD), sessions (WebSocket)
+- API routes: health, projects (with git info), preferences (active-project + settings), board aggregation, issues (CRUD), workspaces (CRUD + actions), tags (CRUD), sessions (WebSocket)
+- Settings panel: gear icon in header, agent command/args, output parsing, mock agent toggle
 - MCP server: 8 tools via stdio JSON-RPC
 - CLI: `pnpm cli -- register <path>` to register a git repo as a project
 
@@ -36,8 +37,11 @@ Cleanroom reimplementation of [vibe-kanban](https://github.com/BloopAI/vibe-kanb
 - **MCP server DB path**: Uses `import.meta.dirname` relative path (`../../server/kanban.db`) since pnpm changes CWD per package
 - **Git tests on Windows**: Use `.trim()` for file content assertions (CRLF vs LF); test git output for keywords, not exact strings
 - **WS setup**: `@hono/node-ws` requires `createNodeWebSocket({ app })` then `injectWebSocket(server)` after `serve()` returns
-- **Test agent substitution**: `AGENT_COMMAND` env var overrides the agent binary for E2E tests
+- **Test agent substitution**: `AGENT_COMMAND` env var overrides the agent binary for E2E tests; `MOCK_AGENT=1` env var globally enables mock agent for all launches; `mock_agent` preference stores per-user setting in DB
+- **Adding settings keys**: The preferences route uses a whitelist pattern — new settings require adding the key to both the GET `keys` array and PUT `allowedKeys` array in `packages/server/src/routes/preferences.ts`. The client `SettingsPanel.tsx` also needs the key added to its `Settings` interface and `DEFAULT_SETTINGS` object.
 - **Hook paths on Windows**: Use relative paths (`.claude/hooks/...`) not `$CLAUDE_PROJECT_DIR` (env var not expanded) or absolute paths (not portable)
+- **E2E locator specificity**: `page.locator("text=X")` can match multiple elements (labels, descriptions) causing strict mode violations. Use scoped selectors: `page.locator("label", { hasText: "X" })` or `.first()`
+- **E2E test data cleanup**: Use `test.afterAll` to reset preferences/settings state; accumulate-only test data (issues from prior runs) can cause duplicate text matches in unrelated tests
 
 ## Visual Verification
 Every feature that has a UI component must be visually verified using the `playwright-cli` skill (user-scoped). After implementing or modifying a feature:
@@ -58,8 +62,8 @@ Every feature that has a UI component must be visually verified using the `playw
 
 ## Monorepo Commands
 - `pnpm dev` — start server (port 3001) + client (port 5173) concurrently
-- `pnpm --filter @agentic-kanban/server test` — Vitest unit tests (27 tests)
-- `pnpm test:e2e` — Playwright E2E tests (30 tests)
+- `pnpm --filter @agentic-kanban/server test` — Vitest unit tests (28 tests)
+- `pnpm test:e2e` — Playwright E2E tests (42 tests)
 - `pnpm --filter @agentic-kanban/mcp-server dev` — run MCP server for testing
 - `pnpm db:migrate && pnpm db:seed` — reset DB to clean state (tags only, no default project)
 - `pnpm cli -- register <path>` — register a git repo as a project
