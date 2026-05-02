@@ -112,9 +112,22 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange }: W
 
     // Agent has exited — store session for resume and clear active state
     const wsId = selectedWorkspace;
+    const sid = activeSession;
     if (wsId) {
-      setLastSessionPerWorkspace((prev) => ({ ...prev, [wsId]: activeSession }));
-      setCompletedMessages([...messages]);
+      setLastSessionPerWorkspace((prev) => ({ ...prev, [wsId]: sid }));
+
+      // Use WS messages if we got meaningful output; otherwise fetch from API
+      const wsMessages = [...messages];
+      const hasOutput = wsMessages.some(m => m.type === "stdout");
+      if (hasOutput) {
+        setCompletedMessages(wsMessages);
+      } else {
+        // WS missed output (common for fast agents via Vite proxy) — fetch from API
+        apiFetch<AgentOutputMessage[]>(`/api/sessions/${sid}/output`)
+          .then((data) => setCompletedMessages(data))
+          .catch(() => setCompletedMessages(wsMessages));
+      }
+
       // Refresh sessions for current workspace
       setWorkspaceSessions((prev) => {
         const next = { ...prev };
