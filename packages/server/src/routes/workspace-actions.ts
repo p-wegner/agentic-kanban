@@ -66,8 +66,10 @@ export function createWorkspaceActionsRoute(
 
     try {
       const { repoPath } = await resolveProjectRepo(id, database);
+      console.log(`[workspace-actions] setup: workspaceId=${id} branch=${workspace.branch} repoPath=${repoPath}`);
 
       const worktreePath = await gitService.createWorktree(repoPath, workspace.branch);
+      console.log(`[workspace-actions] setup complete: workspaceId=${id} worktreePath=${worktreePath}`);
 
       const now = new Date().toISOString();
       await database
@@ -99,6 +101,8 @@ export function createWorkspaceActionsRoute(
     }
 
     try {
+      const truncatedPrompt = body.prompt.length > 80 ? body.prompt.slice(0, 80) + "..." : body.prompt;
+      console.log(`[workspace-actions] launch: workspaceId=${id} prompt="${truncatedPrompt}"`);
       const sessionId = await getSessionManager().startSession(id, body.prompt, body.agentCommand);
 
       const now = new Date().toISOString();
@@ -116,6 +120,7 @@ export function createWorkspaceActionsRoute(
   // POST /api/workspaces/:id/stop — kill current session
   router.post("/:id/stop", async (c) => {
     const id = c.req.param("id");
+    console.log(`[workspace-actions] stop: workspaceId=${id}`);
 
     // Find running sessions for this workspace
     const runningSessions = await database
@@ -155,6 +160,7 @@ export function createWorkspaceActionsRoute(
       const { defaultBranch } = await resolveProjectRepo(id, database);
       const diff = await gitService.getDiff(workspace.workingDir, defaultBranch);
       const stats = parseDiffStats(diff);
+      console.log(`[workspace-actions] diff: workspaceId=${id} files=${stats.filesChanged} +${stats.insertions} -${stats.deletions}`);
       return c.json({ diff, stats });
     } catch (err) {
       return c.json(
@@ -177,6 +183,7 @@ export function createWorkspaceActionsRoute(
 
     try {
       const { repoPath } = await resolveProjectRepo(id, database);
+      console.log(`[workspace-actions] merge: workspaceId=${id} branch=${workspace.branch} repoPath=${repoPath}`);
       const result = await gitService.mergeBranch(repoPath, workspace.branch);
 
       // Cleanup worktree if it exists

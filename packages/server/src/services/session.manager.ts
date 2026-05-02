@@ -51,6 +51,7 @@ function createSessionManager(
 
     const sessionId = randomUUID();
     const now = new Date().toISOString();
+    console.log(`[session] starting: workspaceId=${workspaceId} sessionId=${sessionId} workingDir=${workspace.workingDir}`);
 
     await db.insert(sessions).values({
       id: sessionId,
@@ -93,6 +94,7 @@ function createSessionManager(
 
   /** Stop a running session by killing the agent process. */
   async function stopSession(sessionId: string) {
+    console.log(`[session] stopping: sessionId=${sessionId}`);
     const killed = agentService.kill(sessionId);
     if (killed) {
       const now = new Date().toISOString();
@@ -110,6 +112,7 @@ function createSessionManager(
       subscribers.set(sessionId, new Set());
     }
     subscribers.get(sessionId)!.add({ ws });
+    console.log(`[session] WS subscribed: sessionId=${sessionId} subscribers=${subscribers.get(sessionId)!.size}`);
   }
 
   /** Unsubscribe a WebSocket from session output. */
@@ -117,6 +120,7 @@ function createSessionManager(
     const subs = subscribers.get(sessionId);
     if (subs) {
       subs.delete({ ws });
+      console.log(`[session] WS unsubscribed: sessionId=${sessionId} subscribers=${subs.size}`);
       if (subs.size === 0) {
         subscribers.delete(sessionId);
       }

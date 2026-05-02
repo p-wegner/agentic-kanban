@@ -23,9 +23,13 @@ export function launch(
   onOutput: AgentOutputCallback,
 ): ChildProcess {
   const command = process.env.AGENT_COMMAND || "claude";
+  const isCustomCommand = !!process.env.AGENT_COMMAND;
   const isWindows = process.platform === "win32";
+  console.log(`[agent] launching: command=${command} worktree=${worktreePath} sessionId=${sessionId}`);
 
-  const proc = spawn(command, ["--output-format", "stream-json", "-p", prompt], {
+  // Custom agent commands run directly; claude gets its specific flags
+  const args = isCustomCommand ? [] : ["--output-format", "stream-json", "-p", prompt];
+  const proc = spawn(command, args, {
     cwd: worktreePath,
     shell: isWindows,
     env: { ...process.env },
@@ -43,11 +47,13 @@ export function launch(
   });
 
   proc.on("exit", (code) => {
+    console.log(`[agent] exited: sessionId=${sessionId} code=${code}`);
     activeProcesses.delete(sessionId);
     onOutput({ type: "exit", sessionId, exitCode: code });
   });
 
   proc.on("error", (err) => {
+    console.error(`[agent] process error: sessionId=${sessionId} err=${err.message}`);
     onOutput({ type: "stderr", sessionId, data: `Process error: ${err.message}` });
     activeProcesses.delete(sessionId);
     onOutput({ type: "exit", sessionId, exitCode: 1 });
