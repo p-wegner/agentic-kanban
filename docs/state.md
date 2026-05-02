@@ -17,7 +17,9 @@
 - [x] Ctrl+K keyboard shortcut to open command palette
 - [x] Registered actions: Create Issue, Search Issues, Switch Project, Open Settings, Go to column
 - [x] E2E tests: session history API (3), session history UI (2), board events API (3), board realtime UI (2), command palette UI (5)
-- [x] 28 unit tests + 57 E2E tests passing
+- [x] Workspace summary badges on board cards (workspaceSummary computed server-side in board endpoint)
+- [x] E2E test fixes: retry loops for session history workspace setup/output, unique suffixes for edit tests
+- [x] 28 unit tests + 60 E2E tests passing
 
 ### Stage 7 Checklist
 - [x] Settings screen: gear icon in header, slide-in panel
@@ -149,12 +151,13 @@ packages/
   server/     - Hono API + @libsql/client + SQLite (port 3001) + CLI (commander)
   client/     - React + Vite + Tailwind v4 (port 5173)
   mcp-server/ - MCP stdio server (8 tools: get_context, list/get/create/update_issue, list/start_workspace, get_workspace_diff)
-  e2e/        - Playwright tests (57 tests: API + UI, global setup creates project)
+  e2e/        - Playwright tests (60 tests: API + UI, global setup creates project)
 ```
 
 ## API Routes
 | Method | Path | Description |
 |--------|------|-------------|
+| GET | /health | Health check |
 | GET | /api/projects | List all projects |
 | POST | /api/projects | Create a project |
 | GET | /api/projects/:id/statuses | List statuses for a project |
@@ -217,3 +220,4 @@ packages/
 | 2026-05-02 | Agent launch fix | Fixed real Claude agent launch: added --verbose flag required by stream-json, use stdin:"ignore" to prevent Claude from hanging, restrict shell:true to custom commands only (claude.exe doesn't need cmd.exe). Session manager buffers broadcast messages for late-connecting WS clients. |
 | 2026-05-02 | Stage 7 complete | Settings + output parsing + mock agent improvements. Created standalone mock-agent.ts script that emits stream-json NDJSON. Moved mock agent toggle from WorkspacePanel to Settings panel. Added server-side MOCK_AGENT=1 env var for global override. Preferences API now accepts mock_agent key. E2E tests: 5 settings API tests, 6 settings UI tests, mock_agent preference integration test. 28 unit tests + 42 E2E tests passing. |
 | 2026-05-02 | Stage 8 complete | Session history + real-time board updates + command palette. New session_messages table (migration 0003). Messages persisted to DB for replay. Board events service (WS /ws/board/:projectId) broadcasts on issue/workspace mutations. Client auto-refreshes via useBoardEvents hook. Session history shows past sessions with replayable output. Command palette (Ctrl+K) with searchable actions grouped by category. 28 unit tests + 57 E2E tests passing (15 new Stage 8 tests). |
+| 2026-05-02 | Post-Stage 8 | Workspace summary badges on board cards — server-side aggregation via grouped query in board endpoint (workspaceSummary with count/status per issue). Replaced test.skip() with retry loops in session history E2E tests. Fixed flaky edit test with unique Date.now() suffixes. 28 unit tests + 60 E2E tests passing (3 new board-workspace-summary API tests). |
