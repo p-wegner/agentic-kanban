@@ -20,6 +20,9 @@
 - [x] E2E tests updated: global setup creates project via API, board test uses project from global setup
 - [x] E2E test fixes: unique suffixed status names (board API), find Todo/In Progress by name (not index), scoped edit panel input selector, column-aware drag target
 - [x] Server logging: structured console.log at agent/session/workspace pipeline points for debugging
+- [x] Worktree reuse: createWorktree returns existing worktree path instead of 500 error on duplicate
+- [x] Client error messages: apiFetch reads JSON error body instead of showing generic status text
+- [x] Stop hook fix: clear client edits from state on first block to prevent infinite loop
 - [x] Mock agent: checkbox in WorkspacePanel sends agentCommand for integration testing without Claude Code
 - [x] Custom agent fix: skip claude-specific flags (--output-format, -p) when AGENT_COMMAND is set
 
@@ -165,3 +168,4 @@ packages/
 | 2026-05-01 | Stage 4 | MCP server implementation: 8 tools using @modelcontextprotocol/sdk over stdio transport, connected to same SQLite DB as web server. Tools: get_context, list_issues, get_issue, create_issue, update_issue, list_workspaces, start_workspace, get_workspace_diff. Project-level .claude/settings.json configures MCP server for Claude Code. E2E test via stdio JSON-RPC. |
 | 2026-05-01 | Stage 6 | Git repo management: each project IS a registered git repo. CLI (commander) with register/unregister/list/cleanup commands. Projects table gained repoPath/repoName/defaultBranch/remoteUrl columns. New preferences table for activeProjectId. Workspace actions (setup/diff/merge) now auto-resolve repoPath from project chain — no manual input needed. Client has project switcher in header, workspace panel shows read-only repo info. Seed no longer creates default project. 27 unit tests + 30 E2E tests passing. E2E tests use global setup for project creation, unique suffixed status names for isolation, and name-based status lookups for robustness. |
 | 2026-05-02 | Integration | Added structured logging across workspace/agent pipeline (agent.service, session.manager, workspace-actions). Added "Mock agent" checkbox to WorkspacePanel for integration testing without Claude Code — sends node one-liner as agentCommand. Fixed agent.service to skip claude-specific flags when AGENT_COMMAND is set. Verified full integration via playwright-cli: create issue → workspace → worktree → launch mock agent → see output in TerminalView via WebSocket. 28 unit tests + 30 E2E tests passing. |
+| 2026-05-02 | Bug fixes | Fixed worktree setup 500 error: createWorktree now reuses existing worktrees instead of throwing on duplicate branches. Path normalization for git --porcelain output on Windows (forward to backslash). Client apiFetch now reads JSON error body for actionable error messages. Fixed stop hook infinite loop by clearing client edits from state file on first block. 28 unit tests passing. |
