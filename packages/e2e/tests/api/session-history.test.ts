@@ -32,6 +32,21 @@ test.describe("Session History API", () => {
     });
     expect(wsRes.status()).toBe(201);
     workspaceId = (await wsRes.json()).id;
+
+    // Setup workspace (git worktree) with retries
+    let setupOk = false;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const setupRes = await request.post(
+        `http://localhost:3001/api/workspaces/${workspaceId}/setup`,
+        { data: {} },
+      );
+      if (setupRes.status() === 200) {
+        setupOk = true;
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+    expect(setupOk).toBe(true);
   });
 
   test("GET /api/sessions/:id/output returns 404 for unknown session", async ({
@@ -48,18 +63,6 @@ test.describe("Session History API", () => {
   test("GET /api/sessions/:id/output returns persisted messages after mock agent run", async ({
     request,
   }) => {
-    // Set up workspace with a working directory
-    const setupRes = await request.post(
-      `http://localhost:3001/api/workspaces/${workspaceId}/setup`,
-      { data: {} },
-    );
-
-    // If setup fails, we can't test agent output persistence
-    if (setupRes.status() !== 200) {
-      test.skip();
-      return;
-    }
-
     // Launch with a simple command that exits quickly
     const launchRes = await request.post(
       `http://localhost:3001/api/workspaces/${workspaceId}/launch`,
@@ -70,11 +73,7 @@ test.describe("Session History API", () => {
         },
       },
     );
-
-    if (launchRes.status() !== 201) {
-      test.skip();
-      return;
-    }
+    expect(launchRes.status()).toBe(201);
 
     const { sessionId } = await launchRes.json();
     expect(sessionId).toBeDefined();
@@ -82,7 +81,7 @@ test.describe("Session History API", () => {
     // Wait for the session to complete and messages to be persisted
     await new Promise((resolve) => setTimeout(resolve, 3000));
 
-    // Fetch session output (with retry for timing)
+    // Fetch session output (with retry for async DB persistence)
     let messages: any[] = [];
     for (let attempt = 0; attempt < 3; attempt++) {
       const outputRes = await request.get(
@@ -131,16 +130,20 @@ test.describe("Session History API", () => {
     });
     const testWorkspaceId = (await wsRes.json()).id;
 
-    // Setup workspace
-    const setupRes = await request.post(
-      `http://localhost:3001/api/workspaces/${testWorkspaceId}/setup`,
-      { data: {} },
-    );
-
-    if (setupRes.status() !== 200) {
-      test.skip();
-      return;
+    // Setup workspace with retries
+    let setupOk = false;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const setupRes = await request.post(
+        `http://localhost:3001/api/workspaces/${testWorkspaceId}/setup`,
+        { data: {} },
+      );
+      if (setupRes.status() === 200) {
+        setupOk = true;
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 500));
     }
+    expect(setupOk).toBe(true);
 
     // Launch agent
     const launchRes = await request.post(
@@ -152,18 +155,14 @@ test.describe("Session History API", () => {
         },
       },
     );
-
-    if (launchRes.status() !== 201) {
-      test.skip();
-      return;
-    }
+    expect(launchRes.status()).toBe(201);
 
     const { sessionId } = await launchRes.json();
 
     // Wait for completion
     await new Promise((resolve) => setTimeout(resolve, 3000));
 
-    // Verify output is available (with retry)
+    // Verify output is available (with retry for async DB persistence)
     let messages: any[] = [];
     for (let attempt = 0; attempt < 3; attempt++) {
       const outputRes = await request.get(
