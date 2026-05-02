@@ -16,7 +16,7 @@
 - [x] MCP start_workspace: repoPath now optional (auto-resolved from project)
 - [x] Client: project switcher dropdown in header (multi-project support)
 - [x] Client: workspace panel shows read-only repo info, no repo path input
-- [x] Tests: 27 unit tests passing (including preferences API + git-info service tests)
+- [x] Tests: 28 unit tests passing (including preferences API + git-info + duplicate worktree check tests)
 - [x] E2E tests updated: global setup creates project via API, board test uses project from global setup
 - [x] E2E test fixes: unique suffixed status names (board API), find Todo/In Progress by name (not index), scoped edit panel input selector, column-aware drag target
 
