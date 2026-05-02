@@ -68,6 +68,20 @@ describe("GitService", () => {
     await gitService.removeWorktree(repoPath, worktreePath);
   });
 
+  it("rejects duplicate worktree for an existing branch", async () => {
+    const worktreePath = await gitService.createWorktree(repoPath, "feature/dup-test");
+
+    try {
+      await expect(
+        gitService.createWorktree(repoPath, "feature/dup-test"),
+      ).rejects.toThrow(
+        /A worktree for branch 'feature\/dup-test' already exists/,
+      );
+    } finally {
+      await gitService.removeWorktree(repoPath, worktreePath);
+    }
+  });
+
   it("gets diff between worktree and base branch", async () => {
     const worktreePath = await gitService.createWorktree(repoPath, "feature/diff-test");
 
