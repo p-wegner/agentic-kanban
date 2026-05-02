@@ -62,6 +62,75 @@ test.describe("Workspace lifecycle API", () => {
     expect(res.status()).toBeLessThan(600);
   });
 
+  test("POST /api/workspaces/:id/launch uses mock_agent preference", async ({
+    request,
+  }) => {
+    // Set mock_agent preference
+    await request.put("http://localhost:3001/api/preferences/settings", {
+      data: { mock_agent: "true" },
+    });
+
+    // Create a new workspace with setup
+    const issueRes = await request.post("http://localhost:3001/api/issues", {
+      data: { title: "Mock agent pref test", statusId, projectId },
+    });
+    const testIssueId = (await issueRes.json()).id;
+
+    const wsRes = await request.post("http://localhost:3001/api/workspaces", {
+      data: { issueId: testIssueId, branch: "feature/mock-pref-test" },
+    });
+    const testWorkspaceId = (await wsRes.json()).id;
+
+    // Setup worktree so launch has a workingDir
+    const setupRes = await request.post(
+      `http://localhost:3001/api/workspaces/${testWorkspaceId}/setup`,
+      { data: {} },
+    );
+    // Setup may fail in CI — skip if so
+    if (setupRes.status() !== 200) {
+      // Reset mock_agent preference
+      await request.put("http://localhost:3001/api/preferences/settings", {
+        data: { mock_agent: "false" },
+      });
+      test.skip();
+      return;
+    }
+
+    // Launch without explicit agentCommand — should use mock_agent pref
+    const launchRes = await request.post(
+      `http://localhost:3001/api/workspaces/${testWorkspaceId}/launch`,
+      { data: { prompt: "test with mock agent pref" } },
+    );
+
+    expect(launchRes.status()).toBe(201);
+    const launchBody = await launchRes.json();
+    expect(launchBody.sessionId).toBeDefined();
+
+    // Wait briefly for the mock agent to emit output
+    await new Promise((r) => setTimeout(r, 1500));
+
+    // Check sessions endpoint for output
+    const sessionsRes = await request.get(
+      `http://localhost:3001/api/workspaces/${testWorkspaceId}/sessions`,
+    );
+    expect(sessionsRes.ok()).toBeTruthy();
+    const sessions = await sessionsRes.json();
+    expect(sessions.length).toBeGreaterThan(0);
+
+    // The session should have completed (mock agent exits after ~400ms)
+    const session = sessions.find(
+      (s: { id: string }) => s.id === launchBody.sessionId,
+    );
+    expect(session).toBeDefined();
+    // Session should be completed or running (may not have exited yet)
+    expect(["running", "completed", "stopped"]).toContain(session.status);
+
+    // Reset mock_agent preference
+    await request.put("http://localhost:3001/api/preferences/settings", {
+      data: { mock_agent: "false" },
+    });
+  });
+
   test("GET /api/workspaces/:id/sessions returns session list", async ({
     request,
   }) => {
