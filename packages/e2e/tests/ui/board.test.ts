@@ -116,6 +116,9 @@ test.describe("Board interactions", () => {
 
   test("edit issue from detail panel", async ({ page, request }) => {
     // Create an issue via API
+    const editSuffix = Date.now().toString(36);
+    const originalTitle = `EditTest ${editSuffix}`;
+    const editedTitle = `EditedTitle ${editSuffix}`;
     const projectsRes = await request.get("http://localhost:3001/api/projects");
     const projects = await projectsRes.json();
     const projectId = projects[0].id;
@@ -129,7 +132,7 @@ test.describe("Board interactions", () => {
 
     await request.post("http://localhost:3001/api/issues", {
       data: {
-        title: "EditTestIssue 888",
+        title: originalTitle,
         description: "Before edit",
         priority: "low",
         statusId,
@@ -141,7 +144,7 @@ test.describe("Board interactions", () => {
     await page.waitForSelector("h2");
 
     // Click the issue card
-    await page.locator("p", { hasText: "EditTestIssue 888" }).first().click();
+    await page.locator("p", { hasText: originalTitle }).first().click();
     await expect(
       page.locator("h2", { hasText: "Issue Details" }),
     ).toBeVisible();
@@ -154,7 +157,7 @@ test.describe("Board interactions", () => {
     const panel = page.locator(".fixed.right-0");
     const titleInput = panel.locator('input[type="text"]').first();
     await titleInput.clear();
-    await titleInput.fill("Edited Title 777");
+    await titleInput.fill(editedTitle);
 
     // Save
     await page.locator('button:has-text("Save")').click();
@@ -166,7 +169,7 @@ test.describe("Board interactions", () => {
 
     // Verify the edited title appears on the board
     await expect(
-      page.locator("p", { hasText: "Edited Title 777" }),
+      page.locator("p", { hasText: editedTitle }),
     ).toBeVisible({ timeout: 10000 });
   });
 

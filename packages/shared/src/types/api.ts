@@ -42,6 +42,13 @@ export interface UpdateIssueRequest {
   sortOrder?: number;
 }
 
+export interface WorkspaceSummary {
+  total: number;
+  active: number;
+  idle: number;
+  branches: string[];
+}
+
 export interface IssueWithStatus {
   id: string;
   title: string;
@@ -53,6 +60,7 @@ export interface IssueWithStatus {
   createdAt: string;
   updatedAt: string;
   statusName: string;
+  workspaceSummary?: WorkspaceSummary;
 }
 
 export interface StatusWithIssues {
