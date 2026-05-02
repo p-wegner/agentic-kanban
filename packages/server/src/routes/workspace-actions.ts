@@ -74,7 +74,7 @@ export function createWorkspaceActionsRoute(
 ) {
   const router = new Hono();
 
-  // POST /api/workspaces/:id/setup — create git worktree
+  // POST /api/workspaces/:id/setup — create git worktree (no-op if already set up)
   router.post("/:id/setup", async (c) => {
     const id = c.req.param("id");
 
@@ -86,17 +86,23 @@ export function createWorkspaceActionsRoute(
 
     const workspace = rows[0];
 
-    try {
-      const { repoPath } = await resolveProjectRepo(id, database);
-      console.log(`[workspace-actions] setup: workspaceId=${id} branch=${workspace.branch} repoPath=${repoPath}`);
+    // Already set up — return existing info
+    if (workspace.workingDir) {
+      return c.json({ id, workingDir: workspace.workingDir });
+    }
 
-      const worktreePath = await gitService.createWorktree(repoPath, workspace.branch);
+    try {
+      const { repoPath, defaultBranch } = await resolveProjectRepo(id, database);
+      const baseBranch = workspace.baseBranch || defaultBranch;
+      console.log(`[workspace-actions] setup: workspaceId=${id} branch=${workspace.branch} repoPath=${repoPath} baseBranch=${baseBranch}`);
+
+      const worktreePath = await gitService.createWorktree(repoPath, workspace.branch, baseBranch);
       console.log(`[workspace-actions] setup complete: workspaceId=${id} worktreePath=${worktreePath}`);
 
       const now = new Date().toISOString();
       await database
         .update(workspaces)
-        .set({ workingDir: worktreePath, updatedAt: now })
+        .set({ workingDir: worktreePath, baseBranch, updatedAt: now })
         .where(eq(workspaces.id, id));
 
       // Broadcast board event
@@ -208,7 +214,8 @@ export function createWorkspaceActionsRoute(
 
     try {
       const { defaultBranch } = await resolveProjectRepo(id, database);
-      const diff = await gitService.getDiff(workspace.workingDir, defaultBranch);
+      const baseBranch = workspace.baseBranch || defaultBranch;
+      const diff = await gitService.getDiff(workspace.workingDir, baseBranch);
       const stats = parseDiffStats(diff);
       console.log(`[workspace-actions] diff: workspaceId=${id} files=${stats.filesChanged} +${stats.insertions} -${stats.deletions}`);
       return c.json({ diff, stats });

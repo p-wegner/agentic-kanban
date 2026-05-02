@@ -46,12 +46,14 @@ export async function listWorktrees(
 /**
  * Create a git worktree for a branch. The worktree is created in a
  * `.worktrees/<branch>` directory sibling to the repo root.
- * If the branch doesn't exist yet, it is created from HEAD.
+ * If the branch doesn't exist yet, it is created from the given baseBranch
+ * (or HEAD if no baseBranch is specified).
  * Throws if a worktree for this branch already exists.
  */
 export async function createWorktree(
   repoPath: string,
   branch: string,
+  baseBranch?: string,
 ): Promise<string> {
   // Check if a worktree for this branch already exists — reuse it
   const existing = await listWorktrees(repoPath);
@@ -70,11 +72,12 @@ export async function createWorktree(
 
   await mkdir(worktreesDir, { recursive: true });
 
-  // Check if branch exists; if not, create it
+  // Check if branch exists; if not, create it from baseBranch (or HEAD)
   try {
     await execGit(["rev-parse", "--verify", branch], repoPath);
   } catch {
-    await execGit(["branch", branch], repoPath);
+    const branchArgs = baseBranch ? ["branch", branch, baseBranch] : ["branch", branch];
+    await execGit(branchArgs, repoPath);
   }
 
   await execGit(

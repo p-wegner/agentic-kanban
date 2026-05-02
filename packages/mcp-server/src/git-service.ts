@@ -43,7 +43,7 @@ export async function listWorktrees(
   return worktrees;
 }
 
-export async function createWorktree(repoPath: string, branch: string): Promise<string> {
+export async function createWorktree(repoPath: string, branch: string, baseBranch?: string): Promise<string> {
   // Check if a worktree for this branch already exists
   const existing = await listWorktrees(repoPath);
   const match = existing.find(
@@ -64,7 +64,8 @@ export async function createWorktree(repoPath: string, branch: string): Promise<
   try {
     await execGit(["rev-parse", "--verify", branch], repoPath);
   } catch {
-    await execGit(["branch", branch], repoPath);
+    const branchArgs = baseBranch ? ["branch", branch, baseBranch] : ["branch", branch];
+    await execGit(branchArgs, repoPath);
   }
 
   await execGit(["worktree", "add", worktreePath, branch], repoPath);

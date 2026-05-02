@@ -17,7 +17,7 @@ export function createRoutes(database: Database, getSessionManager: () => Sessio
   const routes = new Hono();
   routes.route("/projects", createProjectsRoute(database));
   routes.route("/issues", createIssuesRoute(database, options));
-  routes.route("/workspaces", createWorkspacesRoute(database));
+  routes.route("/workspaces", createWorkspacesRoute(database, getSessionManager, options));
   routes.route("/workspaces", createWorkspaceActionsRoute(getSessionManager, database, options));
   routes.route("/tags", createTagsRoute());
   routes.route("/preferences", createPreferencesRoute(database));
