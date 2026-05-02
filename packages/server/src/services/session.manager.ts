@@ -15,8 +15,16 @@ function createSessionManager(
   upgradeWebSocket: (callback: (c: any) => any) => any,
 ) {
   const subscribers = new Map<string, Set<Subscriber>>();
+  // Buffer messages per session so late-connecting WS clients get missed output
+  const messageBuffer = new Map<string, AgentOutputMessage[]>();
 
   function broadcast(sessionId: string, message: AgentOutputMessage) {
+    // Buffer the message for late subscribers
+    if (!messageBuffer.has(sessionId)) {
+      messageBuffer.set(sessionId, []);
+    }
+    messageBuffer.get(sessionId)!.push(message);
+
     const subs = subscribers.get(sessionId);
     if (!subs) return;
     const payload = JSON.stringify(message);
@@ -84,8 +92,11 @@ function createSessionManager(
         }
       });
     } finally {
-      if (agentCommand && prevAgentCommand !== undefined) {
+      // Always restore the previous env var (or delete it if it wasn't set)
+      if (prevAgentCommand !== undefined) {
         process.env.AGENT_COMMAND = prevAgentCommand;
+      } else {
+        delete process.env.AGENT_COMMAND;
       }
     }
 
@@ -113,6 +124,16 @@ function createSessionManager(
     }
     subscribers.get(sessionId)!.add({ ws });
     console.log(`[session] WS subscribed: sessionId=${sessionId} subscribers=${subscribers.get(sessionId)!.size}`);
+
+    // Replay buffered messages so late subscribers don't miss output
+    const buffer = messageBuffer.get(sessionId);
+    if (buffer) {
+      for (const msg of buffer) {
+        if (ws.readyState === 1) {
+          ws.send(JSON.stringify(msg));
+        }
+      }
+    }
   }
 
   /** Unsubscribe a WebSocket from session output. */
@@ -123,6 +144,11 @@ function createSessionManager(
       console.log(`[session] WS unsubscribed: sessionId=${sessionId} subscribers=${subs.size}`);
       if (subs.size === 0) {
         subscribers.delete(sessionId);
+        // Clean up buffer if session has ended
+        const buffer = messageBuffer.get(sessionId);
+        if (buffer && buffer.length > 0 && buffer[buffer.length - 1].type === "exit") {
+          messageBuffer.delete(sessionId);
+        }
       }
     }
   }

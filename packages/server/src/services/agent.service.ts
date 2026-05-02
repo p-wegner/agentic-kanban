@@ -28,12 +28,17 @@ export function launch(
   console.log(`[agent] launching: command=${command} worktree=${worktreePath} sessionId=${sessionId}`);
 
   // Custom agent commands run directly; claude gets its specific flags
-  const args = isCustomCommand ? [] : ["--output-format", "stream-json", "-p", prompt];
+  const args = isCustomCommand ? [] : ["--output-format", "stream-json", "--verbose", "-p", prompt];
+
+  // On Windows, only use shell:true for custom commands (which may be one-liners).
+  // The claude binary is a real .exe — shell:true causes cmd.exe to buffer stdout.
+  const useShell = isWindows && isCustomCommand;
+
   const proc = spawn(command, args, {
     cwd: worktreePath,
-    shell: isWindows,
-    env: { ...process.env },
-    stdio: ["pipe", "pipe", "pipe"],
+    shell: useShell,
+    env: { ...process.env, FORCE_COLOR: "0", NO_COLOR: "1" },
+    stdio: ["ignore", "pipe", "pipe"] as const,
   });
 
   activeProcesses.set(sessionId, proc);
