@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# Register this repo as a kanban project and seed the database
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+
+echo "Initializing database..."
+pnpm --filter @agentic-kanban/server db:migrate
+pnpm --filter @agentic-kanban/server db:seed
+
+echo "Registering $PROJECT_DIR as a kanban project..."
+pnpm cli -- register "$PROJECT_DIR"
+
+echo "Done. Run 'pnpm dev' to start the app."
