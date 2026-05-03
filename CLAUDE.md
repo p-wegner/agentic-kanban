@@ -3,15 +3,15 @@
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Project Status
-This project is **Stage 8 complete** (Stages 0-8 done). Tech stack: TypeScript monorepo — Hono + Drizzle + React + MCP SDK. Progress tracked in `docs/state.md`.
+This project is **Stage 11 complete** (Stages 0-11 done). Tech stack: TypeScript monorepo — Hono + Drizzle + React + MCP SDK. Progress tracked in `docs/state.md`.
 
-All documented features have been visually verified (2026-05-02):
+All documented features have been visually verified (2026-05-03):
 - Board renders 5 columns (Todo, In Progress, In Review, Done, Cancelled) with empty states
 - Create issue: inline form with title, description, priority, Add/Cancel
-- Issue detail panel: slide-in with view/edit/delete, description, priority badge, status, workspaces, tags
-- Edit issue: title/description/priority editable, Save/Cancel
-- Tags: CRUD via dropdown in detail panel, removable badges, 4 seed tags (bug, feature, improvement, docs)
-- Search/filter: real-time text search in header, priority dropdown filter, keyboard shortcut `/` to focus, Escape to clear
+- Issue detail panel: slide-in with view/edit/delete, status dropdown, description placeholder, priority badge, status, workspaces, tags, timestamps, issue number
+- Edit issue: title/description/priority editable, Save/Cancel; all sections visible in edit mode; unsaved changes warning
+- Tags: CRUD via dropdown in detail panel, removable badges with colors, 4 seed tags (bug, feature, improvement, docs)
+- Search/filter: real-time text search with highlighted matches, priority dropdown filter, keyboard shortcut `/` to focus, Escape to clear
 - Drag-and-drop: HTML5 DnD between columns (mouse-based, use `run-code` for `/` key on Windows/MSYS)
 - Workspace panel: slide-in with read-only repo info, "New Workspace" button (one-step: creates worktree + auto-launches agent with issue title/description as prompt)
 - Project switcher: dropdown in header when multiple projects registered
@@ -21,6 +21,10 @@ All documented features have been visually verified (2026-05-02):
 - Chat-like agent interaction: persistent chat input with Send/Stop toggle, --resume support, auto-clear on exit, Ctrl+Enter to send
 - Real-time board updates: board auto-refreshes via WebSocket when mutations happen
 - Command palette: Ctrl+K searchable action list, keyboard navigation
+- Keyboard shortcut help: `?` overlay showing all shortcuts
+- Issue numbers: auto-incrementing #1, #2, #3 per project on cards and detail panel
+- Panel animations: slide-in transitions on detail/workspace/settings panels
+- Favicon: inline SVG kanban-board icon
 - MCP server: 8 tools via stdio JSON-RPC
 - CLI: `pnpm cli -- register <path>` to register a git repo as a project
 
@@ -59,6 +63,15 @@ Cleanroom reimplementation of [vibe-kanban](https://github.com/BloopAI/vibe-kanb
 - **Mock agent tsx resolution**: The mock agent runs from the worktree CWD (no `node_modules`). It must use `pathToFileURL()` to resolve the absolute path to `packages/server/node_modules/tsx/dist/loader.mjs` as a `file://` URL in the `--import` flag. Bare `--import tsx` would fail with `ERR_MODULE_NOT_FOUND`.
 - **Git worktree base branch**: `createWorktree()` in both server and MCP git services accepts an optional `baseBranch` parameter. When creating a new branch, it runs `git branch <branch> <baseBranch>` instead of `git branch <branch>` (which defaults to HEAD). This ensures worktrees start from the correct base.
 - **DB file locations**: The server DB lives at `packages/server/kanban.db` (relative to `file:kanban.db` CWD resolution under pnpm). The MCP server has its own copy at `packages/mcp-server/kanban.db`. Scripts using `import.meta.dirname` relative paths must account for which package they run in — `../../../kanban.db` from `packages/server/src/scripts/` points to the repo root, not the actual DB.
+- **Issue numbers**: Auto-incrementing per project via `MAX(issue_number) + 1` in `POST /api/issues`. The `issue_number` column was added in migration 0006. The test migration list in `api.test.ts` (`MIGRATION_FILES` array) must be updated when new migrations are added.
+- **`/` key search shortcut**: `e.preventDefault()` on keydown doesn't prevent the subsequent input event from inserting the character. Fix: use `requestAnimationFrame` to clear the stray `/` from the input after focus shift.
+- **Board refresh during create form**: WebSocket board_changed events can unmount the inline create form mid-edit. Fix: skip board refreshes while `creatingInColumnId` is set, queue a pending refresh via ref, and process it when the form closes.
+- **Panel state sync**: `selectedIssue` in BoardPage is a snapshot captured on click. Board refreshes don't update the open panel. Fix: a `useEffect` watches `columns` changes and re-finds the issue by ID, updating `selectedIssue` in place. If the issue was deleted, the panel closes.
+- **Panel stays open after save**: The old pattern closed the detail panel on every `handleUpdateIssue`. Fix: remove `setSelectedIssue(null)` from the update handler — the useEffect above re-syncs the data. Add `onIssueUpdate` prop if the panel needs to push updates upstream.
+- **Unsaved changes guard**: Use a `hasChanges` derived boolean (compare local edit state against `issue` prop) and `window.confirm()` in backdrop click, close button, Escape, and Cancel handlers. This is simpler than a router-level prompt for modal/panel patterns.
+- **Search result highlighting**: Pass `searchQuery` through `BoardColumn` → `IssueCard` props. The `HighlightedText` component splits text at the first match index and wraps the match in a `<mark>` element. Only highlights the first occurrence to avoid complex multi-match rendering.
+- **Slide-in animations**: Defined in `app.css` as `@keyframes slide-in-right` with `transform: translateX(100%) → 0`. Applied via `animate-slide-in-right` class on panel containers. 0.2s ease-out duration feels snappy without being jarring.
+- **Migration test list**: The `MIGRATION_FILES` array in `packages/server/src/__tests__/api.test.ts` must include every migration SQL file. Forgetting to add new migrations here causes test failures (missing columns).
 
 ## Visual Verification
 Every feature that has a UI component must be visually verified using the `playwright-cli` skill (user-scoped). After implementing or modifying a feature:
