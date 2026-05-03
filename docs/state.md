@@ -1,6 +1,6 @@
 # Project State
 
-## Current Stage: Stage 8 — Session History + Real-time Board + Command Palette (DONE)
+## Current Stage: Stage 11 — UX Audit Complete (DONE)
 
 ### Stage 8 Checklist
 - [x] Session messages DB table (session_messages: id, sessionId, type, data, exitCode, createdAt)
@@ -24,7 +24,32 @@
 - [x] Migration 0004: added claudeSessionId + resumeFromId columns to sessions table
 - [x] 28 unit tests + 60 E2E tests passing
 
-### Stage 7 Checklist
+### Stage 11 Checklist — Search & Navigation Enhancements
+- [x] Search result highlighting (yellow mark on matching text in cards)
+- [x] Keyboard shortcut help overlay (? key, ShortcutHelp component)
+- [x] Panel slide-in animations (0.2s ease-out on detail/workspace/settings panels)
+- [x] Context-aware workspace button ("New Workspace" when 0, "View Workspaces" when >0)
+
+### Stage 10 Checklist — Detail Panel Improvements
+- [x] Status dropdown in detail panel (select that PATCHes issue, visible in view + edit modes)
+- [x] Keep panel open after save (re-syncs selectedIssue from refreshed board data)
+- [x] Show all sections in edit mode (status/description always visible; tags/workspaces in view mode)
+- [x] Description placeholder when empty ("No description. Click edit to add one.")
+- [x] Timestamps in detail panel (relative: "Created 4m ago" / "Updated 4m ago")
+- [x] Issue numbers (#1, #2, #3 per project — displayed on cards and in panel header)
+- [x] Migration 0006_wide_ogun.sql (issue_number column on issues table, auto-assigned per project)
+- [x] Unsaved changes warning (window.confirm before discarding edits)
+- [x] Stale panel data fix (useEffect syncs selectedIssue when board data changes)
+
+### Stage 9 Checklist — Bug Fixes + Polish
+- [x] Fix "/" key inserting literal "/" into search (requestAnimationFrame clears stray character)
+- [x] Fix create form disappearing on board refresh (debounce WS updates while form is open)
+- [x] Fix duplicate "/" shortcut label (changed "Create Issue" shortcut to "c")
+- [x] Fix silent tag operation failures (toast notifications in catch blocks)
+- [x] Column count badge formatting (rounded pill badge instead of inline number)
+- [x] Seed tag colors (bug=#EF4444, feature=#3B82F6, improvement=#8B5CF6, docs=#10B981)
+- [x] Favicon (inline SVG kanban-board icon)
+- [x] Improved workspace indicator tooltips on cards
 - [x] Settings screen: gear icon in header, slide-in panel
 - [x] Agent command setting: configurable binary name (e.g. `claude`, `claude-glm`)
 - [x] Agent args setting: additional CLI arguments (e.g. `--settings`, `--model`)
@@ -146,15 +171,18 @@ Claude Code with `--output-format stream-json --verbose -p <prompt>` emits NDJSO
 | 6 | Git Repo Management | DONE |
 | 7 | Settings + Output Parsing | DONE |
 | 8 | Session History + Real-time + Command Palette | DONE |
+| 9 | Bug Fixes + Polish | DONE |
+| 10 | Detail Panel Improvements | DONE |
+| 11 | Search & Navigation Enhancements | DONE |
 
 ## Monorepo Structure
 ```
 packages/
-  shared/     - Drizzle schema (10 tables, 4 migrations) + TypeScript types
+  shared/     - Drizzle schema (10 tables, 7 migrations) + TypeScript types
   server/     - Hono API + @libsql/client + SQLite (port 3001) + CLI (commander)
   client/     - React + Vite + Tailwind v4 (port 5173)
   mcp-server/ - MCP stdio server (8 tools: get_context, list/get/create/update_issue, list/start_workspace, get_workspace_diff)
-  e2e/        - Playwright tests (60 tests: API + UI, global setup creates project)
+  e2e/        - Playwright tests (60 tests: API + UI, global setup creates project, 2 known flaky session-history tests)
 ```
 
 ## API Routes
@@ -226,3 +254,4 @@ packages/
 | 2026-05-02 | Post-Stage 8 | Workspace summary badges on board cards — server-side aggregation via grouped query in board endpoint (workspaceSummary with count/status per issue). Replaced test.skip() with retry loops in session history E2E tests. Fixed flaky edit test with unique Date.now() suffixes. 28 unit tests + 60 E2E tests passing (3 new board-workspace-summary API tests). |
 | 2026-05-02 | Chat-like agent UI | Converted workspace panel from launch/stop model to persistent chat interface. Added claudeSessionId + resumeFromId columns to sessions table (migration 0004). Session manager captures Claude's session_id from system/init events and passes --resume flag for continued conversations. WorkspacePanel now has always-visible chat input (Message Claude Code...), Send/Stop toggle, persistent TerminalView between sessions, and Ctrl+Enter shortcut. 28 unit tests + 60 E2E tests passing. |
 | 2026-05-03 | One-step workspace | Streamlined workspace creation into a single POST /api/workspaces call that creates DB record + git worktree (with optional baseBranch) + auto-launches agent with issue title/description as prompt. Response includes sessionId for immediate terminal output display. Setup route became legacy no-op. Added baseBranch column tracking for correct diff/merge base. Updated CLAUDE.md and state.md. |
+| 2026-05-03 | Stages 9-11 | UX audit: 3 parallel agents explored the live app, identified 5 bugs, 10 UX friction items, 10 missing features. Implemented fixes in 3 stages. Stage 9: fixed "/" search leak, debounced board refresh during create form, toast for tag errors, deduplicated shortcut labels, column count badges, favicon, workspace tooltips. Stage 10: status dropdown in detail panel, keep panel open after save, all sections visible in edit mode, description placeholder, relative timestamps, auto-incrementing issue numbers (migration 0006), unsaved changes warning, stale panel data sync. Stage 11: search result highlighting, keyboard shortcut help overlay (?), slide-in panel animations, context-aware workspace button labels. 28 unit tests + 60 E2E tests passing. |
