@@ -20,6 +20,7 @@
 - [x] Workspace summary badges on board cards (workspaceSummary computed server-side in board endpoint)
 - [x] E2E test fixes: retry loops for session history workspace setup/output, unique suffixes for edit tests
 - [x] Chat-like agent interaction: persistent chat input with Send/Stop toggle, --resume support via claudeSessionId capture, auto-clear on agent exit
+- [x] One-step workspace creation: POST /api/workspaces creates DB record + git worktree + auto-launches agent in single request
 - [x] Migration 0004: added claudeSessionId + resumeFromId columns to sessions table
 - [x] 28 unit tests + 60 E2E tests passing
 
@@ -170,12 +171,12 @@ packages/
 | PATCH | /api/issues/:id | Update an issue |
 | DELETE | /api/issues/:id | Delete an issue |
 | GET | /api/issues/:id/workspaces | List workspaces for an issue |
-| POST | /api/workspaces | Create a workspace |
+| POST | /api/workspaces | Create workspace (one-step: DB + worktree + auto-launch agent) |
 | GET | /api/workspaces/:id | Get workspace with issue info |
 | PATCH | /api/workspaces/:id | Update workspace status |
 | DELETE | /api/workspaces/:id | Delete a workspace |
-| POST | /api/workspaces/:id/setup | Create git worktree for workspace |
-| POST | /api/workspaces/:id/launch | Launch agent session (optional resumeFromId for --resume) |
+| POST | /api/workspaces/:id/setup | Legacy: create git worktree (no-op if exists) |
+| POST | /api/workspaces/:id/launch | Launch agent session (optional resumeFromId for --resume; usually auto-launched at creation) |
 | POST | /api/workspaces/:id/stop | Stop running agent session |
 | GET | /api/workspaces/:id/diff | Get git diff for workspace |
 | POST | /api/workspaces/:id/merge | Merge branch and close workspace |
@@ -224,3 +225,4 @@ packages/
 | 2026-05-02 | Stage 8 complete | Session history + real-time board updates + command palette. New session_messages table (migration 0003). Messages persisted to DB for replay. Board events service (WS /ws/board/:projectId) broadcasts on issue/workspace mutations. Client auto-refreshes via useBoardEvents hook. Session history shows past sessions with replayable output. Command palette (Ctrl+K) with searchable actions grouped by category. 28 unit tests + 57 E2E tests passing (15 new Stage 8 tests). |
 | 2026-05-02 | Post-Stage 8 | Workspace summary badges on board cards — server-side aggregation via grouped query in board endpoint (workspaceSummary with count/status per issue). Replaced test.skip() with retry loops in session history E2E tests. Fixed flaky edit test with unique Date.now() suffixes. 28 unit tests + 60 E2E tests passing (3 new board-workspace-summary API tests). |
 | 2026-05-02 | Chat-like agent UI | Converted workspace panel from launch/stop model to persistent chat interface. Added claudeSessionId + resumeFromId columns to sessions table (migration 0004). Session manager captures Claude's session_id from system/init events and passes --resume flag for continued conversations. WorkspacePanel now has always-visible chat input (Message Claude Code...), Send/Stop toggle, persistent TerminalView between sessions, and Ctrl+Enter shortcut. 28 unit tests + 60 E2E tests passing. |
+| 2026-05-03 | One-step workspace | Streamlined workspace creation into a single POST /api/workspaces call that creates DB record + git worktree (with optional baseBranch) + auto-launches agent with issue title/description as prompt. Response includes sessionId for immediate terminal output display. Setup route became legacy no-op. Added baseBranch column tracking for correct diff/merge base. Updated CLAUDE.md and state.md. |
