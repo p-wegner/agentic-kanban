@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Layout } from "../components/Layout.js";
 import { BoardColumn } from "../components/BoardColumn.js";
+import { ColumnGroup } from "../components/ColumnGroup.js";
 import { CreateIssueForm } from "../components/CreateIssueForm.js";
 import { IssueDetailPanel } from "../components/IssueDetailPanel.js";
 import { WorkspacePanel } from "../components/WorkspacePanel.js";
@@ -28,6 +29,8 @@ interface Project {
   remoteUrl: string | null;
 }
 
+const ARCHIVE_STATUS_NAMES = new Set(["Done", "Cancelled"]);
+
 export function BoardPage() {
   const [columns, setColumns] = useState<StatusWithIssues[]>([]);
   const [loading, setLoading] = useState(true);
@@ -43,6 +46,9 @@ export function BoardPage() {
   const [showSettings, setShowSettings] = useState(false);
   const [showCommandPalette, setShowCommandPalette] = useState(false);
   const [showShortcutHelp, setShowShortcutHelp] = useState(false);
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(
+    new Set(["archive"]),
+  );
   const pendingBoardRefreshRef = useRef(false);
 
   const refetchBoard = useCallback(async (projectId?: string) => {
@@ -251,20 +257,45 @@ export function BoardPage() {
   }
 
   // Filter columns by search query and priority
-  const filteredColumns = columns.map((col) => ({
-    ...col,
-    issues: col.issues.filter((issue) => {
-      if (priorityFilter && issue.priority !== priorityFilter) return false;
-      if (searchQuery) {
-        const q = searchQuery.toLowerCase();
-        return (
-          issue.title.toLowerCase().includes(q) ||
-          (issue.description?.toLowerCase().includes(q) ?? false)
-        );
+  const filteredColumns = useMemo(
+    () =>
+      columns.map((col) => ({
+        ...col,
+        issues: col.issues.filter((issue) => {
+          if (priorityFilter && issue.priority !== priorityFilter) return false;
+          if (searchQuery) {
+            const q = searchQuery.toLowerCase();
+            return (
+              issue.title.toLowerCase().includes(q) ||
+              (issue.description?.toLowerCase().includes(q) ?? false)
+            );
+          }
+          return true;
+        }),
+      })),
+    [columns, priorityFilter, searchQuery],
+  );
+
+  const activeColumns = useMemo(
+    () => filteredColumns.filter((col) => !ARCHIVE_STATUS_NAMES.has(col.name)),
+    [filteredColumns],
+  );
+  const archiveColumns = useMemo(
+    () => filteredColumns.filter((col) => ARCHIVE_STATUS_NAMES.has(col.name)),
+    [filteredColumns],
+  );
+
+  function toggleGroup(group: string) {
+    setCollapsedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(group)) {
+        next.delete(group);
+      } else {
+        next.add(group);
       }
-      return true;
-    }),
-  }));
+      return next;
+    });
+  }
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -455,35 +486,57 @@ export function BoardPage() {
           </div>
         </div>
       )}
-      <div className="flex gap-4 p-6 overflow-x-auto min-h-[calc(100vh-57px)]">
-        {filteredColumns.map((col) => (
-          <BoardColumn
-            key={col.id}
-            column={col}
-            projectId={activeProjectId}
-            creatingInColumn={creatingInColumnId}
-            onCreateClick={setCreatingInColumnId}
-            onCreateCancel={() => setCreatingInColumnId(null)}
-            onIssueClick={handleIssueClick}
-            onDragStart={(e, issue) => {
-              // Bridge: store drag data on window since onDrop can't read dataTransfer
-              (window as unknown as Record<string, unknown>).__dragData = {
-                issueId: issue.id,
-                sourceStatusId: issue.statusId,
-              };
-              handleDragStart(e, issue);
-            }}
-            onDrop={handleDrop}
-            searchQuery={searchQuery}
-          >
-            <CreateIssueForm
+      <div className="flex flex-col gap-3 p-6 min-h-[calc(100vh-57px)]">
+        <div className="flex gap-4 overflow-x-auto">
+          {activeColumns.map((col) => (
+            <BoardColumn
+              key={col.id}
+              column={col}
               projectId={activeProjectId}
-              statusId={col.id}
-              onSubmit={handleCreateIssue}
-              onCancel={() => setCreatingInColumnId(null)}
-            />
-          </BoardColumn>
-        ))}
+              creatingInColumn={creatingInColumnId}
+              onCreateClick={setCreatingInColumnId}
+              onCreateCancel={() => setCreatingInColumnId(null)}
+              onIssueClick={handleIssueClick}
+              onDragStart={(e, issue) => {
+                (window as unknown as Record<string, unknown>).__dragData = {
+                  issueId: issue.id,
+                  sourceStatusId: issue.statusId,
+                };
+                handleDragStart(e, issue);
+              }}
+              onDrop={handleDrop}
+              searchQuery={searchQuery}
+            >
+              <CreateIssueForm
+                projectId={activeProjectId}
+                statusId={col.id}
+                onSubmit={handleCreateIssue}
+                onCancel={() => setCreatingInColumnId(null)}
+              />
+            </BoardColumn>
+          ))}
+        </div>
+        <ColumnGroup
+          label="Completed"
+          columns={archiveColumns}
+          collapsed={collapsedGroups.has("archive")}
+          onToggle={() => toggleGroup("archive")}
+          projectId={activeProjectId}
+          creatingInColumn={creatingInColumnId}
+          onCreateClick={setCreatingInColumnId}
+          onCreateCancel={() => setCreatingInColumnId(null)}
+          onCreateSubmit={handleCreateIssue}
+          onIssueClick={handleIssueClick}
+          onDragStart={(e, issue) => {
+            (window as unknown as Record<string, unknown>).__dragData = {
+              issueId: issue.id,
+              sourceStatusId: issue.statusId,
+            };
+            handleDragStart(e, issue);
+          }}
+          onDrop={handleDrop}
+          searchQuery={searchQuery}
+        />
       </div>
       {selectedIssue && (
         <IssueDetailPanel

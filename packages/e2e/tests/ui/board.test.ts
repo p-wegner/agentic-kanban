@@ -7,19 +7,25 @@ test.describe("Board UI", () => {
     // Wait for the board to load
     await page.waitForSelector("h2");
 
+    // Active columns are visible by default
     const columns = page.locator("h2");
-    const count = await columns.count();
-    expect(count).toBeGreaterThanOrEqual(5);
-
-    // Verify the 5 default column names are present
     const names = (await columns.allTextContents()).map((n) =>
       n.replace(/\s*\d+$/, "").trim(),
     );
     expect(names).toContain("Todo");
     expect(names).toContain("In Progress");
     expect(names).toContain("In Review");
-    expect(names).toContain("Done");
-    expect(names).toContain("Cancelled");
+
+    // Expand the collapsed "Completed" group to reveal Done/Cancelled
+    await page.locator("button", { hasText: "Completed" }).click();
+
+    // Now all 5 columns should be visible
+    const allColumns = page.locator("h2");
+    const allNames = (await allColumns.allTextContents()).map((n) =>
+      n.replace(/\s*\d+$/, "").trim(),
+    );
+    expect(allNames).toContain("Done");
+    expect(allNames).toContain("Cancelled");
   });
 
   test("shows header with title", async ({ page }) => {
@@ -66,8 +72,8 @@ test.describe("Board interactions", () => {
     // Verify form appears
     await expect(page.locator("form")).toBeVisible();
 
-    // Click Cancel
-    await page.locator('button:has-text("Cancel")').click();
+    // Click Cancel (scope to form to avoid matching other "Cancel" buttons)
+    await page.locator("form").locator('button:has-text("Cancel")').click();
 
     // Form should be gone
     await expect(page.locator("form")).not.toBeVisible();
