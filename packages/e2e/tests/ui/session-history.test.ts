@@ -62,14 +62,14 @@ test.describe("Session History UI", () => {
     const issueEl = page.locator("p", { hasText: "History UI test issue" }).first();
     await issueEl.click();
 
-    // Click "Manage" button in the detail panel (under Workspaces section)
-    await page.locator('button:has-text("Manage")').first().click();
+    // Click "View Workspaces" button in the detail panel (under Workspaces section)
+    await page.locator('button:has-text("View Workspaces")').first().click();
 
     // Expand the workspace (click on the branch name)
     await page.locator("text=feature/history-ui-test").first().click();
 
-    // Should show "Past Sessions" section
-    await expect(page.locator("text=Past Sessions").first()).toBeVisible({ timeout: 5000 });
+    // Should show session selector with "Latest" tab
+    await expect(page.locator('button:has-text("Latest")').first()).toBeVisible({ timeout: 5000 });
   });
 
   test("click past session shows output in TerminalView", async ({ page, request }) => {
@@ -114,19 +114,18 @@ test.describe("Session History UI", () => {
 
     const issueEl = page.locator("p", { hasText: "History output test issue" }).first();
     await issueEl.click();
-    await page.locator('button:has-text("Manage")').first().click();
+    await page.locator('button:has-text("View Workspaces")').first().click();
 
     // Expand workspace
     await page.locator("text=feature/history-output-test").first().click();
 
-    // Wait for past sessions and click "View Output"
-    await expect(page.locator("text=Past Sessions").first()).toBeVisible({ timeout: 5000 });
-    await page.locator('button:has-text("View Output")').first().click();
+    // Wait for session selector to appear, then click a past session row
+    const wsPanel = page.locator("h2", { hasText: "Workspaces —" }).locator("..").locator("..");
+    await expect(wsPanel.locator('button:has-text("Latest")').first()).toBeVisible({ timeout: 5000 });
+    // Click the first completed session in the list (not the "Latest" tab)
+    await wsPanel.locator('button:has-text("completed")').first().click();
 
-    // Should show session output header
-    await expect(page.locator("text=Session Output").first()).toBeVisible({ timeout: 5000 });
-
-    // TerminalView should show "Disconnected" status
+    // TerminalView should show "Disconnected" status (history output loaded inline)
     await expect(page.locator("text=Disconnected").first()).toBeVisible({ timeout: 5000 });
   });
 });
