@@ -48,9 +48,9 @@ export function launch(
     args.push("-p");
   }
 
-  // On Windows, only use shell:true for custom commands (which may be one-liners).
-  // The claude binary is a real .exe — shell:true causes cmd.exe to buffer stdout.
-  const useShell = isWindows && isTestMock;
+  // On Windows, use shell:true for custom/mock commands (.bat/.cmd need cmd.exe).
+  // Default claude uses shell:false to avoid cmd.exe buffering stdout streams.
+  const useShell = isWindows && (isTestMock || !!agentCommand);
 
   const proc = spawn(command, args, {
     cwd: worktreePath,
