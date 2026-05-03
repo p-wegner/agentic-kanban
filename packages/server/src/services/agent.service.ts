@@ -59,7 +59,7 @@ export function launch(
 
   // Send prompt via stdin so --resume + -p (--print) mode works correctly
   if (!isCustomCommand) {
-    proc.stdin?.write(prompt);
+    proc.stdin?.write(prompt + "\n");
     proc.stdin?.end();
   }
 
