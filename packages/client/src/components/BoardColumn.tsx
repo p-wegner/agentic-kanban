@@ -11,6 +11,7 @@ interface BoardColumnProps {
   onIssueClick: (issue: IssueWithStatus) => void;
   onDragStart: (e: React.DragEvent, issue: IssueWithStatus) => void;
   onDrop: (statusId: string, sortOrder?: number) => void;
+  searchQuery?: string;
   children?: React.ReactNode;
 }
 
@@ -23,6 +24,7 @@ export function BoardColumn({
   onIssueClick,
   onDragStart,
   onDrop,
+  searchQuery,
   children,
 }: BoardColumnProps) {
   const [dragOver, setDragOver] = useState(false);
@@ -87,7 +89,7 @@ export function BoardColumn({
       <div className="flex items-center justify-between mb-3 px-1">
         <h2 className="font-medium text-sm text-gray-700">
           {column.name}
-          <span className="ml-2 text-gray-400">{column.issues.length}</span>
+          <span className="ml-2 text-xs text-gray-400 bg-gray-200 rounded-full px-1.5 py-0.5">{column.issues.length}</span>
         </h2>
         {!isCreating && (
           <button
@@ -111,6 +113,7 @@ export function BoardColumn({
               issue={issue}
               onClick={onIssueClick}
               onDragStart={onDragStart}
+              searchQuery={searchQuery}
             />
           </div>
         ))}

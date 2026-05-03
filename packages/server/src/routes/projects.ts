@@ -103,6 +103,7 @@ export function createProjectsRoute(database: Database = db) {
     const projectIssues = await database
       .select({
         id: issues.id,
+        issueNumber: issues.issueNumber,
         title: issues.title,
         description: issues.description,
         priority: issues.priority,

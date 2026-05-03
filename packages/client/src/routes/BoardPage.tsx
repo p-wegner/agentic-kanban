@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Layout } from "../components/Layout.js";
 import { BoardColumn } from "../components/BoardColumn.js";
 import { CreateIssueForm } from "../components/CreateIssueForm.js";
@@ -8,6 +8,7 @@ import { SettingsPanel } from "../components/SettingsPanel.js";
 import { SkeletonBoard } from "../components/SkeletonBoard.js";
 import { ToastContainer, showToast } from "../components/Toast.js";
 import { CommandPalette } from "../components/CommandPalette.js";
+import { ShortcutHelp } from "../components/ShortcutHelp.js";
 import { apiFetch } from "../lib/api.js";
 import { useBoardEvents } from "../lib/useBoardEvents.js";
 import { registerAction } from "../lib/actions.js";
@@ -41,6 +42,8 @@ export function BoardPage() {
   const [priorityFilter, setPriorityFilter] = useState("");
   const [showSettings, setShowSettings] = useState(false);
   const [showCommandPalette, setShowCommandPalette] = useState(false);
+  const [showShortcutHelp, setShowShortcutHelp] = useState(false);
+  const pendingBoardRefreshRef = useRef(false);
 
   const refetchBoard = useCallback(async (projectId?: string) => {
     const pid = projectId || activeProjectId;
@@ -49,13 +52,49 @@ export function BoardPage() {
       `/api/projects/${pid}/board`,
     );
     setColumns(board);
+    return board;
   }, [activeProjectId]);
 
-  // Real-time board updates via WebSocket
+  // Keep selectedIssue in sync with board data (F6 stale data fix)
+  useEffect(() => {
+    if (!selectedIssue) return;
+    for (const col of columns) {
+      const found = col.issues.find((i) => i.id === selectedIssue.id);
+      if (found) {
+        // Only update if data actually changed to avoid unnecessary re-renders
+        if (found.title !== selectedIssue.title ||
+            found.description !== selectedIssue.description ||
+            found.priority !== selectedIssue.priority ||
+            found.statusId !== selectedIssue.statusId ||
+            found.statusName !== selectedIssue.statusName ||
+            found.updatedAt !== selectedIssue.updatedAt) {
+          setSelectedIssue(found);
+        }
+        return;
+      }
+    }
+    // Issue was deleted — close panel
+    setSelectedIssue(null);
+  }, [columns, selectedIssue]);
+
+  // Real-time board updates via WebSocket (debounced while create form is open)
   useBoardEvents(activeProjectId, useCallback((reason: string) => {
     console.log(`[board-events] board changed: ${reason}`);
+    if (creatingInColumnId) {
+      // Don't refresh while create form is open — batch the update
+      pendingBoardRefreshRef.current = true;
+      return;
+    }
     refetchBoard();
-  }, [refetchBoard]));
+  }, [refetchBoard, creatingInColumnId]));
+
+  // Process pending board refresh when create form closes
+  useEffect(() => {
+    if (!creatingInColumnId && pendingBoardRefreshRef.current) {
+      pendingBoardRefreshRef.current = false;
+      refetchBoard();
+    }
+  }, [creatingInColumnId, refetchBoard]);
 
   const loadProjects = useCallback(async () => {
     const projs = await apiFetch<Project[]>("/api/projects");
@@ -121,6 +160,7 @@ export function BoardPage() {
       });
       setCreatingInColumnId(null);
       await refetchBoard();
+      pendingBoardRefreshRef.current = false;
       showToast("Issue created", "success");
     } catch (err) {
       showToast("Failed to create issue", "error");
@@ -137,16 +177,10 @@ export function BoardPage() {
         method: "PATCH",
         body: JSON.stringify(data),
       });
-      await refetchBoard();
-      // Re-find updated issue in new columns
-      for (const col of columns) {
-        const found = col.issues.find((i) => i.id === id);
-        if (found) {
-          // We'll get updated data from next render; for now close panel
-          break;
-        }
-      }
-      setSelectedIssue(null);
+      const board = await refetchBoard();
+      // Re-find updated issue in new columns to keep panel open (F1)
+      // refetchBoard now returns the board data
+      void board; // used below via columns state update
       showToast("Issue updated", "success");
     } catch (err) {
       showToast("Failed to update issue", "error");
@@ -247,12 +281,26 @@ export function BoardPage() {
         const target = e.target as HTMLElement;
         if (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT") return;
         e.preventDefault();
-        document.getElementById("search-input")?.focus();
+        const input = document.getElementById("search-input") as HTMLInputElement | null;
+        if (input) {
+          input.focus();
+          // Clear any stray "/" that leaked through before focus shift
+          requestAnimationFrame(() => {
+            if (input.value === "/") {
+              input.value = "";
+              setSearchQuery("");
+            }
+          });
+        }
       }
-      // Escape to close palette / clear search / close panels
+      // Escape to close palette / shortcut help / clear search / close panels
       if (e.key === "Escape") {
         if (showCommandPalette) {
           setShowCommandPalette(false);
+          return;
+        }
+        if (showShortcutHelp) {
+          setShowShortcutHelp(false);
           return;
         }
         if (searchQuery) {
@@ -260,10 +308,17 @@ export function BoardPage() {
           document.getElementById("search-input")?.blur();
         }
       }
+      // "?" to show keyboard shortcuts
+      if (e.key === "?" && !e.ctrlKey && !e.metaKey) {
+        const target = e.target as HTMLElement;
+        if (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT") return;
+        e.preventDefault();
+        setShowShortcutHelp((prev) => !prev);
+      }
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [searchQuery, showCommandPalette]);
+  }, [searchQuery, showCommandPalette, showShortcutHelp]);
 
   // Register command palette actions
   useEffect(() => {
@@ -272,7 +327,7 @@ export function BoardPage() {
     unregisters.push(registerAction({
       id: "create-issue",
       label: "Create Issue",
-      shortcut: "/",
+      shortcut: "c",
       category: "issue",
       handler: () => {
         // Open create form in the first column (Todo)
@@ -419,6 +474,7 @@ export function BoardPage() {
               handleDragStart(e, issue);
             }}
             onDrop={handleDrop}
+            searchQuery={searchQuery}
           >
             <CreateIssueForm
               projectId={activeProjectId}
@@ -432,10 +488,12 @@ export function BoardPage() {
       {selectedIssue && (
         <IssueDetailPanel
           issue={selectedIssue}
+          statuses={columns.map((col) => ({ id: col.id, name: col.name }))}
           onUpdate={handleUpdateIssue}
           onDelete={handleDeleteIssue}
           onClose={() => setSelectedIssue(null)}
           onManageWorkspaces={handleManageWorkspaces}
+          onIssueUpdate={setSelectedIssue}
         />
       )}
       {workspaceIssue && (
@@ -452,6 +510,9 @@ export function BoardPage() {
       )}
       {showCommandPalette && (
         <CommandPalette onClose={() => setShowCommandPalette(false)} />
+      )}
+      {showShortcutHelp && (
+        <ShortcutHelp onClose={() => setShowShortcutHelp(false)} />
       )}
     </Layout>
   );

@@ -13,11 +13,11 @@ test.describe("Workspace Panel UI", () => {
     if (await issueCard.isVisible()) {
       await issueCard.click();
 
-      // Should see "Manage" link in Workspaces section
-      const manageLink = page.locator("text=Manage");
+      // Should see workspace management link (text is context-aware: "New Workspace" or "View Workspaces")
+      const manageLink = page.locator("text=New Workspace").or(page.locator("text=View Workspaces")).first();
       await expect(manageLink).toBeVisible();
 
-      // Click Manage to open workspace panel
+      // Click to open workspace panel
       await manageLink.click();
 
       // Workspace panel should be visible
@@ -30,7 +30,7 @@ test.describe("Workspace Panel UI", () => {
     const issueCard = page.locator('[class*="cursor-pointer"]').first();
     await issueCard.click();
 
-    const manageLink = page.locator("text=Manage");
+    const manageLink = page.locator("text=New Workspace").or(page.locator("text=View Workspaces")).first();
     if (await manageLink.isVisible()) {
       await manageLink.click();
 

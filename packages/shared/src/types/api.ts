@@ -51,6 +51,7 @@ export interface WorkspaceSummary {
 
 export interface IssueWithStatus {
   id: string;
+  issueNumber: number | null;
   title: string;
   description: string | null;
   priority: string;
