@@ -5,6 +5,7 @@ import { projects } from "./projects.js";
 
 export const issues = sqliteTable("issues", {
   id: text("id").primaryKey(),
+  issueNumber: integer("issue_number"),
   title: text("title").notNull(),
   description: text("description"),
   priority: text("priority").notNull().default("medium"),

@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { db } from "../db/index.js";
 import { issues, projectStatuses, workspaces, tags, issueTags } from "@agentic-kanban/shared/schema";
-import { eq, and } from "drizzle-orm";
+import { eq, and, sql } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import type { Database } from "../db/index.js";
 import type { BoardEvents } from "../services/board-events.js";
@@ -19,6 +19,7 @@ export function createIssuesRoute(database: Database = db, options?: { boardEven
     const result = await database
       .select({
         id: issues.id,
+        issueNumber: issues.issueNumber,
         title: issues.title,
         description: issues.description,
         priority: issues.priority,
@@ -43,8 +44,16 @@ export function createIssuesRoute(database: Database = db, options?: { boardEven
     const now = new Date().toISOString();
     const id = randomUUID();
 
+    // Auto-assign issue number per project
+    const maxResult = await database
+      .select({ maxNum: sql<number | null>`max(${issues.issueNumber})` })
+      .from(issues)
+      .where(eq(issues.projectId, body.projectId));
+    const issueNumber = (maxResult[0]?.maxNum ?? 0) + 1;
+
     await database.insert(issues).values({
       id,
+      issueNumber,
       title: body.title,
       description: body.description ?? null,
       priority: body.priority ?? "medium",
@@ -58,7 +67,7 @@ export function createIssuesRoute(database: Database = db, options?: { boardEven
     // Broadcast board event
     if (body.projectId) options?.boardEvents?.broadcast(body.projectId, "issue_created");
 
-    return c.json({ id, title: body.title }, 201);
+    return c.json({ id, issueNumber, title: body.title }, 201);
   });
 
   // PATCH /api/issues/:id

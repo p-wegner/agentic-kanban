@@ -18,9 +18,30 @@ interface IssueCardProps {
   onClick: (issue: IssueWithStatus) => void;
   onDragStart: (e: React.DragEvent, issue: IssueWithStatus) => void;
   tags?: TagBadge[];
+  searchQuery?: string;
 }
 
-export function IssueCard({ issue, onClick, onDragStart, tags }: IssueCardProps) {
+function HighlightedText({ text, query }: { text: string; query: string }) {
+  if (!query) return <>{text}</>;
+  const lowerText = text.toLowerCase();
+  const lowerQuery = query.toLowerCase();
+  const idx = lowerText.indexOf(lowerQuery);
+  if (idx === -1) return <>{text}</>;
+
+  const before = text.slice(0, idx);
+  const match = text.slice(idx, idx + query.length);
+  const after = text.slice(idx + query.length);
+
+  return (
+    <>
+      {before}
+      <mark className="bg-yellow-200 rounded px-0.5">{match}</mark>
+      {after}
+    </>
+  );
+}
+
+export function IssueCard({ issue, onClick, onDragStart, tags, searchQuery }: IssueCardProps) {
   const badgeColor = priorityColors[issue.priority] ?? "bg-gray-200 text-gray-700";
   const ws = issue.workspaceSummary;
 
@@ -32,11 +53,16 @@ export function IssueCard({ issue, onClick, onDragStart, tags }: IssueCardProps)
       className="bg-white rounded-md shadow-sm p-3 border border-gray-200 cursor-pointer hover:shadow-md hover:border-gray-300 transition-shadow"
     >
       <div className="flex items-start justify-between gap-2">
-        <p className="text-sm text-gray-900">{issue.title}</p>
+        <p className="text-sm text-gray-900">
+          {issue.issueNumber != null && (
+            <span className="text-gray-400 font-mono mr-1">#{issue.issueNumber}</span>
+          )}
+          <HighlightedText text={issue.title} query={searchQuery ?? ""} />
+        </p>
       </div>
       {issue.description && (
         <p className="text-xs text-gray-500 mt-1 line-clamp-2">
-          {issue.description}
+          <HighlightedText text={issue.description} query={searchQuery ?? ""} />
         </p>
       )}
       <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
@@ -57,7 +83,7 @@ export function IssueCard({ issue, onClick, onDragStart, tags }: IssueCardProps)
         {ws && ws.total > 0 && (
           <span
             className="inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded bg-gray-100 text-gray-600"
-            title={ws.active > 0 ? `${ws.active} active, ${ws.idle} idle` : `${ws.idle} idle`}
+            title={ws.active > 0 ? `${ws.active} active workspace${ws.active > 1 ? 's' : ''}, ${ws.idle} idle` : `${ws.idle} idle workspace${ws.idle > 1 ? 's' : ''}`}
           >
             <span
               className={`inline-block w-1.5 h-1.5 rounded-full ${

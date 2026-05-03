@@ -43,6 +43,13 @@
       "when": 1777764294260,
       "tag": "0005_silky_frog_thor",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1777796822440,
+      "tag": "0006_wide_ogun",
+      "breakpoints": true
     }
   ]
 }

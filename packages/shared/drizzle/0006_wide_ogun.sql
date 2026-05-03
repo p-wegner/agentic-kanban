@@ -1,0 +1,1 @@
+ALTER TABLE `issues` ADD `issue_number` integer;
