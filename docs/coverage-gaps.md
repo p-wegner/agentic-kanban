@@ -179,29 +179,41 @@ The `docs/prd/` folder documents the *original* vibe-kanban project analysis, no
 
 | Category | Total | Tested | Gap |
 |----------|-------|--------|-----|
-| API routes | ~28 | ~17 | **11 untested** |
-| Client components | 14 | ~9 | **5 untested** |
+| API routes | ~28 | ~26 | **2 untested** |
+| Client components | 14 | ~13 | **1 untested** |
 | MCP tools | 8 | 7 | **1 untested** |
 | CLI commands | 4 | 0 | **4 untested** |
-| Unit test subjects | 7+ services | 3 | **4+ untested** |
+| Unit test subjects | 7+ services | 6 | **1+ untested** |
 
-### Priority Gaps to Address
+### Previously identified gaps — now addressed
 
-**High (core features with zero test coverage):**
-1. Tags API (5 routes untested) — tags are a core CRUD feature
-2. Status CRUD API — project setup depends on this
-3. Active project switching — multi-project support is a key feature
-4. DiffViewer UI — part of the core workspace workflow
+| Gap | Status | Tests Added |
+|-----|--------|-------------|
+| Tags API (5 routes) | **FIXED** | 12 E2E tests + 13 unit tests |
+| Status CRUD API | **FIXED** | 2 E2E tests (projects.test.ts) |
+| Active project switching | **FIXED** | 3 E2E tests (preferences.test.ts) + 10 unit tests |
+| Branch listing API | **FIXED** | 2 E2E tests (projects.test.ts) |
+| Health endpoint | **FIXED** | 1 E2E test (health.test.ts) |
+| ColumnGroup collapse/expand | **FIXED** | 4 E2E tests (archive-columns.test.ts) |
+| Search highlighting | **FIXED** | 6 E2E tests (search.test.ts) |
+| DiffViewer UI | **FIXED** | 1 E2E test (workspace.test.ts) |
+| Merge from UI | **FIXED** | 1 E2E test (workspace.test.ts) |
+| ShortcutHelp overlay | **FIXED** | 5 E2E tests (shortcuts.test.ts) |
+| Issue number auto-increment | **FIXED** | 11 unit tests (issue-number.test.ts) |
+| Preferences whitelist | **FIXED** | 10 unit tests (preferences.test.ts) |
 
-**Medium (important but partially covered):**
-5. ColumnGroup collapse/expand — archive is a visible feature
-6. Search highlighting — user-facing search feature
-7. Merge from UI — core MVP loop (create → work → diff → merge)
-8. CLI commands — register/unregister/list/cleanup
+### Remaining gaps
 
-**Low (nice to have):**
-9. ShortcutHelp overlay
-10. Toast notifications
-11. Skeleton loading state
-12. WebSocket reconnection
-13. Error response format testing
+**Untested:**
+1. `POST /api/internal/board-notify` — internal route, low priority
+2. CLI commands (register, unregister, list, cleanup) — no test infrastructure for CLI
+3. `get_workspace_diff` MCP tool — no standalone test
+4. Toast notifications — no E2E test
+5. Skeleton/loading state — no E2E test
+
+**Low priority:**
+6. WebSocket reconnection scenarios
+7. Error response format testing
+8. Agent service unit tests
+9. Session manager unit tests
+10. Board events service unit tests
