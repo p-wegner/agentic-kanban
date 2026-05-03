@@ -114,12 +114,6 @@ function createSessionManager(
       resumeFromId: resumeFromId ?? null,
     });
 
-    // Override agent command for testing if provided
-    const prevAgentCommand = process.env.AGENT_COMMAND;
-    if (agentCommand) {
-      process.env.AGENT_COMMAND = agentCommand;
-    }
-
     try {
       agentService.launch(workspace.workingDir, sessionId, prompt, agentArgs, (event) => {
         // Broadcast to WebSocket subscribers
@@ -138,14 +132,9 @@ function createSessionManager(
             })
             .catch((err) => console.error("Failed to update session:", err));
         }
-      }, claudeSessionId);
-    } finally {
-      // Always restore the previous env var (or delete it if it wasn't set)
-      if (prevAgentCommand !== undefined) {
-        process.env.AGENT_COMMAND = prevAgentCommand;
-      } else {
-        delete process.env.AGENT_COMMAND;
-      }
+      }, claudeSessionId, agentCommand);
+    } catch (err) {
+      throw err;
     }
 
     return sessionId;

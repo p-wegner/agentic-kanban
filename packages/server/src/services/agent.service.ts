@@ -23,23 +23,25 @@ export function launch(
   agentArgs: string | undefined,
   onOutput: AgentOutputCallback,
   claudeSessionId?: string,
+  agentCommand?: string,
 ): ChildProcess {
-  const command = process.env.AGENT_COMMAND || "claude";
-  const isCustomCommand = !!process.env.AGENT_COMMAND;
+  // Test mock agents use AGENT_COMMAND env var and need no claude-specific flags.
+  // Real claude (default or configured via preferences) gets stream-json args + stdin prompt.
+  const isTestMock = !!process.env.AGENT_COMMAND;
+  const command = process.env.AGENT_COMMAND || agentCommand || "claude";
   const isWindows = process.platform === "win32";
   console.log(`[agent] launching: command=${command} worktree=${worktreePath} sessionId=${sessionId} resume=${claudeSessionId ?? "none"}`);
 
-  // Custom agent commands run directly; claude gets its specific flags
   let args: string[];
-  if (isCustomCommand) {
+  if (isTestMock) {
+    // Test mock agents: run bare, no flags
     args = [];
   } else {
+    // Real claude binary (default or custom name): always use stream-json + stdin
     args = ["--output-format", "stream-json", "--verbose"];
-    // Append extra args from settings (e.g. "--model opus", "--settings path")
     if (agentArgs) {
       args.push(...splitArgs(agentArgs));
     }
-    // Resume previous Claude session if available
     if (claudeSessionId) {
       args.push("--resume", claudeSessionId);
     }
@@ -48,7 +50,7 @@ export function launch(
 
   // On Windows, only use shell:true for custom commands (which may be one-liners).
   // The claude binary is a real .exe — shell:true causes cmd.exe to buffer stdout.
-  const useShell = isWindows && isCustomCommand;
+  const useShell = isWindows && isTestMock;
 
   const proc = spawn(command, args, {
     cwd: worktreePath,
@@ -58,9 +60,8 @@ export function launch(
   });
 
   // Send prompt via stdin so --resume + -p (--print) mode works correctly
-  if (!isCustomCommand) {
-    proc.stdin?.write(prompt + "\n");
-    proc.stdin?.end();
+  if (!isTestMock) {
+    proc.stdin?.end(prompt + "\n");
   }
 
   activeProcesses.set(sessionId, proc);
