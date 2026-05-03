@@ -94,8 +94,8 @@ test.describe("Settings UI", () => {
     const input = page.locator('input[placeholder="claude"]');
     await input.fill("should-not-persist");
 
-    // Cancel
-    await page.locator('button:has-text("Cancel")').click();
+    // Cancel (use exact match to avoid "Cancelled" column group button)
+    await page.locator('button', { hasText: /^Cancel$/ }).click();
     await expect(page.locator("h2", { hasText: "Settings" })).not.toBeVisible();
 
     // Reopen — value should NOT be there
