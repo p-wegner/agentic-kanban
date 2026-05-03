@@ -83,7 +83,7 @@ function sanitizeBranchName(input: string): string {
     .slice(0, 80);
 }
 
-function suggestBranchName(issue: { issueNumber?: number; title: string }): string {
+function suggestBranchName(issue: { issueNumber?: number | null; title: string }): string {
   const prefix = "feature";
   const num = issue.issueNumber ? `${issue.issueNumber}-` : "";
   const slug = issue.title
