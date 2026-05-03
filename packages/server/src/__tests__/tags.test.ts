@@ -1,0 +1,377 @@
+import { describe, it, expect, beforeAll } from "vitest";
+import { Hono } from "hono";
+import { drizzle } from "drizzle-orm/libsql";
+import { createClient } from "@libsql/client";
+import { createRoutes } from "../routes/index.js";
+import type { SessionManager } from "../services/session.manager.js";
+import * as schema from "@agentic-kanban/shared/schema";
+import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { resolve, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const MIGRATION_FILES = [
+  "../../../shared/drizzle/0000_flawless_trauma.sql",
+  "../../../shared/drizzle/0001_magical_johnny_storm.sql",
+  "../../../shared/drizzle/0002_bent_may_parker.sql",
+  "../../../shared/drizzle/0003_tough_lightspeed.sql",
+  "../../../shared/drizzle/0004_boring_wind_dancer.sql",
+  "../../../shared/drizzle/0005_silky_frog_thor.sql",
+  "../../../shared/drizzle/0006_wide_ogun.sql",
+];
+
+function createTestApp() {
+  const client = createClient({ url: ":memory:" });
+  for (const file of MIGRATION_FILES) {
+    const sql = readFileSync(resolve(__dirname, file), "utf-8");
+    const statements = sql
+      .split("--> statement-breakpoint")
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
+    for (const stmt of statements) {
+      client.execute(stmt);
+    }
+  }
+
+  const database = drizzle(client, { schema });
+  const app = new Hono();
+
+  const mockSessionManager = {
+    startSession: async () => "mock-session-id",
+    stopSession: async () => true,
+    subscribe: () => {},
+    unsubscribe: () => {},
+    wsRoute: () => () => {},
+  } as unknown as SessionManager;
+
+  app.route("/api", createRoutes(database, () => mockSessionManager));
+  return { app, db: database };
+}
+
+// Helper: create a project + status so we can create issues
+async function createProjectAndStatus(
+  database: ReturnType<typeof drizzle<typeof schema>>,
+  name = "Tag Test Project",
+) {
+  const now = new Date().toISOString();
+  const projectId = randomUUID();
+  await database.insert(schema.projects).values({
+    id: projectId,
+    name,
+    repoPath: `/tmp/${name.replace(/\s+/g, "-")}`,
+    repoName: name.replace(/\s+/g, "-"),
+    defaultBranch: "main",
+    createdAt: now,
+    updatedAt: now,
+  });
+
+  const statusId = randomUUID();
+  await database.insert(schema.projectStatuses).values({
+    id: statusId,
+    projectId,
+    name: "Todo",
+    sortOrder: 0,
+    isDefault: true,
+    createdAt: now,
+  });
+
+  return { projectId, statusId };
+}
+
+describe("Tags API - CRUD", () => {
+  const { app } = createTestApp();
+
+  it("GET /api/tags returns empty list initially", async () => {
+    const res = await app.request("/api/tags");
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body).toEqual([]);
+  });
+
+  it("POST /api/tags creates a tag", async () => {
+    const res = await app.request("/api/tags", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "bug", color: "#ff0000" }),
+    });
+    expect(res.status).toBe(201);
+    const body = await res.json();
+    expect(body.name).toBe("bug");
+    expect(body.color).toBe("#ff0000");
+    expect(body.id).toBeDefined();
+  });
+
+  it("POST /api/tags requires a name", async () => {
+    const res = await app.request("/api/tags", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ color: "#00ff00" }),
+    });
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toContain("name is required");
+  });
+
+  it("POST /api/tags creates a tag without color", async () => {
+    const res = await app.request("/api/tags", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "feature" }),
+    });
+    expect(res.status).toBe(201);
+    const body = await res.json();
+    expect(body.name).toBe("feature");
+    expect(body.color).toBeNull();
+  });
+
+  it("GET /api/tags returns all created tags", async () => {
+    const res = await app.request("/api/tags");
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.length).toBeGreaterThanOrEqual(2);
+
+    const names = body.map((t: { name: string }) => t.name);
+    expect(names).toContain("bug");
+    expect(names).toContain("feature");
+  });
+
+  it("PATCH /api/tags/:id updates tag name", async () => {
+    const createRes = await app.request("/api/tags", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "to-update" }),
+    });
+    const { id } = await createRes.json();
+
+    const res = await app.request(`/api/tags/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "updated-name" }),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.id).toBe(id);
+
+    // Verify update
+    const tags = await (await app.request("/api/tags")).json();
+    const updated = tags.find((t: { id: string }) => t.id === id);
+    expect(updated.name).toBe("updated-name");
+  });
+
+  it("PATCH /api/tags/:id updates tag color", async () => {
+    const createRes = await app.request("/api/tags", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "color-test", color: "#111111" }),
+    });
+    const { id } = await createRes.json();
+
+    const res = await app.request(`/api/tags/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ color: "#222222" }),
+    });
+    expect(res.status).toBe(200);
+
+    const tags = await (await app.request("/api/tags")).json();
+    const updated = tags.find((t: { id: string }) => t.id === id);
+    expect(updated.color).toBe("#222222");
+  });
+
+  it("PATCH /api/tags/:id rejects empty update", async () => {
+    const createRes = await app.request("/api/tags", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "no-update" }),
+    });
+    const { id } = await createRes.json();
+
+    const res = await app.request(`/api/tags/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toContain("No fields to update");
+  });
+
+  it("DELETE /api/tags/:id deletes a tag", async () => {
+    const createRes = await app.request("/api/tags", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "to-delete" }),
+    });
+    const { id } = await createRes.json();
+
+    const res = await app.request(`/api/tags/${id}`, { method: "DELETE" });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.success).toBe(true);
+
+    // Verify gone
+    const tags = await (await app.request("/api/tags")).json();
+    const deleted = tags.find((t: { id: string }) => t.id === id);
+    expect(deleted).toBeUndefined();
+  });
+});
+
+describe("Tags API - Issue Associations", () => {
+  const { app, db: database } = createTestApp();
+
+  it("deleting a tag removes its issue associations", async () => {
+    const { projectId, statusId } = await createProjectAndStatus(database, "Tag Assoc Project");
+
+    // Create a tag
+    const tagRes = await app.request("/api/tags", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "assoc-test-tag", color: "#ff00ff" }),
+    });
+    const tag = await tagRes.json();
+
+    // Create an issue
+    const issueRes = await app.request("/api/issues", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "Tag association issue", statusId, projectId }),
+    });
+    const issue = await issueRes.json();
+
+    // Associate tag with issue
+    const assocRes = await app.request(`/api/issues/${issue.id}/tags`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tagId: tag.id }),
+    });
+    expect(assocRes.status).toBe(201);
+
+    // Verify association exists
+    const issueTags = await (
+      await app.request(`/api/issues/${issue.id}/tags`)
+    ).json();
+    expect(issueTags.length).toBe(1);
+    expect(issueTags[0].name).toBe("assoc-test-tag");
+
+    // Delete the tag
+    await app.request(`/api/tags/${tag.id}`, { method: "DELETE" });
+
+    // Verify issue no longer has the tag
+    const issueTagsAfter = await (
+      await app.request(`/api/issues/${issue.id}/tags`)
+    ).json();
+    expect(issueTagsAfter).toEqual([]);
+  });
+
+  it("issue tag associations work end-to-end (assign, list, remove)", async () => {
+    const { projectId, statusId } = await createProjectAndStatus(database, "E2E Tag Project");
+
+    // Create two tags
+    const tag1Res = await app.request("/api/tags", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "e2e-tag-1", color: "#aabbcc" }),
+    });
+    const tag1 = await tag1Res.json();
+
+    const tag2Res = await app.request("/api/tags", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "e2e-tag-2", color: "#ddeeff" }),
+    });
+    const tag2 = await tag2Res.json();
+
+    // Create an issue
+    const issueRes = await app.request("/api/issues", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "Multi-tag issue", statusId, projectId }),
+    });
+    const issue = await issueRes.json();
+
+    // Assign both tags
+    await app.request(`/api/issues/${issue.id}/tags`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tagId: tag1.id }),
+    });
+    await app.request(`/api/issues/${issue.id}/tags`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tagId: tag2.id }),
+    });
+
+    // Verify both tags
+    const tags = await (
+      await app.request(`/api/issues/${issue.id}/tags`)
+    ).json();
+    expect(tags.length).toBe(2);
+
+    // Remove one tag
+    await app.request(`/api/issues/${issue.id}/tags/${tag1.id}`, {
+      method: "DELETE",
+    });
+
+    // Verify only one remains
+    const remaining = await (
+      await app.request(`/api/issues/${issue.id}/tags`)
+    ).json();
+    expect(remaining.length).toBe(1);
+    expect(remaining[0].name).toBe("e2e-tag-2");
+  });
+
+  it("POST /api/issues/:id/tags requires tagId", async () => {
+    const { projectId, statusId } = await createProjectAndStatus(database, "Tag Validation Project");
+    const issueRes = await app.request("/api/issues", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "Tag validation issue", statusId, projectId }),
+    });
+    const issue = await issueRes.json();
+
+    const res = await app.request(`/api/issues/${issue.id}/tags`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toContain("tagId is required");
+  });
+
+  it("deleting an issue does not delete associated tags", async () => {
+    const { projectId, statusId } = await createProjectAndStatus(database, "Tag Issue Delete Project");
+
+    // Create tag
+    const tagRes = await app.request("/api/tags", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "persistent-tag", color: "#333333" }),
+    });
+    const tag = await tagRes.json();
+
+    // Create issue and associate
+    const issueRes = await app.request("/api/issues", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "Issue to delete", statusId, projectId }),
+    });
+    const issue = await issueRes.json();
+
+    await app.request(`/api/issues/${issue.id}/tags`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tagId: tag.id }),
+    });
+
+    // Delete the issue
+    await app.request(`/api/issues/${issue.id}`, { method: "DELETE" });
+
+    // Verify the tag still exists
+    const tags = await (await app.request("/api/tags")).json();
+    const found = tags.find((t: { id: string }) => t.id === tag.id);
+    expect(found).toBeDefined();
+    expect(found.name).toBe("persistent-tag");
+  });
+});
