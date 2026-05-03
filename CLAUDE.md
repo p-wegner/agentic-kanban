@@ -37,6 +37,7 @@ Cleanroom reimplementation of [vibe-kanban](https://github.com/BloopAI/vibe-kanb
 - **Testability first** — E2E tests from day one, AI-runnable feedback loops
 - **Tech stack TBD** — resolved: TypeScript (Hono + Drizzle + React + MCP SDK)
 - **PR creation is skipped** — manual merge only
+- **Always commit** — after finishing a task, commit the changes without waiting to be asked
 - Use `uv` and `uv venv` for any Python work (never global site-packages)
 - Windows environment
 
