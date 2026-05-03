@@ -107,7 +107,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange }: W
 
   // Session history state
   const [workspaceSessions, setWorkspaceSessions] = useState<Record<string, SessionInfo[]>>({});
-  const [historySessionId, setHistorySessionId] = useState<string | null>(null);
+  const [selectedHistoryId, setSelectedHistoryId] = useState<string | null>(null);
   const [historyMessages, setHistoryMessages] = useState<AgentOutputMessage[]>([]);
 
   // Chat-like state: tracks the last session per workspace for resume
@@ -213,8 +213,8 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange }: W
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
       if (e.key === "Escape") {
-        if (historySessionId) {
-          setHistorySessionId(null);
+        if (selectedHistoryId) {
+          setSelectedHistoryId(null);
           setHistoryMessages([]);
           return;
         }
@@ -223,7 +223,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange }: W
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onClose, historySessionId]);
+  }, [onClose, selectedHistoryId]);
 
   // Fetch sessions for a workspace when it's expanded
   useEffect(() => {
@@ -241,7 +241,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange }: W
     try {
       const msgs = await apiFetch<AgentOutputMessage[]>(`/api/sessions/${sessionId}/output`);
       setHistoryMessages(msgs);
-      setHistorySessionId(sessionId);
+      setSelectedHistoryId(sessionId);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load session output");
     }
@@ -363,43 +363,6 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange }: W
     } finally {
       setActionLoading(false);
     }
-  }
-
-  // History overlay
-  if (historySessionId) {
-    return (
-      <>
-        <div className="fixed inset-0 bg-black/30 z-40" onClick={() => { setHistorySessionId(null); setHistoryMessages([]); }} />
-        <div className="fixed right-0 top-0 h-full w-[480px] bg-white shadow-xl z-50 flex flex-col border-l border-gray-200 animate-slide-in-right">
-          <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200">
-            <h2 className="text-sm font-semibold text-gray-900">
-              Session Output
-            </h2>
-            <button
-              onClick={() => { setHistorySessionId(null); setHistoryMessages([]); }}
-              className="text-gray-400 hover:text-gray-600 text-lg leading-none"
-            >
-              &times;
-            </button>
-          </div>
-          <div className="flex-1 overflow-y-auto p-4">
-            <TerminalView
-              messages={historyMessages}
-              connectionState="closed"
-              parseOutput={prefs.output_parser !== "false"}
-            />
-          </div>
-          <div className="px-4 py-3 border-t border-gray-200">
-            <button
-              onClick={() => { setHistorySessionId(null); setHistoryMessages([]); }}
-              className="text-sm text-gray-500 hover:text-gray-700"
-            >
-              Back to Workspaces
-            </button>
-          </div>
-        </div>
-      </>
-    );
   }
 
   return (
@@ -525,7 +488,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange }: W
                 className={`border rounded p-3 space-y-2 cursor-pointer transition-colors ${
                   isSelected ? "border-blue-400 bg-blue-50" : "border-gray-200 hover:border-gray-300"
                 }`}
-                onClick={() => setSelectedWorkspace(isSelected ? null : ws.id)}
+                onClick={() => { setSelectedWorkspace(isSelected ? null : ws.id); setSelectedHistoryId(null); setHistoryMessages([]); }}
               >
                 <div className="flex items-center justify-between">
                   <span className="text-sm font-medium text-gray-900">{ws.branch}</span>
@@ -540,18 +503,78 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange }: W
 
                 {isSelected && (
                   <div className="space-y-2 pt-2 border-t border-gray-200" onClick={(e) => e.stopPropagation()}>
-                    {/* TerminalView — shown whenever there's output (active or completed) */}
-                    {(activeSession || completedMessages.length > 0) && ws.workingDir && ws.status !== "closed" && (
-                      <TerminalView
-                        messages={activeSession ? messages : completedMessages}
-                        connectionState={activeSession ? wsState : "closed"}
-                        parseOutput={prefs.output_parser !== "false"}
-                        prompt={lastPrompt}
-                      />
+                    {/* Session selector — shown when there are completed sessions and workspace is idle */}
+                    {completedSessions.length > 0 && !isRunning && ws.workingDir && ws.status !== "closed" && (
+                      <div className="space-y-0.5">
+                        {/* Latest tab */}
+                        <button
+                          onClick={() => { setSelectedHistoryId(null); setHistoryMessages([]); }}
+                          className={`w-full flex items-center gap-2 py-1 px-2 rounded text-left text-xs ${
+                            selectedHistoryId === null
+                              ? "bg-blue-50 text-blue-700 font-medium"
+                              : "hover:bg-gray-50 text-gray-600"
+                          }`}
+                        >
+                          <span className={`w-1.5 h-1.5 rounded-full ${completedMessages.length > 0 ? "bg-green-500" : "bg-gray-300"}`} />
+                          <span>Latest</span>
+                          {completedMessages.length > 0 && (
+                            <span className="text-[10px] text-gray-400 ml-auto">just now</span>
+                          )}
+                        </button>
+                        {/* Past sessions */}
+                        {completedSessions.map((session) => {
+                          const sessionBadge = SESSION_STATUS_COLORS[session.status] ?? "bg-gray-100 text-gray-500";
+                          const isActive = selectedHistoryId === session.id;
+                          return (
+                            <button
+                              key={session.id}
+                              onClick={() => handleViewHistory(session.id)}
+                              className={`w-full flex items-center gap-2 py-1 px-2 rounded text-left text-xs ${
+                                isActive
+                                  ? "bg-blue-50 text-blue-700 font-medium"
+                                  : "hover:bg-gray-50 text-gray-600"
+                              }`}
+                            >
+                              <span className={`w-1.5 h-1.5 rounded-full ${session.status === "completed" ? "bg-green-500" : session.status === "stopped" ? "bg-yellow-500" : "bg-gray-300"}`} />
+                              <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${sessionBadge}`}>
+                                {session.status}
+                              </span>
+                              <span className="text-xs text-gray-600">
+                                {formatRelativeTime(session.startedAt)}
+                              </span>
+                              <span className="text-[10px] text-gray-400 ml-auto">
+                                ({formatDuration(session.startedAt, session.endedAt)})
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
                     )}
 
-                    {/* Chat input — always visible for active workspaces */}
+                    {/* TerminalView — show history output or live/completed output */}
                     {ws.workingDir && ws.status !== "closed" && (
+                      (selectedHistoryId ? historyMessages : (activeSession || completedMessages.length > 0)) ? (
+                        <TerminalView
+                          messages={selectedHistoryId ? historyMessages : (activeSession ? messages : completedMessages)}
+                          connectionState={selectedHistoryId ? "closed" : (activeSession ? wsState : "closed")}
+                          parseOutput={prefs.output_parser !== "false"}
+                          prompt={selectedHistoryId ? undefined : lastPrompt}
+                        />
+                      ) : null
+                    )}
+
+                    {/* "Back to latest" link when viewing history */}
+                    {selectedHistoryId && ws.workingDir && ws.status !== "closed" && (
+                      <button
+                        onClick={() => { setSelectedHistoryId(null); setHistoryMessages([]); }}
+                        className="text-xs text-blue-600 hover:text-blue-700"
+                      >
+                        &larr; Back to latest session
+                      </button>
+                    )}
+
+                    {/* Chat input — visible when not viewing history */}
+                    {!selectedHistoryId && ws.workingDir && ws.status !== "closed" && (
                       <div className="flex gap-2">
                         <textarea
                           ref={textareaRef}
@@ -593,8 +616,8 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange }: W
                       </div>
                     )}
 
-                    {/* Action buttons — only when idle */}
-                    {ws.workingDir && ws.status !== "closed" && !isRunning && (
+                    {/* Action buttons — only when idle and not viewing history */}
+                    {!selectedHistoryId && ws.workingDir && ws.status !== "closed" && !isRunning && (
                       <div className="flex gap-2">
                         <button
                           onClick={() => handleViewDiff(ws.id)}
@@ -610,42 +633,6 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange }: W
                         >
                           Merge
                         </button>
-                      </div>
-                    )}
-
-                    {/* Past Sessions — only when idle */}
-                    {completedSessions.length > 0 && !isRunning && (
-                      <div className="space-y-1 pt-2 border-t border-gray-200">
-                        <h4 className="text-xs font-medium text-gray-500 uppercase tracking-wide">
-                          Past Sessions ({completedSessions.length})
-                        </h4>
-                        {completedSessions.map((session) => {
-                          const sessionBadge = SESSION_STATUS_COLORS[session.status] ?? "bg-gray-100 text-gray-500";
-                          return (
-                            <div
-                              key={session.id}
-                              className="flex items-center justify-between py-1 px-2 rounded hover:bg-gray-50"
-                            >
-                              <div className="flex items-center gap-2">
-                                <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${sessionBadge}`}>
-                                  {session.status}
-                                </span>
-                                <span className="text-xs text-gray-600">
-                                  {formatRelativeTime(session.startedAt)}
-                                </span>
-                                <span className="text-[10px] text-gray-400">
-                                  ({formatDuration(session.startedAt, session.endedAt)})
-                                </span>
-                              </div>
-                              <button
-                                onClick={() => handleViewHistory(session.id)}
-                                className="text-xs text-blue-600 hover:text-blue-700"
-                              >
-                                View Output
-                              </button>
-                            </div>
-                          );
-                        })}
                       </div>
                     )}
                   </div>
