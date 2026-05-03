@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 This project is **Stage 11 complete** (Stages 0-11 done). Tech stack: TypeScript monorepo — Hono + Drizzle + React + MCP SDK. Progress tracked in `docs/state.md`.
 
 All documented features have been visually verified (2026-05-03):
-- Board renders 5 columns (Todo, In Progress, In Review, Done, Cancelled) with empty states
+- Board renders 3 active columns (Todo, In Progress, In Review) with collapsible "Completed" group for Done/Cancelled
 - Create issue: inline form with title, description, priority, Add/Cancel
 - Issue detail panel: slide-in with view/edit/delete, status dropdown, description placeholder, priority badge, status, workspaces, tags, timestamps, issue number
 - Edit issue: title/description/priority editable, Save/Cancel; all sections visible in edit mode; unsaved changes warning
@@ -72,6 +72,7 @@ Cleanroom reimplementation of [vibe-kanban](https://github.com/BloopAI/vibe-kanb
 - **Search result highlighting**: Pass `searchQuery` through `BoardColumn` → `IssueCard` props. The `HighlightedText` component splits text at the first match index and wraps the match in a `<mark>` element. Only highlights the first occurrence to avoid complex multi-match rendering.
 - **Slide-in animations**: Defined in `app.css` as `@keyframes slide-in-right` with `transform: translateX(100%) → 0`. Applied via `animate-slide-in-right` class on panel containers. 0.2s ease-out duration feels snappy without being jarring.
 - **Migration test list**: The `MIGRATION_FILES` array in `packages/server/src/__tests__/api.test.ts` must include every migration SQL file. Forgetting to add new migrations here causes test failures (missing columns).
+- **Collapsible column groups**: The board splits columns into "active" (Todo, In Progress, In Review) and "archive" (Done, Cancelled) groups based on `ARCHIVE_STATUS_NAMES` set (name-based, not ID-based — no schema changes needed). Archive group renders as a collapsed bar with per-column counts; click to expand inline. Layout is `flex-col` vertical stacking with each group having its own `flex gap-4 overflow-x-auto` row. The `ColumnGroup` component accepts the same `BoardColumn` props plus `collapsed`/`onToggle`. E2E tests must scope "Cancel" locators carefully — the collapsed bar text "Cancelled" matches `button:has-text("Cancel")`, causing strict mode violations. Use `form.locator(...)` scoping or regex `/^Cancel$/` exact match.
 
 ## Visual Verification
 Every feature that has a UI component must be visually verified using the `playwright-cli` skill (user-scoped). After implementing or modifying a feature:
