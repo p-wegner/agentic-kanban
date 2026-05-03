@@ -3,7 +3,9 @@
   "private": true,
   "packageManager": "pnpm@10.12.1",
   "pnpm": {
-    "onlyBuiltDependencies": ["esbuild"]
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
   },
   "scripts": {
     "dev": "concurrently \"pnpm --filter server dev\" \"pnpm --filter client dev\"",
@@ -17,7 +19,7 @@
     "db:migrate": "pnpm --filter server db:migrate",
     "db:seed": "pnpm --filter server db:seed",
     "db:reset": "pnpm --filter server db:reset",
-"setup": "bash scripts/setup"
+    "db:setup": "pnpm db:migrate && pnpm db:seed && pnpm cli -- register ."
   },
   "devDependencies": {
     "concurrently": "^9.1.2",
