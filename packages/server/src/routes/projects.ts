@@ -4,6 +4,7 @@ import { projects, projectStatuses, issues, workspaces } from "@agentic-kanban/s
 import { eq, inArray, sql } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { detectRepoInfo } from "../services/git-info.service.js";
+import { listBranches } from "../services/git.service.js";
 import type { Database } from "../db/index.js";
 
 export function createProjectsRoute(database: Database = db) {
@@ -80,6 +81,27 @@ export function createProjectsRoute(database: Database = db) {
     });
 
     return c.json({ id, projectId, name: body.name }, 201);
+  });
+
+  // GET /api/projects/:id/branches
+  router.get("/:id/branches", async (c) => {
+    const projectId = c.req.param("id");
+    const projectRows = await database
+      .select({ id: projects.id, repoPath: projects.repoPath })
+      .from(projects)
+      .where(eq(projects.id, projectId));
+    if (projectRows.length === 0) {
+      return c.json({ error: "Project not found" }, 404);
+    }
+    try {
+      const branches = await listBranches(projectRows[0].repoPath);
+      return c.json(branches);
+    } catch (err) {
+      return c.json(
+        { error: `Failed to list branches: ${err instanceof Error ? err.message : String(err)}` },
+        500,
+      );
+    }
   });
 
   // GET /api/projects/:id/board

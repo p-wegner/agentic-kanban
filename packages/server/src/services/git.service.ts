@@ -104,6 +104,31 @@ export async function getDiff(
   return execGit(["diff", baseBranch], worktreePath);
 }
 
+/** List all local and remote branches, sorted by most recent committer date. */
+export async function listBranches(
+  repoPath: string,
+): Promise<{ local: string[]; remote: string[] }> {
+  const output = await execGit(["branch", "--all", "--sort=-committerdate"], repoPath);
+  const local: string[] = [];
+  const remote: string[] = [];
+
+  for (const raw of output.split("\n")) {
+    const line = raw.trim().replace(/^\* /, "");
+    if (!line) continue;
+
+    if (line.startsWith("remotes/origin/")) {
+      const name = line.slice("remotes/origin/".length).replace(/\r$/, "");
+      if (name !== "HEAD") {
+        remote.push(name);
+      }
+    } else {
+      local.push(line.replace(/\r$/, ""));
+    }
+  }
+
+  return { local, remote };
+}
+
 /** Merge a branch into the current HEAD of the repo. */
 export async function mergeBranch(
   repoPath: string,

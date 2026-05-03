@@ -72,6 +72,29 @@ function formatDuration(start: string, end: string | null): string {
   return `${min}m ${remSec}s`;
 }
 
+function sanitizeBranchName(input: string): string {
+  return input
+    .toLowerCase()
+    .replace(/[^a-z0-9/_-]/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/\/+/g, "/")
+    .replace(/^-+/, "")
+    .replace(/-+$/, "")
+    .slice(0, 80);
+}
+
+function suggestBranchName(issue: { issueNumber?: number; title: string }): string {
+  const prefix = "feature";
+  const num = issue.issueNumber ? `${issue.issueNumber}-` : "";
+  const slug = issue.title
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 40);
+  return `${prefix}/${num}${slug}`;
+}
+
 export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange }: WorkspacePanelProps) {
   const [workspaces, setWorkspaces] = useState<WorkspaceResponse[]>([]);
   const [loading, setLoading] = useState(true);
@@ -99,6 +122,8 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange }: W
   const [baseBranch, setBaseBranch] = useState("");
   const [prompt, setPrompt] = useState("");
   const [prefs, setPrefs] = useState<Record<string, string>>({});
+  const [branches, setBranches] = useState<{ local: string[]; remote: string[] } | null>(null);
+  const suggestion = suggestBranchName(issue);
 
   const { state: wsState, messages, disconnect } = useWebSocket(activeSession);
 
@@ -175,6 +200,15 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange }: W
       .then((s) => setPrefs(s))
       .catch(() => {});
   }, [issue.id]);
+
+  // Fetch branches & pre-fill branch name when create form opens
+  useEffect(() => {
+    if (!showCreate || !project) return;
+    setBranchName(suggestion);
+    apiFetch<{ local: string[]; remote: string[] }>(`/api/projects/${project.id}/branches`)
+      .then((data) => setBranches(data))
+      .catch(() => setBranches(null));
+  }, [showCreate]);
 
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
@@ -427,23 +461,40 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange }: W
               <input
                 type="text"
                 value={branchName}
-                onChange={(e) => setBranchName(e.target.value)}
-                placeholder="e.g. feature/new-thing"
+                onChange={(e) => setBranchName(sanitizeBranchName(e.target.value))}
+                placeholder={suggestion}
                 className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
               />
               <label className="text-xs font-medium text-gray-600 block mt-2">
                 Base Branch
               </label>
-              <input
-                type="text"
-                value={baseBranch}
-                onChange={(e) => setBaseBranch(e.target.value)}
-                placeholder={project?.defaultBranch || "main"}
-                className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
-              />
-              <p className="text-[10px] text-gray-400">
-                Defaults to {project?.defaultBranch || "main"}
-              </p>
+              {branches ? (
+                <select
+                  value={baseBranch}
+                  onChange={(e) => setBaseBranch(e.target.value)}
+                  className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                >
+                  <option value="">Default ({project?.defaultBranch || "main"})</option>
+                  {branches.local.map((b) => (
+                    <option key={b} value={b}>{b}</option>
+                  ))}
+                  {branches.remote.length > 0 && (
+                    <optgroup label="Remote">
+                      {branches.remote.map((b) => (
+                        <option key={`r/${b}`} value={b}>{b}</option>
+                      ))}
+                    </optgroup>
+                  )}
+                </select>
+              ) : (
+                <input
+                  type="text"
+                  value={baseBranch}
+                  onChange={(e) => setBaseBranch(e.target.value)}
+                  placeholder={project?.defaultBranch || "main"}
+                  className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                />
+              )}
               <div className="flex gap-2">
                 <button
                   onClick={handleCreateWorkspace}
@@ -453,7 +504,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange }: W
                   {actionLoading ? "Creating..." : "Create & Launch"}
                 </button>
                 <button
-                  onClick={() => { setShowCreate(false); setBaseBranch(""); }}
+                  onClick={() => { setShowCreate(false); setBaseBranch(""); setBranchName(""); }}
                   className="text-sm text-gray-500 px-3 py-1.5 hover:text-gray-700"
                 >
                   Cancel

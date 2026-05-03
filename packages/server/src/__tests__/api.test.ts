@@ -97,6 +97,18 @@ describe("Projects API", () => {
     expect(body[0].name).toBeDefined();
     expect(body[0].repoPath).toBeDefined();
   });
+
+  it("GET /api/projects/:id/branches returns error for non-git path", async () => {
+    const res = await app.request(`/api/projects/${projectId}/branches`);
+    expect(res.status).toBe(500);
+    const body = await res.json();
+    expect(body.error).toContain("Failed to list branches");
+  });
+
+  it("GET /api/projects/:id/branches returns 404 for missing project", async () => {
+    const res = await app.request(`/api/projects/${randomUUID()}/branches`);
+    expect(res.status).toBe(404);
+  });
 });
 
 describe("Issues API", () => {
