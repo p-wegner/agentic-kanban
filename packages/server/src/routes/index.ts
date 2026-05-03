@@ -19,7 +19,7 @@ export function createRoutes(database: Database, getSessionManager: () => Sessio
   routes.route("/issues", createIssuesRoute(database, options));
   routes.route("/workspaces", createWorkspacesRoute(database, getSessionManager, options));
   routes.route("/workspaces", createWorkspaceActionsRoute(getSessionManager, database, options));
-  routes.route("/tags", createTagsRoute());
+  routes.route("/tags", createTagsRoute(database));
   routes.route("/preferences", createPreferencesRoute(database));
 
   // Internal endpoint for MCP/CLI tools to trigger immediate board refresh

@@ -1,15 +1,16 @@
 import { Hono } from "hono";
 import { db } from "../db/index.js";
+import type { Database } from "../db/index.js";
 import { tags, issueTags } from "@agentic-kanban/shared/schema";
 import { eq } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 
-export function createTagsRoute() {
+export function createTagsRoute(database: Database = db) {
   const router = new Hono();
 
   // GET /api/tags
   router.get("/", async (c) => {
-    const result = await db.select().from(tags);
+    const result = await database.select().from(tags);
     return c.json(result);
   });
 
@@ -21,7 +22,7 @@ export function createTagsRoute() {
     }
 
     const id = randomUUID();
-    await db.insert(tags).values({
+    await database.insert(tags).values({
       id,
       name: body.name,
       color: body.color ?? null,
@@ -44,7 +45,7 @@ export function createTagsRoute() {
       return c.json({ error: "No fields to update" }, 400);
     }
 
-    await db.update(tags).set(updates).where(eq(tags.id, id));
+    await database.update(tags).set(updates).where(eq(tags.id, id));
     return c.json({ id });
   });
 
@@ -52,8 +53,8 @@ export function createTagsRoute() {
   router.delete("/:id", async (c) => {
     const id = c.req.param("id");
     // Remove all issue associations first
-    await db.delete(issueTags).where(eq(issueTags.tagId, id));
-    await db.delete(tags).where(eq(tags.id, id));
+    await database.delete(issueTags).where(eq(issueTags.tagId, id));
+    await database.delete(tags).where(eq(tags.id, id));
     return c.json({ success: true });
   });
 
