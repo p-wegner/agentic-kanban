@@ -72,8 +72,8 @@ test.describe("Keyboard Shortcuts UI", () => {
       page.locator("h3", { hasText: "Keyboard Shortcuts" }),
     ).toBeVisible({ timeout: 5000 });
 
-    // Click the backdrop (the semi-transparent overlay)
-    await page.locator(".fixed.inset-0.bg-black\\/30").click();
+    // Click the backdrop (top-left corner, outside the centered dialog)
+    await page.mouse.click(10, 10);
 
     // Overlay should be gone
     await expect(
