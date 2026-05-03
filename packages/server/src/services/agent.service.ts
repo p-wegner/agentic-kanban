@@ -43,7 +43,7 @@ export function launch(
     if (claudeSessionId) {
       args.push("--resume", claudeSessionId);
     }
-    args.push("-p", prompt);
+    args.push("-p");
   }
 
   // On Windows, only use shell:true for custom commands (which may be one-liners).
@@ -54,8 +54,14 @@ export function launch(
     cwd: worktreePath,
     shell: useShell,
     env: { ...process.env, FORCE_COLOR: "0", NO_COLOR: "1" },
-    stdio: ["ignore", "pipe", "pipe"] as const,
+    stdio: ["pipe", "pipe", "pipe"] as const,
   });
+
+  // Send prompt via stdin so --resume + -p (--print) mode works correctly
+  if (!isCustomCommand) {
+    proc.stdin?.write(prompt);
+    proc.stdin?.end();
+  }
 
   activeProcesses.set(sessionId, proc);
 
