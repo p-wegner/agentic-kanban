@@ -24,6 +24,13 @@
 - [x] Migration 0004: added claudeSessionId + resumeFromId columns to sessions table
 - [x] 28 unit tests + 60 E2E tests passing
 
+### Test Coverage Expansion
+- [x] API E2E tests: health (1), preferences active-project (3), projects CRUD/statuses/branches (7), tags CRUD + issue-tag associations (12)
+- [x] UI E2E tests: search/filtering + highlighting (6), archive column collapse/expand (4), keyboard shortcut help overlay (5), workspace diff/merge (2)
+- [x] Unit tests: tags CRUD + cascade delete (13), preferences whitelist + active-project (10), issue number auto-increment per-project (11)
+- [x] Refactored createTagsRoute to accept database param for testability
+- [x] 66 unit tests + 99 E2E tests passing
+
 ### Stage 11 Checklist — Search & Navigation Enhancements
 - [x] Search result highlighting (yellow mark on matching text in cards)
 - [x] Keyboard shortcut help overlay (? key, ShortcutHelp component)
@@ -182,7 +189,7 @@ packages/
   server/     - Hono API + @libsql/client + SQLite (port 3001) + CLI (commander)
   client/     - React + Vite + Tailwind v4 (port 5173)
   mcp-server/ - MCP stdio server (8 tools: get_context, list/get/create/update_issue, list/start_workspace, get_workspace_diff)
-  e2e/        - Playwright tests (60 tests: API + UI, global setup creates project, 2 known flaky session-history tests)
+  e2e/        - Playwright tests (99 tests: API + UI, global setup creates project)
 ```
 
 ## API Routes
@@ -256,3 +263,4 @@ packages/
 | 2026-05-03 | One-step workspace | Streamlined workspace creation into a single POST /api/workspaces call that creates DB record + git worktree (with optional baseBranch) + auto-launches agent with issue title/description as prompt. Response includes sessionId for immediate terminal output display. Setup route became legacy no-op. Added baseBranch column tracking for correct diff/merge base. Updated CLAUDE.md and state.md. |
 | 2026-05-03 | Stages 9-11 | UX audit: 3 parallel agents explored the live app, identified 5 bugs, 10 UX friction items, 10 missing features. Implemented fixes in 3 stages. Stage 9: fixed "/" search leak, debounced board refresh during create form, toast for tag errors, deduplicated shortcut labels, column count badges, favicon, workspace tooltips. Stage 10: status dropdown in detail panel, keep panel open after save, all sections visible in edit mode, description placeholder, relative timestamps, auto-incrementing issue numbers (migration 0006), unsaved changes warning, stale panel data sync. Stage 11: search result highlighting, keyboard shortcut help overlay (?), slide-in panel animations, context-aware workspace button labels. 28 unit tests + 60 E2E tests passing. |
 | 2026-05-03 | Session output navigation | Replaced full-panel session history overlay with inline session switching inside the expanded workspace. Session selector shows "Latest" tab + clickable past session rows (status badge, relative time, duration). Clicking a past session loads its output into the same TerminalView area without leaving the workspace context. Chat input and action buttons hide during history viewing. Escape dismisses history selection before closing panel. 28 unit tests passing. |
+| 2026-05-04 | Test coverage expansion | Added 38 unit tests (tags 13, preferences 10, issue-number 11) and 39 E2E tests (health 1, preferences 3, projects 7, tags 12, search 6, archive-columns 4, shortcuts 5, diff/merge 2). Refactored createTagsRoute to accept database parameter for testability. Fixed session history E2E tests for inline session selector UI. 66 unit tests + 99 E2E tests passing. |
