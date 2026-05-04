@@ -361,6 +361,160 @@ describe("Workspaces API", () => {
   });
 });
 
+describe("Diff Comments API", () => {
+  const { app, db: database } = createTestApp();
+  let workspaceId: string;
+
+  beforeAll(async () => {
+    const projectId = await createProjectDirectly(database, { name: "Comments Test Project" });
+    const statusId = await createStatusDirectly(database, projectId, "Todo", 0);
+
+    const issueRes = await app.request("/api/issues", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "Comment test issue", statusId, projectId }),
+    });
+    const issueId = (await issueRes.json()).id;
+
+    const wsRes = await app.request("/api/workspaces", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ issueId, branch: "feature/comments" }),
+    });
+    workspaceId = (await wsRes.json()).id;
+  });
+
+  it("POST creates a comment", async () => {
+    const res = await app.request(`/api/workspaces/${workspaceId}/comments`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        filePath: "src/index.ts",
+        lineNumNew: 10,
+        side: "new",
+        body: "Looks good",
+      }),
+    });
+    expect(res.status).toBe(201);
+    const body = await res.json();
+    expect(body.filePath).toBe("src/index.ts");
+    expect(body.body).toBe("Looks good");
+    expect(body.workspaceId).toBe(workspaceId);
+    expect(body.id).toBeDefined();
+  });
+
+  it("POST requires filePath and body", async () => {
+    const res = await app.request(`/api/workspaces/${workspaceId}/comments`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ lineNumNew: 5 }),
+    });
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toContain("filePath and body are required");
+  });
+
+  it("POST returns 404 for missing workspace", async () => {
+    const res = await app.request(`/api/workspaces/${randomUUID()}/comments`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ filePath: "a.ts", body: "test" }),
+    });
+    expect(res.status).toBe(404);
+  });
+
+  it("GET lists comments for workspace", async () => {
+    const res = await app.request(`/api/workspaces/${workspaceId}/comments`);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.length).toBeGreaterThanOrEqual(1);
+    expect(body[0].filePath).toBeDefined();
+  });
+
+  it("GET filters by filePath", async () => {
+    // Create another comment on a different file
+    await app.request(`/api/workspaces/${workspaceId}/comments`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ filePath: "src/other.ts", body: "Another comment" }),
+    });
+
+    const res = await app.request(`/api/workspaces/${workspaceId}/comments?filePath=src/index.ts`);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.every((c: { filePath: string }) => c.filePath === "src/index.ts")).toBe(true);
+  });
+
+  it("PATCH updates a comment", async () => {
+    // Create a comment
+    const createRes = await app.request(`/api/workspaces/${workspaceId}/comments`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ filePath: "a.ts", body: "Original" }),
+    });
+    const { id } = await createRes.json();
+
+    const res = await app.request(`/api/workspaces/${workspaceId}/comments/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ body: "Updated" }),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.id).toBe(id);
+
+    // Verify update
+    const comments = await (await app.request(`/api/workspaces/${workspaceId}/comments`)).json();
+    const updated = comments.find((c: { id: string }) => c.id === id);
+    expect(updated.body).toBe("Updated");
+  });
+
+  it("PATCH requires body", async () => {
+    const res = await app.request(`/api/workspaces/${workspaceId}/comments/${randomUUID()}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("PATCH returns 404 for missing comment", async () => {
+    const res = await app.request(`/api/workspaces/${workspaceId}/comments/${randomUUID()}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ body: "nope" }),
+    });
+    expect(res.status).toBe(404);
+  });
+
+  it("DELETE removes a comment", async () => {
+    const createRes = await app.request(`/api/workspaces/${workspaceId}/comments`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ filePath: "b.ts", body: "To delete" }),
+    });
+    const { id } = await createRes.json();
+
+    const res = await app.request(`/api/workspaces/${workspaceId}/comments/${id}`, {
+      method: "DELETE",
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.success).toBe(true);
+
+    // Verify gone
+    const comments = await (await app.request(`/api/workspaces/${workspaceId}/comments`)).json();
+    expect(comments.find((c: { id: string }) => c.id === id)).toBeUndefined();
+  });
+
+  it("DELETE returns 404 for missing comment", async () => {
+    const res = await app.request(`/api/workspaces/${workspaceId}/comments/${randomUUID()}`, {
+      method: "DELETE",
+    });
+    expect(res.status).toBe(404);
+  });
+});
+
 describe("Preferences API", () => {
   const { app } = createTestApp();
 
