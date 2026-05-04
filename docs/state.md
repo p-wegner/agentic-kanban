@@ -1,8 +1,24 @@
 # Project State
 
-## Current Stage: Stage 11 — UX Audit Complete (DONE)
+## Current Stage: Stage 12 — Inline Diff Comments (DONE)
 
-### Stage 8 Checklist
+### Stage 12 Checklist — Inline Diff Comments
+- [x] Migration 0007: diff_comments table (id, workspaceId, filePath, lineNumOld, lineNumNew, side, body, timestamps)
+- [x] Drizzle schema: diff-comments.ts with relations, exported from schema index
+- [x] Workspaces relations updated with diffComments: many(diffComments)
+- [x] Shared types: DiffComment, CreateDiffCommentRequest, updated DiffResponse with comments field
+- [x] API: GET/POST/PATCH/DELETE /api/workspaces/:id/comments (CRUD, optional filePath filter on GET)
+- [x] API: GET /api/workspaces/:id/diff returns comments alongside diff and stats
+- [x] Workspace DELETE cascade: deletes diff_comments before sessions
+- [x] DiffViewer: restructured parser to return DiffFile[] with filePath per file
+- [x] DiffViewer: comment rendering with CommentBlock (view/edit/delete) and CommentInput (inline textarea)
+- [x] DiffViewer: unified view — click line to add comment, yellow comment blocks below, hover "+" indicator
+- [x] DiffViewer: split view — same comment features in side-by-side layout (full-width comment rows)
+- [x] DiffViewer: comment count badge in header, Ctrl+Enter to submit, Escape to cancel
+- [x] WorkspacePanel: diffComments state, CRUD handlers (create/edit/delete), wired to DiffViewer
+- [x] 66 unit tests + 99 E2E tests passing
+
+### Stage 11 Checklist — Search & Navigation Enhancements
 - [x] Session messages DB table (session_messages: id, sessionId, type, data, exitCode, createdAt)
 - [x] Migration: 0003_tough_lightspeed.sql (session_messages table)
 - [x] Messages persisted to DB in session.manager broadcast (fire-and-forget insert)
@@ -181,11 +197,12 @@ Claude Code with `--output-format stream-json --verbose -p <prompt>` emits NDJSO
 | 9 | Bug Fixes + Polish | DONE |
 | 10 | Detail Panel Improvements | DONE |
 | 11 | Search & Navigation Enhancements | DONE |
+| 12 | Inline Diff Comments | DONE |
 
 ## Monorepo Structure
 ```
 packages/
-  shared/     - Drizzle schema (10 tables, 7 migrations) + TypeScript types
+  shared/     - Drizzle schema (11 tables, 8 migrations) + TypeScript types
   server/     - Hono API + @libsql/client + SQLite (port 3001) + CLI (commander)
   client/     - React + Vite + Tailwind v4 (port 5173)
   mcp-server/ - MCP stdio server (8 tools: get_context, list/get/create/update_issue, list/start_workspace, get_workspace_diff)
@@ -216,6 +233,10 @@ packages/
 | GET | /api/workspaces/:id/diff | Get git diff for workspace |
 | POST | /api/workspaces/:id/merge | Merge branch and close workspace |
 | GET | /api/workspaces/:id/sessions | List sessions for workspace |
+| GET | /api/workspaces/:id/comments | List diff comments (optional ?filePath= filter) |
+| POST | /api/workspaces/:id/comments | Create diff comment |
+| PATCH | /api/workspaces/:id/comments/:commentId | Update diff comment |
+| DELETE | /api/workspaces/:id/comments/:commentId | Delete diff comment |
 | GET | /ws/sessions/:sessionId | WebSocket: stream agent output |
 | GET | /ws/board/:projectId | WebSocket: real-time board change events |
 | GET | /api/sessions/:sessionId/output | Get persisted session output messages |
@@ -264,3 +285,4 @@ packages/
 | 2026-05-03 | Stages 9-11 | UX audit: 3 parallel agents explored the live app, identified 5 bugs, 10 UX friction items, 10 missing features. Implemented fixes in 3 stages. Stage 9: fixed "/" search leak, debounced board refresh during create form, toast for tag errors, deduplicated shortcut labels, column count badges, favicon, workspace tooltips. Stage 10: status dropdown in detail panel, keep panel open after save, all sections visible in edit mode, description placeholder, relative timestamps, auto-incrementing issue numbers (migration 0006), unsaved changes warning, stale panel data sync. Stage 11: search result highlighting, keyboard shortcut help overlay (?), slide-in panel animations, context-aware workspace button labels. 28 unit tests + 60 E2E tests passing. |
 | 2026-05-03 | Session output navigation | Replaced full-panel session history overlay with inline session switching inside the expanded workspace. Session selector shows "Latest" tab + clickable past session rows (status badge, relative time, duration). Clicking a past session loads its output into the same TerminalView area without leaving the workspace context. Chat input and action buttons hide during history viewing. Escape dismisses history selection before closing panel. 28 unit tests passing. |
 | 2026-05-04 | Test coverage expansion | Added 38 unit tests (tags 13, preferences 10, issue-number 11) and 39 E2E tests (health 1, preferences 3, projects 7, tags 12, search 6, archive-columns 4, shortcuts 5, diff/merge 2). Refactored createTagsRoute to accept database parameter for testability. Fixed session history E2E tests for inline session selector UI. 66 unit tests + 99 E2E tests passing. |
+| 2026-05-04 | Stage 12 | Inline diff comments: new diff_comments table (migration 0007), CRUD API for workspace-scoped comments, DiffViewer restructured to parse per-file with filePath tracking, inline comment blocks with create/edit/delete in both unified and split views, comment count badge in header. Last "keep" feature from PRD now implemented. 66 unit tests + 99 E2E tests passing. |

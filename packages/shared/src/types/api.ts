@@ -133,6 +133,27 @@ export interface DiffResponse {
     insertions: number;
     deletions: number;
   };
+  comments: DiffComment[];
+}
+
+export interface DiffComment {
+  id: string;
+  workspaceId: string;
+  filePath: string;
+  lineNumOld: number | null;
+  lineNumNew: number | null;
+  side: "old" | "new";
+  body: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateDiffCommentRequest {
+  filePath: string;
+  lineNumOld?: number | null;
+  lineNumNew?: number | null;
+  side: "old" | "new";
+  body: string;
 }
 
 export interface AgentOutputMessage {
