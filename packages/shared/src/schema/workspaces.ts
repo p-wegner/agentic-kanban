@@ -19,6 +19,8 @@ export const workspacesRelations = relations(workspaces, ({ one, many }) => ({
     references: [issues.id],
   }),
   sessions: many(sessions),
+  diffComments: many(diffComments),
 }));
 
 import { sessions } from "./sessions.js";
+import { diffComments } from "./diff-comments.js";

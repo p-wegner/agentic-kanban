@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { db } from "../db/index.js";
-import { workspaces, issues, projects, preferences, sessions, sessionMessages } from "@agentic-kanban/shared/schema";
+import { workspaces, issues, projects, preferences, sessions, sessionMessages, diffComments } from "@agentic-kanban/shared/schema";
 import { eq, inArray } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import * as gitService from "../services/git.service.js";
@@ -219,6 +219,8 @@ export function createWorkspacesRoute(
       .select({ id: sessions.id })
       .from(sessions)
       .where(eq(sessions.workspaceId, id));
+    // Delete diff comments, session messages, then sessions, then workspace
+    await database.delete(diffComments).where(eq(diffComments.workspaceId, id));
     // Delete session messages, then sessions, then workspace
     if (wsSessions.length > 0) {
       const sessionIds = wsSessions.map(s => s.id);

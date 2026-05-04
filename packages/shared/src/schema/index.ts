@@ -7,3 +7,4 @@ export { sessions, sessionsRelations } from "./sessions.js";
 export { sessionMessages, sessionMessagesRelations } from "./session-messages.js";
 export { repos } from "./repos.js";
 export { preferences } from "./preferences.js";
+export { diffComments, diffCommentsRelations } from "./diff-comments.js";
