@@ -254,12 +254,12 @@ function UnifiedView({
                 {line.type === "add" ? "+" : line.type === "delete" ? "-" : " "}
                 {line.type === "hunk" ? line.content : line.content || " "}
                 {isCommentable && onCreateComment && lineComments.length === 0 && !isInputOpen && (
-                  <span className="absolute right-2 top-0 opacity-0 group-hover/line:opacity-100 transition-opacity text-gray-400 hover:text-gray-600 cursor-pointer select-none">
+                  <span className="absolute right-1 top-1/2 -translate-y-1/2 opacity-0 group-hover/line:opacity-100 transition-opacity cursor-pointer select-none w-5 h-5 flex items-center justify-center rounded-full bg-gray-200 hover:bg-blue-200 text-gray-500 hover:text-blue-600 text-sm leading-none">
                     +
                   </span>
                 )}
                 {lineComments.length > 0 && (
-                  <span className="absolute right-2 top-0 text-yellow-500 select-none">
+                  <span className="absolute right-1 top-1/2 -translate-y-1/2 w-5 h-5 flex items-center justify-center rounded-full bg-yellow-200 text-yellow-700 text-xs font-medium select-none">
                     {lineComments.length}
                   </span>
                 )}
@@ -303,14 +303,13 @@ function SplitView({
   onEditComment?: (id: string, body: string) => void;
   onDeleteComment?: (id: string) => void;
 }) {
-  const [inputLineIdx, setinputLineIdx] = useState<string | null>(null);
+  const [inputLineIdx, setInputLineIdx] = useState<string | null>(null);
 
   return (
     <div className="overflow-auto max-h-96 bg-gray-50 font-mono text-xs">
       <table className="w-full border-collapse">
         <tbody>
           {files.map((file, fi) => {
-            // Pair up lines same as before
             const pairs: { left: DiffLine | null; right: DiffLine | null; lineIdx: number }[] = [];
             let i = 0;
             while (i < file.lines.length) {
@@ -346,18 +345,22 @@ function SplitView({
               }
 
               const isCommentable = pair.left?.type !== "hunk" && pair.left?.type !== "header";
-              // For split view, comments on delete (old) and add (new) are separate
-              const oldKey = isCommentable && pair.left?.type === "delete"
-                ? commentKey(file.filePath, pair.left.lineNumOld, null, "old")
-                : "";
-              const newKey = isCommentable && pair.right?.type === "add"
-                ? commentKey(file.filePath, null, pair.right.lineNumNew, "new")
-                : "";
-              const ctxKey = isCommentable && pair.left?.type === "context"
-                ? commentKey(file.filePath, pair.left.lineNumOld, pair.left.lineNumNew, "new")
-                : "";
-              const activeKey = oldKey || newKey || ctxKey;
-              const lineComments = activeKey ? (commentMap.get(activeKey) ?? []) : [];
+              // Collect comments from both old and new sides independently
+              const allComments: DiffComment[] = [];
+              if (isCommentable) {
+                if (pair.left?.type === "delete") {
+                  const oldK = commentKey(file.filePath, pair.left.lineNumOld, null, "old");
+                  allComments.push(...(commentMap.get(oldK) ?? []));
+                }
+                if (pair.right?.type === "add") {
+                  const newK = commentKey(file.filePath, null, pair.right.lineNumNew, "new");
+                  allComments.push(...(commentMap.get(newK) ?? []));
+                }
+                if (pair.left?.type === "context") {
+                  const ctxK = commentKey(file.filePath, pair.left.lineNumOld, pair.left.lineNumNew, "new");
+                  allComments.push(...(commentMap.get(ctxK) ?? []));
+                }
+              }
               const isInputOpen = inputLineIdx === key;
 
               return (
@@ -365,7 +368,7 @@ function SplitView({
                   <tr
                     className="group/line"
                     onClick={() => {
-                      if (isCommentable && onCreateComment) setinputLineIdx(key);
+                      if (isCommentable && onCreateComment) setInputLineIdx(key);
                     }}
                   >
                     <td className={`px-1 text-right text-gray-400 w-8 select-none ${pair.left?.type === "delete" ? "bg-red-50" : ""}`}>
@@ -381,7 +384,7 @@ function SplitView({
                       {pair.right ? (pair.right.type === "add" ? pair.right.content : pair.right.content) : ""}
                     </td>
                   </tr>
-                  {lineComments.map((c) => (
+                  {allComments.map((c) => (
                     <tr key={c.id}>
                       <td colSpan={4}>
                         <CommentBlock comment={c} onEdit={onEditComment} onDelete={onDeleteComment} />
@@ -401,9 +404,9 @@ function SplitView({
                               side,
                               body,
                             });
-                            setinputLineIdx(null);
+                            setInputLineIdx(null);
                           }}
-                          onCancel={() => setinputLineIdx(null)}
+                          onCancel={() => setInputLineIdx(null)}
                         />
                       </td>
                     </tr>
