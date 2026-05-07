@@ -1,8 +1,8 @@
 export function SkeletonBoard() {
   return (
-    <div className="flex gap-4 p-6 overflow-x-auto min-h-[calc(100vh-105px)]">
+    <div className="flex flex-col gap-4 p-4 sm:flex-row sm:p-6 sm:overflow-x-auto min-h-[calc(100vh-105px)]">
       {Array.from({ length: 5 }).map((_, colIdx) => (
-        <div key={colIdx} className="flex-shrink-0 w-72 bg-gray-100 rounded-lg p-3">
+        <div key={colIdx} className="w-full sm:flex-shrink-0 sm:w-72 bg-gray-100 rounded-lg p-3">
           <div className="flex items-center justify-between mb-3 px-1">
             <div className="h-4 w-24 bg-gray-200 rounded animate-pulse" />
           </div>

@@ -487,7 +487,7 @@ export function BoardPage() {
         </div>
       )}
       <div className="flex flex-col gap-3 p-4 min-h-[calc(100vh-57px)]">
-        <div className="flex gap-4 overflow-x-auto">
+        <div className="flex flex-col gap-4 sm:flex-row sm:overflow-x-auto">
           {activeColumns.map((col) => (
             <BoardColumn
               key={col.id}
