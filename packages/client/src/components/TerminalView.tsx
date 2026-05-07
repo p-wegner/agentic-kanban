@@ -154,6 +154,14 @@ function renderParsedEvent(event: DisplayEvent, key: number): React.ReactNode {
     );
   }
 
+  if (event.kind === "thinking") {
+    return (
+      <div key={key} className="mb-1 text-gray-500 italic text-[11px]">
+        Thinking: {event.text.length > 200 ? event.text.slice(0, 200) + "..." : event.text}
+      </div>
+    );
+  }
+
   if (event.kind === "tool_use") {
     return (
       <div key={key} className="mb-1 ml-2 pl-2 border-l-2 border-yellow-600">
@@ -166,9 +174,11 @@ function renderParsedEvent(event: DisplayEvent, key: number): React.ReactNode {
   }
 
   if (event.kind === "tool_result") {
+    const borderColor = event.isError ? "border-red-600" : "border-purple-600";
+    const textColor = event.isError ? "text-red-400" : "text-purple-400";
     return (
-      <div key={key} className="mb-1 ml-2 pl-2 border-l-2 border-purple-600">
-        <span className="text-purple-400">Result: {event.toolName}</span>
+      <div key={key} className={`mb-1 ml-2 pl-2 border-l-2 ${borderColor}`}>
+        <span className={textColor}>{event.isError ? "Error" : "Result"}: {event.toolName}</span>
         <pre className="text-gray-500 text-[10px] mt-0.5 max-h-20 overflow-hidden">{event.output}</pre>
       </div>
     );
