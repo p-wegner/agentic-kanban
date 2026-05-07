@@ -85,7 +85,7 @@ describe("Tags API - CRUD", () => {
   it("GET /api/tags returns empty list initially", async () => {
     const res = await app.request("/api/tags");
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = await res.json() as any;
     expect(body).toEqual([]);
   });
 
@@ -96,7 +96,7 @@ describe("Tags API - CRUD", () => {
       body: JSON.stringify({ name: "bug", color: "#ff0000" }),
     });
     expect(res.status).toBe(201);
-    const body = await res.json();
+    const body = await res.json() as any;
     expect(body.name).toBe("bug");
     expect(body.color).toBe("#ff0000");
     expect(body.id).toBeDefined();
@@ -109,7 +109,7 @@ describe("Tags API - CRUD", () => {
       body: JSON.stringify({ color: "#00ff00" }),
     });
     expect(res.status).toBe(400);
-    const body = await res.json();
+    const body = await res.json() as any;
     expect(body.error).toContain("name is required");
   });
 
@@ -120,7 +120,7 @@ describe("Tags API - CRUD", () => {
       body: JSON.stringify({ name: "feature" }),
     });
     expect(res.status).toBe(201);
-    const body = await res.json();
+    const body = await res.json() as any;
     expect(body.name).toBe("feature");
     expect(body.color).toBeNull();
   });
@@ -128,7 +128,7 @@ describe("Tags API - CRUD", () => {
   it("GET /api/tags returns all created tags", async () => {
     const res = await app.request("/api/tags");
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = await res.json() as any;
     expect(body.length).toBeGreaterThanOrEqual(2);
 
     const names = body.map((t: { name: string }) => t.name);
@@ -150,7 +150,7 @@ describe("Tags API - CRUD", () => {
       body: JSON.stringify({ name: "updated-name" }),
     });
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = await res.json() as any;
     expect(body.id).toBe(id);
 
     // Verify update
@@ -193,7 +193,7 @@ describe("Tags API - CRUD", () => {
       body: JSON.stringify({}),
     });
     expect(res.status).toBe(400);
-    const body = await res.json();
+    const body = await res.json() as any;
     expect(body.error).toContain("No fields to update");
   });
 
@@ -207,7 +207,7 @@ describe("Tags API - CRUD", () => {
 
     const res = await app.request(`/api/tags/${id}`, { method: "DELETE" });
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = await res.json() as any;
     expect(body.success).toBe(true);
 
     // Verify gone
@@ -336,7 +336,7 @@ describe("Tags API - Issue Associations", () => {
       body: JSON.stringify({}),
     });
     expect(res.status).toBe(400);
-    const body = await res.json();
+    const body = await res.json() as any;
     expect(body.error).toContain("tagId is required");
   });
 

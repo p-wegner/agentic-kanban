@@ -45,7 +45,7 @@ describe("Preferences API - active-project", () => {
   it("GET /api/preferences/active-project returns null initially", async () => {
     const res = await app.request("/api/preferences/active-project");
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = await res.json() as any;
     expect(body.projectId).toBeNull();
   });
 
@@ -57,7 +57,7 @@ describe("Preferences API - active-project", () => {
       body: JSON.stringify({ projectId: id }),
     });
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = await res.json() as any;
     expect(body.projectId).toBe(id);
   });
 
@@ -71,7 +71,7 @@ describe("Preferences API - active-project", () => {
 
     const res = await app.request("/api/preferences/active-project");
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = await res.json() as any;
     expect(body.projectId).toBe(id);
   });
 
@@ -92,7 +92,7 @@ describe("Preferences API - active-project", () => {
     });
 
     const res = await app.request("/api/preferences/active-project");
-    const body = await res.json();
+    const body = await res.json() as any;
     expect(body.projectId).toBe(id2);
   });
 
@@ -112,7 +112,7 @@ describe("Preferences API - active-project", () => {
       body: JSON.stringify({ projectId: null }),
     });
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = await res.json() as any;
     // The route stores body.projectId which is null, but returns it as-is
     expect(body.projectId).toBeNull();
   });
@@ -124,7 +124,7 @@ describe("Preferences API - settings", () => {
   it("GET /api/preferences/settings returns empty defaults initially", async () => {
     const res = await app.request("/api/preferences/settings");
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = await res.json() as any;
     // No settings have been set yet, so all are absent
     expect(body).toEqual({});
   });
@@ -141,7 +141,7 @@ describe("Preferences API - settings", () => {
       }),
     });
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = await res.json() as any;
     expect(body.ok).toBe(true);
   });
 
@@ -159,7 +159,7 @@ describe("Preferences API - settings", () => {
 
     const res = await freshApp.request("/api/preferences/settings");
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = await res.json() as any;
     expect(body.agent_command).toBe("my-agent");
     expect(body.mock_agent).toBe("1");
     // agent_args and output_parser were not set
@@ -180,7 +180,7 @@ describe("Preferences API - settings", () => {
     });
 
     const res = await freshApp.request("/api/preferences/settings");
-    const body = await res.json();
+    const body = await res.json() as any;
     expect(body.agent_command).toBe("test");
     // The malicious key should not have been persisted
     expect(body.malicious_key).toBeUndefined();
@@ -204,7 +204,7 @@ describe("Preferences API - settings", () => {
     });
 
     const res = await freshApp.request("/api/preferences/settings");
-    const body = await res.json();
+    const body = await res.json() as any;
     expect(body.agent_command).toBe("second");
   });
 
@@ -223,7 +223,7 @@ describe("Preferences API - settings", () => {
     });
 
     const res = await freshApp.request("/api/preferences/settings");
-    const body = await res.json();
+    const body = await res.json() as any;
     expect(body.agent_command).toBe("custom-agent");
     expect(body.agent_args).toBe("--flag value");
     expect(body.output_parser).toBe("custom");

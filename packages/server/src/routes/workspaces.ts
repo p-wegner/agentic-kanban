@@ -65,7 +65,7 @@ export function createWorkspacesRoute(
       baseBranch = body.baseBranch || project.defaultBranch;
 
       // Create git worktree
-      worktreePath = await gitService.createWorktree(project.repoPath, body.branch, baseBranch);
+      worktreePath = await gitService.createWorktree(project.repoPath, body.branch, baseBranch ?? undefined);
 
       // Build prompt from issue title + description
       let agentPrompt = issue.title;
