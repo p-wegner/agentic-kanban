@@ -58,7 +58,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
   return (
     <div className="fixed inset-0 z-50 flex justify-end">
       <div className="absolute inset-0 bg-black/20" onClick={onClose} />
-      <div className="relative w-96 bg-white shadow-xl flex flex-col animate-slide-in-right">
+      <div className="relative w-[min(384px,100vw)] bg-white shadow-xl flex flex-col animate-slide-in-right">
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200">
           <h2 className="text-lg font-semibold text-gray-900">Settings</h2>

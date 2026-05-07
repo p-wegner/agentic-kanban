@@ -1,0 +1,30 @@
+{
+  "version": "1.0.0",
+  "hooks": {
+    "PostToolUse": [],
+    "Stop": [
+      {
+        "name": "Vitest (server)",
+        "command": "pnpm --filter @agentic-kanban/server test",
+        "filePatterns": ["packages/server/**/*.ts"],
+        "enabled": true,
+        "blocking": true,
+        "timeout": 60
+      },
+      {
+        "name": "TypeScript build check",
+        "command": "pnpm build",
+        "enabled": true,
+        "blocking": true,
+        "timeout": 60
+      },
+      {
+        "name": "Remind Playwright",
+        "command": "node .claude/hooks/remind-playwright.js",
+        "enabled": true,
+        "blocking": true,
+        "timeout": 10
+      }
+    ]
+  }
+}

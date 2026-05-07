@@ -30,9 +30,9 @@ export function Layout({
 }: LayoutProps) {
   return (
     <div className="min-h-screen bg-gray-50">
-      <header className="bg-white border-b border-gray-200 px-6 py-3">
-        <div className="flex items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
+      <header className="bg-white border-b border-gray-200 px-4 py-3">
+        <div className="flex items-center justify-between gap-4 flex-wrap">
+          <div className="flex items-center gap-3 min-w-0">
             <h1 className="text-xl font-semibold text-gray-900 shrink-0">
               Agentic Kanban
             </h1>
@@ -71,7 +71,7 @@ export function Layout({
                 value={searchQuery}
                 onChange={(e) => onSearchChange?.(e.target.value)}
                 placeholder='Search issues... (press "/")'
-                className="pl-8 pr-3 py-1.5 text-sm border border-gray-300 rounded-md w-64 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                className="pl-8 pr-3 py-1.5 text-sm border border-gray-300 rounded-md w-48 sm:w-64 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
               />
               {searchQuery && (
                 <button

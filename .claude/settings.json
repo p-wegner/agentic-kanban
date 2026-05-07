@@ -7,13 +7,33 @@
     }
   },
   "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node .claude/hooks/pre_tool_use/require-code-review-for-pr.js"
+          }
+        ]
+      }
+    ],
     "PostToolUse": [
       {
         "matcher": "Write|Edit|MultiEdit",
         "hooks": [
           {
             "type": "command",
-            "command": "node .claude/hooks/post_tool_use/track-edits.js"
+            "command": "node .claude/hooks/smart-hooks-runner.js PostToolUse"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node .claude/hooks/post_tool_use/monitor-pr-pipeline.js"
           }
         ]
       }
@@ -23,7 +43,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node .claude/hooks/stop/remind-visual-verify.js"
+            "command": "node .claude/hooks/smart-hooks-runner.js Stop"
           }
         ]
       }

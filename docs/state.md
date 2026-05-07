@@ -1,6 +1,24 @@
 # Project State
 
-## Current Stage: Stage 12 — Inline Diff Comments (DONE)
+## Current Stage: Stage 13 — Output Parser V2 + Responsive Layout (DONE)
+
+### Stage 13 Checklist — Output Parser V2 + Responsive Layout
+- [x] Output parser: added ParsedThinkingEvent for Claude extended thinking blocks
+- [x] Output parser: parseLine returns event arrays (multi-block assistant messages handled correctly)
+- [x] Output parser: tool_result moved from top-level type to user message content blocks
+- [x] Output parser: isError field on tool results (distinguishes error vs success)
+- [x] Output parser: better model usage extraction via Object.entries
+- [x] TerminalView: thinking block rendering (gray italic, truncated at 200 chars)
+- [x] TerminalView: tool result errors shown with red border/text, success with purple
+- [x] Layout: responsive header with flex-wrap, min-w-0, responsive search (w-48 sm:w-64)
+- [x] BoardColumn: changed from fixed w-72 to min-w-[200px] flex-1 max-w-xs
+- [x] All panels: fixed widths replaced with w-[min(Xpx,100vw)] for mobile
+- [x] BoardPage: padding reduced p-6 → p-4
+- [x] Seed script for example session data (seed-example-session.ts)
+- [x] E2E test for output parser visual verification
+- [x] Smart hooks system (smart-hooks-runner.js, config, PR pipeline monitor)
+- [x] Removed old hooks (track-edits.js, remind-visual-verify.js)
+- [x] 76 unit tests + 100 E2E tests passing
 
 ### Stage 12 Checklist — Inline Diff Comments
 - [x] Migration 0007: diff_comments table (id, workspaceId, filePath, lineNumOld, lineNumNew, side, body, timestamps)
@@ -198,6 +216,7 @@ Claude Code with `--output-format stream-json --verbose -p <prompt>` emits NDJSO
 | 10 | Detail Panel Improvements | DONE |
 | 11 | Search & Navigation Enhancements | DONE |
 | 12 | Inline Diff Comments | DONE |
+| 13 | Output Parser V2 + Responsive Layout | DONE |
 
 ## Monorepo Structure
 ```
@@ -206,7 +225,7 @@ packages/
   server/     - Hono API + @libsql/client + SQLite (port 3001) + CLI (commander)
   client/     - React + Vite + Tailwind v4 (port 5173)
   mcp-server/ - MCP stdio server (8 tools: get_context, list/get/create/update_issue, list/start_workspace, get_workspace_diff)
-  e2e/        - Playwright tests (99 tests: API + UI, global setup creates project)
+  e2e/        - Playwright tests (100 tests: API + UI, global setup creates project)
 ```
 
 ## API Routes
@@ -286,3 +305,4 @@ packages/
 | 2026-05-03 | Session output navigation | Replaced full-panel session history overlay with inline session switching inside the expanded workspace. Session selector shows "Latest" tab + clickable past session rows (status badge, relative time, duration). Clicking a past session loads its output into the same TerminalView area without leaving the workspace context. Chat input and action buttons hide during history viewing. Escape dismisses history selection before closing panel. 28 unit tests passing. |
 | 2026-05-04 | Test coverage expansion | Added 38 unit tests (tags 13, preferences 10, issue-number 11) and 39 E2E tests (health 1, preferences 3, projects 7, tags 12, search 6, archive-columns 4, shortcuts 5, diff/merge 2). Refactored createTagsRoute to accept database parameter for testability. Fixed session history E2E tests for inline session selector UI. 66 unit tests + 99 E2E tests passing. |
 | 2026-05-04 | Stage 12 | Inline diff comments: new diff_comments table (migration 0007), CRUD API for workspace-scoped comments, DiffViewer restructured to parse per-file with filePath tracking, inline comment blocks with create/edit/delete in both unified and split views, comment count badge in header. Last "keep" feature from PRD now implemented. 66 unit tests + 99 E2E tests passing. |
+| 2026-05-07 | Stage 13 | Output parser V2 + responsive layout. Rewrote parser to handle multi-block messages (thinking, text, tool_use from same assistant message), tool_result from user messages with error state detection, thinking block rendering in TerminalView. Responsive layout: panels use w-[min(X,100vw)], columns flex-1, header flex-wrap. Smart hooks system. 76 unit tests + 100 E2E tests passing. |
