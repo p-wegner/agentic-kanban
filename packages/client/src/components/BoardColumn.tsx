@@ -78,7 +78,7 @@ export function BoardColumn({
 
   return (
     <div
-      className={`flex-shrink-0 min-w-[200px] flex-1 max-w-xs bg-gray-100 rounded-lg p-3 transition-all ${
+      className={`w-full sm:flex-shrink-0 sm:min-w-[200px] sm:flex-1 sm:max-w-xs bg-gray-100 rounded-lg p-3 transition-all ${
         dragOver ? "ring-2 ring-blue-400 ring-offset-1" : ""
       }`}
       onDragEnter={handleDragEnter}

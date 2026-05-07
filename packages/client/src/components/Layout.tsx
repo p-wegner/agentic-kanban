@@ -53,7 +53,7 @@ export function Layout({
               <span className="text-sm text-gray-500">{projects[0].name}</span>
             )}
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
             <div className="relative">
               <svg
                 className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400"
