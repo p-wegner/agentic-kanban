@@ -93,7 +93,7 @@ describe("Projects API", () => {
   it("GET /api/projects returns list", async () => {
     const res = await app.request("/api/projects");
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = await res.json() as any;
     expect(body.length).toBeGreaterThanOrEqual(1);
     expect(body[0].name).toBeDefined();
     expect(body[0].repoPath).toBeDefined();
@@ -102,7 +102,7 @@ describe("Projects API", () => {
   it("GET /api/projects/:id/branches returns error for non-git path", async () => {
     const res = await app.request(`/api/projects/${projectId}/branches`);
     expect(res.status).toBe(500);
-    const body = await res.json();
+    const body = await res.json() as any;
     expect(body.error).toContain("Failed to list branches");
   });
 
@@ -134,14 +134,14 @@ describe("Issues API", () => {
       }),
     });
     expect(res.status).toBe(201);
-    const body = await res.json();
+    const body = await res.json() as any;
     expect(body.title).toBe("Test issue");
   });
 
   it("GET /api/issues returns issues with statusName", async () => {
     const res = await app.request(`/api/issues?projectId=${projectId}`);
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = await res.json() as any;
     expect(body.length).toBe(1);
     expect(body[0].statusName).toBe("Todo");
   });
@@ -187,7 +187,7 @@ describe("Issues API", () => {
     const res = await app.request(`/api/issues/${id}`, { method: "DELETE" });
     expect(res.status).toBe(200);
 
-    const body = await res.json();
+    const body = await res.json() as any;
     expect(body.success).toBe(true);
   });
 });
@@ -219,7 +219,7 @@ describe("Board API", () => {
   it("GET /api/projects/:id/board returns statuses with nested issues", async () => {
     const res = await app.request(`/api/projects/${projectId}/board`);
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = await res.json() as any;
 
     expect(body.length).toBe(2);
     expect(body[0].name).toBe("Todo");
@@ -261,7 +261,7 @@ describe("Workspaces API", () => {
       body: JSON.stringify({ issueId, branch: "feature/test" }),
     });
     expect(res.status).toBe(201);
-    const body = await res.json();
+    const body = await res.json() as any;
     expect(body.branch).toBe("feature/test");
     expect(body.status).toBe("active");
     expect(body.id).toBeDefined();
@@ -287,7 +287,7 @@ describe("Workspaces API", () => {
 
     const res = await app.request(`/api/workspaces/${id}`);
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = await res.json() as any;
     expect(body.branch).toBe("feature/get-test");
     expect(body.issue.title).toBe("WS test issue");
   });
@@ -300,7 +300,7 @@ describe("Workspaces API", () => {
   it("GET /api/issues/:id/workspaces lists workspaces for an issue", async () => {
     const res = await app.request(`/api/issues/${issueId}/workspaces`);
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = await res.json() as any;
     expect(body.length).toBeGreaterThanOrEqual(1);
     expect(body[0].branch).toBeDefined();
   });
@@ -352,7 +352,7 @@ describe("Workspaces API", () => {
 
     const res = await app.request(`/api/workspaces/${id}`, { method: "DELETE" });
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = await res.json() as any;
     expect(body.success).toBe(true);
 
     // Verify gone
@@ -396,7 +396,7 @@ describe("Diff Comments API", () => {
       }),
     });
     expect(res.status).toBe(201);
-    const body = await res.json();
+    const body = await res.json() as any;
     expect(body.filePath).toBe("src/index.ts");
     expect(body.body).toBe("Looks good");
     expect(body.workspaceId).toBe(workspaceId);
@@ -410,7 +410,7 @@ describe("Diff Comments API", () => {
       body: JSON.stringify({ lineNumNew: 5 }),
     });
     expect(res.status).toBe(400);
-    const body = await res.json();
+    const body = await res.json() as any;
     expect(body.error).toContain("filePath and body are required");
   });
 
@@ -426,7 +426,7 @@ describe("Diff Comments API", () => {
   it("GET lists comments for workspace", async () => {
     const res = await app.request(`/api/workspaces/${workspaceId}/comments`);
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = await res.json() as any;
     expect(body.length).toBeGreaterThanOrEqual(1);
     expect(body[0].filePath).toBeDefined();
   });
@@ -441,7 +441,7 @@ describe("Diff Comments API", () => {
 
     const res = await app.request(`/api/workspaces/${workspaceId}/comments?filePath=src/index.ts`);
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = await res.json() as any;
     expect(body.every((c: { filePath: string }) => c.filePath === "src/index.ts")).toBe(true);
   });
 
@@ -460,7 +460,7 @@ describe("Diff Comments API", () => {
       body: JSON.stringify({ body: "Updated" }),
     });
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = await res.json() as any;
     expect(body.id).toBe(id);
 
     // Verify update
@@ -499,7 +499,7 @@ describe("Diff Comments API", () => {
       method: "DELETE",
     });
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = await res.json() as any;
     expect(body.success).toBe(true);
 
     // Verify gone
@@ -521,7 +521,7 @@ describe("Preferences API", () => {
   it("GET /api/preferences/active-project returns null initially", async () => {
     const res = await app.request("/api/preferences/active-project");
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = await res.json() as any;
     expect(body.projectId).toBeNull();
   });
 
@@ -533,7 +533,7 @@ describe("Preferences API", () => {
       body: JSON.stringify({ projectId: id }),
     });
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = await res.json() as any;
     expect(body.projectId).toBe(id);
   });
 
@@ -547,7 +547,7 @@ describe("Preferences API", () => {
 
     const res = await app.request("/api/preferences/active-project");
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = await res.json() as any;
     expect(body.projectId).toBe(id);
   });
 
@@ -568,7 +568,7 @@ describe("Preferences API", () => {
     });
 
     const res = await app.request("/api/preferences/active-project");
-    const body = await res.json();
+    const body = await res.json() as any;
     expect(body.projectId).toBe(id2);
   });
 });

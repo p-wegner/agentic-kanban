@@ -93,7 +93,7 @@ describe("Issue Number Auto-Increment", () => {
       body: JSON.stringify({ title: "First issue", statusId, projectId }),
     });
     expect(res.status).toBe(201);
-    const body = await res.json();
+    const body = await res.json() as any;
     expect(body.issueNumber).toBe(1);
   });
 
@@ -104,7 +104,7 @@ describe("Issue Number Auto-Increment", () => {
       body: JSON.stringify({ title: "Second issue", statusId, projectId }),
     });
     expect(res.status).toBe(201);
-    const body = await res.json();
+    const body = await res.json() as any;
     expect(body.issueNumber).toBe(2);
   });
 
@@ -115,14 +115,14 @@ describe("Issue Number Auto-Increment", () => {
       body: JSON.stringify({ title: "Third issue", statusId, projectId }),
     });
     expect(res.status).toBe(201);
-    const body = await res.json();
+    const body = await res.json() as any;
     expect(body.issueNumber).toBe(3);
   });
 
   it("GET /api/issues returns issues with their issue numbers", async () => {
     const res = await app.request(`/api/issues?projectId=${projectId}`);
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = await res.json() as any;
     expect(body.length).toBe(3);
 
     const numbers = body.map((i: { issueNumber: number }) => i.issueNumber);
@@ -198,7 +198,7 @@ describe("Issue Number - Independent Per Project", () => {
       body: JSON.stringify({ title: "Project A issue 1", statusId: statusAId, projectId: projectAId }),
     });
     expect(res.status).toBe(201);
-    const body = await res.json();
+    const body = await res.json() as any;
     expect(body.issueNumber).toBe(1);
   });
 
@@ -209,7 +209,7 @@ describe("Issue Number - Independent Per Project", () => {
       body: JSON.stringify({ title: "Project B issue 1", statusId: statusBId, projectId: projectBId }),
     });
     expect(res.status).toBe(201);
-    const body = await res.json();
+    const body = await res.json() as any;
     expect(body.issueNumber).toBe(1);
   });
 
@@ -220,7 +220,7 @@ describe("Issue Number - Independent Per Project", () => {
       body: JSON.stringify({ title: "Project A issue 2", statusId: statusAId, projectId: projectAId }),
     });
     expect(res.status).toBe(201);
-    const body = await res.json();
+    const body = await res.json() as any;
     expect(body.issueNumber).toBe(2);
   });
 
@@ -231,7 +231,7 @@ describe("Issue Number - Independent Per Project", () => {
       body: JSON.stringify({ title: "Project B issue 2", statusId: statusBId, projectId: projectBId }),
     });
     expect(res.status).toBe(201);
-    const body = await res.json();
+    const body = await res.json() as any;
     expect(body.issueNumber).toBe(2);
   });
 
