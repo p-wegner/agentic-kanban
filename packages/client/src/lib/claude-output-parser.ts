@@ -180,9 +180,15 @@ export class ClaudeOutputParser {
           const output = typeof rawContent === "string"
             ? rawContent
             : JSON.stringify(rawContent);
+          const toolResult = obj.tool_use_result;
+          const toolName = typeof toolResult === "string"
+            ? toolResult
+            : (toolResult as Record<string, unknown>)?.tool_use_id
+              ? `tool_${(toolResult as Record<string, unknown>).tool_use_id}`
+              : "tool";
           events.push({
             kind: "tool_result",
-            toolName: (obj.tool_use_result as string) || "unknown",
+            toolName: toolName || "unknown",
             output,
             isError: (block.is_error as boolean) || false,
           });
