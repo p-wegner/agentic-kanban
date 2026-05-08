@@ -13,3 +13,6 @@ playwright-report/
 blob-report/
 coverage/
 .claude/hooks/.edited-files.json
+.playwright-cli/
+docs/temp/
+bash.exe.stackdump
