@@ -8,6 +8,7 @@ import { WorkspacePanel } from "../components/WorkspacePanel.js";
 import { SettingsPanel } from "../components/SettingsPanel.js";
 import { SkeletonBoard } from "../components/SkeletonBoard.js";
 import { ToastContainer, showToast } from "../components/Toast.js";
+import { suggestBranchName } from "../lib/branch.js";
 import { CommandPalette } from "../components/CommandPalette.js";
 import { ShortcutHelp } from "../components/ShortcutHelp.js";
 import { apiFetch } from "../lib/api.js";
@@ -156,18 +157,47 @@ export function BoardPage() {
     }
   }
 
-  async function handleCreateIssue(data: CreateIssueRequest) {
+  async function handleCreateIssue(data: CreateIssueRequest & { startWorkspace?: boolean }) {
     setMutating(true);
     setError(null);
+    const { startWorkspace, ...issueData } = data;
     try {
-      await apiFetch("/api/issues", {
-        method: "POST",
-        body: JSON.stringify(data),
-      });
+      const created = await apiFetch<{ id: string; issueNumber: number; title: string }>(
+        "/api/issues",
+        { method: "POST", body: JSON.stringify(issueData) },
+      );
       setCreatingInColumnId(null);
-      await refetchBoard();
+      const board = await refetchBoard();
       pendingBoardRefreshRef.current = false;
-      showToast("Issue created", "success");
+
+      if (startWorkspace && activeProject) {
+        try {
+          const branch = suggestBranchName({
+            issueNumber: created.issueNumber,
+            title: created.title,
+          });
+          await apiFetch("/api/workspaces", {
+            method: "POST",
+            body: JSON.stringify({
+              issueId: created.id,
+              branch,
+              baseBranch: activeProject.defaultBranch,
+            }),
+          });
+          for (const col of board ?? columns) {
+            const found = col.issues.find((i) => i.id === created.id);
+            if (found) {
+              setWorkspaceIssue(found);
+              break;
+            }
+          }
+          showToast("Issue and workspace created", "success");
+        } catch {
+          showToast("Issue created, but workspace creation failed", "error");
+        }
+      } else {
+        showToast("Issue created", "success");
+      }
     } catch (err) {
       showToast("Failed to create issue", "error");
     } finally {
@@ -437,6 +467,7 @@ export function BoardPage() {
   }
 
   const activeProject = projects.find((p) => p.id === activeProjectId);
+  const canStartWorkspace = !!activeProject?.repoPath;
 
   return (
     <Layout
@@ -512,6 +543,7 @@ export function BoardPage() {
                 statusId={col.id}
                 onSubmit={handleCreateIssue}
                 onCancel={() => setCreatingInColumnId(null)}
+                canStartWorkspace={canStartWorkspace}
               />
             </BoardColumn>
           ))}
@@ -536,6 +568,7 @@ export function BoardPage() {
           }}
           onDrop={handleDrop}
           searchQuery={searchQuery}
+          canStartWorkspace={canStartWorkspace}
         />
       </div>
       {selectedIssue && (

@@ -4,8 +4,9 @@ import type { CreateIssueRequest } from "@agentic-kanban/shared";
 interface CreateIssueFormProps {
   projectId: string;
   statusId: string;
-  onSubmit: (data: CreateIssueRequest) => Promise<void>;
+  onSubmit: (data: CreateIssueRequest & { startWorkspace?: boolean }) => Promise<void>;
   onCancel: () => void;
+  canStartWorkspace?: boolean;
 }
 
 export function CreateIssueForm({
@@ -13,10 +14,12 @@ export function CreateIssueForm({
   statusId,
   onSubmit,
   onCancel,
+  canStartWorkspace = false,
 }: CreateIssueFormProps) {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [priority, setPriority] = useState<CreateIssueRequest["priority"]>("medium");
+  const [startWorkspace, setStartWorkspace] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
   async function handleSubmit(e: React.FormEvent) {
@@ -30,6 +33,7 @@ export function CreateIssueForm({
         priority,
         statusId,
         projectId,
+        startWorkspace: startWorkspace || undefined,
       });
     } finally {
       setSubmitting(false);
@@ -73,13 +77,26 @@ export function CreateIssueForm({
         <option value="high">High</option>
         <option value="critical">Critical</option>
       </select>
+      {canStartWorkspace && (
+        <label className="flex items-center gap-2 text-xs text-gray-600 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={startWorkspace}
+            onChange={(e) => setStartWorkspace(e.target.checked)}
+            className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+          />
+          Start workspace
+        </label>
+      )}
       <div className="flex gap-2">
         <button
           type="submit"
           disabled={!title.trim() || submitting}
           className="text-xs bg-blue-600 text-white px-3 py-1.5 rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          {submitting ? "Adding..." : "Add"}
+          {submitting
+            ? (startWorkspace ? "Creating..." : "Adding...")
+            : (startWorkspace ? "Create & Start" : "Add")}
         </button>
         <button
           type="button"

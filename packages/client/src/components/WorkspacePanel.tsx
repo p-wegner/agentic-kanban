@@ -74,28 +74,7 @@ function formatDuration(start: string, end: string | null): string {
   return `${min}m ${remSec}s`;
 }
 
-function sanitizeBranchName(input: string): string {
-  return input
-    .toLowerCase()
-    .replace(/[^a-z0-9/_-]/g, "-")
-    .replace(/-+/g, "-")
-    .replace(/\/+/g, "/")
-    .replace(/^-+/, "")
-    .replace(/-+$/, "")
-    .slice(0, 80);
-}
-
-function suggestBranchName(issue: { issueNumber?: number | null; title: string }): string {
-  const prefix = "feature";
-  const num = issue.issueNumber ? `${issue.issueNumber}-` : "";
-  const slug = issue.title
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/-+/g, "-")
-    .replace(/^-|-$/g, "")
-    .slice(0, 40);
-  return `${prefix}/${num}${slug}`;
-}
+import { suggestBranchName, sanitizeBranchName } from "../lib/branch.js";
 
 export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange }: WorkspacePanelProps) {
   const [workspaces, setWorkspaces] = useState<WorkspaceResponse[]>([]);
