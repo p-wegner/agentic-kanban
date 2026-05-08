@@ -11,11 +11,12 @@ interface ColumnGroupProps {
   creatingInColumn: string | null;
   onCreateClick: (statusId: string) => void;
   onCreateCancel: () => void;
-  onCreateSubmit: (data: CreateIssueRequest) => Promise<void>;
+  onCreateSubmit: (data: CreateIssueRequest & { startWorkspace?: boolean }) => Promise<void>;
   onIssueClick: (issue: IssueWithStatus) => void;
   onDragStart: (e: React.DragEvent, issue: IssueWithStatus) => void;
   onDrop: (statusId: string, sortOrder?: number) => void;
   searchQuery: string;
+  canStartWorkspace?: boolean;
 }
 
 export function ColumnGroup({
@@ -32,6 +33,7 @@ export function ColumnGroup({
   onDragStart,
   onDrop,
   searchQuery,
+  canStartWorkspace = false,
 }: ColumnGroupProps) {
   if (columns.length === 0) return null;
 
@@ -104,6 +106,7 @@ export function ColumnGroup({
               statusId={col.id}
               onSubmit={onCreateSubmit}
               onCancel={onCreateCancel}
+              canStartWorkspace={canStartWorkspace}
             />
           </BoardColumn>
         ))}
