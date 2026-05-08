@@ -240,6 +240,24 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange }: W
       .catch(() => {});
   }, [selectedWorkspace]);
 
+  // Auto-load latest session output when expanding a workspace with completed sessions
+  useEffect(() => {
+    if (!selectedWorkspace) return;
+    const sessions = workspaceSessions[selectedWorkspace];
+    if (!sessions || sessions.length === 0) return;
+    if (completedMessages.length > 0 || activeSession) return;
+
+    const latestCompleted = sessions
+      .filter(s => s.status !== "running")
+      .sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime())[0];
+
+    if (latestCompleted) {
+      apiFetch<AgentOutputMessage[]>(`/api/sessions/${latestCompleted.id}/output`)
+        .then((msgs) => setCompletedMessages(msgs))
+        .catch(() => {});
+    }
+  }, [selectedWorkspace, workspaceSessions, activeSession]);
+
   async function handleViewHistory(sessionId: string) {
     try {
       const msgs = await apiFetch<AgentOutputMessage[]>(`/api/sessions/${sessionId}/output`);

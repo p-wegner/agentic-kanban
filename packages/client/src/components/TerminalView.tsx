@@ -43,7 +43,7 @@ export function TerminalView({ messages, connectionState, parseOutput = true, pr
         continue;
       }
       if (msg.data) {
-        events.push(...parser.feed(msg.data));
+        events.push(...parser.feed(msg.data + "\n"));
       }
     }
 
