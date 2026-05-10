@@ -102,6 +102,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange }: W
   // Create form
   const [branchName, setBranchName] = useState("");
   const [baseBranch, setBaseBranch] = useState("");
+  const [isDirect, setIsDirect] = useState(false);
   const [prompt, setPrompt] = useState("");
   const [prefs, setPrefs] = useState<Record<string, string>>({});
   const [branches, setBranches] = useState<{ local: string[]; remote: string[] } | null>(null);
@@ -248,14 +249,17 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange }: W
   }
 
   async function handleCreateWorkspace() {
-    if (!branchName.trim()) return;
+    if (!isDirect && !branchName.trim()) return;
     setActionLoading(true);
     setError(null);
     setCompletedMessages([]);
     try {
-      const body: Record<string, string> = { issueId: issue.id, branch: branchName.trim() };
-      if (baseBranch.trim()) {
-        body.baseBranch = baseBranch.trim();
+      const body: Record<string, unknown> = { issueId: issue.id, isDirect };
+      if (!isDirect) {
+        body.branch = branchName.trim();
+        if (baseBranch.trim()) {
+          body.baseBranch = baseBranch.trim();
+        }
       }
       const result = await apiFetch<WorkspaceResponse & { sessionId?: string }>("/api/workspaces", {
         method: "POST",
@@ -263,6 +267,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange }: W
       });
       setBranchName("");
       setBaseBranch("");
+      setIsDirect(false);
       setShowCreate(false);
       // If auto-launched, set active session to show terminal immediately
       if (result.sessionId) {
@@ -455,56 +460,74 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange }: W
 
           {showCreate && (
             <div className="border border-gray-200 rounded p-3 space-y-2">
-              <label className="text-xs font-medium text-gray-600 block">
-                Branch Name
-              </label>
-              <input
-                type="text"
-                value={branchName}
-                onChange={(e) => setBranchName(sanitizeBranchName(e.target.value))}
-                placeholder={suggestion}
-                className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
-              />
-              <label className="text-xs font-medium text-gray-600 block mt-2">
-                Base Branch
-              </label>
-              {branches ? (
-                <select
-                  value={baseBranch}
-                  onChange={(e) => setBaseBranch(e.target.value)}
-                  className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                >
-                  <option value="">Default ({project?.defaultBranch || "main"})</option>
-                  {branches.local.map((b) => (
-                    <option key={b} value={b}>{b}</option>
-                  ))}
-                  {branches.remote.length > 0 && (
-                    <optgroup label="Remote">
-                      {branches.remote.map((b) => (
-                        <option key={`r/${b}`} value={b}>{b}</option>
-                      ))}
-                    </optgroup>
-                  )}
-                </select>
-              ) : (
+              <label className="flex items-center gap-2 text-xs text-gray-600">
                 <input
-                  type="text"
-                  value={baseBranch}
-                  onChange={(e) => setBaseBranch(e.target.value)}
-                  placeholder={project?.defaultBranch || "main"}
-                  className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  type="checkbox"
+                  checked={isDirect}
+                  onChange={(e) => setIsDirect(e.target.checked)}
+                  className="rounded border-gray-300"
                 />
+                <span>Work directly on main checkout</span>
+              </label>
+              {isDirect && (
+                <p className="text-xs text-gray-400">
+                  Agent will work on the current branch of the main repository (no worktree created).
+                </p>
+              )}
+              {!isDirect && (
+                <>
+                  <label className="text-xs font-medium text-gray-600 block">
+                    Branch Name
+                  </label>
+                  <input
+                    type="text"
+                    value={branchName}
+                    onChange={(e) => setBranchName(sanitizeBranchName(e.target.value))}
+                    placeholder={suggestion}
+                    className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  />
+                  <label className="text-xs font-medium text-gray-600 block mt-2">
+                    Base Branch
+                  </label>
+                  {branches ? (
+                    <select
+                      value={baseBranch}
+                      onChange={(e) => setBaseBranch(e.target.value)}
+                      className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    >
+                      <option value="">Default ({project?.defaultBranch || "main"})</option>
+                      {branches.local.map((b) => (
+                        <option key={b} value={b}>{b}</option>
+                      ))}
+                      {branches.remote.length > 0 && (
+                        <optgroup label="Remote">
+                          {branches.remote.map((b) => (
+                            <option key={`r/${b}`} value={b}>{b}</option>
+                          ))}
+                        </optgroup>
+                      )}
+                    </select>
+                  ) : (
+                    <input
+                      type="text"
+                      value={baseBranch}
+                      onChange={(e) => setBaseBranch(e.target.value)}
+                      placeholder={project?.defaultBranch || "main"}
+                      className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    />
+                  )}
+                </>
               )}
               <div className="flex gap-2">
                 <button
                   onClick={handleCreateWorkspace}
-                  disabled={actionLoading || !branchName.trim()}
+                  disabled={actionLoading || (!isDirect && !branchName.trim())}
                   className="text-sm bg-blue-600 text-white px-3 py-1.5 rounded hover:bg-blue-700 disabled:opacity-50"
                 >
-                  {actionLoading ? "Creating..." : "Create & Launch"}
+                  {actionLoading ? "Creating..." : isDirect ? "Create Direct & Launch" : "Create & Launch"}
                 </button>
                 <button
-                  onClick={() => { setShowCreate(false); setBaseBranch(""); setBranchName(""); }}
+                  onClick={() => { setShowCreate(false); setBaseBranch(""); setBranchName(""); setIsDirect(false); }}
                   className="text-sm text-gray-500 px-3 py-1.5 hover:text-gray-700"
                 >
                   Cancel
@@ -528,7 +551,12 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange }: W
                 onClick={() => { setSelectedWorkspace(isSelected ? null : ws.id); setSelectedHistoryId(null); setHistoryMessages([]); }}
               >
                 <div className="flex items-center justify-between">
-                  <span className="text-sm font-medium text-gray-900">{ws.branch}</span>
+                  <span className="text-sm font-medium text-gray-900">
+                    {ws.branch}
+                    {ws.isDirect && (
+                      <span className="ml-1.5 text-[10px] font-medium px-1.5 py-0.5 rounded bg-purple-100 text-purple-700">direct</span>
+                    )}
+                  </span>
                   <span className={`text-xs font-medium px-1.5 py-0.5 rounded ${badgeColor}`}>
                     {ws.status}
                   </span>
@@ -661,14 +689,14 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange }: W
                           disabled={actionLoading}
                           className="text-sm bg-purple-600 text-white px-3 py-1.5 rounded hover:bg-purple-700 disabled:opacity-50 flex-1"
                         >
-                          View Diff
+                          {ws.isDirect ? "View Changes" : "View Diff"}
                         </button>
                         <button
                           onClick={() => handleMerge(ws.id)}
                           disabled={actionLoading}
                           className="text-sm bg-orange-600 text-white px-3 py-1.5 rounded hover:bg-orange-700 disabled:opacity-50 flex-1"
                         >
-                          Merge
+                          {ws.isDirect ? "Close" : "Merge"}
                         </button>
                       </div>
                     )}

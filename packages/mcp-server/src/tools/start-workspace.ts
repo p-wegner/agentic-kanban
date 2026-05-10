@@ -13,10 +13,11 @@ export function registerStartWorkspace(server: McpServer) {
     {
       issueId: z.string().describe("The issue ID to create a workspace for"),
       repoPath: z.string().optional().describe("Absolute path to the git repository (auto-detected from project if omitted)"),
-      branch: z.string().optional().describe("Branch name (defaults to 'workspace/{issueId-short}')"),
+      branch: z.string().optional().describe("Branch name (defaults to 'workspace/{issueId-short}'). Not needed when isDirect is true."),
       baseBranch: z.string().optional().describe("Base branch to create from (defaults to project's defaultBranch)"),
+      isDirect: z.boolean().optional().describe("Work directly on the main checkout instead of creating a worktree"),
     },
-    async ({ issueId, repoPath, branch, baseBranch }) => {
+    async ({ issueId, repoPath, branch, baseBranch, isDirect }) => {
       // Look up the issue
       const issues = await db.select().from(schema.issues).where(eq(schema.issues.id, issueId)).limit(1);
       if (issues.length === 0) {
@@ -44,19 +45,25 @@ export function registerStartWorkspace(server: McpServer) {
         resolvedBaseBranch = projectRows[0].defaultBranch;
       }
 
-      const branchName = branch || `workspace/${issueId.slice(0, 8)}`;
+      const branchName = isDirect ? await gitService.getCurrentBranch(resolvedRepoPath) : (branch || `workspace/${issueId.slice(0, 8)}`);
       const id = randomUUID();
       const now = new Date().toISOString();
 
       try {
-        const worktreePath = await gitService.createWorktree(resolvedRepoPath, branchName, resolvedBaseBranch);
+        let worktreePath: string;
+        if (isDirect) {
+          worktreePath = resolvedRepoPath;
+        } else {
+          worktreePath = await gitService.createWorktree(resolvedRepoPath, branchName, resolvedBaseBranch);
+        }
 
         await db.insert(schema.workspaces).values({
           id,
           issueId,
           branch: branchName,
           workingDir: worktreePath,
-          baseBranch: resolvedBaseBranch,
+          baseBranch: isDirect ? null : resolvedBaseBranch,
+          isDirect: isDirect ?? false,
           status: "active",
           createdAt: now,
           updatedAt: now,
@@ -69,8 +76,11 @@ export function registerStartWorkspace(server: McpServer) {
           issueId,
           branch: branchName,
           workingDir: worktreePath,
+          isDirect: isDirect ?? false,
           status: "active",
-          message: `Workspace created. Working directory: ${worktreePath}`,
+          message: isDirect
+            ? `Direct workspace created on branch '${branchName}'. Working directory: ${worktreePath}`
+            : `Workspace created. Working directory: ${worktreePath}`,
         };
 
         return {

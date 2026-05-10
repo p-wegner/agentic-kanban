@@ -214,15 +214,20 @@ export function createWorkspaceActionsRoute(
     }
 
     try {
-      const { defaultBranch } = await resolveProjectRepo(id, database);
-      const baseBranch = workspace.baseBranch || defaultBranch;
-      const diff = await gitService.getDiff(workspace.workingDir, baseBranch);
+      let diff: string;
+      if (workspace.isDirect) {
+        diff = await gitService.getWorkingTreeDiff(workspace.workingDir);
+      } else {
+        const { defaultBranch } = await resolveProjectRepo(id, database);
+        const baseBranch = workspace.baseBranch || defaultBranch;
+        diff = await gitService.getDiff(workspace.workingDir, baseBranch);
+      }
       const stats = parseDiffStats(diff);
       const comments = await database
         .select()
         .from(diffComments)
         .where(eq(diffComments.workspaceId, id));
-      console.log(`[workspace-actions] diff: workspaceId=${id} files=${stats.filesChanged} +${stats.insertions} -${stats.deletions} comments=${comments.length}`);
+      console.log(`[workspace-actions] diff: workspaceId=${id} isDirect=${workspace.isDirect} files=${stats.filesChanged} +${stats.insertions} -${stats.deletions} comments=${comments.length}`);
       return c.json({ diff, stats, comments });
     } catch (err) {
       return c.json(
@@ -244,6 +249,20 @@ export function createWorkspaceActionsRoute(
     const workspace = rows[0];
 
     try {
+      // Direct workspace: no merge needed, just close
+      if (workspace.isDirect) {
+        const now = new Date().toISOString();
+        await database
+          .update(workspaces)
+          .set({ status: "closed", updatedAt: now })
+          .where(eq(workspaces.id, id));
+
+        const projectId = await resolveProjectId(id, database);
+        if (projectId) options?.boardEvents?.broadcast(projectId, "workspace_merged");
+
+        return c.json({ id, mergeOutput: "Direct workspace closed (no merge needed)" });
+      }
+
       const { repoPath } = await resolveProjectRepo(id, database);
       console.log(`[workspace-actions] merge: workspaceId=${id} branch=${workspace.branch} repoPath=${repoPath}`);
       const result = await gitService.mergeBranch(repoPath, workspace.branch);
