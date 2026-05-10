@@ -57,6 +57,13 @@
       "when": 1777880000000,
       "tag": "0007_diff_comments",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1777966400000,
+      "tag": "0008_direct_workspace",
+      "breakpoints": true
     }
   ]
 }

@@ -1,4 +1,4 @@
-import { sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
 import { relations } from "drizzle-orm";
 import { issues } from "./issues.js";
 
@@ -8,6 +8,7 @@ export const workspaces = sqliteTable("workspaces", {
   branch: text("branch").notNull(),
   workingDir: text("working_dir"),
   baseBranch: text("base_branch"),
+  isDirect: integer("is_direct", { mode: "boolean" }).notNull().default(false),
   status: text("status").notNull().default("active"),
   createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
   updatedAt: text("updated_at").notNull().$defaultFn(() => new Date().toISOString()),

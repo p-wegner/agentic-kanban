@@ -27,8 +27,9 @@ export function createWorkspacesRoute(
   // POST /api/workspaces — create workspace with worktree + auto-launch agent
   router.post("/", async (c) => {
     const body = await c.req.json();
-    if (!body.issueId || !body.branch) {
-      return c.json({ error: "issueId and branch are required" }, 400);
+    const isDirect = body.isDirect === true;
+    if (!body.issueId || (!body.branch && !isDirect)) {
+      return c.json({ error: "issueId is required; branch is required unless isDirect is true" }, 400);
     }
 
     const now = new Date().toISOString();
@@ -36,6 +37,7 @@ export function createWorkspacesRoute(
     let sessionId: string | undefined;
     let worktreePath: string | null = null;
     let baseBranch: string | null = null;
+    let branch: string = body.branch;
 
     try {
       // Resolve issue → project to get repoPath and defaultBranch
@@ -62,10 +64,17 @@ export function createWorkspacesRoute(
       }
 
       const project = projectRows[0];
-      baseBranch = body.baseBranch || project.defaultBranch;
 
-      // Create git worktree
-      worktreePath = await gitService.createWorktree(project.repoPath, body.branch, baseBranch ?? undefined);
+      if (isDirect) {
+        // Direct workspace: use main checkout, auto-detect branch
+        branch = await gitService.getCurrentBranch(project.repoPath);
+        worktreePath = project.repoPath;
+        baseBranch = null;
+      } else {
+        // Normal workspace: create worktree
+        baseBranch = body.baseBranch || project.defaultBranch;
+        worktreePath = await gitService.createWorktree(project.repoPath, branch, baseBranch ?? undefined);
+      }
 
       // Build prompt from issue title + description
       let agentPrompt = issue.title;
@@ -90,9 +99,10 @@ export function createWorkspacesRoute(
       await database.insert(workspaces).values({
         id,
         issueId: body.issueId,
-        branch: body.branch,
+        branch,
         workingDir: worktreePath,
         baseBranch,
+        isDirect,
         status: "active",
         createdAt: now,
         updatedAt: now,
@@ -101,7 +111,7 @@ export function createWorkspacesRoute(
       // Auto-launch agent if sessionManager is available
       if (getSessionManager) {
         const truncatedPrompt = agentPrompt.length > 80 ? agentPrompt.slice(0, 80) + "..." : agentPrompt;
-        console.log(`[workspaces] auto-launch: workspaceId=${id} branch=${body.branch} prompt="${truncatedPrompt}" agentCommand=${agentCommand ?? "default"}`);
+        console.log(`[workspaces] auto-launch: workspaceId=${id} branch=${branch} isDirect=${isDirect} prompt="${truncatedPrompt}" agentCommand=${agentCommand ?? "default"}`);
         sessionId = await getSessionManager().startSession(id, agentPrompt, agentCommand, agentArgs);
       }
 
@@ -114,9 +124,10 @@ export function createWorkspacesRoute(
         {
           id,
           issueId: body.issueId,
-          branch: body.branch,
+          branch,
           workingDir: worktreePath,
           baseBranch,
+          isDirect,
           status: "active",
           sessionId,
           createdAt: now,
@@ -134,9 +145,10 @@ export function createWorkspacesRoute(
         await database.insert(workspaces).values({
           id,
           issueId: body.issueId,
-          branch: body.branch,
+          branch,
           workingDir: worktreePath,
           baseBranch,
+          isDirect,
           status: "active",
           createdAt: now,
           updatedAt: now,
@@ -146,7 +158,7 @@ export function createWorkspacesRoute(
       }
 
       return c.json(
-        { id, issueId: body.issueId, branch: body.branch, workingDir: worktreePath, baseBranch, status: "active", error: errorMsg },
+        { id, issueId: body.issueId, branch, workingDir: worktreePath, baseBranch, isDirect, status: "active", error: errorMsg },
         201,
       );
     }
@@ -163,6 +175,7 @@ export function createWorkspacesRoute(
         branch: workspaces.branch,
         workingDir: workspaces.workingDir,
         baseBranch: workspaces.baseBranch,
+        isDirect: workspaces.isDirect,
         status: workspaces.status,
         createdAt: workspaces.createdAt,
         updatedAt: workspaces.updatedAt,
@@ -184,6 +197,7 @@ export function createWorkspacesRoute(
       branch: row.branch,
       workingDir: row.workingDir,
       baseBranch: row.baseBranch,
+      isDirect: row.isDirect,
       status: row.status,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,

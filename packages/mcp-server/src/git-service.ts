@@ -79,3 +79,14 @@ export async function getDiff(worktreePath: string, baseBranch: string = "main")
 export async function removeWorktree(repoPath: string, worktreePath: string): Promise<void> {
   await execGit(["worktree", "remove", "--force", worktreePath], repoPath);
 }
+
+/** Get the current branch name of a repo. */
+export async function getCurrentBranch(repoPath: string): Promise<string> {
+  const output = await execGit(["rev-parse", "--abbrev-ref", "HEAD"], repoPath);
+  return output.trim();
+}
+
+/** Get diff of working tree changes against HEAD (for direct workspaces). */
+export async function getWorkingTreeDiff(workdirPath: string): Promise<string> {
+  return execGit(["diff", "HEAD"], workdirPath);
+}

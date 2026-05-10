@@ -77,6 +77,7 @@ export interface CreateWorkspaceRequest {
   branch: string;
   baseBranch?: string;
   workingDir?: string;
+  isDirect?: boolean;
 }
 
 export interface UpdateWorkspaceRequest {
@@ -91,6 +92,7 @@ export interface WorkspaceResponse {
   status: string;
   workingDir: string | null;
   baseBranch: string | null;
+  isDirect: boolean;
   sessionId?: string;
   createdAt: string;
   updatedAt: string;
