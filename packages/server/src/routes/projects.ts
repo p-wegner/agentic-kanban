@@ -4,8 +4,9 @@ import { projects, projectStatuses, issues, workspaces } from "@agentic-kanban/s
 import { eq, inArray, sql } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { detectRepoInfo } from "../services/git-info.service.js";
-import { listBranches } from "../services/git.service.js";
+import { listBranches, listWorktrees, getDiffShortstat } from "../services/git.service.js";
 import type { Database } from "../db/index.js";
+import { sep } from "node:path";
 
 export function createProjectsRoute(database: Database = db) {
   const router = new Hono();
@@ -102,6 +103,101 @@ export function createProjectsRoute(database: Database = db) {
         500,
       );
     }
+  });
+
+  // GET /api/projects/:id/worktrees
+  router.get("/:id/worktrees", async (c) => {
+    const projectId = c.req.param("id");
+
+    const projectRows = await database
+      .select({ repoPath: projects.repoPath, defaultBranch: projects.defaultBranch })
+      .from(projects)
+      .where(eq(projects.id, projectId));
+    if (projectRows.length === 0) {
+      return c.json({ error: "Project not found" }, 404);
+    }
+
+    const { repoPath, defaultBranch } = projectRows[0];
+
+    let gitWorktrees: { path: string; branch: string }[];
+    try {
+      gitWorktrees = await listWorktrees(repoPath);
+    } catch (err) {
+      return c.json(
+        { error: `Failed to list worktrees: ${err instanceof Error ? err.message : String(err)}` },
+        500,
+      );
+    }
+
+    // Fetch all non-closed workspaces for this project, join with issues for info
+    const projectWorkspaces = await database
+      .select({
+        id: workspaces.id,
+        issueId: workspaces.issueId,
+        branch: workspaces.branch,
+        workingDir: workspaces.workingDir,
+        baseBranch: workspaces.baseBranch,
+        isDirect: workspaces.isDirect,
+        status: workspaces.status,
+        issueNumber: issues.issueNumber,
+        issueTitle: issues.title,
+      })
+      .from(workspaces)
+      .innerJoin(issues, eq(workspaces.issueId, issues.id))
+      .where(eq(issues.projectId, projectId));
+
+    // Index workspaces by workingDir (normalized path)
+    const wsByDir = new Map<string, typeof projectWorkspaces[number]>();
+    for (const ws of projectWorkspaces) {
+      if (ws.workingDir) {
+        wsByDir.set(ws.workingDir.replace(/\//g, sep), ws);
+      }
+    }
+
+    const result = await Promise.all(
+      gitWorktrees.map(async (wt, index) => {
+        // First worktree is always the primary checkout (git guarantee)
+        const isMain = index === 0;
+        const normalizedWtPath = wt.path.replace(/\//g, sep);
+
+        // Match workspace by exact path, or by direct workspace whose workingDir is inside this worktree
+        let ws = wsByDir.get(normalizedWtPath);
+        if (!ws && isMain) {
+          for (const [, candidate] of wsByDir) {
+            if (candidate.isDirect && candidate.workingDir && candidate.workingDir.startsWith(normalizedWtPath)) {
+              ws = candidate;
+              break;
+            }
+          }
+        }
+
+        let diffStats: { filesChanged: number; insertions: number; deletions: number } | undefined;
+        if (!isMain) {
+          const base = ws?.baseBranch || defaultBranch;
+          diffStats = await getDiffShortstat(wt.path, base);
+          if (diffStats.filesChanged === 0 && diffStats.insertions === 0 && diffStats.deletions === 0) {
+            diffStats = undefined;
+          }
+        }
+
+        return {
+          path: wt.path,
+          branch: isMain ? defaultBranch : wt.branch.replace(/^refs\/heads\//, ""),
+          isMain,
+          workspace: ws ? {
+            id: ws.id,
+            status: ws.status,
+            isDirect: ws.isDirect,
+            issueId: ws.issueId,
+            issueNumber: ws.issueNumber,
+            issueTitle: ws.issueTitle,
+          } : undefined,
+          diffStats,
+        };
+      }),
+    );
+
+    return c.json(result);
   });
 
   // GET /api/projects/:id/board
