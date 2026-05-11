@@ -5,6 +5,7 @@ import { ColumnGroup } from "../components/ColumnGroup.js";
 import { CreateIssueForm } from "../components/CreateIssueForm.js";
 import { IssueDetailPanel } from "../components/IssueDetailPanel.js";
 import { WorkspacePanel } from "../components/WorkspacePanel.js";
+import { WorktreeOverview } from "../components/WorktreeOverview.js";
 import { SettingsPanel } from "../components/SettingsPanel.js";
 import { SkeletonBoard } from "../components/SkeletonBoard.js";
 import { ToastContainer, showToast } from "../components/Toast.js";
@@ -45,6 +46,7 @@ export function BoardPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [priorityFilter, setPriorityFilter] = useState("");
   const [showSettings, setShowSettings] = useState(false);
+  const [showWorktreeOverview, setShowWorktreeOverview] = useState(false);
   const [showCommandPalette, setShowCommandPalette] = useState(false);
   const [showShortcutHelp, setShowShortcutHelp] = useState(false);
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(
@@ -360,6 +362,10 @@ export function BoardPage() {
           setShowCommandPalette(false);
           return;
         }
+        if (showWorktreeOverview) {
+          setShowWorktreeOverview(false);
+          return;
+        }
         if (showShortcutHelp) {
           setShowShortcutHelp(false);
           return;
@@ -379,7 +385,7 @@ export function BoardPage() {
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [searchQuery, showCommandPalette, showShortcutHelp]);
+  }, [searchQuery, showCommandPalette, showWorktreeOverview, showShortcutHelp]);
 
   // Register command palette actions
   useEffect(() => {
@@ -413,6 +419,13 @@ export function BoardPage() {
       label: "Open Settings",
       category: "settings",
       handler: () => setShowSettings(true),
+    }));
+
+    unregisters.push(registerAction({
+      id: "view-worktrees",
+      label: "View Worktrees",
+      category: "navigation",
+      handler: () => setShowWorktreeOverview(true),
     }));
 
     unregisters.push(registerAction({
@@ -479,6 +492,7 @@ export function BoardPage() {
       priorityFilter={priorityFilter}
       onPriorityFilterChange={setPriorityFilter}
       onSettingsClick={() => setShowSettings(true)}
+      onWorktreeOverviewClick={() => setShowWorktreeOverview(true)}
     >
       {error && (
         <div className="mx-6 mt-4 p-3 bg-red-50 border border-red-200 rounded-md flex items-center justify-between">
@@ -593,6 +607,22 @@ export function BoardPage() {
       <ToastContainer />
       {showSettings && (
         <SettingsPanel onClose={() => setShowSettings(false)} />
+      )}
+      {showWorktreeOverview && activeProjectId && (
+        <WorktreeOverview
+          projectId={activeProjectId}
+          onClose={() => setShowWorktreeOverview(false)}
+          onIssueClick={(issueId: string) => {
+            for (const col of columns) {
+              const found = col.issues.find((i) => i.id === issueId);
+              if (found) {
+                setSelectedIssue(found);
+                break;
+              }
+            }
+            setShowWorktreeOverview(false);
+          }}
+        />
       )}
       {showCommandPalette && (
         <CommandPalette onClose={() => setShowCommandPalette(false)} />

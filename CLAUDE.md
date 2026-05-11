@@ -83,9 +83,10 @@ Every feature that has a UI component must be visually verified using the `playw
 1. Ensure dev servers are running (`pnpm dev`)
 2. Use `/playwright-cli` to open the page, take a snapshot, and confirm the UI renders correctly
 3. Take a screenshot only when needed for debugging — clean up `.png` files and `.playwright-cli/` after
-4. Clean up any test data created during verification (reset DB with `pnpm db:migrate && pnpm db:seed`)
+4. Clean up any test data created during verification (full reset: stop server, `pnpm db:reset`, `pnpm cli -- register .`, `pnpm dev`)
 
 ## Documentation Map
+- @.llm/workflows.md — dev workflows: clean-start setup, DB reset, project registration
 - `docs/prd/00-executive-summary.md` — vision, keep/skip list
 - `docs/prd/05-mvp-scope.md` — MVP definition, 6-stage plan, feature matrix
 - `docs/prd/03-data-model.md` — core entities (Project, Issue, Workspace, Session)
