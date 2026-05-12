@@ -11,7 +11,7 @@ interface Subscriber {
 }
 
 interface SessionManagerOptions {
-  onSessionExit?: (workspaceId: string) => void;
+  onSessionExit?: (workspaceId: string, sessionId: string, exitCode: number | null) => void;
 }
 
 function createSessionManager(
@@ -128,7 +128,7 @@ function createSessionManager(
             .where(eq(sessions.id, sessionId))
             .then(() => {
               // Notify board that a session completed
-              options?.onSessionExit?.(workspaceId);
+              options?.onSessionExit?.(workspaceId, sessionId, event.exitCode ?? null);
             })
             .catch((err) => console.error("Failed to update session:", err));
         }
