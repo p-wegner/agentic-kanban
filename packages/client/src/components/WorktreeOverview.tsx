@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { apiFetch } from "../lib/api.js";
+import { showToast } from "./Toast.js";
 
 interface WorktreeInfo {
   path: string;
@@ -24,6 +25,7 @@ interface WorktreeOverviewProps {
   projectId: string;
   onClose: () => void;
   onIssueClick: (issueId: string) => void;
+  onWorkspaceChange?: () => void;
 }
 
 const STATUS_COLORS: Record<string, string> = {
@@ -37,24 +39,54 @@ function truncatePath(path: string, maxLen = 50): string {
   return "..." + path.slice(path.length - maxLen + 3);
 }
 
-export function WorktreeOverview({ projectId, onClose, onIssueClick }: WorktreeOverviewProps) {
+export function WorktreeOverview({ projectId, onClose, onIssueClick, onWorkspaceChange }: WorktreeOverviewProps) {
   const [worktrees, setWorktrees] = useState<WorktreeInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState<string | null>(null);
+
+  const loadWorktrees = useCallback(async () => {
+    try {
+      const data = await apiFetch<WorktreeInfo[]>(`/api/projects/${projectId}/worktrees`);
+      setWorktrees(data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load worktrees");
+    }
+  }, [projectId]);
 
   useEffect(() => {
     async function load() {
-      try {
-        const data = await apiFetch<WorktreeInfo[]>(`/api/projects/${projectId}/worktrees`);
-        setWorktrees(data);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Failed to load worktrees");
-      } finally {
-        setLoading(false);
-      }
+      await loadWorktrees();
+      setLoading(false);
     }
     load();
-  }, [projectId]);
+  }, [loadWorktrees]);
+
+  async function handleDelete(wt: WorktreeInfo) {
+    const label = wt.workspace
+      ? `#${wt.workspace.issueNumber} ${wt.workspace.issueTitle} (${wt.branch})`
+      : wt.branch;
+
+    if (!window.confirm(`Delete worktree "${label}"?\n\nThis will remove the git worktree${wt.workspace ? ", workspace, and all session data" : ""}.`)) return;
+
+    setDeleting(wt.path);
+    try {
+      const body: Record<string, string> = { path: wt.path };
+      if (wt.workspace) body.workspaceId = wt.workspace.id;
+
+      await apiFetch(`/api/projects/${projectId}/worktrees`, {
+        method: "DELETE",
+        body: JSON.stringify(body),
+      });
+      await loadWorktrees();
+      onWorkspaceChange?.();
+      showToast("Worktree deleted", "success");
+    } catch {
+      showToast("Failed to delete worktree", "error");
+    } finally {
+      setDeleting(null);
+    }
+  }
 
   const additionalWorktrees = worktrees.filter((wt) => !wt.isMain);
   const mainWorktree = worktrees.find((wt) => wt.isMain);
@@ -143,14 +175,24 @@ export function WorktreeOverview({ projectId, onClose, onIssueClick }: WorktreeO
                         </span>
                       )}
                       {wt.diffStats && wt.diffStats.filesChanged > 0 && (
-                        <span className="text-xs text-gray-500 ml-auto">
-                          {wt.diffStats.filesChanged} file{wt.diffStats.filesChanged !== 1 ? "s" : ""},
-                          {" "}{" "}
+                        <span className="text-xs text-gray-500">
+                          {wt.diffStats.filesChanged} file{wt.diffStats.filesChanged !== 1 ? "s" : ""},{" "}
                           <span className="text-green-600">+{wt.diffStats.insertions}</span>
                           {" "}/{" "}
                           <span className="text-red-600">-{wt.diffStats.deletions}</span>
                         </span>
                       )}
+                      <button
+                        onClick={() => handleDelete(wt)}
+                        disabled={deleting === wt.path}
+                        className="ml-auto p-1 text-gray-300 hover:text-red-500 rounded hover:bg-red-50 disabled:opacity-50"
+                        title="Delete worktree"
+                      >
+                        <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <polyline points="3 6 5 6 21 6" />
+                          <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                        </svg>
+                      </button>
                     </div>
                     <div className="text-xs text-gray-400 font-mono">
                       {truncatePath(wt.path, 60)}
