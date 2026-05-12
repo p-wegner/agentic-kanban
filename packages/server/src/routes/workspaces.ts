@@ -250,12 +250,22 @@ export function createWorkspacesRoute(
     const id = c.req.param("id");
     // Get session IDs for this workspace
     const wsSessions = await database
-      .select({ id: sessions.id })
+      .select({ id: sessions.id, status: sessions.status })
       .from(sessions)
       .where(eq(sessions.workspaceId, id));
-    // Delete diff comments, session messages, then sessions, then workspace
+
+    // Kill any running agents before deleting sessions to prevent FK errors
+    // from in-flight broadcast callbacks trying to insert session_messages after deletion
+    if (getSessionManager && wsSessions.some(s => s.status === "running")) {
+      for (const s of wsSessions) {
+        if (s.status === "running") {
+          await getSessionManager().stopSession(s.id).catch(() => {});
+        }
+      }
+    }
+
+    // Delete diff comments, session messages (cascade via FK on delete), sessions, workspace
     await database.delete(diffComments).where(eq(diffComments.workspaceId, id));
-    // Delete session messages, then sessions, then workspace
     if (wsSessions.length > 0) {
       const sessionIds = wsSessions.map(s => s.id);
       await database.delete(sessionMessages).where(inArray(sessionMessages.sessionId, sessionIds));
