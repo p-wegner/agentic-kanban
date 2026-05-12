@@ -3,9 +3,9 @@
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Project Status
-This project is **Stage 11 complete** (Stages 0-11 done). Tech stack: TypeScript monorepo — Hono + Drizzle + React + MCP SDK. Progress tracked in `docs/state.md`.
+This project is **Stage 13 complete** (Stages 0-13 done). Tech stack: TypeScript monorepo — Hono + Drizzle + React + MCP SDK. Progress tracked in `docs/state.md`.
 
-All documented features have been visually verified (2026-05-03):
+All documented features have been visually verified (2026-05-12):
 - Board renders 3 active columns (Todo, In Progress, In Review) with collapsible "Completed" group for Done/Cancelled
 - Create issue: inline form with title, description, priority, Add/Cancel
 - Issue detail panel: slide-in with view/edit/delete, status dropdown, description placeholder, priority badge, status, workspaces, tags, timestamps, issue number
@@ -14,8 +14,9 @@ All documented features have been visually verified (2026-05-03):
 - Search/filter: real-time text search with highlighted matches, priority dropdown filter, keyboard shortcut `/` to focus, Escape to clear
 - Drag-and-drop: HTML5 DnD between columns (mouse-based, use `run-code` for `/` key on Windows/MSYS)
 - Workspace panel: slide-in with read-only repo info, "New Workspace" button (one-step: creates worktree + auto-launches agent with issue title/description as prompt)
+- Worktree overview: branch icon in header, slide-in panel listing all git worktrees with issue linking, diff stats, and status badges
 - Project switcher: dropdown in header when multiple projects registered
-- API routes: health, projects (with git info), preferences (active-project + settings), board aggregation, issues (CRUD), workspaces (CRUD + one-step create with worktree+launch + actions), tags (CRUD), sessions (WebSocket + output history)
+- API routes: health, projects (with git info + worktrees), preferences (active-project + settings), board aggregation, issues (CRUD), workspaces (CRUD + one-step create with worktree+launch + actions), tags (CRUD), sessions (WebSocket + output history)
 - Settings panel: gear icon in header, agent command/args, output parsing, mock agent toggle
 - Session history: inline session selector in workspace panel, click between past sessions without leaving workspace context
 - Chat-like agent interaction: persistent chat input with Send/Stop toggle, --resume support, auto-clear on exit, Ctrl+Enter to send
@@ -23,7 +24,7 @@ All documented features have been visually verified (2026-05-03):
 - Command palette: Ctrl+K searchable action list, keyboard navigation
 - Keyboard shortcut help: `?` overlay showing all shortcuts
 - Issue numbers: auto-incrementing #1, #2, #3 per project on cards and detail panel
-- Panel animations: slide-in transitions on detail/workspace/settings panels
+- Panel animations: slide-in transitions on detail/workspace/settings/worktree panels
 - Favicon: inline SVG kanban-board icon
 - MCP server: 8 tools via stdio JSON-RPC
 - CLI: `pnpm cli -- register <path>` to register a git repo as a project
