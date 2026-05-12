@@ -407,6 +407,21 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange }: W
     }
   }
 
+  async function handleDeleteWorkspace(wsId: string) {
+    if (!window.confirm("Delete this workspace? This removes the workspace record and all session data.")) return;
+    setActionLoading(true);
+    setError(null);
+    try {
+      await apiFetch(`/api/workspaces/${wsId}`, { method: "DELETE" });
+      await fetchWorkspaces();
+      onWorkspaceChange?.();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Delete failed");
+    } finally {
+      setActionLoading(false);
+    }
+  }
+
   return (
     <>
       <div className="fixed inset-0 bg-black/30 z-40" onClick={onClose} />
@@ -697,6 +712,26 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange }: W
                           className="text-sm bg-orange-600 text-white px-3 py-1.5 rounded hover:bg-orange-700 disabled:opacity-50 flex-1"
                         >
                           {ws.isDirect ? "Close" : "Merge"}
+                        </button>
+                        <button
+                          onClick={() => handleDeleteWorkspace(ws.id)}
+                          disabled={actionLoading}
+                          className="text-sm bg-red-600 text-white px-3 py-1.5 rounded hover:bg-red-700 disabled:opacity-50"
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    )}
+
+                    {/* Delete button for closed workspaces */}
+                    {!selectedHistoryId && ws.status === "closed" && (
+                      <div className="pt-2 border-t border-gray-200">
+                        <button
+                          onClick={() => handleDeleteWorkspace(ws.id)}
+                          disabled={actionLoading}
+                          className="text-sm bg-red-600 text-white px-3 py-1.5 rounded hover:bg-red-700 disabled:opacity-50 w-full"
+                        >
+                          Delete
                         </button>
                       </div>
                     )}
