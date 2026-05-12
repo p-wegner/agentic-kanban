@@ -2,6 +2,17 @@
 
 ## Current Stage: Stage 13 — Output Parser V2 + Responsive Layout (DONE)
 
+### Post-Stage 13 — Worktree Overview
+- [x] `getDiffShortstat()` in git.service.ts — lightweight diff stats via `git diff --shortstat`
+- [x] `GET /api/projects/:id/worktrees` — lists all git worktrees, cross-references with DB workspaces, computes diff stats
+- [x] Direct workspace matching: worktrees whose `workingDir` is inside the main checkout are linked
+- [x] `WorktreeOverview.tsx` — slide-in panel showing all worktrees with branch, path, issue link, diff stats, status badges
+- [x] Branch icon button in Layout header (between priority dropdown and settings gear)
+- [x] Issue click from worktree overview opens IssueDetailPanel and closes overview
+- [x] Command palette action "View Worktrees"
+- [x] Escape key closes worktree overview
+- [x] Visually verified 2026-05-12
+
 ### Stage 13 Checklist — Output Parser V2 + Responsive Layout
 - [x] Output parser: added ParsedThinkingEvent for Claude extended thinking blocks
 - [x] Output parser: parseLine returns event arrays (multi-block assistant messages handled correctly)
@@ -237,6 +248,7 @@ packages/
 | GET | /api/projects/:id/statuses | List statuses for a project |
 | POST | /api/projects/:id/statuses | Create a status |
 | GET | /api/projects/:id/board | Get board (statuses + nested issues) |
+| GET | /api/projects/:id/worktrees | List git worktrees with workspace links and diff stats |
 | GET | /api/issues?projectId= | List issues for a project |
 | POST | /api/issues | Create an issue |
 | PATCH | /api/issues/:id | Update an issue |
@@ -306,3 +318,4 @@ packages/
 | 2026-05-04 | Test coverage expansion | Added 38 unit tests (tags 13, preferences 10, issue-number 11) and 39 E2E tests (health 1, preferences 3, projects 7, tags 12, search 6, archive-columns 4, shortcuts 5, diff/merge 2). Refactored createTagsRoute to accept database parameter for testability. Fixed session history E2E tests for inline session selector UI. 66 unit tests + 99 E2E tests passing. |
 | 2026-05-04 | Stage 12 | Inline diff comments: new diff_comments table (migration 0007), CRUD API for workspace-scoped comments, DiffViewer restructured to parse per-file with filePath tracking, inline comment blocks with create/edit/delete in both unified and split views, comment count badge in header. Last "keep" feature from PRD now implemented. 66 unit tests + 99 E2E tests passing. |
 | 2026-05-07 | Stage 13 | Output parser V2 + responsive layout. Rewrote parser to handle multi-block messages (thinking, text, tool_use from same assistant message), tool_result from user messages with error state detection, thinking block rendering in TerminalView. Responsive layout: panels use w-[min(X,100vw)], columns flex-1, header flex-wrap. Smart hooks system. 76 unit tests + 100 E2E tests passing. |
+| 2026-05-12 | Worktree overview | New worktree overview panel: branch icon in header opens slide-in listing all git worktrees for the active project. Each worktree shows branch, path, diff stats (+N/-N files changed), and links to the kanban issue if a workspace exists. Direct workspaces matched via parent path comparison. API: GET /api/projects/:id/worktrees with getDiffShortstat() helper. Command palette action + Escape to close. |
