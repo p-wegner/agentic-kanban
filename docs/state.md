@@ -11,6 +11,8 @@
 - [x] Issue click from worktree overview opens IssueDetailPanel and closes overview
 - [x] Command palette action "View Worktrees"
 - [x] Escape key closes worktree overview
+- [x] Delete worktree with confirmation dialog (removes git worktree + cascade deletes workspace/sessions)
+- [x] DELETE /api/projects/:id/worktrees endpoint with path or workspaceId
 - [x] Visually verified 2026-05-12
 
 ### Stage 13 Checklist — Output Parser V2 + Responsive Layout
@@ -249,6 +251,7 @@ packages/
 | POST | /api/projects/:id/statuses | Create a status |
 | GET | /api/projects/:id/board | Get board (statuses + nested issues) |
 | GET | /api/projects/:id/worktrees | List git worktrees with workspace links and diff stats |
+| DELETE | /api/projects/:id/worktrees | Remove worktree (+ cascade delete workspace/sessions if linked) |
 | GET | /api/issues?projectId= | List issues for a project |
 | POST | /api/issues | Create an issue |
 | PATCH | /api/issues/:id | Update an issue |

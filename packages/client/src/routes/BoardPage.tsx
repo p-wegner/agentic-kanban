@@ -622,6 +622,7 @@ export function BoardPage() {
             }
             setShowWorktreeOverview(false);
           }}
+          onWorkspaceChange={() => refetchBoard()}
         />
       )}
       {showCommandPalette && (

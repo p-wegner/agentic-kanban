@@ -1,10 +1,10 @@
 import { Hono } from "hono";
 import { db } from "../db/index.js";
-import { projects, projectStatuses, issues, workspaces } from "@agentic-kanban/shared/schema";
-import { eq, inArray, sql } from "drizzle-orm";
+import { projects, projectStatuses, issues, workspaces, sessions, sessionMessages, diffComments } from "@agentic-kanban/shared/schema";
+import { eq, inArray, sql, and } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { detectRepoInfo } from "../services/git-info.service.js";
-import { listBranches, listWorktrees, getDiffShortstat } from "../services/git.service.js";
+import { listBranches, listWorktrees, getDiffShortstat, removeWorktree } from "../services/git.service.js";
 import type { Database } from "../db/index.js";
 import { sep } from "node:path";
 
@@ -198,6 +198,68 @@ export function createProjectsRoute(database: Database = db) {
     );
 
     return c.json(result);
+  });
+
+  // DELETE /api/projects/:id/worktrees — remove a worktree (and optionally its workspace)
+  router.delete("/:id/worktrees", async (c) => {
+    const projectId = c.req.param("id");
+    const body = await c.req.json<{ path?: string; workspaceId?: string }>();
+
+    if (!body.path && !body.workspaceId) {
+      return c.json({ error: "path or workspaceId is required" }, 400);
+    }
+
+    const projectRows = await database
+      .select({ repoPath: projects.repoPath })
+      .from(projects)
+      .where(eq(projects.id, projectId));
+    if (projectRows.length === 0) {
+      return c.json({ error: "Project not found" }, 404);
+    }
+
+    const { repoPath } = projectRows[0];
+    let removedPath = body.path;
+
+    // If workspaceId given, look up the workspace to find its workingDir
+    if (body.workspaceId) {
+      const wsRows = await database
+        .select({ id: workspaces.id, workingDir: workspaces.workingDir })
+        .from(workspaces)
+        .where(eq(workspaces.id, body.workspaceId))
+        .limit(1);
+
+      if (wsRows.length === 0) {
+        return c.json({ error: "Workspace not found" }, 404);
+      }
+
+      const ws = wsRows[0];
+      if (ws.workingDir) removedPath = ws.workingDir;
+
+      // Cascade delete: diff comments → session messages → sessions → workspace
+      const wsSessions = await database
+        .select({ id: sessions.id })
+        .from(sessions)
+        .where(eq(sessions.workspaceId, ws.id));
+
+      await database.delete(diffComments).where(eq(diffComments.workspaceId, ws.id));
+      if (wsSessions.length > 0) {
+        const sessionIds = wsSessions.map(s => s.id);
+        await database.delete(sessionMessages).where(inArray(sessionMessages.sessionId, sessionIds));
+      }
+      await database.delete(sessions).where(eq(sessions.workspaceId, ws.id));
+      await database.delete(workspaces).where(eq(workspaces.id, ws.id));
+    }
+
+    // Remove git worktree
+    if (removedPath) {
+      try {
+        await removeWorktree(repoPath, removedPath);
+      } catch {
+        // Best effort — worktree may already be removed
+      }
+    }
+
+    return c.json({ success: true });
   });
 
   // GET /api/projects/:id/board
