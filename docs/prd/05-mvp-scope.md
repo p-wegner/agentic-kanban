@@ -19,6 +19,7 @@ A local web application where you can:
 | Create/edit/delete issues | YES | Title, description, priority, status |
 | Drag-and-drop on board | YES | Basic DnD between columns |
 | Workspace creation | YES | Git worktree + branch |
+| Workspace deletion | YES | Delete with confirmation, cascade removes sessions/messages |
 | Claude Code execution | YES | Via Agent SDK or subprocess |
 | Diff viewer | YES | Basic unified diff |
 | MCP server | YES | At least get_context + list_issues |
