@@ -35,7 +35,13 @@ function createSessionManager(
       type: message.type,
       data: message.data ?? null,
       exitCode: message.exitCode != null ? String(message.exitCode) : null,
-    }).catch((err) => console.error("Failed to persist session message:", err));
+    }).catch((err: unknown) => {
+      // FK constraint failure means the session was already deleted (race with workspace cleanup) — ignore
+      const msg = err instanceof Error ? err.message : String(err);
+      if (!msg.includes("SQLITE_CONSTRAINT_FOREIGNKEY") && !msg.includes("FOREIGN KEY")) {
+        console.error("Failed to persist session message:", err);
+      }
+    });
 
     // Detect system/init events to capture claudeSessionId
     if (message.type === "stdout" && message.data) {
