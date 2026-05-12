@@ -60,11 +60,17 @@ Complete inventory of features discovered in the original vibe-kanban, organized
 - Branch naming conventions
 - **Priority: MUST**
 
-### F-WS-05: Session Forking
+### F-WS-05: Workspace Deletion
+- Delete workspace from WorkspacePanel with confirmation dialog
+- Cascade deletes sessions, session messages, and diff comments
+- Available for both active/idle and closed workspaces
+- **Priority: MUST**
+
+### F-WS-06: Session Forking
 - Fork an existing agent session
 - **Priority: LATER**
 
-### F-WS-06: Multi-Repo Workspaces
+### F-WS-07: Multi-Repo Workspaces
 - Add multiple repos to a workspace
 - Setup/cleanup scripts per repo
 - **Priority: SHOULD**

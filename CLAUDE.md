@@ -13,7 +13,7 @@ All documented features have been visually verified (2026-05-12):
 - Tags: CRUD via dropdown in detail panel, removable badges with colors, 4 seed tags (bug, feature, improvement, docs)
 - Search/filter: real-time text search with highlighted matches, priority dropdown filter, keyboard shortcut `/` to focus, Escape to clear
 - Drag-and-drop: HTML5 DnD between columns (mouse-based, use `run-code` for `/` key on Windows/MSYS)
-- Workspace panel: slide-in with read-only repo info, "New Workspace" button (one-step: creates worktree + auto-launches agent with issue title/description as prompt)
+- Workspace panel: slide-in with read-only repo info, "New Workspace" button (one-step: creates worktree + auto-launches agent with issue title/description as prompt), delete button with confirmation for active and closed workspaces
 - Worktree overview: branch icon in header, slide-in panel listing all git worktrees with issue linking, diff stats, and status badges
 - Project switcher: dropdown in header when multiple projects registered
 - API routes: health, projects (with git info + worktrees), preferences (active-project + settings), board aggregation, issues (CRUD), workspaces (CRUD + one-step create with worktree+launch + actions), tags (CRUD), sessions (WebSocket + output history)

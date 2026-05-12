@@ -2,7 +2,7 @@
 
 ## Current Stage: Stage 13 — Output Parser V2 + Responsive Layout (DONE)
 
-### Post-Stage 13 — Worktree Overview
+### Post-Stage 13 — Worktree Overview + Workspace Deletion
 - [x] `getDiffShortstat()` in git.service.ts — lightweight diff stats via `git diff --shortstat`
 - [x] `GET /api/projects/:id/worktrees` — lists all git worktrees, cross-references with DB workspaces, computes diff stats
 - [x] Direct workspace matching: worktrees whose `workingDir` is inside the main checkout are linked
@@ -13,6 +13,7 @@
 - [x] Escape key closes worktree overview
 - [x] Delete worktree with confirmation dialog (removes git worktree + cascade deletes workspace/sessions)
 - [x] DELETE /api/projects/:id/worktrees endpoint with path or workspaceId
+- [x] Workspace delete button in WorkspacePanel (red button with confirmation dialog, for both active/idle and closed workspaces)
 - [x] Visually verified 2026-05-12
 
 ### Stage 13 Checklist — Output Parser V2 + Responsive Layout
@@ -322,3 +323,4 @@ packages/
 | 2026-05-04 | Stage 12 | Inline diff comments: new diff_comments table (migration 0007), CRUD API for workspace-scoped comments, DiffViewer restructured to parse per-file with filePath tracking, inline comment blocks with create/edit/delete in both unified and split views, comment count badge in header. Last "keep" feature from PRD now implemented. 66 unit tests + 99 E2E tests passing. |
 | 2026-05-07 | Stage 13 | Output parser V2 + responsive layout. Rewrote parser to handle multi-block messages (thinking, text, tool_use from same assistant message), tool_result from user messages with error state detection, thinking block rendering in TerminalView. Responsive layout: panels use w-[min(X,100vw)], columns flex-1, header flex-wrap. Smart hooks system. 76 unit tests + 100 E2E tests passing. |
 | 2026-05-12 | Worktree overview | New worktree overview panel: branch icon in header opens slide-in listing all git worktrees for the active project. Each worktree shows branch, path, diff stats (+N/-N files changed), and links to the kanban issue if a workspace exists. Direct workspaces matched via parent path comparison. API: GET /api/projects/:id/worktrees with getDiffShortstat() helper. Command palette action + Escape to close. |
+| 2026-05-12 | Workspace deletion | Added delete button to WorkspacePanel for both active/idle and closed workspaces. Red button with confirmation dialog calls existing DELETE /api/workspaces/:id endpoint. Board and workspace list refresh after deletion. |
