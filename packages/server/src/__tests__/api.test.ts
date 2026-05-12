@@ -22,6 +22,7 @@ const MIGRATION_FILES = [
   "../../../shared/drizzle/0007_diff_comments.sql",
   "../../../shared/drizzle/0008_direct_workspace.sql",
   "../../../shared/drizzle/0009_requires_review.sql",
+  "../../../shared/drizzle/0010_session_messages_cascade.sql",
 ];
 
 function createTestApp() {
