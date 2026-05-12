@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { db } from "../db/index.js";
-import { workspaces, issues, projects, preferences, sessions, sessionMessages, diffComments } from "@agentic-kanban/shared/schema";
+import { workspaces, issues, projects, preferences, sessions, sessionMessages, diffComments, projectStatuses } from "@agentic-kanban/shared/schema";
 import { eq, inArray } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import * as gitService from "../services/git.service.js";
@@ -32,6 +32,7 @@ export function createWorkspacesRoute(
       return c.json({ error: "issueId is required; branch is required unless isDirect is true" }, 400);
     }
 
+    const requiresReview = body.requiresReview === true;
     const now = new Date().toISOString();
     const id = randomUUID();
     let sessionId: string | undefined;
@@ -103,10 +104,28 @@ export function createWorkspacesRoute(
         workingDir: worktreePath,
         baseBranch,
         isDirect,
+        requiresReview,
         status: "active",
         createdAt: now,
         updatedAt: now,
       });
+
+      // Auto-move issue to "In Progress" when workspace is created
+      try {
+        const statuses = await database
+          .select()
+          .from(projectStatuses)
+          .where(eq(projectStatuses.projectId, issue.projectId));
+        const inProgress = statuses.find(s => s.name === "In Progress");
+        if (inProgress) {
+          await database
+            .update(issues)
+            .set({ statusId: inProgress.id, updatedAt: now })
+            .where(eq(issues.id, body.issueId));
+        }
+      } catch (err) {
+        console.warn("[workspaces] Failed to move issue to In Progress:", err);
+      }
 
       // Auto-launch agent if sessionManager is available
       if (getSessionManager) {
@@ -149,6 +168,7 @@ export function createWorkspacesRoute(
           workingDir: worktreePath,
           baseBranch,
           isDirect,
+          requiresReview,
           status: "active",
           createdAt: now,
           updatedAt: now,
