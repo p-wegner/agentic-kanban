@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pnpm --filter @agentic-kanban/server test)",
+      "Bash(pnpm --filter @agentic-kanban/server exec tsc --noEmit)",
+      "Bash(git add *)"
+    ]
+  }
+}
