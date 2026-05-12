@@ -1,4 +1,35 @@
 import { spawn, type ChildProcess } from "node:child_process";
+import { writeFileSync, existsSync } from "node:fs";
+import { resolve, dirname } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { tmpdir } from "node:os";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+
+// Resolve MCP server entry point and tsx loader (relative to this file)
+const MCP_SERVER_PATH = resolve(__dirname, "../../../mcp-server/src/index.ts");
+const TSX_LOADER = resolve(__dirname, "../../node_modules/tsx/dist/loader.mjs");
+const TSX_URL = pathToFileURL(TSX_LOADER).href;
+
+// Write MCP config JSON once and reuse the path
+let mcpConfigPath: string | null = null;
+
+function getMcpConfigPath(): string {
+  if (mcpConfigPath && existsSync(mcpConfigPath)) return mcpConfigPath;
+  const config = {
+    mcpServers: {
+      "agentic-kanban": {
+        command: "node",
+        args: ["--import", TSX_URL, MCP_SERVER_PATH],
+      },
+    },
+  };
+  const path = resolve(tmpdir(), "agentic-kanban-mcp-config.json");
+  writeFileSync(path, JSON.stringify(config, null, 2), "utf-8");
+  mcpConfigPath = path;
+  console.log(`[agent] MCP config written to ${path}`);
+  return path;
+}
 
 export interface AgentOutputEvent {
   type: "stdout" | "stderr" | "exit";
@@ -39,6 +70,13 @@ export function launch(
   } else {
     // Real claude binary (default or custom name): always use stream-json + stdin
     args = ["--output-format", "stream-json", "--verbose"];
+    // Pass MCP config so the agent can use agentic-kanban tools
+    try {
+      const configPath = getMcpConfigPath();
+      args.push("--mcp-config", configPath);
+    } catch (err) {
+      console.warn(`[agent] Failed to generate MCP config: ${err}`);
+    }
     if (agentArgs) {
       args.push(...splitArgs(agentArgs));
     }
