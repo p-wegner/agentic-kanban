@@ -595,6 +595,11 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                   <p className="text-xs text-gray-500 truncate">{ws.workingDir}</p>
                 )}
 
+                <div className="flex gap-3 text-xs text-gray-400">
+                  <span>Created {formatRelativeTime(ws.createdAt)}</span>
+                  {ws.closedAt && <span>Closed {formatRelativeTime(ws.closedAt)}</span>}
+                </div>
+
                 {isSelected && (
                   <div className="space-y-2 pt-2 border-t border-gray-200" onClick={(e) => e.stopPropagation()}>
                     {/* Session selector — shown when there are completed sessions and workspace is idle */}
