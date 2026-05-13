@@ -11,6 +11,7 @@ interface Settings {
   agent_args?: string;
   output_parser?: string;
   mock_agent?: string;
+  skip_permissions?: string;
 }
 
 const DEFAULT_SETTINGS: Settings = {
@@ -18,6 +19,7 @@ const DEFAULT_SETTINGS: Settings = {
   agent_args: "",
   output_parser: "true",
   mock_agent: "false",
+  skip_permissions: "false",
 };
 
 export function SettingsPanel({ onClose }: SettingsPanelProps) {
@@ -134,6 +136,25 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                 <p className="text-xs text-gray-500 mt-1">
                   When enabled, the terminal view parses Claude&apos;s JSON output
                   and displays structured info (model, tools, cost, etc.).
+                </p>
+              </div>
+
+              {/* Skip Permissions */}
+              <div>
+                <label className="flex items-center gap-2 text-sm font-medium text-gray-700 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={settings.skip_permissions === "true"}
+                    onChange={(e) =>
+                      setSettings((s) => ({ ...s, skip_permissions: e.target.checked ? "true" : "false" }))
+                    }
+                    className="rounded border-gray-300"
+                  />
+                  Skip Permissions (<code className="text-xs">--dangerously-skip-permissions</code>)
+                </label>
+                <p className="text-xs text-gray-500 mt-1">
+                  Bypass all permission checks. Recommended only for sandboxes
+                  with no internet access.
                 </p>
               </div>
 

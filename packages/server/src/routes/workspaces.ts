@@ -94,7 +94,11 @@ export function createWorkspacesRoute(
       } else {
         agentCommand = prefMap.get("agent_command") || undefined;
       }
-      const agentArgs = prefMap.get("agent_args") || undefined;
+      const skipPerms = prefMap.get("skip_permissions") === "true";
+      const baseArgs = prefMap.get("agent_args") || "";
+      const agentArgs = skipPerms
+        ? (baseArgs ? baseArgs + " --dangerously-skip-permissions" : "--dangerously-skip-permissions")
+        : (baseArgs || undefined);
 
       // Insert DB record with workingDir and baseBranch
       await database.insert(workspaces).values({
