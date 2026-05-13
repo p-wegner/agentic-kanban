@@ -28,6 +28,7 @@ export function createIssuesRoute(database: Database = db, options?: { boardEven
         projectId: issues.projectId,
         createdAt: issues.createdAt,
         updatedAt: issues.updatedAt,
+        statusChangedAt: issues.statusChangedAt,
         statusName: projectStatuses.name,
       })
       .from(issues)
@@ -80,7 +81,7 @@ export function createIssuesRoute(database: Database = db, options?: { boardEven
     if (body.title !== undefined) updates.title = body.title;
     if (body.description !== undefined) updates.description = body.description;
     if (body.priority !== undefined) updates.priority = body.priority;
-    if (body.statusId !== undefined) updates.statusId = body.statusId;
+    if (body.statusId !== undefined) { updates.statusId = body.statusId; updates.statusChangedAt = now; }
     if (body.sortOrder !== undefined) updates.sortOrder = body.sortOrder;
 
     await database.update(issues).set(updates).where(eq(issues.id, id));

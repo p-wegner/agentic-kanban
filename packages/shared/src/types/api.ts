@@ -60,6 +60,7 @@ export interface IssueWithStatus {
   projectId: string;
   createdAt: string;
   updatedAt: string;
+  statusChangedAt: string | null;
   statusName: string;
   workspaceSummary?: WorkspaceSummary;
 }
@@ -96,6 +97,7 @@ export interface WorkspaceResponse {
   sessionId?: string;
   createdAt: string;
   updatedAt: string;
+  closedAt?: string | null;
 }
 
 export interface WorkspaceWithIssue extends WorkspaceResponse {

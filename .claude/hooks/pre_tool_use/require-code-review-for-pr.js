@@ -62,6 +62,8 @@ async function main() {
   }
 
   // Block — no review marker found
+  const safeBranch = branch.replace(/[^a-zA-Z0-9._-]/g, "_");
+  const markerRel = `.claude/.pr-review-done-${safeBranch}`;
   process.stdout.write(
     JSON.stringify({
       decision: "block",
@@ -73,7 +75,9 @@ async function main() {
         "  /review          (general code review)",
         "  /security-review  (security-focused review)",
         "",
-        "After the review is complete, the PR gate will open automatically.",
+        "After the review is complete, create the marker file to unblock PR creation:",
+        "",
+        `  Bash: echo done > ${markerRel}`,
       ].join("\n"),
     }) + "\n"
   );

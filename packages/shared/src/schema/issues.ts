@@ -14,6 +14,7 @@ export const issues = sqliteTable("issues", {
   projectId: text("project_id").notNull().references(() => projects.id),
   createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
   updatedAt: text("updated_at").notNull().$defaultFn(() => new Date().toISOString()),
+  statusChangedAt: text("status_changed_at"),
 });
 
 export const issuesRelations = relations(issues, ({ one, many }) => ({

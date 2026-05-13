@@ -13,6 +13,7 @@ export const workspaces = sqliteTable("workspaces", {
   status: text("status").notNull().default("active"),
   createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
   updatedAt: text("updated_at").notNull().$defaultFn(() => new Date().toISOString()),
+  closedAt: text("closed_at"),
 });
 
 export const workspacesRelations = relations(workspaces, ({ one, many }) => ({

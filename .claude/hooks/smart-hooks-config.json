@@ -1,7 +1,16 @@
 {
   "version": "1.0.0",
   "hooks": {
-    "PostToolUse": [],
+    "PostToolUse": [
+      {
+        "name": "TypeScript check",
+        "command": "npx tsc --noEmit --pretty",
+        "filePatterns": ["packages/**/*.ts"],
+        "enabled": true,
+        "blocking": false,
+        "timeout": 30
+      }
+    ],
     "Stop": [
       {
         "name": "Vitest (server)",

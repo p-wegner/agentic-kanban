@@ -292,6 +292,7 @@ export function createProjectsRoute(database: Database = db) {
         projectId: issues.projectId,
         createdAt: issues.createdAt,
         updatedAt: issues.updatedAt,
+        statusChangedAt: issues.statusChangedAt,
         statusName: projectStatuses.name,
       })
       .from(issues)

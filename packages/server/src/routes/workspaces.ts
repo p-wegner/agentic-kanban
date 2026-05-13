@@ -124,7 +124,7 @@ export function createWorkspacesRoute(
         if (inProgress) {
           await database
             .update(issues)
-            .set({ statusId: inProgress.id, updatedAt: now })
+            .set({ statusId: inProgress.id, updatedAt: now, statusChangedAt: now })
             .where(eq(issues.id, body.issueId));
         }
       } catch (err) {
