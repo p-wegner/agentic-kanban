@@ -10,6 +10,8 @@ import { registerUpdateIssue } from "./tools/update-issue.js";
 import { registerListWorkspaces } from "./tools/list-workspaces.js";
 import { registerStartWorkspace } from "./tools/start-workspace.js";
 import { registerGetWorkspaceDiff } from "./tools/get-workspace-diff.js";
+import { registerMergeWorkspace } from "./tools/merge-workspace.js";
+import { registerCloseWorkspace } from "./tools/close-workspace.js";
 
 const server = new McpServer({
   name: "agentic-kanban",
@@ -25,6 +27,8 @@ registerUpdateIssue(server);
 registerListWorkspaces(server);
 registerStartWorkspace(server);
 registerGetWorkspaceDiff(server);
+registerMergeWorkspace(server);
+registerCloseWorkspace(server);
 
 async function main() {
   const transport = new StdioServerTransport();

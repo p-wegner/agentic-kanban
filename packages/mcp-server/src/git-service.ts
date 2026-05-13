@@ -90,3 +90,8 @@ export async function getCurrentBranch(repoPath: string): Promise<string> {
 export async function getWorkingTreeDiff(workdirPath: string): Promise<string> {
   return execGit(["diff", "HEAD"], workdirPath);
 }
+
+/** Merge a branch into the current HEAD of the repo. */
+export async function mergeBranch(repoPath: string, branch: string): Promise<string> {
+  return execGit(["merge", "--no-ff", branch, "-m", `Merge branch '${branch}'`], repoPath);
+}

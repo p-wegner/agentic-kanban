@@ -5,7 +5,8 @@
       "Bash(pnpm --filter @agentic-kanban/server exec tsc --noEmit)",
       "Bash(git add *)",
       "Bash(pnpm dev *)",
-      "Skill(playwright-cli)"
+      "Skill(playwright-cli)",
+      "WebSearch"
     ]
   }
 }

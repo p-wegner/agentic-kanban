@@ -3,7 +3,7 @@
     "agentic-kanban": {
       "command": "pnpm",
       "args": ["--filter", "@agentic-kanban/mcp-server", "dev"],
-      "cwd": "F:\\projects\\agentic_kanban"
+      "cwd": "C:/andrena/agentic-kanban"
     }
   },
   "hooks": {
@@ -13,7 +13,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node C:\\andrena\\agentic-kanban\\.claude\\hooks\\pre_tool_use\\require-code-review-for-pr.js"
+            "command": "node C:/andrena/agentic-kanban/.claude/hooks/pre_tool_use/require-code-review-for-pr.js"
           }
         ]
       }
@@ -24,7 +24,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node C:\\andrena\\agentic-kanban\\.claude\\hooks\\smart-hooks-runner.js PostToolUse"
+            "command": "node C:/andrena/agentic-kanban/.claude/hooks/smart-hooks-runner.js PostToolUse"
           }
         ]
       },
@@ -33,7 +33,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node C:\\andrena\\agentic-kanban\\.claude\\hooks\\post_tool_use\\monitor-pr-pipeline.js"
+            "command": "node C:/andrena/agentic-kanban/.claude/hooks/post_tool_use/monitor-pr-pipeline.js"
           }
         ]
       }
@@ -43,7 +43,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node C:\\andrena\\agentic-kanban\\.claude\\hooks\\smart-hooks-runner.js Stop"
+            "command": "node C:/andrena/agentic-kanban/.claude/hooks/smart-hooks-runner.js Stop"
           }
         ]
       }

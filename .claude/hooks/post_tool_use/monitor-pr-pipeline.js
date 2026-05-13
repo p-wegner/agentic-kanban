@@ -37,18 +37,17 @@ async function main() {
   // Create the review marker so the PR gate opens for future PRs on this branch
   process.stdout.write(
     JSON.stringify({
-      decision: "block",
+      decision: "allow",
       reason: [
-        "PR CREATED — MONITOR CI PIPELINE",
+        "PR CREATED — CONSIDER MONITORING CI",
         "",
         `PR #${prNum}: ${prUrl}`,
         "",
-        "Watch the CI checks and report results:",
+        "You may want to:",
+        `  1. Move the issue to "In Review" status (update_issue with statusName="In Review")`,
+        `  2. Watch CI checks: gh pr checks ${prNum} --watch`,
         "",
-        `  gh pr checks ${prNum} --watch`,
-        "",
-        "If checks fail, investigate and fix before stopping.",
-        "If checks pass, you may stop.",
+        "If checks fail, investigate and fix. If they pass, you may stop.",
       ].join("\n"),
     }) + "\n"
   );

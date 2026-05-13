@@ -258,7 +258,7 @@ export function createWorkspaceActionsRoute(
         const now = new Date().toISOString();
         await database
           .update(workspaces)
-          .set({ status: "closed", updatedAt: now })
+          .set({ status: "closed", closedAt: now, updatedAt: now })
           .where(eq(workspaces.id, id));
 
         // Auto-move issue to "Done"
@@ -268,7 +268,7 @@ export function createWorkspaceActionsRoute(
             const statuses = await database.select().from(projectStatuses).where(eq(projectStatuses.projectId, projectId));
             const doneStatus = statuses.find(s => s.name === "Done");
             if (doneStatus) {
-              await database.update(issues).set({ statusId: doneStatus.id, updatedAt: now }).where(eq(issues.id, workspace.issueId));
+              await database.update(issues).set({ statusId: doneStatus.id, updatedAt: now, statusChangedAt: now }).where(eq(issues.id, workspace.issueId));
             }
           }
         } catch (err) {
@@ -297,7 +297,7 @@ export function createWorkspaceActionsRoute(
       const now = new Date().toISOString();
       await database
         .update(workspaces)
-        .set({ status: "closed", workingDir: null, updatedAt: now })
+        .set({ status: "closed", workingDir: null, closedAt: now, updatedAt: now })
         .where(eq(workspaces.id, id));
 
       // Auto-move issue to "Done"
@@ -307,7 +307,7 @@ export function createWorkspaceActionsRoute(
           const statuses = await database.select().from(projectStatuses).where(eq(projectStatuses.projectId, projectId));
           const doneStatus = statuses.find(s => s.name === "Done");
           if (doneStatus) {
-            await database.update(issues).set({ statusId: doneStatus.id, updatedAt: now }).where(eq(issues.id, workspace.issueId));
+            await database.update(issues).set({ statusId: doneStatus.id, updatedAt: now, statusChangedAt: now }).where(eq(issues.id, workspace.issueId));
           }
         }
       } catch (err) {
