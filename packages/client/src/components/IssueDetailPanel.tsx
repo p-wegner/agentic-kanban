@@ -357,9 +357,12 @@ export function IssueDetailPanel({
 
           {/* Timestamps */}
           <div className="pt-2 border-t border-gray-100">
-            <div className="flex gap-4 text-xs text-gray-400">
+            <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-400">
               <span>Created {formatRelativeTime(issue.createdAt)}</span>
               <span>Updated {formatRelativeTime(issue.updatedAt)}</span>
+              {issue.statusChangedAt && (
+                <span>Moved to <span className="text-gray-500 font-medium">{issue.statusName}</span> {formatRelativeTime(issue.statusChangedAt)}</span>
+              )}
             </div>
           </div>
         </div>
