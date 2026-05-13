@@ -43,6 +43,7 @@ export function BoardPage() {
   const [error, setError] = useState<string | null>(null);
   const [mutating, setMutating] = useState(false);
   const [workspaceIssue, setWorkspaceIssue] = useState<IssueWithStatus | null>(null);
+  const [workspaceInitial, setWorkspaceInitial] = useState<{ workspaceId: string; sessionId: string } | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [priorityFilter, setPriorityFilter] = useState("");
   const [showSettings, setShowSettings] = useState(false);
@@ -178,7 +179,7 @@ export function BoardPage() {
             issueNumber: created.issueNumber,
             title: created.title,
           });
-          await apiFetch("/api/workspaces", {
+          const ws = await apiFetch<{ id: string; sessionId?: string }>("/api/workspaces", {
             method: "POST",
             body: JSON.stringify({
               issueId: created.id,
@@ -190,6 +191,9 @@ export function BoardPage() {
             const found = col.issues.find((i) => i.id === created.id);
             if (found) {
               setWorkspaceIssue(found);
+              if (ws.sessionId) {
+                setWorkspaceInitial({ workspaceId: ws.id, sessionId: ws.sessionId });
+              }
               break;
             }
           }
@@ -600,8 +604,10 @@ export function BoardPage() {
         <WorkspacePanel
           issue={workspaceIssue}
           project={activeProject ?? null}
-          onClose={() => setWorkspaceIssue(null)}
+          onClose={() => { setWorkspaceIssue(null); setWorkspaceInitial(null); }}
           onWorkspaceChange={() => refetchBoard()}
+          initialWorkspaceId={workspaceInitial?.workspaceId}
+          initialSessionId={workspaceInitial?.sessionId}
         />
       )}
       <ToastContainer />

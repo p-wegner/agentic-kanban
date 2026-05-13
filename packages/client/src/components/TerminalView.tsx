@@ -100,6 +100,9 @@ export function TerminalView({ messages, connectionState, parseOutput = true, pr
                 {event.kind === "raw" ? event.text : ""}
               </div>
             ))}
+        {displayEvents.length === 0 && connectionState === "connecting" && (
+          <span className="text-gray-500 animate-pulse">Starting agent...</span>
+        )}
         {displayEvents.length === 0 && connectionState === "open" && (
           <span className="text-gray-500">Waiting for output...</span>
         )}

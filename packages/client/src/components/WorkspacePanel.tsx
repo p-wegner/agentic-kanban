@@ -36,6 +36,8 @@ interface WorkspacePanelProps {
   project: Project | null;
   onClose: () => void;
   onWorkspaceChange?: () => void;
+  initialWorkspaceId?: string;
+  initialSessionId?: string;
 }
 
 const STATUS_COLORS: Record<string, string> = {
@@ -76,12 +78,12 @@ function formatDuration(start: string, end: string | null): string {
 
 import { suggestBranchName, sanitizeBranchName } from "../lib/branch.js";
 
-export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange }: WorkspacePanelProps) {
+export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, initialWorkspaceId, initialSessionId }: WorkspacePanelProps) {
   const [workspaces, setWorkspaces] = useState<WorkspaceResponse[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
-  const [selectedWorkspace, setSelectedWorkspace] = useState<string | null>(null);
-  const [activeSession, setActiveSession] = useState<string | null>(null);
+  const [selectedWorkspace, setSelectedWorkspace] = useState<string | null>(initialWorkspaceId ?? null);
+  const [activeSession, setActiveSession] = useState<string | null>(initialSessionId ?? null);
   const [diff, setDiff] = useState<DiffResponse | null>(null);
   const [diffComments, setDiffComments] = useState<DiffComment[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -96,7 +98,9 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange }: W
   const [lastSessionPerWorkspace, setLastSessionPerWorkspace] = useState<Record<string, string>>({});
   // Track messages from completed sessions so TerminalView stays visible after exit
   const [completedMessages, setCompletedMessages] = useState<AgentOutputMessage[]>([]);
-  const [lastPrompt, setLastPrompt] = useState<string>("");
+  const [lastPrompt, setLastPrompt] = useState<string>(
+    initialSessionId ? `${issue.title}${issue.description ? `\n\n${issue.description}` : ""}` : ""
+  );
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Create form
