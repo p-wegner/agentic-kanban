@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { AgentOutputMessage } from "@agentic-kanban/shared";
 import { ClaudeOutputParser, type DisplayEvent } from "../lib/claude-output-parser.js";
 
@@ -7,9 +7,12 @@ interface TerminalViewProps {
   connectionState: "connecting" | "open" | "closed" | "error";
   parseOutput?: boolean;
   prompt?: string;
+  title?: string;
+  footer?: ReactNode;
 }
 
-export function TerminalView({ messages, connectionState, parseOutput = true, prompt }: TerminalViewProps) {
+export function TerminalView({ messages, connectionState, parseOutput = true, prompt, title, footer }: TerminalViewProps) {
+  const [isMaximized, setIsMaximized] = useState(false);
   const preRef = useRef<HTMLPreElement>(null);
   const parserRef = useRef(new ClaudeOutputParser());
   const [displayEvents, setDisplayEvents] = useState<DisplayEvent[]>([]);
@@ -58,6 +61,19 @@ export function TerminalView({ messages, connectionState, parseOutput = true, pr
     }
   }, [displayEvents]);
 
+  useEffect(() => {
+    if (!isMaximized) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        setIsMaximized(false);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown, true);
+    return () => window.removeEventListener("keydown", handleKeyDown, true);
+  }, [isMaximized]);
+
   const statusColors: Record<string, string> = {
     connecting: "bg-yellow-400",
     open: "bg-green-400",
@@ -74,40 +90,88 @@ export function TerminalView({ messages, connectionState, parseOutput = true, pr
 
   const isParsed = parseOutput && displayEvents.some((e) => e.kind !== "raw");
 
-  return (
-    <div className="flex flex-col h-64 border border-gray-300 rounded bg-gray-900">
-      <div className="flex items-center gap-2 px-3 py-1.5 bg-gray-800 border-b border-gray-700">
-        <span className={`w-2 h-2 rounded-full ${statusColors[connectionState]}`} />
-        <span className="text-xs text-gray-300">{statusLabels[connectionState]}</span>
-        {isParsed && (
-          <span className="text-xs text-blue-400 ml-auto">stream-json</span>
-        )}
+  const toggleMaximize = () => setIsMaximized((v) => !v);
+
+  const content = (
+    <>
+      {prompt && (
+        <div className="mb-2 pb-2 border-b border-gray-700">
+          <span className="text-blue-400">&gt; </span>
+          <span className="text-gray-200">{prompt}</span>
+        </div>
+      )}
+      {isParsed
+        ? displayEvents.map((event, i) => renderParsedEvent(event, i))
+        : displayEvents.map((event, i) => (
+            <div key={i} className={event.kind === "raw" && messages[i]?.type === "stderr" ? "text-red-400" : ""}>
+              {event.kind === "raw" ? event.text : ""}
+            </div>
+          ))}
+      {displayEvents.length === 0 && connectionState === "connecting" && (
+        <span className="text-gray-500 animate-pulse">Starting agent...</span>
+      )}
+      {displayEvents.length === 0 && connectionState === "open" && (
+        <span className="text-gray-500">Waiting for output...</span>
+      )}
+    </>
+  );
+
+  if (isMaximized) {
+    return (
+      <div className="fixed inset-0 z-[55] bg-gray-950 flex flex-col">
+        <div className="flex items-center gap-2 px-3 py-2 bg-gray-900 border-b border-gray-700">
+          <span className={`w-2 h-2 rounded-full ${statusColors[connectionState]}`} />
+          <span className="text-sm text-gray-300">{title ?? "Agent Output"}</span>
+          {isParsed && <span className="text-xs text-blue-400">stream-json</span>}
+          <button
+            onClick={toggleMaximize}
+            className="ml-auto p-1 text-gray-400 hover:text-white rounded hover:bg-gray-700"
+            title="Restore (Esc)"
+          >
+            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3" />
+            </svg>
+          </button>
+        </div>
+        <pre
+          ref={preRef}
+          className="flex-1 overflow-auto p-4 text-xs text-green-400 font-mono whitespace-pre-wrap"
+        >
+          {content}
+        </pre>
+        {footer && <div className="border-t border-gray-700 p-2">{footer}</div>}
       </div>
-      <pre
-        ref={preRef}
-        className="flex-1 overflow-auto p-3 text-xs text-green-400 font-mono whitespace-pre-wrap"
-      >
-        {prompt && (
-          <div className="mb-2 pb-2 border-b border-gray-700">
-            <span className="text-blue-400">&gt; </span>
-            <span className="text-gray-200">{prompt}</span>
-          </div>
-        )}
-        {isParsed
-          ? displayEvents.map((event, i) => renderParsedEvent(event, i))
-          : displayEvents.map((event, i) => (
-              <div key={i} className={event.kind === "raw" && messages[i]?.type === "stderr" ? "text-red-400" : ""}>
-                {event.kind === "raw" ? event.text : ""}
-              </div>
-            ))}
-        {displayEvents.length === 0 && connectionState === "connecting" && (
-          <span className="text-gray-500 animate-pulse">Starting agent...</span>
-        )}
-        {displayEvents.length === 0 && connectionState === "open" && (
-          <span className="text-gray-500">Waiting for output...</span>
-        )}
-      </pre>
-    </div>
+    );
+  }
+
+  return (
+    <>
+      <div className="flex flex-col h-64 border border-gray-300 rounded bg-gray-900">
+        <div className="flex items-center gap-2 px-3 py-1.5 bg-gray-800 border-b border-gray-700">
+          <span className={`w-2 h-2 rounded-full ${statusColors[connectionState]}`} />
+          <span className="text-xs text-gray-300">{statusLabels[connectionState]}</span>
+          {isParsed && (
+            <span className="text-xs text-blue-400 ml-auto">stream-json</span>
+          )}
+          <button
+            onClick={toggleMaximize}
+            className={`${isParsed ? "" : "ml-auto"} p-0.5 text-gray-400 hover:text-white rounded hover:bg-gray-700`}
+            title="Maximize"
+          >
+            <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3" />
+            </svg>
+          </button>
+        </div>
+        <pre
+          ref={preRef}
+          className="flex-1 overflow-auto p-3 text-xs text-green-400 font-mono whitespace-pre-wrap"
+        >
+          {content}
+        </pre>
+      </div>
+      {footer}
+    </>
   );
 }
 

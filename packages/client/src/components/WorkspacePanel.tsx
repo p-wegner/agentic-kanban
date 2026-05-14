@@ -690,6 +690,48 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                           connectionState={selectedHistoryId ? "closed" : (activeSession ? wsState : "closed")}
                           parseOutput={prefs.output_parser !== "false"}
                           prompt={selectedHistoryId ? undefined : lastPrompt}
+                          title={issue.title}
+                          footer={!selectedHistoryId ? (
+                            <div className="flex gap-2">
+                              <textarea
+                                ref={textareaRef}
+                                value={prompt}
+                                onChange={(e) => setPrompt(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter" && e.ctrlKey) {
+                                    e.preventDefault();
+                                    if (isRunning) {
+                                      handleStop(ws.id);
+                                    } else if (prompt.trim()) {
+                                      handleLaunch(ws.id);
+                                    }
+                                  }
+                                }}
+                                placeholder={isRunning ? "Agent is running..." : "Message Claude Code..."}
+                                rows={2}
+                                disabled={isRunning}
+                                className="flex-1 text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none disabled:bg-gray-50 disabled:text-gray-400"
+                                onClick={(e) => e.stopPropagation()}
+                              />
+                              {isRunning ? (
+                                <button
+                                  onClick={() => handleStop(ws.id)}
+                                  disabled={actionLoading}
+                                  className="text-sm bg-red-600 text-white px-3 py-1.5 rounded hover:bg-red-700 disabled:opacity-50 self-end"
+                                >
+                                  Stop
+                                </button>
+                              ) : (
+                                <button
+                                  onClick={() => handleLaunch(ws.id)}
+                                  disabled={actionLoading || !prompt.trim()}
+                                  className="text-sm bg-blue-600 text-white px-3 py-1.5 rounded hover:bg-blue-700 disabled:opacity-50 self-end"
+                                >
+                                  Send
+                                </button>
+                              )}
+                            </div>
+                          ) : undefined}
                         />
                       ) : null
                     )}
@@ -704,8 +746,8 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                       </button>
                     )}
 
-                    {/* Chat input — visible when not viewing history */}
-                    {!selectedHistoryId && ws.workingDir && ws.status !== "closed" && (
+                    {/* Chat input — only when TerminalView is not shown */}
+                    {!selectedHistoryId && ws.workingDir && ws.status !== "closed" && !(selectedHistoryId ? historyMessages : (activeSession || completedMessages.length > 0)) && (
                       <div className="flex gap-2">
                         <textarea
                           ref={textareaRef}
