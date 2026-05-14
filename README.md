@@ -39,6 +39,8 @@ pnpm dev             # start server (port 3001) + client (port 5173)
 
 Open http://localhost:5173 — the board loads with 3 active columns for the registered project.
 
+For detailed installation instructions including prerequisites, see [INSTALL.md](INSTALL.md).
+
 ### Reset to Clean State
 
 Stop the dev server first, then:
