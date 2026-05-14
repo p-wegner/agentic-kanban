@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@agentic-kanban/shared": "workspace:*",
+    "@tauri-apps/plugin-notification": "^2",
     "react": "^19.1.0",
     "react-dom": "^19.1.0"
   },
