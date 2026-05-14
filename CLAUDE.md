@@ -3,7 +3,7 @@
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Project Status
-This project is **Stage 13 complete** (Stages 0-13 done). Tech stack: TypeScript monorepo — Hono + Drizzle + React + MCP SDK. Progress tracked in `docs/state.md`.
+This project is **Stage 13 complete + Tauri desktop** (Stages 0-13 done). Tech stack: TypeScript monorepo — Hono + Drizzle + React + MCP SDK + Tauri v2. Progress tracked in `docs/state.md`.
 
 All documented features have been visually verified (2026-05-12):
 - Board renders 3 active columns (Todo, In Progress, In Review) with collapsible "Completed" group for Done/Cancelled
@@ -28,6 +28,7 @@ All documented features have been visually verified (2026-05-12):
 - Favicon: inline SVG kanban-board icon
 - MCP server: 8 tools via stdio JSON-RPC
 - CLI: `pnpm cli -- register <path>` to register a git repo as a project
+- Desktop app: Tauri v2 native window with system tray (Show/Quit), minimize-to-tray on close, OS notifications on session_completed/workspace_merged events
 
 ## What This Is
 Cleanroom reimplementation of [vibe-kanban](https://github.com/BloopAI/vibe-kanban) — a kanban board for managing AI-driven coding tasks. Personal use only, single user, local-first. The original (being sunset) is 34 Rust crates; we're building a focused alternative.
@@ -100,6 +101,7 @@ Every feature that has a UI component must be visually verified using the `playw
 
 ## Monorepo Commands
 - `pnpm dev` — start server (port 3001) + client (port 5173) concurrently
+- `pnpm dev:desktop` — start server + client + Tauri native window (requires MSVC C++ Build Tools + Rust)
 - `pnpm --filter @agentic-kanban/server test` — Vitest unit tests (28 tests)
 - `pnpm test:e2e` — Playwright E2E tests (60 tests)
 - `pnpm --filter @agentic-kanban/mcp-server dev` — run MCP server for testing
