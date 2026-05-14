@@ -1,8 +1,8 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { writeFileSync, existsSync } from "node:fs";
-import { resolve, dirname } from "node:path";
+import { resolve, dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { tmpdir } from "node:os";
+import { tmpdir, homedir } from "node:os";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -82,7 +82,10 @@ export function launch(
       args.push(...splitArgs(agentArgs));
     }
     if (claudeProfile) {
-      args.push("--profile", claudeProfile);
+      const settingsPath = join(homedir(), ".claude", `settings_${claudeProfile}.json`);
+      if (existsSync(settingsPath)) {
+        args.push("--settings", settingsPath);
+      }
     }
     if (claudeSessionId) {
       args.push("--resume", claudeSessionId);
