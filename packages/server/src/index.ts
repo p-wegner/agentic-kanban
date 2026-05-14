@@ -72,12 +72,8 @@ async function runWorkflowOnExit(workspaceId: string, sessionId: string, exitCod
       return;
     }
 
-    // Main agent session completed
-    if (!workspace.requiresReview) {
-      // No review needed — auto-merge and move to Done
-      console.log(`[workflow] agent session ${sessionId} completed, no review required — auto-merging`);
-      await autoMerge(workspace, projectId, issueId, findStatus("Done")?.id ?? null, now);
-    } else {
+    // Main agent session completed — user merges explicitly from the UI
+    if (workspace.requiresReview) {
       // Review required — move to "In Review" and launch automated review agent
       console.log(`[workflow] agent session ${sessionId} completed, review required — moving to In Review`);
       const inReview = findStatus("In Review");
