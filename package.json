@@ -19,7 +19,8 @@
     "db:migrate": "pnpm --filter server db:migrate",
     "db:seed": "pnpm --filter server db:seed",
     "db:reset": "pnpm --filter server db:reset",
-    "db:setup": "pnpm db:migrate && pnpm db:seed && pnpm cli -- register ."
+    "db:setup": "pnpm db:migrate && pnpm db:seed && pnpm cli -- register .",
+    "dev:desktop": "concurrently \"pnpm --filter server dev\" \"pnpm --filter client dev\" \"pnpm --filter @agentic-kanban/desktop dev\""
   },
   "devDependencies": {
     "concurrently": "^9.1.2",

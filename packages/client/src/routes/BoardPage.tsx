@@ -14,6 +14,7 @@ import { CommandPalette } from "../components/CommandPalette.js";
 import { ShortcutHelp } from "../components/ShortcutHelp.js";
 import { apiFetch } from "../lib/api.js";
 import { useBoardEvents } from "../lib/useBoardEvents.js";
+import { sendDesktopNotification } from "../lib/desktop.js";
 import { registerAction } from "../lib/actions.js";
 import type {
   CreateIssueRequest,
@@ -90,6 +91,12 @@ export function BoardPage() {
   // Real-time board updates via WebSocket (debounced while create form is open)
   useBoardEvents(activeProjectId, useCallback((reason: string) => {
     console.log(`[board-events] board changed: ${reason}`);
+    // Desktop notification for agent events
+    if (reason === "session_completed") {
+      sendDesktopNotification("Agentic Kanban", "Agent session completed");
+    } else if (reason === "workspace_merged") {
+      sendDesktopNotification("Agentic Kanban", "Workspace merged successfully");
+    }
     if (creatingInColumnId) {
       // Don't refresh while create form is open — batch the update
       pendingBoardRefreshRef.current = true;
