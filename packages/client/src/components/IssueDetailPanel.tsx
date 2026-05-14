@@ -14,7 +14,7 @@ interface IssueDetailPanelProps {
   onUpdate: (id: string, data: UpdateIssueRequest) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
   onClose: () => void;
-  onManageWorkspaces: (issue: IssueWithStatus) => void;
+  onManageWorkspaces: (issue: IssueWithStatus, workspaceId?: string) => void;
   onIssueUpdate: (issue: IssueWithStatus) => void;
 }
 
@@ -281,17 +281,36 @@ export function IssueDetailPanel({
               <label className="text-xs font-medium text-gray-600 block mb-1">
                 Workspaces
               </label>
-              <div className="flex items-center gap-2">
-                <span className="text-sm text-gray-900">
-                  {workspaceCount} workspace{workspaceCount !== 1 ? "s" : ""}
-                </span>
+              {issue.workspaceSummary?.main ? (
+                <button
+                  onClick={() => onManageWorkspaces(issue, issue.workspaceSummary!.main!.id)}
+                  className="w-full flex items-center gap-2 p-2 rounded border border-gray-200 hover:border-blue-300 hover:bg-blue-50 transition-colors text-left"
+                >
+                  <span className={`inline-block w-2 h-2 rounded-full shrink-0 ${
+                    issue.workspaceSummary.main.status === "active" ? "bg-green-500" :
+                    issue.workspaceSummary.main.status === "idle" ? "bg-amber-500" :
+                    "bg-gray-400"
+                  }`} />
+                  <span className="text-sm font-mono text-gray-700 truncate">{issue.workspaceSummary.main.branch}</span>
+                  <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${
+                    issue.workspaceSummary.main.status === "active" ? "bg-green-100 text-green-700" :
+                    issue.workspaceSummary.main.status === "idle" ? "bg-amber-100 text-amber-700" :
+                    "bg-gray-100 text-gray-500"
+                  }`}>
+                    {issue.workspaceSummary.main.status}
+                  </span>
+                  {issue.workspaceSummary!.total > 1 && (
+                    <span className="text-xs text-gray-400 ml-auto">+{issue.workspaceSummary!.total - 1}</span>
+                  )}
+                </button>
+              ) : (
                 <button
                   onClick={() => onManageWorkspaces(issue)}
-                  className="text-xs text-blue-600 hover:text-blue-700"
+                  className="text-sm text-blue-600 hover:text-blue-700"
                 >
                   {workspaceCount === 0 ? "New Workspace" : "View Workspaces"}
                 </button>
-              </div>
+              )}
             </div>
           )}
 

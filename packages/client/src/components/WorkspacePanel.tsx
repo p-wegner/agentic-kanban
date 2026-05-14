@@ -38,6 +38,7 @@ interface WorkspacePanelProps {
   onWorkspaceChange?: () => void;
   initialWorkspaceId?: string;
   initialSessionId?: string;
+  autoSelectId?: string;
 }
 
 const STATUS_COLORS: Record<string, string> = {
@@ -78,12 +79,12 @@ function formatDuration(start: string, end: string | null): string {
 
 import { suggestBranchName, sanitizeBranchName } from "../lib/branch.js";
 
-export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, initialWorkspaceId, initialSessionId }: WorkspacePanelProps) {
+export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, initialWorkspaceId, initialSessionId, autoSelectId }: WorkspacePanelProps) {
   const [workspaces, setWorkspaces] = useState<WorkspaceResponse[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
   const [selectedWorkspace, setSelectedWorkspace] = useState<string | null>(initialWorkspaceId ?? null);
-  const [activeSession, setActiveSession] = useState<string | null>(initialSessionId ?? null);
+  const [activeSession, setActiveSession] = useState<string | null>(initialSessionId || null);
   const [diff, setDiff] = useState<DiffResponse | null>(null);
   const [diffComments, setDiffComments] = useState<DiffComment[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -174,6 +175,13 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
         `/api/issues/${issue.id}/workspaces`,
       );
       setWorkspaces(data);
+      // Auto-expand: if a specific workspace was requested, or only one exists
+      if (data.length > 0 && !selectedWorkspace) {
+        const targetId = autoSelectId ?? (data.length === 1 ? data[0].id : undefined);
+        if (targetId) {
+          setSelectedWorkspace(targetId);
+        }
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load workspaces");
     } finally {
