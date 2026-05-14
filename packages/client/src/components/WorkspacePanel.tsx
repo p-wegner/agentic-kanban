@@ -412,6 +412,21 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
     }
   }
 
+  async function handleOpenTerminal(wsId: string) {
+    setActionLoading(true);
+    setError(null);
+    try {
+      await apiFetch(`/api/workspaces/${wsId}/terminal`, {
+        method: "POST",
+        body: JSON.stringify({}),
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to open terminal");
+    } finally {
+      setActionLoading(false);
+    }
+  }
+
   async function handleDeleteWorkspace(wsId: string) {
     if (!window.confirm("Delete this workspace? This removes the workspace record and all session data.")) return;
     setActionLoading(true);
@@ -718,6 +733,14 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                     {/* Action buttons — only when idle and not viewing history */}
                     {!selectedHistoryId && ws.workingDir && ws.status !== "closed" && !isRunning && (
                       <div className="flex gap-2">
+                        <button
+                          onClick={() => handleOpenTerminal(ws.id)}
+                          disabled={actionLoading}
+                          className="text-sm bg-gray-700 text-white px-3 py-1.5 rounded hover:bg-gray-800 disabled:opacity-50"
+                          title="Open terminal in workspace directory"
+                        >
+                          Terminal
+                        </button>
                         <button
                           onClick={() => handleViewDiff(ws.id)}
                           disabled={actionLoading}

@@ -9,6 +9,7 @@ import type { BoardEvents } from "../services/board-events.js";
 import type { Database } from "../db/index.js";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { spawn } from "node:child_process";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const MOCK_AGENT_PATH = resolve(__dirname, "../scripts/mock-agent.ts");
@@ -114,6 +115,62 @@ export function createWorkspaceActionsRoute(
     } catch (err) {
       return c.json(
         { error: `Worktree setup failed: ${err instanceof Error ? err.message : String(err)}` },
+        500,
+      );
+    }
+  });
+
+  // POST /api/workspaces/:id/terminal — open a terminal in the workspace directory
+  router.post("/:id/terminal", async (c) => {
+    const id = c.req.param("id");
+
+    const rows = await database.select().from(workspaces).where(eq(workspaces.id, id)).limit(1);
+    if (rows.length === 0) {
+      return c.json({ error: "Workspace not found" }, 404);
+    }
+
+    const workspace = rows[0];
+    if (!workspace.workingDir) {
+      return c.json({ error: "Workspace not set up" }, 400);
+    }
+
+    try {
+      const prefRows = await database.select().from(preferences);
+      const prefMap = new Map(prefRows.map(r => [r.key, r.value]));
+
+      const agentCommand = prefMap.get("agent_command") || "claude";
+      const skipPerms = prefMap.get("skip_permissions") === "true";
+      const baseArgs = prefMap.get("agent_args") || "";
+      const agentArgs = skipPerms
+        ? (baseArgs ? baseArgs + " --dangerously-skip-permissions" : "--dangerously-skip-permissions")
+        : baseArgs;
+
+      const fullCommand = agentArgs ? `${agentCommand} ${agentArgs}` : agentCommand;
+
+      if (process.platform === "win32") {
+        spawn("cmd.exe", [
+          "/c", "start",
+          `Terminal - ${workspace.branch}`,
+          "cmd.exe", "/K",
+          `cd /d "${workspace.workingDir}" && ${fullCommand}`,
+        ], {
+          detached: true,
+          stdio: "ignore",
+        }).unref();
+      } else {
+        spawn("x-terminal-emulator", [
+          "-e", `bash -c 'cd "${workspace.workingDir}" && ${fullCommand}; exec bash'`,
+        ], {
+          detached: true,
+          stdio: "ignore",
+        }).unref();
+      }
+
+      console.log(`[workspace-actions] terminal: workspaceId=${id} workingDir=${workspace.workingDir} command=${fullCommand}`);
+      return c.json({ ok: true, workingDir: workspace.workingDir, command: fullCommand });
+    } catch (err) {
+      return c.json(
+        { error: `Terminal launch failed: ${err instanceof Error ? err.message : String(err)}` },
         500,
       );
     }
