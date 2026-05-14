@@ -8,6 +8,14 @@ import { listBranches, listWorktrees, getDiffShortstat, removeWorktree } from ".
 import type { Database } from "../db/index.js";
 import { sep } from "node:path";
 
+const DEFAULT_STATUSES = [
+  { name: "Todo", sortOrder: 0, isDefault: true },
+  { name: "In Progress", sortOrder: 1, isDefault: false },
+  { name: "In Review", sortOrder: 2, isDefault: false },
+  { name: "Done", sortOrder: 3, isDefault: false },
+  { name: "Cancelled", sortOrder: 4, isDefault: false },
+];
+
 export function createProjectsRoute(database: Database = db) {
   const router = new Hono();
 
@@ -39,6 +47,16 @@ export function createProjectsRoute(database: Database = db) {
 
     const name = body.name || repoInfo.repoName;
 
+    // Reject duplicate repo paths
+    const existing = await database
+      .select({ id: projects.id, name: projects.name })
+      .from(projects)
+      .where(eq(projects.repoPath, repoInfo.repoPath))
+      .limit(1);
+    if (existing.length > 0) {
+      return c.json({ error: `Project "${existing[0].name}" is already registered at this path` }, 409);
+    }
+
     await database.insert(projects).values({
       id,
       name,
@@ -51,6 +69,17 @@ export function createProjectsRoute(database: Database = db) {
       createdAt: now,
       updatedAt: now,
     });
+
+    for (const status of DEFAULT_STATUSES) {
+      await database.insert(projectStatuses).values({
+        id: randomUUID(),
+        projectId: id,
+        name: status.name,
+        sortOrder: status.sortOrder,
+        isDefault: status.isDefault,
+        createdAt: now,
+      });
+    }
 
     return c.json({ id, name, repoPath: repoInfo.repoPath }, 201);
   });
