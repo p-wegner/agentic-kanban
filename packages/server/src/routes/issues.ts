@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { db } from "../db/index.js";
-import { issues, projectStatuses, workspaces, tags, issueTags } from "@agentic-kanban/shared/schema";
-import { eq, and, sql } from "drizzle-orm";
+import { issues, projectStatuses, workspaces, tags, issueTags, sessions, sessionMessages, diffComments } from "@agentic-kanban/shared/schema";
+import { eq, and, sql, inArray } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import type { Database } from "../db/index.js";
 import type { BoardEvents } from "../services/board-events.js";
@@ -95,13 +95,29 @@ export function createIssuesRoute(database: Database = db, options?: { boardEven
     return c.json({ id });
   });
 
-  // DELETE /api/issues/:id
+  // DELETE /api/issues/:id — cascade delete workspaces, sessions, messages, tags
   router.delete("/:id", async (c) => {
     const id = c.req.param("id");
 
     // Resolve projectId before delete
     const rows = await database.select({ projectId: issues.projectId }).from(issues).where(eq(issues.id, id)).limit(1);
 
+    // Find all workspaces for this issue
+    const wsRows = await database.select({ id: workspaces.id }).from(workspaces).where(eq(workspaces.issueId, id));
+
+    // Cascade delete each workspace's diff comments, session messages, sessions
+    for (const ws of wsRows) {
+      const wsSessions = await database.select({ id: sessions.id }).from(sessions).where(eq(sessions.workspaceId, ws.id));
+      await database.delete(diffComments).where(eq(diffComments.workspaceId, ws.id));
+      if (wsSessions.length > 0) {
+        await database.delete(sessionMessages).where(inArray(sessionMessages.sessionId, wsSessions.map(s => s.id)));
+      }
+      await database.delete(sessions).where(eq(sessions.workspaceId, ws.id));
+      await database.delete(workspaces).where(eq(workspaces.id, ws.id));
+    }
+
+    // Delete issue tags and the issue itself
+    await database.delete(issueTags).where(eq(issueTags.issueId, id));
     await database.delete(issues).where(eq(issues.id, id));
 
     if (rows.length > 0) {
