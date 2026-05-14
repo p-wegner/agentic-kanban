@@ -261,18 +261,18 @@ export function createWorkspaceActionsRoute(
           .set({ status: "closed", closedAt: now, updatedAt: now })
           .where(eq(workspaces.id, id));
 
-        // Auto-move issue to "Done"
+        // Auto-move issue to "In Review"
         try {
           const projectId = await resolveProjectId(id, database);
           if (projectId) {
             const statuses = await database.select().from(projectStatuses).where(eq(projectStatuses.projectId, projectId));
-            const doneStatus = statuses.find(s => s.name === "Done");
-            if (doneStatus) {
-              await database.update(issues).set({ statusId: doneStatus.id, updatedAt: now, statusChangedAt: now }).where(eq(issues.id, workspace.issueId));
+            const reviewStatus = statuses.find(s => s.name === "In Review");
+            if (reviewStatus) {
+              await database.update(issues).set({ statusId: reviewStatus.id, updatedAt: now, statusChangedAt: now }).where(eq(issues.id, workspace.issueId));
             }
           }
         } catch (err) {
-          console.warn("[workspaces] Failed to move issue to Done:", err);
+          console.warn("[workspaces] Failed to move issue to In Review:", err);
         }
 
         const projectId = await resolveProjectId(id, database);
@@ -300,18 +300,18 @@ export function createWorkspaceActionsRoute(
         .set({ status: "closed", workingDir: null, closedAt: now, updatedAt: now })
         .where(eq(workspaces.id, id));
 
-      // Auto-move issue to "Done"
+      // Auto-move issue to "In Review"
       try {
         const projectId = await resolveProjectId(id, database);
         if (projectId) {
           const statuses = await database.select().from(projectStatuses).where(eq(projectStatuses.projectId, projectId));
-          const doneStatus = statuses.find(s => s.name === "Done");
-          if (doneStatus) {
-            await database.update(issues).set({ statusId: doneStatus.id, updatedAt: now, statusChangedAt: now }).where(eq(issues.id, workspace.issueId));
+          const reviewStatus = statuses.find(s => s.name === "In Review");
+          if (reviewStatus) {
+            await database.update(issues).set({ statusId: reviewStatus.id, updatedAt: now, statusChangedAt: now }).where(eq(issues.id, workspace.issueId));
           }
         }
       } catch (err) {
-        console.warn("[workspaces] Failed to move issue to Done:", err);
+        console.warn("[workspaces] Failed to move issue to In Review:", err);
       }
 
       // Broadcast board event

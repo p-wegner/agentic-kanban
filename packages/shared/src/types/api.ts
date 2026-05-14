@@ -46,6 +46,7 @@ export interface WorkspaceSummary {
   total: number;
   active: number;
   idle: number;
+  closed: number;
   branches: string[];
 }
 
