@@ -44,7 +44,6 @@ function parseUnifiedDiff(diff: string): DiffFile[] {
       continue;
     }
     if (line.startsWith("--- ") && !currentFile) {
-      // --- header before +++ — skip, we'll create file on +++
       continue;
     }
     if (!currentFile) continue;
@@ -67,6 +66,16 @@ function parseUnifiedDiff(diff: string): DiffFile[] {
     }
   }
   return files;
+}
+
+function computeFileStats(lines: DiffLine[]): { additions: number; deletions: number } {
+  let additions = 0;
+  let deletions = 0;
+  for (const line of lines) {
+    if (line.type === "add") additions++;
+    if (line.type === "delete") deletions++;
+  }
+  return { additions, deletions };
 }
 
 function commentKey(filePath: string, lineNumOld: number | null | undefined, lineNumNew: number | null | undefined, side: string): string {
@@ -203,217 +212,208 @@ function CommentInput({
   );
 }
 
-function UnifiedView({
-  files,
+function UnifiedFileView({
+  file,
   commentMap,
   onCreateComment,
   onEditComment,
   onDeleteComment,
 }: {
-  files: DiffFile[];
+  file: DiffFile;
   commentMap: Map<string, DiffComment[]>;
   onCreateComment?: (data: CreateDiffCommentRequest) => void;
   onEditComment?: (id: string, body: string) => void;
   onDeleteComment?: (id: string) => void;
 }) {
-  const [inputLineIdx, setInputLineIdx] = useState<string | null>(null);
-  // key format: "fileIdx:lineIdx"
+  const [inputLineIdx, setInputLineIdx] = useState<number | null>(null);
 
   return (
-    <div className="overflow-auto max-h-96 bg-gray-50 font-mono text-xs">
-      {files.map((file, fi) =>
-        file.lines.map((line, li) => {
-          const key = `${fi}:${li}`;
-          const isCommentable = line.type !== "header" && line.type !== "hunk";
-          const side = line.type === "delete" ? "old" : "new";
-          const cKey = isCommentable
-            ? commentKey(file.filePath, line.lineNumOld, line.lineNumNew, side)
-            : "";
-          const lineComments = isCommentable ? (commentMap.get(cKey) ?? []) : [];
-          const isInputOpen = inputLineIdx === key;
+    <div className="overflow-auto max-h-80 bg-gray-50 font-mono text-xs">
+      {file.lines.map((line, li) => {
+        const isCommentable = line.type !== "header" && line.type !== "hunk";
+        const side = line.type === "delete" ? "old" : "new";
+        const cKey = isCommentable
+          ? commentKey(file.filePath, line.lineNumOld, line.lineNumNew, side)
+          : "";
+        const lineComments = isCommentable ? (commentMap.get(cKey) ?? []) : [];
+        const isInputOpen = inputLineIdx === li;
 
-          let className = "px-2 relative group/line ";
-          if (line.type === "hunk") {
-            className += "bg-blue-50 text-blue-700";
-          } else if (line.type === "add") {
-            className += "bg-green-50 text-green-800";
-          } else if (line.type === "delete") {
-            className += "bg-red-50 text-red-800";
-          } else {
-            className += "text-gray-700";
-          }
+        let className = "px-2 relative group/line ";
+        if (line.type === "hunk") {
+          className += "bg-blue-50 text-blue-700";
+        } else if (line.type === "add") {
+          className += "bg-green-50 text-green-800";
+        } else if (line.type === "delete") {
+          className += "bg-red-50 text-red-800";
+        } else {
+          className += "text-gray-700";
+        }
 
-          return (
-            <Fragment key={key}>
-              <div
-                className={className}
-                onClick={() => {
-                  if (isCommentable && onCreateComment) setInputLineIdx(key);
-                }}
-              >
-                {line.type === "add" ? "+" : line.type === "delete" ? "-" : " "}
-                {line.type === "hunk" ? line.content : line.content || " "}
-                {isCommentable && onCreateComment && lineComments.length === 0 && !isInputOpen && (
-                  <span className="absolute right-1 top-1/2 -translate-y-1/2 opacity-0 group-hover/line:opacity-100 transition-opacity cursor-pointer select-none w-5 h-5 flex items-center justify-center rounded-full bg-gray-200 hover:bg-blue-200 text-gray-500 hover:text-blue-600 text-sm leading-none">
-                    +
-                  </span>
-                )}
-                {lineComments.length > 0 && (
-                  <span className="absolute right-1 top-1/2 -translate-y-1/2 w-5 h-5 flex items-center justify-center rounded-full bg-yellow-200 text-yellow-700 text-xs font-medium select-none">
-                    {lineComments.length}
-                  </span>
-                )}
-              </div>
-              {lineComments.map((c) => (
-                <CommentBlock key={c.id} comment={c} onEdit={onEditComment} onDelete={onDeleteComment} />
-              ))}
-              {isInputOpen && (
-                <CommentInput
-                  onSubmit={(body) => {
-                    onCreateComment?.({
-                      filePath: file.filePath,
-                      lineNumOld: line.lineNumOld ?? null,
-                      lineNumNew: line.lineNumNew ?? null,
-                      side,
-                      body,
-                    });
-                    setInputLineIdx(null);
-                  }}
-                  onCancel={() => setInputLineIdx(null)}
-                />
+        return (
+          <Fragment key={li}>
+            <div
+              className={className}
+              onClick={() => {
+                if (isCommentable && onCreateComment) setInputLineIdx(li);
+              }}
+            >
+              {line.type === "add" ? "+" : line.type === "delete" ? "-" : " "}
+              {line.type === "hunk" ? line.content : line.content || " "}
+              {isCommentable && onCreateComment && lineComments.length === 0 && !isInputOpen && (
+                <span className="absolute right-1 top-1/2 -translate-y-1/2 opacity-0 group-hover/line:opacity-100 transition-opacity cursor-pointer select-none w-5 h-5 flex items-center justify-center rounded-full bg-gray-200 hover:bg-blue-200 text-gray-500 hover:text-blue-600 text-sm leading-none">
+                  +
+                </span>
               )}
-            </Fragment>
-          );
-        })
-      )}
+              {lineComments.length > 0 && (
+                <span className="absolute right-1 top-1/2 -translate-y-1/2 w-5 h-5 flex items-center justify-center rounded-full bg-yellow-200 text-yellow-700 text-xs font-medium select-none">
+                  {lineComments.length}
+                </span>
+              )}
+            </div>
+            {lineComments.map((c) => (
+              <CommentBlock key={c.id} comment={c} onEdit={onEditComment} onDelete={onDeleteComment} />
+            ))}
+            {isInputOpen && (
+              <CommentInput
+                onSubmit={(body) => {
+                  onCreateComment?.({
+                    filePath: file.filePath,
+                    lineNumOld: line.lineNumOld ?? null,
+                    lineNumNew: line.lineNumNew ?? null,
+                    side,
+                    body,
+                  });
+                  setInputLineIdx(null);
+                }}
+                onCancel={() => setInputLineIdx(null)}
+              />
+            )}
+          </Fragment>
+        );
+      })}
     </div>
   );
 }
 
-function SplitView({
-  files,
+function SplitFileView({
+  file,
   commentMap,
   onCreateComment,
   onEditComment,
   onDeleteComment,
 }: {
-  files: DiffFile[];
+  file: DiffFile;
   commentMap: Map<string, DiffComment[]>;
   onCreateComment?: (data: CreateDiffCommentRequest) => void;
   onEditComment?: (id: string, body: string) => void;
   onDeleteComment?: (id: string) => void;
 }) {
-  const [inputLineIdx, setInputLineIdx] = useState<string | null>(null);
+  const [inputLineIdx, setInputLineIdx] = useState<number | null>(null);
+
+  const pairs: { left: DiffLine | null; right: DiffLine | null; lineIdx: number }[] = [];
+  let i = 0;
+  while (i < file.lines.length) {
+    const line = file.lines[i];
+    if (line.type === "delete" && i + 1 < file.lines.length && file.lines[i + 1].type === "add") {
+      pairs.push({ left: line, right: file.lines[i + 1], lineIdx: i });
+      i += 2;
+    } else if (line.type === "delete") {
+      pairs.push({ left: line, right: null, lineIdx: i });
+      i++;
+    } else if (line.type === "add") {
+      pairs.push({ left: null, right: line, lineIdx: i });
+      i++;
+    } else {
+      pairs.push({ left: line, right: line, lineIdx: i });
+      i++;
+    }
+  }
 
   return (
-    <div className="overflow-auto max-h-96 bg-gray-50 font-mono text-xs">
+    <div className="overflow-auto max-h-80 bg-gray-50 font-mono text-xs">
       <table className="w-full border-collapse">
         <tbody>
-          {files.map((file, fi) => {
-            const pairs: { left: DiffLine | null; right: DiffLine | null; lineIdx: number }[] = [];
-            let i = 0;
-            while (i < file.lines.length) {
-              const line = file.lines[i];
-              if (line.type === "delete" && i + 1 < file.lines.length && file.lines[i + 1].type === "add") {
-                pairs.push({ left: line, right: file.lines[i + 1], lineIdx: i });
-                i += 2;
-              } else if (line.type === "delete") {
-                pairs.push({ left: line, right: null, lineIdx: i });
-                i++;
-              } else if (line.type === "add") {
-                pairs.push({ left: null, right: line, lineIdx: i });
-                i++;
-              } else {
-                pairs.push({ left: line, right: line, lineIdx: i });
-                i++;
-              }
+          {pairs.map((pair) => {
+            const isHeader = pair.left?.type === "hunk";
+
+            if (isHeader && pair.left) {
+              return (
+                <tr key={pair.lineIdx}>
+                  <td colSpan={4} className="px-2 py-0 bg-blue-50 text-blue-700">
+                    {pair.left.content || " "}
+                  </td>
+                </tr>
+              );
             }
 
-            return pairs.map((pair, idx) => {
-              const key = `${fi}:${pair.lineIdx}`;
-              const isHeader = pair.left?.type === "hunk";
+            const isCommentable = pair.left?.type !== "hunk" && pair.left?.type !== "header";
+            const allComments: DiffComment[] = [];
+            if (isCommentable) {
+              if (pair.left?.type === "delete") {
+                const oldK = commentKey(file.filePath, pair.left.lineNumOld, null, "old");
+                allComments.push(...(commentMap.get(oldK) ?? []));
+              }
+              if (pair.right?.type === "add") {
+                const newK = commentKey(file.filePath, null, pair.right.lineNumNew, "new");
+                allComments.push(...(commentMap.get(newK) ?? []));
+              }
+              if (pair.left?.type === "context") {
+                const ctxK = commentKey(file.filePath, pair.left.lineNumOld, pair.left.lineNumNew, "new");
+                allComments.push(...(commentMap.get(ctxK) ?? []));
+              }
+            }
+            const isInputOpen = inputLineIdx === pair.lineIdx;
 
-              if (isHeader && pair.left) {
-                const line = pair.left;
-                return (
-                  <tr key={key}>
-                    <td colSpan={4} className="px-2 py-0 bg-blue-50 text-blue-700">
-                      {line.content || " "}
+            return (
+              <Fragment key={pair.lineIdx}>
+                <tr
+                  className="group/line"
+                  onClick={() => {
+                    if (isCommentable && onCreateComment) setInputLineIdx(pair.lineIdx);
+                  }}
+                >
+                  <td className={`px-1 text-right text-gray-400 w-8 select-none ${pair.left?.type === "delete" ? "bg-red-50" : ""}`}>
+                    {pair.left?.lineNumOld ?? ""}
+                  </td>
+                  <td className={`px-2 ${pair.left?.type === "delete" ? "bg-red-50 text-red-800" : "text-gray-700"}`}>
+                    {pair.left ? pair.left.content : ""}
+                  </td>
+                  <td className={`px-1 text-right text-gray-400 w-8 select-none border-l border-gray-200 ${pair.right?.type === "add" ? "bg-green-50" : ""}`}>
+                    {pair.right?.lineNumNew ?? ""}
+                  </td>
+                  <td className={`px-2 ${pair.right?.type === "add" ? "bg-green-50 text-green-800" : "text-gray-700"}`}>
+                    {pair.right ? pair.right.content : ""}
+                  </td>
+                </tr>
+                {allComments.map((c) => (
+                  <tr key={c.id}>
+                    <td colSpan={4}>
+                      <CommentBlock comment={c} onEdit={onEditComment} onDelete={onDeleteComment} />
                     </td>
                   </tr>
-                );
-              }
-
-              const isCommentable = pair.left?.type !== "hunk" && pair.left?.type !== "header";
-              // Collect comments from both old and new sides independently
-              const allComments: DiffComment[] = [];
-              if (isCommentable) {
-                if (pair.left?.type === "delete") {
-                  const oldK = commentKey(file.filePath, pair.left.lineNumOld, null, "old");
-                  allComments.push(...(commentMap.get(oldK) ?? []));
-                }
-                if (pair.right?.type === "add") {
-                  const newK = commentKey(file.filePath, null, pair.right.lineNumNew, "new");
-                  allComments.push(...(commentMap.get(newK) ?? []));
-                }
-                if (pair.left?.type === "context") {
-                  const ctxK = commentKey(file.filePath, pair.left.lineNumOld, pair.left.lineNumNew, "new");
-                  allComments.push(...(commentMap.get(ctxK) ?? []));
-                }
-              }
-              const isInputOpen = inputLineIdx === key;
-
-              return (
-                <Fragment key={key}>
-                  <tr
-                    className="group/line"
-                    onClick={() => {
-                      if (isCommentable && onCreateComment) setInputLineIdx(key);
-                    }}
-                  >
-                    <td className={`px-1 text-right text-gray-400 w-8 select-none ${pair.left?.type === "delete" ? "bg-red-50" : ""}`}>
-                      {pair.left?.lineNumOld ?? ""}
-                    </td>
-                    <td className={`px-2 ${pair.left?.type === "delete" ? "bg-red-50 text-red-800" : "text-gray-700"}`}>
-                      {pair.left ? (pair.left.type === "delete" ? pair.left.content : pair.left.content) : ""}
-                    </td>
-                    <td className={`px-1 text-right text-gray-400 w-8 select-none border-l border-gray-200 ${pair.right?.type === "add" ? "bg-green-50" : ""}`}>
-                      {pair.right?.lineNumNew ?? ""}
-                    </td>
-                    <td className={`px-2 ${pair.right?.type === "add" ? "bg-green-50 text-green-800" : "text-gray-700"}`}>
-                      {pair.right ? (pair.right.type === "add" ? pair.right.content : pair.right.content) : ""}
+                ))}
+                {isInputOpen && (
+                  <tr>
+                    <td colSpan={4}>
+                      <CommentInput
+                        onSubmit={(body) => {
+                          const side = pair.left?.type === "delete" ? "old" : "new";
+                          onCreateComment?.({
+                            filePath: file.filePath,
+                            lineNumOld: pair.left?.lineNumOld ?? null,
+                            lineNumNew: pair.right?.lineNumNew ?? null,
+                            side,
+                            body,
+                          });
+                          setInputLineIdx(null);
+                        }}
+                        onCancel={() => setInputLineIdx(null)}
+                      />
                     </td>
                   </tr>
-                  {allComments.map((c) => (
-                    <tr key={c.id}>
-                      <td colSpan={4}>
-                        <CommentBlock comment={c} onEdit={onEditComment} onDelete={onDeleteComment} />
-                      </td>
-                    </tr>
-                  ))}
-                  {isInputOpen && (
-                    <tr>
-                      <td colSpan={4}>
-                        <CommentInput
-                          onSubmit={(body) => {
-                            const side = pair.left?.type === "delete" ? "old" : "new";
-                            onCreateComment?.({
-                              filePath: file.filePath,
-                              lineNumOld: pair.left?.lineNumOld ?? null,
-                              lineNumNew: pair.right?.lineNumNew ?? null,
-                              side,
-                              body,
-                            });
-                            setInputLineIdx(null);
-                          }}
-                          onCancel={() => setInputLineIdx(null)}
-                        />
-                      </td>
-                    </tr>
-                  )}
-                </Fragment>
-              );
-            });
+                )}
+              </Fragment>
+            );
           })}
         </tbody>
       </table>
@@ -421,8 +421,73 @@ function SplitView({
   );
 }
 
+function FileDiffAccordion({
+  file,
+  fileIdx,
+  expanded,
+  onToggle,
+  viewMode,
+  commentMap,
+  onCreateComment,
+  onEditComment,
+  onDeleteComment,
+}: {
+  file: DiffFile;
+  fileIdx: number;
+  expanded: boolean;
+  onToggle: () => void;
+  viewMode: ViewMode;
+  commentMap: Map<string, DiffComment[]>;
+  onCreateComment?: (data: CreateDiffCommentRequest) => void;
+  onEditComment?: (id: string, body: string) => void;
+  onDeleteComment?: (id: string) => void;
+}) {
+  const { additions, deletions } = computeFileStats(file.lines);
+
+  return (
+    <div>
+      <button
+        onClick={onToggle}
+        className="w-full flex items-center gap-2 px-3 py-2 bg-gray-100 hover:bg-gray-200 cursor-pointer select-none transition-colors text-left"
+      >
+        <svg
+          className={`w-3.5 h-3.5 text-gray-500 shrink-0 transition-transform duration-150 ${expanded ? "rotate-90" : ""}`}
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+          strokeWidth={2}
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+        </svg>
+        <span className="text-xs font-mono text-gray-700 truncate flex-1 min-w-0" title={file.filePath}>
+          {file.filePath}
+        </span>
+        <span className="text-xs text-green-600 font-medium shrink-0">+{additions}</span>
+        <span className="text-xs text-red-600 font-medium shrink-0">-{deletions}</span>
+      </button>
+      {expanded && (
+        viewMode === "unified" ? (
+          <UnifiedFileView file={file} commentMap={commentMap} onCreateComment={onCreateComment} onEditComment={onEditComment} onDeleteComment={onDeleteComment} />
+        ) : (
+          <SplitFileView file={file} commentMap={commentMap} onCreateComment={onCreateComment} onEditComment={onEditComment} onDeleteComment={onDeleteComment} />
+        )
+      )}
+    </div>
+  );
+}
+
 export function DiffViewer({ diff, stats, comments = [], onCreateComment, onEditComment, onDeleteComment }: DiffViewerProps) {
   const [viewMode, setViewMode] = useState<ViewMode>("unified");
+  const files = parseUnifiedDiff(diff);
+  const commentMap = buildCommentMap(comments);
+
+  const [expandedFiles, setExpandedFiles] = useState<Set<number>>(() => new Set(files.map((_, i) => i)));
+
+  useEffect(() => {
+    setExpandedFiles(new Set(files.map((_, i) => i)));
+  }, [diff]);
+
+  const allExpanded = expandedFiles.size === files.length;
 
   if (!diff) {
     return (
@@ -431,9 +496,6 @@ export function DiffViewer({ diff, stats, comments = [], onCreateComment, onEdit
       </div>
     );
   }
-
-  const files = parseUnifiedDiff(diff);
-  const commentMap = buildCommentMap(comments);
 
   return (
     <div className="border border-gray-300 rounded overflow-hidden">
@@ -446,26 +508,60 @@ export function DiffViewer({ diff, stats, comments = [], onCreateComment, onEdit
             <span className="text-yellow-600">{comments.length} comment{comments.length !== 1 ? "s" : ""}</span>
           )}
         </div>
-        <div className="flex items-center bg-gray-200 rounded overflow-hidden">
-          <button
-            onClick={() => setViewMode("unified")}
-            className={`px-2 py-0.5 text-xs ${viewMode === "unified" ? "bg-white shadow-sm" : "text-gray-500 hover:text-gray-700"}`}
-          >
-            Unified
-          </button>
-          <button
-            onClick={() => setViewMode("split")}
-            className={`px-2 py-0.5 text-xs ${viewMode === "split" ? "bg-white shadow-sm" : "text-gray-500 hover:text-gray-700"}`}
-          >
-            Split
-          </button>
+        <div className="flex items-center gap-2">
+          {files.length > 1 && (
+            <button
+              onClick={() => {
+                if (allExpanded) {
+                  setExpandedFiles(new Set());
+                } else {
+                  setExpandedFiles(new Set(files.map((_, i) => i)));
+                }
+              }}
+              className="text-xs px-2 py-0.5 text-gray-500 hover:text-gray-700"
+            >
+              {allExpanded ? "Collapse all" : "Expand all"}
+            </button>
+          )}
+          <div className="flex items-center bg-gray-200 rounded overflow-hidden">
+            <button
+              onClick={() => setViewMode("unified")}
+              className={`px-2 py-0.5 text-xs ${viewMode === "unified" ? "bg-white shadow-sm" : "text-gray-500 hover:text-gray-700"}`}
+            >
+              Unified
+            </button>
+            <button
+              onClick={() => setViewMode("split")}
+              className={`px-2 py-0.5 text-xs ${viewMode === "split" ? "bg-white shadow-sm" : "text-gray-500 hover:text-gray-700"}`}
+            >
+              Split
+            </button>
+          </div>
         </div>
       </div>
-      {viewMode === "unified" ? (
-        <UnifiedView files={files} commentMap={commentMap} onCreateComment={onCreateComment} onEditComment={onEditComment} onDeleteComment={onDeleteComment} />
-      ) : (
-        <SplitView files={files} commentMap={commentMap} onCreateComment={onCreateComment} onEditComment={onEditComment} onDeleteComment={onDeleteComment} />
-      )}
+      <div className="divide-y divide-gray-200">
+        {files.map((file, fi) => (
+          <FileDiffAccordion
+            key={fi}
+            file={file}
+            fileIdx={fi}
+            expanded={expandedFiles.has(fi)}
+            onToggle={() => {
+              setExpandedFiles(prev => {
+                const next = new Set(prev);
+                if (next.has(fi)) next.delete(fi);
+                else next.add(fi);
+                return next;
+              });
+            }}
+            viewMode={viewMode}
+            commentMap={commentMap}
+            onCreateComment={onCreateComment}
+            onEditComment={onEditComment}
+            onDeleteComment={onDeleteComment}
+          />
+        ))}
+      </div>
     </div>
   );
 }
