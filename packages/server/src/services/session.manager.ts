@@ -25,7 +25,7 @@ function createSessionManager(
   upgradeWebSocket: (callback: (c: any) => any) => any,
   options?: SessionManagerOptions,
 ) {
-  const subscribers = new Map<string, Set<Subscriber>>();
+  const subscribers = new Map<string, Map<WSContext, Subscriber>>();
   // Buffer messages per session so late-connecting WS clients get missed output
   const messageBuffer = new Map<string, AgentOutputMessage[]>();
   // Cache session context for activity broadcasting (avoids DB queries per stdout line)
@@ -94,7 +94,7 @@ function createSessionManager(
     const subs = subscribers.get(sessionId);
     if (!subs) return;
     const payload = JSON.stringify(message);
-    for (const sub of subs) {
+    for (const sub of subs.values()) {
       if (sub.ws.readyState === 1) {
         sub.ws.send(payload);
       }
@@ -209,9 +209,9 @@ function createSessionManager(
   /** Subscribe a WebSocket to session output. */
   function subscribe(sessionId: string, ws: WSContext) {
     if (!subscribers.has(sessionId)) {
-      subscribers.set(sessionId, new Set());
+      subscribers.set(sessionId, new Map());
     }
-    subscribers.get(sessionId)!.add({ ws });
+    subscribers.get(sessionId)!.set(ws, { ws });
     console.log(`[session] WS subscribed: sessionId=${sessionId} subscribers=${subscribers.get(sessionId)!.size}`);
 
     // Replay buffered messages so late subscribers don't miss output
@@ -229,7 +229,7 @@ function createSessionManager(
   function unsubscribe(sessionId: string, ws: WSContext) {
     const subs = subscribers.get(sessionId);
     if (subs) {
-      subs.delete({ ws });
+      subs.delete(ws);
       console.log(`[session] WS unsubscribed: sessionId=${sessionId} subscribers=${subs.size}`);
       if (subs.size === 0) {
         subscribers.delete(sessionId);
