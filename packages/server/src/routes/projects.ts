@@ -331,7 +331,7 @@ export function createProjectsRoute(database: Database = db) {
 
     // Fetch workspace summaries grouped by issueId
     const issueIds = projectIssues.map((i) => i.id);
-    const workspaceSummaryMap = new Map<string, { total: number; active: number; idle: number; closed: number; branches: string[] }>();
+    const workspaceSummaryMap = new Map<string, { total: number; active: number; idle: number; closed: number; branches: string[]; main?: { branch: string; status: string } }>();
 
     if (issueIds.length > 0) {
       const wsRows = await database
@@ -361,6 +361,39 @@ export function createProjectsRoute(database: Database = db) {
         }
         if (!summary.branches.includes(row.branch)) {
           summary.branches.push(row.branch);
+        }
+      }
+
+      // Determine main workspace per issue (active > idle > closed, tie-break by updatedAt)
+      const wsDetailRows = await database
+        .select({
+          issueId: workspaces.issueId,
+          branch: workspaces.branch,
+          status: workspaces.status,
+          updatedAt: workspaces.updatedAt,
+        })
+        .from(workspaces)
+        .where(inArray(workspaces.issueId, issueIds));
+
+      const mainWorkspaceMap = new Map<string, { branch: string; status: string; updatedAt: string }>();
+      const statusPriority = (s: string) => s === "active" ? 0 : s === "idle" ? 1 : 2;
+      for (const row of wsDetailRows) {
+        const existing = mainWorkspaceMap.get(row.issueId);
+        if (!existing) {
+          mainWorkspaceMap.set(row.issueId, row);
+          continue;
+        }
+        const existingP = statusPriority(existing.status);
+        const rowP = statusPriority(row.status);
+        if (rowP < existingP || (rowP === existingP && row.updatedAt > existing.updatedAt)) {
+          mainWorkspaceMap.set(row.issueId, row);
+        }
+      }
+
+      for (const [issueId, summary] of workspaceSummaryMap) {
+        const mainWs = mainWorkspaceMap.get(issueId);
+        if (mainWs) {
+          summary.main = { branch: mainWs.branch, status: mainWs.status as "active" | "idle" | "closed" };
         }
       }
     }

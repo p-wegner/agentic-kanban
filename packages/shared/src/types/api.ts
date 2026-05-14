@@ -42,12 +42,18 @@ export interface UpdateIssueRequest {
   sortOrder?: number;
 }
 
+export interface MainWorkspaceInfo {
+  branch: string;
+  status: "active" | "idle" | "closed";
+}
+
 export interface WorkspaceSummary {
   total: number;
   active: number;
   idle: number;
   closed: number;
   branches: string[];
+  main?: MainWorkspaceInfo;
 }
 
 export interface IssueWithStatus {

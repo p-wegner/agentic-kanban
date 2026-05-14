@@ -16,6 +16,7 @@ interface TagBadge {
 interface IssueCardProps {
   issue: IssueWithStatus;
   onClick: (issue: IssueWithStatus) => void;
+  onWorkspaceClick?: (issue: IssueWithStatus) => void;
   onDragStart: (e: React.DragEvent, issue: IssueWithStatus) => void;
   tags?: TagBadge[];
   searchQuery?: string;
@@ -41,7 +42,7 @@ function HighlightedText({ text, query }: { text: string; query: string }) {
   );
 }
 
-export function IssueCard({ issue, onClick, onDragStart, tags, searchQuery }: IssueCardProps) {
+export function IssueCard({ issue, onClick, onWorkspaceClick, onDragStart, tags, searchQuery }: IssueCardProps) {
   const badgeColor = priorityColors[issue.priority] ?? "bg-gray-200 text-gray-700";
   const ws = issue.workspaceSummary;
 
@@ -80,39 +81,27 @@ export function IssueCard({ issue, onClick, onDragStart, tags, searchQuery }: Is
             {tag.name}
           </span>
         ))}
-        {ws && ws.total > 0 && (
-          <span
-            className="inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded"
-            title={
-              ws.active > 0
-                ? `${ws.active} active, ${ws.idle} idle, ${ws.closed} merged`
-                : ws.closed > 0 && ws.idle === 0
-                  ? `Merged`
-                  : `${ws.idle} unmerged, ${ws.closed} merged`
-            }
-            style={
-              ws.closed > 0 && ws.active === 0 && ws.idle === 0
-                ? { backgroundColor: "#dcfce722", color: "#16a34a" }
-                : ws.idle > 0 && ws.active === 0
-                  ? { backgroundColor: "#fef3c722", color: "#d97706" }
-                  : undefined
-            }
-          >
-            <span
-              className={`inline-block w-1.5 h-1.5 rounded-full ${
-                ws.active > 0
-                  ? "bg-green-500 animate-pulse"
-                  : ws.closed > 0 && ws.idle === 0
-                    ? "bg-green-500"
-                    : ws.idle > 0
-                      ? "bg-amber-500"
-                      : "bg-gray-400"
-              }`}
-            />
-            {ws.closed > 0 && ws.active === 0 && ws.idle === 0 ? "merged" : ws.total}
-          </span>
-        )}
       </div>
+      {ws && ws.main && (
+        <div
+          className="flex items-center gap-1.5 mt-1.5 text-xs cursor-pointer rounded px-1 py-0.5 -mx-1 hover:bg-gray-50 transition-colors"
+          title={`Workspace: ${ws.main.branch} (${ws.main.status})`}
+          onClick={(e) => { e.stopPropagation(); onWorkspaceClick?.(issue); }}
+        >
+          <span className={`inline-block w-2 h-2 rounded-full shrink-0 ${
+            ws.main.status === "active" ? "bg-green-500" :
+            ws.main.status === "idle" ? "bg-amber-500" :
+            "bg-gray-400"
+          }`} />
+          <span className="font-mono text-gray-600 truncate">{ws.main.branch}</span>
+          {ws.main.status === "closed" && (
+            <span className="text-green-600 font-medium shrink-0">merged</span>
+          )}
+          {ws.total > 1 && (
+            <span className="text-gray-400 shrink-0">+{ws.total - 1} more</span>
+          )}
+        </div>
+      )}
     </div>
   );
 }
