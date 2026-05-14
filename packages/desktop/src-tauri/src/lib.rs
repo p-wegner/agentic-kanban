@@ -14,11 +14,10 @@ pub fn run() {
             let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&show, &quit])?;
 
-            TrayIconBuilder::new()
-                .with_id("main-tray")
-                .with_tooltip("Agentic Kanban")
-                .with_icon(app.default_window_icon().unwrap().clone())
-                .with_menu(&menu)
+            TrayIconBuilder::with_id("main-tray")
+                .tooltip("Agentic Kanban")
+                .icon(app.default_window_icon().unwrap().clone())
+                .menu(&menu)
                 .on_menu_event(|app, event| match event.id().as_ref() {
                     "show" => {
                         if let Some(window) = app.get_webview_window("main") {
