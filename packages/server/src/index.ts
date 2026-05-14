@@ -146,6 +146,9 @@ const sessionManager = createSessionManager(upgradeWebSocket, {
   onSessionExit: (workspaceId, sessionId, exitCode) => {
     runWorkflowOnExit(workspaceId, sessionId, exitCode);
   },
+  onActivity: (projectId, issueId, sessionId, activity) => {
+    boardEvents.broadcastActivity(projectId, { issueId, sessionId, activity });
+  },
 });
 
 // Mount WebSocket routes

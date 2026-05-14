@@ -20,6 +20,7 @@ interface IssueCardProps {
   onDragStart: (e: React.DragEvent, issue: IssueWithStatus) => void;
   tags?: TagBadge[];
   searchQuery?: string;
+  liveActivity?: string;
 }
 
 function HighlightedText({ text, query }: { text: string; query: string }) {
@@ -42,7 +43,7 @@ function HighlightedText({ text, query }: { text: string; query: string }) {
   );
 }
 
-export function IssueCard({ issue, onClick, onWorkspaceClick, onDragStart, tags, searchQuery }: IssueCardProps) {
+export function IssueCard({ issue, onClick, onWorkspaceClick, onDragStart, tags, searchQuery, liveActivity }: IssueCardProps) {
   const badgeColor = priorityColors[issue.priority] ?? "bg-gray-200 text-gray-700";
   const ws = issue.workspaceSummary;
 
@@ -100,6 +101,12 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onDragStart, tags,
           {ws.total > 1 && (
             <span className="text-gray-400 shrink-0">+{ws.total - 1} more</span>
           )}
+        </div>
+      )}
+      {liveActivity && (
+        <div className="flex items-center gap-1.5 mt-1 text-xs text-gray-400 px-1">
+          <span className="inline-block w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse shrink-0" />
+          <span className="truncate">{liveActivity}</span>
         </div>
       )}
     </div>

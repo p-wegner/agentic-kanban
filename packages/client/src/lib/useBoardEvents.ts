@@ -8,14 +8,27 @@ interface BoardChangedEvent {
   reason: string;
 }
 
+interface SessionActivityEvent {
+  type: "session_activity";
+  projectId: string;
+  issueId: string;
+  sessionId: string;
+  activity: string;
+}
+
+type BoardWsEvent = BoardChangedEvent | SessionActivityEvent;
+
 export function useBoardEvents(
   projectId: string | null,
   onBoardChange: (reason: string) => void,
+  onSessionActivity?: (issueId: string, activity: string) => void,
 ) {
   const wsRef = useRef<WebSocket | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const onBoardChangeRef = useRef(onBoardChange);
+  const onSessionActivityRef = useRef(onSessionActivity);
   onBoardChangeRef.current = onBoardChange;
+  onSessionActivityRef.current = onSessionActivity;
 
   const connect = useCallback(() => {
     if (!projectId) return;
@@ -34,9 +47,11 @@ export function useBoardEvents(
 
     ws.onmessage = (event) => {
       try {
-        const msg: BoardChangedEvent = JSON.parse(event.data);
+        const msg: BoardWsEvent = JSON.parse(event.data);
         if (msg.type === "board_changed") {
           onBoardChangeRef.current(msg.reason);
+        } else if (msg.type === "session_activity") {
+          onSessionActivityRef.current?.(msg.issueId, msg.activity);
         }
       } catch {
         // Ignore malformed messages

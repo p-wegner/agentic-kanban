@@ -25,7 +25,51 @@ const initMsg = {
   cwd: process.cwd(),
 };
 
-// Line 2: assistant message with text content
+// Line 2: assistant message with tool_use content
+const toolUseMsg = {
+  type: "assistant",
+  message: {
+    id: "msg_mock_tool_" + Math.random().toString(36).slice(2, 10),
+    type: "message",
+    role: "assistant",
+    content: [
+      {
+        type: "tool_use",
+        id: "toolu_mock_" + Math.random().toString(36).slice(2, 10),
+        name: "Read",
+        input: { file_path: "packages/client/src/components/IssueCard.tsx" },
+      },
+    ],
+    model: "mock-claude-opus-4",
+    stop_reason: "tool_use",
+    stop_sequence: null,
+    usage: { input_tokens: 150, output_tokens: 42 },
+  },
+};
+
+// Line 3: second tool_use (Edit)
+const editMsg = {
+  type: "assistant",
+  message: {
+    id: "msg_mock_edit_" + Math.random().toString(36).slice(2, 10),
+    type: "message",
+    role: "assistant",
+    content: [
+      {
+        type: "tool_use",
+        id: "toolu_mock_edit_" + Math.random().toString(36).slice(2, 10),
+        name: "Edit",
+        input: { file_path: "packages/client/src/components/IssueCard.tsx", old_string: "old", new_string: "new" },
+      },
+    ],
+    model: "mock-claude-opus-4",
+    stop_reason: "tool_use",
+    stop_sequence: null,
+    usage: { input_tokens: 150, output_tokens: 42 },
+  },
+};
+
+// Line 4: assistant message with text content
 const assistantMsg = {
   type: "assistant",
   message: {
@@ -35,7 +79,7 @@ const assistantMsg = {
     content: [
       {
         type: "text",
-        text: "Mock agent completed the task successfully. No files were modified.",
+        text: "Mock agent completed the task successfully.",
       },
     ],
     model: "mock-claude-opus-4",
@@ -61,17 +105,25 @@ const resultMsg = {
   usage: { input_tokens: 150, output_tokens: 42 },
 };
 
-// Write each line as NDJSON with a small delay between them
+// Write each line as NDJSON with delays to simulate real-time activity
 process.stdout.write(JSON.stringify(initMsg) + "\n");
 
 setTimeout(() => {
-  process.stdout.write(JSON.stringify(assistantMsg) + "\n");
+  process.stdout.write(JSON.stringify(toolUseMsg) + "\n");
 
   setTimeout(() => {
-    // Recalculate duration to include delays
-    resultMsg.duration_ms = Date.now() - startTime;
-    resultMsg.duration_api_ms = resultMsg.duration_ms;
-    process.stdout.write(JSON.stringify(resultMsg) + "\n");
-    process.exit(0);
-  }, 200);
-}, 200);
+    process.stdout.write(JSON.stringify(editMsg) + "\n");
+
+    setTimeout(() => {
+      process.stdout.write(JSON.stringify(assistantMsg) + "\n");
+
+      setTimeout(() => {
+        // Recalculate duration to include delays
+        resultMsg.duration_ms = Date.now() - startTime;
+        resultMsg.duration_api_ms = resultMsg.duration_ms;
+        process.stdout.write(JSON.stringify(resultMsg) + "\n");
+        process.exit(0);
+      }, 500);
+    }, 500);
+  }, 500);
+}, 500);

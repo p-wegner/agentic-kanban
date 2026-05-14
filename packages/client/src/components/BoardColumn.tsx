@@ -13,6 +13,7 @@ interface BoardColumnProps {
   onDragStart: (e: React.DragEvent, issue: IssueWithStatus) => void;
   onDrop: (statusId: string, sortOrder?: number) => void;
   searchQuery?: string;
+  sessionActivity?: Record<string, string>;
   children?: React.ReactNode;
 }
 
@@ -27,6 +28,7 @@ export function BoardColumn({
   onDragStart,
   onDrop,
   searchQuery,
+  sessionActivity,
   children,
 }: BoardColumnProps) {
   const [dragOver, setDragOver] = useState(false);
@@ -117,6 +119,7 @@ export function BoardColumn({
               onWorkspaceClick={onWorkspaceClick}
               onDragStart={onDragStart}
               searchQuery={searchQuery}
+              liveActivity={sessionActivity?.[issue.id]}
             />
           </div>
         ))}
