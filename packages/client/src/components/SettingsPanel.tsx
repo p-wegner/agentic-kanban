@@ -123,8 +123,8 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                   ))}
                 </select>
                 <p className="text-xs text-gray-500 mt-1">
-                  Passes <code className="text-xs">--profile</code> to Claude Code.
-                  Profiles are detected from <code className="text-xs">~/.claude/settings_*.json</code>.
+                  Passes <code className="text-xs">--settings</code> to Claude Code pointing to
+                  the corresponding <code className="text-xs">~/.claude/settings_*.json</code> file.
                 </p>
               </div>
 
