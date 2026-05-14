@@ -54,6 +54,7 @@ export function BoardPage() {
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(
     new Set(["archive"]),
   );
+  const [sessionActivity, setSessionActivity] = useState<Record<string, string>>({});
   const pendingBoardRefreshRef = useRef(false);
 
   const refetchBoard = useCallback(async (projectId?: string) => {
@@ -103,7 +104,17 @@ export function BoardPage() {
       return;
     }
     refetchBoard();
-  }, [refetchBoard, creatingInColumnId]));
+  }, [refetchBoard, creatingInColumnId]), useCallback((issueId: string, activity: string) => {
+    setSessionActivity((prev) => {
+      if (!activity) {
+        const next = { ...prev };
+        delete next[issueId];
+        return next;
+      }
+      if (prev[issueId] === activity) return prev;
+      return { ...prev, [issueId]: activity };
+    });
+  }, []));
 
   // Process pending board refresh when create form closes
   useEffect(() => {
@@ -574,6 +585,7 @@ export function BoardPage() {
               }}
               onDrop={handleDrop}
               searchQuery={searchQuery}
+              sessionActivity={sessionActivity}
             >
               <CreateIssueForm
                 projectId={activeProjectId}
@@ -606,6 +618,7 @@ export function BoardPage() {
           }}
           onDrop={handleDrop}
           searchQuery={searchQuery}
+          sessionActivity={sessionActivity}
           canStartWorkspace={canStartWorkspace}
         />
       </div>

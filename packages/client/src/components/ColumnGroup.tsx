@@ -17,6 +17,7 @@ interface ColumnGroupProps {
   onDragStart: (e: React.DragEvent, issue: IssueWithStatus) => void;
   onDrop: (statusId: string, sortOrder?: number) => void;
   searchQuery: string;
+  sessionActivity?: Record<string, string>;
   canStartWorkspace?: boolean;
 }
 
@@ -35,6 +36,7 @@ export function ColumnGroup({
   onDragStart,
   onDrop,
   searchQuery,
+  sessionActivity,
   canStartWorkspace = false,
 }: ColumnGroupProps) {
   if (columns.length === 0) return null;
@@ -103,6 +105,7 @@ export function ColumnGroup({
             onDragStart={onDragStart}
             onDrop={onDrop}
             searchQuery={searchQuery}
+            sessionActivity={sessionActivity}
           >
             <CreateIssueForm
               projectId={projectId}

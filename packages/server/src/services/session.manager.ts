@@ -1,6 +1,6 @@
 import type { WSContext } from "hono/ws";
 import { db } from "../db/index.js";
-import { sessions, workspaces, sessionMessages } from "@agentic-kanban/shared/schema";
+import { sessions, workspaces, sessionMessages, issues } from "@agentic-kanban/shared/schema";
 import { eq } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import * as agentService from "./agent.service.js";
@@ -10,8 +10,15 @@ interface Subscriber {
   ws: WSContext;
 }
 
+interface SessionContext {
+  workspaceId: string;
+  issueId: string;
+  projectId: string;
+}
+
 interface SessionManagerOptions {
   onSessionExit?: (workspaceId: string, sessionId: string, exitCode: number | null) => void;
+  onActivity?: (projectId: string, issueId: string, sessionId: string, activity: string) => void;
 }
 
 function createSessionManager(
@@ -21,6 +28,8 @@ function createSessionManager(
   const subscribers = new Map<string, Set<Subscriber>>();
   // Buffer messages per session so late-connecting WS clients get missed output
   const messageBuffer = new Map<string, AgentOutputMessage[]>();
+  // Cache session context for activity broadcasting (avoids DB queries per stdout line)
+  const sessionContexts = new Map<string, SessionContext>();
 
   function broadcast(sessionId: string, message: AgentOutputMessage) {
     // Buffer the message for late subscribers
@@ -53,8 +62,32 @@ function createSessionManager(
             .where(eq(sessions.id, sessionId))
             .catch((err) => console.error("Failed to update claudeSessionId:", err));
         }
+
+        // Parse tool_use events for live activity
+        if (obj.type === "assistant" && obj.message?.content) {
+          const content = obj.message.content;
+          if (Array.isArray(content)) {
+            for (const block of content) {
+              if (block.type === "tool_use") {
+                const activity = formatToolActivity(block.name, block.input);
+                const ctx = sessionContexts.get(sessionId);
+                if (ctx && activity) {
+                  options?.onActivity?.(ctx.projectId, ctx.issueId, sessionId, activity);
+                }
+              }
+            }
+          }
+        }
       } catch {
         // Not JSON or not a system/init event — ignore
+      }
+    }
+
+    // On exit, clear activity
+    if (message.type === "exit") {
+      const ctx = sessionContexts.get(sessionId);
+      if (ctx) {
+        options?.onActivity?.(ctx.projectId, ctx.issueId, sessionId, "");
       }
     }
 
@@ -92,6 +125,14 @@ function createSessionManager(
       throw new Error("Workspace has no working directory; run setup first");
     }
 
+    // Look up issue's projectId for activity broadcasting
+    const issueRows = await db
+      .select({ projectId: issues.projectId })
+      .from(issues)
+      .where(eq(issues.id, workspace.issueId))
+      .limit(1);
+    const projectId = issueRows.length > 0 ? issueRows[0].projectId : "";
+
     // If resuming, look up the previous session's claudeSessionId
     let claudeSessionId: string | undefined;
     if (resumeFromId) {
@@ -109,6 +150,9 @@ function createSessionManager(
     const sessionId = randomUUID();
     const now = new Date().toISOString();
     console.log(`[session] starting: workspaceId=${workspaceId} sessionId=${sessionId} workingDir=${workspace.workingDir}`);
+
+    // Cache session context for activity broadcasting
+    sessionContexts.set(sessionId, { workspaceId, issueId: workspace.issueId, projectId });
 
     await db.insert(sessions).values({
       id: sessionId,
@@ -135,6 +179,8 @@ function createSessionManager(
             .then(() => {
               // Notify board that a session completed
               options?.onSessionExit?.(workspaceId, sessionId, event.exitCode ?? null);
+              // Clean up cached context
+              sessionContexts.delete(sessionId);
             })
             .catch((err) => console.error("Failed to update session:", err));
         }
@@ -216,3 +262,36 @@ function createSessionManager(
 
 export { createSessionManager };
 export type SessionManager = ReturnType<typeof createSessionManager>;
+
+function basename(path: string): string {
+  const parts = path.replace(/\\/g, "/").split("/");
+  return parts[parts.length - 1] || path;
+}
+
+function formatToolActivity(name: string, input: Record<string, unknown>): string {
+  switch (name) {
+    case "Read":
+      return `Reading ${basename(input.file_path as string || "")}`;
+    case "Edit":
+      return `Editing ${basename(input.file_path as string || "")}`;
+    case "Write":
+      return `Writing ${basename(input.file_path as string || "")}`;
+    case "Bash": {
+      const cmd = (input.command as string || "").slice(0, 60);
+      return `Running: ${cmd}`;
+    }
+    case "Grep":
+      return `Searching for ${input.pattern || ""}`;
+    case "Glob":
+      return `Finding ${input.pattern || "files"}`;
+    case "Agent":
+      return `Delegating to agent`;
+    case "WebSearch":
+      return `Searching web`;
+    case "WebFetch":
+    case "mcp__web_reader__webReader":
+      return `Fetching URL`;
+    default:
+      return name;
+  }
+}
