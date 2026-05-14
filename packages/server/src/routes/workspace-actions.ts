@@ -7,8 +7,10 @@ import * as gitService from "../services/git.service.js";
 import type { SessionManager } from "../services/session.manager.js";
 import type { BoardEvents } from "../services/board-events.js";
 import type { Database } from "../db/index.js";
-import { resolve, dirname } from "node:path";
+import { resolve, dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { tmpdir } from "node:os";
+import { writeFileSync } from "node:fs";
 import { spawn } from "node:child_process";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -148,12 +150,10 @@ export function createWorkspaceActionsRoute(
       const fullCommand = agentArgs ? `${agentCommand} ${agentArgs}` : agentCommand;
 
       if (process.platform === "win32") {
-        spawn("cmd.exe", [
-          "/c", "start",
-          `Terminal - ${workspace.branch}`,
-          "cmd.exe", "/K",
-          `cd /d "${workspace.workingDir}" && ${fullCommand}`,
-        ], {
+        // Write a temp batch file to avoid quoting/escaping issues with nested cmd.exe
+        const tmpScript = join(tmpdir(), `terminal-${id}.cmd`);
+        writeFileSync(tmpScript, `@cd /d "${workspace.workingDir}"\r\n@${fullCommand}\r\n`);
+        spawn("cmd.exe", ["/c", "start", `Terminal - ${workspace.branch}`, tmpScript], {
           detached: true,
           stdio: "ignore",
         }).unref();
