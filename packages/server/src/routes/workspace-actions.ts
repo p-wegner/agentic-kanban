@@ -210,10 +210,11 @@ export function createWorkspaceActionsRoute(
       const agentArgs = skipPerms
         ? (baseArgs ? baseArgs + " --dangerously-skip-permissions" : "--dangerously-skip-permissions")
         : (baseArgs || undefined);
+      const claudeProfile = prefMap.get("claude_profile") || undefined;
 
       const truncatedPrompt = body.prompt.length > 80 ? body.prompt.slice(0, 80) + "..." : body.prompt;
-      console.log(`[workspace-actions] launch: workspaceId=${id} prompt="${truncatedPrompt}" agentCommand=${agentCommand ?? "default"} agentArgs=${agentArgs ?? "none"} resumeFromId=${body.resumeFromId ?? "none"}`);
-      const sessionId = await getSessionManager().startSession(id, body.prompt, agentCommand, agentArgs, body.resumeFromId);
+      console.log(`[workspace-actions] launch: workspaceId=${id} prompt="${truncatedPrompt}" agentCommand=${agentCommand ?? "default"} agentArgs=${agentArgs ?? "none"} profile=${claudeProfile ?? "none"} resumeFromId=${body.resumeFromId ?? "none"}`);
+      const sessionId = await getSessionManager().startSession(id, body.prompt, agentCommand, agentArgs, body.resumeFromId, claudeProfile);
 
       const now = new Date().toISOString();
       await database.update(workspaces).set({ status: "active", updatedAt: now }).where(eq(workspaces.id, id));

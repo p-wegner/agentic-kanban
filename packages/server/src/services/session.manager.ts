@@ -108,6 +108,7 @@ function createSessionManager(
     agentCommand?: string,
     agentArgs?: string,
     resumeFromId?: string,
+    claudeProfile?: string,
   ) {
     // Look up workspace to get workingDir
     const wsRows = await db
@@ -184,7 +185,7 @@ function createSessionManager(
             })
             .catch((err) => console.error("Failed to update session:", err));
         }
-      }, claudeSessionId, agentCommand);
+      }, claudeSessionId, agentCommand, claudeProfile);
     } catch (err) {
       throw err;
     }

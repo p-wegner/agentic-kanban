@@ -3,6 +3,9 @@ import { db } from "../db/index.js";
 import { preferences } from "@agentic-kanban/shared/schema";
 import { eq } from "drizzle-orm";
 import type { Database } from "../db/index.js";
+import { readdirSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 
 export function createPreferencesRoute(database: Database = db) {
   const router = new Hono();
@@ -44,7 +47,7 @@ export function createPreferencesRoute(database: Database = db) {
 
   // GET /api/preferences/settings — get all agent settings
   router.get("/settings", async (c) => {
-    const keys = ["agent_command", "agent_args", "output_parser", "mock_agent", "skip_permissions"];
+    const keys = ["agent_command", "agent_args", "output_parser", "mock_agent", "skip_permissions", "claude_profile"];
     const rows = await database
       .select()
       .from(preferences);
@@ -63,7 +66,7 @@ export function createPreferencesRoute(database: Database = db) {
   router.put("/settings", async (c) => {
     const body = await c.req.json() as Record<string, string>;
     const now = new Date().toISOString();
-    const allowedKeys = ["agent_command", "agent_args", "output_parser", "mock_agent", "skip_permissions"];
+    const allowedKeys = ["agent_command", "agent_args", "output_parser", "mock_agent", "skip_permissions", "claude_profile"];
 
     for (const [key, value] of Object.entries(body)) {
       if (!allowedKeys.includes(key)) continue;
@@ -77,6 +80,20 @@ export function createPreferencesRoute(database: Database = db) {
     }
 
     return c.json({ ok: true });
+  });
+
+  // GET /api/preferences/claude-profiles — list available claude profiles
+  router.get("/claude-profiles", async (c) => {
+    const claudeDir = join(homedir(), ".claude");
+    const profiles: string[] = [];
+    try {
+      const files = readdirSync(claudeDir);
+      for (const file of files) {
+        const match = file.match(/^settings_(.+)\.json$/);
+        if (match) profiles.push(match[1]);
+      }
+    } catch {}
+    return c.json({ profiles: profiles.sort() });
   });
 
   return router;
