@@ -331,7 +331,7 @@ export function createProjectsRoute(database: Database = db) {
 
     // Fetch workspace summaries grouped by issueId
     const issueIds = projectIssues.map((i) => i.id);
-    const workspaceSummaryMap = new Map<string, { total: number; active: number; idle: number; closed: number; branches: string[]; main?: { branch: string; status: string } }>();
+    const workspaceSummaryMap = new Map<string, { total: number; active: number; idle: number; closed: number; branches: string[]; main?: { id: string; branch: string; status: "active" | "idle" | "closed" } }>();
 
     if (issueIds.length > 0) {
       const wsRows = await database
