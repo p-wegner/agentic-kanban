@@ -99,6 +99,7 @@ export function createWorkspacesRoute(
       const agentArgs = skipPerms
         ? (baseArgs ? baseArgs + " --dangerously-skip-permissions" : "--dangerously-skip-permissions")
         : (baseArgs || undefined);
+      const claudeProfile = prefMap.get("claude_profile") || undefined;
 
       // Insert DB record with workingDir and baseBranch
       await database.insert(workspaces).values({
@@ -135,7 +136,7 @@ export function createWorkspacesRoute(
       if (getSessionManager) {
         const truncatedPrompt = agentPrompt.length > 80 ? agentPrompt.slice(0, 80) + "..." : agentPrompt;
         console.log(`[workspaces] auto-launch: workspaceId=${id} branch=${branch} isDirect=${isDirect} prompt="${truncatedPrompt}" agentCommand=${agentCommand ?? "default"}`);
-        sessionId = await getSessionManager().startSession(id, agentPrompt, agentCommand, agentArgs);
+        sessionId = await getSessionManager().startSession(id, agentPrompt, agentCommand, agentArgs, undefined, claudeProfile);
       }
 
       // Broadcast board event

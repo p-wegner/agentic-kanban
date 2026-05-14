@@ -55,6 +55,7 @@ export function launch(
   onOutput: AgentOutputCallback,
   claudeSessionId?: string,
   agentCommand?: string,
+  claudeProfile?: string,
 ): ChildProcess {
   // Test mock agents use AGENT_COMMAND env var and need no claude-specific flags.
   // Real claude (default or configured via preferences) gets stream-json args + stdin prompt.
@@ -79,6 +80,9 @@ export function launch(
     }
     if (agentArgs) {
       args.push(...splitArgs(agentArgs));
+    }
+    if (claudeProfile) {
+      args.push("--profile", claudeProfile);
     }
     if (claudeSessionId) {
       args.push("--resume", claudeSessionId);

@@ -12,6 +12,7 @@ interface Settings {
   output_parser?: string;
   mock_agent?: string;
   skip_permissions?: string;
+  claude_profile?: string;
 }
 
 const DEFAULT_SETTINGS: Settings = {
@@ -20,18 +21,24 @@ const DEFAULT_SETTINGS: Settings = {
   output_parser: "true",
   mock_agent: "false",
   skip_permissions: "false",
+  claude_profile: "",
 };
 
 export function SettingsPanel({ onClose }: SettingsPanelProps) {
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
+  const [profiles, setProfiles] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     async function load() {
       try {
-        const data = await apiFetch<Record<string, string>>("/api/preferences/settings");
+        const [data, profileData] = await Promise.all([
+          apiFetch<Record<string, string>>("/api/preferences/settings"),
+          apiFetch<{ profiles: string[] }>("/api/preferences/claude-profiles"),
+        ]);
         setSettings({ ...DEFAULT_SETTINGS, ...data });
+        setProfiles(profileData.profiles);
       } catch {
         // Use defaults
       } finally {
@@ -95,6 +102,29 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                 <p className="text-xs text-gray-500 mt-1">
                   Binary name or path. Leave empty for default (claude).
                   Examples: claude, claude-glm, /usr/local/bin/claude
+                </p>
+              </div>
+
+              {/* Claude Profile */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Claude Profile
+                </label>
+                <select
+                  value={settings.claude_profile || ""}
+                  onChange={(e) =>
+                    setSettings((s) => ({ ...s, claude_profile: e.target.value }))
+                  }
+                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
+                >
+                  <option value="">Default (no profile)</option>
+                  {profiles.map((p) => (
+                    <option key={p} value={p}>{p}</option>
+                  ))}
+                </select>
+                <p className="text-xs text-gray-500 mt-1">
+                  Passes <code className="text-xs">--profile</code> to Claude Code.
+                  Profiles are detected from <code className="text-xs">~/.claude/settings_*.json</code>.
                 </p>
               </div>
 
