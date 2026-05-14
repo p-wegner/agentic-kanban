@@ -145,7 +145,13 @@ export async function getCurrentBranch(repoPath: string): Promise<string> {
 
 /** Get diff of working tree changes against HEAD (for direct workspaces). */
 export async function getWorkingTreeDiff(workdirPath: string): Promise<string> {
-  return execGit(["diff", "HEAD"], workdirPath);
+  const tracked = await execGit(["diff", "HEAD"], workdirPath);
+  const untrackedFiles = await execGit(["ls-files", "--others", "--exclude-standard"], workdirPath);
+  if (!untrackedFiles.trim()) return tracked;
+  const header = tracked ? tracked + "\n" : "";
+  return header + untrackedFiles.trim().split("\n").filter(Boolean).map(f =>
+    `diff --git a/${f} b/${f}\nnew file mode 100644`
+  ).join("\n");
 }
 
 /** Get lightweight diff stats using --shortstat (no full diff transfer). */
