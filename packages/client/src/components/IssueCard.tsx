@@ -16,7 +16,7 @@ interface TagBadge {
 interface IssueCardProps {
   issue: IssueWithStatus;
   onClick: (issue: IssueWithStatus) => void;
-  onWorkspaceClick?: (issue: IssueWithStatus) => void;
+  onWorkspaceClick?: (issue: IssueWithStatus, workspaceId?: string) => void;
   onDragStart: (e: React.DragEvent, issue: IssueWithStatus) => void;
   tags?: TagBadge[];
   searchQuery?: string;
@@ -87,7 +87,7 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onDragStart, tags,
         <div
           className="flex items-center gap-1.5 mt-1.5 text-xs cursor-pointer rounded px-1 py-0.5 -mx-1 hover:bg-gray-50 transition-colors"
           title={`Workspace: ${ws.main.branch} (${ws.main.status})`}
-          onClick={(e) => { e.stopPropagation(); onWorkspaceClick?.(issue); }}
+          onClick={(e) => { e.stopPropagation(); onWorkspaceClick?.(issue, ws.main?.id); }}
         >
           <span className={`inline-block w-2 h-2 rounded-full shrink-0 ${
             ws.main.status === "active" ? "bg-green-500" :

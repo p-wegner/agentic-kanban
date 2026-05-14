@@ -316,9 +316,12 @@ export function BoardPage() {
     setSelectedIssue(issue);
   }
 
-  function handleManageWorkspaces(issue: IssueWithStatus) {
+  function handleManageWorkspaces(issue: IssueWithStatus, workspaceId?: string) {
     setSelectedIssue(null);
     setWorkspaceIssue(issue);
+    if (workspaceId) {
+      setWorkspaceInitial({ workspaceId, sessionId: "" });
+    }
   }
 
   // Filter columns by search query and priority

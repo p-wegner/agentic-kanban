@@ -367,6 +367,7 @@ export function createProjectsRoute(database: Database = db) {
       // Determine main workspace per issue (active > idle > closed, tie-break by updatedAt)
       const wsDetailRows = await database
         .select({
+          id: workspaces.id,
           issueId: workspaces.issueId,
           branch: workspaces.branch,
           status: workspaces.status,
@@ -375,7 +376,7 @@ export function createProjectsRoute(database: Database = db) {
         .from(workspaces)
         .where(inArray(workspaces.issueId, issueIds));
 
-      const mainWorkspaceMap = new Map<string, { branch: string; status: string; updatedAt: string }>();
+      const mainWorkspaceMap = new Map<string, { id: string; branch: string; status: string; updatedAt: string }>();
       const statusPriority = (s: string) => s === "active" ? 0 : s === "idle" ? 1 : 2;
       for (const row of wsDetailRows) {
         const existing = mainWorkspaceMap.get(row.issueId);
@@ -393,7 +394,7 @@ export function createProjectsRoute(database: Database = db) {
       for (const [issueId, summary] of workspaceSummaryMap) {
         const mainWs = mainWorkspaceMap.get(issueId);
         if (mainWs) {
-          summary.main = { branch: mainWs.branch, status: mainWs.status as "active" | "idle" | "closed" };
+          summary.main = { id: mainWs.id, branch: mainWs.branch, status: mainWs.status as "active" | "idle" | "closed" };
         }
       }
     }
