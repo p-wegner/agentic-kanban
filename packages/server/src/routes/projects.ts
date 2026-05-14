@@ -331,7 +331,7 @@ export function createProjectsRoute(database: Database = db) {
 
     // Fetch workspace summaries grouped by issueId
     const issueIds = projectIssues.map((i) => i.id);
-    const workspaceSummaryMap = new Map<string, { total: number; active: number; idle: number; branches: string[] }>();
+    const workspaceSummaryMap = new Map<string, { total: number; active: number; idle: number; closed: number; branches: string[] }>();
 
     if (issueIds.length > 0) {
       const wsRows = await database
@@ -348,12 +348,14 @@ export function createProjectsRoute(database: Database = db) {
       for (const row of wsRows) {
         let summary = workspaceSummaryMap.get(row.issueId);
         if (!summary) {
-          summary = { total: 0, active: 0, idle: 0, branches: [] };
+          summary = { total: 0, active: 0, idle: 0, closed: 0, branches: [] };
           workspaceSummaryMap.set(row.issueId, summary);
         }
         summary.total += row.count;
         if (row.status === "active") {
           summary.active += row.count;
+        } else if (row.status === "closed") {
+          summary.closed += row.count;
         } else {
           summary.idle += row.count;
         }

@@ -82,17 +82,34 @@ export function IssueCard({ issue, onClick, onDragStart, tags, searchQuery }: Is
         ))}
         {ws && ws.total > 0 && (
           <span
-            className="inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded bg-gray-100 text-gray-600"
-            title={ws.active > 0 ? `${ws.active} active workspace${ws.active > 1 ? 's' : ''}, ${ws.idle} idle` : `${ws.idle} idle workspace${ws.idle > 1 ? 's' : ''}`}
+            className="inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded"
+            title={
+              ws.active > 0
+                ? `${ws.active} active, ${ws.idle} idle, ${ws.closed} merged`
+                : ws.closed > 0 && ws.idle === 0
+                  ? `Merged`
+                  : `${ws.idle} unmerged, ${ws.closed} merged`
+            }
+            style={
+              ws.closed > 0 && ws.active === 0 && ws.idle === 0
+                ? { backgroundColor: "#dcfce722", color: "#16a34a" }
+                : ws.idle > 0 && ws.active === 0
+                  ? { backgroundColor: "#fef3c722", color: "#d97706" }
+                  : undefined
+            }
           >
             <span
               className={`inline-block w-1.5 h-1.5 rounded-full ${
                 ws.active > 0
                   ? "bg-green-500 animate-pulse"
-                  : "bg-gray-400"
+                  : ws.closed > 0 && ws.idle === 0
+                    ? "bg-green-500"
+                    : ws.idle > 0
+                      ? "bg-amber-500"
+                      : "bg-gray-400"
               }`}
             />
-            {ws.total}
+            {ws.closed > 0 && ws.active === 0 && ws.idle === 0 ? "merged" : ws.total}
           </span>
         )}
       </div>
