@@ -159,6 +159,17 @@ export function BoardPage() {
     }
   }
 
+  async function handleRegisterProject(repoPath: string) {
+    const result = await apiFetch<{ id: string; name: string; error?: string }>(
+      "/api/projects",
+      { method: "POST", body: JSON.stringify({ repoPath }) },
+    );
+    if (result.error) throw new Error(result.error);
+    await loadProjects();
+    await handleProjectChange(result.id);
+    showToast(`Registered "${result.name}"`, "success");
+  }
+
   async function handleCreateIssue(data: CreateIssueRequest & { startWorkspace?: boolean }) {
     setMutating(true);
     setError(null);
@@ -491,6 +502,7 @@ export function BoardPage() {
       onSearchChange={setSearchQuery}
       priorityFilter={priorityFilter}
       onPriorityFilterChange={setPriorityFilter}
+      onRegisterProject={handleRegisterProject}
       onSettingsClick={() => setShowSettings(true)}
       onWorktreeOverviewClick={() => setShowWorktreeOverview(true)}
     >
