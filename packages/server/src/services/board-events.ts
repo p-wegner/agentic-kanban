@@ -23,20 +23,20 @@ interface BoardEventSubscriber {
 function createBoardEvents(
   upgradeWebSocket: (callback: (c: any) => any) => any,
 ) {
-  const subscribers = new Map<string, Set<BoardEventSubscriber>>();
+  const subscribers = new Map<string, Map<WSContext, BoardEventSubscriber>>();
 
   function subscribe(projectId: string, ws: WSContext) {
     if (!subscribers.has(projectId)) {
-      subscribers.set(projectId, new Set());
+      subscribers.set(projectId, new Map());
     }
-    subscribers.get(projectId)!.add({ ws });
+    subscribers.get(projectId)!.set(ws, { ws });
     console.log(`[board-events] WS subscribed: projectId=${projectId} subscribers=${subscribers.get(projectId)!.size}`);
   }
 
   function unsubscribe(projectId: string, ws: WSContext) {
     const subs = subscribers.get(projectId);
     if (subs) {
-      subs.delete({ ws });
+      subs.delete(ws);
       console.log(`[board-events] WS unsubscribed: projectId=${projectId} subscribers=${subs.size}`);
       if (subs.size === 0) {
         subscribers.delete(projectId);
@@ -49,7 +49,7 @@ function createBoardEvents(
     if (!subs) return;
     const message: BoardEventMessage = { type: "board_changed", projectId, reason };
     const payload = JSON.stringify(message);
-    for (const sub of subs) {
+    for (const sub of subs.values()) {
       if (sub.ws.readyState === 1) {
         sub.ws.send(payload);
       }
@@ -61,7 +61,7 @@ function createBoardEvents(
     if (!subs) return;
     const message: SessionActivityMessage = { type: "session_activity", projectId, ...data };
     const payload = JSON.stringify(message);
-    for (const sub of subs) {
+    for (const sub of subs.values()) {
       if (sub.ws.readyState === 1) {
         sub.ws.send(payload);
       }

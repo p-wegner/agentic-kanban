@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from "react";
+import { apiFetch } from "./api.js";
 import type { AgentOutputMessage } from "@agentic-kanban/shared";
 
 type ConnectionState = "connecting" | "open" | "closed" | "error";
@@ -11,8 +12,16 @@ export function useWebSocket(sessionId: string | null) {
   const connect = useCallback(() => {
     if (!sessionId) return;
 
-    // Clear messages from previous session
     setMessages([]);
+
+    // Load historical output first, then connect WS for live updates
+    apiFetch<AgentOutputMessage[]>(`/api/sessions/${sessionId}/output`)
+      .then((history) => {
+        setMessages(history);
+      })
+      .catch(() => {
+        // Session may be new with no output yet
+      });
 
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     const url = `${protocol}//${window.location.host}/ws/sessions/${sessionId}`;
