@@ -564,6 +564,7 @@ export function BoardPage() {
               onCreateClick={setCreatingInColumnId}
               onCreateCancel={() => setCreatingInColumnId(null)}
               onIssueClick={handleIssueClick}
+              onWorkspaceClick={handleManageWorkspaces}
               onDragStart={(e, issue) => {
                 (window as unknown as Record<string, unknown>).__dragData = {
                   issueId: issue.id,
@@ -595,6 +596,7 @@ export function BoardPage() {
           onCreateCancel={() => setCreatingInColumnId(null)}
           onCreateSubmit={handleCreateIssue}
           onIssueClick={handleIssueClick}
+          onWorkspaceClick={handleManageWorkspaces}
           onDragStart={(e, issue) => {
             (window as unknown as Record<string, unknown>).__dragData = {
               issueId: issue.id,

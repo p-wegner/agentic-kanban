@@ -9,6 +9,7 @@ interface BoardColumnProps {
   onCreateClick: (statusId: string) => void;
   onCreateCancel: () => void;
   onIssueClick: (issue: IssueWithStatus) => void;
+  onWorkspaceClick?: (issue: IssueWithStatus) => void;
   onDragStart: (e: React.DragEvent, issue: IssueWithStatus) => void;
   onDrop: (statusId: string, sortOrder?: number) => void;
   searchQuery?: string;
@@ -22,6 +23,7 @@ export function BoardColumn({
   onCreateClick,
   onCreateCancel,
   onIssueClick,
+  onWorkspaceClick,
   onDragStart,
   onDrop,
   searchQuery,
@@ -112,6 +114,7 @@ export function BoardColumn({
             <IssueCard
               issue={issue}
               onClick={onIssueClick}
+              onWorkspaceClick={onWorkspaceClick}
               onDragStart={onDragStart}
               searchQuery={searchQuery}
             />
