@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { type ReactNode, useRef, useState } from "react";
 
 interface Project {
   id: string;
@@ -10,6 +10,7 @@ interface LayoutProps {
   projects?: Project[];
   activeProjectId?: string | null;
   onProjectChange?: (id: string) => void;
+  onRegisterProject?: (repoPath: string) => Promise<void>;
   searchQuery?: string;
   onSearchChange?: (query: string) => void;
   priorityFilter?: string;
@@ -23,6 +24,7 @@ export function Layout({
   projects = [],
   activeProjectId,
   onProjectChange,
+  onRegisterProject,
   searchQuery = "",
   onSearchChange,
   priorityFilter = "",
@@ -30,11 +32,40 @@ export function Layout({
   onWorktreeOverviewClick,
   onSettingsClick,
 }: LayoutProps) {
+  const [showRegister, setShowRegister] = useState(false);
+  const [repoPath, setRepoPath] = useState("");
+  const [registering, setRegistering] = useState(false);
+  const [registerError, setRegisterError] = useState<string | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  async function handleRegisterSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!repoPath.trim()) return;
+    setRegistering(true);
+    setRegisterError(null);
+    try {
+      await onRegisterProject?.(repoPath.trim());
+      setShowRegister(false);
+      setRepoPath("");
+    } catch (err) {
+      setRegisterError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setRegistering(false);
+    }
+  }
+
+  function openRegister() {
+    setRegisterError(null);
+    setRepoPath("");
+    setShowRegister(true);
+    setTimeout(() => inputRef.current?.focus(), 50);
+  }
+
   return (
     <div className="min-h-screen bg-gray-50">
       <header className="bg-white border-b border-gray-200 px-4 py-3">
         <div className="flex items-center justify-between gap-4 flex-wrap">
-          <div className="flex items-center gap-3 min-w-0">
+          <div className="flex items-center gap-2 min-w-0">
             <h1 className="text-xl font-semibold text-gray-900 shrink-0">
               Agentic Kanban
             </h1>
@@ -54,6 +85,15 @@ export function Layout({
             {projects.length === 1 && (
               <span className="text-sm text-gray-500">{projects[0].name}</span>
             )}
+            <button
+              onClick={openRegister}
+              className="p-1 text-gray-400 hover:text-gray-600 rounded-md hover:bg-gray-100"
+              title="Register project"
+            >
+              <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                <path d="M12 5v14M5 12h14" />
+              </svg>
+            </button>
           </div>
           <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
             <div className="relative">
@@ -121,6 +161,54 @@ export function Layout({
         </div>
       </header>
       <main>{children}</main>
+
+      {showRegister && (
+        <div
+          className="fixed inset-0 bg-black/40 flex items-center justify-center z-50"
+          onClick={(e) => { if (e.target === e.currentTarget) setShowRegister(false); }}
+        >
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-md mx-4 p-6">
+            <h2 className="text-lg font-semibold text-gray-900 mb-4">Register Project</h2>
+            <form onSubmit={handleRegisterSubmit} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Repository path
+                </label>
+                <input
+                  ref={inputRef}
+                  type="text"
+                  value={repoPath}
+                  onChange={(e) => setRepoPath(e.target.value)}
+                  placeholder="C:/path/to/repo"
+                  className="w-full text-sm border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                />
+                <p className="mt-1 text-xs text-gray-500">
+                  Absolute path to a git repository. Branch and remote URL are auto-detected.
+                </p>
+              </div>
+              {registerError && (
+                <p className="text-sm text-red-600">{registerError}</p>
+              )}
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowRegister(false)}
+                  className="px-3 py-1.5 text-sm text-gray-700 border border-gray-300 rounded-md hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={registering || !repoPath.trim()}
+                  className="px-3 py-1.5 text-sm text-white bg-blue-600 rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {registering ? "Registering…" : "Register"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
