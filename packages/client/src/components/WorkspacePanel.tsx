@@ -225,13 +225,22 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
       .catch(() => {});
   }, [selectedWorkspace]);
 
-  // Auto-load latest session output when expanding a workspace with completed sessions
+  // Auto-load session output when expanding a workspace
   useEffect(() => {
     if (!selectedWorkspace) return;
     const sessions = workspaceSessions[selectedWorkspace];
     if (!sessions || sessions.length === 0) return;
     if (completedMessages.length > 0 || activeSession) return;
 
+    // If there's a running session, connect to it
+    const running = sessions.find(s => s.status === "running");
+    if (running) {
+      setActiveSession(running.id);
+      setLastPrompt(`${issue.title}${issue.description ? `\n\n${issue.description}` : ""}`);
+      return;
+    }
+
+    // Otherwise load latest completed session output
     const latestCompleted = sessions
       .filter(s => s.status !== "running")
       .sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime())[0];
