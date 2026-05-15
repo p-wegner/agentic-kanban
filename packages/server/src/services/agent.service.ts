@@ -59,6 +59,7 @@ export function launch(
   claudeProfile?: string,
   keepAlive?: boolean,
   permissionPromptTool?: string,
+  planMode?: boolean,
 ): ChildProcess {
   // Mock agents (env var or preference-based) need no claude-specific flags.
   // Real claude (default or configured via preferences) gets stream-json args + stdin prompt.
@@ -105,6 +106,9 @@ export function launch(
     }
     if (permissionPromptTool) {
       args.push("--permission-prompt-tool", permissionPromptTool);
+    }
+    if (planMode) {
+      args.push("--permission-mode", "plan");
     }
     args.push("-p");
   }
