@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn, execSync, type ChildProcess } from "node:child_process";
 import { writeFileSync, existsSync } from "node:fs";
 import { resolve, dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -63,8 +63,18 @@ export function launch(
   // Mock agents (env var or preference-based) need no claude-specific flags.
   // Real claude (default or configured via preferences) gets stream-json args + stdin prompt.
   const isTestMock = !!process.env.AGENT_COMMAND || (agentCommand?.includes("mock-agent") ?? false);
-  const command = process.env.AGENT_COMMAND || agentCommand || "claude";
+  let command = process.env.AGENT_COMMAND || agentCommand || "claude";
   const isWindows = process.platform === "win32";
+
+  // On Windows, resolve .cmd wrappers to the actual .exe to avoid cmd.exe stdout buffering.
+  // shell:false is required for real-time stream-json output; cmd.exe buffers everything.
+  if (isWindows && !isTestMock && !agentCommand) {
+    try {
+      const resolved = execSync("where claude.exe 2>nul", { encoding: "utf8" }).trim().split("\n")[0]?.trim();
+      if (resolved) command = resolved;
+    } catch {}
+  }
+
   console.log(`[agent] launching: command=${command} worktree=${worktreePath} sessionId=${sessionId} resume=${claudeSessionId ?? "none"}`);
 
   let args: string[];
@@ -99,8 +109,8 @@ export function launch(
     args.push("-p");
   }
 
-  // On Windows, use shell:true for custom/mock commands (.bat/.cmd need cmd.exe).
-  // Default claude uses shell:false to avoid cmd.exe buffering stdout streams.
+  // On Windows, use shell:true for mock/custom commands (.bat/.cmd need cmd.exe).
+  // Default claude is resolved to .exe above, so shell:false works for real-time streaming.
   const useShell = isWindows && (isTestMock || !!agentCommand);
 
   const proc = spawn(command, args, {
