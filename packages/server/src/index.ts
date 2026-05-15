@@ -71,10 +71,10 @@ async function runWorkflowOnExit(workspaceId: string, sessionId: string, exitCod
     const findStatus = (name: string) => statuses.find(s => s.name === name);
 
     if (reviewSessionIds.has(sessionId)) {
-      // Review session completed — auto-merge and move to Done
+      // Review session completed — auto-merge and move to AI Reviewed
       reviewSessionIds.delete(sessionId);
       console.log(`[workflow] review session ${sessionId} completed for workspace ${workspaceId} — auto-merging`);
-      await autoMerge(workspace, projectId, issueId, findStatus("Done")?.id ?? null, now);
+      await autoMerge(workspace, projectId, issueId, findStatus("AI Reviewed")?.id ?? null, now);
       return;
     }
 
@@ -105,7 +105,7 @@ async function runWorkflowOnExit(workspaceId: string, sessionId: string, exitCod
       // Check if auto-review is enabled (requiresReview checkbox or auto_review setting)
       const prefRows = await db.select().from(preferences);
       const prefMap = new Map(prefRows.map(r => [r.key, r.value]));
-      const autoReview = workspace.requiresReview || prefMap.get("auto_review") === "true";
+      const autoReview = workspace.requiresReview || prefMap.get("auto_review") !== "false";
 
       if (autoReview) {
         const useMock = prefMap.get("mock_agent") === "true" || process.env.MOCK_AGENT === "1";
@@ -116,7 +116,7 @@ async function runWorkflowOnExit(workspaceId: string, sessionId: string, exitCod
           `You are a code reviewer. Review the changes on branch '${workspace.branch}'.`,
           `Run 'git diff ${workspace.baseBranch ?? "HEAD"}' to see the diff.`,
           `Provide a concise review covering: correctness, code quality, and potential issues.`,
-          `When finished, use the update_issue MCP tool to move this issue to 'Done' status if ready to merge, or describe what needs to change.`,
+          `When finished, use the update_issue MCP tool to move this issue to 'AI Reviewed' status if ready to merge, or describe what needs to change.`,
           `Issue ID: ${issueId}`,
         ].join("\n");
 

@@ -12,8 +12,9 @@ const DEFAULT_STATUSES = [
   { name: "Todo", sortOrder: 0, isDefault: true },
   { name: "In Progress", sortOrder: 1, isDefault: false },
   { name: "In Review", sortOrder: 2, isDefault: false },
-  { name: "Done", sortOrder: 3, isDefault: false },
-  { name: "Cancelled", sortOrder: 4, isDefault: false },
+  { name: "AI Reviewed", sortOrder: 3, isDefault: false },
+  { name: "Done", sortOrder: 4, isDefault: false },
+  { name: "Cancelled", sortOrder: 5, isDefault: false },
 ];
 
 export function createProjectsRoute(database: Database = db) {
@@ -440,7 +441,7 @@ export function createProjectsRoute(database: Database = db) {
         const issue = issuesWithBlocked[i];
         const deps = depsByIssue.get(issue.id);
         if (deps && deps.length > 0) {
-          const isBlocked = deps.some(depId => depStatusMap.get(depId) !== "Done");
+          const isBlocked = deps.some(depId => { const s = depStatusMap.get(depId); return s !== "Done" && s !== "AI Reviewed"; });
           issuesWithBlocked[i] = { ...issue, isBlocked };
         }
       }

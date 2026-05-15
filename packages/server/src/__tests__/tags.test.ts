@@ -19,6 +19,15 @@ const MIGRATION_FILES = [
   "../../../shared/drizzle/0004_boring_wind_dancer.sql",
   "../../../shared/drizzle/0005_silky_frog_thor.sql",
   "../../../shared/drizzle/0006_wide_ogun.sql",
+  "../../../shared/drizzle/0007_diff_comments.sql",
+  "../../../shared/drizzle/0008_direct_workspace.sql",
+  "../../../shared/drizzle/0009_requires_review.sql",
+  "../../../shared/drizzle/0010_session_messages_cascade.sql",
+  "../../../shared/drizzle/0011_timestamps.sql",
+  "../../../shared/drizzle/0012_session_stats.sql",
+  "../../../shared/drizzle/0013_plan_mode.sql",
+  "../../../shared/drizzle/0014_issue_dependencies.sql",
+  "../../../shared/drizzle/0015_ai_reviewed_status.sql",
 ];
 
 function createTestApp() {

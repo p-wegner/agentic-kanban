@@ -11,8 +11,9 @@ const DEFAULT_STATUSES = [
   { name: "Todo", sortOrder: 0, isDefault: true },
   { name: "In Progress", sortOrder: 1, isDefault: false },
   { name: "In Review", sortOrder: 2, isDefault: false },
-  { name: "Done", sortOrder: 3, isDefault: false },
-  { name: "Cancelled", sortOrder: 4, isDefault: false },
+  { name: "AI Reviewed", sortOrder: 3, isDefault: false },
+  { name: "Done", sortOrder: 4, isDefault: false },
+  { name: "Cancelled", sortOrder: 5, isDefault: false },
 ];
 
 async function runMigrations() {

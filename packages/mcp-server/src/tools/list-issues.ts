@@ -73,7 +73,7 @@ export function registerListIssues(server: McpServer) {
 
         const blockedSet = new Set<string>();
         for (const dep of depRows) {
-          if (depStatusMap.get(dep.dependsOnId) !== "Done") {
+          if (depStatusMap.get(dep.dependsOnId) !== "Done" && depStatusMap.get(dep.dependsOnId) !== "AI Reviewed") {
             blockedSet.add(dep.issueId);
           }
         }

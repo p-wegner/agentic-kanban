@@ -32,7 +32,7 @@ interface Project {
   remoteUrl: string | null;
 }
 
-const ARCHIVE_STATUS_NAMES = new Set(["Done", "Cancelled"]);
+const ARCHIVE_STATUS_NAMES = new Set(["AI Reviewed", "Done", "Cancelled"]);
 
 export function BoardPage() {
   const [columns, setColumns] = useState<StatusWithIssues[]>([]);
