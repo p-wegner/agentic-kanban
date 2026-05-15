@@ -32,6 +32,8 @@ function createSessionManager(
   const sessionContexts = new Map<string, SessionContext>();
   // Track turn state per session: "processing" = agent is working, "waiting" = sent result, awaiting input
   const turnStates = new Map<string, "processing" | "waiting">();
+  // Track sessions explicitly stopped by user — exit handler should not overwrite their status
+  const stoppedByUser = new Set<string>();
 
   function broadcast(sessionId: string, message: AgentOutputMessage) {
     // Buffer the message for late subscribers
@@ -185,16 +187,23 @@ function createSessionManager(
 
         // On exit, update session status
         if (event.type === "exit") {
+          // Always clean up in-memory state regardless of DB result
+          sessionContexts.delete(sessionId);
+          turnStates.delete(sessionId);
+
+          // Skip DB update if user explicitly stopped — stopSession already wrote "stopped"
+          if (stoppedByUser.has(sessionId)) {
+            stoppedByUser.delete(sessionId);
+            options?.onSessionExit?.(workspaceId, sessionId, event.exitCode ?? null);
+            return;
+          }
+
           const endNow = new Date().toISOString();
           db.update(sessions)
             .set({ status: "completed", endedAt: endNow, exitCode: String(event.exitCode ?? 0) })
             .where(eq(sessions.id, sessionId))
             .then(() => {
-              // Notify board that a session completed
               options?.onSessionExit?.(workspaceId, sessionId, event.exitCode ?? null);
-              // Clean up cached context
-              sessionContexts.delete(sessionId);
-              turnStates.delete(sessionId);
             })
             .catch((err) => console.error("Failed to update session:", err));
         }
@@ -209,6 +218,10 @@ function createSessionManager(
   /** Stop a running session by closing stdin (graceful) then killing the agent process. */
   async function stopSession(sessionId: string) {
     console.log(`[session] stopping: sessionId=${sessionId}`);
+    // Mark as user-stopped so the exit handler doesn't overwrite the DB status
+    stoppedByUser.add(sessionId);
+    // Clean up in-memory state immediately
+    turnStates.delete(sessionId);
     // Try graceful shutdown first (close stdin so agent finishes)
     const closed = agentService.closeStdin(sessionId);
     if (closed) {
@@ -226,7 +239,6 @@ function createSessionManager(
       .update(sessions)
       .set({ status: "stopped", endedAt: now })
       .where(eq(sessions.id, sessionId));
-    turnStates.delete(sessionId);
     return true;
   }
 

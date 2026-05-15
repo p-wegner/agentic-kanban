@@ -193,7 +193,12 @@ export function sendInput(sessionId: string, content: string): boolean {
   if (!proc || !proc.stdin || proc.stdin.destroyed) return false;
   if (!stdinOpen.has(sessionId)) return false;
   const jsonl = JSON.stringify({ type: "user", content }) + "\n";
-  return proc.stdin.write(jsonl);
+  try {
+    return proc.stdin.write(jsonl);
+  } catch (err) {
+    console.error(`[agent] sendInput write error: sessionId=${sessionId}`, err);
+    return false;
+  }
 }
 
 /** Close stdin to signal the agent should finish. */
@@ -224,6 +229,7 @@ export function killAll(): number {
     }
   }
   activeProcesses.clear();
+  stdinOpen.clear();
   return count;
 }
 
