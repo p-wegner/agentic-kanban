@@ -26,11 +26,11 @@ We need a **focused, testable** tool that does one thing well.
 - MCP server for agent integration
 - Real-time updates (simplified)
 - Diff viewer with inline comments
+- Tauri desktop app with system tray
 
 ## What We Skip (from original)
 - Multi-tenant / organizations / team collaboration
 - Cloud deployment / ElectricSQL / PostgreSQL
-- Tauri desktop wrapper
 - 9 additional agent executors (keep only Claude Code)
 - Relay / WebRTC / tunnel system
 - OAuth / billing / Sentry / PostHog
@@ -41,11 +41,8 @@ We need a **focused, testable** tool that does one thing well.
 - Multiple host support
 - PR creation with AI descriptions
 
-## Tech Stack Decision (for reimplementation)
-> TBD - to be decided after MVP scoping. Options:
-> - **Option A**: Python (FastAPI + React/Vue) - most testable, fastest to develop
-> - **Option B**: TypeScript full-stack (Next.js or Hono + React) - unified language
-> - **Option C**: Rust + React (like original) - proven but heavy
+## Tech Stack
+TypeScript monorepo — Hono + Drizzle + React + MCP SDK + Tauri v2. See `docs/state.md` for current status.
 
 ### Key Criterion
 The stack must support **automated E2E testing** that an AI agent can run in tight feedback loops without human intervention.
