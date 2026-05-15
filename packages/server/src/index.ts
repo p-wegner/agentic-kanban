@@ -221,17 +221,17 @@ const server = serve({ fetch: app.fetch, port }, (info) => {
 // Inject WebSocket handler into the HTTP server
 injectWebSocket(server);
 
-// Process lifecycle logging
-process.on("uncaughtException", (err) => {
-  console.error("[fatal] Uncaught exception — server will exit:", err);
-  server.close();
-  process.exit(1);
+// Process lifecycle logging — log but don't exit for recoverable errors
+process.on("uncaughtException", (err: NodeJS.ErrnoException) => {
+  if (err.code === "EADDRINUSE") {
+    console.error("[fatal] Port already in use — exiting:", err.message);
+    process.exit(1);
+  }
+  console.error("[error] Uncaught exception (recoverable):", err);
 });
 
 process.on("unhandledRejection", (reason) => {
-  console.error("[fatal] Unhandled rejection — server will exit:", reason);
-  server.close();
-  process.exit(1);
+  console.error("[error] Unhandled rejection (suppressed):", reason);
 });
 
 function shutdown(signal: string) {
