@@ -26,7 +26,7 @@ All documented features have been visually verified (2026-05-15):
 - Issue numbers: auto-incrementing #1, #2, #3 per project on cards and detail panel
 - Panel animations: slide-in transitions on detail/workspace/settings/worktree panels
 - Favicon: inline SVG kanban-board icon
-- MCP server: 8 tools via stdio JSON-RPC
+- MCP server: 21 tools via stdio JSON-RPC
 - CLI: `pnpm cli -- register <path>` to register a git repo as a project
 - Desktop app: Tauri v2 native window with system tray (Show/Quit), minimize-to-tray on close, OS notifications on session_completed/workspace_merged events
 
