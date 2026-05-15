@@ -124,3 +124,4 @@ Private — personal use only.
 [README.de.md](README.de.md) — Deutsche Version
 [README.fr.md](README.fr.md) — Version française
 [README.it.md](README.it.md) — Versione italiana
+[README.ru.md](README.ru.md) — Русская версия

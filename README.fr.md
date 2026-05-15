@@ -120,3 +120,6 @@ Privé — usage personnel uniquement.
 ---
 
 [README.md](README.md) — English version
+[README.de.md](README.de.md) — Deutsche Version
+[README.it.md](README.it.md) — Versione italiana
+[README.ru.md](README.ru.md) — Русская версия
