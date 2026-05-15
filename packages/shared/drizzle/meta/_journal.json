@@ -99,6 +99,13 @@
       "when": 1778398400000,
       "tag": "0013_plan_mode",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "6",
+      "when": 1778484800000,
+      "tag": "0014_issue_dependencies",
+      "breakpoints": true
     }
   ]
 }

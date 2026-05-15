@@ -25,6 +25,8 @@ const MIGRATION_FILES = [
   "../../../shared/drizzle/0010_session_messages_cascade.sql",
   "../../../shared/drizzle/0011_timestamps.sql",
   "../../../shared/drizzle/0012_session_stats.sql",
+  "../../../shared/drizzle/0013_plan_mode.sql",
+  "../../../shared/drizzle/0014_issue_dependencies.sql",
 ];
 
 function createTestApp() {

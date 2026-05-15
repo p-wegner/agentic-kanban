@@ -28,7 +28,9 @@ export const issuesRelations = relations(issues, ({ one, many }) => ({
   }),
   tags: many(issueTags),
   workspaces: many(workspaces),
+  dependencies: many(issueDependencies),
 }));
 
+import { issueDependencies } from "./issue-dependencies.js";
 import { issueTags } from "./tags.js";
 import { workspaces } from "./workspaces.js";
