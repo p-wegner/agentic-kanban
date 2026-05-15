@@ -29,6 +29,17 @@ interface SessionInfo {
   startedAt: string;
   endedAt: string | null;
   exitCode: string | null;
+  stats: string | null;
+}
+
+interface SessionStats {
+  durationMs: number;
+  totalCostUsd: number;
+  inputTokens: number;
+  outputTokens: number;
+  numTurns: number;
+  model: string;
+  success: boolean;
 }
 
 interface WorkspacePanelProps {
@@ -75,6 +86,44 @@ function formatDuration(start: string, end: string | null): string {
   const min = Math.floor(sec / 60);
   const remSec = sec % 60;
   return `${min}m ${remSec}s`;
+}
+
+function formatTokenCount(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  return String(n);
+}
+
+function parseStats(statsStr: string | null | undefined): SessionStats | null {
+  if (!statsStr) return null;
+  try {
+    return JSON.parse(statsStr);
+  } catch {
+    return null;
+  }
+}
+
+function SessionStatsBadge({ stats }: { stats: string | null | undefined }) {
+  const s = parseStats(stats);
+  if (!s) return null;
+  return (
+    <span className="text-[10px] text-gray-400" title={`Tokens: ${s.inputTokens.toLocaleString()} in / ${s.outputTokens.toLocaleString()} out\nCost: $${s.totalCostUsd.toFixed(4)}\nDuration: ${(s.durationMs / 1000).toFixed(0)}s`}>
+      ${s.totalCostUsd.toFixed(2)}
+    </span>
+  );
+}
+
+function SessionStatsSummary({ stats }: { stats: string | null | undefined }) {
+  const s = parseStats(stats);
+  if (!s) return null;
+  return (
+    <div className="flex items-center gap-3 text-xs text-gray-500 py-1 px-1">
+      <span title="Input / output tokens">{formatTokenCount(s.inputTokens)} in / {formatTokenCount(s.outputTokens)} out</span>
+      <span>${s.totalCostUsd.toFixed(2)}</span>
+      <span>{(s.durationMs / 1000).toFixed(0)}s</span>
+      {s.numTurns > 1 && <span>{s.numTurns} turns</span>}
+    </div>
+  );
 }
 
 import { suggestBranchName, sanitizeBranchName } from "../lib/branch.js";
@@ -746,6 +795,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                               <span className="text-[10px] text-gray-400 ml-auto">
                                 ({formatDuration(session.startedAt, session.endedAt)})
                               </span>
+                              <SessionStatsBadge stats={session.stats} />
                             </button>
                           );
                         })}
@@ -807,6 +857,16 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                           ) : undefined}
                         />
                       ) : null
+                    )}
+
+                    {/* Session stats summary — shown below terminal for completed sessions */}
+                    {ws.workingDir && ws.status !== "closed" && !isRunning && (
+                      <SessionStatsSummary
+                        stats={selectedHistoryId
+                          ? completedSessions.find(s => s.id === selectedHistoryId)?.stats ?? null
+                          : completedSessions.find(s => s.id === lastSessionPerWorkspace[ws.id])?.stats ?? null
+                        }
+                      />
                     )}
 
                     {/* "Back to latest" link when viewing history */}

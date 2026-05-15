@@ -72,6 +72,25 @@ function createSessionManager(
           turnStates.set(sessionId, "waiting");
         }
 
+        // Extract stats from result events and persist to sessions table
+        if (obj.type === "result") {
+          const usage = obj.usage as Record<string, unknown> | undefined;
+          const rawCost = obj.total_cost_usd ?? obj.cost_usd;
+          const stats = JSON.stringify({
+            durationMs: (obj.duration_ms as number) ?? 0,
+            totalCostUsd: typeof rawCost === "number" ? rawCost : 0,
+            inputTokens: (usage?.input_tokens as number) ?? 0,
+            outputTokens: (usage?.output_tokens as number) ?? 0,
+            numTurns: (obj.num_turns as number) ?? 1,
+            model: (obj.model as string) ?? "",
+            success: obj.subtype === "success" && !obj.is_error,
+          });
+          db.update(sessions)
+            .set({ stats })
+            .where(eq(sessions.id, sessionId))
+            .catch((err) => console.error("Failed to update session stats:", err));
+        }
+
         // Parse tool_use events for live activity
         if (obj.type === "assistant" && obj.message?.content) {
           const content = obj.message.content;
