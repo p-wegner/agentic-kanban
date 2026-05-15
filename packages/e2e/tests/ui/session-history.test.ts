@@ -1,8 +1,12 @@
 import { test, expect } from "@playwright/test";
+import { writeFileSync, unlinkSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 
 test.describe("Session History UI", () => {
   let projectId: string;
   let statusId: string;
+  const tmpFiles: string[] = [];
 
   test.beforeAll(async ({ request }) => {
     const projectsRes = await request.get("http://localhost:3001/api/projects");
@@ -39,12 +43,15 @@ test.describe("Session History UI", () => {
   }
 
   test("completed sessions show in workspace panel", async ({ page, request }) => {
+    const suffix = Date.now().toString(36);
+    const issueTitle = `History UI test ${suffix}`;
+    const branchName = `feature/history-ui-${suffix}`;
+
     const issueRes = await request.post("http://localhost:3001/api/issues", {
-      data: { title: "History UI test issue", statusId, projectId },
+      data: { title: issueTitle, statusId, projectId },
     });
     const issueId = (await issueRes.json()).id;
 
-    const branchName = "feature/history-ui-test";
     const wsRes = await request.post("http://localhost:3001/api/workspaces", {
       data: { issueId, branch: branchName },
     });
@@ -56,13 +63,25 @@ test.describe("Session History UI", () => {
       { data: {} },
     );
 
-    // Launch and wait for completion
+    // Stop auto-launched session (workspace creation auto-launches claude.exe)
+    await request.post(
+      `http://localhost:3001/api/workspaces/${workspaceId}/stop`,
+      { data: {} },
+    );
+    await new Promise((r) => setTimeout(r, 500));
+
+    // Launch and wait for completion (write to temp file to avoid Windows cmd.exe quoting issues)
+    const script1 = "console.log('history test output'); process.exit(0);";
+    const tmp1 = join(tmpdir(), `mock-agent-history-${Date.now()}.mjs`);
+    writeFileSync(tmp1, script1);
+    tmpFiles.push(tmp1);
+
     const launchRes = await request.post(
       `http://localhost:3001/api/workspaces/${workspaceId}/launch`,
       {
         data: {
           prompt: "test session history",
-          agentCommand: "node -e \"console.log('history test output'); process.exit(0)\"",
+          agentCommand: `node ${tmp1.replace(/\\/g, '/')}`,
         },
       },
     );
@@ -79,7 +98,7 @@ test.describe("Session History UI", () => {
     await page.goto("/");
     await page.waitForSelector("h2");
 
-    await openWorkspaceForIssue(page, "History UI test issue");
+    await openWorkspaceForIssue(page, issueTitle);
 
     // Expand the workspace (click on the branch name)
     await page.locator(`text=${branchName}`).first().click();
@@ -89,9 +108,12 @@ test.describe("Session History UI", () => {
   });
 
   test("click past session shows output in TerminalView", async ({ page, request }) => {
-    const branchName = "feature/history-output-test";
+    const suffix = Date.now().toString(36);
+    const issueTitle = `History output test ${suffix}`;
+    const branchName = `feature/history-output-${suffix}`;
+
     const issueRes = await request.post("http://localhost:3001/api/issues", {
-      data: { title: "History output test issue", statusId, projectId },
+      data: { title: issueTitle, statusId, projectId },
     });
     const issueId = (await issueRes.json()).id;
 
@@ -106,13 +128,25 @@ test.describe("Session History UI", () => {
       { data: {} },
     );
 
-    // Launch and wait for completion
+    // Stop auto-launched session (workspace creation auto-launches claude.exe)
+    await request.post(
+      `http://localhost:3001/api/workspaces/${workspaceId}/stop`,
+      { data: {} },
+    );
+    await new Promise((r) => setTimeout(r, 500));
+
+    // Launch and wait for completion (write to temp file to avoid Windows cmd.exe quoting issues)
+    const script2 = "console.log('viewable output'); process.exit(0);";
+    const tmp2 = join(tmpdir(), `mock-agent-output-${Date.now()}.mjs`);
+    writeFileSync(tmp2, script2);
+    tmpFiles.push(tmp2);
+
     const launchRes = await request.post(
       `http://localhost:3001/api/workspaces/${workspaceId}/launch`,
       {
         data: {
           prompt: "test output viewing",
-          agentCommand: "node -e \"console.log('viewable output'); process.exit(0)\"",
+          agentCommand: `node ${tmp2.replace(/\\/g, '/')}`,
         },
       },
     );
@@ -128,7 +162,7 @@ test.describe("Session History UI", () => {
     await page.goto("/");
     await page.waitForSelector("h2");
 
-    await openWorkspaceForIssue(page, "History output test issue");
+    await openWorkspaceForIssue(page, issueTitle);
 
     // Expand workspace
     await page.locator(`text=${branchName}`).first().click();
@@ -141,5 +175,11 @@ test.describe("Session History UI", () => {
 
     // TerminalView should show "Disconnected" status (history output loaded inline)
     await expect(page.locator("text=Disconnected").first()).toBeVisible({ timeout: 5000 });
+  });
+
+  test.afterAll(() => {
+    for (const f of tmpFiles) {
+      try { unlinkSync(f); } catch { /* ignore */ }
+    }
   });
 });
