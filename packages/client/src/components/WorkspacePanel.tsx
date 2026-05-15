@@ -710,7 +710,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                                 placeholder={isRunning ? "Agent is running..." : "Message Claude Code..."}
                                 rows={2}
                                 disabled={isRunning}
-                                className="flex-1 text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none disabled:bg-gray-50 disabled:text-gray-400"
+                                className="flex-1 text-sm bg-white text-gray-900 border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none disabled:bg-gray-50 disabled:text-gray-400"
                                 onClick={(e) => e.stopPropagation()}
                               />
                               {isRunning ? (
