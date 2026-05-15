@@ -87,6 +87,7 @@ export interface CreateWorkspaceRequest {
   baseBranch?: string;
   workingDir?: string;
   isDirect?: boolean;
+  planMode?: boolean;
 }
 
 export interface UpdateWorkspaceRequest {
@@ -102,6 +103,7 @@ export interface WorkspaceResponse {
   workingDir: string | null;
   baseBranch: string | null;
   isDirect: boolean;
+  planMode: boolean;
   sessionId?: string;
   createdAt: string;
   updatedAt: string;

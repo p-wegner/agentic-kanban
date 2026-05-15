@@ -85,6 +85,13 @@
       "when": 1778225600000,
       "tag": "0011_timestamps",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1778312000000,
+      "tag": "0012_plan_mode",
+      "breakpoints": true
     }
   ]
 }
