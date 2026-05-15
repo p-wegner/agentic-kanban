@@ -54,6 +54,11 @@ async function runWorkflowOnExit(workspaceId: string, sessionId: string, exitCod
 
     boardEvents.broadcast(projectId, "session_completed");
 
+    // Always set workspace back to idle after session exits
+    const now = new Date().toISOString();
+    await db.update(workspaces).set({ status: "idle", updatedAt: now }).where(eq(workspaces.id, workspaceId));
+    boardEvents.broadcast(projectId, "workspace_idle");
+
     // Only run auto-workflow on successful exit (code 0)
     if (exitCode !== 0) return;
 
@@ -63,7 +68,6 @@ async function runWorkflowOnExit(workspaceId: string, sessionId: string, exitCod
       .where(eq(projectStatuses.projectId, projectId));
 
     const findStatus = (name: string) => statuses.find(s => s.name === name);
-    const now = new Date().toISOString();
 
     if (reviewSessionIds.has(sessionId)) {
       // Review session completed — auto-merge and move to Done

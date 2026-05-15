@@ -242,41 +242,60 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
     if (!sessions || sessions.length === 0) return;
     if (completedMessages.length > 0 || activeSession) return;
 
+    const wsId = selectedWorkspace;
+    const defaultPrompt = `${issue.title}${issue.description ? `\n\n${issue.description}` : ""}`;
+
     // If there's a running session, check if it's actually alive before connecting
     const running = sessions.find(s => s.status === "running");
     if (running) {
-      // Fetch output to check for stale sessions (process dead but DB still says "running")
       apiFetch<AgentOutputMessage[]>(`/api/sessions/${running.id}/output`)
         .then((msgs) => {
           if (msgs.some(m => m.type === "exit")) {
-            // Stale session — treat as completed and load its output
-            setLastSessionPerWorkspace((prev) => ({ ...prev, [selectedWorkspace!]: running.id }));
+            // Has exit message — definitely stale
+            setLastSessionPerWorkspace((prev) => ({ ...prev, [wsId]: running.id }));
             setCompletedMessages(msgs);
+          } else if (msgs.length === 0) {
+            // 0 output — stale if running >2min
+            const ageMs = Date.now() - new Date(running.startedAt).getTime();
+            if (ageMs > 2 * 60 * 1000) {
+              setLastSessionPerWorkspace((prev) => ({ ...prev, [wsId]: running.id }));
+              setCompletedMessages(msgs);
+            } else {
+              setActiveSession(running.id);
+              setLastPrompt(defaultPrompt);
+            }
           } else {
-            // Actually running — connect to it
+            // Has output, no exit — actually running
             setActiveSession(running.id);
-            setLastPrompt(`${issue.title}${issue.description ? `\n\n${issue.description}` : ""}`);
+            setLastPrompt(defaultPrompt);
           }
         })
         .catch(() => {
-          // Can't reach API — assume actually running
           setActiveSession(running.id);
-          setLastPrompt(`${issue.title}${issue.description ? `\n\n${issue.description}` : ""}`);
+          setLastPrompt(defaultPrompt);
         });
       return;
     }
 
-    // Otherwise load latest completed session output
-    const latestCompleted = sessions
+    // Otherwise load latest completed session that has output (skip empty sessions)
+    const sortedCompleted = sessions
       .filter(s => s.status !== "running")
-      .sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime())[0];
+      .sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime());
 
-    if (latestCompleted) {
-      setLastSessionPerWorkspace((prev) => ({ ...prev, [selectedWorkspace!]: latestCompleted.id }));
-      apiFetch<AgentOutputMessage[]>(`/api/sessions/${latestCompleted.id}/output`)
-        .then((msgs) => setCompletedMessages(msgs))
-        .catch(() => {});
-    }
+    (async () => {
+      for (const session of sortedCompleted) {
+        try {
+          const msgs = await apiFetch<AgentOutputMessage[]>(`/api/sessions/${session.id}/output`);
+          setLastSessionPerWorkspace((prev) => ({ ...prev, [wsId]: session.id }));
+          if (msgs.length > 0) {
+            setCompletedMessages(msgs);
+            break;
+          }
+        } catch {
+          break;
+        }
+      }
+    })();
   }, [selectedWorkspace, workspaceSessions, activeSession]);
 
   async function handleViewHistory(sessionId: string) {
@@ -329,7 +348,6 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
     if (!prompt.trim()) return;
     setActionLoading(true);
     setError(null);
-    setCompletedMessages([]);
     try {
       const body: Record<string, string> = { prompt: prompt.trim() };
       // Attach resumeFromId if we have a previous session for this workspace

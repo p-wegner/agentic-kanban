@@ -60,9 +60,9 @@ export function launch(
   keepAlive?: boolean,
   permissionPromptTool?: string,
 ): ChildProcess {
-  // Test mock agents use AGENT_COMMAND env var and need no claude-specific flags.
+  // Mock agents (env var or preference-based) need no claude-specific flags.
   // Real claude (default or configured via preferences) gets stream-json args + stdin prompt.
-  const isTestMock = !!process.env.AGENT_COMMAND;
+  const isTestMock = !!process.env.AGENT_COMMAND || (agentCommand?.includes("mock-agent") ?? false);
   const command = process.env.AGENT_COMMAND || agentCommand || "claude";
   const isWindows = process.platform === "win32";
   console.log(`[agent] launching: command=${command} worktree=${worktreePath} sessionId=${sessionId} resume=${claudeSessionId ?? "none"}`);
