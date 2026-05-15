@@ -1,4 +1,8 @@
 import { test, expect } from "@playwright/test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { execSync } from "node:child_process";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 
 test.describe("Projects API", () => {
   let projectId: string;
@@ -26,12 +30,21 @@ test.describe("Projects API", () => {
   test("POST /api/projects creates project with git info auto-detection", async ({
     request,
   }) => {
+    // Create a temporary git repo for the test
+    const tmpDir = mkdtempSync(join(tmpdir(), "e2e-project-"));
+    execSync("git init", { cwd: tmpDir });
+    execSync("git config user.email test@test.com", { cwd: tmpDir });
+    execSync("git config user.name Test", { cwd: tmpDir });
+
     const res = await request.post("http://localhost:3001/api/projects", {
       data: {
         name: "E2E Test Project " + Date.now(),
-        repoPath: "F:\\projects\\agentic_kanban",
+        repoPath: tmpDir,
       },
     });
+
+    // Clean up temp dir
+    try { rmSync(tmpDir, { recursive: true, force: true }); } catch {}
     expect(res.status()).toBe(201);
     const body = await res.json();
     expect(body.id).toBeDefined();
