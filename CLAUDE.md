@@ -5,7 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Project Status
 This project is **Stage 13 complete + Tauri desktop** (Stages 0-13 done). Tech stack: TypeScript monorepo — Hono + Drizzle + React + MCP SDK + Tauri v2. Progress tracked in `docs/state.md`.
 
-All documented features have been visually verified (2026-05-12):
+All documented features have been visually verified (2026-05-15):
 - Board renders 3 active columns (Todo, In Progress, In Review) with collapsible "Completed" group for Done/Cancelled
 - Create issue: inline form with title, description, priority, Add/Cancel
 - Issue detail panel: slide-in with view/edit/delete, status dropdown, description placeholder, priority badge, status, workspaces, tags, timestamps, issue number
@@ -38,6 +38,7 @@ Cleanroom reimplementation of [vibe-kanban](https://github.com/BloopAI/vibe-kanb
 - **Local only** — no cloud, no multi-tenant, no OAuth
 - **Testability first** — E2E tests from day one, AI-runnable feedback loops
 - **Tech stack TBD** — resolved: TypeScript (Hono + Drizzle + React + MCP SDK)
+- **Server resilience**: Agent subprocess callbacks are wrapped in try/catch in `agent.service.ts` — a failing agent never crashes the server. `uncaughtException`/`unhandledRejection` handlers log with `[fatal]` prefix before exiting. Stale sessions (still "running" after crash/restart) are cleaned up on startup in `index.ts` after migrations — set to "stopped" and their workspaces to "idle".
 - **PR creation is skipped** — manual merge only
 - **Always commit** — after finishing a task, commit the changes without waiting to be asked
 - Use `uv` and `uv venv` for any Python work (never global site-packages)
