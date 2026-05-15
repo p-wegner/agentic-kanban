@@ -122,14 +122,12 @@ export function launch(
 
   console.log(`[agent] spawned: sessionId=${sessionId} pid=${proc.pid} command=${command} shell=${useShell}`);
 
-  // Send prompt via stdin. Keep stdin open for multi-turn when keepAlive is true.
+  // Send prompt via stdin and close immediately.
+  // Note: On Windows, claude.exe buffers stdout until stdin is closed,
+  // so keeping stdin open for multi-turn causes no output to arrive.
+  // Multi-turn follow-ups are handled via --resume (new process per turn).
   if (!isTestMock) {
-    if (keepAlive) {
-      proc.stdin?.write(prompt + "\n");
-      stdinOpen.set(sessionId, true);
-    } else {
-      proc.stdin?.end(prompt + "\n");
-    }
+    proc.stdin?.end(prompt + "\n");
   }
 
   activeProcesses.set(sessionId, proc);
