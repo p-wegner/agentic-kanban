@@ -17,9 +17,17 @@ Use the **agentic-kanban MCP** tools (prefix: `mcp__agentic-kanban__`) to keep t
 | `get_issue` | Get full details for a specific issue |
 | `create_issue` | Create a new issue on the board |
 | `update_issue` | Move an issue to a new status, change title/description/priority |
+| `delete_issue` | Permanently delete an issue |
+| `move_issue` | Move an issue to a different status (shorthand) |
 | `list_workspaces` | List workspaces (filter by issue ID) |
 | `start_workspace` | Create a git worktree workspace for an issue |
+| `stop_workspace` | Stop a running agent session |
 | `get_workspace_diff` | Get the git diff for a workspace |
+| `list_tags` | List all tags |
+| `create_tag` | Create a new tag |
+| `list_sessions` | List sessions for a workspace |
+| `read_terminal` | Read last N lines of terminal output for a session |
+| `get_session_stats` | Get token usage, cost, and duration for a session |
 
 ## Step-by-Step Workflow
 
@@ -47,22 +55,32 @@ Move each sub-issue to **In Progress** when you start it, **Done** when you fini
 ### 4. Update description with progress notes
 Use `update_issue` to log blockers, decisions, or scope changes in the description field — this is the only shared state between you and the user:
 ```
-update_issue(issueId, description="## Progress\n- ✅ Schema migrated\n- 🔄 API route WIP\n- ⬜ UI pending")
+update_issue(issueId, description="## Progress\n- Schema migrated\n- API route WIP\n- UI pending")
 ```
 
-### 5. Move to review when code is ready
+### 5. Commit your changes
+**This is mandatory before finishing.** After implementation is complete:
+1. Stage and commit all changed files with a descriptive message
+2. The commit message should summarize the what and why
+3. Reference the issue in the commit if appropriate
+
+Do NOT leave uncommitted changes in the worktree. If you have made changes, commit them before moving to the next step.
+
+### 6. Move to In Review when code is ready
+After committing, move the issue to **In Review**:
 ```
 update_issue(issueId, statusName="In Review")
 ```
-Use **In Review** if the work needs human sign-off (PR, design review, testing). Skip this status and go straight to Done if no review is needed.
+This signals that the implementation is complete and ready for review. An automated code review will be triggered.
 
-### 6. Close the issue
+### 7. Close the issue
+After review approval:
 ```
 update_issue(issueId, statusName="Done")
 ```
-Do this only after the work is actually complete (tests pass, code committed). Do **not** mark Done while work is still in progress.
+Do this only after the work is actually complete (tests pass, code committed, review approved). Do **not** mark Done while work is still in progress.
 
-### 7. Cancel if work is abandoned
+### 8. Cancel if work is abandoned
 ```
 update_issue(issueId, statusName="Cancelled")
 ```
@@ -73,7 +91,7 @@ Use **Cancelled** for issues that are no longer relevant or were superseded. Add
 The board has 5 statuses. Pass these exact strings to `statusName`:
 - `"Todo"` — not started
 - `"In Progress"` — actively being worked on
-- `"In Review"` — waiting for review/approval
+- `"In Review"` — implementation complete, awaiting review
 - `"Done"` — complete
 - `"Cancelled"` — abandoned/irrelevant
 
@@ -90,12 +108,14 @@ update_issue("<id>", statusName="In Progress")
 
 ### "I finished this task"
 ```
-update_issue("<id>", statusName="Done")
+# 1. Commit all changes
+# 2. Move to In Review
+update_issue("<id>", statusName="In Review")
 ```
 
 ### "I'm blocked — flagging for the user"
 ```
-update_issue("<id>", description="<existing description>\n\n## 🚧 Blocked\n<describe the blocker>", priority="high")
+update_issue("<id>", description="<existing description>\n\n## Blocked\n<describe the blocker>", priority="high")
 ```
 
 ### "This issue is too big — splitting it"
@@ -111,10 +131,17 @@ list_workspaces(issueId="<id>")   → get workspaceId
 get_workspace_diff(workspaceId)   → see git diff
 ```
 
+### "Review a completed task"
+```
+get_workspace_diff(workspaceId)   → see all changes
+get_session_stats(sessionId)      → see token usage and cost
+```
+
 ## Rules of Thumb
 
 1. **Move first, code second** — update to In Progress before any file edits.
-2. **One status transition per logical checkpoint** — don't batch-move issues after the fact.
-3. **Description is a shared log** — write progress notes so the user can follow along without reading code.
-4. **Done means done** — code committed, tests green, no loose ends.
-5. **Cancelled is not failure** — use it freely when scope changes.
+2. **Commit before moving to In Review** — never leave uncommitted changes when signaling completion.
+3. **One status transition per logical checkpoint** — don't batch-move issues after the fact.
+4. **Description is a shared log** — write progress notes so the user can follow along without reading code.
+5. **Done means done** — code committed, tests green, review approved, no loose ends.
+6. **Cancelled is not failure** — use it freely when scope changes.

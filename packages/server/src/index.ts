@@ -12,6 +12,7 @@ import { workspaces, issues, projects, projectStatuses, preferences, sessions } 
 import { eq } from "drizzle-orm";
 import * as agentService from "./services/agent.service.js";
 import * as gitService from "./services/git.service.js";
+import { execFile } from "node:child_process";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -77,38 +78,58 @@ async function runWorkflowOnExit(workspaceId: string, sessionId: string, exitCod
       return;
     }
 
-    // Main agent session completed — user merges explicitly from the UI
-    if (workspace.requiresReview) {
-      // Review required — move to "In Review" and launch automated review agent
-      console.log(`[workflow] agent session ${sessionId} completed, review required — moving to In Review`);
+    // Main agent session completed — check if changes were committed
+    let hasCommittedChanges = false;
+    if (workspace.workingDir) {
+      try {
+        hasCommittedChanges = await new Promise<boolean>((resolve) => {
+          execFile("git", ["diff", "--quiet", "HEAD"], { cwd: workspace.workingDir! }, (err: Error | null) => {
+            // git diff --quiet exits 0 if clean, 1 if dirty
+            resolve(!err);
+          });
+        });
+      } catch {
+        hasCommittedChanges = false;
+      }
+    }
+
+    if (hasCommittedChanges) {
+      // Agent committed changes — auto-move to In Review and optionally launch review
+      console.log(`[workflow] agent session ${sessionId} completed with committed changes — moving to In Review`);
       const inReview = findStatus("In Review");
       if (inReview) {
         await db.update(issues).set({ statusId: inReview.id, updatedAt: now }).where(eq(issues.id, issueId));
       }
       boardEvents.broadcast(projectId, "issue_updated");
 
-      // Launch automated review session
+      // Check if auto-review is enabled (requiresReview checkbox or auto_review setting)
       const prefRows = await db.select().from(preferences);
       const prefMap = new Map(prefRows.map(r => [r.key, r.value]));
-      const useMock = prefMap.get("mock_agent") === "true" || process.env.MOCK_AGENT === "1";
-      const agentCommand = useMock ? MOCK_AGENT_COMMAND : (prefMap.get("agent_command") || undefined);
-      const agentArgs = prefMap.get("agent_args") || undefined;
+      const autoReview = workspace.requiresReview || prefMap.get("auto_review") === "true";
 
-      const reviewPrompt = [
-        `You are a code reviewer. Review the changes on branch '${workspace.branch}'.`,
-        `Run 'git diff ${workspace.baseBranch ?? "HEAD"}' to see the diff.`,
-        `Provide a concise review covering: correctness, code quality, and potential issues.`,
-        `When finished, use the update_issue MCP tool to move this issue to 'Done' status if ready to merge, or describe what needs to change.`,
-        `Issue ID: ${issueId}`,
-      ].join("\n");
+      if (autoReview) {
+        const useMock = prefMap.get("mock_agent") === "true" || process.env.MOCK_AGENT === "1";
+        const agentCommand = useMock ? MOCK_AGENT_COMMAND : (prefMap.get("agent_command") || undefined);
+        const agentArgs = prefMap.get("agent_args") || undefined;
 
-      try {
-        const reviewSessionId = await sessionManager.startSession(workspaceId, reviewPrompt, agentCommand, agentArgs);
-        reviewSessionIds.add(reviewSessionId);
-        console.log(`[workflow] launched review session ${reviewSessionId} for workspace ${workspaceId}`);
-      } catch (err) {
-        console.error("[workflow] Failed to launch review session:", err);
+        const reviewPrompt = [
+          `You are a code reviewer. Review the changes on branch '${workspace.branch}'.`,
+          `Run 'git diff ${workspace.baseBranch ?? "HEAD"}' to see the diff.`,
+          `Provide a concise review covering: correctness, code quality, and potential issues.`,
+          `When finished, use the update_issue MCP tool to move this issue to 'Done' status if ready to merge, or describe what needs to change.`,
+          `Issue ID: ${issueId}`,
+        ].join("\n");
+
+        try {
+          const reviewSessionId = await sessionManager.startSession(workspaceId, reviewPrompt, agentCommand, agentArgs);
+          reviewSessionIds.add(reviewSessionId);
+          console.log(`[workflow] launched review session ${reviewSessionId} for workspace ${workspaceId}`);
+        } catch (err) {
+          console.error("[workflow] Failed to launch review session:", err);
+        }
       }
+    } else {
+      console.log(`[workflow] agent session ${sessionId} completed but no committed changes — leaving issue in current status`);
     }
   } catch (err) {
     console.error("[workflow] onSessionExit error:", err);
