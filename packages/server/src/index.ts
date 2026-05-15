@@ -10,6 +10,7 @@ import { createSessionManager } from "./services/session.manager.js";
 import { createBoardEvents } from "./services/board-events.js";
 import { workspaces, issues, projects, projectStatuses, preferences } from "@agentic-kanban/shared/schema";
 import { eq } from "drizzle-orm";
+import * as agentService from "./services/agent.service.js";
 import * as gitService from "./services/git.service.js";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -180,6 +181,36 @@ const server = serve({ fetch: app.fetch, port }, (info) => {
 
 // Inject WebSocket handler into the HTTP server
 injectWebSocket(server);
+
+// Process lifecycle logging
+process.on("uncaughtException", (err) => {
+  console.error("[fatal] Uncaught exception — server will exit:", err);
+  server.close();
+  process.exit(1);
+});
+
+process.on("unhandledRejection", (reason) => {
+  console.error("[fatal] Unhandled rejection — server will exit:", reason);
+  server.close();
+  process.exit(1);
+});
+
+function shutdown(signal: string) {
+  const activeCount = agentService.killAll();
+  console.log(`[shutdown] Received ${signal} — closing server (${activeCount} agent process(es) terminated)...`);
+  server.close(() => {
+    console.log("[shutdown] Server closed.");
+    process.exit(0);
+  });
+  // Force exit after 5s if graceful shutdown hangs
+  setTimeout(() => {
+    console.error("[shutdown] Forced exit after 5s timeout");
+    process.exit(1);
+  }, 5000).unref();
+}
+
+process.on("SIGTERM", () => shutdown("SIGTERM"));
+process.on("SIGINT", () => shutdown("SIGINT"));
 
 export default app;
 export { sessionManager };

@@ -104,6 +104,8 @@ export function launch(
     stdio: ["pipe", "pipe", "pipe"] as const,
   });
 
+  console.log(`[agent] spawned: sessionId=${sessionId} pid=${proc.pid} command=${command} shell=${useShell}`);
+
   // Send prompt via stdin so --resume + -p (--print) mode works correctly
   if (!isTestMock) {
     proc.stdin?.end(prompt + "\n");
@@ -112,24 +114,44 @@ export function launch(
   activeProcesses.set(sessionId, proc);
 
   proc.stdout?.on("data", (chunk: Buffer) => {
-    onOutput({ type: "stdout", sessionId, data: chunk.toString() });
+    try {
+      onOutput({ type: "stdout", sessionId, data: chunk.toString() });
+    } catch (err) {
+      console.error(`[agent] stdout callback error: sessionId=${sessionId}`, err);
+    }
   });
 
   proc.stderr?.on("data", (chunk: Buffer) => {
-    onOutput({ type: "stderr", sessionId, data: chunk.toString() });
+    try {
+      onOutput({ type: "stderr", sessionId, data: chunk.toString() });
+    } catch (err) {
+      console.error(`[agent] stderr callback error: sessionId=${sessionId}`, err);
+    }
   });
 
-  proc.on("exit", (code) => {
-    console.log(`[agent] exited: sessionId=${sessionId} code=${code}`);
+  proc.on("exit", (code, signal) => {
+    console.log(`[agent] exited: sessionId=${sessionId} code=${code} signal=${signal ?? "none"} pid=${proc.pid}`);
     activeProcesses.delete(sessionId);
-    onOutput({ type: "exit", sessionId, exitCode: code });
+    try {
+      onOutput({ type: "exit", sessionId, exitCode: code });
+    } catch (err) {
+      console.error(`[agent] exit callback error: sessionId=${sessionId}`, err);
+    }
   });
 
   proc.on("error", (err) => {
     console.error(`[agent] process error: sessionId=${sessionId} err=${err.message}`);
-    onOutput({ type: "stderr", sessionId, data: `Process error: ${err.message}` });
+    try {
+      onOutput({ type: "stderr", sessionId, data: `Process error: ${err.message}` });
+    } catch (cbErr) {
+      console.error(`[agent] error callback error: sessionId=${sessionId}`, cbErr);
+    }
     activeProcesses.delete(sessionId);
-    onOutput({ type: "exit", sessionId, exitCode: 1 });
+    try {
+      onOutput({ type: "exit", sessionId, exitCode: 1 });
+    } catch (cbErr) {
+      console.error(`[agent] error-exit callback error: sessionId=${sessionId}`, cbErr);
+    }
   });
 
   return proc;
@@ -140,6 +162,7 @@ export function kill(sessionId: string): boolean {
   const proc = activeProcesses.get(sessionId);
   if (!proc) return false;
 
+  console.log(`[agent] killing: sessionId=${sessionId} pid=${proc.pid}`);
   if (process.platform === "win32") {
     // On Windows, use taskkill to kill the process tree
     spawn("taskkill", ["/pid", String(proc.pid), "/T", "/F"], { shell: true });
@@ -149,6 +172,23 @@ export function kill(sessionId: string): boolean {
 
   activeProcesses.delete(sessionId);
   return true;
+}
+
+/** Kill all active agent processes (for graceful shutdown). */
+export function killAll(): number {
+  const count = activeProcesses.size;
+  if (count === 0) return 0;
+  console.log(`[agent] killAll: terminating ${count} active process(es)`);
+  for (const [sessionId, proc] of activeProcesses) {
+    console.log(`[agent] killAll: sessionId=${sessionId} pid=${proc.pid}`);
+    if (process.platform === "win32") {
+      spawn("taskkill", ["/pid", String(proc.pid), "/T", "/F"], { shell: true });
+    } else {
+      proc.kill("SIGTERM");
+    }
+  }
+  activeProcesses.clear();
+  return count;
 }
 
 /** Get the active process for a session, if any. */
