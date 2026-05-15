@@ -30,6 +30,7 @@ interface SessionInfo {
   endedAt: string | null;
   exitCode: string | null;
   stats: string | null;
+  claudeSessionId: string | null;
 }
 
 interface SessionStats {
@@ -584,6 +585,32 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
     }
   }
 
+  async function handleContinueFromSession(wsId: string, sessionId: string) {
+    setActionLoading(true);
+    setError(null);
+    const continuePrompt = "Continue where you left off. If you were in the middle of implementing something, pick up from where you stopped. If the implementation is complete, commit your changes and move this issue to In Review.";
+    try {
+      const body: Record<string, string> = {
+        prompt: continuePrompt,
+        resumeFromId: sessionId,
+      };
+      const result = await apiFetch<{ sessionId: string }>(
+        `/api/workspaces/${wsId}/launch`,
+        { method: "POST", body: JSON.stringify(body) },
+      );
+      setActiveSession(result.sessionId);
+      setLastPrompt(continuePrompt);
+      setPrompt("");
+      setSelectedHistoryId(null);
+      setHistoryMessages([]);
+      await fetchWorkspaces();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Continue failed");
+    } finally {
+      setActionLoading(false);
+    }
+  }
+
   async function handleDeleteWorkspace(wsId: string) {
     const suffix = isRunning ? " The running agent will be stopped." : "";
     if (!window.confirm(`Delete this workspace? This removes the workspace record and all session data.${suffix}`)) return;
@@ -803,27 +830,38 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                           const sessionBadge = SESSION_STATUS_COLORS[session.status] ?? "bg-gray-100 text-gray-500";
                           const isActive = selectedHistoryId === session.id;
                           return (
-                            <button
-                              key={session.id}
-                              onClick={() => handleViewHistory(session.id)}
-                              className={`w-full flex items-center gap-2 py-1 px-2 rounded text-left text-xs ${
-                                isActive
-                                  ? "bg-blue-50 text-blue-700 font-medium"
-                                  : "hover:bg-gray-50 text-gray-600"
-                              }`}
-                            >
-                              <span className={`w-1.5 h-1.5 rounded-full ${session.status === "completed" ? "bg-green-500" : session.status === "stopped" ? "bg-yellow-500" : "bg-gray-300"}`} />
-                              <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${sessionBadge}`}>
-                                {session.status}
-                              </span>
-                              <span className="text-xs text-gray-600">
-                                {formatRelativeTime(session.startedAt)}
-                              </span>
-                              <span className="text-[10px] text-gray-400 ml-auto">
-                                ({formatDuration(session.startedAt, session.endedAt)})
-                              </span>
-                              <SessionStatsBadge stats={session.stats} />
-                            </button>
+                            <div key={session.id} className="flex items-center gap-1">
+                              <button
+                                onClick={() => handleViewHistory(session.id)}
+                                className={`flex-1 flex items-center gap-2 py-1 px-2 rounded text-left text-xs ${
+                                  isActive
+                                    ? "bg-blue-50 text-blue-700 font-medium"
+                                    : "hover:bg-gray-50 text-gray-600"
+                                }`}
+                              >
+                                <span className={`w-1.5 h-1.5 rounded-full ${session.status === "completed" ? "bg-green-500" : session.status === "stopped" ? "bg-yellow-500" : "bg-gray-300"}`} />
+                                <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${sessionBadge}`}>
+                                  {session.status}
+                                </span>
+                                <span className="text-xs text-gray-600">
+                                  {formatRelativeTime(session.startedAt)}
+                                </span>
+                                <span className="text-[10px] text-gray-400 ml-auto">
+                                  ({formatDuration(session.startedAt, session.endedAt)})
+                                </span>
+                                <SessionStatsBadge stats={session.stats} />
+                              </button>
+                              {session.claudeSessionId && ws.status !== "closed" && (
+                                <button
+                                  onClick={() => handleContinueFromSession(ws.id, session.id)}
+                                  disabled={actionLoading}
+                                  className="text-[10px] bg-green-600 text-white px-1.5 py-0.5 rounded hover:bg-green-700 disabled:opacity-50 shrink-0"
+                                  title="Continue this session with --resume"
+                                >
+                                  Continue
+                                </button>
+                              )}
+                            </div>
                           );
                         })}
                       </div>
