@@ -138,6 +138,13 @@ test.describe("Board workspace summary", () => {
     });
     const ws2 = await ws2Res.json();
 
+    // Stop auto-launched sessions and re-set both to active
+    // (auto-launch sets workspace to "idle" when the session exits)
+    await request.post(`http://localhost:3001/api/workspaces/${ws1.id}/stop`, { data: {} });
+    await request.post(`http://localhost:3001/api/workspaces/${ws2.id}/stop`, { data: {} });
+    await request.patch(`http://localhost:3001/api/workspaces/${ws1.id}`, { data: { status: "active" } });
+    await request.patch(`http://localhost:3001/api/workspaces/${ws2.id}`, { data: { status: "active" } });
+
     // Both start active — main should be the more recently updated one
     let res = await request.get(
       `http://localhost:3001/api/projects/${projectId}/board`,
