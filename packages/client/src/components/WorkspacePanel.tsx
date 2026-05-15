@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from "react";
 import { apiFetch } from "../lib/api.js";
 import { useWebSocket } from "../lib/useWebSocket.js";
 import { TerminalView } from "./TerminalView.js";
-import { PermissionPrompt } from "./PermissionPrompt.js";
 import { DiffViewer } from "./DiffViewer.js";
 import type {
   AgentOutputMessage,
@@ -114,9 +113,6 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
   const [prefs, setPrefs] = useState<Record<string, string>>({});
   const [branches, setBranches] = useState<{ local: string[]; remote: string[] } | null>(null);
   const suggestion = suggestBranchName(issue);
-
-  // Permission prompt state
-  const [activePermission, setActivePermission] = useState<{ id: string; toolName: string; toolInput: Record<string, unknown> } | null>(null);
 
   const { state: wsState, messages, disconnect, isWaitingForInput } = useWebSocket(activeSession);
 
@@ -265,22 +261,6 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
         .catch(() => {});
     }
   }, [selectedWorkspace, workspaceSessions, activeSession]);
-
-  // Poll for permission prompts when a session is active
-  useEffect(() => {
-    if (!isSessionAlive || !selectedWorkspace) return;
-    const pollInterval = setInterval(() => {
-      apiFetch<{ prompts: Array<{ requestId: string; toolName: string; toolInput: Record<string, unknown> }> }>(
-        `/api/workspaces/${selectedWorkspace}/permission-prompts`,
-      ).then((data) => {
-        if (data.prompts.length > 0 && !activePermission) {
-          const p = data.prompts[0];
-          setActivePermission({ id: p.requestId, toolName: p.toolName, toolInput: p.toolInput });
-        }
-      }).catch(() => {});
-    }, 2000);
-    return () => clearInterval(pollInterval);
-  }, [isSessionAlive, selectedWorkspace, activePermission]);
 
   async function handleViewHistory(sessionId: string) {
     try {
@@ -735,17 +715,6 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                           );
                         })}
                       </div>
-                    )}
-
-                    {/* Permission prompt — shown when agent requests tool approval */}
-                    {activePermission && isSessionAlive && (
-                      <PermissionPrompt
-                        permissionId={activePermission.id}
-                        toolName={activePermission.toolName}
-                        toolInput={activePermission.toolInput}
-                        workspaceId={ws.id}
-                        onResponded={() => setActivePermission(null)}
-                      />
                     )}
 
                     {/* TerminalView — show history output or live/completed output */}

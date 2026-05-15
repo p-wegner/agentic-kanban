@@ -13,6 +13,7 @@ interface Settings {
   mock_agent?: string;
   skip_permissions?: string;
   claude_profile?: string;
+  permission_prompt_tool?: string;
 }
 
 const DEFAULT_SETTINGS: Settings = {
@@ -22,6 +23,7 @@ const DEFAULT_SETTINGS: Settings = {
   mock_agent: "false",
   skip_permissions: "false",
   claude_profile: "",
+  permission_prompt_tool: "true",
 };
 
 export function SettingsPanel({ onClose }: SettingsPanelProps) {
@@ -185,6 +187,25 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                 <p className="text-xs text-gray-500 mt-1">
                   Bypass all permission checks. Recommended only for sandboxes
                   with no internet access.
+                </p>
+              </div>
+
+              {/* Permission Prompt Tool */}
+              <div>
+                <label className="flex items-center gap-2 text-sm font-medium text-gray-700 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={settings.permission_prompt_tool !== "false"}
+                    onChange={(e) =>
+                      setSettings((s) => ({ ...s, permission_prompt_tool: e.target.checked ? "true" : "false" }))
+                    }
+                    className="rounded border-gray-300"
+                  />
+                  Permission Prompt Tool
+                </label>
+                <p className="text-xs text-gray-500 mt-1">
+                  Pass <code className="text-xs">--permission-prompt-tool</code> to Claude Code.
+                  Routes tool approval requests through the UI instead of the terminal.
                 </p>
               </div>
 
