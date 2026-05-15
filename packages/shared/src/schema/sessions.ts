@@ -13,6 +13,7 @@ export const sessions = sqliteTable("sessions", {
   exitCode: text("exit_code"),
   claudeSessionId: text("claude_session_id"),
   resumeFromId: text("resume_from_id"),
+  stats: text("stats"),
 });
 
 export const sessionsRelations = relations(sessions, ({ one, many }) => ({

@@ -95,6 +95,7 @@ const resultMsg = {
   type: "result",
   subtype: "success",
   cost_usd: 0.001,
+  total_cost_usd: 0.001,
   is_error: false,
   duration_ms: durationMs,
   duration_api_ms: durationMs,

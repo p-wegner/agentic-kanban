@@ -39,5 +39,31 @@ export function createSessionsRoute(database: Database = db) {
     return c.json(messages);
   });
 
+  // GET /api/sessions/:sessionId/stats
+  router.get("/:sessionId/stats", async (c) => {
+    const sessionId = c.req.param("sessionId");
+
+    const sessionRows = await database
+      .select({ stats: sessions.stats })
+      .from(sessions)
+      .where(eq(sessions.id, sessionId))
+      .limit(1);
+
+    if (sessionRows.length === 0) {
+      return c.json({ error: "Session not found" }, 404);
+    }
+
+    const statsStr = sessionRows[0].stats;
+    if (!statsStr) {
+      return c.json({ error: "No stats available" }, 404);
+    }
+
+    try {
+      return c.json(JSON.parse(statsStr));
+    } catch {
+      return c.json({ error: "Invalid stats data" }, 500);
+    }
+  });
+
   return router;
 }
