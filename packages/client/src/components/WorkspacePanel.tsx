@@ -242,11 +242,27 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
     if (!sessions || sessions.length === 0) return;
     if (completedMessages.length > 0 || activeSession) return;
 
-    // If there's a running session, connect to it
+    // If there's a running session, check if it's actually alive before connecting
     const running = sessions.find(s => s.status === "running");
     if (running) {
-      setActiveSession(running.id);
-      setLastPrompt(`${issue.title}${issue.description ? `\n\n${issue.description}` : ""}`);
+      // Fetch output to check for stale sessions (process dead but DB still says "running")
+      apiFetch<AgentOutputMessage[]>(`/api/sessions/${running.id}/output`)
+        .then((msgs) => {
+          if (msgs.some(m => m.type === "exit")) {
+            // Stale session — treat as completed and load its output
+            setLastSessionPerWorkspace((prev) => ({ ...prev, [selectedWorkspace!]: running.id }));
+            setCompletedMessages(msgs);
+          } else {
+            // Actually running — connect to it
+            setActiveSession(running.id);
+            setLastPrompt(`${issue.title}${issue.description ? `\n\n${issue.description}` : ""}`);
+          }
+        })
+        .catch(() => {
+          // Can't reach API — assume actually running
+          setActiveSession(running.id);
+          setLastPrompt(`${issue.title}${issue.description ? `\n\n${issue.description}` : ""}`);
+        });
       return;
     }
 
@@ -256,6 +272,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
       .sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime())[0];
 
     if (latestCompleted) {
+      setLastSessionPerWorkspace((prev) => ({ ...prev, [selectedWorkspace!]: latestCompleted.id }));
       apiFetch<AgentOutputMessage[]>(`/api/sessions/${latestCompleted.id}/output`)
         .then((msgs) => setCompletedMessages(msgs))
         .catch(() => {});
