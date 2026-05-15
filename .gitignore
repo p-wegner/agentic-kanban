@@ -13,6 +13,9 @@ playwright-report/
 blob-report/
 coverage/
 .claude/hooks/.edited-files.json
+.claude/worktrees/
+packages/.worktrees/
+packages/desktop/src-tauri/gen/
 .playwright-cli/
 docs/temp/
 bash.exe.stackdump
