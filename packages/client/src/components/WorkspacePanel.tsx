@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { apiFetch } from "../lib/api.js";
 import { useWebSocket } from "../lib/useWebSocket.js";
 import { TerminalView } from "./TerminalView.js";
+import { PermissionPrompt } from "./PermissionPrompt.js";
 import { DiffViewer } from "./DiffViewer.js";
 import type {
   AgentOutputMessage,
@@ -114,10 +115,15 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
   const [branches, setBranches] = useState<{ local: string[]; remote: string[] } | null>(null);
   const suggestion = suggestBranchName(issue);
 
-  const { state: wsState, messages, disconnect } = useWebSocket(activeSession);
+  // Permission prompt state
+  const [activePermission, setActivePermission] = useState<{ id: string; toolName: string; toolInput: Record<string, unknown> } | null>(null);
 
-  // Derive whether agent is currently running
+  const { state: wsState, messages, disconnect, isWaitingForInput } = useWebSocket(activeSession);
+
+  // Derive whether agent is currently running (processing a turn)
   const isRunning = activeSession !== null && !messages.some(m => m.type === "exit");
+  // Whether a session is alive (may be processing or waiting for input)
+  const isSessionAlive = activeSession !== null && isRunning;
 
   // Auto-clear activeSession when agent completes.
   // Primary: detect exit via WS messages.
@@ -260,6 +266,22 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
     }
   }, [selectedWorkspace, workspaceSessions, activeSession]);
 
+  // Poll for permission prompts when a session is active
+  useEffect(() => {
+    if (!isSessionAlive || !selectedWorkspace) return;
+    const pollInterval = setInterval(() => {
+      apiFetch<{ prompts: Array<{ requestId: string; toolName: string; toolInput: Record<string, unknown> }> }>(
+        `/api/workspaces/${selectedWorkspace}/permission-prompts`,
+      ).then((data) => {
+        if (data.prompts.length > 0 && !activePermission) {
+          const p = data.prompts[0];
+          setActivePermission({ id: p.requestId, toolName: p.toolName, toolInput: p.toolInput });
+        }
+      }).catch(() => {});
+    }, 2000);
+    return () => clearInterval(pollInterval);
+  }, [isSessionAlive, selectedWorkspace, activePermission]);
+
   async function handleViewHistory(sessionId: string) {
     try {
       const msgs = await apiFetch<AgentOutputMessage[]>(`/api/sessions/${sessionId}/output`);
@@ -331,6 +353,27 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
       await fetchWorkspaces();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Launch failed");
+    } finally {
+      setActionLoading(false);
+    }
+  }
+
+  async function handleSendTurn(wsId: string) {
+    if (!prompt.trim()) return;
+    setActionLoading(true);
+    setError(null);
+    try {
+      await apiFetch<{ ok: boolean }>(
+        `/api/workspaces/${wsId}/turn`,
+        {
+          method: "POST",
+          body: JSON.stringify({ content: prompt.trim() }),
+        },
+      );
+      setLastPrompt(prompt.trim());
+      setPrompt("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to send message");
     } finally {
       setActionLoading(false);
     }
@@ -694,6 +737,17 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                       </div>
                     )}
 
+                    {/* Permission prompt — shown when agent requests tool approval */}
+                    {activePermission && isSessionAlive && (
+                      <PermissionPrompt
+                        permissionId={activePermission.id}
+                        toolName={activePermission.toolName}
+                        toolInput={activePermission.toolInput}
+                        workspaceId={ws.id}
+                        onResponded={() => setActivePermission(null)}
+                      />
+                    )}
+
                     {/* TerminalView — show history output or live/completed output */}
                     {ws.workingDir && ws.status !== "closed" && (
                       (selectedHistoryId ? historyMessages : (activeSession || completedMessages.length > 0)) ? (
@@ -703,6 +757,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                           parseOutput={prefs.output_parser !== "false"}
                           prompt={selectedHistoryId ? undefined : lastPrompt}
                           title={issue.title}
+                          multiTurn={isSessionAlive}
                           footer={!selectedHistoryId ? (
                             <div className="flex gap-2">
                               <textarea
@@ -712,20 +767,22 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                                 onKeyDown={(e) => {
                                   if (e.key === "Enter" && e.ctrlKey) {
                                     e.preventDefault();
-                                    if (isRunning) {
+                                    if (isSessionAlive && !isWaitingForInput) {
                                       handleStop(ws.id);
-                                    } else if (prompt.trim()) {
+                                    } else if (isWaitingForInput && prompt.trim()) {
+                                      handleSendTurn(ws.id);
+                                    } else if (!isRunning && prompt.trim()) {
                                       handleLaunch(ws.id);
                                     }
                                   }
                                 }}
-                                placeholder={isRunning ? "Agent is running..." : "Message Claude Code..."}
+                                placeholder={isSessionAlive && !isWaitingForInput ? "Agent is working..." : "Message Claude Code..."}
                                 rows={2}
-                                disabled={isRunning}
+                                disabled={isSessionAlive && !isWaitingForInput}
                                 className="flex-1 text-sm bg-white text-gray-900 border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none disabled:bg-gray-50 disabled:text-gray-400"
                                 onClick={(e) => e.stopPropagation()}
                               />
-                              {isRunning ? (
+                              {isSessionAlive && !isWaitingForInput ? (
                                 <button
                                   onClick={() => handleStop(ws.id)}
                                   disabled={actionLoading}
@@ -735,7 +792,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                                 </button>
                               ) : (
                                 <button
-                                  onClick={() => handleLaunch(ws.id)}
+                                  onClick={() => isWaitingForInput ? handleSendTurn(ws.id) : handleLaunch(ws.id)}
                                   disabled={actionLoading || !prompt.trim()}
                                   className="text-sm bg-blue-600 text-white px-3 py-1.5 rounded hover:bg-blue-700 disabled:opacity-50 self-end"
                                 >
@@ -768,20 +825,20 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                           onKeyDown={(e) => {
                             if (e.key === "Enter" && e.ctrlKey) {
                               e.preventDefault();
-                              if (isRunning) {
+                              if (isSessionAlive && !isWaitingForInput) {
                                 handleStop(ws.id);
                               } else if (prompt.trim()) {
                                 handleLaunch(ws.id);
                               }
                             }
                           }}
-                          placeholder={isRunning ? "Agent is running..." : "Message Claude Code..."}
+                          placeholder={isSessionAlive && !isWaitingForInput ? "Agent is working..." : "Message Claude Code..."}
                           rows={2}
-                          disabled={isRunning}
+                          disabled={isSessionAlive && !isWaitingForInput}
                           className="flex-1 text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none disabled:bg-gray-50 disabled:text-gray-400"
                           onClick={(e) => e.stopPropagation()}
                         />
-                        {isRunning ? (
+                        {isSessionAlive && !isWaitingForInput ? (
                           <button
                             onClick={() => handleStop(ws.id)}
                             disabled={actionLoading}

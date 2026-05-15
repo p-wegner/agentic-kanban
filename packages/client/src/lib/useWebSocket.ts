@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { apiFetch } from "./api.js";
 import type { AgentOutputMessage } from "@agentic-kanban/shared";
 
@@ -71,5 +71,22 @@ export function useWebSocket(sessionId: string | null) {
     }
   }, []);
 
-  return { state, messages, connect, disconnect };
+  // Detect when agent has finished a turn and is waiting for input
+  const isWaitingForInput = useMemo(() => {
+    if (state !== "open") return false;
+    // Scan messages backwards for a result event
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const msg = messages[i];
+      if (msg.type === "exit") return false;
+      if (msg.type === "stdout" && msg.data) {
+        try {
+          const obj = JSON.parse(msg.data);
+          if (obj.type === "result") return true;
+        } catch { /* not JSON */ }
+      }
+    }
+    return false;
+  }, [messages, state]);
+
+  return { state, messages, connect, disconnect, isWaitingForInput };
 }
