@@ -41,6 +41,7 @@ export interface AgentOutputEvent {
 export type AgentOutputCallback = (event: AgentOutputEvent) => void;
 
 const activeProcesses = new Map<string, ChildProcess>();
+const stdinOpen = new Map<string, boolean>();
 
 /**
  * Launch an agent subprocess in the given worktree directory.
@@ -56,6 +57,8 @@ export function launch(
   claudeSessionId?: string,
   agentCommand?: string,
   claudeProfile?: string,
+  keepAlive?: boolean,
+  permissionPromptTool?: string,
 ): ChildProcess {
   // Test mock agents use AGENT_COMMAND env var and need no claude-specific flags.
   // Real claude (default or configured via preferences) gets stream-json args + stdin prompt.
@@ -90,6 +93,9 @@ export function launch(
     if (claudeSessionId) {
       args.push("--resume", claudeSessionId);
     }
+    if (permissionPromptTool) {
+      args.push("--permission-prompt-tool", permissionPromptTool);
+    }
     args.push("-p");
   }
 
@@ -106,9 +112,14 @@ export function launch(
 
   console.log(`[agent] spawned: sessionId=${sessionId} pid=${proc.pid} command=${command} shell=${useShell}`);
 
-  // Send prompt via stdin so --resume + -p (--print) mode works correctly
+  // Send prompt via stdin. Keep stdin open for multi-turn when keepAlive is true.
   if (!isTestMock) {
-    proc.stdin?.end(prompt + "\n");
+    if (keepAlive) {
+      proc.stdin?.write(prompt + "\n");
+      stdinOpen.set(sessionId, true);
+    } else {
+      proc.stdin?.end(prompt + "\n");
+    }
   }
 
   activeProcesses.set(sessionId, proc);
@@ -132,6 +143,7 @@ export function launch(
   proc.on("exit", (code, signal) => {
     console.log(`[agent] exited: sessionId=${sessionId} code=${code} signal=${signal ?? "none"} pid=${proc.pid}`);
     activeProcesses.delete(sessionId);
+    stdinOpen.delete(sessionId);
     try {
       onOutput({ type: "exit", sessionId, exitCode: code });
     } catch (err) {
@@ -171,7 +183,31 @@ export function kill(sessionId: string): boolean {
   }
 
   activeProcesses.delete(sessionId);
+  stdinOpen.delete(sessionId);
   return true;
+}
+
+/** Send a follow-up message to a running agent via stdin JSONL. */
+export function sendInput(sessionId: string, content: string): boolean {
+  const proc = activeProcesses.get(sessionId);
+  if (!proc || !proc.stdin || proc.stdin.destroyed) return false;
+  if (!stdinOpen.has(sessionId)) return false;
+  const jsonl = JSON.stringify({ type: "user", content }) + "\n";
+  return proc.stdin.write(jsonl);
+}
+
+/** Close stdin to signal the agent should finish. */
+export function closeStdin(sessionId: string): boolean {
+  const proc = activeProcesses.get(sessionId);
+  if (!proc || !proc.stdin || proc.stdin.destroyed) return false;
+  proc.stdin.end();
+  stdinOpen.delete(sessionId);
+  return true;
+}
+
+/** Check if stdin is open for a session (multi-turn mode). */
+export function isStdinOpen(sessionId: string): boolean {
+  return stdinOpen.get(sessionId) === true;
 }
 
 /** Kill all active agent processes (for graceful shutdown). */

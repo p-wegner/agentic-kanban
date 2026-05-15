@@ -9,9 +9,10 @@ interface TerminalViewProps {
   prompt?: string;
   title?: string;
   footer?: ReactNode;
+  multiTurn?: boolean;
 }
 
-export function TerminalView({ messages, connectionState, parseOutput = true, prompt, title, footer }: TerminalViewProps) {
+export function TerminalView({ messages, connectionState, parseOutput = true, prompt, title, footer, multiTurn }: TerminalViewProps) {
   const [isMaximized, setIsMaximized] = useState(false);
   const preRef = useRef<HTMLPreElement>(null);
   const parserRef = useRef(new ClaudeOutputParser());
@@ -101,7 +102,7 @@ export function TerminalView({ messages, connectionState, parseOutput = true, pr
         </div>
       )}
       {isParsed
-        ? displayEvents.map((event, i) => renderParsedEvent(event, i))
+        ? displayEvents.map((event, i) => renderParsedEvent(event, i, multiTurn))
         : displayEvents.map((event, i) => (
             <div key={i} className={event.kind === "raw" && messages[i]?.type === "stderr" ? "text-red-400" : ""}>
               {event.kind === "raw" ? event.text : ""}
@@ -175,7 +176,7 @@ export function TerminalView({ messages, connectionState, parseOutput = true, pr
   );
 }
 
-function renderParsedEvent(event: DisplayEvent, key: number): React.ReactNode {
+function renderParsedEvent(event: DisplayEvent, key: number, multiTurn?: boolean): React.ReactNode {
   if (event.kind === "raw") {
     return (
       <div key={key} className="text-green-400">
@@ -255,7 +256,8 @@ function renderParsedEvent(event: DisplayEvent, key: number): React.ReactNode {
     return (
       <div key={key} className="mt-2 pt-2 border-t border-gray-700">
         <div className={event.success ? "text-green-400 font-bold" : "text-red-400 font-bold"}>
-          {event.success ? "Completed" : "Failed"}
+          {event.success ? (multiTurn ? "Turn complete" : "Completed") : "Failed"}
+          {multiTurn && event.success && <span className="text-gray-400 font-normal"> — waiting for input</span>}
           {event.model && <span className="text-gray-400 font-normal"> ({event.model})</span>}
         </div>
         {event.result && (

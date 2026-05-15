@@ -211,10 +211,11 @@ export function createWorkspaceActionsRoute(
         ? (baseArgs ? baseArgs + " --dangerously-skip-permissions" : "--dangerously-skip-permissions")
         : (baseArgs || undefined);
       const claudeProfile = prefMap.get("claude_profile") || undefined;
+      const permissionPromptTool = !skipPerms && prefMap.get("permission_prompt_tool") !== "false" ? "permission_prompt" : undefined;
 
       const truncatedPrompt = body.prompt.length > 80 ? body.prompt.slice(0, 80) + "..." : body.prompt;
-      console.log(`[workspace-actions] launch: workspaceId=${id} prompt="${truncatedPrompt}" agentCommand=${agentCommand ?? "default"} agentArgs=${agentArgs ?? "none"} profile=${claudeProfile ?? "none"} resumeFromId=${body.resumeFromId ?? "none"}`);
-      const sessionId = await getSessionManager().startSession(id, body.prompt, agentCommand, agentArgs, body.resumeFromId, claudeProfile);
+      console.log(`[workspace-actions] launch: workspaceId=${id} prompt="${truncatedPrompt}" agentCommand=${agentCommand ?? "default"} agentArgs=${agentArgs ?? "none"} profile=${claudeProfile ?? "none"} resumeFromId=${body.resumeFromId ?? "none"} multiTurn=${body.multiTurn !== false} permTool=${permissionPromptTool ?? "none"}`);
+      const sessionId = await getSessionManager().startSession(id, body.prompt, agentCommand, agentArgs, body.resumeFromId, claudeProfile, body.multiTurn !== false, permissionPromptTool);
 
       const now = new Date().toISOString();
       await database.update(workspaces).set({ status: "active", updatedAt: now }).where(eq(workspaces.id, id));
@@ -230,6 +231,34 @@ export function createWorkspaceActionsRoute(
         500,
       );
     }
+  });
+
+  // POST /api/workspaces/:id/turn — send follow-up message to active session (multi-turn)
+  router.post("/:id/turn", async (c) => {
+    const id = c.req.param("id");
+    const body = await c.req.json();
+
+    if (!body.content) {
+      return c.json({ error: "content is required" }, 400);
+    }
+
+    // Find running session for this workspace
+    const runningSessions = await database
+      .select()
+      .from(sessions)
+      .where(eq(sessions.workspaceId, id));
+
+    const running = runningSessions.find(s => s.status === "running");
+    if (!running) {
+      return c.json({ error: "No running session found" }, 404);
+    }
+
+    const result = getSessionManager().sendTurn(running.id, body.content);
+    if (!result.ok) {
+      return c.json({ error: result.error }, 409);
+    }
+
+    return c.json({ ok: true });
   });
 
   // POST /api/workspaces/:id/stop — kill current session
@@ -491,6 +520,39 @@ export function createWorkspaceActionsRoute(
       .where(eq(sessions.workspaceId, id));
 
     return c.json(result);
+  });
+
+  // POST /api/workspaces/:id/permission-response — browser-facing endpoint for permission responses
+  router.post("/:id/permission-response", async (c) => {
+    const id = c.req.param("id");
+    const body = await c.req.json<{ requestId: string; behavior: string; updatedInput?: Record<string, unknown> }>();
+
+    if (!body.requestId || !body.behavior) {
+      return c.json({ error: "requestId and behavior required" }, 400);
+    }
+
+    // Forward to internal endpoint
+    const res = await fetch(`http://localhost:3001/api/internal/permission-response/${body.requestId}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ behavior: body.behavior, updatedInput: body.updatedInput }),
+    });
+
+    if (!res.ok) {
+      return c.json({ error: "Failed to submit permission response" }, 500);
+    }
+
+    return c.json({ ok: true });
+  });
+
+  // GET /api/workspaces/:id/permission-prompts — list pending permission prompts
+  router.get("/:id/permission-prompts", async (c) => {
+    const res = await fetch("http://localhost:3001/api/internal/permission-prompts");
+    if (res.ok) {
+      const data = await res.json() as { prompts: Array<{ requestId: string; toolName: string; toolInput: Record<string, unknown> }> };
+      return c.json(data);
+    }
+    return c.json({ prompts: [] });
   });
 
   return router;

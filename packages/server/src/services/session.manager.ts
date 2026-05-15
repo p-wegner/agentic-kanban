@@ -30,6 +30,8 @@ function createSessionManager(
   const messageBuffer = new Map<string, AgentOutputMessage[]>();
   // Cache session context for activity broadcasting (avoids DB queries per stdout line)
   const sessionContexts = new Map<string, SessionContext>();
+  // Track turn state per session: "processing" = agent is working, "waiting" = sent result, awaiting input
+  const turnStates = new Map<string, "processing" | "waiting">();
 
   function broadcast(sessionId: string, message: AgentOutputMessage) {
     // Buffer the message for late subscribers
@@ -61,6 +63,11 @@ function createSessionManager(
             .set({ claudeSessionId: obj.session_id })
             .where(eq(sessions.id, sessionId))
             .catch((err) => console.error("Failed to update claudeSessionId:", err));
+        }
+
+        // Detect result events — in multi-turn mode, this means turn complete, not session complete
+        if (obj.type === "result" && agentService.isStdinOpen(sessionId)) {
+          turnStates.set(sessionId, "waiting");
         }
 
         // Parse tool_use events for live activity
@@ -109,6 +116,8 @@ function createSessionManager(
     agentArgs?: string,
     resumeFromId?: string,
     claudeProfile?: string,
+    multiTurn?: boolean,
+    permissionPromptTool?: string,
   ) {
     // Look up workspace to get workingDir
     const wsRows = await db
@@ -154,6 +163,9 @@ function createSessionManager(
 
     // Cache session context for activity broadcasting
     sessionContexts.set(sessionId, { workspaceId, issueId: workspace.issueId, projectId });
+    if (multiTurn) {
+      turnStates.set(sessionId, "processing");
+    }
 
     await db.insert(sessions).values({
       id: sessionId,
@@ -182,10 +194,11 @@ function createSessionManager(
               options?.onSessionExit?.(workspaceId, sessionId, event.exitCode ?? null);
               // Clean up cached context
               sessionContexts.delete(sessionId);
+              turnStates.delete(sessionId);
             })
             .catch((err) => console.error("Failed to update session:", err));
         }
-      }, claudeSessionId, agentCommand, claudeProfile);
+      }, claudeSessionId, agentCommand, claudeProfile, multiTurn, permissionPromptTool);
     } catch (err) {
       throw err;
     }
@@ -193,18 +206,28 @@ function createSessionManager(
     return sessionId;
   }
 
-  /** Stop a running session by killing the agent process. */
+  /** Stop a running session by closing stdin (graceful) then killing the agent process. */
   async function stopSession(sessionId: string) {
     console.log(`[session] stopping: sessionId=${sessionId}`);
-    const killed = agentService.kill(sessionId);
-    if (killed) {
-      const now = new Date().toISOString();
-      await db
-        .update(sessions)
-        .set({ status: "stopped", endedAt: now })
-        .where(eq(sessions.id, sessionId));
+    // Try graceful shutdown first (close stdin so agent finishes)
+    const closed = agentService.closeStdin(sessionId);
+    if (closed) {
+      // Give the agent a moment to exit gracefully
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+      // If still running, force kill
+      if (agentService.getProcess(sessionId)) {
+        agentService.kill(sessionId);
+      }
+    } else {
+      agentService.kill(sessionId);
     }
-    return killed;
+    const now = new Date().toISOString();
+    await db
+      .update(sessions)
+      .set({ status: "stopped", endedAt: now })
+      .where(eq(sessions.id, sessionId));
+    turnStates.delete(sessionId);
+    return true;
   }
 
   /** Subscribe a WebSocket to session output. */
@@ -258,7 +281,29 @@ function createSessionManager(
     });
   }
 
-  return { startSession, stopSession, subscribe, unsubscribe, wsRoute };
+  /** Send a follow-up message to a running session (multi-turn). */
+  function sendTurn(sessionId: string, content: string): { ok: boolean; error?: string } {
+    const state = turnStates.get(sessionId);
+    if (!state) {
+      return { ok: false, error: "Session not found or not in multi-turn mode" };
+    }
+    if (state !== "waiting") {
+      return { ok: false, error: "Agent is still processing the previous turn" };
+    }
+    const sent = agentService.sendInput(sessionId, content);
+    if (!sent) {
+      return { ok: false, error: "Failed to send input to agent (stdin closed or process gone)" };
+    }
+    turnStates.set(sessionId, "processing");
+    return { ok: true };
+  }
+
+  /** Get the current turn state for a session. */
+  function getTurnState(sessionId: string): "processing" | "waiting" | undefined {
+    return turnStates.get(sessionId);
+  }
+
+  return { startSession, stopSession, sendTurn, getTurnState, subscribe, unsubscribe, wsRoute };
 }
 
 export { createSessionManager };
