@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { db } from "../db/index.js";
-import { issues, projectStatuses, workspaces, tags, issueTags, sessions, sessionMessages, diffComments } from "@agentic-kanban/shared/schema";
+import { issues, projectStatuses, workspaces, tags, issueTags, sessions, sessionMessages, diffComments, issueDependencies } from "@agentic-kanban/shared/schema";
 import { eq, and, sql, inArray } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import type { Database } from "../db/index.js";
@@ -183,7 +183,149 @@ export function createIssuesRoute(database: Database = db, options?: { boardEven
     return c.json({ success: true });
   });
 
+  // GET /api/issues/:id/dependencies
+  router.get("/:id/dependencies", async (c) => {
+    const issueId = c.req.param("id");
+
+    // "Depends on" — issues this one depends on
+    const dependsOn = await database
+      .select({
+        id: issueDependencies.id,
+        issueId: issueDependencies.issueId,
+        dependsOnId: issueDependencies.dependsOnId,
+        createdAt: issueDependencies.createdAt,
+        issueTitle: issues.title,
+        issueStatusName: projectStatuses.name,
+        issueNumber: issues.issueNumber,
+      })
+      .from(issueDependencies)
+      .innerJoin(issues, eq(issueDependencies.dependsOnId, issues.id))
+      .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
+      .where(eq(issueDependencies.issueId, issueId));
+
+    // "Blocked by" — issues that depend on this one
+    const blockedBy = await database
+      .select({
+        id: issueDependencies.id,
+        issueId: issueDependencies.issueId,
+        dependsOnId: issueDependencies.dependsOnId,
+        createdAt: issueDependencies.createdAt,
+        issueTitle: issues.title,
+        issueStatusName: projectStatuses.name,
+        issueNumber: issues.issueNumber,
+      })
+      .from(issueDependencies)
+      .innerJoin(issues, eq(issueDependencies.issueId, issues.id))
+      .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
+      .where(eq(issueDependencies.dependsOnId, issueId));
+
+    return c.json({ dependsOn, blockedBy });
+  });
+
+  // POST /api/issues/:id/dependencies — add dependency with cycle detection
+  router.post("/:id/dependencies", async (c) => {
+    const issueId = c.req.param("id");
+    const body = await c.req.json();
+    const { dependsOnId } = body;
+
+    if (!dependsOnId) {
+      return c.json({ error: "dependsOnId is required" }, 400);
+    }
+    if (dependsOnId === issueId) {
+      return c.json({ error: "An issue cannot depend on itself" }, 400);
+    }
+
+    // Verify both issues exist and are in the same project
+    const [sourceIssue, targetIssue] = await Promise.all([
+      database.select({ projectId: issues.projectId }).from(issues).where(eq(issues.id, issueId)).limit(1),
+      database.select({ projectId: issues.projectId }).from(issues).where(eq(issues.id, dependsOnId)).limit(1),
+    ]);
+
+    if (sourceIssue.length === 0) return c.json({ error: "Issue not found" }, 404);
+    if (targetIssue.length === 0) return c.json({ error: "Dependency target issue not found" }, 404);
+    if (sourceIssue[0].projectId !== targetIssue[0].projectId) {
+      return c.json({ error: "Cannot add dependencies across projects" }, 400);
+    }
+
+    // Cycle detection: DFS from dependsOnId following dependency edges
+    const wouldCycle = await wouldCreateCycle(database, issueId, dependsOnId, sourceIssue[0].projectId);
+    if (wouldCycle) {
+      return c.json({ error: "Adding this dependency would create a cycle" }, 409);
+    }
+
+    const id = randomUUID();
+    try {
+      await database.insert(issueDependencies).values({
+        id,
+        issueId,
+        dependsOnId,
+        createdAt: new Date().toISOString(),
+      });
+    } catch (err: any) {
+      if (err.message?.includes("UNIQUE constraint")) {
+        return c.json({ error: "This dependency already exists" }, 409);
+      }
+      throw err;
+    }
+
+    options?.boardEvents?.broadcast(sourceIssue[0].projectId, "dependency_added");
+
+    return c.json({ id }, 201);
+  });
+
+  // DELETE /api/issues/:id/dependencies/:dependsOnId — remove dependency
+  router.delete("/:id/dependencies/:dependsOnId", async (c) => {
+    const issueId = c.req.param("id");
+    const dependsOnId = c.req.param("dependsOnId");
+
+    await database.delete(issueDependencies)
+      .where(and(eq(issueDependencies.issueId, issueId), eq(issueDependencies.dependsOnId, dependsOnId)));
+
+    // Resolve projectId for broadcast
+    const rows = await database.select({ projectId: issues.projectId }).from(issues).where(eq(issues.id, issueId)).limit(1);
+    if (rows.length > 0) {
+      options?.boardEvents?.broadcast(rows[0].projectId, "dependency_removed");
+    }
+
+    return c.json({ success: true });
+  });
+
   return router;
 }
 
 export const issuesRoute = createIssuesRoute();
+
+async function wouldCreateCycle(database: Database, issueId: string, dependsOnId: string, projectId: string): Promise<boolean> {
+  // Load all dependencies for the project
+  const allDeps = await database
+    .select({
+      depIssueId: issueDependencies.issueId,
+      depDependsOnId: issueDependencies.dependsOnId,
+    })
+    .from(issueDependencies)
+    .innerJoin(issues, eq(issueDependencies.issueId, issues.id))
+    .where(eq(issues.projectId, projectId));
+
+  // Build adjacency: issueId -> Set of dependsOnIds
+  const adj = new Map<string, Set<string>>();
+  for (const dep of allDeps) {
+    let set = adj.get(dep.depIssueId);
+    if (!set) { set = new Set(); adj.set(dep.depIssueId, set); }
+    set.add(dep.depDependsOnId);
+  }
+
+  // DFS from dependsOnId: if we can reach issueId, adding this edge creates a cycle
+  const visited = new Set<string>();
+  const stack = [dependsOnId];
+  while (stack.length > 0) {
+    const current = stack.pop()!;
+    if (current === issueId) return true;
+    if (visited.has(current)) continue;
+    visited.add(current);
+    const neighbors = adj.get(current);
+    if (neighbors) {
+      for (const n of neighbors) stack.push(n);
+    }
+  }
+  return false;
+}

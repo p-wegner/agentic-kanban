@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { db } from "../db/index.js";
-import { projects, projectStatuses, issues, workspaces, sessions, sessionMessages, diffComments } from "@agentic-kanban/shared/schema";
+import { projects, projectStatuses, issues, workspaces, sessions, sessionMessages, diffComments, issueDependencies } from "@agentic-kanban/shared/schema";
 import { eq, inArray, sql, and } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { detectRepoInfo } from "../services/git-info.service.js";
@@ -400,17 +400,58 @@ export function createProjectsRoute(database: Database = db) {
     }
 
     // Attach workspace summaries to issues
-    const issuesWithSummary = projectIssues.map((issue) => {
+    const issuesWithSummary: Array<typeof projectIssues[number] & { workspaceSummary?: typeof workspaceSummaryMap extends Map<string, infer V> ? V : never }> = projectIssues.map((issue) => {
       const wsSummary = workspaceSummaryMap.get(issue.id);
       return wsSummary ? { ...issue, workspaceSummary: wsSummary } : issue;
     });
+
+    // Compute isBlocked for each issue
+    const issuesWithBlocked: Array<typeof issuesWithSummary[number] & { isBlocked?: boolean }> = [...issuesWithSummary];
+    if (issueIds.length > 0) {
+      const depRows = await database
+        .select({
+          issueId: issueDependencies.issueId,
+          dependsOnId: issueDependencies.dependsOnId,
+        })
+        .from(issueDependencies)
+        .where(inArray(issueDependencies.issueId, issueIds));
+
+      // Map each depended-on issue to its status name
+      const dependsOnIds = [...new Set(depRows.map(d => d.dependsOnId))];
+      const depStatusMap = new Map<string, string>();
+      if (dependsOnIds.length > 0) {
+        const depStatuses = await database
+          .select({ id: issues.id, statusName: projectStatuses.name })
+          .from(issues)
+          .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
+          .where(inArray(issues.id, dependsOnIds));
+        for (const ds of depStatuses) depStatusMap.set(ds.id, ds.statusName);
+      }
+
+      // Group deps by issue
+      const depsByIssue = new Map<string, string[]>();
+      for (const dep of depRows) {
+        let arr = depsByIssue.get(dep.issueId);
+        if (!arr) { arr = []; depsByIssue.set(dep.issueId, arr); }
+        arr.push(dep.dependsOnId);
+      }
+
+      for (let i = 0; i < issuesWithBlocked.length; i++) {
+        const issue = issuesWithBlocked[i];
+        const deps = depsByIssue.get(issue.id);
+        if (deps && deps.length > 0) {
+          const isBlocked = deps.some(depId => depStatusMap.get(depId) !== "Done");
+          issuesWithBlocked[i] = { ...issue, isBlocked };
+        }
+      }
+    }
 
     const result = statuses.map((s) => ({
       id: s.id,
       name: s.name,
       projectId: s.projectId,
       sortOrder: s.sortOrder,
-      issues: issuesWithSummary.filter((i) => i.statusId === s.id),
+      issues: issuesWithBlocked.filter((i) => i.statusId === s.id),
     }));
 
     return c.json(result);

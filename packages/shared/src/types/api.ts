@@ -71,6 +71,7 @@ export interface IssueWithStatus {
   statusChangedAt: string | null;
   statusName: string;
   workspaceSummary?: WorkspaceSummary;
+  isBlocked?: boolean;
 }
 
 export interface StatusWithIssues {
@@ -173,4 +174,19 @@ export interface AgentOutputMessage {
   sessionId: string;
   data?: string;
   exitCode?: number | null;
+}
+
+export interface DependencyItem {
+  id: string;
+  issueId: string;
+  dependsOnId: string;
+  createdAt: string;
+  issueTitle: string;
+  issueStatusName: string;
+  issueNumber: number | null;
+}
+
+export interface DependencyInfo {
+  dependsOn: DependencyItem[];
+  blockedBy: DependencyItem[];
 }

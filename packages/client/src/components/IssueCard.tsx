@@ -68,6 +68,12 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onDragStart, tags,
         </p>
       )}
       <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
+        {issue.isBlocked && (
+          <span className="inline-flex items-center gap-1 text-xs font-medium px-1.5 py-0.5 rounded bg-amber-100 text-amber-700">
+            <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 16 16"><path d="M8 1a2 2 0 0 1 2 2v4H6V3a2 2 0 0 1 2-2zm3 6V3a3 3 0 0 0-6 0v4a2 2 0 0 0 2 2v2.5a.5.5 0 0 0 1 0V9a2 2 0 0 0 2-2z"/></svg>
+            blocked
+          </span>
+        )}
         <span
           className={`inline-block text-xs font-medium px-1.5 py-0.5 rounded ${badgeColor}`}
         >
