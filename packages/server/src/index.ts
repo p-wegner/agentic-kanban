@@ -8,7 +8,7 @@ import { migrate } from "drizzle-orm/libsql/migrator";
 import { db } from "./db/index.js";
 import { createSessionManager } from "./services/session.manager.js";
 import { createBoardEvents } from "./services/board-events.js";
-import { workspaces, issues, projects, projectStatuses, preferences } from "@agentic-kanban/shared/schema";
+import { workspaces, issues, projects, projectStatuses, preferences, sessions } from "@agentic-kanban/shared/schema";
 import { eq } from "drizzle-orm";
 import * as agentService from "./services/agent.service.js";
 import * as gitService from "./services/git.service.js";
@@ -173,6 +173,18 @@ const port = Number(process.env.PORT) || 3001;
 
 // Run migrations on startup
 await migrate(db, { migrationsFolder: "../shared/drizzle" });
+
+// Clean up stale sessions from previous crash/restart
+const staleSessions = await db.select({ workspaceId: sessions.workspaceId }).from(sessions).where(eq(sessions.status, "running"));
+if (staleSessions.length > 0) {
+  console.log(`[startup] Cleaning up ${staleSessions.length} stale session(s)`);
+  const now = new Date().toISOString();
+  await db.update(sessions).set({ status: "stopped", endedAt: now }).where(eq(sessions.status, "running"));
+  const workspaceIds = [...new Set(staleSessions.map(s => s.workspaceId))];
+  for (const wsId of workspaceIds) {
+    await db.update(workspaces).set({ status: "idle", updatedAt: now }).where(eq(workspaces.id, wsId));
+  }
+}
 
 console.log(`Server starting on port ${port}...`);
 const server = serve({ fetch: app.fetch, port }, (info) => {

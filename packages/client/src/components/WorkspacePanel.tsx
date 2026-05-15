@@ -413,9 +413,15 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
   }
 
   async function handleMerge(wsId: string) {
+    if (isRunning && !window.confirm("Agent is still running. Stop and merge?")) return;
     setActionLoading(true);
     setError(null);
     try {
+      if (isRunning) {
+        await apiFetch(`/api/workspaces/${wsId}/stop`, { method: "POST" });
+        setActiveSession(null);
+        setCompletedMessages([]);
+      }
       await apiFetch(`/api/workspaces/${wsId}/merge`, {
         method: "POST",
         body: JSON.stringify({}),
@@ -445,10 +451,16 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
   }
 
   async function handleDeleteWorkspace(wsId: string) {
-    if (!window.confirm("Delete this workspace? This removes the workspace record and all session data.")) return;
+    const suffix = isRunning ? " The running agent will be stopped." : "";
+    if (!window.confirm(`Delete this workspace? This removes the workspace record and all session data.${suffix}`)) return;
     setActionLoading(true);
     setError(null);
     try {
+      if (isRunning) {
+        await apiFetch(`/api/workspaces/${wsId}/stop`, { method: "POST" });
+        setActiveSession(null);
+        setCompletedMessages([]);
+      }
       await apiFetch(`/api/workspaces/${wsId}`, { method: "DELETE" });
       await fetchWorkspaces();
       onWorkspaceChange?.();
@@ -789,8 +801,8 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                       </div>
                     )}
 
-                    {/* Action buttons — only when idle and not viewing history */}
-                    {!selectedHistoryId && ws.workingDir && ws.status !== "closed" && !isRunning && (
+                    {/* Action buttons — visible even while agent runs */}
+                    {!selectedHistoryId && ws.workingDir && ws.status !== "closed" && (
                       <div className="flex gap-2">
                         <button
                           onClick={() => handleOpenTerminal(ws.id)}
