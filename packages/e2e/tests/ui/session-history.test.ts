@@ -17,15 +17,36 @@ test.describe("Session History UI", () => {
     statusId = todoStatus ? todoStatus.id : statuses[0].id;
   });
 
+  async function openWorkspaceForIssue(page: import("@playwright/test").Page, issueTitle: string) {
+    const issueEl = page.locator("p", { hasText: issueTitle }).first();
+    await issueEl.click();
+    await expect(page.locator("h2", { hasText: "Issue Details" })).toBeVisible();
+
+    // Click the workspace button in the Workspaces section of the detail panel
+    const wsLabel = page.locator("label", { hasText: "Workspaces" });
+    const wsSection = wsLabel.locator("..");
+    await wsSection.locator("button").first().click();
+
+    await expect(page.locator("h2", { hasText: "Workspaces —" })).toBeVisible({ timeout: 5000 });
+
+    // Close the detail panel backdrop that blocks clicks on the workspace panel content
+    // The detail panel backdrop is z-40, the workspace panel is z-50
+    const backdrop = page.locator("div.fixed.inset-0.bg-black\\/30").first();
+    if (await backdrop.isVisible()) {
+      await backdrop.click({ force: true });
+      await page.waitForTimeout(300);
+    }
+  }
+
   test("completed sessions show in workspace panel", async ({ page, request }) => {
-    // Create an issue and workspace with a completed session
     const issueRes = await request.post("http://localhost:3001/api/issues", {
       data: { title: "History UI test issue", statusId, projectId },
     });
     const issueId = (await issueRes.json()).id;
 
+    const branchName = "feature/history-ui-test";
     const wsRes = await request.post("http://localhost:3001/api/workspaces", {
-      data: { issueId, branch: "feature/history-ui-test" },
+      data: { issueId, branch: branchName },
     });
     const workspaceId = (await wsRes.json()).id;
 
@@ -58,29 +79,24 @@ test.describe("Session History UI", () => {
     await page.goto("/");
     await page.waitForSelector("h2");
 
-    // Find the issue and click to open detail panel
-    const issueEl = page.locator("p", { hasText: "History UI test issue" }).first();
-    await issueEl.click();
-
-    // Click "View Workspaces" button in the detail panel (under Workspaces section)
-    await page.locator('button:has-text("View Workspaces")').first().click();
+    await openWorkspaceForIssue(page, "History UI test issue");
 
     // Expand the workspace (click on the branch name)
-    await page.locator("text=feature/history-ui-test").first().click();
+    await page.locator(`text=${branchName}`).first().click();
 
     // Should show session selector with "Latest" tab
     await expect(page.locator('button:has-text("Latest")').first()).toBeVisible({ timeout: 5000 });
   });
 
   test("click past session shows output in TerminalView", async ({ page, request }) => {
-    // Create an issue and workspace with a completed session
+    const branchName = "feature/history-output-test";
     const issueRes = await request.post("http://localhost:3001/api/issues", {
       data: { title: "History output test issue", statusId, projectId },
     });
     const issueId = (await issueRes.json()).id;
 
     const wsRes = await request.post("http://localhost:3001/api/workspaces", {
-      data: { issueId, branch: "feature/history-output-test" },
+      data: { issueId, branch: branchName },
     });
     const workspaceId = (await wsRes.json()).id;
 
@@ -112,14 +128,12 @@ test.describe("Session History UI", () => {
     await page.goto("/");
     await page.waitForSelector("h2");
 
-    const issueEl = page.locator("p", { hasText: "History output test issue" }).first();
-    await issueEl.click();
-    await page.locator('button:has-text("View Workspaces")').first().click();
+    await openWorkspaceForIssue(page, "History output test issue");
 
     // Expand workspace
-    await page.locator("text=feature/history-output-test").first().click();
+    await page.locator(`text=${branchName}`).first().click();
 
-    // Wait for session selector to appear, then click a past session row
+    // Wait for session selector to appear
     const wsPanel = page.locator("h2", { hasText: "Workspaces —" }).locator("..").locator("..");
     await expect(wsPanel.locator('button:has-text("Latest")').first()).toBeVisible({ timeout: 5000 });
     // Click the first completed session in the list (not the "Latest" tab)

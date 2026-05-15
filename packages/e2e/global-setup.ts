@@ -1,20 +1,32 @@
 import { request } from "@playwright/test";
+import { resolve } from "node:path";
 
 async function globalSetup() {
-  // Ensure a project exists for E2E tests
-  // Use the actual repo path so git-info detection works
   const apiContext = await request.newContext({ baseURL: "http://localhost:3001" });
 
-  // Check if projects already exist
+  // Resolve the actual monorepo root (e2e package is at packages/e2e)
+  const repoPath = resolve(import.meta.dirname, "..", "..");
+
+  // Check if a project with the correct path already exists
   const res = await apiContext.get("/api/projects");
   const projects = await res.json();
 
-  if (projects.length === 0) {
-    // Register this project's own repo as a test project
+  const existing = projects.find(
+    (p: { repoPath: string }) =>
+      p.repoPath === repoPath || p.repoPath === repoPath.replace(/\//g, "\\"),
+  );
+
+  if (existing) {
+    // Ensure it's the active project
+    await apiContext.put("/api/preferences/active-project", {
+      data: { projectId: existing.id },
+    });
+  } else {
+    // Register the monorepo as a test project
     const registerRes = await apiContext.post("/api/projects", {
       data: {
         name: "E2E Test Project",
-        repoPath: "F:\\projects\\agentic_kanban",
+        repoPath,
       },
     });
 

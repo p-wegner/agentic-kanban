@@ -45,12 +45,12 @@ test.describe("Archive Column Group UI", () => {
     await page.waitForSelector("h2");
 
     // The "Completed" button should be visible in collapsed state
-    const completedBtn = page.locator("button", { hasText: "Completed" });
+    const completedBtn = page.locator("button", { hasText: "Completed" }).first();
     await expect(completedBtn).toBeVisible();
 
     // It should show "Done" and "Cancelled" column names with counts
-    await expect(completedBtn.locator("text=Done")).toBeVisible();
-    await expect(completedBtn.locator("text=Cancelled")).toBeVisible();
+    await expect(completedBtn.locator("text=Done").first()).toBeVisible();
+    await expect(completedBtn.locator("text=Cancelled").first()).toBeVisible();
   });
 
   test("click Completed to expand archive columns", async ({ page }) => {
@@ -93,20 +93,21 @@ test.describe("Archive Column Group UI", () => {
     // Expand first
     await page.locator("button", { hasText: "Completed" }).click();
 
-    // Verify expanded — Done h2 should be visible
+    // Verify expanded — Done h2 should be visible (use .first() to handle extra test statuses)
     await expect(
-      page.locator("h2", { hasText: /^Done/ }),
+      page.locator("h2", { hasText: /^Done\d*$/ }).first(),
     ).toBeVisible({ timeout: 5000 });
 
     // Now click the toggle button again (it now shows a down arrow + "Completed" text)
     await page.locator("button", { hasText: "Completed" }).first().click();
 
-    // Should collapse back — Done/Cancelled h2s gone
+    // Should collapse back — Done/Cancelled h2s gone (the ones from the archive group)
+    // Use the default status names exactly — "Done" followed by only a count number
     await expect(
-      page.locator("h2", { hasText: /^Done/ }),
+      page.locator("h2", { hasText: /^Done\d*$/ }).first(),
     ).not.toBeVisible({ timeout: 5000 });
     await expect(
-      page.locator("h2", { hasText: /^Cancelled/ }),
+      page.locator("h2", { hasText: /^Cancelled\d*$/ }).first(),
     ).not.toBeVisible({ timeout: 5000 });
   });
 
@@ -115,7 +116,7 @@ test.describe("Archive Column Group UI", () => {
     await page.waitForSelector("h2");
 
     // Active columns (Todo, In Progress, In Review) are always visible
-    const activeCols = page.locator(".flex-shrink-0.w-72");
+    const activeCols = page.locator(".bg-gray-100.rounded-lg");
     const activeCount = await activeCols.count();
     expect(activeCount).toBeGreaterThanOrEqual(3);
 
@@ -123,7 +124,7 @@ test.describe("Archive Column Group UI", () => {
     await page.locator("button", { hasText: "Completed" }).click();
 
     // After expanding, there should be MORE columns visible
-    const allColsAfter = page.locator(".flex-shrink-0.w-72");
+    const allColsAfter = page.locator(".bg-gray-100.rounded-lg");
     const allCountAfter = await allColsAfter.count();
     expect(allCountAfter).toBeGreaterThan(activeCount);
   });

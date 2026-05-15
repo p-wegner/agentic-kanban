@@ -51,6 +51,9 @@ test.describe("Settings UI", () => {
     const input = page.locator('input[placeholder="claude"]');
     await input.fill("claude-persist-test");
     await page.locator('button:has-text("Save")').click();
+
+    // Wait for save confirmation and panel to close
+    await expect(page.locator("text=Settings saved")).toBeVisible();
     await expect(page.locator("h2", { hasText: "Settings" })).not.toBeVisible();
 
     // Reopen
@@ -66,8 +69,9 @@ test.describe("Settings UI", () => {
     await page.locator('button[title="Settings"]').click();
     await expect(page.locator("h2", { hasText: "Settings" })).toBeVisible();
 
-    // Find the mock agent checkbox
-    const mockCheckbox = page.locator('input[type="checkbox"]');
+    // Find the mock agent checkbox (scoped to its label to avoid strict mode)
+    const mockLabel = page.locator("label", { hasText: "Mock Agent" });
+    const mockCheckbox = mockLabel.locator('input[type="checkbox"]');
     await expect(mockCheckbox).toBeVisible();
 
     // Check it
@@ -82,7 +86,8 @@ test.describe("Settings UI", () => {
     await expect(page.locator("h2", { hasText: "Settings" })).toBeVisible();
 
     // Should still be checked
-    const mockCheckboxAfter = page.locator('input[type="checkbox"]');
+    const mockLabelAfter = page.locator("label", { hasText: "Mock Agent" });
+    const mockCheckboxAfter = mockLabelAfter.locator('input[type="checkbox"]');
     await expect(mockCheckboxAfter).toBeChecked();
   });
 

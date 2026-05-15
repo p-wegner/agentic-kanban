@@ -41,7 +41,7 @@ test.describe("Board interactions", () => {
     await page.waitForSelector("h2");
 
     // Click "+" on the first column (Todo)
-    const firstColumn = page.locator(".flex-shrink-0.w-72").first();
+    const firstColumn = page.locator(".bg-gray-100.rounded-lg").first();
     await firstColumn.locator("button[title='Add issue']").click();
 
     // Fill the form
@@ -66,7 +66,7 @@ test.describe("Board interactions", () => {
     await page.waitForSelector("h2");
 
     // Click "+" on the first column
-    const firstColumn = page.locator(".flex-shrink-0.w-72").first();
+    const firstColumn = page.locator(".bg-gray-100.rounded-lg").first();
     await firstColumn.locator("button[title='Add issue']").click();
 
     // Verify form appears
@@ -300,7 +300,7 @@ test.describe("Board interactions", () => {
         };
 
         // Find the "In Progress" column by its heading text
-        const columns = document.querySelectorAll(".flex-shrink-0.w-72");
+        const columns = document.querySelectorAll(".bg-gray-100.rounded-lg");
         let targetCol: Element | null = null;
         for (const col of columns) {
           const h2 = col.querySelector("h2");
@@ -352,7 +352,7 @@ test.describe("Board interactions", () => {
     });
 
     // Click "+" and try to create
-    const firstColumn = page.locator(".flex-shrink-0.w-72").first();
+    const firstColumn = page.locator(".bg-gray-100.rounded-lg").first();
     await firstColumn.locator("button[title='Add issue']").click();
     const form = page.locator("form");
     await form
