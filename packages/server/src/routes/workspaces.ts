@@ -33,6 +33,7 @@ export function createWorkspacesRoute(
     }
 
     const requiresReview = body.requiresReview === true;
+    const planMode = body.planMode === true;
     const now = new Date().toISOString();
     const id = randomUUID();
     let sessionId: string | undefined;
@@ -110,6 +111,7 @@ export function createWorkspacesRoute(
         baseBranch,
         isDirect,
         requiresReview,
+        planMode,
         status: "active",
         createdAt: now,
         updatedAt: now,
@@ -136,7 +138,7 @@ export function createWorkspacesRoute(
       if (getSessionManager) {
         const truncatedPrompt = agentPrompt.length > 80 ? agentPrompt.slice(0, 80) + "..." : agentPrompt;
         console.log(`[workspaces] auto-launch: workspaceId=${id} branch=${branch} isDirect=${isDirect} prompt="${truncatedPrompt}" agentCommand=${agentCommand ?? "default"}`);
-        sessionId = await getSessionManager().startSession(id, agentPrompt, agentCommand, agentArgs, undefined, claudeProfile);
+        sessionId = await getSessionManager().startSession(id, agentPrompt, agentCommand, agentArgs, undefined, claudeProfile, undefined, undefined, planMode);
       }
 
       // Broadcast board event
@@ -152,6 +154,7 @@ export function createWorkspacesRoute(
           workingDir: worktreePath,
           baseBranch,
           isDirect,
+          planMode,
           status: "active",
           sessionId,
           createdAt: now,
@@ -174,6 +177,7 @@ export function createWorkspacesRoute(
           baseBranch,
           isDirect,
           requiresReview,
+          planMode,
           status: "active",
           createdAt: now,
           updatedAt: now,
@@ -183,7 +187,7 @@ export function createWorkspacesRoute(
       }
 
       return c.json(
-        { id, issueId: body.issueId, branch, workingDir: worktreePath, baseBranch, isDirect, status: "active", error: errorMsg },
+        { id, issueId: body.issueId, branch, workingDir: worktreePath, baseBranch, isDirect, planMode, status: "active", error: errorMsg },
         201,
       );
     }
@@ -201,6 +205,7 @@ export function createWorkspacesRoute(
         workingDir: workspaces.workingDir,
         baseBranch: workspaces.baseBranch,
         isDirect: workspaces.isDirect,
+        planMode: workspaces.planMode,
         status: workspaces.status,
         createdAt: workspaces.createdAt,
         updatedAt: workspaces.updatedAt,
@@ -223,6 +228,7 @@ export function createWorkspacesRoute(
       workingDir: row.workingDir,
       baseBranch: row.baseBranch,
       isDirect: row.isDirect,
+      planMode: row.planMode,
       status: row.status,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
