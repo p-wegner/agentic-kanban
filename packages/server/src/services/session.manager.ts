@@ -154,8 +154,14 @@ function createSessionManager(
         .where(eq(sessions.id, resumeFromId))
         .limit(1);
       if (prevRows.length > 0 && prevRows[0].claudeSessionId) {
-        claudeSessionId = prevRows[0].claudeSessionId;
-        console.log(`[session] resuming: resumeFromId=${resumeFromId} claudeSessionId=${claudeSessionId}`);
+        // Skip non-UUID session IDs (e.g. mock agent "mock-session-xxx")
+        const sid = prevRows[0].claudeSessionId;
+        if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(sid)) {
+          claudeSessionId = sid;
+          console.log(`[session] resuming: resumeFromId=${resumeFromId} claudeSessionId=${claudeSessionId}`);
+        } else {
+          console.log(`[session] skipping resume: claudeSessionId=${sid} is not a valid UUID`);
+        }
       }
     }
 
