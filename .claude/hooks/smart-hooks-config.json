@@ -33,6 +33,13 @@
         "enabled": true,
         "blocking": true,
         "timeout": 10
+      },
+      {
+        "name": "Uncommitted worktree changes",
+        "command": "node .claude/hooks/check-uncommitted.js",
+        "enabled": true,
+        "blocking": true,
+        "timeout": 10
       }
     ]
   }

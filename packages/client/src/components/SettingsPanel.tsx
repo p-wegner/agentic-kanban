@@ -14,6 +14,7 @@ interface Settings {
   skip_permissions?: string;
   claude_profile?: string;
   permission_prompt_tool?: string;
+  auto_review?: string;
 }
 
 const DEFAULT_SETTINGS: Settings = {
@@ -24,6 +25,7 @@ const DEFAULT_SETTINGS: Settings = {
   skip_permissions: "false",
   claude_profile: "",
   permission_prompt_tool: "true",
+  auto_review: "true",
 };
 
 export function SettingsPanel({ onClose }: SettingsPanelProps) {
@@ -225,6 +227,26 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                 <p className="text-xs text-gray-500 mt-1">
                   Use a mock agent that emits fake stream-json output instead of
                   launching Claude Code. Useful for testing and development.
+                </p>
+              </div>
+
+              {/* Auto Review */}
+              <div>
+                <label className="flex items-center gap-2 text-sm font-medium text-gray-700 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={settings.auto_review !== "false"}
+                    onChange={(e) =>
+                      setSettings((s) => ({ ...s, auto_review: e.target.checked ? "true" : "false" }))
+                    }
+                    className="rounded border-gray-300"
+                  />
+                  Auto Code Review
+                </label>
+                <p className="text-xs text-gray-500 mt-1">
+                  When an agent commits and exits successfully, automatically launch
+                  a review agent that checks the diff for issues. The issue moves to
+                  In Review, then Done after review passes.
                 </p>
               </div>
 

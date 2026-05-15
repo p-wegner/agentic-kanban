@@ -169,6 +169,9 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
   const isRunning = activeSession !== null && !messages.some(m => m.type === "exit");
   // Whether a session is alive (may be processing or waiting for input)
   const isSessionAlive = activeSession !== null && isRunning;
+  // Whether we can resume (workspace active, no session running, has previous session)
+  const canResume = (ws: WorkspaceResponse) =>
+    ws.status === "active" && !isRunning && !activeSession && !!lastSessionPerWorkspace[ws.id];
 
   // Auto-clear activeSession when agent completes.
   // Primary: detect exit via WS messages.
@@ -557,6 +560,30 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
     }
   }
 
+  async function handleResume(wsId: string) {
+    setActionLoading(true);
+    setError(null);
+    const resumePrompt = "Continue where you left off. If you were in the middle of implementing something, pick up from where you stopped. If the implementation is complete, commit your changes and move this issue to In Review.";
+    try {
+      const body: Record<string, string> = {
+        prompt: resumePrompt,
+        resumeFromId: lastSessionPerWorkspace[wsId] || "",
+      };
+      const result = await apiFetch<{ sessionId: string }>(
+        `/api/workspaces/${wsId}/launch`,
+        { method: "POST", body: JSON.stringify(body) },
+      );
+      setActiveSession(result.sessionId);
+      setLastPrompt(resumePrompt);
+      setPrompt("");
+      await fetchWorkspaces();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Resume failed");
+    } finally {
+      setActionLoading(false);
+    }
+  }
+
   async function handleDeleteWorkspace(wsId: string) {
     const suffix = isRunning ? " The running agent will be stopped." : "";
     if (!window.confirm(`Delete this workspace? This removes the workspace record and all session data.${suffix}`)) return;
@@ -924,7 +951,17 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
 
                     {/* Action buttons — visible even while agent runs */}
                     {!selectedHistoryId && ws.workingDir && ws.status !== "closed" && (
-                      <div className="flex gap-2">
+                      <div className="flex gap-2 flex-wrap">
+                        {/* Resume button — shown when workspace active but no session running */}
+                        {canResume(ws) && (
+                          <button
+                            onClick={() => handleResume(ws.id)}
+                            disabled={actionLoading}
+                            className="text-sm bg-green-600 text-white px-3 py-1.5 rounded hover:bg-green-700 disabled:opacity-50"
+                          >
+                            Resume
+                          </button>
+                        )}
                         <button
                           onClick={() => handleOpenTerminal(ws.id)}
                           disabled={actionLoading}
