@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { IssueWithStatus, UpdateIssueRequest } from "@agentic-kanban/shared";
+import type { IssueWithStatus, UpdateIssueRequest, DependencyInfo } from "@agentic-kanban/shared";
 import { apiFetch } from "../lib/api.js";
 import { showToast } from "./Toast.js";
 
@@ -16,6 +16,7 @@ interface IssueDetailPanelProps {
   onClose: () => void;
   onManageWorkspaces: (issue: IssueWithStatus, workspaceId?: string) => void;
   onIssueUpdate: (issue: IssueWithStatus) => void;
+  onNavigateToIssue?: (issueId: string) => void;
 }
 
 function formatRelativeTime(dateStr: string): string {
@@ -49,6 +50,7 @@ export function IssueDetailPanel({
   onClose,
   onManageWorkspaces,
   onIssueUpdate,
+  onNavigateToIssue,
 }: IssueDetailPanelProps) {
   const [editing, setEditing] = useState(false);
   const [title, setTitle] = useState(issue.title);
@@ -59,6 +61,8 @@ export function IssueDetailPanel({
   const [workspaceCount, setWorkspaceCount] = useState(0);
   const [issueTags, setIssueTags] = useState<{ id: string; name: string; color: string | null }[]>([]);
   const [allTags, setAllTags] = useState<{ id: string; name: string; color: string | null }[]>([]);
+  const [dependencies, setDependencies] = useState<DependencyInfo>({ dependsOn: [], blockedBy: [] });
+  const [availableIssues, setAvailableIssues] = useState<IssueWithStatus[]>([]);
 
   // Track unsaved changes for warning
   const hasChanges = editing && (
@@ -70,14 +74,18 @@ export function IssueDetailPanel({
   useEffect(() => {
     async function loadData() {
       try {
-        const [ws, tags, available] = await Promise.all([
+        const [ws, tags, available, deps, issues] = await Promise.all([
           apiFetch<{ id: string }[]>(`/api/issues/${issue.id}/workspaces`),
           apiFetch<{ id: string; name: string; color: string | null }[]>(`/api/issues/${issue.id}/tags`),
           apiFetch<{ id: string; name: string; color: string | null }[]>(`/api/tags`),
+          apiFetch<DependencyInfo>(`/api/issues/${issue.id}/dependencies`),
+          apiFetch<IssueWithStatus[]>(`/api/issues?projectId=${issue.projectId}`),
         ]);
         setWorkspaceCount(ws.length);
         setIssueTags(tags);
         setAllTags(available);
+        setDependencies(deps);
+        setAvailableIssues(issues.filter(i => i.id !== issue.id));
       } catch {
         // Ignore — non-critical
       }
@@ -371,6 +379,112 @@ export function IssueDetailPanel({
                   </select>
                 )}
               </div>
+            </div>
+          )}
+
+          {/* Dependencies section */}
+          {!editing && (
+            <div>
+              <label className="text-xs font-medium text-gray-600 block mb-1">
+                Dependencies
+              </label>
+              {dependencies.dependsOn.length > 0 && (
+                <div className="mb-2">
+                  <span className="text-xs text-gray-500 block mb-1">Depends on:</span>
+                  <div className="flex flex-wrap gap-1.5">
+                    {dependencies.dependsOn.map((dep) => (
+                      <span
+                        key={dep.id}
+                        className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 cursor-pointer hover:bg-blue-100"
+                        onClick={() => onNavigateToIssue?.(dep.dependsOnId)}
+                        title={`#${dep.issueNumber ?? ""} ${dep.issueTitle}`}
+                      >
+                        {dep.issueStatusName !== "Done" && (
+                          <span className="w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0" />
+                        )}
+                        {dep.issueStatusName === "Done" && (
+                          <span className="w-1.5 h-1.5 rounded-full bg-green-400 shrink-0" />
+                        )}
+                        <span className="truncate max-w-[120px]">{dep.issueTitle}</span>
+                        <button
+                          onClick={async (e) => {
+                            e.stopPropagation();
+                            try {
+                              await apiFetch(`/api/issues/${issue.id}/dependencies/${dep.dependsOnId}`, { method: "DELETE" });
+                              setDependencies((prev) => ({
+                                ...prev,
+                                dependsOn: prev.dependsOn.filter((d) => d.dependsOnId !== dep.dependsOnId),
+                              }));
+                              onIssueUpdate(issue);
+                            } catch {
+                              showToast("Failed to remove dependency", "error");
+                            }
+                          }}
+                          className="text-blue-300 hover:text-blue-500"
+                        >
+                          &times;
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {dependencies.blockedBy.length > 0 && (
+                <div className="mb-2">
+                  <span className="text-xs text-gray-500 block mb-1">Blocked by:</span>
+                  <div className="flex flex-wrap gap-1.5">
+                    {dependencies.blockedBy.map((dep) => (
+                      <span
+                        key={dep.id}
+                        className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-orange-50 text-orange-700 cursor-pointer hover:bg-orange-100"
+                        onClick={() => onNavigateToIssue?.(dep.issueId)}
+                        title={`#${dep.issueNumber ?? ""} ${dep.issueTitle}`}
+                      >
+                        {dep.issueStatusName !== "Done" && (
+                          <span className="w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0" />
+                        )}
+                        {dep.issueStatusName === "Done" && (
+                          <span className="w-1.5 h-1.5 rounded-full bg-green-400 shrink-0" />
+                        )}
+                        <span className="truncate max-w-[120px]">{dep.issueTitle}</span>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {(() => {
+                const existingDepIds = new Set(dependencies.dependsOn.map((d) => d.dependsOnId));
+                const candidates = availableIssues.filter((i) => !existingDepIds.has(i.id));
+                return candidates.length > 0 ? (
+                  <select
+                    className="text-xs border border-gray-300 rounded px-1 py-0.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    value=""
+                    onChange={async (e) => {
+                      const depId = e.target.value;
+                      if (!depId) return;
+                      try {
+                        await apiFetch(`/api/issues/${issue.id}/dependencies`, {
+                          method: "POST",
+                          body: JSON.stringify({ dependsOnId: depId }),
+                        });
+                        const deps = await apiFetch<DependencyInfo>(`/api/issues/${issue.id}/dependencies`);
+                        setDependencies(deps);
+                        onIssueUpdate(issue);
+                      } catch (err: any) {
+                        const msg = err?.message ?? "Failed to add dependency";
+                        showToast(msg, "error");
+                      }
+                    }}
+                  >
+                    <option value="">+ Add dependency</option>
+                    {candidates.map((i) => (
+                      <option key={i.id} value={i.id}>
+                        {i.issueNumber != null ? `#${i.issueNumber} ` : ""}{i.title}
+                      </option>
+                    ))}
+                  </select>
+                ) : null;
+              })()}
             </div>
           )}
 

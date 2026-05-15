@@ -634,6 +634,15 @@ export function BoardPage() {
           onClose={() => setSelectedIssue(null)}
           onManageWorkspaces={handleManageWorkspaces}
           onIssueUpdate={setSelectedIssue}
+          onNavigateToIssue={(issueId) => {
+            for (const col of columns) {
+              const found = col.issues.find((i) => i.id === issueId);
+              if (found) {
+                setSelectedIssue(found);
+                return;
+              }
+            }
+          }}
         />
       )}
       {workspaceIssue && (
