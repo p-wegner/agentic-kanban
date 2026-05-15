@@ -10,6 +10,7 @@ export const workspaces = sqliteTable("workspaces", {
   baseBranch: text("base_branch"),
   isDirect: integer("is_direct", { mode: "boolean" }).notNull().default(false),
   requiresReview: integer("requires_review", { mode: "boolean" }).notNull().default(false),
+  planMode: integer("plan_mode", { mode: "boolean" }).notNull().default(false),
   status: text("status").notNull().default("active"),
   createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
   updatedAt: text("updated_at").notNull().$defaultFn(() => new Date().toISOString()),
