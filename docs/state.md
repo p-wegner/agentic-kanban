@@ -238,7 +238,7 @@ packages/
   shared/     - Drizzle schema (11 tables, 12 migrations) + TypeScript types
   server/     - Hono API + @libsql/client + SQLite (port 3001) + CLI (commander)
   client/     - React + Vite + Tailwind v4 (port 5173)
-  mcp-server/ - MCP stdio server (8 tools: get_context, list/get/create/update_issue, list/start_workspace, get_workspace_diff)
+  mcp-server/ - MCP stdio server (21 tools: full CRUD for issues/workspaces/tags/sessions/comments + move/stop/stats)
   e2e/        - Playwright tests (100 tests: API + UI, global setup creates project)
 ```
 
@@ -295,9 +295,22 @@ packages/
 | get_issue | Issue detail with associated workspaces |
 | create_issue | Create issue with title, description, priority |
 | update_issue | Update issue title, description, status, priority |
+| delete_issue | Delete issue and cascade-delete workspaces/sessions/messages/tags |
+| move_issue | Move issue to a different status column by name |
 | list_workspaces | List workspaces filtered by issue or status |
 | start_workspace | Create git worktree + workspace for an issue |
 | get_workspace_diff | Get git diff for a workspace |
+| merge_workspace | Merge workspace branch into default branch, close, auto-transition issue to Done |
+| close_workspace | Close workspace without merging |
+| stop_workspace | Stop running agent session for a workspace |
+| delete_workspace | Delete workspace and cascade-delete sessions/messages/comments |
+| list_tags | List all available tags |
+| create_tag | Create a new tag |
+| read_terminal | Read agent session output (ANSI-stripped, last N messages) |
+| list_sessions | List sessions for a workspace |
+| get_session_stats | Parse token usage, cost, duration from session output |
+| get_diff_comments | Get diff review comments for a workspace |
+| create_diff_comment | Add a review comment on a file in a workspace diff |
 
 ## Session Log
 | Date | Session | Summary |
