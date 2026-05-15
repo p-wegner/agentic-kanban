@@ -60,7 +60,7 @@ export function registerGetIssue(server: McpServer) {
           .where(eq(schema.issueDependencies.dependsOnId, issueId)),
       ]);
 
-      const isBlocked = dependsOn.some((dep) => dep.issueStatusName !== "Done");
+      const isBlocked = dependsOn.some((dep) => dep.issueStatusName !== "Done" && dep.issueStatusName !== "AI Reviewed");
 
       const result = {
         ...issues[0],

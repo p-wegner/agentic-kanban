@@ -38,8 +38,9 @@ async function globalSetup() {
         { name: "Todo", sortOrder: 0 },
         { name: "In Progress", sortOrder: 1 },
         { name: "In Review", sortOrder: 2 },
-        { name: "Done", sortOrder: 3 },
-        { name: "Cancelled", sortOrder: 4 },
+        { name: "AI Reviewed", sortOrder: 3 },
+        { name: "Done", sortOrder: 4 },
+        { name: "Cancelled", sortOrder: 5 },
       ];
       for (const status of statuses) {
         await apiContext.post(`/api/projects/${project.id}/statuses`, {

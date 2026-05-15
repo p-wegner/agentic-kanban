@@ -246,7 +246,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                 <p className="text-xs text-gray-500 mt-1">
                   When an agent commits and exits successfully, automatically launch
                   a review agent that checks the diff for issues. The issue moves to
-                  In Review, then Done after review passes.
+                  In Review, then AI Reviewed after review passes.
                 </p>
               </div>
 
