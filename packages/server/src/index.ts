@@ -149,7 +149,9 @@ async function autoMerge(
 // Session manager with onSessionExit callback
 const sessionManager = createSessionManager(upgradeWebSocket, {
   onSessionExit: (workspaceId, sessionId, exitCode) => {
-    runWorkflowOnExit(workspaceId, sessionId, exitCode);
+    runWorkflowOnExit(workspaceId, sessionId, exitCode).catch((err) => {
+      console.error("[fatal] runWorkflowOnExit unhandled:", err);
+    });
   },
   onActivity: (projectId, issueId, sessionId, activity) => {
     boardEvents.broadcastActivity(projectId, { issueId, sessionId, activity });

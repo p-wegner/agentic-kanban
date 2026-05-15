@@ -52,6 +52,20 @@ export function createIssuesRoute(database: Database = db, options?: { boardEven
       .where(eq(issues.projectId, body.projectId));
     const issueNumber = (maxResult[0]?.maxNum ?? 0) + 1;
 
+    // Default statusId to the first status for the project if not provided
+    let statusId = body.statusId;
+    if (!statusId) {
+      const statuses = await database
+        .select({ id: projectStatuses.id })
+        .from(projectStatuses)
+        .where(eq(projectStatuses.projectId, body.projectId))
+        .limit(1);
+      if (statuses.length === 0) {
+        return c.json({ error: "No statuses found for project" }, 400);
+      }
+      statusId = statuses[0].id;
+    }
+
     await database.insert(issues).values({
       id,
       issueNumber,
@@ -59,7 +73,7 @@ export function createIssuesRoute(database: Database = db, options?: { boardEven
       description: body.description ?? null,
       priority: body.priority ?? "medium",
       sortOrder: body.sortOrder ?? 0,
-      statusId: body.statusId,
+      statusId,
       projectId: body.projectId,
       createdAt: now,
       updatedAt: now,
