@@ -4,7 +4,7 @@ import { workspaces, issues, projects, preferences, sessions, sessionMessages, d
 import { eq, inArray } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import * as gitService from "../services/git.service.js";
-import { runSetupScript } from "@agentic-kanban/shared/lib/setup-script";
+import { runSetupScript } from "../services/setup-script.js";
 import type { SessionManager } from "../services/session.manager.js";
 import type { BoardEvents } from "../services/board-events.js";
 import type { Database } from "../db/index.js";

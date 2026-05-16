@@ -5,7 +5,7 @@ import { eq } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import * as gitService from "../git-service.js";
 import { notifyBoard } from "../notify.js";
-import { runSetupScript } from "@agentic-kanban/shared/lib/setup-script";
+import { runSetupScript } from "../setup-script.js";
 
 export function registerStartWorkspace(server: McpServer) {
   server.tool(
