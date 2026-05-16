@@ -874,7 +874,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                         <TerminalView
                           messages={selectedHistoryId ? historyMessages : (activeSession ? messages : completedMessages)}
                           connectionState={selectedHistoryId ? "closed" : (activeSession ? wsState : "closed")}
-                          parseOutput={prefs.output_parser !== "false"}
+                          parseOutput={prefs.output_parser === "false" ? "false" : (prefs.output_parser === "minimal" ? "minimal" : "true")}
                           prompt={selectedHistoryId ? undefined : lastPrompt}
                           title={issue.title}
                           multiTurn={isSessionAlive}
