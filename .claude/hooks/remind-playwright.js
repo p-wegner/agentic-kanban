@@ -52,7 +52,7 @@ function main() {
         "  /playwright-cli",
         "",
         "Then:",
-        "  1. Open http://localhost:5173",
+        "  1. Open http://localhost:" + (process.env.VITE_PORT || "5173"),
         "  2. Take a snapshot to check the UI renders correctly",
         "  3. Screenshot only if debugging — clean up .png files after",
         "",
