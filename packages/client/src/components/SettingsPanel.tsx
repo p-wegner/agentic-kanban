@@ -268,10 +268,8 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                   Use new model on resume
                 </label>
                 <p className="text-xs text-gray-500 mt-1">
-                  When enabled, continuing a chat starts a fresh session with the current profile
-                  and arguments instead of resuming the previous Claude session. Use this when
-                  switching providers or models via a different Claude profile. Conversation history
-                  is not carried over.
+                  When enabled, continuing a chat uses the model from Additional Arguments instead of
+                  the model from the previous session. The conversation history is not preserved.
                 </p>
               </div>
 
