@@ -165,11 +165,13 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                   className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
                 >
                   <option value="true">Parse stream-json output</option>
+                  <option value="minimal">Minimal activity view</option>
                   <option value="false">Show raw output</option>
                 </select>
                 <p className="text-xs text-gray-500 mt-1">
                   When enabled, the terminal view parses Claude&apos;s JSON output
-                  and displays structured info (model, tools, cost, etc.).
+                  and displays structured info. &quot;Minimal&quot; shows a compact
+                  activity timeline.
                 </p>
               </div>
 
