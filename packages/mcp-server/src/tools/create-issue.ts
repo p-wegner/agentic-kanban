@@ -1,7 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { db, schema } from "../db.js";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { notifyBoard } from "../notify.js";
 
@@ -43,11 +43,18 @@ export function registerCreateIssue(server: McpServer) {
         statusId = statuses[0].id;
       }
 
+      const maxResult = await db
+        .select({ maxNum: sql<number | null>`max(${schema.issues.issueNumber})` })
+        .from(schema.issues)
+        .where(eq(schema.issues.projectId, pid));
+      const issueNumber = (maxResult[0]?.maxNum ?? 0) + 1;
+
       const id = randomUUID();
       const now = new Date().toISOString();
 
       await db.insert(schema.issues).values({
         id,
+        issueNumber,
         title,
         description: description ?? null,
         priority: priority ?? "medium",
@@ -61,7 +68,7 @@ export function registerCreateIssue(server: McpServer) {
       notifyBoard(pid, "mcp_create_issue");
 
       return {
-        content: [{ type: "text" as const, text: JSON.stringify({ id, title, status: statusName || "Todo", priority: priority || "medium" }, null, 2) }],
+        content: [{ type: "text" as const, text: JSON.stringify({ id, issueNumber, title, status: statusName || "Todo", priority: priority || "medium" }, null, 2) }],
       };
     },
   );
