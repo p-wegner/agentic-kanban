@@ -21,6 +21,7 @@ interface SessionStatsMessage {
   model: string;
   contextTokens: number;
   toolUses: number;
+  subagentCount: number;
 }
 
 export interface TodoItem {
@@ -91,10 +92,10 @@ function createBoardEvents(
     }
   }
 
-  function broadcastLiveStats(projectId: string, issueId: string, model: string, contextTokens: number, toolUses: number) {
+  function broadcastLiveStats(projectId: string, issueId: string, model: string, contextTokens: number, toolUses: number, subagentCount: number) {
     const subs = subscribers.get(projectId);
     if (!subs) return;
-    const message: SessionStatsMessage = { type: "session_stats", projectId, issueId, model, contextTokens, toolUses };
+    const message: SessionStatsMessage = { type: "session_stats", projectId, issueId, model, contextTokens, toolUses, subagentCount };
     const payload = JSON.stringify(message);
     for (const sub of subs.values()) {
       if (sub.ws.readyState === 1) {

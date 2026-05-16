@@ -20,7 +20,7 @@ interface SessionContext {
 interface SessionManagerOptions {
   onSessionExit?: (workspaceId: string, sessionId: string, exitCode: number | null) => void;
   onActivity?: (projectId: string, issueId: string, sessionId: string, activity: string) => void;
-  onLiveStats?: (projectId: string, issueId: string, model: string, contextTokens: number, toolUses: number) => void;
+  onLiveStats?: (projectId: string, issueId: string, model: string, contextTokens: number, toolUses: number, subagentCount: number) => void;
   onTodos?: (projectId: string, issueId: string, todos: TodoItem[]) => void;
 }
 
@@ -41,6 +41,12 @@ function createSessionManager(
   const sessionToolUses = new Map<string, number>();
   // Track last known model per session for result-event stats broadcasts
   const sessionModels = new Map<string, string>();
+  // Track active subagent count per session (Agent tool_use calls)
+  const sessionSubagents = new Map<string, number>();
+  // Track Agent tool_use IDs per session to decrement count when tool_result arrives
+  const sessionAgentToolUseIds = new Map<string, Set<string>>();
+  // Track tasks from TaskCreate/TaskUpdate calls per session
+  const sessionTasks = new Map<string, Map<string, { subject: string; status: string }>>();
 
   function broadcast(sessionId: string, message: AgentOutputMessage) {
     // Buffer the message for late subscribers
@@ -105,9 +111,10 @@ function createSessionManager(
           const contextTokens = ((usage?.cache_read_input_tokens as number) ?? 0) + ((usage?.input_tokens as number) ?? 0);
           if (model) sessionModels.set(sessionId, model);
           const toolUses = sessionToolUses.get(sessionId) ?? 0;
+          const subagentCount = sessionSubagents.get(sessionId) ?? 0;
           const ctx = sessionContexts.get(sessionId);
-          if (ctx && (model || contextTokens || toolUses)) {
-            options?.onLiveStats?.(ctx.projectId, ctx.issueId, model, contextTokens, toolUses);
+          if (ctx && (model || contextTokens || toolUses || subagentCount)) {
+            options?.onLiveStats?.(ctx.projectId, ctx.issueId, model, contextTokens, toolUses, subagentCount);
           }
         }
 
@@ -117,9 +124,10 @@ function createSessionManager(
           if (tpUsage.tool_uses) {
             sessionToolUses.set(sessionId, tpUsage.tool_uses);
             const model = sessionModels.get(sessionId) ?? "";
+            const subagentCount = sessionSubagents.get(sessionId) ?? 0;
             const ctx = sessionContexts.get(sessionId);
             if (ctx) {
-              options?.onLiveStats?.(ctx.projectId, ctx.issueId, model, 0, tpUsage.tool_uses);
+              options?.onLiveStats?.(ctx.projectId, ctx.issueId, model, 0, tpUsage.tool_uses, subagentCount);
             }
           }
         }
@@ -130,13 +138,14 @@ function createSessionManager(
           const contextTokens = ((rUsage.cache_read_input_tokens as number) ?? 0) + ((rUsage.input_tokens as number) ?? 0);
           const model = sessionModels.get(sessionId) ?? "";
           const toolUses = sessionToolUses.get(sessionId) ?? 0;
+          const subagentCount = sessionSubagents.get(sessionId) ?? 0;
           const ctx = sessionContexts.get(sessionId);
-          if (ctx && (contextTokens || toolUses)) {
-            options?.onLiveStats?.(ctx.projectId, ctx.issueId, model, contextTokens, toolUses);
+          if (ctx && (contextTokens || toolUses || subagentCount)) {
+            options?.onLiveStats?.(ctx.projectId, ctx.issueId, model, contextTokens, toolUses, subagentCount);
           }
         }
 
-        // Parse tool_use events for live activity and todos
+        // Parse tool_use events for live activity, todos, and subagent tracking
         if (obj.type === "assistant" && obj.message?.content) {
           const content = obj.message.content;
           if (Array.isArray(content)) {
@@ -154,6 +163,66 @@ function createSessionManager(
                     options?.onTodos?.(ctx.projectId, ctx.issueId, block.input.todos as TodoItem[]);
                   }
                 }
+                // Track Agent tool calls as active subagents
+                if (block.name === "Agent") {
+                  if (block.id) {
+                    if (!sessionAgentToolUseIds.has(sessionId)) sessionAgentToolUseIds.set(sessionId, new Set());
+                    sessionAgentToolUseIds.get(sessionId)!.add(block.id);
+                  }
+                  const count = (sessionSubagents.get(sessionId) ?? 0) + 1;
+                  sessionSubagents.set(sessionId, count);
+                  const model = sessionModels.get(sessionId) ?? "";
+                  const toolUses = sessionToolUses.get(sessionId) ?? 0;
+                  if (ctx) {
+                    options?.onLiveStats?.(ctx.projectId, ctx.issueId, model, 0, toolUses, count);
+                  }
+                }
+                // Track TaskCreate calls
+                if (block.name === "TaskCreate" && block.input?.subject) {
+                  if (!sessionTasks.has(sessionId)) sessionTasks.set(sessionId, new Map());
+                  const tasks = sessionTasks.get(sessionId)!;
+                  const taskIdx = String(tasks.size + 1);
+                  tasks.set(taskIdx, { subject: block.input.subject as string, status: "pending" });
+                  if (ctx) {
+                    options?.onTodos?.(ctx.projectId, ctx.issueId, tasksToTodoItems(tasks));
+                  }
+                }
+                // Track TaskUpdate calls
+                if (block.name === "TaskUpdate" && block.input?.taskId && block.input?.status) {
+                  const tasks = sessionTasks.get(sessionId);
+                  if (tasks) {
+                    const task = tasks.get(block.input.taskId as string);
+                    if (task) {
+                      task.status = block.input.status as string;
+                      if (ctx) {
+                        options?.onTodos?.(ctx.projectId, ctx.issueId, tasksToTodoItems(tasks));
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+
+        // Decrement subagent count when tool_result arrives for a tracked Agent tool_use
+        if (obj.type === "user" && obj.message?.content) {
+          const content = obj.message.content;
+          if (Array.isArray(content)) {
+            const agentIds = sessionAgentToolUseIds.get(sessionId);
+            if (agentIds && agentIds.size > 0) {
+              for (const block of content) {
+                if (block.type === "tool_result" && block.tool_use_id && agentIds.has(block.tool_use_id)) {
+                  agentIds.delete(block.tool_use_id);
+                  const newCount = Math.max(0, (sessionSubagents.get(sessionId) ?? 1) - 1);
+                  sessionSubagents.set(sessionId, newCount);
+                  const ctx = sessionContexts.get(sessionId);
+                  if (ctx) {
+                    const model = sessionModels.get(sessionId) ?? "";
+                    const toolUses = sessionToolUses.get(sessionId) ?? 0;
+                    options?.onLiveStats?.(ctx.projectId, ctx.issueId, model, 0, toolUses, newCount);
+                  }
+                }
               }
             }
           }
@@ -163,13 +232,22 @@ function createSessionManager(
       }
     }
 
-    // On exit, clear activity and todos
+    // On exit, clear activity, todos, and subagent state
     if (message.type === "exit") {
       const ctx = sessionContexts.get(sessionId);
       if (ctx) {
         options?.onActivity?.(ctx.projectId, ctx.issueId, sessionId, "");
         options?.onTodos?.(ctx.projectId, ctx.issueId, []);
+        // Broadcast final stats with zero subagents
+        const model = sessionModels.get(sessionId) ?? "";
+        const toolUses = sessionToolUses.get(sessionId) ?? 0;
+        options?.onLiveStats?.(ctx.projectId, ctx.issueId, model, 0, toolUses, 0);
       }
+      sessionSubagents.delete(sessionId);
+      sessionTasks.delete(sessionId);
+      sessionToolUses.delete(sessionId);
+      sessionModels.delete(sessionId);
+      sessionAgentToolUseIds.delete(sessionId);
     }
 
     const subs = subscribers.get(sessionId);
@@ -396,6 +474,11 @@ function createSessionManager(
     console.log(`[session] cleaning up stale session: sessionId=${sessionId}`);
     sessionContexts.delete(sessionId);
     turnStates.delete(sessionId);
+    sessionSubagents.delete(sessionId);
+    sessionTasks.delete(sessionId);
+    sessionToolUses.delete(sessionId);
+    sessionModels.delete(sessionId);
+    sessionAgentToolUseIds.delete(sessionId);
     const now = new Date().toISOString();
     await db.update(sessions)
       .set({ status: "stopped", endedAt: now })
@@ -485,4 +568,15 @@ function formatToolActivity(name: string, input: Record<string, unknown>): strin
     default:
       return name;
   }
+}
+
+function tasksToTodoItems(tasks: Map<string, { subject: string; status: string }>): TodoItem[] {
+  return Array.from(tasks.entries()).map(([id, task]) => ({
+    id,
+    content: task.subject,
+    status: (task.status === "in_progress" || task.status === "completed" || task.status === "pending")
+      ? task.status as "pending" | "in_progress" | "completed"
+      : "pending",
+    priority: "medium" as const,
+  }));
 }

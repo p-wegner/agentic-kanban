@@ -10,6 +10,10 @@
 - [x] Agent skills system — 3 built-in skills (board-navigator, dependency-analyzer, ticket-enhancer), custom skills via DB, CLI skill commands, MCP tools
 - [x] All features merged to master, visually verified
 
+### Recent Features (2026-05-17)
+- [x] Active subagent count on issue cards — Agent tool_use events tracked per session, violet badge with person icon shows count, broadcast via session_stats WS channel
+- [x] TaskCreate/TaskUpdate detection — SDK task tools parsed alongside TodoWrite, unified todo list broadcast via session_todos, existing TodoProgress component reused
+
 ### Post-Stage 13 — Worktree Overview + Workspace Deletion
 - [x] `getDiffShortstat()` in git.service.ts — lightweight diff stats via `git diff --shortstat`
 - [x] `GET /api/projects/:id/worktrees` — lists all git worktrees, cross-references with DB workspaces, computes diff stats
