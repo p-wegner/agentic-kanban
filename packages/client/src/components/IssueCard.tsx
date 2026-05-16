@@ -138,9 +138,11 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onDragStart, tags,
       {liveStats && (ws?.total === 1) && (
         <div className="flex items-center gap-2 mt-0.5 text-[10px] text-gray-400 px-1">
           {liveStats.model && <span className="font-mono">{liveStats.model}</span>}
-          {liveStats.contextTokens > 0 && (
+          {liveStats.contextTokens > 0 ? (
             <span>{Math.round(liveStats.contextTokens / 1000)}k ctx</span>
-          )}
+          ) : liveStats.toolUses > 0 ? (
+            <span>{liveStats.toolUses} tools</span>
+          ) : null}
         </div>
       )}
       {todos && todos.length > 0 && <TodoProgress todos={todos} />}

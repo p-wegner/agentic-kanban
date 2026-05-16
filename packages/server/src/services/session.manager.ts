@@ -20,7 +20,7 @@ interface SessionContext {
 interface SessionManagerOptions {
   onSessionExit?: (workspaceId: string, sessionId: string, exitCode: number | null) => void;
   onActivity?: (projectId: string, issueId: string, sessionId: string, activity: string) => void;
-  onLiveStats?: (projectId: string, issueId: string, model: string, contextTokens: number) => void;
+  onLiveStats?: (projectId: string, issueId: string, model: string, contextTokens: number, toolUses: number) => void;
   onTodos?: (projectId: string, issueId: string, todos: TodoItem[]) => void;
 }
 
@@ -37,6 +37,10 @@ function createSessionManager(
   const turnStates = new Map<string, "processing" | "waiting">();
   // Track sessions explicitly stopped by user — exit handler should not overwrite their status
   const stoppedByUser = new Set<string>();
+  // Track cumulative tool uses per session for live stats (providers like ZAI don't report tokens per-turn)
+  const sessionToolUses = new Map<string, number>();
+  // Track last known model per session for result-event stats broadcasts
+  const sessionModels = new Map<string, string>();
 
   function broadcast(sessionId: string, message: AgentOutputMessage) {
     // Buffer the message for late subscribers
@@ -99,9 +103,36 @@ function createSessionManager(
           const usage = obj.message.usage as Record<string, unknown> | undefined;
           const model = (obj.message.model as string) ?? "";
           const contextTokens = ((usage?.cache_read_input_tokens as number) ?? 0) + ((usage?.input_tokens as number) ?? 0);
+          if (model) sessionModels.set(sessionId, model);
+          const toolUses = sessionToolUses.get(sessionId) ?? 0;
           const ctx = sessionContexts.get(sessionId);
-          if (ctx && (model || contextTokens)) {
-            options?.onLiveStats?.(ctx.projectId, ctx.issueId, model, contextTokens);
+          if (ctx && (model || contextTokens || toolUses)) {
+            options?.onLiveStats?.(ctx.projectId, ctx.issueId, model, contextTokens, toolUses);
+          }
+        }
+
+        // Track tool_uses from task_progress events (live proxy for providers that don't report tokens per-turn)
+        if (obj.type === "system" && obj.subtype === "task_progress" && obj.usage) {
+          const tpUsage = obj.usage as { tool_uses?: number };
+          if (tpUsage.tool_uses) {
+            sessionToolUses.set(sessionId, tpUsage.tool_uses);
+            const model = sessionModels.get(sessionId) ?? "";
+            const ctx = sessionContexts.get(sessionId);
+            if (ctx) {
+              options?.onLiveStats?.(ctx.projectId, ctx.issueId, model, 0, tpUsage.tool_uses);
+            }
+          }
+        }
+
+        // Broadcast final stats from result event (some providers only report usage here)
+        if (obj.type === "result" && obj.usage) {
+          const rUsage = obj.usage as Record<string, unknown>;
+          const contextTokens = ((rUsage.cache_read_input_tokens as number) ?? 0) + ((rUsage.input_tokens as number) ?? 0);
+          const model = sessionModels.get(sessionId) ?? "";
+          const toolUses = sessionToolUses.get(sessionId) ?? 0;
+          const ctx = sessionContexts.get(sessionId);
+          if (ctx && (contextTokens || toolUses)) {
+            options?.onLiveStats?.(ctx.projectId, ctx.issueId, model, contextTokens, toolUses);
           }
         }
 

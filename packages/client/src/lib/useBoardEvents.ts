@@ -22,6 +22,7 @@ interface SessionStatsEvent {
   issueId: string;
   model: string;
   contextTokens: number;
+  toolUses: number;
 }
 
 export interface TodoItem {
@@ -43,6 +44,7 @@ type BoardWsEvent = BoardChangedEvent | SessionActivityEvent | SessionStatsEvent
 export interface LiveSessionStats {
   model: string;
   contextTokens: number;
+  toolUses: number;
 }
 
 export function useBoardEvents(
@@ -86,7 +88,7 @@ export function useBoardEvents(
         } else if (msg.type === "session_activity") {
           onSessionActivityRef.current?.(msg.issueId, msg.activity);
         } else if (msg.type === "session_stats") {
-          onSessionStatsRef.current?.(msg.issueId, { model: msg.model, contextTokens: msg.contextTokens });
+          onSessionStatsRef.current?.(msg.issueId, { model: msg.model, contextTokens: msg.contextTokens, toolUses: msg.toolUses ?? 0 });
         } else if (msg.type === "session_todos") {
           onSessionTodosRef.current?.(msg.issueId, msg.todos);
         }

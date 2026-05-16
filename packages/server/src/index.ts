@@ -249,8 +249,8 @@ const sessionManager = createSessionManager(upgradeWebSocket, {
   onActivity: (projectId, issueId, sessionId, activity) => {
     boardEvents.broadcastActivity(projectId, { issueId, sessionId, activity });
   },
-  onLiveStats: (projectId, issueId, model, contextTokens) => {
-    boardEvents.broadcastLiveStats(projectId, issueId, model, contextTokens);
+  onLiveStats: (projectId, issueId, model, contextTokens, toolUses) => {
+    boardEvents.broadcastLiveStats(projectId, issueId, model, contextTokens, toolUses);
   },
   onTodos: (projectId, issueId, todos) => {
     boardEvents.broadcastTodos(projectId, issueId, todos);
