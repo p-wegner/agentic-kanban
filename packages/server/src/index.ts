@@ -128,6 +128,7 @@ async function runWorkflowOnExit(workspaceId: string, sessionId: string, exitCod
         const useMock = prefMap.get("mock_agent") === "true" || process.env.MOCK_AGENT === "1";
         const agentCommand = useMock ? MOCK_AGENT_COMMAND : (prefMap.get("agent_command") || undefined);
         const agentArgs = prefMap.get("agent_args") || undefined;
+        const claudeProfile = useMock ? undefined : (prefMap.get("claude_profile") || undefined);
 
         const reviewPrompt = [
           `You are an AI code reviewer. Review the changes on branch '${workspace.branch}'.`,
@@ -153,7 +154,7 @@ async function runWorkflowOnExit(workspaceId: string, sessionId: string, exitCod
           await db.update(workspaces).set({ status: "reviewing", updatedAt: now }).where(eq(workspaces.id, workspaceId));
           boardEvents.broadcast(projectId, "issue_updated");
 
-          const reviewSessionId = await sessionManager.startSession(workspaceId, reviewPrompt, agentCommand, agentArgs);
+          const reviewSessionId = await sessionManager.startSession(workspaceId, reviewPrompt, agentCommand, agentArgs, undefined, claudeProfile);
           reviewSessionIds.add(reviewSessionId);
           console.log(`[workflow] launched review session ${reviewSessionId} for workspace ${workspaceId}`);
         } catch (err) {
