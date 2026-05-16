@@ -43,6 +43,8 @@ function createSessionManager(
   const sessionModels = new Map<string, string>();
   // Track active subagent count per session (Agent tool_use calls)
   const sessionSubagents = new Map<string, number>();
+  // Track Agent tool_use IDs per session to decrement count when tool_result arrives
+  const sessionAgentToolUseIds = new Map<string, Set<string>>();
   // Track tasks from TaskCreate/TaskUpdate calls per session
   const sessionTasks = new Map<string, Map<string, { subject: string; status: string }>>();
 
@@ -163,6 +165,10 @@ function createSessionManager(
                 }
                 // Track Agent tool calls as active subagents
                 if (block.name === "Agent") {
+                  if (block.id) {
+                    if (!sessionAgentToolUseIds.has(sessionId)) sessionAgentToolUseIds.set(sessionId, new Set());
+                    sessionAgentToolUseIds.get(sessionId)!.add(block.id);
+                  }
                   const count = (sessionSubagents.get(sessionId) ?? 0) + 1;
                   sessionSubagents.set(sessionId, count);
                   const model = sessionModels.get(sessionId) ?? "";
@@ -198,6 +204,29 @@ function createSessionManager(
             }
           }
         }
+
+        // Decrement subagent count when tool_result arrives for a tracked Agent tool_use
+        if (obj.type === "user" && obj.message?.content) {
+          const content = obj.message.content;
+          if (Array.isArray(content)) {
+            const agentIds = sessionAgentToolUseIds.get(sessionId);
+            if (agentIds && agentIds.size > 0) {
+              for (const block of content) {
+                if (block.type === "tool_result" && block.tool_use_id && agentIds.has(block.tool_use_id)) {
+                  agentIds.delete(block.tool_use_id);
+                  const newCount = Math.max(0, (sessionSubagents.get(sessionId) ?? 1) - 1);
+                  sessionSubagents.set(sessionId, newCount);
+                  const ctx = sessionContexts.get(sessionId);
+                  if (ctx) {
+                    const model = sessionModels.get(sessionId) ?? "";
+                    const toolUses = sessionToolUses.get(sessionId) ?? 0;
+                    options?.onLiveStats?.(ctx.projectId, ctx.issueId, model, 0, toolUses, newCount);
+                  }
+                }
+              }
+            }
+          }
+        }
       } catch {
         // Not JSON or not a system/init event — ignore
       }
@@ -216,6 +245,9 @@ function createSessionManager(
       }
       sessionSubagents.delete(sessionId);
       sessionTasks.delete(sessionId);
+      sessionToolUses.delete(sessionId);
+      sessionModels.delete(sessionId);
+      sessionAgentToolUseIds.delete(sessionId);
     }
 
     const subs = subscribers.get(sessionId);
@@ -444,6 +476,9 @@ function createSessionManager(
     turnStates.delete(sessionId);
     sessionSubagents.delete(sessionId);
     sessionTasks.delete(sessionId);
+    sessionToolUses.delete(sessionId);
+    sessionModels.delete(sessionId);
+    sessionAgentToolUseIds.delete(sessionId);
     const now = new Date().toISOString();
     await db.update(sessions)
       .set({ status: "stopped", endedAt: now })
