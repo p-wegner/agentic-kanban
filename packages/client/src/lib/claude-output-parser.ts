@@ -48,6 +48,7 @@ export interface ParsedToolUseEvent {
   kind: "tool_use";
   name: string;
   input: string;
+  inputParsed: Record<string, unknown>;
 }
 
 export interface ParsedToolResultEvent {
@@ -79,6 +80,7 @@ export type DisplayEvent = ParsedEvent | RawTextEvent;
 export class ClaudeOutputParser {
   private buffer = "";
   private _isClaudeJson = false;
+  private toolNameMap = new Map<string, string>();
 
   /** Whether we've detected Claude stream-json output */
   get isClaudeJson(): boolean {
@@ -158,10 +160,18 @@ export class ClaudeOutputParser {
             events.push({ kind: "assistant", text, model });
           }
         } else if (blockType === "tool_use") {
+          const toolUseId = (block.id as string) || "";
+          const toolName = (block.name as string) || "unknown";
+          if (toolUseId) {
+            this.toolNameMap.set(toolUseId, toolName);
+          }
           events.push({
             kind: "tool_use",
-            name: (block.name as string) || "unknown",
+            name: toolName,
             input: JSON.stringify(block.input, null, 2),
+            inputParsed: (typeof block.input === "object" && block.input !== null && !Array.isArray(block.input))
+              ? block.input as Record<string, unknown>
+              : {},
           });
         }
       }
@@ -180,15 +190,13 @@ export class ClaudeOutputParser {
           const output = typeof rawContent === "string"
             ? rawContent
             : JSON.stringify(rawContent);
-          const toolResult = obj.tool_use_result;
-          const toolName = typeof toolResult === "string"
-            ? toolResult
-            : (toolResult as Record<string, unknown>)?.tool_use_id
-              ? `tool_${(toolResult as Record<string, unknown>).tool_use_id}`
-              : "tool";
+          const toolUseId = (block.tool_use_id as string) || "";
+          const toolName = toolUseId
+            ? (this.toolNameMap.get(toolUseId) || `tool_${toolUseId}`)
+            : "unknown";
           events.push({
             kind: "tool_result",
-            toolName: toolName || "unknown",
+            toolName,
             output,
             isError: (block.is_error as boolean) || false,
           });
