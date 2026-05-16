@@ -1,5 +1,6 @@
 import { BoardColumn } from "./BoardColumn.js";
 import { CreateIssueForm } from "./CreateIssueForm.js";
+import type { CreateIssueFormState } from "./CreateIssueForm.js";
 import type { CreateIssueRequest, IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
 import type { LiveSessionStats } from "../lib/useBoardEvents.js";
 
@@ -21,6 +22,7 @@ interface ColumnGroupProps {
   sessionActivity?: Record<string, string>;
   liveStats?: Record<string, LiveSessionStats>;
   canStartWorkspace?: boolean;
+  onExpandCreate?: (statusId: string, statusName: string, state: CreateIssueFormState) => void;
 }
 
 export function ColumnGroup({
@@ -41,6 +43,7 @@ export function ColumnGroup({
   sessionActivity,
   liveStats,
   canStartWorkspace = false,
+  onExpandCreate,
 }: ColumnGroupProps) {
   if (columns.length === 0) return null;
 
@@ -117,6 +120,10 @@ export function ColumnGroup({
               onSubmit={onCreateSubmit}
               onCancel={onCreateCancel}
               canStartWorkspace={canStartWorkspace}
+              onExpand={onExpandCreate ? (state) => {
+                onCreateCancel();
+                onExpandCreate(col.id, col.name, state);
+              } : undefined}
             />
           </BoardColumn>
         ))}
