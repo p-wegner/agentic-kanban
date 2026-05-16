@@ -211,16 +211,15 @@ export function createWorkspaceActionsRoute(
         ? (baseArgs ? baseArgs + " --dangerously-skip-permissions" : "--dangerously-skip-permissions")
         : (baseArgs || undefined);
       const claudeProfile = prefMap.get("claude_profile") || undefined;
-      const resumeWithNewModel = prefMap.get("resume_with_new_model") === "true";
 
       const truncatedPrompt = body.prompt.length > 80 ? body.prompt.slice(0, 80) + "..." : body.prompt;
-      console.log(`[workspace-actions] launch: workspaceId=${id} prompt="${truncatedPrompt}" agentCommand=${agentCommand ?? "default"} agentArgs=${agentArgs ?? "none"} profile=${claudeProfile ?? "none"} resumeFromId=${body.resumeFromId ?? "none"} multiTurn=${body.multiTurn !== false} resumeWithNewModel=${resumeWithNewModel}`);
+      console.log(`[workspace-actions] launch: workspaceId=${id} prompt="${truncatedPrompt}" agentCommand=${agentCommand ?? "default"} agentArgs=${agentArgs ?? "none"} profile=${claudeProfile ?? "none"} resumeFromId=${body.resumeFromId ?? "none"} multiTurn=${body.multiTurn !== false}`);
 
       // Read planMode from workspace record
       const wsRows = await database.select({ planMode: workspaces.planMode }).from(workspaces).where(eq(workspaces.id, id)).limit(1);
       const planMode = wsRows.length > 0 ? wsRows[0].planMode : false;
 
-      const sessionId = await getSessionManager().startSession(id, body.prompt, agentCommand, agentArgs, body.resumeFromId, claudeProfile, body.multiTurn !== false, undefined, planMode, resumeWithNewModel);
+      const sessionId = await getSessionManager().startSession(id, body.prompt, agentCommand, agentArgs, body.resumeFromId, claudeProfile, body.multiTurn !== false, undefined, planMode);
 
       const now = new Date().toISOString();
       await database.update(workspaces).set({ status: "active", updatedAt: now }).where(eq(workspaces.id, id));
@@ -278,7 +277,6 @@ export function createWorkspaceActionsRoute(
           ? (baseArgs ? baseArgs + " --dangerously-skip-permissions" : "--dangerously-skip-permissions")
           : (baseArgs || undefined);
         const claudeProfile = prefMap.get("claude_profile") || undefined;
-        const resumeWithNewModel = prefMap.get("resume_with_new_model") === "true";
         const wsRows = await database.select({ planMode: workspaces.planMode }).from(workspaces).where(eq(workspaces.id, id)).limit(1);
         const planMode = wsRows.length > 0 ? wsRows[0].planMode : false;
 
@@ -292,7 +290,6 @@ export function createWorkspaceActionsRoute(
           true,
           undefined,
           planMode,
-          resumeWithNewModel,
         );
         const projectId = await resolveProjectId(id, database);
         if (projectId) options?.boardEvents?.broadcast(projectId, "session_launched");
