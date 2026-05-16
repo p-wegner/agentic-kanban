@@ -196,3 +196,44 @@ export interface DependencyInfo {
   dependsOn: DependencyItem[];
   blockedBy: DependencyItem[];
 }
+
+export interface BoardStatusIssue {
+  issueNumber: number | null;
+  issueId: string;
+  title: string;
+  priority: string;
+  statusName: string;
+  workspace: {
+    id: string;
+    branch: string;
+    status: string;
+    workingDir: string | null;
+    baseBranch: string | null;
+    isDirect: boolean;
+  } | null;
+  session: {
+    id: string;
+    status: string;
+    startedAt: string;
+    endedAt: string | null;
+  } | null;
+  sessionStats: {
+    durationMs: number;
+    totalCostUsd: number;
+    inputTokens: number;
+    outputTokens: number;
+    numTurns: number;
+    model: string;
+    success: boolean;
+  } | null;
+  diffStats: { filesChanged: number; insertions: number; deletions: number } | null;
+  lastActivity: string | null;
+  lastOutput: string[];
+}
+
+export interface BoardStatusResponse {
+  project: { id: string; name: string; repoPath: string; defaultBranch: string };
+  generatedAt: string;
+  totals: { totalIssues: number; inProgress: number; activeWorkspaces: number; runningSessions: number };
+  issues: BoardStatusIssue[];
+}

@@ -25,6 +25,7 @@ import { registerGetDiffComments } from "./tools/get-diff-comments.js";
 import { registerCreateDiffComment } from "./tools/create-diff-comment.js";
 import { registerAddDependency } from "./tools/add-dependency.js";
 import { registerRemoveDependency } from "./tools/remove-dependency.js";
+import { registerGetBoardStatus } from "./tools/get-board-status.js";
 
 const server = new McpServer({
   name: "agentic-kanban",
@@ -55,6 +56,7 @@ registerGetDiffComments(server);
 registerCreateDiffComment(server);
 registerAddDependency(server);
 registerRemoveDependency(server);
+registerGetBoardStatus(server);
 
 async function main() {
   const transport = new StdioServerTransport();
