@@ -7,6 +7,13 @@ const { DatabaseSync } = require("node:sqlite");
 const { resolve } = require("path");
 const { existsSync } = require("fs");
 
+// Only run this check when the agent is operating from a worktree.
+// Our own Claude session runs from the main checkout — skip there.
+const projectDir = process.env.CLAUDE_PROJECT_DIR || process.cwd();
+if (!projectDir.includes(".worktrees")) {
+  process.exit(0);
+}
+
 const DB_PATH = resolve(__dirname, "../../packages/server/kanban.db");
 
 if (!existsSync(DB_PATH)) {
