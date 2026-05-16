@@ -679,7 +679,7 @@ export function BoardPage() {
       )}
       <ToastContainer />
       {showSettings && (
-        <SettingsPanel onClose={() => setShowSettings(false)} />
+        <SettingsPanel onClose={() => setShowSettings(false)} activeProjectId={activeProjectId} />
       )}
       {showWorktreeOverview && activeProjectId && (
         <WorktreeOverview

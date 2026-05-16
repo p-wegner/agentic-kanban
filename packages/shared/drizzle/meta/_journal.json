@@ -148,6 +148,13 @@
       "when": 1778920000000,
       "tag": "0018_dependency_types",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "6",
+      "when": 1779006400000,
+      "tag": "0020_setup_script",
+      "breakpoints": true
     }
   ]
 }
