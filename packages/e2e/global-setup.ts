@@ -1,8 +1,10 @@
 import { request } from "@playwright/test";
 import { resolve } from "node:path";
 
+const serverPort = Number(process.env.SERVER_PORT) || 3001;
+
 async function globalSetup() {
-  const apiContext = await request.newContext({ baseURL: "http://localhost:3001" });
+  const apiContext = await request.newContext({ baseURL: `http://localhost:${serverPort}` });
 
   // Resolve the actual monorepo root (e2e package is at packages/e2e)
   const repoPath = resolve(import.meta.dirname, "..", "..");

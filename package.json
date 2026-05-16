@@ -8,7 +8,7 @@
     ]
   },
   "scripts": {
-    "dev": "concurrently \"pnpm --filter server dev\" \"pnpm --filter client dev\"",
+    "dev": "node scripts/dev.mjs",
     "dev:server": "pnpm --filter server dev",
     "dev:client": "pnpm --filter client dev",
     "build": "pnpm --filter shared build && pnpm --filter server build && pnpm --filter client build",

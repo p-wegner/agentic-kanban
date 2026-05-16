@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { SERVER_URL } from "../helpers/port.js";
 
 test.describe("Board UI", () => {
   test("shows kanban columns with expected names", async ({ page }) => {
@@ -84,17 +85,17 @@ test.describe("Board interactions", () => {
     request,
   }) => {
     // Create an issue via API first
-    const projectsRes = await request.get("http://localhost:3001/api/projects");
+    const projectsRes = await request.get(`${SERVER_URL}/api/projects`);
     const projects = await projectsRes.json();
     const projectId = projects[0].id;
     const statusesRes = await request.get(
-      `http://localhost:3001/api/projects/${projectId}/statuses`,
+      `${SERVER_URL}/api/projects/${projectId}/statuses`,
     );
     const statuses = await statusesRes.json();
     const todoStatus = statuses.find((s: { name: string }) => s.name === "Todo");
     const statusId = todoStatus ? todoStatus.id : statuses[0].id;
 
-    await request.post("http://localhost:3001/api/issues", {
+    await request.post(`${SERVER_URL}/api/issues`, {
       data: {
         title: "PanelClickTest 999",
         description: "Click me",
@@ -125,18 +126,18 @@ test.describe("Board interactions", () => {
     const editSuffix = Date.now().toString(36);
     const originalTitle = `EditTest ${editSuffix}`;
     const editedTitle = `EditedTitle ${editSuffix}`;
-    const projectsRes = await request.get("http://localhost:3001/api/projects");
+    const projectsRes = await request.get(`${SERVER_URL}/api/projects`);
     const projects = await projectsRes.json();
     const projectId = projects[0].id;
     const statusesRes = await request.get(
-      `http://localhost:3001/api/projects/${projectId}/statuses`,
+      `${SERVER_URL}/api/projects/${projectId}/statuses`,
     );
     const statuses = await statusesRes.json();
     // Use the "Todo" status specifically
     const todoStatus = statuses.find((s: { name: string }) => s.name === "Todo");
     const statusId = todoStatus ? todoStatus.id : statuses[0].id;
 
-    await request.post("http://localhost:3001/api/issues", {
+    await request.post(`${SERVER_URL}/api/issues`, {
       data: {
         title: originalTitle,
         description: "Before edit",
@@ -181,17 +182,17 @@ test.describe("Board interactions", () => {
 
   test("delete issue from detail panel", async ({ page, request }) => {
     // Create an issue via API
-    const projectsRes = await request.get("http://localhost:3001/api/projects");
+    const projectsRes = await request.get(`${SERVER_URL}/api/projects`);
     const projects = await projectsRes.json();
     const projectId = projects[0].id;
     const statusesRes = await request.get(
-      `http://localhost:3001/api/projects/${projectId}/statuses`,
+      `${SERVER_URL}/api/projects/${projectId}/statuses`,
     );
     const statuses = await statusesRes.json();
     const todoStatus = statuses.find((s: { name: string }) => s.name === "Todo");
     const statusId = todoStatus ? todoStatus.id : statuses[0].id;
 
-    await request.post("http://localhost:3001/api/issues", {
+    await request.post(`${SERVER_URL}/api/issues`, {
       data: {
         title: "DeleteTestIssue 666",
         statusId,
@@ -225,17 +226,17 @@ test.describe("Board interactions", () => {
 
   test("escape closes detail panel", async ({ page, request }) => {
     // Create an issue via API
-    const projectsRes = await request.get("http://localhost:3001/api/projects");
+    const projectsRes = await request.get(`${SERVER_URL}/api/projects`);
     const projects = await projectsRes.json();
     const projectId = projects[0].id;
     const statusesRes = await request.get(
-      `http://localhost:3001/api/projects/${projectId}/statuses`,
+      `${SERVER_URL}/api/projects/${projectId}/statuses`,
     );
     const statuses = await statusesRes.json();
     const todoStatus = statuses.find((s: { name: string }) => s.name === "Todo");
     const statusId = todoStatus ? todoStatus.id : statuses[0].id;
 
-    await request.post("http://localhost:3001/api/issues", {
+    await request.post(`${SERVER_URL}/api/issues`, {
       data: {
         title: "EscapeTestIssue 555",
         statusId,
@@ -263,13 +264,13 @@ test.describe("Board interactions", () => {
 
   test("drag issue between columns", async ({ page, request }) => {
     // Create an issue in Todo
-    const projectsRes = await request.get("http://localhost:3001/api/projects");
+    const projectsRes = await request.get(`${SERVER_URL}/api/projects`);
     const projects = await projectsRes.json();
     const projectId = projects[0].id;
     const statuses = (
       await (
         await request.get(
-          `http://localhost:3001/api/projects/${projectId}/statuses`,
+          `${SERVER_URL}/api/projects/${projectId}/statuses`,
         )
       ).json()
     );
@@ -278,7 +279,7 @@ test.describe("Board interactions", () => {
     const todoStatusId = todoStatus ? todoStatus.id : statuses[0].id;
     const inProgressStatusId = inProgressStatus ? inProgressStatus.id : statuses[1].id;
 
-    const createRes = await request.post("http://localhost:3001/api/issues", {
+    const createRes = await request.post(`${SERVER_URL}/api/issues`, {
       data: {
         title: "DragTestIssue 444",
         projectId,
@@ -328,7 +329,7 @@ test.describe("Board interactions", () => {
 
     // Verify via API that the issue moved
     const boardRes = await request.get(
-      `http://localhost:3001/api/projects/${projectId}/board`,
+      `${SERVER_URL}/api/projects/${projectId}/board`,
     );
     const board = await boardRes.json();
     const inProgressColumn = board.find((s: { name: string }) => s.name === "In Progress");

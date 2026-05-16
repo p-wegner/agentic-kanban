@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { SERVER_URL } from "../helpers/port.js";
 
 test.describe("Search UI", () => {
   let projectId: string;
@@ -6,12 +7,12 @@ test.describe("Search UI", () => {
   let inProgressStatusId: string;
 
   test.beforeAll(async ({ request }) => {
-    const projectsRes = await request.get("http://localhost:3001/api/projects");
+    const projectsRes = await request.get(`${SERVER_URL}/api/projects`);
     const projects = await projectsRes.json();
     projectId = projects[0].id;
 
     const statusesRes = await request.get(
-      `http://localhost:3001/api/projects/${projectId}/statuses`,
+      `${SERVER_URL}/api/projects/${projectId}/statuses`,
     );
     const statuses = await statusesRes.json();
     const todoStatus = statuses.find((s: { name: string }) => s.name === "Todo");
@@ -21,7 +22,7 @@ test.describe("Search UI", () => {
 
     // Create issues with distinct titles for search testing
     const suffix = Date.now().toString(36);
-    await request.post("http://localhost:3001/api/issues", {
+    await request.post(`${SERVER_URL}/api/issues`, {
       data: {
         title: `SearchAlpha ${suffix}`,
         description: "Alpha description for search",
@@ -30,7 +31,7 @@ test.describe("Search UI", () => {
         projectId,
       },
     });
-    await request.post("http://localhost:3001/api/issues", {
+    await request.post(`${SERVER_URL}/api/issues`, {
       data: {
         title: `SearchBeta ${suffix}`,
         description: "Beta description for search",
@@ -39,7 +40,7 @@ test.describe("Search UI", () => {
         projectId,
       },
     });
-    await request.post("http://localhost:3001/api/issues", {
+    await request.post(`${SERVER_URL}/api/issues`, {
       data: {
         title: `SearchGamma ${suffix}`,
         description: "Gamma description for search",

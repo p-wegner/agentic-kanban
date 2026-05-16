@@ -120,7 +120,15 @@ export function launch(
   const proc = spawn(command, args, {
     cwd: worktreePath,
     shell: useShell,
-    env: { ...process.env, FORCE_COLOR: "0", NO_COLOR: "1" },
+    env: {
+    ...process.env,
+    FORCE_COLOR: "0",
+    NO_COLOR: "1",
+    KANBAN_SERVER_PORT: process.env.KANBAN_SERVER_PORT || process.env.PORT || "3001",
+    KANBAN_CLIENT_PORT: process.env.KANBAN_CLIENT_PORT || process.env.VITE_PORT || "5173",
+    SERVER_PORT: process.env.SERVER_PORT || process.env.PORT || "3001",
+    PORT: process.env.PORT || "3001",
+  },
     stdio: ["pipe", "pipe", "pipe"] as const,
   });
 

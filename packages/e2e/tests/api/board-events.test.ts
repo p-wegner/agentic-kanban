@@ -1,16 +1,17 @@
 import { test, expect } from "@playwright/test";
+import { SERVER_URL, SERVER_PORT } from "../helpers/port.js";
 
 test.describe("Board Events API", () => {
   let projectId: string;
   let statusId: string;
 
   test.beforeAll(async ({ request }) => {
-    const projectsRes = await request.get("http://localhost:3001/api/projects");
+    const projectsRes = await request.get(`${SERVER_URL}/api/projects`);
     const projects = await projectsRes.json();
     projectId = projects[0].id;
 
     const statusesRes = await request.get(
-      `http://localhost:3001/api/projects/${projectId}/statuses`,
+      `${SERVER_URL}/api/projects/${projectId}/statuses`,
     );
     const statuses = await statusesRes.json();
     const todoStatus = statuses.find((s: { name: string }) => s.name === "Todo");
@@ -26,9 +27,9 @@ test.describe("Board Events API", () => {
     await page.waitForSelector("h2");
 
     // Set up WebSocket listener that filters for issue_created
-    const wsMessagePromise = page.evaluate((pid) => {
+    const wsMessagePromise = page.evaluate(([pid, port]) => {
       return new Promise<string>((resolve) => {
-        const ws = new WebSocket(`ws://localhost:3001/ws/board/${pid}`);
+        const ws = new WebSocket(`ws://localhost:${port}/ws/board/${pid}`);
         ws.onmessage = (event) => {
           const data = JSON.parse(event.data as string);
           if (data.type === "board_changed" && data.reason === "issue_created") {
@@ -37,13 +38,13 @@ test.describe("Board Events API", () => {
           }
         };
       });
-    }, projectId);
+    }, [projectId, SERVER_PORT] as [string, number]);
 
     // Small delay to ensure WS is connected
     await page.waitForTimeout(500);
 
     // Create an issue via API
-    const issueRes = await request.post("http://localhost:3001/api/issues", {
+    const issueRes = await request.post(`${SERVER_URL}/api/issues`, {
       data: {
         title: "Board events test issue",
         statusId,
@@ -66,7 +67,7 @@ test.describe("Board Events API", () => {
     request,
   }) => {
     // Create an issue first
-    const issueRes = await request.post("http://localhost:3001/api/issues", {
+    const issueRes = await request.post(`${SERVER_URL}/api/issues`, {
       data: {
         title: "Board events update test",
         statusId,
@@ -79,9 +80,9 @@ test.describe("Board Events API", () => {
     await page.waitForSelector("h2");
 
     // Set up WS listener that filters for issue_updated
-    const wsMessagePromise = page.evaluate((pid) => {
+    const wsMessagePromise = page.evaluate(([pid, port]) => {
       return new Promise<string>((resolve) => {
-        const ws = new WebSocket(`ws://localhost:3001/ws/board/${pid}`);
+        const ws = new WebSocket(`ws://localhost:${port}/ws/board/${pid}`);
         ws.onmessage = (event) => {
           const data = JSON.parse(event.data as string);
           if (data.type === "board_changed" && data.reason === "issue_updated") {
@@ -90,12 +91,12 @@ test.describe("Board Events API", () => {
           }
         };
       });
-    }, projectId);
+    }, [projectId, SERVER_PORT] as [string, number]);
 
     await page.waitForTimeout(500);
 
     // Update the issue
-    await request.patch(`http://localhost:3001/api/issues/${issueId}`, {
+    await request.patch(`${SERVER_URL}/api/issues/${issueId}`, {
       data: { title: "Board events updated title" },
     });
 
@@ -111,7 +112,7 @@ test.describe("Board Events API", () => {
     request,
   }) => {
     // Create an issue
-    const issueRes = await request.post("http://localhost:3001/api/issues", {
+    const issueRes = await request.post(`${SERVER_URL}/api/issues`, {
       data: {
         title: "Board events delete test",
         statusId,
@@ -124,9 +125,9 @@ test.describe("Board Events API", () => {
     await page.waitForSelector("h2");
 
     // Set up WS listener that filters for issue_deleted
-    const wsMessagePromise = page.evaluate((pid) => {
+    const wsMessagePromise = page.evaluate(([pid, port]) => {
       return new Promise<string>((resolve) => {
-        const ws = new WebSocket(`ws://localhost:3001/ws/board/${pid}`);
+        const ws = new WebSocket(`ws://localhost:${port}/ws/board/${pid}`);
         ws.onmessage = (event) => {
           const data = JSON.parse(event.data as string);
           if (data.type === "board_changed" && data.reason === "issue_deleted") {
@@ -135,12 +136,12 @@ test.describe("Board Events API", () => {
           }
         };
       });
-    }, projectId);
+    }, [projectId, SERVER_PORT] as [string, number]);
 
     await page.waitForTimeout(500);
 
     // Delete the issue
-    await request.delete(`http://localhost:3001/api/issues/${issueId}`);
+    await request.delete(`${SERVER_URL}/api/issues/${issueId}`);
 
     const messageStr = await wsMessagePromise;
     const message = JSON.parse(messageStr);

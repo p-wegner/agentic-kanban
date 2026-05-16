@@ -2,6 +2,7 @@ import { test, expect } from "@playwright/test";
 import { writeFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { SERVER_URL } from "../helpers/port.js";
 
 test.describe("Session History UI", () => {
   let projectId: string;
@@ -9,12 +10,12 @@ test.describe("Session History UI", () => {
   const tmpFiles: string[] = [];
 
   test.beforeAll(async ({ request }) => {
-    const projectsRes = await request.get("http://localhost:3001/api/projects");
+    const projectsRes = await request.get(`${SERVER_URL}/api/projects`);
     const projects = await projectsRes.json();
     projectId = projects[0].id;
 
     const statusesRes = await request.get(
-      `http://localhost:3001/api/projects/${projectId}/statuses`,
+      `${SERVER_URL}/api/projects/${projectId}/statuses`,
     );
     const statuses = await statusesRes.json();
     const todoStatus = statuses.find((s: { name: string }) => s.name === "Todo");
@@ -47,25 +48,25 @@ test.describe("Session History UI", () => {
     const issueTitle = `History UI test ${suffix}`;
     const branchName = `feature/history-ui-${suffix}`;
 
-    const issueRes = await request.post("http://localhost:3001/api/issues", {
+    const issueRes = await request.post(`${SERVER_URL}/api/issues`, {
       data: { title: issueTitle, statusId, projectId },
     });
     const issueId = (await issueRes.json()).id;
 
-    const wsRes = await request.post("http://localhost:3001/api/workspaces", {
+    const wsRes = await request.post(`${SERVER_URL}/api/workspaces`, {
       data: { issueId, branch: branchName },
     });
     const workspaceId = (await wsRes.json()).id;
 
     // Setup workspace
     await request.post(
-      `http://localhost:3001/api/workspaces/${workspaceId}/setup`,
+      `${SERVER_URL}/api/workspaces/${workspaceId}/setup`,
       { data: {} },
     );
 
     // Stop auto-launched session (workspace creation auto-launches claude.exe)
     await request.post(
-      `http://localhost:3001/api/workspaces/${workspaceId}/stop`,
+      `${SERVER_URL}/api/workspaces/${workspaceId}/stop`,
       { data: {} },
     );
     await new Promise((r) => setTimeout(r, 500));
@@ -77,7 +78,7 @@ test.describe("Session History UI", () => {
     tmpFiles.push(tmp1);
 
     const launchRes = await request.post(
-      `http://localhost:3001/api/workspaces/${workspaceId}/launch`,
+      `${SERVER_URL}/api/workspaces/${workspaceId}/launch`,
       {
         data: {
           prompt: "test session history",
@@ -112,25 +113,25 @@ test.describe("Session History UI", () => {
     const issueTitle = `History output test ${suffix}`;
     const branchName = `feature/history-output-${suffix}`;
 
-    const issueRes = await request.post("http://localhost:3001/api/issues", {
+    const issueRes = await request.post(`${SERVER_URL}/api/issues`, {
       data: { title: issueTitle, statusId, projectId },
     });
     const issueId = (await issueRes.json()).id;
 
-    const wsRes = await request.post("http://localhost:3001/api/workspaces", {
+    const wsRes = await request.post(`${SERVER_URL}/api/workspaces`, {
       data: { issueId, branch: branchName },
     });
     const workspaceId = (await wsRes.json()).id;
 
     // Setup workspace
     await request.post(
-      `http://localhost:3001/api/workspaces/${workspaceId}/setup`,
+      `${SERVER_URL}/api/workspaces/${workspaceId}/setup`,
       { data: {} },
     );
 
     // Stop auto-launched session (workspace creation auto-launches claude.exe)
     await request.post(
-      `http://localhost:3001/api/workspaces/${workspaceId}/stop`,
+      `${SERVER_URL}/api/workspaces/${workspaceId}/stop`,
       { data: {} },
     );
     await new Promise((r) => setTimeout(r, 500));
@@ -142,7 +143,7 @@ test.describe("Session History UI", () => {
     tmpFiles.push(tmp2);
 
     const launchRes = await request.post(
-      `http://localhost:3001/api/workspaces/${workspaceId}/launch`,
+      `${SERVER_URL}/api/workspaces/${workspaceId}/launch`,
       {
         data: {
           prompt: "test output viewing",
