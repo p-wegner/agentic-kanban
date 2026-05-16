@@ -88,7 +88,7 @@ Cleanroom reimplementation of [vibe-kanban](https://github.com/BloopAI/vibe-kanb
 
 ## Visual Verification
 Every feature that has a UI component must be visually verified using the `playwright-cli` skill (user-scoped). After implementing or modifying a feature:
-1. Ensure dev servers are running (`pnpm dev`)
+1. Ensure dev servers are running (`pnpm dev` — use the port from the dev banner, not hardcoded ports)
 2. Use `/playwright-cli` to open the page, take a snapshot, and confirm the UI renders correctly
 3. Take a screenshot only when needed for debugging — clean up `.png` files and `.playwright-cli/` after
 4. Clean up any test data created during verification (full reset: stop server, `pnpm db:reset`, `pnpm cli -- register .`, `pnpm dev`)
@@ -105,7 +105,7 @@ Every feature that has a UI component must be visually verified using the `playw
 - `docs/state.md` — current progress tracking (API routes, MCP tools, stage checklists)
 
 ## Monorepo Commands
-- `pnpm dev` — start server (port 3001) + client (port 5173) concurrently
+- `pnpm dev` — start server + client concurrently (auto-detects worktree ports; default: server 3001, client 5173)
 - `pnpm dev:desktop` — start server + client + Tauri native window (requires MSVC C++ Build Tools + Rust)
 - `pnpm --filter @agentic-kanban/server test` — Vitest unit tests (28 tests)
 - `pnpm test:e2e` — Playwright E2E tests (60 tests)
@@ -117,12 +117,31 @@ Every feature that has a UI component must be visually verified using the `playw
 - `pnpm cli -- unregister <name>` — remove a project by name or ID
 - `pnpm cli -- cleanup` — show stale worktrees for closed workspaces
 
+## Worktree Port Strategy
+`pnpm dev` uses `scripts/dev.mjs` which auto-detects whether the CWD is a git worktree and assigns deterministic ports:
+- **Main checkout**: server 3001, client 5173 (default)
+- **Worktree** (branch `feature/<N>-...`): server `3001+N`, client `5173+N`
+- **Worktree** (non-standard branch): server `3001+hash`, client `5173+hash`
+
+The script prints a banner showing detected ports, e.g.: `[dev] Worktree detected (feature/2-proper-devserver-setup) — server:3003 client:5175`
+
+**Environment variables available to agents** (set by both `scripts/dev.mjs` and `agent.service.ts`):
+- `KANBAN_SERVER_PORT` — the server port for this worktree
+- `KANBAN_CLIENT_PORT` — the client port for this worktree
+- `PORT` — server port (same value)
+- `VITE_PORT` — client port (same value)
+- `SERVER_PORT` — used by MCP server for notifications
+
+**CRITICAL: Never kill ALL node processes.** Other agents may be running in separate worktrees with their own dev servers. Instead:
+- Kill by specific port: `Get-NetTCPConnection -LocalPort <port> | Select-Object -ExpandProperty OwningProcess | ForEach-Object { Stop-Process -Id $_ -Force }`
+- Or kill by PID: `Stop-Process -Id <pid> -Force`
+
 ## Getting Started (First Run)
 1. `pnpm install` — install dependencies
 2. `pnpm db:migrate && pnpm db:seed` — initialize database (creates 4 default tags)
 3. `pnpm cli -- register <repo-path>` — register a git repo as a project (auto-detects default branch and remote URL)
-4. `pnpm dev` — start the app
-5. Open `http://localhost:5173` — board loads with the registered project's columns
+4. `pnpm dev` — start the app (auto-detects worktree; prints banner with ports)
+5. Open the client URL shown in the dev banner (default `http://localhost:5173`, worktrees use different ports)
 
 ## Project Registration
 Each project maps 1:1 to a git repo. The CLI reads git info automatically:

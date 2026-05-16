@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { SERVER_URL } from "../helpers/port.js";
 
 test.describe("Workspace Panel UI", () => {
   test.beforeEach(async ({ page }) => {
@@ -59,12 +60,12 @@ test.describe("Workspace Diff and Merge UI", () => {
   let todoStatusId: string;
 
   test.beforeAll(async ({ request }) => {
-    const projectsRes = await request.get("http://localhost:3001/api/projects");
+    const projectsRes = await request.get(`${SERVER_URL}/api/projects`);
     const projects = await projectsRes.json();
     projectId = projects[0].id;
 
     const statusesRes = await request.get(
-      `http://localhost:3001/api/projects/${projectId}/statuses`,
+      `${SERVER_URL}/api/projects/${projectId}/statuses`,
     );
     const statuses = await statusesRes.json();
     const todoStatus = statuses.find((s: { name: string }) => s.name === "Todo");
@@ -95,13 +96,13 @@ test.describe("Workspace Diff and Merge UI", () => {
 
   test("View Diff button shows diff output in panel", async ({ page, request }) => {
     const suffix = Date.now().toString(36);
-    const issueRes = await request.post("http://localhost:3001/api/issues", {
+    const issueRes = await request.post(`${SERVER_URL}/api/issues`, {
       data: { title: `DiffTestIssue ${suffix}`, statusId: todoStatusId, projectId },
     });
     const issueId = (await issueRes.json()).id;
 
     const branchName = `feature/diff-test-${suffix}`;
-    const wsRes = await request.post("http://localhost:3001/api/workspaces", {
+    const wsRes = await request.post(`${SERVER_URL}/api/workspaces`, {
       data: { issueId, branch: branchName },
     });
     const workspace = await wsRes.json();
@@ -112,7 +113,7 @@ test.describe("Workspace Diff and Merge UI", () => {
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
         const setupRes = await request.post(
-          `http://localhost:3001/api/workspaces/${workspaceId}/setup`,
+          `${SERVER_URL}/api/workspaces/${workspaceId}/setup`,
           { data: {} },
         );
         if (setupRes.ok()) { setupOk = true; break; }
@@ -147,13 +148,13 @@ test.describe("Workspace Diff and Merge UI", () => {
 
   test("Merge button merges and workspace status changes", async ({ page, request }) => {
     const suffix = Date.now().toString(36);
-    const issueRes = await request.post("http://localhost:3001/api/issues", {
+    const issueRes = await request.post(`${SERVER_URL}/api/issues`, {
       data: { title: `MergeTestIssue ${suffix}`, statusId: todoStatusId, projectId },
     });
     const issueId = (await issueRes.json()).id;
 
     const branchName = `feature/merge-test-${suffix}`;
-    const wsRes = await request.post("http://localhost:3001/api/workspaces", {
+    const wsRes = await request.post(`${SERVER_URL}/api/workspaces`, {
       data: { issueId, branch: branchName },
     });
     const workspace = await wsRes.json();
@@ -164,7 +165,7 @@ test.describe("Workspace Diff and Merge UI", () => {
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
         const setupRes = await request.post(
-          `http://localhost:3001/api/workspaces/${workspaceId}/setup`,
+          `${SERVER_URL}/api/workspaces/${workspaceId}/setup`,
           { data: {} },
         );
         if (setupRes.ok()) { setupOk = true; break; }

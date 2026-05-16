@@ -1,11 +1,12 @@
 import { test, expect } from "@playwright/test";
+import { SERVER_URL } from "../helpers/port.js";
 
 test.describe("Preferences API", () => {
   let projectId: string;
 
   test.beforeAll(async ({ request }) => {
     // Get the default project (created by global-setup)
-    const projectsRes = await request.get("http://localhost:3001/api/projects");
+    const projectsRes = await request.get(`${SERVER_URL}/api/projects`);
     const projects = await projectsRes.json();
     projectId = projects[0].id;
   });
@@ -14,7 +15,7 @@ test.describe("Preferences API", () => {
     request,
   }) => {
     const res = await request.get(
-      "http://localhost:3001/api/preferences/active-project",
+      `${SERVER_URL}/api/preferences/active-project`,
     );
     expect(res.ok()).toBeTruthy();
     const body = await res.json();
@@ -28,7 +29,7 @@ test.describe("Preferences API", () => {
   }) => {
     // Set the active project to the known project ID
     const res = await request.put(
-      "http://localhost:3001/api/preferences/active-project",
+      `${SERVER_URL}/api/preferences/active-project`,
       {
         data: { projectId },
       },
@@ -39,7 +40,7 @@ test.describe("Preferences API", () => {
 
     // Verify it was persisted
     const getRes = await request.get(
-      "http://localhost:3001/api/preferences/active-project",
+      `${SERVER_URL}/api/preferences/active-project`,
     );
     const getBody = await getRes.json();
     expect(getBody.projectId).toBe(projectId);
@@ -51,7 +52,7 @@ test.describe("Preferences API", () => {
     // The API stores whatever value is passed (no validation against project list)
     const fakeId = "non-existent-project-id";
     const res = await request.put(
-      "http://localhost:3001/api/preferences/active-project",
+      `${SERVER_URL}/api/preferences/active-project`,
       {
         data: { projectId: fakeId },
       },
@@ -63,11 +64,11 @@ test.describe("Preferences API", () => {
 
   test.afterAll(async ({ request }) => {
     // Restore the active project to the correct one
-    const projectsRes = await request.get("http://localhost:3001/api/projects");
+    const projectsRes = await request.get(`${SERVER_URL}/api/projects`);
     const projects = await projectsRes.json();
     if (projects.length > 0) {
       await request.put(
-        "http://localhost:3001/api/preferences/active-project",
+        `${SERVER_URL}/api/preferences/active-project`,
         {
           data: { projectId: projects[0].id },
         },

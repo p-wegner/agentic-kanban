@@ -2,6 +2,7 @@ import { test, expect } from "@playwright/test";
 import { writeFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { SERVER_URL } from "./helpers/port.js";
 
 test.describe("Output parser verification", () => {
   let projectId: string;
@@ -9,12 +10,12 @@ test.describe("Output parser verification", () => {
   const tmpFiles: string[] = [];
 
   test.beforeAll(async ({ request }) => {
-    const projectsRes = await request.get("http://localhost:3001/api/projects");
+    const projectsRes = await request.get(`${SERVER_URL}/api/projects`);
     const projects = await projectsRes.json();
     projectId = projects[0].id;
 
     const statusesRes = await request.get(
-      `http://localhost:3001/api/projects/${projectId}/statuses`,
+      `${SERVER_URL}/api/projects/${projectId}/statuses`,
     );
     const statuses = await statusesRes.json();
     const todoStatus = statuses.find((s: { name: string }) => s.name === "Todo");
@@ -28,12 +29,12 @@ test.describe("Output parser verification", () => {
     const branchName = `feature/test-parser-${suffix}`;
 
     // Create an issue and workspace with a completed session that produced stream-json output
-    const issueRes = await request.post("http://localhost:3001/api/issues", {
+    const issueRes = await request.post(`${SERVER_URL}/api/issues`, {
       data: { title: issueTitle, statusId, projectId },
     });
     const issueId = (await issueRes.json()).id;
 
-    const wsRes = await request.post("http://localhost:3001/api/workspaces", {
+    const wsRes = await request.post(`${SERVER_URL}/api/workspaces`, {
       data: { issueId, branch: branchName },
     });
     const workspaceId = (await wsRes.json()).id;
@@ -43,7 +44,7 @@ test.describe("Output parser verification", () => {
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
         const setupRes = await request.post(
-          `http://localhost:3001/api/workspaces/${workspaceId}/setup`,
+          `${SERVER_URL}/api/workspaces/${workspaceId}/setup`,
           { data: {} },
         );
         if (setupRes.ok()) { setupOk = true; break; }
@@ -76,13 +77,13 @@ process.exit(0);
 
     // Stop the auto-launched session (workspace creation auto-launches claude.exe)
     await request.post(
-      `http://localhost:3001/api/workspaces/${workspaceId}/stop`,
+      `${SERVER_URL}/api/workspaces/${workspaceId}/stop`,
       { data: {} },
     );
     await new Promise((r) => setTimeout(r, 500));
 
     const launchRes = await request.post(
-      `http://localhost:3001/api/workspaces/${workspaceId}/launch`,
+      `${SERVER_URL}/api/workspaces/${workspaceId}/launch`,
       {
         data: {
           prompt: "test output parser",

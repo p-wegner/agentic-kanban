@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { SERVER_URL } from "../helpers/port.js";
 
 test.describe("Archive Column Group UI", () => {
   let projectId: string;
@@ -7,12 +8,12 @@ test.describe("Archive Column Group UI", () => {
   let todoStatusId: string;
 
   test.beforeAll(async ({ request }) => {
-    const projectsRes = await request.get("http://localhost:3001/api/projects");
+    const projectsRes = await request.get(`${SERVER_URL}/api/projects`);
     const projects = await projectsRes.json();
     projectId = projects[0].id;
 
     const statusesRes = await request.get(
-      `http://localhost:3001/api/projects/${projectId}/statuses`,
+      `${SERVER_URL}/api/projects/${projectId}/statuses`,
     );
     const statuses = await statusesRes.json();
     const doneStatus = statuses.find((s: { name: string }) => s.name === "Done");
@@ -24,14 +25,14 @@ test.describe("Archive Column Group UI", () => {
 
     // Create issues in Done and Cancelled columns so they have counts
     const suffix = Date.now().toString(36);
-    await request.post("http://localhost:3001/api/issues", {
+    await request.post(`${SERVER_URL}/api/issues`, {
       data: {
         title: `ArchiveDoneTest ${suffix}`,
         statusId: doneStatusId,
         projectId,
       },
     });
-    await request.post("http://localhost:3001/api/issues", {
+    await request.post(`${SERVER_URL}/api/issues`, {
       data: {
         title: `ArchiveCancelledTest ${suffix}`,
         statusId: cancelledStatusId,
