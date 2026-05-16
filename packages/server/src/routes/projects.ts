@@ -333,7 +333,7 @@ export function createProjectsRoute(database: Database = db) {
 
     // Fetch workspace summaries grouped by issueId
     const issueIds = projectIssues.map((i) => i.id);
-    const workspaceSummaryMap = new Map<string, { total: number; active: number; idle: number; closed: number; branches: string[]; main?: { id: string; branch: string; status: "active" | "idle" | "closed" } }>();
+    const workspaceSummaryMap = new Map<string, { total: number; active: number; idle: number; closed: number; branches: string[]; main?: { id: string; branch: string; status: "active" | "reviewing" | "idle" | "closed" } }>();
 
     if (issueIds.length > 0) {
       const wsRows = await database
@@ -354,7 +354,7 @@ export function createProjectsRoute(database: Database = db) {
           workspaceSummaryMap.set(row.issueId, summary);
         }
         summary.total += row.count;
-        if (row.status === "active") {
+        if (row.status === "active" || row.status === "reviewing") {
           summary.active += row.count;
         } else if (row.status === "closed") {
           summary.closed += row.count;
@@ -379,7 +379,7 @@ export function createProjectsRoute(database: Database = db) {
         .where(inArray(workspaces.issueId, issueIds));
 
       const mainWorkspaceMap = new Map<string, { id: string; branch: string; status: string; updatedAt: string }>();
-      const statusPriority = (s: string) => s === "active" ? 0 : s === "idle" ? 1 : 2;
+      const statusPriority = (s: string) => s === "active" || s === "reviewing" ? 0 : s === "idle" ? 1 : 2;
       for (const row of wsDetailRows) {
         const existing = mainWorkspaceMap.get(row.issueId);
         if (!existing) {
@@ -396,7 +396,7 @@ export function createProjectsRoute(database: Database = db) {
       for (const [issueId, summary] of workspaceSummaryMap) {
         const mainWs = mainWorkspaceMap.get(issueId);
         if (mainWs) {
-          summary.main = { id: mainWs.id, branch: mainWs.branch, status: mainWs.status as "active" | "idle" | "closed" };
+          summary.main = { id: mainWs.id, branch: mainWs.branch, status: mainWs.status as "active" | "reviewing" | "idle" | "closed" };
         }
       }
     }

@@ -1,0 +1,11 @@
+{
+  "editedFiles": [
+    "packages/server/src/index.ts",
+    "packages/server/src/routes/projects.ts",
+    "C:/andrena/agentic-kanban/packages/shared/src/types/api.ts",
+    "packages/client/src/components/IssueCard.tsx",
+    ".claude/skills/kanban-workflow/SKILL.md",
+    "packages/client/src/components/WorkspacePanel.tsx",
+    "packages/shared/src/types/api.ts"
+  ]
+}

@@ -73,7 +73,22 @@ async function runWorkflowOnExit(workspaceId: string, sessionId: string, exitCod
     if (reviewSessionIds.has(sessionId)) {
       // Review session completed — auto-merge and move to AI Reviewed
       reviewSessionIds.delete(sessionId);
-      console.log(`[workflow] review session ${sessionId} completed for workspace ${workspaceId} — auto-merging`);
+
+      // Check if the review agent moved the issue back to "In Progress" (found and fixed critical issues)
+      const currentIssueRows = await db.select({ statusId: issues.statusId }).from(issues).where(eq(issues.id, issueId)).limit(1);
+      const currentStatus = currentIssueRows.length > 0 ? statuses.find(s => s.id === currentIssueRows[0].statusId) : null;
+
+      if (currentStatus?.name === "In Progress") {
+        // Review agent fixed issues — move to AI Reviewed and auto-merge
+        console.log(`[workflow] review session ${sessionId} fixed issues — moving to AI Reviewed and auto-merging`);
+        const aiReviewedStatus = findStatus("AI Reviewed");
+        if (aiReviewedStatus) {
+          await db.update(issues).set({ statusId: aiReviewedStatus.id, updatedAt: now }).where(eq(issues.id, issueId));
+        }
+      } else {
+        console.log(`[workflow] review session ${sessionId} completed — auto-merging`);
+      }
+
       await autoMerge(workspace, projectId, issueId, findStatus("AI Reviewed")?.id ?? null, now);
       return;
     }
@@ -114,14 +129,29 @@ async function runWorkflowOnExit(workspaceId: string, sessionId: string, exitCod
         const agentArgs = prefMap.get("agent_args") || undefined;
 
         const reviewPrompt = [
-          `You are a code reviewer. Review the changes on branch '${workspace.branch}'.`,
+          `You are an AI code reviewer. Review the changes on branch '${workspace.branch}'.`,
           `Run 'git diff ${workspace.baseBranch ?? "HEAD"}' to see the diff.`,
-          `Provide a concise review covering: correctness, code quality, and potential issues.`,
-          `When finished, use the update_issue MCP tool to move this issue to 'AI Reviewed' status if ready to merge, or describe what needs to change.`,
+          ``,
+          `Review for: correctness bugs, security vulnerabilities, logic errors, and missing error handling.`,
+          `Classify each issue as CRITICAL (must fix — bugs, security, data loss), MAJOR (should fix — broken edge cases, poor error handling), or MINOR (nice to have — style, naming).`,
+          ``,
+          `If you find CRITICAL or MAJOR issues:`,
+          `1. Use the move_issue MCP tool to move issue ${issueId} to 'In Progress' (so the board shows the issue needs fixes)`,
+          `2. Fix all critical and major issues directly in the code`,
+          `3. Commit the fixes with a descriptive message`,
+          `4. Exit normally (the system will handle merging)`,
+          ``,
+          `If only MINOR issues or no issues: just exit normally (the system will auto-merge).`,
+          `Do NOT move the issue to 'AI Reviewed' yourself — the system handles that on merge.`,
+          ``,
           `Issue ID: ${issueId}`,
         ].join("\n");
 
         try {
+          // Set workspace to "reviewing" so the board shows "AI Reviewing" badge
+          await db.update(workspaces).set({ status: "reviewing", updatedAt: now }).where(eq(workspaces.id, workspaceId));
+          boardEvents.broadcast(projectId, "issue_updated");
+
           const reviewSessionId = await sessionManager.startSession(workspaceId, reviewPrompt, agentCommand, agentArgs);
           reviewSessionIds.add(reviewSessionId);
           console.log(`[workflow] launched review session ${reviewSessionId} for workspace ${workspaceId}`);
