@@ -4,7 +4,7 @@ import type { CreateIssueRequest } from "@agentic-kanban/shared";
 interface CreateIssueFormProps {
   projectId: string;
   statusId: string;
-  onSubmit: (data: CreateIssueRequest & { startWorkspace?: boolean }) => Promise<void>;
+  onSubmit: (data: CreateIssueRequest & { startWorkspace?: boolean; planMode?: boolean; skipAutoReview?: boolean }) => Promise<void>;
   onCancel: () => void;
   canStartWorkspace?: boolean;
 }
@@ -20,6 +20,7 @@ export function CreateIssueForm({
   const [description, setDescription] = useState("");
   const [priority, setPriority] = useState<CreateIssueRequest["priority"]>("medium");
   const [startWorkspace, setStartWorkspace] = useState(false);
+  const [planMode, setPlanMode] = useState(false);
   const [skipAutoReview, setSkipAutoReview] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
@@ -35,7 +36,8 @@ export function CreateIssueForm({
         statusId,
         projectId,
         startWorkspace: startWorkspace || undefined,
-        skipAutoReview: skipAutoReview || undefined,
+        planMode: (startWorkspace && planMode) || undefined,
+        skipAutoReview: (startWorkspace && skipAutoReview) || undefined,
       });
     } finally {
       setSubmitting(false);
@@ -90,16 +92,27 @@ export function CreateIssueForm({
           Start workspace
         </label>
       )}
-      {canStartWorkspace && (
-        <label className="flex items-center gap-2 text-xs text-gray-600 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={skipAutoReview}
-            onChange={(e) => setSkipAutoReview(e.target.checked)}
-            className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-          />
-          Skip auto AI code review
-        </label>
+      {canStartWorkspace && startWorkspace && (
+        <div className="pl-4 space-y-1 border-l-2 border-blue-100">
+          <label className="flex items-center gap-2 text-xs text-gray-600 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={planMode}
+              onChange={(e) => setPlanMode(e.target.checked)}
+              className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+            />
+            Plan mode (agent plans before implementing)
+          </label>
+          <label className="flex items-center gap-2 text-xs text-gray-600 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={skipAutoReview}
+              onChange={(e) => setSkipAutoReview(e.target.checked)}
+              className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+            />
+            Skip auto AI code review
+          </label>
+        </div>
       )}
       <div className="flex gap-2">
         <button

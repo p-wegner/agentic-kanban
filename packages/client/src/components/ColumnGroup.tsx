@@ -11,7 +11,7 @@ interface ColumnGroupProps {
   creatingInColumn: string | null;
   onCreateClick: (statusId: string) => void;
   onCreateCancel: () => void;
-  onCreateSubmit: (data: CreateIssueRequest & { startWorkspace?: boolean }) => Promise<void>;
+  onCreateSubmit: (data: CreateIssueRequest & { startWorkspace?: boolean; planMode?: boolean }) => Promise<void>;
   onIssueClick: (issue: IssueWithStatus) => void;
   onWorkspaceClick?: (issue: IssueWithStatus, workspaceId?: string) => void;
   onDragStart: (e: React.DragEvent, issue: IssueWithStatus) => void;
