@@ -1,6 +1,16 @@
 import { useState } from "react";
 import type { CreateIssueRequest } from "@agentic-kanban/shared";
 
+async function enhanceIssue(projectId: string, title: string, description: string) {
+  const res = await fetch("/api/issues/enhance", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ title, description, projectId }),
+  });
+  if (!res.ok) throw new Error("Enhancement failed");
+  return res.json() as Promise<{ title: string; description: string }>;
+}
+
 export interface CreateIssueFormState {
   title: string;
   description: string;
@@ -36,6 +46,21 @@ export function CreateIssueForm({
   const [planMode, setPlanMode] = useState(initialState?.planMode ?? false);
   const [skipAutoReview, setSkipAutoReview] = useState(initialState?.skipAutoReview ?? false);
   const [submitting, setSubmitting] = useState(false);
+  const [enhancing, setEnhancing] = useState(false);
+
+  async function handleEnhance() {
+    if (!title.trim() || enhancing) return;
+    setEnhancing(true);
+    try {
+      const result = await enhanceIssue(projectId, title, description);
+      setTitle(result.title);
+      setDescription(result.description);
+    } catch {
+      // silently ignore — user keeps their original text
+    } finally {
+      setEnhancing(false);
+    }
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -143,6 +168,25 @@ export function CreateIssueForm({
           className="text-xs text-gray-500 px-3 py-1.5 hover:text-gray-700"
         >
           Cancel
+        </button>
+        <button
+          type="button"
+          onClick={handleEnhance}
+          disabled={!title.trim() || enhancing}
+          title="Enhance with AI"
+          className="text-xs text-purple-600 px-2 py-1.5 hover:text-purple-800 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
+        >
+          {enhancing ? (
+            <svg className="animate-spin h-3.5 w-3.5" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+            </svg>
+          ) : (
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M5 3l1.5 3.5L10 8l-3.5 1.5L5 13l-1.5-3.5L0 8l3.5-1.5L5 3zM19 11l1 2.5L22.5 14l-2.5 1L19 17.5l-1-2.5L15.5 14l2.5-1L19 11z" />
+            </svg>
+          )}
+          {enhancing ? "Enhancing..." : "Enhance"}
         </button>
         {onExpand && (
           <button
