@@ -34,11 +34,12 @@ const DEFAULT_SETTINGS: Settings = {
   resume_with_new_model: "false",
 };
 
-type Tab = "agent" | "workflow" | "ui" | "advanced";
+type Tab = "agent" | "workflow" | "skills" | "ui" | "advanced";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "agent", label: "Agent" },
   { id: "workflow", label: "Workflow" },
+  { id: "skills", label: "Skills" },
   { id: "ui", label: "UI" },
   { id: "advanced", label: "Advanced" },
 ];
@@ -77,6 +78,66 @@ function Toggle({ checked, onChange, label, hint, disabled }: {
   );
 }
 
+function EditSkillForm({ skill, isNew, onSave, onCancel }: {
+  skill: { id?: string; name: string; description: string; prompt: string; model: string | null };
+  isNew?: boolean;
+  onSave: (data: { name: string; description: string; prompt: string; model: string }) => void;
+  onCancel: () => void;
+}) {
+  const [name, setName] = useState(skill.name);
+  const [description, setDescription] = useState(skill.description);
+  const [prompt, setPrompt] = useState(skill.prompt);
+  const [model, setModel] = useState(skill.model || "");
+
+  return (
+    <div className="space-y-2">
+      <input
+        type="text"
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        placeholder="Skill name (e.g. dependency-analyzer)"
+        className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
+        disabled={!isNew}
+      />
+      <input
+        type="text"
+        value={description}
+        onChange={(e) => setDescription(e.target.value)}
+        placeholder="Short description"
+        className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
+      />
+      <textarea
+        value={prompt}
+        onChange={(e) => setPrompt(e.target.value)}
+        placeholder="Skill prompt — injected into the agent's context before the issue description"
+        rows={6}
+        className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 font-mono"
+      />
+      <div className="flex items-center gap-2">
+        <input
+          type="text"
+          value={model}
+          onChange={(e) => setModel(e.target.value)}
+          placeholder="Model override (optional, e.g. haiku)"
+          className="flex-1 text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
+        />
+      </div>
+      <div className="flex gap-2">
+        <button
+          onClick={() => onSave({ name, description, prompt, model })}
+          disabled={!name || !prompt}
+          className="text-xs px-3 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
+        >
+          {isNew ? "Create" : "Save"}
+        </button>
+        <button onClick={onCancel} className="text-xs px-3 py-1.5 text-gray-600 hover:bg-gray-100 rounded">
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export function SettingsPanel({ onClose }: SettingsPanelProps) {
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [profiles, setProfiles] = useState<string[]>([]);
@@ -84,15 +145,22 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
   const [saving, setSaving] = useState(false);
   const [tab, setTab] = useState<Tab>("agent");
 
+  // Skills state
+  const [skills, setSkills] = useState<{ id: string; name: string; description: string; prompt: string; model: string | null; isBuiltin: boolean }[]>([]);
+  const [editingSkill, setEditingSkill] = useState<string | null>(null);
+  const [newSkill, setNewSkill] = useState<{ name: string; description: string; prompt: string; model: string } | null>(null);
+
   useEffect(() => {
     async function load() {
       try {
-        const [data, profileData] = await Promise.all([
+        const [data, profileData, skillsData] = await Promise.all([
           apiFetch<Record<string, string>>("/api/preferences/settings"),
           apiFetch<{ profiles: string[] }>("/api/preferences/claude-profiles"),
+          apiFetch<{ id: string; name: string; description: string; prompt: string; model: string | null; isBuiltin: boolean }[]>("/api/agent-skills"),
         ]);
         setSettings({ ...DEFAULT_SETTINGS, ...data });
         setProfiles(profileData.profiles);
+        setSkills(skillsData);
       } catch {
         // Use defaults
       } finally {
@@ -240,6 +308,91 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                     hint="When continuing a chat, start a fresh session using the current profile instead of resuming the previous one. Use this when switching providers via a different Claude profile."
                   />
                 </>
+              )}
+
+              {/* Skills tab */}
+              {tab === "skills" && (
+                <div className="space-y-3">
+                  <p className="text-xs text-gray-500">
+                    Agent skills are prompt templates injected into the agent's context when launching a workspace. They teach the agent how to interact with the board and perform specific tasks.
+                  </p>
+                  {skills.map((skill) => (
+                    <div key={skill.id} className="border border-gray-200 rounded-md p-3">
+                      {editingSkill === skill.id ? (
+                        <EditSkillForm
+                          skill={skill}
+                          onSave={async (updates) => {
+                            await apiFetch(`/api/agent-skills/${skill.id}`, {
+                              method: "PUT",
+                              body: JSON.stringify(updates),
+                            });
+                            setSkills((s) => s.map((sk) => sk.id === skill.id ? { ...sk, ...updates } : sk));
+                            setEditingSkill(null);
+                          }}
+                          onCancel={() => setEditingSkill(null)}
+                        />
+                      ) : (
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2">
+                              <span className="text-sm font-medium text-gray-900">{skill.name}</span>
+                              {skill.isBuiltin && (
+                                <span className="text-[10px] px-1.5 py-0.5 bg-gray-100 text-gray-500 rounded">builtin</span>
+                              )}
+                              {skill.model && (
+                                <span className="text-[10px] px-1.5 py-0.5 bg-blue-50 text-blue-600 rounded">{skill.model}</span>
+                              )}
+                            </div>
+                            <p className="text-xs text-gray-500 mt-0.5 line-clamp-2">{skill.description}</p>
+                          </div>
+                          <div className="flex gap-1 shrink-0">
+                            <button
+                              onClick={() => setEditingSkill(skill.id)}
+                              className="text-xs text-gray-400 hover:text-blue-600 px-1"
+                            >
+                              Edit
+                            </button>
+                            {!skill.isBuiltin && (
+                              <button
+                                onClick={async () => {
+                                  await apiFetch(`/api/agent-skills/${skill.id}`, { method: "DELETE" });
+                                  setSkills((s) => s.filter((sk) => sk.id !== skill.id));
+                                }}
+                                className="text-xs text-gray-400 hover:text-red-600 px-1"
+                              >
+                                Delete
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                  {newSkill ? (
+                    <div className="border border-gray-200 rounded-md p-3">
+                      <EditSkillForm
+                        skill={{ name: newSkill.name, description: newSkill.description, prompt: newSkill.prompt, model: newSkill.model || null }}
+                        isNew
+                        onSave={async (data) => {
+                          const created = await apiFetch<{ id: string }>("/api/agent-skills", {
+                            method: "POST",
+                            body: JSON.stringify(data),
+                          });
+                          setSkills((s) => [...s, { ...data, id: created.id, isBuiltin: false }]);
+                          setNewSkill(null);
+                        }}
+                        onCancel={() => setNewSkill(null)}
+                      />
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => setNewSkill({ name: "", description: "", prompt: "", model: "" })}
+                      className="text-sm text-blue-600 hover:text-blue-700"
+                    >
+                      + Add Skill
+                    </button>
+                  )}
+                </div>
               )}
 
               {/* UI tab */}

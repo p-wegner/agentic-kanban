@@ -16,8 +16,9 @@ export function registerStartWorkspace(server: McpServer) {
       branch: z.string().optional().describe("Branch name (defaults to 'workspace/{issueId-short}'). Not needed when isDirect is true."),
       baseBranch: z.string().optional().describe("Base branch to create from (defaults to project's defaultBranch)"),
       isDirect: z.boolean().optional().describe("Work directly on the main checkout instead of creating a worktree"),
+      skillId: z.string().optional().describe("Agent skill ID to apply — the skill's prompt will be prepended to the agent's context"),
     },
-    async ({ issueId, repoPath, branch, baseBranch, isDirect }) => {
+    async ({ issueId, repoPath, branch, baseBranch, isDirect, skillId }) => {
       // Look up the issue
       const issues = await db.select().from(schema.issues).where(eq(schema.issues.id, issueId)).limit(1);
       if (issues.length === 0) {
@@ -70,6 +71,7 @@ export function registerStartWorkspace(server: McpServer) {
           workingDir: worktreePath,
           baseBranch: isDirect ? null : resolvedBaseBranch,
           isDirect: isDirect ?? false,
+          skillId: skillId ?? null,
           status: "active",
           claudeProfile,
           agentCommand,

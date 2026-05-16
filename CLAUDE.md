@@ -28,8 +28,9 @@ All documented features have been visually verified (2026-05-16):
 - Issue numbers: auto-incrementing #1, #2, #3 per project on cards and detail panel
 - Panel animations: slide-in transitions on detail/workspace/settings/worktree panels
 - Favicon: inline SVG kanban-board icon
-- MCP server: 21 tools via stdio JSON-RPC
-- CLI: `pnpm cli -- register <path>` to register a git repo as a project; also `issue list/create/move` and `workspace list/create` for board operations
+- MCP server: 26 tools via stdio JSON-RPC (includes agent skills: list/get/create)
+- CLI: `pnpm cli -- register <path>` to register a git repo as a project; also `issue list/create/move`, `workspace list/create`, and `skill list/get/create` for board operations
+- Agent skills: 3 built-in skills (board-navigator, dependency-analyzer, ticket-enhancer) + custom skills via DB. Skills are prompt templates injected into agent context at workspace creation time.
 - Desktop app: Tauri v2 native window with system tray (Show/Quit), minimize-to-tray on close, OS notifications on session_completed/workspace_merged events
 
 ## What This Is
@@ -150,6 +151,9 @@ When performing kanban board operations (creating issues, moving issues, managin
 - `pnpm cli -- issue move <id> <status>` — move issue to a status
 - `pnpm cli -- workspace list` — list workspaces for active project
 - `pnpm cli -- workspace create <issueId>` — create a workspace
+- `pnpm cli -- skill list` — list agent skills
+- `pnpm cli -- skill get <name-or-id>` — show skill details and prompt
+- `pnpm cli -- skill create <name>` — create a new agent skill (-d description, -p prompt, -m model)
 
 ## Worktree Port Strategy
 `pnpm dev` uses `scripts/dev.mjs` which auto-detects whether the CWD is a git worktree and assigns deterministic ports:
@@ -185,7 +189,7 @@ Each project maps 1:1 to a git repo. The CLI reads git info automatically:
 The registered project gets 5 default statuses (Todo, In Progress, In Review, Done, Cancelled) and is set as the active project. Registering additional projects adds a dropdown switcher in the header.
 
 ## Workspace Flow
-Workspaces are created in a single step: `POST /api/workspaces` accepts `issueId`, `branch`, and optional `baseBranch` (defaults to project's `defaultBranch`). The server creates the DB record, creates the git worktree, and auto-launches the agent with the issue title + description as the prompt. The response includes `sessionId` so the client can immediately show terminal output.
+Workspaces are created in a single step: `POST /api/workspaces` accepts `issueId`, `branch`, optional `baseBranch` (defaults to project's `defaultBranch`), and optional `skillId`. The server creates the DB record, creates the git worktree, and auto-launches the agent with the issue title + description as the prompt. If `skillId` is provided, the skill's prompt is prepended to the agent's context. The response includes `sessionId` so the client can immediately show terminal output.
 
 - `POST /api/workspaces` — one-step: DB record + worktree + auto-launch agent
 - `POST /api/workspaces/:id/setup` — legacy no-op if worktree already exists (backward compat)
@@ -198,6 +202,17 @@ The `baseBranch` column on the workspaces table tracks which branch the worktree
 
 ## MVP Core Loop
 Register repo (`pnpm cli -- register <path>`) → Create issue → Click "New Workspace" (one step: branch + worktree + agent launch) → View diff → Merge
+
+## Agent Skills
+Agent skills are prompt templates stored in the `agent_skills` DB table. When a workspace is created with a `skillId`, the skill's prompt is prepended to the agent's context (before the issue title/description). Skills have a `model` override field (e.g., "haiku" for quick tasks).
+
+- **Built-in skills**: Seeded on `pnpm db:seed` with `isBuiltin: true`. Cannot be modified or deleted via API. Three defaults: `board-navigator` (comprehensive board interaction guide), `dependency-analyzer` (analyze issue dependencies), `ticket-enhancer` (improve ticket clarity).
+- **Custom skills**: Created via API, CLI, or MCP tools. Can be edited and deleted.
+- **Storage**: `agent_skills` table (id, name, description, prompt, model, is_builtin, timestamps). Referenced by `workspaces.skill_id`.
+- **API**: `GET/POST/PUT/DELETE /api/agent-skills` — CRUD with builtin protection.
+- **MCP tools**: `list_agent_skills`, `get_agent_skill`, `create_agent_skill`.
+- **CLI**: `pnpm cli -- skill list/get/create`.
+- **UI**: Skills tab in Settings panel for management; skill selector dropdown in workspace creation form.
 
 ## Reference Codebase
 The original vibe-kanban is at `F:/projects/vibe-kanban` for reference. Key files:
