@@ -58,13 +58,29 @@ export interface ParsedToolResultEvent {
   isError: boolean;
 }
 
+export interface ParsedTaskStartedEvent {
+  kind: "task_started";
+  taskId: string;
+  description: string;
+  taskType: string;
+}
+
+export interface ParsedNotificationEvent {
+  kind: "notification";
+  key: string;
+  text: string;
+  priority: string;
+}
+
 export type ParsedEvent =
   | ParsedInitEvent
   | ParsedAssistantEvent
   | ParsedThinkingEvent
   | ParsedResultEvent
   | ParsedToolUseEvent
-  | ParsedToolResultEvent;
+  | ParsedToolResultEvent
+  | ParsedTaskStartedEvent
+  | ParsedNotificationEvent;
 
 export interface RawTextEvent {
   kind: "raw";
@@ -128,16 +144,36 @@ export class ClaudeOutputParser {
   private parseJsonObject(obj: Record<string, unknown>): DisplayEvent[] {
     const type = obj.type as string;
 
-    if (type === "system" && obj.subtype === "init") {
-      return [{
-        kind: "init",
-        model: (obj.model as string) || "unknown",
-        sessionId: (obj.session_id as string) || "",
-        cwd: (obj.cwd as string) || "",
-        tools: (obj.tools as string[]) || [],
-        mcpServers: (obj.mcp_servers as { name: string; status: string }[]) || [],
-        permissionMode: (obj.permissionMode as string) || "",
-      }];
+    if (type === "system") {
+      const subtype = obj.subtype as string;
+      if (subtype === "init") {
+        return [{
+          kind: "init",
+          model: (obj.model as string) || "unknown",
+          sessionId: (obj.session_id as string) || "",
+          cwd: (obj.cwd as string) || "",
+          tools: (obj.tools as string[]) || [],
+          mcpServers: (obj.mcp_servers as { name: string; status: string }[]) || [],
+          permissionMode: (obj.permissionMode as string) || "",
+        }];
+      }
+      if (subtype === "task_started") {
+        return [{
+          kind: "task_started",
+          taskId: (obj.task_id as string) || "",
+          description: (obj.description as string) || "",
+          taskType: (obj.task_type as string) || "",
+        }];
+      }
+      if (subtype === "notification") {
+        return [{
+          kind: "notification",
+          key: (obj.key as string) || "",
+          text: (obj.text as string) || "",
+          priority: (obj.priority as string) || "",
+        }];
+      }
+      return [];
     }
 
     if (type === "assistant") {

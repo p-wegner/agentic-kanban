@@ -12,6 +12,8 @@ export const workspaces = sqliteTable("workspaces", {
   requiresReview: integer("requires_review", { mode: "boolean" }).notNull().default(false),
   planMode: integer("plan_mode", { mode: "boolean" }).notNull().default(false),
   status: text("status").notNull().default("active"),
+  claudeProfile: text("claude_profile"),
+  agentCommand: text("agent_command"),
   createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
   updatedAt: text("updated_at").notNull().$defaultFn(() => new Date().toISOString()),
   closedAt: text("closed_at"),

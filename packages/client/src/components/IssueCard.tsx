@@ -117,6 +117,12 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onDragStart, tags,
           {ws.main.status === "closed" && (
             <span className="text-green-600 font-medium shrink-0">merged</span>
           )}
+          {ws.main.claudeProfile && (
+            <span className="inline-flex items-center px-1 rounded bg-indigo-50 text-indigo-600 font-medium shrink-0">{ws.main.claudeProfile}</span>
+          )}
+          {!ws.main.claudeProfile && ws.main.agentCommand && ws.main.agentCommand !== "claude" && (
+            <span className="inline-flex items-center px-1 rounded bg-gray-100 text-gray-500 font-mono text-[10px] shrink-0">{ws.main.agentCommand}</span>
+          )}
           {ws.total > 1 && (
             <span className="text-gray-400 shrink-0">+{ws.total - 1} more</span>
           )}

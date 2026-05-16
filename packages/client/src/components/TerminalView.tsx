@@ -49,6 +49,20 @@ function summarizeToolCall(name: string, input: Record<string, unknown>): string
     case "WebFetch":
     case "mcp__web_reader__webReader":
       return "Fetching URL";
+    case "TaskCreate":
+      return `Task: ${(input.subject as string) || "new task"}`;
+    case "TaskUpdate": {
+      const status = input.status as string;
+      const subject = input.subject as string;
+      if (status === "completed") return `Done: ${subject || "task"}`;
+      if (status === "in_progress") return `Starting: ${subject || "task"}`;
+      if (status === "deleted") return `Removed: ${subject || "task"}`;
+      return `Task update: ${subject || "task"}`;
+    }
+    case "TaskList":
+      return "Listing tasks";
+    case "TaskGet":
+      return "Getting task details";
     default:
       return name;
   }
@@ -215,6 +229,8 @@ export function TerminalView({ messages, connectionState, parseOutput = "true", 
         case "tool_result": color = event.isError ? "bg-red-500" : "bg-purple-500"; break;
         case "result": color = event.success ? "bg-emerald-400" : "bg-red-400"; break;
         case "init": color = "bg-cyan-400"; break;
+        case "task_started": color = "bg-blue-500"; break;
+        case "notification": color = "bg-orange-500"; break;
         default: color = "bg-gray-600";
       }
 
@@ -412,6 +428,64 @@ function renderParsedEvent(event: DisplayEvent, key: number, ctx: RenderContext)
   }
 
   if (event.kind === "tool_use") {
+    const isTaskTool = ["TaskCreate", "TaskUpdate", "TaskGet", "TaskList", "TaskStop"].includes(event.name);
+
+    if (isTaskTool && isMinimal) {
+      const summary = summarizeToolCall(event.name, event.inputParsed || {});
+      const input = event.inputParsed || {};
+      let icon = "";
+      let color = "text-gray-400";
+      if (event.name === "TaskCreate") { icon = "+"; color = "text-blue-400"; }
+      else if (event.name === "TaskUpdate") {
+        const s = input.status as string;
+        if (s === "completed") { icon = "✓"; color = "text-green-400"; }
+        else if (s === "in_progress") { icon = "▶"; color = "text-yellow-400"; }
+        else if (s === "deleted") { icon = "✗"; color = "text-red-400"; }
+        else { icon = "•"; color = "text-gray-400"; }
+      }
+      else if (event.name === "TaskList") { icon = "☰"; color = "text-gray-400"; }
+      else { icon = "•"; color = "text-gray-400"; }
+
+      return (
+        <div key={key} data-event-idx={key} className="mb-0.5 ml-1 text-[11px]">
+          <span className={color}>{icon} </span>
+          <span className="text-gray-300">{summary}</span>
+        </div>
+      );
+    }
+
+    if (isTaskTool && !isMinimal) {
+      const input = event.inputParsed || {};
+      if (event.name === "TaskCreate") {
+        return (
+          <div key={key} data-event-idx={key} className="mb-1 ml-2 pl-2 border-l-2 border-blue-500">
+            <span className="text-blue-400">+ Task created</span>
+            <div className="text-white text-[11px]">{input.subject as string || ""}</div>
+            {input.description ? <div className="text-gray-400 text-[10px]">{String(input.description)}</div> : null}
+            {input.activeForm ? <div className="text-blue-300 text-[10px] italic">{String(input.activeForm)}</div> : null}
+          </div>
+        );
+      }
+      if (event.name === "TaskUpdate") {
+        const s = input.status as string;
+        const subject = (input.subject as string) || "task";
+        let statusIcon = "•";
+        let statusColor = "text-gray-400";
+        if (s === "completed") { statusIcon = "✓"; statusColor = "text-green-400"; }
+        else if (s === "in_progress") { statusIcon = "▶"; statusColor = "text-yellow-400"; }
+        else if (s === "pending") { statusIcon = "○"; statusColor = "text-gray-400"; }
+        else if (s === "deleted") { statusIcon = "✗"; statusColor = "text-red-400"; }
+        return (
+          <div key={key} data-event-idx={key} className="mb-1 ml-2 pl-2 border-l-2 border-gray-600">
+            <span className={statusColor}>{statusIcon} </span>
+            <span className="text-gray-300">{subject}</span>
+            {s && <span className="text-gray-500 text-[10px] ml-1">({s})</span>}
+          </div>
+        );
+      }
+      // TaskList, TaskGet, TaskStop — fall through to generic tool_use
+    }
+
     if (isMinimal) {
       const summary = summarizeToolCall(event.name, event.inputParsed || {});
       return (
@@ -517,6 +591,41 @@ function renderParsedEvent(event: DisplayEvent, key: number, ctx: RenderContext)
           {" | "}Cost: ${event.totalCostUsd.toFixed(4)}
           {" | "}Tokens: {event.inputTokens.toLocaleString()} in / {event.outputTokens.toLocaleString()} out
         </div>
+      </div>
+    );
+  }
+
+  if (event.kind === "task_started") {
+    if (isMinimal) {
+      return (
+        <div key={key} data-event-idx={key} className="mb-0.5 ml-1 text-[11px]">
+          <span className="text-blue-400">Background: </span>
+          <span className="text-gray-400">{event.description}</span>
+        </div>
+      );
+    }
+    return (
+      <div key={key} data-event-idx={key} className="mb-1 ml-2 pl-2 border-l-2 border-blue-600">
+        <span className="text-blue-400">Background task started</span>
+        <div className="text-gray-400 text-[10px]">{event.description}</div>
+        <div className="text-gray-600 text-[10px]">{event.taskType} | {event.taskId}</div>
+      </div>
+    );
+  }
+
+  if (event.kind === "notification") {
+    if (isMinimal) {
+      return (
+        <div key={key} data-event-idx={key} className="mb-0.5 ml-1 text-[11px]">
+          <span className="text-orange-400">Note: </span>
+          <span className="text-gray-400">{event.text}</span>
+        </div>
+      );
+    }
+    return (
+      <div key={key} data-event-idx={key} className="mb-1 ml-2 pl-2 border-l-2 border-orange-600">
+        <span className="text-orange-400">Notification: {event.text}</span>
+        <div className="text-gray-600 text-[10px]">{event.key} | {event.priority}</div>
       </div>
     );
   }

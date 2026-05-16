@@ -47,6 +47,8 @@ export interface MainWorkspaceInfo {
   id: string;
   branch: string;
   status: "active" | "reviewing" | "idle" | "closed";
+  claudeProfile?: string | null;
+  agentCommand?: string | null;
 }
 
 export interface WorkspaceSummary {

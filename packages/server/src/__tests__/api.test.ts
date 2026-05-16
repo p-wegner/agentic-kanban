@@ -29,6 +29,7 @@ const MIGRATION_FILES = [
   "../../../shared/drizzle/0014_issue_dependencies.sql",
   "../../../shared/drizzle/0015_ai_reviewed_status.sql",
   "../../../shared/drizzle/0016_skip_auto_review.sql",
+  "../../../shared/drizzle/0017_agent_config.sql",
 ];
 
 function createTestApp() {
