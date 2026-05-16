@@ -618,6 +618,21 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
     }
   }
 
+  async function handleReview(wsId: string) {
+    setActionLoading(true);
+    setError(null);
+    try {
+      const result = await apiFetch<{ sessionId: string }>(`/api/workspaces/${wsId}/review`, { method: "POST" });
+      setActiveSession(result.sessionId);
+      setCompletedMessages([]);
+      await fetchWorkspaces();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to start review");
+    } finally {
+      setActionLoading(false);
+    }
+  }
+
   async function handleDeleteWorkspace(wsId: string) {
     const suffix = isRunning ? " The running agent will be stopped." : "";
     if (!window.confirm(`Delete this workspace? This removes the workspace record and all session data.${suffix}`)) return;
@@ -1027,6 +1042,14 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                           title="Open terminal in workspace directory"
                         >
                           Terminal
+                        </button>
+                        <button
+                          onClick={() => handleReview(ws.id)}
+                          disabled={actionLoading || isRunning}
+                          className="text-sm bg-violet-600 text-white px-3 py-1.5 rounded hover:bg-violet-700 disabled:opacity-50"
+                          title="Trigger AI code review"
+                        >
+                          Review
                         </button>
                         <button
                           onClick={() => handleViewDiff(ws.id)}
