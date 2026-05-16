@@ -18,5 +18,5 @@ export function suggestBranchName(issue: { issueNumber?: number | null; title: s
     .replace(/-+/g, "-")
     .replace(/^-|-$/g, "")
     .slice(0, 40);
-  return `${prefix}/${num}${slug}`;
+  return `${prefix}/ak-${num}${slug}`;
 }
