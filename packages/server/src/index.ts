@@ -46,12 +46,12 @@ async function runWorkflowOnExit(workspaceId: string, sessionId: string, exitCod
     const workspace = wsRows[0];
 
     const issueRows = await db
-      .select({ projectId: issues.projectId, id: issues.id })
+      .select({ projectId: issues.projectId, id: issues.id, skipAutoReview: issues.skipAutoReview })
       .from(issues)
       .where(eq(issues.id, workspace.issueId))
       .limit(1);
     if (issueRows.length === 0) return;
-    const { projectId, id: issueId } = issueRows[0];
+    const { projectId, id: issueId, skipAutoReview } = issueRows[0];
 
     boardEvents.broadcast(projectId, "session_completed");
 
@@ -103,9 +103,10 @@ async function runWorkflowOnExit(workspaceId: string, sessionId: string, exitCod
       boardEvents.broadcast(projectId, "issue_updated");
 
       // Check if auto-review is enabled (requiresReview checkbox or auto_review setting)
+      // Issue-level skipAutoReview overrides everything
       const prefRows = await db.select().from(preferences);
       const prefMap = new Map(prefRows.map(r => [r.key, r.value]));
-      const autoReview = workspace.requiresReview || prefMap.get("auto_review") !== "false";
+      const autoReview = !skipAutoReview && (workspace.requiresReview || prefMap.get("auto_review") !== "false");
 
       if (autoReview) {
         const useMock = prefMap.get("mock_agent") === "true" || process.env.MOCK_AGENT === "1";

@@ -32,6 +32,7 @@ export interface CreateIssueRequest {
   priority?: "low" | "medium" | "high" | "critical";
   statusId: string;
   projectId: string;
+  skipAutoReview?: boolean;
 }
 
 export interface UpdateIssueRequest {
@@ -72,6 +73,7 @@ export interface IssueWithStatus {
   statusName: string;
   workspaceSummary?: WorkspaceSummary;
   isBlocked?: boolean;
+  skipAutoReview?: boolean;
 }
 
 export interface StatusWithIssues {

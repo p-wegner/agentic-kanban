@@ -198,6 +198,10 @@ export function BoardPage() {
         "/api/issues",
         { method: "POST", body: JSON.stringify(issueData) },
       );
+      const created = await apiFetch<{ id: string; issueNumber: number; title: string }>(
+        "/api/issues",
+        { method: "POST", body: JSON.stringify(issueData) },
+      );
       setCreatingInColumnId(null);
       const board = await refetchBoard();
       pendingBoardRefreshRef.current = false;

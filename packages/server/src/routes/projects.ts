@@ -324,6 +324,7 @@ export function createProjectsRoute(database: Database = db) {
         updatedAt: issues.updatedAt,
         statusChangedAt: issues.statusChangedAt,
         statusName: projectStatuses.name,
+        skipAutoReview: issues.skipAutoReview,
       })
       .from(issues)
       .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
