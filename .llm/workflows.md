@@ -11,7 +11,7 @@ pnpm install              # install dependencies
 pnpm db:migrate           # create DB and apply all migrations
 pnpm db:seed              # seed 4 default tags (bug, feature, improvement, docs)
 pnpm cli -- register .    # register current repo as a project (sets active project)
-pnpm dev                  # start server (port 3001) + client (port 5173)
+pnpm dev                  # start server + client (auto-detects worktree ports; default: 3001/5173)
 ```
 
 Or as a one-liner (skips `pnpm install`):
@@ -47,18 +47,42 @@ If the repo is already registered (same `repoPath`), it skips without error.
 ### Verifying the state
 
 After starting:
-1. Open `http://localhost:5173` — board should show the registered project with 3 active columns
+1. Open the client URL from the dev banner (default `http://localhost:5173`, worktrees use different ports)
 2. Run `pnpm cli -- list` to confirm the project is registered and marked `(active)`
+
+### Starting in a Worktree
+
+When working in a git worktree (agents working on issues), `pnpm dev` automatically detects the worktree and assigns unique ports:
+- Issue #2 → server:3003, client:5175
+- Issue #5 → server:3006, client:5178
+- Main checkout → server:3001, client:5173 (default)
+
+The dev script prints a banner showing the detected ports:
+```
+[dev] Worktree detected (feature/2-proper-devserver-setup) — server:3003 client:5175
+```
+
+Each worktree gets its own database (`packages/server/kanban.db` resolved within the worktree).
 
 ---
 
 ## Stopping the Server
 
-The dev server runs node processes. To stop:
+**Never kill ALL node processes** — other agents may be running in separate worktrees with their own dev servers.
+
+To stop a specific dev server, kill by port:
 
 ```powershell
-# PowerShell — kill all node processes
-Get-Process -Name "node" -ErrorAction SilentlyContinue | Stop-Process -Force -Confirm:$false
+# Stop server on a specific port (e.g. 3003 for issue #2)
+$proc = Get-NetTCPConnection -LocalPort 3003 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess
+if ($proc) { $proc | ForEach-Object { Stop-Process -Id $_ -Force } }
+```
+
+To stop the main checkout server (port 3001):
+
+```powershell
+$proc = Get-NetTCPConnection -LocalPort 3001 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess
+if ($proc) { $proc | ForEach-Object { Stop-Process -Id $_ -Force } }
 ```
 
 Always stop the server before running `pnpm db:reset` or `pnpm db:migrate` to avoid `EBUSY` lock errors.
@@ -140,24 +164,26 @@ node --experimental-sqlite "$env:TEMP\check_migrations.mjs"
 
 ## API Health Checks
 
+Replace `<port>` with the server port from the dev banner (default: 3001, worktree: 3001+N).
+
 ```powershell
-# Server health (port 3001)
-curl http://localhost:3001/health               # {"status":"ok"}
+# Server health
+curl http://localhost:<port>/health               # {"status":"ok"}
 
 # List projects
-curl http://localhost:3001/api/projects
+curl http://localhost:<port>/api/projects
 
 # Active project ID
-curl http://localhost:3001/api/preferences/active-project
+curl http://localhost:<port>/api/preferences/active-project
 
 # Board for a project
-curl http://localhost:3001/api/projects/<projectId>/board
+curl http://localhost:<port>/api/projects/<projectId>/board
 
 # List workspaces
-curl http://localhost:3001/api/workspaces
+curl http://localhost:<port>/api/workspaces
 
 # Create a direct workspace (no worktree)
-curl -X POST http://localhost:3001/api/workspaces `
+curl -X POST http://localhost:<port>/api/workspaces `
   -H "Content-Type: application/json" `
   -d '{"issueId":"<id>","isDirect":true}'
 ```
@@ -172,18 +198,19 @@ See "Diagnosing migration issues" above.
 
 ### `EBUSY: resource busy or locked`
 
-The DB is locked — a node process is holding it open. Stop all node processes first:
+The DB is locked — a node process is holding it open. Stop the specific server by port:
 
 ```powershell
-Get-Process -Name "node" -ErrorAction SilentlyContinue | Stop-Process -Force -Confirm:$false
+$proc = Get-NetTCPConnection -LocalPort <port> -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess
+if ($proc) { $proc | ForEach-Object { Stop-Process -Id $_ -Force } }
 ```
 
 ### Port already in use
 
-The server (3001) or client (5173) ports may still be bound from a prior run:
+The server or client port may still be bound from a prior run:
 
 ```powershell
-# Find and kill processes on port 3001
-$proc = Get-NetTCPConnection -LocalPort 3001 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess
-if ($proc) { Stop-Process -Id $proc -Force }
+# Find and kill processes on a specific port
+$proc = Get-NetTCPConnection -LocalPort <port> -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess
+if ($proc) { $proc | ForEach-Object { Stop-Process -Id $_ -Force } }
 ```

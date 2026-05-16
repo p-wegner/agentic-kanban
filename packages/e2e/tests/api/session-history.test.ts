@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { SERVER_URL } from "../helpers/port.js";
 
 test.describe("Session History API", () => {
   let projectId: string;
@@ -8,26 +9,26 @@ test.describe("Session History API", () => {
 
   test.beforeAll(async ({ request }) => {
     // Get the default project
-    const projectsRes = await request.get("http://localhost:3001/api/projects");
+    const projectsRes = await request.get(`${SERVER_URL}/api/projects`);
     const projects = await projectsRes.json();
     projectId = projects[0].id;
 
     // Get statuses for the project
     const statusesRes = await request.get(
-      `http://localhost:3001/api/projects/${projectId}/statuses`,
+      `${SERVER_URL}/api/projects/${projectId}/statuses`,
     );
     const statuses = await statusesRes.json();
     const todoStatus = statuses.find((s: { name: string }) => s.name === "Todo");
     statusId = todoStatus ? todoStatus.id : statuses[0].id;
 
     // Create an issue
-    const issueRes = await request.post("http://localhost:3001/api/issues", {
+    const issueRes = await request.post(`${SERVER_URL}/api/issues`, {
       data: { title: "Session history test issue", statusId, projectId },
     });
     issueId = (await issueRes.json()).id;
 
     // Create a workspace
-    const wsRes = await request.post("http://localhost:3001/api/workspaces", {
+    const wsRes = await request.post(`${SERVER_URL}/api/workspaces`, {
       data: { issueId, branch: "feature/session-history-test" },
     });
     expect(wsRes.status()).toBe(201);
@@ -37,7 +38,7 @@ test.describe("Session History API", () => {
     let setupOk = false;
     for (let attempt = 0; attempt < 3; attempt++) {
       const setupRes = await request.post(
-        `http://localhost:3001/api/workspaces/${workspaceId}/setup`,
+        `${SERVER_URL}/api/workspaces/${workspaceId}/setup`,
         { data: {} },
       );
       if (setupRes.status() === 200) {
@@ -53,7 +54,7 @@ test.describe("Session History API", () => {
     request,
   }) => {
     const res = await request.get(
-      "http://localhost:3001/api/sessions/nonexistent-session-id/output",
+      `${SERVER_URL}/api/sessions/nonexistent-session-id/output`,
     );
     expect(res.status()).toBe(404);
     const body = await res.json();
@@ -65,7 +66,7 @@ test.describe("Session History API", () => {
   }) => {
     // Launch with a simple command that exits quickly
     const launchRes = await request.post(
-      `http://localhost:3001/api/workspaces/${workspaceId}/launch`,
+      `${SERVER_URL}/api/workspaces/${workspaceId}/launch`,
       {
         data: {
           prompt: "echo hello",
@@ -85,7 +86,7 @@ test.describe("Session History API", () => {
     let messages: any[] = [];
     for (let attempt = 0; attempt < 3; attempt++) {
       const outputRes = await request.get(
-        `http://localhost:3001/api/sessions/${sessionId}/output`,
+        `${SERVER_URL}/api/sessions/${sessionId}/output`,
       );
       expect(outputRes.status()).toBe(200);
       messages = await outputRes.json();
@@ -111,7 +112,7 @@ test.describe("Session History API", () => {
 
     // Cleanup: stop session if still running
     await request.post(
-      `http://localhost:3001/api/workspaces/${workspaceId}/stop`,
+      `${SERVER_URL}/api/workspaces/${workspaceId}/stop`,
       { data: {} },
     );
   });
@@ -120,12 +121,12 @@ test.describe("Session History API", () => {
     request,
   }) => {
     // Create a fresh workspace for this test
-    const issueRes = await request.post("http://localhost:3001/api/issues", {
+    const issueRes = await request.post(`${SERVER_URL}/api/issues`, {
       data: { title: "Persistence test issue", statusId, projectId },
     });
     const testIssueId = (await issueRes.json()).id;
 
-    const wsRes = await request.post("http://localhost:3001/api/workspaces", {
+    const wsRes = await request.post(`${SERVER_URL}/api/workspaces`, {
       data: { issueId: testIssueId, branch: "feature/persistence-test" },
     });
     const testWorkspaceId = (await wsRes.json()).id;
@@ -134,7 +135,7 @@ test.describe("Session History API", () => {
     let setupOk = false;
     for (let attempt = 0; attempt < 3; attempt++) {
       const setupRes = await request.post(
-        `http://localhost:3001/api/workspaces/${testWorkspaceId}/setup`,
+        `${SERVER_URL}/api/workspaces/${testWorkspaceId}/setup`,
         { data: {} },
       );
       if (setupRes.status() === 200) {
@@ -147,7 +148,7 @@ test.describe("Session History API", () => {
 
     // Launch agent
     const launchRes = await request.post(
-      `http://localhost:3001/api/workspaces/${testWorkspaceId}/launch`,
+      `${SERVER_URL}/api/workspaces/${testWorkspaceId}/launch`,
       {
         data: {
           prompt: "persistence test",
@@ -166,7 +167,7 @@ test.describe("Session History API", () => {
     let messages: any[] = [];
     for (let attempt = 0; attempt < 3; attempt++) {
       const outputRes = await request.get(
-        `http://localhost:3001/api/sessions/${sessionId}/output`,
+        `${SERVER_URL}/api/sessions/${sessionId}/output`,
       );
       expect(outputRes.status()).toBe(200);
       messages = await outputRes.json();

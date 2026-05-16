@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { SERVER_URL } from "../helpers/port.js";
 
 test.describe("Issues API", () => {
   let projectId: string;
@@ -6,13 +7,13 @@ test.describe("Issues API", () => {
 
   test.beforeAll(async ({ request }) => {
     // Get the default project
-    const projectsRes = await request.get("http://localhost:3001/api/projects");
+    const projectsRes = await request.get(`${SERVER_URL}/api/projects`);
     const projects = await projectsRes.json();
     projectId = projects[0].id;
 
     // Get statuses for the project
     const statusesRes = await request.get(
-      `http://localhost:3001/api/projects/${projectId}/statuses`,
+      `${SERVER_URL}/api/projects/${projectId}/statuses`,
     );
     const statuses = await statusesRes.json();
     statusId = statuses[0].id; // "Todo"
@@ -24,7 +25,7 @@ test.describe("Issues API", () => {
     // Use a filter on a status with no issues instead of creating a new project
     // (POST /api/projects now requires repoPath which points to a real git repo)
     const res = await request.get(
-      `http://localhost:3001/api/issues?projectId=${projectId}`,
+      `${SERVER_URL}/api/issues?projectId=${projectId}`,
     );
     expect(res.ok()).toBeTruthy();
     const body = await res.json();
@@ -33,7 +34,7 @@ test.describe("Issues API", () => {
   });
 
   test("POST /api/issues creates an issue", async ({ request }) => {
-    const res = await request.post("http://localhost:3001/api/issues", {
+    const res = await request.post(`${SERVER_URL}/api/issues`, {
       data: {
         title: "Test issue",
         description: "A test issue",
@@ -50,7 +51,7 @@ test.describe("Issues API", () => {
 
   test("GET /api/issues returns created issue", async ({ request }) => {
     // Create an issue first
-    await request.post("http://localhost:3001/api/issues", {
+    await request.post(`${SERVER_URL}/api/issues`, {
       data: {
         title: "Another issue",
         statusId,
@@ -59,7 +60,7 @@ test.describe("Issues API", () => {
     });
 
     const res = await request.get(
-      `http://localhost:3001/api/issues?projectId=${projectId}`,
+      `${SERVER_URL}/api/issues?projectId=${projectId}`,
     );
     const body = await res.json();
     expect(body.length).toBeGreaterThanOrEqual(1);
@@ -68,7 +69,7 @@ test.describe("Issues API", () => {
 
   test("PATCH /api/issues/:id updates an issue", async ({ request }) => {
     // Create an issue
-    const createRes = await request.post("http://localhost:3001/api/issues", {
+    const createRes = await request.post(`${SERVER_URL}/api/issues`, {
       data: {
         title: "To update",
         statusId,
@@ -79,7 +80,7 @@ test.describe("Issues API", () => {
 
     // Update it
     const updateRes = await request.patch(
-      `http://localhost:3001/api/issues/${id}`,
+      `${SERVER_URL}/api/issues/${id}`,
       {
         data: { title: "Updated", priority: "critical" },
       },
@@ -89,7 +90,7 @@ test.describe("Issues API", () => {
 
   test("DELETE /api/issues/:id deletes an issue", async ({ request }) => {
     // Create an issue
-    const createRes = await request.post("http://localhost:3001/api/issues", {
+    const createRes = await request.post(`${SERVER_URL}/api/issues`, {
       data: {
         title: "To delete",
         statusId,
@@ -100,7 +101,7 @@ test.describe("Issues API", () => {
 
     // Delete it
     const deleteRes = await request.delete(
-      `http://localhost:3001/api/issues/${id}`,
+      `${SERVER_URL}/api/issues/${id}`,
     );
     expect(deleteRes.ok()).toBeTruthy();
   });

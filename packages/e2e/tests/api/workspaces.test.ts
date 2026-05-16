@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { SERVER_URL } from "../helpers/port.js";
 
 test.describe("Workspaces API", () => {
   let projectId: string;
@@ -7,20 +8,20 @@ test.describe("Workspaces API", () => {
 
   test.beforeAll(async ({ request }) => {
     // Get the default project
-    const projectsRes = await request.get("http://localhost:3001/api/projects");
+    const projectsRes = await request.get(`${SERVER_URL}/api/projects`);
     const projects = await projectsRes.json();
     projectId = projects[0].id;
 
     // Get statuses for the project
     const statusesRes = await request.get(
-      `http://localhost:3001/api/projects/${projectId}/statuses`,
+      `${SERVER_URL}/api/projects/${projectId}/statuses`,
     );
     const statuses = await statusesRes.json();
     const todoStatus = statuses.find((s: { name: string }) => s.name === "Todo");
     statusId = todoStatus ? todoStatus.id : statuses[0].id;
 
     // Create an issue for workspace tests
-    const issueRes = await request.post("http://localhost:3001/api/issues", {
+    const issueRes = await request.post(`${SERVER_URL}/api/issues`, {
       data: {
         title: "Workspace test issue",
         statusId,
@@ -31,7 +32,7 @@ test.describe("Workspaces API", () => {
   });
 
   test("POST /api/workspaces creates a workspace", async ({ request }) => {
-    const res = await request.post("http://localhost:3001/api/workspaces", {
+    const res = await request.post(`${SERVER_URL}/api/workspaces`, {
       data: {
         issueId,
         branch: "feature/test-branch",
@@ -47,7 +48,7 @@ test.describe("Workspaces API", () => {
   test("POST /api/workspaces requires issueId and branch", async ({
     request,
   }) => {
-    const res = await request.post("http://localhost:3001/api/workspaces", {
+    const res = await request.post(`${SERVER_URL}/api/workspaces`, {
       data: { issueId },
     });
     expect(res.status()).toBe(400);
@@ -58,7 +59,7 @@ test.describe("Workspaces API", () => {
   }) => {
     // Create workspace
     const createRes = await request.post(
-      "http://localhost:3001/api/workspaces",
+      `${SERVER_URL}/api/workspaces`,
       {
         data: {
           issueId,
@@ -68,7 +69,7 @@ test.describe("Workspaces API", () => {
     );
     const { id } = await createRes.json();
 
-    const res = await request.get(`http://localhost:3001/api/workspaces/${id}`);
+    const res = await request.get(`${SERVER_URL}/api/workspaces/${id}`);
     expect(res.ok()).toBeTruthy();
     const body = await res.json();
     expect(body.branch).toBe("feature/get-test");
@@ -79,7 +80,7 @@ test.describe("Workspaces API", () => {
     request,
   }) => {
     const res = await request.get(
-      `http://localhost:3001/api/issues/${issueId}/workspaces`,
+      `${SERVER_URL}/api/issues/${issueId}/workspaces`,
     );
     expect(res.ok()).toBeTruthy();
     const body = await res.json();
@@ -88,7 +89,7 @@ test.describe("Workspaces API", () => {
 
   test("PATCH /api/workspaces/:id updates status", async ({ request }) => {
     const createRes = await request.post(
-      "http://localhost:3001/api/workspaces",
+      `${SERVER_URL}/api/workspaces`,
       {
         data: {
           issueId,
@@ -99,7 +100,7 @@ test.describe("Workspaces API", () => {
     const { id } = await createRes.json();
 
     const res = await request.patch(
-      `http://localhost:3001/api/workspaces/${id}`,
+      `${SERVER_URL}/api/workspaces/${id}`,
       {
         data: { status: "idle" },
       },
@@ -111,7 +112,7 @@ test.describe("Workspaces API", () => {
     request,
   }) => {
     const createRes = await request.post(
-      "http://localhost:3001/api/workspaces",
+      `${SERVER_URL}/api/workspaces`,
       {
         data: {
           issueId,
@@ -122,7 +123,7 @@ test.describe("Workspaces API", () => {
     const { id } = await createRes.json();
 
     const res = await request.delete(
-      `http://localhost:3001/api/workspaces/${id}`,
+      `${SERVER_URL}/api/workspaces/${id}`,
     );
     expect(res.ok()).toBeTruthy();
     const body = await res.json();
