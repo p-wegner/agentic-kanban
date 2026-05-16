@@ -134,6 +134,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
   const [workspaces, setWorkspaces] = useState<WorkspaceResponse[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
+  const [quickDropdownOpen, setQuickDropdownOpen] = useState(false);
   const [selectedWorkspace, setSelectedWorkspace] = useState<string | null>(initialWorkspaceId ?? null);
   const [activeSession, setActiveSession] = useState<string | null>(initialSessionId || null);
   const [diff, setDiff] = useState<DiffResponse | null>(null);
@@ -388,6 +389,38 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
       setIsDirect(false);
       setShowCreate(false);
       // If auto-launched, set active session to show terminal immediately
+      if (result.sessionId) {
+        setSelectedWorkspace(result.id);
+        setActiveSession(result.sessionId);
+        setLastPrompt(`${issue.title}${issue.description ? `\n\n${issue.description}` : ""}`);
+      }
+      await fetchWorkspaces();
+      onWorkspaceChange?.();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to create workspace");
+    } finally {
+      setActionLoading(false);
+    }
+  }
+
+  async function handleQuickLaunch(withPlanMode: boolean) {
+    setActionLoading(true);
+    setError(null);
+    setCompletedMessages([]);
+    setQuickDropdownOpen(false);
+    try {
+      const body: Record<string, unknown> = {
+        issueId: issue.id,
+        isDirect: false,
+        requiresReview,
+        planMode: withPlanMode,
+        branch: suggestion,
+      };
+      const result = await apiFetch<WorkspaceResponse & { sessionId?: string }>("/api/workspaces", {
+        method: "POST",
+        body: JSON.stringify(body),
+      });
+      setShowCreate(false);
       if (result.sessionId) {
         setSelectedWorkspace(result.id);
         setActiveSession(result.sessionId);
@@ -699,12 +732,46 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
           ) : workspaces.length === 0 && !showCreate ? (
             <div className="text-center py-6">
               <p className="text-sm text-gray-500 mb-3">No workspaces yet</p>
-              <button
-                onClick={() => setShowCreate(true)}
-                className="text-sm bg-blue-600 text-white px-4 py-1.5 rounded hover:bg-blue-700"
-              >
-                New Workspace
-              </button>
+              <div className="inline-flex relative">
+                <button
+                  onClick={() => handleQuickLaunch(false)}
+                  disabled={actionLoading}
+                  className="text-sm bg-blue-600 text-white px-4 py-1.5 rounded-l hover:bg-blue-700 disabled:opacity-50"
+                >
+                  {actionLoading ? "Creating..." : "New Workspace"}
+                </button>
+                <button
+                  onClick={() => setQuickDropdownOpen((o) => !o)}
+                  disabled={actionLoading}
+                  className="text-sm bg-blue-600 text-white px-2 py-1.5 rounded-r border-l border-blue-500 hover:bg-blue-700 disabled:opacity-50"
+                  title="More options"
+                >
+                  ▾
+                </button>
+                {quickDropdownOpen && (
+                  <div className="absolute top-full left-0 mt-1 w-52 bg-white border border-gray-200 rounded shadow-lg z-10">
+                    <button
+                      onClick={() => handleQuickLaunch(false)}
+                      className="w-full text-left text-sm px-3 py-2 hover:bg-gray-50"
+                    >
+                      New Workspace
+                    </button>
+                    <button
+                      onClick={() => handleQuickLaunch(true)}
+                      className="w-full text-left text-sm px-3 py-2 hover:bg-gray-50"
+                    >
+                      New Workspace with Plan Mode
+                    </button>
+                    <div className="border-t border-gray-100" />
+                    <button
+                      onClick={() => { setQuickDropdownOpen(false); setShowCreate(true); }}
+                      className="w-full text-left text-sm px-3 py-2 hover:bg-gray-50 text-gray-500"
+                    >
+                      Custom options...
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
           ) : null}
 
@@ -1117,12 +1184,46 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
           )}
 
           {workspaces.length > 0 && (
-            <button
-              onClick={() => setShowCreate(true)}
-              className="text-sm text-blue-600 hover:text-blue-700"
-            >
-              + New Workspace
-            </button>
+            <div className="inline-flex relative">
+              <button
+                onClick={() => handleQuickLaunch(false)}
+                disabled={actionLoading}
+                className="text-sm text-blue-600 hover:text-blue-700 disabled:opacity-50"
+              >
+                + New Workspace
+              </button>
+              <button
+                onClick={() => setQuickDropdownOpen((o) => !o)}
+                disabled={actionLoading}
+                className="text-sm text-blue-600 hover:text-blue-700 disabled:opacity-50 px-1"
+                title="More options"
+              >
+                ▾
+              </button>
+              {quickDropdownOpen && (
+                <div className="absolute bottom-full left-0 mb-1 w-52 bg-white border border-gray-200 rounded shadow-lg z-10">
+                  <button
+                    onClick={() => handleQuickLaunch(false)}
+                    className="w-full text-left text-sm px-3 py-2 hover:bg-gray-50"
+                  >
+                    New Workspace
+                  </button>
+                  <button
+                    onClick={() => handleQuickLaunch(true)}
+                    className="w-full text-left text-sm px-3 py-2 hover:bg-gray-50"
+                  >
+                    New Workspace with Plan Mode
+                  </button>
+                  <div className="border-t border-gray-100" />
+                  <button
+                    onClick={() => { setQuickDropdownOpen(false); setShowCreate(true); }}
+                    className="w-full text-left text-sm px-3 py-2 hover:bg-gray-50 text-gray-500"
+                  >
+                    Custom options...
+                  </button>
+                </div>
+              )}
+            </div>
           )}
         </div>
       </div>
