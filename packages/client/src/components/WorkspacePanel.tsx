@@ -250,7 +250,10 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
     fetchWorkspaces();
     // Load preferences (output_parser, mock_agent)
     apiFetch<Record<string, string>>("/api/preferences/settings")
-      .then((s) => setPrefs(s))
+      .then((s) => {
+        setPrefs(s);
+        setRequiresReview(s.auto_review !== "false");
+      })
       .catch(() => {});
   }, [issue.id]);
 
