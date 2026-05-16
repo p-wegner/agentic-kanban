@@ -3,7 +3,7 @@ import { Command } from "commander";
 import { migrate } from "drizzle-orm/libsql/migrator";
 import { db } from "./db/index.js";
 import { projects, projectStatuses, preferences, workspaces, issues, issueTags, sessions } from "@agentic-kanban/shared/schema";
-import { eq, inArray } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { detectRepoInfo } from "./services/git-info.service.js";
 
@@ -243,6 +243,255 @@ program
       }
       console.log("\nThese worktrees can be removed manually with:");
       console.log("  git worktree remove --force <path>");
+      process.exit(0);
+    } catch (err) {
+      console.error("Error:", err instanceof Error ? err.message : String(err));
+      process.exit(1);
+    }
+  });
+
+async function getActiveProjectId(): Promise<string> {
+  const pref = await db.select().from(preferences).where(eq(preferences.key, "activeProjectId")).limit(1);
+  if (pref.length === 0) throw new Error("No active project. Run `pnpm cli -- register <path>` first.");
+  return pref[0].value;
+}
+
+// ── issue commands ────────────────────────────────────────────────────────────
+
+const issueCmd = program.command("issue").description("Manage issues");
+
+issueCmd
+  .command("list")
+  .description("List issues for the active project")
+  .option("-s, --status <status>", "Filter by status name (e.g. Todo, 'In Progress')")
+  .option("-p, --priority <priority>", "Filter by priority (low, medium, high, critical)")
+  .action(async (options: { status?: string; priority?: string }) => {
+    try {
+      await runMigrations();
+      const projectId = await getActiveProjectId();
+
+      let rows = await db
+        .select({
+          issueNumber: issues.issueNumber,
+          id: issues.id,
+          title: issues.title,
+          priority: issues.priority,
+          statusName: projectStatuses.name,
+          createdAt: issues.createdAt,
+        })
+        .from(issues)
+        .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
+        .where(eq(issues.projectId, projectId));
+
+      if (options.status) rows = rows.filter((r) => r.statusName === options.status);
+      if (options.priority) rows = rows.filter((r) => r.priority === options.priority);
+
+      if (rows.length === 0) {
+        console.log("No issues found.");
+        process.exit(0);
+      }
+
+      for (const r of rows) {
+        const num = r.issueNumber != null ? `#${r.issueNumber}` : "(no number)";
+        console.log(`  ${num.padEnd(6)} [${r.priority.padEnd(8)}] [${r.statusName}] ${r.title}`);
+        console.log(`         id: ${r.id}`);
+      }
+      process.exit(0);
+    } catch (err) {
+      console.error("Error:", err instanceof Error ? err.message : String(err));
+      process.exit(1);
+    }
+  });
+
+issueCmd
+  .command("create <title>")
+  .description("Create a new issue in the active project")
+  .option("-d, --description <description>", "Issue description")
+  .option("-p, --priority <priority>", "Priority: low, medium, high, critical (default: medium)")
+  .option("-s, --status <status>", "Initial status name (default: Todo)")
+  .action(async (title: string, options: { description?: string; priority?: string; status?: string }) => {
+    try {
+      await runMigrations();
+      const projectId = await getActiveProjectId();
+
+      const statuses = await db
+        .select()
+        .from(projectStatuses)
+        .where(eq(projectStatuses.projectId, projectId))
+        .orderBy(projectStatuses.sortOrder);
+
+      if (statuses.length === 0) throw new Error("No statuses found for project.");
+
+      let statusId = statuses[0].id;
+      if (options.status) {
+        const found = statuses.find((s) => s.name === options.status);
+        if (!found) {
+          console.error(`Status '${options.status}' not found. Available: ${statuses.map((s) => s.name).join(", ")}`);
+          process.exit(1);
+        }
+        statusId = found.id;
+      }
+
+      const maxResult = await db
+        .select({ maxNum: sql<number | null>`max(${issues.issueNumber})` })
+        .from(issues)
+        .where(eq(issues.projectId, projectId));
+      const issueNumber = (maxResult[0]?.maxNum ?? 0) + 1;
+
+      const id = randomUUID();
+      const now = new Date().toISOString();
+
+      await db.insert(issues).values({
+        id,
+        issueNumber,
+        title,
+        description: options.description ?? null,
+        priority: (options.priority as "low" | "medium" | "high" | "critical") ?? "medium",
+        sortOrder: 0,
+        statusId,
+        projectId,
+        createdAt: now,
+        updatedAt: now,
+      });
+
+      console.log(`Created issue #${issueNumber}: ${title}`);
+      console.log(`  id: ${id}`);
+      process.exit(0);
+    } catch (err) {
+      console.error("Error:", err instanceof Error ? err.message : String(err));
+      process.exit(1);
+    }
+  });
+
+issueCmd
+  .command("move <issue-id> <status>")
+  .description("Move an issue to a different status")
+  .action(async (issueId: string, statusName: string) => {
+    try {
+      await runMigrations();
+
+      const issueRows = await db.select().from(issues).where(eq(issues.id, issueId)).limit(1);
+      if (issueRows.length === 0) {
+        console.error(`Issue '${issueId}' not found.`);
+        process.exit(1);
+      }
+
+      const statuses = await db
+        .select()
+        .from(projectStatuses)
+        .where(eq(projectStatuses.projectId, issueRows[0].projectId));
+      const target = statuses.find((s) => s.name === statusName);
+      if (!target) {
+        console.error(`Status '${statusName}' not found. Available: ${statuses.map((s) => s.name).join(", ")}`);
+        process.exit(1);
+      }
+
+      await db.update(issues).set({ statusId: target.id, updatedAt: new Date().toISOString() }).where(eq(issues.id, issueId));
+
+      console.log(`Moved issue to '${statusName}'`);
+      process.exit(0);
+    } catch (err) {
+      console.error("Error:", err instanceof Error ? err.message : String(err));
+      process.exit(1);
+    }
+  });
+
+// ── workspace commands ────────────────────────────────────────────────────────
+
+const wsCmd = program.command("workspace").description("Manage workspaces");
+
+wsCmd
+  .command("list")
+  .description("List workspaces for the active project")
+  .option("-s, --status <status>", "Filter by status: active, idle, closed")
+  .action(async (options: { status?: string }) => {
+    try {
+      await runMigrations();
+      const projectId = await getActiveProjectId();
+
+      const projectIssues = await db
+        .select({ id: issues.id })
+        .from(issues)
+        .where(eq(issues.projectId, projectId));
+
+      if (projectIssues.length === 0) {
+        console.log("No workspaces found (no issues in active project).");
+        process.exit(0);
+      }
+
+      const issueIds = projectIssues.map((i) => i.id);
+      let rows = await db.select().from(workspaces).where(inArray(workspaces.issueId, issueIds));
+
+      if (options.status) rows = rows.filter((r) => r.status === options.status);
+
+      if (rows.length === 0) {
+        console.log("No workspaces found.");
+        process.exit(0);
+      }
+
+      for (const ws of rows) {
+        console.log(`  [${ws.status.padEnd(6)}] ${ws.branch}`);
+        console.log(`         id: ${ws.id}`);
+        if (ws.workingDir) console.log(`         dir: ${ws.workingDir}`);
+      }
+      process.exit(0);
+    } catch (err) {
+      console.error("Error:", err instanceof Error ? err.message : String(err));
+      process.exit(1);
+    }
+  });
+
+wsCmd
+  .command("create <issue-id>")
+  .description("Create a git worktree workspace for an issue")
+  .option("-b, --branch <branch>", "Branch name (default: workspace/<issue-id-short>)")
+  .option("--base <baseBranch>", "Base branch to create from (default: project default branch)")
+  .action(async (issueId: string, options: { branch?: string; base?: string }) => {
+    try {
+      await runMigrations();
+
+      const issueRows = await db.select().from(issues).where(eq(issues.id, issueId)).limit(1);
+      if (issueRows.length === 0) {
+        console.error(`Issue '${issueId}' not found.`);
+        process.exit(1);
+      }
+
+      const projectRows = await db
+        .select()
+        .from(projects)
+        .where(eq(projects.id, issueRows[0].projectId))
+        .limit(1);
+      if (projectRows.length === 0 || !projectRows[0].repoPath) {
+        console.error("Project has no repo path configured.");
+        process.exit(1);
+      }
+
+      const project = projectRows[0];
+      const { createWorktree } = await import("./services/git.service.js");
+
+      const branchName = options.branch ?? `workspace/${issueId.slice(0, 8)}`;
+      const baseBranch = options.base ?? project.defaultBranch;
+      const worktreePath = await createWorktree(project.repoPath, branchName, baseBranch);
+
+      const id = randomUUID();
+      const now = new Date().toISOString();
+
+      await db.insert(workspaces).values({
+        id,
+        issueId,
+        branch: branchName,
+        workingDir: worktreePath,
+        baseBranch,
+        isDirect: false,
+        status: "active",
+        createdAt: now,
+        updatedAt: now,
+      });
+
+      console.log(`Created workspace for issue '${issueId}'`);
+      console.log(`  id: ${id}`);
+      console.log(`  branch: ${branchName}`);
+      console.log(`  dir: ${worktreePath}`);
       process.exit(0);
     } catch (err) {
       console.error("Error:", err instanceof Error ? err.message : String(err));

@@ -17,6 +17,7 @@ export function registerListIssues(server: McpServer) {
     async ({ projectId, status, priority, tag, blocked }) => {
       let query = db.select({
         id: schema.issues.id,
+        issueNumber: schema.issues.issueNumber,
         title: schema.issues.title,
         description: schema.issues.description,
         priority: schema.issues.priority,

@@ -1,0 +1,9 @@
+{
+  "editedFiles": [
+    "packages/mcp-server/src/tools/create-issue.ts",
+    "packages/mcp-server/src/tools/list-issues.ts",
+    "packages/mcp-server/src/tools/get-issue.ts",
+    "packages/server/src/cli.ts",
+    "CLAUDE.md"
+  ]
+}
