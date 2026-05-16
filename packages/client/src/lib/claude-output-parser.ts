@@ -169,7 +169,9 @@ export class ClaudeOutputParser {
             kind: "tool_use",
             name: toolName,
             input: JSON.stringify(block.input, null, 2),
-            inputParsed: (block.input as Record<string, unknown>) || {},
+            inputParsed: (typeof block.input === "object" && block.input !== null && !Array.isArray(block.input))
+              ? block.input as Record<string, unknown>
+              : {},
           });
         }
       }
