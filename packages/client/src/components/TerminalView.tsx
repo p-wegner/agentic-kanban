@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import type { AgentOutputMessage } from "@agentic-kanban/shared";
 import { ClaudeOutputParser, type DisplayEvent } from "../lib/claude-output-parser.js";
 
@@ -22,24 +22,24 @@ interface RenderContext {
 const SCROLL_THRESHOLD = 50;
 
 function basename(path: string): string {
-  const parts = path.replace(/\\/g, "/").split("/");
+  const parts = path.replace(/\\/g, "/").replace(/\/+$/, "").split("/");
   return parts[parts.length - 1] || path;
 }
 
 function summarizeToolCall(name: string, input: Record<string, unknown>): string {
   switch (name) {
     case "Read":
-      return `Reading ${basename((input.file_path as string) || "")}`;
+      return `Reading ${basename((input.file_path as string) || "file")}`;
     case "Edit":
-      return `Editing ${basename((input.file_path as string) || "")}`;
+      return `Editing ${basename((input.file_path as string) || "file")}`;
     case "Write":
-      return `Writing ${basename((input.file_path as string) || "")}`;
+      return `Writing ${basename((input.file_path as string) || "file")}`;
     case "Bash": {
       const cmd = ((input.command as string) || "").slice(0, 80);
-      return `Running: ${cmd}`;
+      return `Running: ${cmd || "command"}`;
     }
     case "Grep":
-      return `Searching for "${input.pattern || ""}"`;
+      return `Searching for "${input.pattern || "pattern"}"`;
     case "Glob":
       return `Finding ${input.pattern || "files"}`;
     case "Agent":
@@ -61,16 +61,16 @@ export function TerminalView({ messages, connectionState, parseOutput = "true", 
   const [expandedSections, setExpandedSections] = useState<Set<number>>(new Set());
   const [isAtBottom, setIsAtBottom] = useState(true);
   const [showScrollButton, setShowScrollButton] = useState(false);
-  const [markers, setMarkers] = useState<Array<{ idx: number; color: string }>>([]);
+  const [markers, setMarkers] = useState<Array<{ idx: number; color: string; pct: number }>>([]);
 
-  const toggleExpand = (idx: number) => {
+  const toggleExpand = useCallback((idx: number) => {
     setExpandedSections((prev) => {
       const next = new Set(prev);
       if (next.has(idx)) next.delete(idx);
       else next.add(idx);
       return next;
     });
-  };
+  }, []);
 
   // Re-parse all messages when they change or parseOutput toggles
   useEffect(() => {
@@ -119,8 +119,8 @@ export function TerminalView({ messages, connectionState, parseOutput = "true", 
     if (!preRef.current) return;
     const el = preRef.current;
     const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < SCROLL_THRESHOLD;
-    setIsAtBottom(nearBottom);
-    setShowScrollButton(!nearBottom);
+    setIsAtBottom((prev) => prev === nearBottom ? prev : nearBottom);
+    setShowScrollButton((prev) => prev === !nearBottom ? prev : !nearBottom);
   };
 
   const scrollToBottom = () => {
@@ -192,7 +192,7 @@ export function TerminalView({ messages, connectionState, parseOutput = "true", 
     </>
   );
 
-  // Scrollbar markers
+  // Scrollbar markers — position computed here, not during render
   useLayoutEffect(() => {
     if (!preRef.current || !isParsed) {
       setMarkers([]);
@@ -218,7 +218,8 @@ export function TerminalView({ messages, connectionState, parseOutput = "true", 
         default: color = "bg-gray-600";
       }
 
-      newMarkers.push({ idx, color });
+      const pct = (el instanceof HTMLElement ? el.offsetTop : 0) / container.scrollHeight * 100;
+      newMarkers.push({ idx, color, pct });
     });
 
     setMarkers(newMarkers);
@@ -227,16 +228,14 @@ export function TerminalView({ messages, connectionState, parseOutput = "true", 
   const scrollIndicator = isParsed && markers.length > 0 && (
     <div className="absolute top-0 right-0 bottom-0 w-3 z-10">
       {markers.map((m) => {
-        const el = preRef.current?.querySelector(`[data-event-idx="${m.idx}"]`) as HTMLElement;
-        if (!el || !preRef.current) return null;
-        const pct = (el.offsetTop / preRef.current.scrollHeight) * 100;
+        const el = preRef.current?.querySelector(`[data-event-idx="${m.idx}"]`) as HTMLElement | null;
         return (
           <div
             key={m.idx}
             className={`absolute right-0 w-1.5 h-1 rounded-full ${m.color} cursor-pointer opacity-60 hover:opacity-100 hover:w-2 transition-all`}
-            style={{ top: `${pct}%` }}
+            style={{ top: `${m.pct}%` }}
             onClick={() => {
-              if (preRef.current) {
+              if (el && preRef.current) {
                 preRef.current.scrollTop = el.offsetTop - 20;
               }
             }}
