@@ -1,25 +1,12 @@
 {
   "editedFiles": [
     "C:/andrena/agentic-kanban/.claude/hooks/.smart-hooks-state.json",
-    "packages/shared/drizzle/0018_agent_skills.sql",
-    "packages/shared/drizzle/0019_workspace_skill.sql",
-    "packages/shared/drizzle/meta/_journal.json",
-    "packages/shared/src/schema/agent-skills.ts",
-    "packages/shared/src/schema/index.ts",
-    "packages/shared/src/schema/workspaces.ts",
-    "packages/server/src/routes/agent-skills.ts",
-    "packages/server/src/routes/index.ts",
-    "packages/mcp-server/src/tools/list-agent-skills.ts",
-    "packages/mcp-server/src/tools/get-agent-skill.ts",
-    "packages/mcp-server/src/tools/create-agent-skill.ts",
-    "packages/mcp-server/src/index.ts",
-    "packages/server/src/cli.ts",
-    "packages/server/src/db/seed.ts",
-    "packages/server/src/routes/workspaces.ts",
-    "packages/mcp-server/src/tools/start-workspace.ts",
-    "packages/server/src/__tests__/api.test.ts",
-    "packages/client/src/components/SettingsPanel.tsx",
-    "packages/client/src/components/WorkspacePanel.tsx",
-    "CLAUDE.md"
+    "packages/server/src/services/board-events.ts",
+    "packages/server/src/services/session.manager.ts",
+    "packages/server/src/index.ts",
+    "packages/client/src/lib/useBoardEvents.ts",
+    "packages/client/src/routes/BoardPage.tsx",
+    "packages/client/src/components/BoardColumn.tsx",
+    "packages/client/src/components/IssueCard.tsx"
   ]
 }
