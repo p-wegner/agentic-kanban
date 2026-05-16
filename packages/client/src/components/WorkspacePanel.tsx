@@ -806,6 +806,9 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                     {ws.isDirect && (
                       <span className="ml-1.5 text-[10px] font-medium px-1.5 py-0.5 rounded bg-purple-100 text-purple-700">direct</span>
                     )}
+                    {ws.planMode && (
+                      <span className="ml-1.5 text-[10px] font-medium px-1.5 py-0.5 rounded bg-blue-100 text-blue-700">plan</span>
+                    )}
                   </span>
                   <span className={`text-xs font-medium px-1.5 py-0.5 rounded ${badgeColor}`}>
                     {ws.status}
