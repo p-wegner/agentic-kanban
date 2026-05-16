@@ -11,6 +11,8 @@ export interface UpdateProjectRequest {
   name?: string;
   description?: string;
   color?: string;
+  setupScript?: string | null;
+  setupBlocking?: boolean;
 }
 
 export interface ProjectResponse {
@@ -22,6 +24,8 @@ export interface ProjectResponse {
   repoName: string;
   defaultBranch: string;
   remoteUrl: string | null;
+  setupScript: string | null;
+  setupBlocking: boolean;
   createdAt: string;
   updatedAt: string;
 }

@@ -5,6 +5,7 @@ import { eq } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import * as gitService from "../git-service.js";
 import { notifyBoard } from "../notify.js";
+import { runSetupScript } from "@agentic-kanban/shared/lib/setup-script";
 
 export function registerStartWorkspace(server: McpServer) {
   server.tool(
@@ -30,7 +31,7 @@ export function registerStartWorkspace(server: McpServer) {
       let resolvedBaseBranch = baseBranch;
       const issue = issues[0];
       const projectRows = await db
-        .select({ repoPath: schema.projects.repoPath, defaultBranch: schema.projects.defaultBranch })
+        .select({ repoPath: schema.projects.repoPath, defaultBranch: schema.projects.defaultBranch, setupScript: schema.projects.setupScript })
         .from(schema.projects)
         .where(eq(schema.projects.id, issue.projectId))
         .limit(1);
@@ -56,6 +57,21 @@ export function registerStartWorkspace(server: McpServer) {
           worktreePath = resolvedRepoPath;
         } else {
           worktreePath = await gitService.createWorktree(resolvedRepoPath, branchName, resolvedBaseBranch);
+        }
+
+        // Run setup script if configured
+        const setupScript = projectRows[0].setupScript;
+        if (setupScript) {
+          try {
+            const result = await runSetupScript(worktreePath, setupScript);
+            if (result.exitCode === 0) {
+              console.log(`[mcp] setup complete: workspaceId=${id}`);
+            } else {
+              console.warn(`[mcp] setup failed (exit ${result.exitCode}): ${result.stderr || result.stdout}`);
+            }
+          } catch (err) {
+            console.warn(`[mcp] setup error: ${err instanceof Error ? err.message : String(err)}`);
+          }
         }
 
         // Read agent settings to store on workspace
