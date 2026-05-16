@@ -61,6 +61,7 @@ export interface ParsedToolResultEvent {
 export interface ParsedTaskStartedEvent {
   kind: "task_started";
   taskId: string;
+  toolUseId: string;
   description: string;
   taskType: string;
 }
@@ -161,6 +162,7 @@ export class ClaudeOutputParser {
         return [{
           kind: "task_started",
           taskId: (obj.task_id as string) || "",
+          toolUseId: (obj.tool_use_id as string) || "",
           description: (obj.description as string) || "",
           taskType: (obj.task_type as string) || "",
         }];
