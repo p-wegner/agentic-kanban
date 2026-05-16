@@ -29,6 +29,12 @@ test.describe("Board workspace summary", () => {
     issueId = (await issueRes.json()).id;
   });
 
+  test.afterAll(async ({ request }) => {
+    if (issueId) {
+      await request.delete(`${SERVER_URL}/api/issues/${issueId}`);
+    }
+  });
+
   test("board returns no workspaceSummary for issues without workspaces", async ({
     request,
   }) => {

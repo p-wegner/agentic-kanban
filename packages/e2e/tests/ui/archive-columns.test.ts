@@ -6,6 +6,8 @@ test.describe("Archive Column Group UI", () => {
   let doneStatusId: string;
   let cancelledStatusId: string;
   let todoStatusId: string;
+  let suffix: string;
+  const createdIssueIds: string[] = [];
 
   test.beforeAll(async ({ request }) => {
     const projectsRes = await request.get(`${SERVER_URL}/api/projects`);
@@ -23,22 +25,30 @@ test.describe("Archive Column Group UI", () => {
     cancelledStatusId = cancelledStatus ? cancelledStatus.id : statuses[4].id;
     todoStatusId = todoStatus ? todoStatus.id : statuses[0].id;
 
-    // Create issues in Done and Cancelled columns so they have counts
-    const suffix = Date.now().toString(36);
-    await request.post(`${SERVER_URL}/api/issues`, {
+    suffix = Date.now().toString(36);
+    const doneRes = await request.post(`${SERVER_URL}/api/issues`, {
       data: {
         title: `ArchiveDoneTest ${suffix}`,
         statusId: doneStatusId,
         projectId,
       },
     });
-    await request.post(`${SERVER_URL}/api/issues`, {
+    createdIssueIds.push((await doneRes.json()).id);
+
+    const cancelledRes = await request.post(`${SERVER_URL}/api/issues`, {
       data: {
         title: `ArchiveCancelledTest ${suffix}`,
         statusId: cancelledStatusId,
         projectId,
       },
     });
+    createdIssueIds.push((await cancelledRes.json()).id);
+  });
+
+  test.afterAll(async ({ request }) => {
+    for (const id of createdIssueIds) {
+      await request.delete(`${SERVER_URL}/api/issues/${id}`);
+    }
   });
 
   test("board shows Completed button with archive counts", async ({ page }) => {

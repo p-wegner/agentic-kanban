@@ -5,15 +5,14 @@ test.describe("Board API", () => {
   let projectId: string;
   let todoStatusId: string;
   let doneStatusId: string;
+  const createdIssueIds: string[] = [];
   const suffix = Date.now().toString(36);
 
   test.beforeAll(async ({ request }) => {
-    // Get the project created by global setup
     const projectsRes = await request.get(`${SERVER_URL}/api/projects`);
     const projects = await projectsRes.json();
     projectId = projects[0].id;
 
-    // Create unique statuses for this test run
     const todoRes = await request.post(
       `${SERVER_URL}/api/projects/${projectId}/statuses`,
       { data: { name: `Board Todo ${suffix}`, sortOrder: 0 } },
@@ -26,13 +25,23 @@ test.describe("Board API", () => {
     );
     doneStatusId = (await doneRes.json()).id;
 
-    // Create issues
-    await request.post(`${SERVER_URL}/api/issues`, {
+    const issue1Res = await request.post(`${SERVER_URL}/api/issues`, {
       data: { title: `Board task 1 ${suffix}`, statusId: todoStatusId, projectId },
     });
-    await request.post(`${SERVER_URL}/api/issues`, {
+    createdIssueIds.push((await issue1Res.json()).id);
+
+    const issue2Res = await request.post(`${SERVER_URL}/api/issues`, {
       data: { title: `Board task 2 ${suffix}`, statusId: doneStatusId, projectId },
     });
+    createdIssueIds.push((await issue2Res.json()).id);
+  });
+
+  test.afterAll(async ({ request }) => {
+    for (const id of createdIssueIds) {
+      await request.delete(`${SERVER_URL}/api/issues/${id}`);
+    }
+    // Note: no DELETE endpoint for statuses — they accumulate but use unique suffixes
+    // so they don't interfere with tests. A future DELETE /statuses/:id endpoint would fix this.
   });
 
   test("GET /api/projects/:id/board returns statuses with nested issues", async ({
@@ -66,7 +75,6 @@ test.describe("Board API", () => {
   test("Board endpoint includes all statuses even with no issues", async ({
     request,
   }) => {
-    // Create empty status
     await request.post(
       `${SERVER_URL}/api/projects/${projectId}/statuses`,
       { data: { name: `Review ${suffix}`, sortOrder: 2 } },

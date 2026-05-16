@@ -4,6 +4,7 @@ import { SERVER_URL, SERVER_PORT } from "../helpers/port.js";
 test.describe("Board Events API", () => {
   let projectId: string;
   let statusId: string;
+  const createdIssueIds: string[] = [];
 
   test.beforeAll(async ({ request }) => {
     const projectsRes = await request.get(`${SERVER_URL}/api/projects`);
@@ -16,6 +17,12 @@ test.describe("Board Events API", () => {
     const statuses = await statusesRes.json();
     const todoStatus = statuses.find((s: { name: string }) => s.name === "Todo");
     statusId = todoStatus ? todoStatus.id : statuses[0].id;
+  });
+
+  test.afterAll(async ({ request }) => {
+    for (const id of createdIssueIds) {
+      await request.delete(`${SERVER_URL}/api/issues/${id}`);
+    }
   });
 
   test("WS /ws/board/:projectId receives board_changed event on issue create", async ({
@@ -43,15 +50,16 @@ test.describe("Board Events API", () => {
     // Small delay to ensure WS is connected
     await page.waitForTimeout(500);
 
-    // Create an issue via API
+    const suffix = Date.now().toString(36);
     const issueRes = await request.post(`${SERVER_URL}/api/issues`, {
       data: {
-        title: "Board events test issue",
+        title: `Board events test issue ${suffix}`,
         statusId,
         projectId,
       },
     });
     expect(issueRes.status()).toBe(201);
+    createdIssueIds.push((await issueRes.json()).id);
 
     // Wait for the board_changed event
     const messageStr = await wsMessagePromise;

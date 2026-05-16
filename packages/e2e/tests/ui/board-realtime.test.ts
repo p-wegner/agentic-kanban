@@ -4,6 +4,7 @@ import { SERVER_URL } from "../helpers/port.js";
 test.describe("Board Real-time Updates", () => {
   let projectId: string;
   let statusId: string;
+  const createdIssueIds: string[] = [];
 
   test.beforeAll(async ({ request }) => {
     const projectsRes = await request.get(`${SERVER_URL}/api/projects`);
@@ -18,15 +19,21 @@ test.describe("Board Real-time Updates", () => {
     statusId = todoStatus ? todoStatus.id : statuses[0].id;
   });
 
+  test.afterAll(async ({ request }) => {
+    for (const id of createdIssueIds) {
+      await request.delete(`${SERVER_URL}/api/issues/${id}`);
+    }
+  });
+
   test("board updates when issue created via API", async ({ page, request }) => {
     await page.goto("/");
     await page.waitForSelector("h2");
 
-    // Create an issue via API
     const uniqueTitle = `RT create test ${Date.now()}`;
-    await request.post(`${SERVER_URL}/api/issues`, {
+    const createRes = await request.post(`${SERVER_URL}/api/issues`, {
       data: { title: uniqueTitle, statusId, projectId },
     });
+    createdIssueIds.push((await createRes.json()).id);
 
     // Board should auto-refresh and show the new issue
     await expect(
@@ -41,6 +48,7 @@ test.describe("Board Real-time Updates", () => {
       data: { title: uniqueTitle, statusId, projectId },
     });
     const { id: issueId } = await issueRes.json();
+    createdIssueIds.push(issueId);
 
     // Get the "Done" status
     const statusesRes = await request.get(

@@ -58,6 +58,8 @@ test.describe("Workspace Panel UI", () => {
 test.describe("Workspace Diff and Merge UI", () => {
   let projectId: string;
   let todoStatusId: string;
+  const createdWorkspaceIds: string[] = [];
+  const createdIssueIds: string[] = [];
 
   test.beforeAll(async ({ request }) => {
     const projectsRes = await request.get(`${SERVER_URL}/api/projects`);
@@ -70,6 +72,15 @@ test.describe("Workspace Diff and Merge UI", () => {
     const statuses = await statusesRes.json();
     const todoStatus = statuses.find((s: { name: string }) => s.name === "Todo");
     todoStatusId = todoStatus ? todoStatus.id : statuses[0].id;
+  });
+
+  test.afterAll(async ({ request }) => {
+    for (const id of createdWorkspaceIds) {
+      await request.delete(`${SERVER_URL}/api/workspaces/${id}`);
+    }
+    for (const id of createdIssueIds) {
+      await request.delete(`${SERVER_URL}/api/issues/${id}`);
+    }
   });
 
   async function openWorkspaceForIssue(page: import("@playwright/test").Page, issueTitle: string) {
@@ -100,6 +111,7 @@ test.describe("Workspace Diff and Merge UI", () => {
       data: { title: `DiffTestIssue ${suffix}`, statusId: todoStatusId, projectId },
     });
     const issueId = (await issueRes.json()).id;
+    createdIssueIds.push(issueId);
 
     const branchName = `feature/diff-test-${suffix}`;
     const wsRes = await request.post(`${SERVER_URL}/api/workspaces`, {
@@ -107,6 +119,7 @@ test.describe("Workspace Diff and Merge UI", () => {
     });
     const workspace = await wsRes.json();
     const workspaceId = workspace.id;
+    createdWorkspaceIds.push(workspaceId);
 
     // Setup workspace (retry loop per CLAUDE.md guidance)
     let setupOk = false;
@@ -152,6 +165,7 @@ test.describe("Workspace Diff and Merge UI", () => {
       data: { title: `MergeTestIssue ${suffix}`, statusId: todoStatusId, projectId },
     });
     const issueId = (await issueRes.json()).id;
+    createdIssueIds.push(issueId);
 
     const branchName = `feature/merge-test-${suffix}`;
     const wsRes = await request.post(`${SERVER_URL}/api/workspaces`, {
@@ -159,6 +173,7 @@ test.describe("Workspace Diff and Merge UI", () => {
     });
     const workspace = await wsRes.json();
     const workspaceId = workspace.id;
+    createdWorkspaceIds.push(workspaceId);
 
     // Setup workspace (retry loop)
     let setupOk = false;

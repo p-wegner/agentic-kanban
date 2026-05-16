@@ -8,6 +8,8 @@ test.describe("Session History UI", () => {
   let projectId: string;
   let statusId: string;
   const tmpFiles: string[] = [];
+  const createdWorkspaceIds: string[] = [];
+  const createdIssueIds: string[] = [];
 
   test.beforeAll(async ({ request }) => {
     const projectsRes = await request.get(`${SERVER_URL}/api/projects`);
@@ -52,11 +54,13 @@ test.describe("Session History UI", () => {
       data: { title: issueTitle, statusId, projectId },
     });
     const issueId = (await issueRes.json()).id;
+    createdIssueIds.push(issueId);
 
     const wsRes = await request.post(`${SERVER_URL}/api/workspaces`, {
       data: { issueId, branch: branchName },
     });
     const workspaceId = (await wsRes.json()).id;
+    createdWorkspaceIds.push(workspaceId);
 
     // Setup workspace
     await request.post(
@@ -117,11 +121,13 @@ test.describe("Session History UI", () => {
       data: { title: issueTitle, statusId, projectId },
     });
     const issueId = (await issueRes.json()).id;
+    createdIssueIds.push(issueId);
 
     const wsRes = await request.post(`${SERVER_URL}/api/workspaces`, {
       data: { issueId, branch: branchName },
     });
     const workspaceId = (await wsRes.json()).id;
+    createdWorkspaceIds.push(workspaceId);
 
     // Setup workspace
     await request.post(
@@ -178,9 +184,15 @@ test.describe("Session History UI", () => {
     await expect(page.locator("text=Disconnected").first()).toBeVisible({ timeout: 5000 });
   });
 
-  test.afterAll(() => {
+  test.afterAll(async ({ request }) => {
     for (const f of tmpFiles) {
       try { unlinkSync(f); } catch { /* ignore */ }
+    }
+    for (const id of createdWorkspaceIds) {
+      await request.delete(`${SERVER_URL}/api/workspaces/${id}`);
+    }
+    for (const id of createdIssueIds) {
+      await request.delete(`${SERVER_URL}/api/issues/${id}`);
     }
   });
 });
