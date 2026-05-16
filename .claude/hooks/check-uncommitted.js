@@ -16,6 +16,13 @@ if (!existsSync(DB_PATH)) {
 const db = new DatabaseSync(DB_PATH);
 
 try {
+  // Check if the DB has the expected tables (worktree DBs may be empty)
+  const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='workspaces'").all();
+  if (tables.length === 0) {
+    // No workspaces table — this is a worktree DB or uninitialized DB, skip check
+    process.exit(0);
+  }
+
   const workspaces = db
     .prepare("SELECT w.id, w.branch, w.working_dir, w.status, i.title FROM workspaces w JOIN issues i ON w.issue_id = i.id WHERE w.status = 'active'")
     .all();
