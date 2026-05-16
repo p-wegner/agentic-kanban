@@ -275,12 +275,13 @@ Current description: ${body.description?.trim() || "(none)"}`;
   router.get("/:id/dependencies", async (c) => {
     const issueId = c.req.param("id");
 
-    // "Depends on" — issues this one depends on
-    const dependsOn = await database
+    // Outgoing dependencies: this issue -> other issues
+    const outgoing = await database
       .select({
         id: issueDependencies.id,
         issueId: issueDependencies.issueId,
         dependsOnId: issueDependencies.dependsOnId,
+        type: issueDependencies.type,
         createdAt: issueDependencies.createdAt,
         issueTitle: issues.title,
         issueStatusName: projectStatuses.name,
@@ -291,12 +292,13 @@ Current description: ${body.description?.trim() || "(none)"}`;
       .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
       .where(eq(issueDependencies.issueId, issueId));
 
-    // "Blocked by" — issues that depend on this one
-    const blockedBy = await database
+    // Incoming dependencies: other issues -> this issue
+    const incoming = await database
       .select({
         id: issueDependencies.id,
         issueId: issueDependencies.issueId,
         dependsOnId: issueDependencies.dependsOnId,
+        type: issueDependencies.type,
         createdAt: issueDependencies.createdAt,
         issueTitle: issues.title,
         issueStatusName: projectStatuses.name,
@@ -307,20 +309,26 @@ Current description: ${body.description?.trim() || "(none)"}`;
       .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
       .where(eq(issueDependencies.dependsOnId, issueId));
 
-    return c.json({ dependsOn, blockedBy });
+    return c.json({ dependencies: [...outgoing, ...incoming] });
   });
 
   // POST /api/issues/:id/dependencies — add dependency with cycle detection
   router.post("/:id/dependencies", async (c) => {
     const issueId = c.req.param("id");
     const body = await c.req.json();
-    const { dependsOnId } = body;
+    const { dependsOnId, type } = body;
 
     if (!dependsOnId) {
       return c.json({ error: "dependsOnId is required" }, 400);
     }
     if (dependsOnId === issueId) {
       return c.json({ error: "An issue cannot depend on itself" }, 400);
+    }
+
+    const depType = type || "depends_on";
+    const validTypes = ["depends_on", "blocked_by", "related_to", "duplicates", "parent_of", "child_of"];
+    if (!validTypes.includes(depType)) {
+      return c.json({ error: `Invalid dependency type. Must be one of: ${validTypes.join(", ")}` }, 400);
     }
 
     // Verify both issues exist and are in the same project
@@ -335,10 +343,12 @@ Current description: ${body.description?.trim() || "(none)"}`;
       return c.json({ error: "Cannot add dependencies across projects" }, 400);
     }
 
-    // Cycle detection: DFS from dependsOnId following dependency edges
-    const wouldCycle = await wouldCreateCycle(database, issueId, dependsOnId, sourceIssue[0].projectId);
-    if (wouldCycle) {
-      return c.json({ error: "Adding this dependency would create a cycle" }, 409);
+    // Cycle detection: only for directional types (depends_on, blocked_by, parent_of, child_of)
+    if (depType === "depends_on" || depType === "blocked_by" || depType === "parent_of" || depType === "child_of") {
+      const wouldCycle = await wouldCreateCycle(database, issueId, dependsOnId, sourceIssue[0].projectId);
+      if (wouldCycle) {
+        return c.json({ error: "Adding this dependency would create a cycle" }, 409);
+      }
     }
 
     const id = randomUUID();
@@ -347,6 +357,7 @@ Current description: ${body.description?.trim() || "(none)"}`;
         id,
         issueId,
         dependsOnId,
+        type: depType,
         createdAt: new Date().toISOString(),
       });
     } catch (err: any) {
@@ -358,16 +369,16 @@ Current description: ${body.description?.trim() || "(none)"}`;
 
     options?.boardEvents?.broadcast(sourceIssue[0].projectId, "dependency_added");
 
-    return c.json({ id }, 201);
+    return c.json({ id, type: depType }, 201);
   });
 
-  // DELETE /api/issues/:id/dependencies/:dependsOnId — remove dependency
-  router.delete("/:id/dependencies/:dependsOnId", async (c) => {
+  // DELETE /api/issues/:id/dependencies/:depId — remove dependency by row ID
+  router.delete("/:id/dependencies/:depId", async (c) => {
     const issueId = c.req.param("id");
-    const dependsOnId = c.req.param("dependsOnId");
+    const depId = c.req.param("depId");
 
     await database.delete(issueDependencies)
-      .where(and(eq(issueDependencies.issueId, issueId), eq(issueDependencies.dependsOnId, dependsOnId)));
+      .where(and(eq(issueDependencies.id, depId), eq(issueDependencies.issueId, issueId)));
 
     // Resolve projectId for broadcast
     const rows = await database.select({ projectId: issues.projectId }).from(issues).where(eq(issues.id, issueId)).limit(1);

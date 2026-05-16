@@ -2,7 +2,7 @@
 import { Command } from "commander";
 import { migrate } from "drizzle-orm/libsql/migrator";
 import { db } from "./db/index.js";
-import { projects, projectStatuses, preferences, workspaces, issues, issueTags, sessions, agentSkills } from "@agentic-kanban/shared/schema";
+import { projects, projectStatuses, preferences, workspaces, issues, issueTags, sessions, agentSkills, issueDependencies, DEPENDENCY_TYPES } from "@agentic-kanban/shared/schema";
 import { eq, inArray, sql } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { detectRepoInfo } from "./services/git-info.service.js";
@@ -694,6 +694,159 @@ skillCmd
       });
       console.log(`Created skill '${name}'`);
       console.log(`  id: ${id}`);
+      process.exit(0);
+    } catch (err) {
+      console.error("Error:", err instanceof Error ? err.message : String(err));
+      process.exit(1);
+    }
+  });
+
+// ── dependency commands ─────────────────────────────────────────────────────────
+
+const depCmd = issueCmd.command("dependency").description("Manage issue dependencies");
+
+depCmd
+  .command("list <issue-id>")
+  .description("List dependencies for an issue")
+  .action(async (issueId: string) => {
+    try {
+      await runMigrations();
+
+      // Outgoing: this issue depends on / relates to others
+      const outgoing = await db
+        .select({
+          id: issueDependencies.id,
+          type: issueDependencies.type,
+          targetTitle: issues.title,
+          targetNumber: issues.issueNumber,
+          targetStatusName: projectStatuses.name,
+        })
+        .from(issueDependencies)
+        .innerJoin(issues, eq(issueDependencies.dependsOnId, issues.id))
+        .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
+        .where(eq(issueDependencies.issueId, issueId));
+
+      // Incoming: others depend on / relate to this issue
+      const incoming = await db
+        .select({
+          id: issueDependencies.id,
+          type: issueDependencies.type,
+          sourceTitle: issues.title,
+          sourceNumber: issues.issueNumber,
+          sourceStatusName: projectStatuses.name,
+        })
+        .from(issueDependencies)
+        .innerJoin(issues, eq(issueDependencies.issueId, issues.id))
+        .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
+        .where(eq(issueDependencies.dependsOnId, issueId));
+
+      if (outgoing.length === 0 && incoming.length === 0) {
+        console.log("No dependencies found.");
+        process.exit(0);
+      }
+
+      if (outgoing.length > 0) {
+        console.log("Outgoing:");
+        for (const dep of outgoing) {
+          const num = dep.targetNumber != null ? `#${dep.targetNumber}` : "(no number)";
+          console.log(`  [${dep.type}] ${num} ${dep.targetTitle} (${dep.targetStatusName})`);
+          console.log(`    id: ${dep.id}`);
+        }
+      }
+
+      if (incoming.length > 0) {
+        console.log("Incoming:");
+        for (const dep of incoming) {
+          const num = dep.sourceNumber != null ? `#${dep.sourceNumber}` : "(no number)";
+          console.log(`  [${dep.type}] ${num} ${dep.sourceTitle} (${dep.sourceStatusName})`);
+          console.log(`    id: ${dep.id}`);
+        }
+      }
+      process.exit(0);
+    } catch (err) {
+      console.error("Error:", err instanceof Error ? err.message : String(err));
+      process.exit(1);
+    }
+  });
+
+depCmd
+  .command("add <issue-id> <target-id>")
+  .description("Add a dependency between two issues")
+  .option("-t, --type <type>", "Dependency type: depends_on, blocked_by, related_to, duplicates, parent_of, child_of (default: depends_on)")
+  .action(async (issueId: string, targetId: string, options: { type?: string }) => {
+    try {
+      await runMigrations();
+
+      const depType = options.type || "depends_on";
+      const validTypes = ["depends_on", "blocked_by", "related_to", "duplicates", "parent_of", "child_of"];
+      if (!validTypes.includes(depType)) {
+        console.error(`Invalid type '${depType}'. Valid types: ${validTypes.join(", ")}`);
+        process.exit(1);
+      }
+
+      if (issueId === targetId) {
+        console.error("An issue cannot depend on itself.");
+        process.exit(1);
+      }
+
+      const [sourceIssue, targetIssue] = await Promise.all([
+        db.select({ projectId: issues.projectId }).from(issues).where(eq(issues.id, issueId)).limit(1),
+        db.select({ projectId: issues.projectId }).from(issues).where(eq(issues.id, targetId)).limit(1),
+      ]);
+
+      if (sourceIssue.length === 0) {
+        console.error(`Issue '${issueId}' not found.`);
+        process.exit(1);
+      }
+      if (targetIssue.length === 0) {
+        console.error(`Issue '${targetId}' not found.`);
+        process.exit(1);
+      }
+      if (sourceIssue[0].projectId !== targetIssue[0].projectId) {
+        console.error("Cannot add dependencies across projects.");
+        process.exit(1);
+      }
+
+      const id = randomUUID();
+      try {
+        await db.insert(issueDependencies).values({
+          id,
+          issueId,
+          dependsOnId: targetId,
+          type: depType as typeof DEPENDENCY_TYPES[number],
+          createdAt: new Date().toISOString(),
+        });
+      } catch (err: any) {
+        if (err.message?.includes("UNIQUE constraint")) {
+          console.error("This dependency already exists.");
+          process.exit(1);
+        }
+        throw err;
+      }
+
+      console.log(`Added '${depType}' dependency: ${issueId} -> ${targetId}`);
+      console.log(`  id: ${id}`);
+      process.exit(0);
+    } catch (err) {
+      console.error("Error:", err instanceof Error ? err.message : String(err));
+      process.exit(1);
+    }
+  });
+
+depCmd
+  .command("remove <dependency-id>")
+  .description("Remove a dependency by its ID")
+  .action(async (dependencyId: string) => {
+    try {
+      await runMigrations();
+
+      const rows = await db.delete(issueDependencies).where(eq(issueDependencies.id, dependencyId)).returning();
+      if (rows.length === 0) {
+        console.error(`Dependency '${dependencyId}' not found.`);
+        process.exit(1);
+      }
+
+      console.log(`Removed dependency '${dependencyId}'.`);
       process.exit(0);
     } catch (err) {
       console.error("Error:", err instanceof Error ? err.message : String(err));

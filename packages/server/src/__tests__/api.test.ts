@@ -32,6 +32,7 @@ const MIGRATION_FILES = [
   "../../../shared/drizzle/0017_agent_config.sql",
   "../../../shared/drizzle/0018_agent_skills.sql",
   "../../../shared/drizzle/0019_workspace_skill.sql",
+  "../../../shared/drizzle/0018_dependency_types.sql",
 ];
 
 function createTestApp() {
