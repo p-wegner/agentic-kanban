@@ -27,9 +27,9 @@ test.describe("Board Events API", () => {
     await page.waitForSelector("h2");
 
     // Set up WebSocket listener that filters for issue_created
-    const wsMessagePromise = page.evaluate((pid) => {
+    const wsMessagePromise = page.evaluate(([pid, port]) => {
       return new Promise<string>((resolve) => {
-        const ws = new WebSocket(`ws://localhost:${SERVER_PORT}/ws/board/${pid}`);
+        const ws = new WebSocket(`ws://localhost:${port}/ws/board/${pid}`);
         ws.onmessage = (event) => {
           const data = JSON.parse(event.data as string);
           if (data.type === "board_changed" && data.reason === "issue_created") {
@@ -38,7 +38,7 @@ test.describe("Board Events API", () => {
           }
         };
       });
-    }, projectId);
+    }, [projectId, SERVER_PORT] as [string, number]);
 
     // Small delay to ensure WS is connected
     await page.waitForTimeout(500);
@@ -80,9 +80,9 @@ test.describe("Board Events API", () => {
     await page.waitForSelector("h2");
 
     // Set up WS listener that filters for issue_updated
-    const wsMessagePromise = page.evaluate((pid) => {
+    const wsMessagePromise = page.evaluate(([pid, port]) => {
       return new Promise<string>((resolve) => {
-        const ws = new WebSocket(`ws://localhost:${SERVER_PORT}/ws/board/${pid}`);
+        const ws = new WebSocket(`ws://localhost:${port}/ws/board/${pid}`);
         ws.onmessage = (event) => {
           const data = JSON.parse(event.data as string);
           if (data.type === "board_changed" && data.reason === "issue_updated") {
@@ -91,7 +91,7 @@ test.describe("Board Events API", () => {
           }
         };
       });
-    }, projectId);
+    }, [projectId, SERVER_PORT] as [string, number]);
 
     await page.waitForTimeout(500);
 
@@ -125,9 +125,9 @@ test.describe("Board Events API", () => {
     await page.waitForSelector("h2");
 
     // Set up WS listener that filters for issue_deleted
-    const wsMessagePromise = page.evaluate((pid) => {
+    const wsMessagePromise = page.evaluate(([pid, port]) => {
       return new Promise<string>((resolve) => {
-        const ws = new WebSocket(`ws://localhost:${SERVER_PORT}/ws/board/${pid}`);
+        const ws = new WebSocket(`ws://localhost:${port}/ws/board/${pid}`);
         ws.onmessage = (event) => {
           const data = JSON.parse(event.data as string);
           if (data.type === "board_changed" && data.reason === "issue_deleted") {
@@ -136,7 +136,7 @@ test.describe("Board Events API", () => {
           }
         };
       });
-    }, projectId);
+    }, [projectId, SERVER_PORT] as [string, number]);
 
     await page.waitForTimeout(500);
 

@@ -125,12 +125,10 @@ Every feature that has a UI component must be visually verified using the `playw
 
 The script prints a banner showing detected ports, e.g.: `[dev] Worktree detected (feature/2-proper-devserver-setup) — server:3003 client:5175`
 
-**Environment variables available to agents** (set by both `scripts/dev.mjs` and `agent.service.ts`):
-- `KANBAN_SERVER_PORT` — the server port for this worktree
-- `KANBAN_CLIENT_PORT` — the client port for this worktree
-- `PORT` — server port (same value)
-- `VITE_PORT` — client port (same value)
-- `SERVER_PORT` — used by MCP server for notifications
+**Environment variables available to agents**:
+- Set by `scripts/dev.mjs`: `PORT`, `VITE_PORT`, `SERVER_PORT`, `KANBAN_SERVER_PORT`, `KANBAN_CLIENT_PORT`
+- Set by `agent.service.ts` (passed to spawned agents): `KANBAN_SERVER_PORT`, `KANBAN_CLIENT_PORT`, `SERVER_PORT`, `PORT`
+- Agents should read `KANBAN_SERVER_PORT` / `KANBAN_CLIENT_PORT` to determine their ports
 
 **CRITICAL: Never kill ALL node processes.** Other agents may be running in separate worktrees with their own dev servers. Instead:
 - Kill by specific port: `Get-NetTCPConnection -LocalPort <port> | Select-Object -ExpandProperty OwningProcess | ForEach-Object { Stop-Process -Id $_ -Force }`

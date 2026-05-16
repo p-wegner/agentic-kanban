@@ -46,7 +46,8 @@ function branchHash(branchName) {
   for (let i = 0; i < branchName.length; i++) {
     hash = (hash * 31 + branchName.charCodeAt(i)) & 0xffff;
   }
-  return (hash % 100) + 1;
+  // Use range 101-1000 to avoid collisions with issue numbers 1-100
+  return (hash % 900) + 101;
 }
 
 const { isWorktree, branch } = detectWorktree();
@@ -58,6 +59,10 @@ if (isWorktree && branch) {
   const offset = issueNum !== null ? issueNum : branchHash(branch);
   serverPort = DEFAULT_SERVER_PORT + offset;
   clientPort = DEFAULT_CLIENT_PORT + offset;
+  if (serverPort > 60000) {
+    console.error(`[dev] ERROR: computed server port ${serverPort} exceeds 60000. Use a different branch name.`);
+    process.exit(1);
+  }
   console.log(`[dev] Worktree detected (${branch}) — server:${serverPort} client:${clientPort}`);
 } else {
   console.log(`[dev] Main checkout — server:${serverPort} client:${clientPort}`);

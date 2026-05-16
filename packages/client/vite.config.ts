@@ -9,6 +9,7 @@ export default defineConfig({
   plugins: [react(), tailwindcss()],
   server: {
     port: clientPort,
+    strictPort: true,
     proxy: {
       "/api": `http://localhost:${serverPort}`,
       "/health": `http://localhost:${serverPort}`,
