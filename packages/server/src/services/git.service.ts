@@ -55,14 +55,21 @@ export async function createWorktree(
   branch: string,
   baseBranch?: string,
 ): Promise<string> {
-  // Check if a worktree for this branch already exists — reuse it
+  // Check if a worktree for this branch already exists — reuse if healthy
   const existing = await listWorktrees(repoPath);
   const match = existing.find(
     (wt) => wt.branch === branch || wt.branch === `refs/heads/${branch}`,
   );
   if (match) {
-    // Normalize to platform path separators (git --porcelain uses forward slashes)
-    return match.path.replace(/\//g, sep);
+    // Verify the branch still exists — merged/deleted branches leave prunable worktrees
+    try {
+      await execGit(["rev-parse", "--verify", branch], repoPath);
+      // Branch exists — reuse the worktree
+      return match.path.replace(/\//g, sep);
+    } catch {
+      // Branch gone (merged away) — prune stale worktree and recreate
+      await execGit(["worktree", "remove", "--force", match.path], repoPath);
+    }
   }
 
   // Sanitize branch name for directory use
