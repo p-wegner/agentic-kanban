@@ -5,6 +5,8 @@ import { eq } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { notifyBoard } from "../notify.js";
 
+const VALID_TYPES = ["depends_on", "blocked_by", "related_to", "duplicates", "parent_of", "child_of"] as const;
+
 async function wouldCreateCycle(issueId: string, dependsOnId: string, projectId: string): Promise<boolean> {
   const allDeps = await db
     .select({
@@ -40,15 +42,18 @@ async function wouldCreateCycle(issueId: string, dependsOnId: string, projectId:
 export function registerAddDependency(server: McpServer) {
   server.tool(
     "add_dependency",
-    "Add a dependency link: issue A depends on issue B. Rejects cycles and self-dependencies.",
+    "Add a dependency link between two issues. Types: depends_on (prerequisite), blocked_by (inverse of depends_on), related_to (symmetric link), duplicates (marks as duplicate), parent_of (parent-child), child_of (inverse of parent_of). Rejects cycles for directional types and self-dependencies.",
     {
       issueId: z.string().describe("The issue ID that has the dependency"),
-      dependsOnId: z.string().describe("The issue ID of the prerequisite"),
+      dependsOnId: z.string().describe("The issue ID of the target issue"),
+      type: z.enum(VALID_TYPES).default("depends_on").describe("Dependency type: depends_on, blocked_by, related_to, duplicates, parent_of, child_of"),
     },
-    async ({ issueId, dependsOnId }) => {
+    async ({ issueId, dependsOnId, type }) => {
       if (dependsOnId === issueId) {
         return { content: [{ type: "text" as const, text: "Error: An issue cannot depend on itself" }] };
       }
+
+      const depType = type || "depends_on";
 
       const [sourceIssue, targetIssue] = await Promise.all([
         db.select({ projectId: schema.issues.projectId }).from(schema.issues).where(eq(schema.issues.id, issueId)).limit(1),
@@ -61,9 +66,12 @@ export function registerAddDependency(server: McpServer) {
         return { content: [{ type: "text" as const, text: "Error: Cannot add dependencies across projects" }] };
       }
 
-      const wouldCycle = await wouldCreateCycle(issueId, dependsOnId, sourceIssue[0].projectId);
-      if (wouldCycle) {
-        return { content: [{ type: "text" as const, text: "Error: Adding this dependency would create a cycle" }] };
+      // Cycle detection for directional types only
+      if (depType === "depends_on" || depType === "blocked_by" || depType === "parent_of" || depType === "child_of") {
+        const wouldCycle = await wouldCreateCycle(issueId, dependsOnId, sourceIssue[0].projectId);
+        if (wouldCycle) {
+          return { content: [{ type: "text" as const, text: "Error: Adding this dependency would create a cycle" }] };
+        }
       }
 
       const id = randomUUID();
@@ -72,6 +80,7 @@ export function registerAddDependency(server: McpServer) {
           id,
           issueId,
           dependsOnId,
+          type: depType,
           createdAt: new Date().toISOString(),
         });
       } catch (err: any) {
@@ -83,7 +92,7 @@ export function registerAddDependency(server: McpServer) {
 
       notifyBoard(sourceIssue[0].projectId, "mcp_dependency_added");
 
-      return { content: [{ type: "text" as const, text: JSON.stringify({ id, issueId, dependsOnId }, null, 2) }] };
+      return { content: [{ type: "text" as const, text: JSON.stringify({ id, issueId, dependsOnId, type: depType }, null, 2) }] };
     },
   );
 }

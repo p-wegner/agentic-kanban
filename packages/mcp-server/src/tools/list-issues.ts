@@ -57,7 +57,7 @@ export function registerListIssues(server: McpServer) {
       if (blocked !== undefined) {
         const issueIds = results.map(i => i.id);
         const depRows = issueIds.length > 0 ? await db
-          .select({ issueId: schema.issueDependencies.issueId, dependsOnId: schema.issueDependencies.dependsOnId })
+          .select({ issueId: schema.issueDependencies.issueId, dependsOnId: schema.issueDependencies.dependsOnId, type: schema.issueDependencies.type })
           .from(schema.issueDependencies)
           .where(inArray(schema.issueDependencies.issueId, issueIds)) : [];
 
@@ -74,7 +74,8 @@ export function registerListIssues(server: McpServer) {
 
         const blockedSet = new Set<string>();
         for (const dep of depRows) {
-          if (depStatusMap.get(dep.dependsOnId) !== "Done" && depStatusMap.get(dep.dependsOnId) !== "AI Reviewed") {
+          const isBlockingType = dep.type === "depends_on" || dep.type === "blocked_by";
+          if (isBlockingType && depStatusMap.get(dep.dependsOnId) !== "Done" && depStatusMap.get(dep.dependsOnId) !== "AI Reviewed") {
             blockedSet.add(dep.issueId);
           }
         }
