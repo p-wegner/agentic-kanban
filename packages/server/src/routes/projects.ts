@@ -416,6 +416,7 @@ export function createProjectsRoute(database: Database = db) {
         .select({
           issueId: issueDependencies.issueId,
           dependsOnId: issueDependencies.dependsOnId,
+          type: issueDependencies.type,
         })
         .from(issueDependencies)
         .where(inArray(issueDependencies.issueId, issueIds));
@@ -432,19 +433,24 @@ export function createProjectsRoute(database: Database = db) {
         for (const ds of depStatuses) depStatusMap.set(ds.id, ds.statusName);
       }
 
-      // Group deps by issue
-      const depsByIssue = new Map<string, string[]>();
+      // Group blocking deps by issue (only depends_on and blocked_by types cause blocking)
+      const depsByIssue = new Map<string, { dependsOnId: string; type: string }[]>();
       for (const dep of depRows) {
         let arr = depsByIssue.get(dep.issueId);
         if (!arr) { arr = []; depsByIssue.set(dep.issueId, arr); }
-        arr.push(dep.dependsOnId);
+        arr.push({ dependsOnId: dep.dependsOnId, type: dep.type });
       }
 
       for (let i = 0; i < issuesWithBlocked.length; i++) {
         const issue = issuesWithBlocked[i];
         const deps = depsByIssue.get(issue.id);
         if (deps && deps.length > 0) {
-          const isBlocked = deps.some(depId => { const s = depStatusMap.get(depId); return s !== "Done" && s !== "AI Reviewed"; });
+          const isBlocked = deps.some(dep => {
+            const isBlockingType = dep.type === "depends_on" || dep.type === "blocked_by";
+            if (!isBlockingType) return false;
+            const s = depStatusMap.get(dep.dependsOnId);
+            return s !== "Done" && s !== "AI Reviewed";
+          });
           issuesWithBlocked[i] = { ...issue, isBlocked };
         }
       }

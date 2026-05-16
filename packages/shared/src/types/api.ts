@@ -182,10 +182,13 @@ export interface AgentOutputMessage {
   exitCode?: number | null;
 }
 
+import type { DependencyType } from "../schema/index.js";
+
 export interface DependencyItem {
   id: string;
   issueId: string;
   dependsOnId: string;
+  type: DependencyType;
   createdAt: string;
   issueTitle: string;
   issueStatusName: string;
@@ -193,6 +196,5 @@ export interface DependencyItem {
 }
 
 export interface DependencyInfo {
-  dependsOn: DependencyItem[];
-  blockedBy: DependencyItem[];
+  dependencies: DependencyItem[];
 }

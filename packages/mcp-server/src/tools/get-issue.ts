@@ -33,11 +33,12 @@ export function registerGetIssue(server: McpServer) {
         return { content: [{ type: "text" as const, text: `Issue ${issueId} not found` }] };
       }
 
-      const [workspaces, dependsOn, blockedBy] = await Promise.all([
+      const [workspaces, outgoing, incoming] = await Promise.all([
         db.select().from(schema.workspaces).where(eq(schema.workspaces.issueId, issueId)),
         db.select({
           id: schema.issueDependencies.id,
           dependsOnId: schema.issueDependencies.dependsOnId,
+          type: schema.issueDependencies.type,
           createdAt: schema.issueDependencies.createdAt,
           issueTitle: schema.issues.title,
           issueStatusName: schema.projectStatuses.name,
@@ -50,6 +51,7 @@ export function registerGetIssue(server: McpServer) {
         db.select({
           id: schema.issueDependencies.id,
           issueId: schema.issueDependencies.issueId,
+          type: schema.issueDependencies.type,
           createdAt: schema.issueDependencies.createdAt,
           issueTitle: schema.issues.title,
           issueStatusName: schema.projectStatuses.name,
@@ -61,12 +63,17 @@ export function registerGetIssue(server: McpServer) {
           .where(eq(schema.issueDependencies.dependsOnId, issueId)),
       ]);
 
-      const isBlocked = dependsOn.some((dep) => dep.issueStatusName !== "Done" && dep.issueStatusName !== "AI Reviewed");
+      // An issue is blocked if it has unmet "depends_on" or "blocked_by" dependencies
+      const isBlocked = [...outgoing, ...incoming].some((dep) => {
+        const type = (dep as any).type;
+        return (type === "depends_on" || type === "blocked_by") &&
+          dep.issueStatusName !== "Done" && dep.issueStatusName !== "AI Reviewed";
+      });
 
       const result = {
         ...issues[0],
         workspaces,
-        dependencies: { dependsOn, blockedBy },
+        dependencies: { outgoing, incoming },
         isBlocked,
       };
 
