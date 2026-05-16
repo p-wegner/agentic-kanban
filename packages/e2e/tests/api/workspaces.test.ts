@@ -5,14 +5,14 @@ test.describe("Workspaces API", () => {
   let projectId: string;
   let statusId: string;
   let issueId: string;
+  const suffix = Date.now().toString(36);
+  const createdWorkspaceIds: string[] = [];
 
   test.beforeAll(async ({ request }) => {
-    // Get the default project
     const projectsRes = await request.get(`${SERVER_URL}/api/projects`);
     const projects = await projectsRes.json();
     projectId = projects[0].id;
 
-    // Get statuses for the project
     const statusesRes = await request.get(
       `${SERVER_URL}/api/projects/${projectId}/statuses`,
     );
@@ -20,10 +20,9 @@ test.describe("Workspaces API", () => {
     const todoStatus = statuses.find((s: { name: string }) => s.name === "Todo");
     statusId = todoStatus ? todoStatus.id : statuses[0].id;
 
-    // Create an issue for workspace tests
     const issueRes = await request.post(`${SERVER_URL}/api/issues`, {
       data: {
-        title: "Workspace test issue",
+        title: `Workspace test issue ${suffix}`,
         statusId,
         projectId,
       },
@@ -31,18 +30,28 @@ test.describe("Workspaces API", () => {
     issueId = (await issueRes.json()).id;
   });
 
+  test.afterAll(async ({ request }) => {
+    for (const id of createdWorkspaceIds) {
+      await request.delete(`${SERVER_URL}/api/workspaces/${id}`);
+    }
+    if (issueId) {
+      await request.delete(`${SERVER_URL}/api/issues/${issueId}`);
+    }
+  });
+
   test("POST /api/workspaces creates a workspace", async ({ request }) => {
     const res = await request.post(`${SERVER_URL}/api/workspaces`, {
       data: {
         issueId,
-        branch: "feature/test-branch",
+        branch: `feature/test-branch-${suffix}`,
       },
     });
     expect(res.status()).toBe(201);
     const body = await res.json();
-    expect(body.branch).toBe("feature/test-branch");
+    expect(body.branch).toBe(`feature/test-branch-${suffix}`);
     expect(body.status).toBe("active");
     expect(body.id).toBeDefined();
+    createdWorkspaceIds.push(body.id);
   });
 
   test("POST /api/workspaces requires issueId and branch", async ({
@@ -57,23 +66,23 @@ test.describe("Workspaces API", () => {
   test("GET /api/workspaces/:id returns workspace with issue info", async ({
     request,
   }) => {
-    // Create workspace
     const createRes = await request.post(
       `${SERVER_URL}/api/workspaces`,
       {
         data: {
           issueId,
-          branch: "feature/get-test",
+          branch: `feature/get-test-${suffix}`,
         },
       },
     );
     const { id } = await createRes.json();
+    createdWorkspaceIds.push(id);
 
     const res = await request.get(`${SERVER_URL}/api/workspaces/${id}`);
     expect(res.ok()).toBeTruthy();
     const body = await res.json();
-    expect(body.branch).toBe("feature/get-test");
-    expect(body.issue.title).toBe("Workspace test issue");
+    expect(body.branch).toBe(`feature/get-test-${suffix}`);
+    expect(body.issue.title).toBe(`Workspace test issue ${suffix}`);
   });
 
   test("GET /api/issues/:id/workspaces lists workspaces", async ({
@@ -93,11 +102,12 @@ test.describe("Workspaces API", () => {
       {
         data: {
           issueId,
-          branch: "feature/patch-test",
+          branch: `feature/patch-test-${suffix}`,
         },
       },
     );
     const { id } = await createRes.json();
+    createdWorkspaceIds.push(id);
 
     const res = await request.patch(
       `${SERVER_URL}/api/workspaces/${id}`,
@@ -116,7 +126,7 @@ test.describe("Workspaces API", () => {
       {
         data: {
           issueId,
-          branch: "feature/delete-test",
+          branch: `feature/delete-test-${suffix}`,
         },
       },
     );
@@ -128,5 +138,6 @@ test.describe("Workspaces API", () => {
     expect(res.ok()).toBeTruthy();
     const body = await res.json();
     expect(body.success).toBe(true);
+    // Don't push to createdWorkspaceIds — already deleted
   });
 });

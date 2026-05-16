@@ -2,11 +2,32 @@ import { test, expect } from "@playwright/test";
 import { SERVER_URL } from "../helpers/port.js";
 
 test.describe("Settings API", () => {
+  const createdIssueIds: string[] = [];
+  const createdWorkspaceIds: string[] = [];
+
+  test.afterAll(async ({ request }) => {
+    // Clean up issues/workspaces created during tests
+    for (const id of createdWorkspaceIds) {
+      await request.delete(`${SERVER_URL}/api/workspaces/${id}`);
+    }
+    for (const id of createdIssueIds) {
+      await request.delete(`${SERVER_URL}/api/issues/${id}`);
+    }
+    // Reset settings to defaults
+    await request.put(`${SERVER_URL}/api/preferences/settings`, {
+      data: {
+        agent_command: "",
+        agent_args: "",
+        output_parser: "true",
+        mock_agent: "false",
+      },
+    });
+  });
+
   test("GET /api/preferences/settings returns defaults", async ({ request }) => {
     const res = await request.get(`${SERVER_URL}/api/preferences/settings`);
     expect(res.ok()).toBeTruthy();
     const body = await res.json();
-    // Should return an object (may be empty or have existing saved values)
     expect(typeof body).toBe("object");
   });
 
@@ -25,7 +46,6 @@ test.describe("Settings API", () => {
   });
 
   test("GET /api/preferences/settings returns saved values", async ({ request }) => {
-    // First save
     await request.put(`${SERVER_URL}/api/preferences/settings`, {
       data: {
         agent_command: "claude-verify",
@@ -35,7 +55,6 @@ test.describe("Settings API", () => {
       },
     });
 
-    // Then read back
     const res = await request.get(`${SERVER_URL}/api/preferences/settings`);
     expect(res.ok()).toBeTruthy();
     const body = await res.json();
@@ -60,7 +79,6 @@ test.describe("Settings API", () => {
   });
 
   test("workspace launch uses agent_command from preferences", async ({ request }) => {
-    // Save agent_command preference
     await request.put(`${SERVER_URL}/api/preferences/settings`, {
       data: {
         agent_command: 'node -e "console.log(\'pref-agent\')"',
@@ -68,7 +86,6 @@ test.describe("Settings API", () => {
       },
     });
 
-    // Create issue + workspace
     const projectsRes = await request.get(`${SERVER_URL}/api/projects`);
     const projects = await projectsRes.json();
     const projectId = projects[0].id;
@@ -80,42 +97,30 @@ test.describe("Settings API", () => {
     const todoStatus = statuses.find((s: { name: string }) => s.name === "Todo");
     const statusId = todoStatus ? todoStatus.id : statuses[0].id;
 
+    const suffix = Date.now().toString(36);
     const issueRes = await request.post(`${SERVER_URL}/api/issues`, {
-      data: { title: "Settings agent test", statusId, projectId },
+      data: { title: `Settings agent test ${suffix}`, statusId, projectId },
     });
     const issueId = (await issueRes.json()).id;
+    createdIssueIds.push(issueId);
 
     const wsRes = await request.post(`${SERVER_URL}/api/workspaces`, {
-      data: { issueId, branch: "feature/settings-agent-test" },
+      data: { issueId, branch: `feature/settings-agent-test-${suffix}` },
     });
     const workspaceId = (await wsRes.json()).id;
+    createdWorkspaceIds.push(workspaceId);
 
-    // Setup worktree so launch has a workingDir
     await request.post(`${SERVER_URL}/api/workspaces/${workspaceId}/setup`, {
       data: {},
     });
 
-    // Launch with no explicit agentCommand — should use preference
     const launchRes = await request.post(
       `${SERVER_URL}/api/workspaces/${workspaceId}/launch`,
       { data: { prompt: "test prompt" } },
     );
 
-    // Should succeed (201) since agent_command pref provides a valid command
     expect(launchRes.status()).toBe(201);
     const launchBody = await launchRes.json();
     expect(launchBody.sessionId).toBeDefined();
-  });
-});
-
-test.afterAll(async ({ request }) => {
-  // Clean up: reset settings to defaults
-  await request.put(`${SERVER_URL}/api/preferences/settings`, {
-    data: {
-      agent_command: "",
-      agent_args: "",
-      output_parser: "true",
-      mock_agent: "false",
-    },
   });
 });

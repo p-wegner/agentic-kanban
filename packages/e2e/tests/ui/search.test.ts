@@ -5,6 +5,8 @@ test.describe("Search UI", () => {
   let projectId: string;
   let todoStatusId: string;
   let inProgressStatusId: string;
+  let suffix: string;
+  const createdIssueIds: string[] = [];
 
   test.beforeAll(async ({ request }) => {
     const projectsRes = await request.get(`${SERVER_URL}/api/projects`);
@@ -20,9 +22,8 @@ test.describe("Search UI", () => {
     todoStatusId = todoStatus ? todoStatus.id : statuses[0].id;
     inProgressStatusId = inProgressStatus ? inProgressStatus.id : statuses[1].id;
 
-    // Create issues with distinct titles for search testing
-    const suffix = Date.now().toString(36);
-    await request.post(`${SERVER_URL}/api/issues`, {
+    suffix = Date.now().toString(36);
+    const a = await request.post(`${SERVER_URL}/api/issues`, {
       data: {
         title: `SearchAlpha ${suffix}`,
         description: "Alpha description for search",
@@ -31,7 +32,9 @@ test.describe("Search UI", () => {
         projectId,
       },
     });
-    await request.post(`${SERVER_URL}/api/issues`, {
+    createdIssueIds.push((await a.json()).id);
+
+    const b = await request.post(`${SERVER_URL}/api/issues`, {
       data: {
         title: `SearchBeta ${suffix}`,
         description: "Beta description for search",
@@ -40,7 +43,9 @@ test.describe("Search UI", () => {
         projectId,
       },
     });
-    await request.post(`${SERVER_URL}/api/issues`, {
+    createdIssueIds.push((await b.json()).id);
+
+    const g = await request.post(`${SERVER_URL}/api/issues`, {
       data: {
         title: `SearchGamma ${suffix}`,
         description: "Gamma description for search",
@@ -49,6 +54,13 @@ test.describe("Search UI", () => {
         projectId,
       },
     });
+    createdIssueIds.push((await g.json()).id);
+  });
+
+  test.afterAll(async ({ request }) => {
+    for (const id of createdIssueIds) {
+      await request.delete(`${SERVER_URL}/api/issues/${id}`);
+    }
   });
 
   test("typing in search box filters issue cards", async ({ page }) => {

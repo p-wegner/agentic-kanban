@@ -5,10 +5,8 @@ test.describe("Board UI", () => {
   test("shows kanban columns with expected names", async ({ page }) => {
     await page.goto("/");
 
-    // Wait for the board to load
     await page.waitForSelector("h2");
 
-    // Active columns are visible by default
     const columns = page.locator("h2");
     const names = (await columns.allTextContents()).map((n) =>
       n.replace(/\s*\d+$/, "").trim(),
@@ -17,10 +15,8 @@ test.describe("Board UI", () => {
     expect(names).toContain("In Progress");
     expect(names).toContain("In Review");
 
-    // Expand the collapsed "Completed" group to reveal Done/Cancelled
     await page.locator("button", { hasText: "Completed" }).click();
 
-    // Now all 5 columns should be visible
     const allColumns = page.locator("h2");
     const allNames = (await allColumns.allTextContents()).map((n) =>
       n.replace(/\s*\d+$/, "").trim(),
@@ -37,46 +33,73 @@ test.describe("Board UI", () => {
 });
 
 test.describe("Board interactions", () => {
-  test("create issue via inline form", async ({ page }) => {
+  let projectId: string;
+  let statusId: string;
+  const createdIssueIds: string[] = [];
+
+  test.beforeAll(async ({ request }) => {
+    const projectsRes = await request.get(`${SERVER_URL}/api/projects`);
+    const projects = await projectsRes.json();
+    projectId = projects[0].id;
+
+    const statusesRes = await request.get(
+      `${SERVER_URL}/api/projects/${projectId}/statuses`,
+    );
+    const statuses = await statusesRes.json();
+    const todoStatus = statuses.find((s: { name: string }) => s.name === "Todo");
+    statusId = todoStatus ? todoStatus.id : statuses[0].id;
+  });
+
+  test.afterAll(async ({ request }) => {
+    for (const id of createdIssueIds) {
+      await request.delete(`${SERVER_URL}/api/issues/${id}`);
+    }
+  });
+
+  test("create issue via inline form", async ({ page, request }) => {
+    const suffix = Date.now().toString(36);
+    const title = `E2E Create Test ${suffix}`;
+
     await page.goto("/");
     await page.waitForSelector("h2");
 
-    // Click "+" on the first column (Todo)
     const firstColumn = page.locator(".bg-gray-100.rounded-lg").first();
     await firstColumn.locator("button[title='Add issue']").click();
 
-    // Fill the form
     const form = page.locator("form");
     await form
       .locator("input[placeholder='Issue title']")
-      .fill("E2E Test Issue Unique 123");
+      .fill(title);
     await form
       .locator("textarea[placeholder='Description (optional)']")
       .fill("Created by e2e test");
     await form.locator("select").selectOption("high");
     await form.locator('button:has-text("Add")').click();
 
-    // Verify the issue appears (use .first() to avoid strict mode with title + description match)
     await expect(
-      page.locator("p", { hasText: "E2E Test Issue Unique 123" }).first(),
+      page.locator("p", { hasText: title }).first(),
     ).toBeVisible();
+
+    // Fetch the created issue ID for cleanup
+    const issuesRes = await request.get(
+      `${SERVER_URL}/api/issues?projectId=${projectId}`,
+    );
+    const issues = await issuesRes.json();
+    const created = issues.find((i: { title: string }) => i.title === title);
+    if (created) createdIssueIds.push(created.id);
   });
 
   test("cancel create form", async ({ page }) => {
     await page.goto("/");
     await page.waitForSelector("h2");
 
-    // Click "+" on the first column
     const firstColumn = page.locator(".bg-gray-100.rounded-lg").first();
     await firstColumn.locator("button[title='Add issue']").click();
 
-    // Verify form appears
     await expect(page.locator("form")).toBeVisible();
 
-    // Click Cancel (scope to form to avoid matching other "Cancel" buttons)
     await page.locator("form").locator('button:has-text("Cancel")').click();
 
-    // Form should be gone
     await expect(page.locator("form")).not.toBeVisible();
   });
 
@@ -84,60 +107,41 @@ test.describe("Board interactions", () => {
     page,
     request,
   }) => {
-    // Create an issue via API first
-    const projectsRes = await request.get(`${SERVER_URL}/api/projects`);
-    const projects = await projectsRes.json();
-    const projectId = projects[0].id;
-    const statusesRes = await request.get(
-      `${SERVER_URL}/api/projects/${projectId}/statuses`,
-    );
-    const statuses = await statusesRes.json();
-    const todoStatus = statuses.find((s: { name: string }) => s.name === "Todo");
-    const statusId = todoStatus ? todoStatus.id : statuses[0].id;
+    const suffix = Date.now().toString(36);
+    const title = `PanelClickTest ${suffix}`;
 
-    await request.post(`${SERVER_URL}/api/issues`, {
+    const createRes = await request.post(`${SERVER_URL}/api/issues`, {
       data: {
-        title: "PanelClickTest 999",
+        title,
         description: "Click me",
         priority: "medium",
         statusId,
         projectId,
       },
     });
+    const { id } = await createRes.json();
+    createdIssueIds.push(id);
 
     await page.goto("/");
     await page.waitForSelector("h2");
 
-    // Click the issue card (use .first() to handle any duplicates from prior tests)
-    await page.locator("p", { hasText: "PanelClickTest 999" }).first().click();
+    await page.locator("p", { hasText: title }).first().click();
 
-    // Panel should be visible with heading
     await expect(
       page.locator("h2", { hasText: "Issue Details" }),
     ).toBeVisible();
     await expect(
-      page.locator("h3", { hasText: "PanelClickTest 999" }),
+      page.locator("h3", { hasText: title }),
     ).toBeVisible();
     await expect(page.locator(".whitespace-pre-wrap", { hasText: "Click me" })).toBeVisible();
   });
 
   test("edit issue from detail panel", async ({ page, request }) => {
-    // Create an issue via API
     const editSuffix = Date.now().toString(36);
     const originalTitle = `EditTest ${editSuffix}`;
     const editedTitle = `EditedTitle ${editSuffix}`;
-    const projectsRes = await request.get(`${SERVER_URL}/api/projects`);
-    const projects = await projectsRes.json();
-    const projectId = projects[0].id;
-    const statusesRes = await request.get(
-      `${SERVER_URL}/api/projects/${projectId}/statuses`,
-    );
-    const statuses = await statusesRes.json();
-    // Use the "Todo" status specifically
-    const todoStatus = statuses.find((s: { name: string }) => s.name === "Todo");
-    const statusId = todoStatus ? todoStatus.id : statuses[0].id;
 
-    await request.post(`${SERVER_URL}/api/issues`, {
+    const createRes = await request.post(`${SERVER_URL}/api/issues`, {
       data: {
         title: originalTitle,
         description: "Before edit",
@@ -146,127 +150,94 @@ test.describe("Board interactions", () => {
         projectId,
       },
     });
+    const { id } = await createRes.json();
+    createdIssueIds.push(id);
 
     await page.goto("/");
     await page.waitForSelector("h2");
 
-    // Click the issue card
     await page.locator("p", { hasText: originalTitle }).first().click();
     await expect(
       page.locator("h2", { hasText: "Issue Details" }),
     ).toBeVisible();
 
-    // Click Edit
     await page.locator('button:has-text("Edit")').click();
     await expect(page.locator("text=Edit Issue")).toBeVisible();
 
-    // Change the title — use the panel's right-side container to scope the input
     const panel = page.locator(".fixed.right-0");
     const titleInput = panel.locator('input[type="text"]').first();
     await titleInput.clear();
     await titleInput.fill(editedTitle);
 
-    // Save
     await page.locator('button:has-text("Save")').click();
 
-    // Panel closes
     await expect(
       page.locator("h2", { hasText: "Issue Details" }),
     ).not.toBeVisible();
 
-    // Verify the edited title appears on the board
     await expect(
       page.locator("p", { hasText: editedTitle }),
     ).toBeVisible({ timeout: 10000 });
   });
 
   test("delete issue from detail panel", async ({ page, request }) => {
-    // Create an issue via API
-    const projectsRes = await request.get(`${SERVER_URL}/api/projects`);
-    const projects = await projectsRes.json();
-    const projectId = projects[0].id;
-    const statusesRes = await request.get(
-      `${SERVER_URL}/api/projects/${projectId}/statuses`,
-    );
-    const statuses = await statusesRes.json();
-    const todoStatus = statuses.find((s: { name: string }) => s.name === "Todo");
-    const statusId = todoStatus ? todoStatus.id : statuses[0].id;
+    const suffix = Date.now().toString(36);
+    const title = `DeleteTestIssue ${suffix}`;
 
     await request.post(`${SERVER_URL}/api/issues`, {
-      data: {
-        title: "DeleteTestIssue 666",
-        statusId,
-        projectId,
-      },
+      data: { title, statusId, projectId },
     });
+    // No need to track ID — the test itself deletes it via the UI
 
     await page.goto("/");
     await page.waitForSelector("h2");
 
-    // Click the issue card
-    await page.locator("p", { hasText: "DeleteTestIssue 666" }).first().click();
+    await page.locator("p", { hasText: title }).first().click();
     await expect(
       page.locator("h2", { hasText: "Issue Details" }),
     ).toBeVisible();
 
-    // Click Delete (first click shows confirm)
     await page.locator('button:has-text("Delete")').click();
     await expect(
       page.locator('button:has-text("Confirm Delete")'),
     ).toBeVisible();
 
-    // Confirm delete
     await page.locator('button:has-text("Confirm Delete")').click();
 
-    // Panel closes and issue card is gone from board
     await expect(
-      page.locator("p", { hasText: "DeleteTestIssue 666" }),
+      page.locator("p", { hasText: title }),
     ).not.toBeVisible({ timeout: 5000 });
   });
 
   test("escape closes detail panel", async ({ page, request }) => {
-    // Create an issue via API
-    const projectsRes = await request.get(`${SERVER_URL}/api/projects`);
-    const projects = await projectsRes.json();
-    const projectId = projects[0].id;
-    const statusesRes = await request.get(
-      `${SERVER_URL}/api/projects/${projectId}/statuses`,
-    );
-    const statuses = await statusesRes.json();
-    const todoStatus = statuses.find((s: { name: string }) => s.name === "Todo");
-    const statusId = todoStatus ? todoStatus.id : statuses[0].id;
+    const suffix = Date.now().toString(36);
+    const title = `EscapeTestIssue ${suffix}`;
 
-    await request.post(`${SERVER_URL}/api/issues`, {
-      data: {
-        title: "EscapeTestIssue 555",
-        statusId,
-        projectId,
-      },
+    const createRes = await request.post(`${SERVER_URL}/api/issues`, {
+      data: { title, statusId, projectId },
     });
+    const { id } = await createRes.json();
+    createdIssueIds.push(id);
 
     await page.goto("/");
     await page.waitForSelector("h2");
 
-    // Click the issue card
-    await page.locator("p", { hasText: "EscapeTestIssue 555" }).first().click();
+    await page.locator("p", { hasText: title }).first().click();
     await expect(
       page.locator("h2", { hasText: "Issue Details" }),
     ).toBeVisible();
 
-    // Press Escape
     await page.keyboard.press("Escape");
 
-    // Panel should close
     await expect(
       page.locator("h2", { hasText: "Issue Details" }),
     ).not.toBeVisible();
   });
 
   test("drag issue between columns", async ({ page, request }) => {
-    // Create an issue in Todo
-    const projectsRes = await request.get(`${SERVER_URL}/api/projects`);
-    const projects = await projectsRes.json();
-    const projectId = projects[0].id;
+    const suffix = Date.now().toString(36);
+    const title = `DragTestIssue ${suffix}`;
+
     const statuses = (
       await (
         await request.get(
@@ -280,27 +251,21 @@ test.describe("Board interactions", () => {
     const inProgressStatusId = inProgressStatus ? inProgressStatus.id : statuses[1].id;
 
     const createRes = await request.post(`${SERVER_URL}/api/issues`, {
-      data: {
-        title: "DragTestIssue 444",
-        projectId,
-        statusId: todoStatusId,
-      },
+      data: { title, projectId, statusId: todoStatusId },
     });
     const { id: issueId } = await createRes.json();
+    createdIssueIds.push(issueId);
 
     await page.goto("/");
     await page.waitForSelector("h2");
 
-    // Set up drag data and simulate drop via JS evaluation
     await page.evaluate(
       ({ iid, srcId, tgtId }) => {
-        // Set the drag bridge data
         (window as unknown as Record<string, unknown>).__dragData = {
           issueId: iid,
           sourceStatusId: srcId,
         };
 
-        // Find the "In Progress" column by its heading text
         const columns = document.querySelectorAll(".bg-gray-100.rounded-lg");
         let targetCol: Element | null = null;
         for (const col of columns) {
@@ -324,17 +289,15 @@ test.describe("Board interactions", () => {
       { iid: issueId, srcId: todoStatusId, tgtId: inProgressStatusId },
     );
 
-    // Wait for the API call and board refresh
     await page.waitForTimeout(1000);
 
-    // Verify via API that the issue moved
     const boardRes = await request.get(
       `${SERVER_URL}/api/projects/${projectId}/board`,
     );
     const board = await boardRes.json();
     const inProgressColumn = board.find((s: { name: string }) => s.name === "In Progress");
     const movedIssue = inProgressColumn.issues.find(
-      (i: { title: string }) => i.title === "DragTestIssue 444",
+      (i: { title: string }) => i.title === title,
     );
     expect(movedIssue).toBeDefined();
   });
@@ -343,7 +306,6 @@ test.describe("Board interactions", () => {
     await page.goto("/");
     await page.waitForSelector("h2");
 
-    // Intercept POST /api/issues to return 500
     await page.route("**/api/issues", (route) => {
       if (route.request().method() === "POST") {
         route.fulfill({ status: 500, body: "Server error" });
@@ -352,7 +314,6 @@ test.describe("Board interactions", () => {
       }
     });
 
-    // Click "+" and try to create
     const firstColumn = page.locator(".bg-gray-100.rounded-lg").first();
     await firstColumn.locator("button[title='Add issue']").click();
     const form = page.locator("form");
@@ -361,7 +322,6 @@ test.describe("Board interactions", () => {
       .fill("Should Fail");
     await form.locator('button:has-text("Add")').click();
 
-    // Toast notification should appear
     await expect(page.locator("text=Failed to create issue")).toBeVisible();
   });
 });

@@ -6,14 +6,15 @@ test.describe("Session History API", () => {
   let statusId: string;
   let issueId: string;
   let workspaceId: string;
+  const suffix = Date.now().toString(36);
+  const extraIssueIds: string[] = [];
+  const extraWorkspaceIds: string[] = [];
 
   test.beforeAll(async ({ request }) => {
-    // Get the default project
     const projectsRes = await request.get(`${SERVER_URL}/api/projects`);
     const projects = await projectsRes.json();
     projectId = projects[0].id;
 
-    // Get statuses for the project
     const statusesRes = await request.get(
       `${SERVER_URL}/api/projects/${projectId}/statuses`,
     );
@@ -21,20 +22,17 @@ test.describe("Session History API", () => {
     const todoStatus = statuses.find((s: { name: string }) => s.name === "Todo");
     statusId = todoStatus ? todoStatus.id : statuses[0].id;
 
-    // Create an issue
     const issueRes = await request.post(`${SERVER_URL}/api/issues`, {
-      data: { title: "Session history test issue", statusId, projectId },
+      data: { title: `Session history test issue ${suffix}`, statusId, projectId },
     });
     issueId = (await issueRes.json()).id;
 
-    // Create a workspace
     const wsRes = await request.post(`${SERVER_URL}/api/workspaces`, {
-      data: { issueId, branch: "feature/session-history-test" },
+      data: { issueId, branch: `feature/session-history-test-${suffix}` },
     });
     expect(wsRes.status()).toBe(201);
     workspaceId = (await wsRes.json()).id;
 
-    // Setup workspace (git worktree) with retries
     let setupOk = false;
     for (let attempt = 0; attempt < 3; attempt++) {
       const setupRes = await request.post(
@@ -48,6 +46,21 @@ test.describe("Session History API", () => {
       await new Promise((resolve) => setTimeout(resolve, 500));
     }
     expect(setupOk).toBe(true);
+  });
+
+  test.afterAll(async ({ request }) => {
+    for (const id of extraWorkspaceIds) {
+      await request.delete(`${SERVER_URL}/api/workspaces/${id}`);
+    }
+    for (const id of extraIssueIds) {
+      await request.delete(`${SERVER_URL}/api/issues/${id}`);
+    }
+    if (workspaceId) {
+      await request.delete(`${SERVER_URL}/api/workspaces/${workspaceId}`);
+    }
+    if (issueId) {
+      await request.delete(`${SERVER_URL}/api/issues/${issueId}`);
+    }
   });
 
   test("GET /api/sessions/:id/output returns 404 for unknown session", async ({
@@ -64,7 +77,6 @@ test.describe("Session History API", () => {
   test("GET /api/sessions/:id/output returns persisted messages after mock agent run", async ({
     request,
   }) => {
-    // Launch with a simple command that exits quickly
     const launchRes = await request.post(
       `${SERVER_URL}/api/workspaces/${workspaceId}/launch`,
       {
@@ -79,10 +91,8 @@ test.describe("Session History API", () => {
     const { sessionId } = await launchRes.json();
     expect(sessionId).toBeDefined();
 
-    // Wait for the session to complete and messages to be persisted
     await new Promise((resolve) => setTimeout(resolve, 3000));
 
-    // Fetch session output (with retry for async DB persistence)
     let messages: any[] = [];
     for (let attempt = 0; attempt < 3; attempt++) {
       const outputRes = await request.get(
@@ -97,20 +107,17 @@ test.describe("Session History API", () => {
     expect(Array.isArray(messages)).toBe(true);
     expect(messages.length).toBeGreaterThan(0);
 
-    // Verify message structure
     for (const msg of messages) {
       expect(msg).toHaveProperty("type");
       expect(msg).toHaveProperty("sessionId");
       expect(["stdout", "stderr", "exit"]).toContain(msg.type);
     }
 
-    // Should have an exit message
     const exitMessages = messages.filter(
       (m: { type: string }) => m.type === "exit",
     );
     expect(exitMessages.length).toBeGreaterThan(0);
 
-    // Cleanup: stop session if still running
     await request.post(
       `${SERVER_URL}/api/workspaces/${workspaceId}/stop`,
       { data: {} },
@@ -120,18 +127,19 @@ test.describe("Session History API", () => {
   test("messages persist in database (output available after session ends)", async ({
     request,
   }) => {
-    // Create a fresh workspace for this test
+    const persistSuffix = Date.now().toString(36);
     const issueRes = await request.post(`${SERVER_URL}/api/issues`, {
-      data: { title: "Persistence test issue", statusId, projectId },
+      data: { title: `Persistence test issue ${persistSuffix}`, statusId, projectId },
     });
     const testIssueId = (await issueRes.json()).id;
+    extraIssueIds.push(testIssueId);
 
     const wsRes = await request.post(`${SERVER_URL}/api/workspaces`, {
-      data: { issueId: testIssueId, branch: "feature/persistence-test" },
+      data: { issueId: testIssueId, branch: `feature/persistence-test-${persistSuffix}` },
     });
     const testWorkspaceId = (await wsRes.json()).id;
+    extraWorkspaceIds.push(testWorkspaceId);
 
-    // Setup workspace with retries
     let setupOk = false;
     for (let attempt = 0; attempt < 3; attempt++) {
       const setupRes = await request.post(
@@ -146,7 +154,6 @@ test.describe("Session History API", () => {
     }
     expect(setupOk).toBe(true);
 
-    // Launch agent
     const launchRes = await request.post(
       `${SERVER_URL}/api/workspaces/${testWorkspaceId}/launch`,
       {
@@ -160,10 +167,8 @@ test.describe("Session History API", () => {
 
     const { sessionId } = await launchRes.json();
 
-    // Wait for completion
     await new Promise((resolve) => setTimeout(resolve, 3000));
 
-    // Verify output is available (with retry for async DB persistence)
     let messages: any[] = [];
     for (let attempt = 0; attempt < 3; attempt++) {
       const outputRes = await request.get(

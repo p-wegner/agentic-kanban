@@ -4,39 +4,40 @@ import { SERVER_URL } from "../helpers/port.js";
 test.describe("Issues API", () => {
   let projectId: string;
   let statusId: string;
+  const createdIssueIds: string[] = [];
 
   test.beforeAll(async ({ request }) => {
-    // Get the default project
     const projectsRes = await request.get(`${SERVER_URL}/api/projects`);
     const projects = await projectsRes.json();
     projectId = projects[0].id;
 
-    // Get statuses for the project
     const statusesRes = await request.get(
       `${SERVER_URL}/api/projects/${projectId}/statuses`,
     );
     const statuses = await statusesRes.json();
-    statusId = statuses[0].id; // "Todo"
+    statusId = statuses[0].id;
   });
 
-  test("GET /api/issues returns empty array for new project", async ({
-    request,
-  }) => {
-    // Use a filter on a status with no issues instead of creating a new project
-    // (POST /api/projects now requires repoPath which points to a real git repo)
+  test.afterAll(async ({ request }) => {
+    for (const id of createdIssueIds) {
+      await request.delete(`${SERVER_URL}/api/issues/${id}`);
+    }
+  });
+
+  test("GET /api/issues returns array for project", async ({ request }) => {
     const res = await request.get(
       `${SERVER_URL}/api/issues?projectId=${projectId}`,
     );
     expect(res.ok()).toBeTruthy();
     const body = await res.json();
-    // The project has issues from other tests, but the endpoint works correctly
     expect(Array.isArray(body)).toBe(true);
   });
 
   test("POST /api/issues creates an issue", async ({ request }) => {
+    const suffix = Date.now().toString(36);
     const res = await request.post(`${SERVER_URL}/api/issues`, {
       data: {
-        title: "Test issue",
+        title: `Test issue ${suffix}`,
         description: "A test issue",
         priority: "high",
         statusId,
@@ -45,61 +46,63 @@ test.describe("Issues API", () => {
     });
     expect(res.status()).toBe(201);
     const body = await res.json();
-    expect(body.title).toBe("Test issue");
+    expect(body.title).toBe(`Test issue ${suffix}`);
     expect(body.id).toBeDefined();
+    createdIssueIds.push(body.id);
   });
 
   test("GET /api/issues returns created issue", async ({ request }) => {
-    // Create an issue first
-    await request.post(`${SERVER_URL}/api/issues`, {
+    const suffix = Date.now().toString(36);
+    const createRes = await request.post(`${SERVER_URL}/api/issues`, {
       data: {
-        title: "Another issue",
+        title: `Another issue ${suffix}`,
         statusId,
         projectId,
       },
     });
+    const created = await createRes.json();
+    createdIssueIds.push(created.id);
 
     const res = await request.get(
       `${SERVER_URL}/api/issues?projectId=${projectId}`,
     );
     const body = await res.json();
     expect(body.length).toBeGreaterThanOrEqual(1);
-    expect(body.some((i: { title: string }) => i.title === "Another issue")).toBeTruthy();
+    expect(body.some((i: { id: string }) => i.id === created.id)).toBeTruthy();
   });
 
   test("PATCH /api/issues/:id updates an issue", async ({ request }) => {
-    // Create an issue
+    const suffix = Date.now().toString(36);
     const createRes = await request.post(`${SERVER_URL}/api/issues`, {
       data: {
-        title: "To update",
+        title: `To update ${suffix}`,
         statusId,
         projectId,
       },
     });
     const { id } = await createRes.json();
+    createdIssueIds.push(id);
 
-    // Update it
     const updateRes = await request.patch(
       `${SERVER_URL}/api/issues/${id}`,
       {
-        data: { title: "Updated", priority: "critical" },
+        data: { title: `Updated ${suffix}`, priority: "critical" },
       },
     );
     expect(updateRes.ok()).toBeTruthy();
   });
 
   test("DELETE /api/issues/:id deletes an issue", async ({ request }) => {
-    // Create an issue
+    const suffix = Date.now().toString(36);
     const createRes = await request.post(`${SERVER_URL}/api/issues`, {
       data: {
-        title: "To delete",
+        title: `To delete ${suffix}`,
         statusId,
         projectId,
       },
     });
     const { id } = await createRes.json();
 
-    // Delete it
     const deleteRes = await request.delete(
       `${SERVER_URL}/api/issues/${id}`,
     );
