@@ -55,6 +55,7 @@ interface WorkspacePanelProps {
 
 const STATUS_COLORS: Record<string, string> = {
   active: "bg-green-100 text-green-700",
+  reviewing: "bg-purple-100 text-purple-700",
   idle: "bg-yellow-100 text-yellow-700",
   closed: "bg-gray-100 text-gray-500",
 };

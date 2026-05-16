@@ -91,16 +91,27 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onDragStart, tags,
       </div>
       {ws && ws.main && (
         <div
-          className="flex items-center gap-1.5 mt-1.5 text-xs cursor-pointer rounded px-1 py-0.5 -mx-1 hover:bg-gray-50 transition-colors"
+          className={`flex items-center gap-1.5 mt-1.5 text-xs cursor-pointer rounded px-1 py-0.5 -mx-1 transition-colors ${
+            ws.main.status === "reviewing" ? "bg-purple-50 hover:bg-purple-100" : "hover:bg-gray-50"
+          }`}
           title={`Workspace: ${ws.main.branch} (${ws.main.status})`}
           onClick={(e) => { e.stopPropagation(); onWorkspaceClick?.(issue, ws.main?.id); }}
         >
-          <span className={`inline-block w-2 h-2 rounded-full shrink-0 ${
-            ws.main.status === "active" ? "bg-green-500" :
-            ws.main.status === "idle" ? "bg-amber-500" :
-            "bg-gray-400"
-          }`} />
-          <span className="font-mono text-gray-600 truncate">{ws.main.branch}</span>
+          {ws.main.status === "reviewing" ? (
+            <>
+              <span className="inline-block w-2 h-2 rounded-full shrink-0 bg-purple-500 animate-pulse" />
+              <span className="font-medium text-purple-700">AI Reviewing</span>
+            </>
+          ) : (
+            <>
+              <span className={`inline-block w-2 h-2 rounded-full shrink-0 ${
+                ws.main.status === "active" ? "bg-green-500" :
+                ws.main.status === "idle" ? "bg-amber-500" :
+                "bg-gray-400"
+              }`} />
+              <span className="font-mono text-gray-600 truncate">{ws.main.branch}</span>
+            </>
+          )}
           {ws.main.status === "closed" && (
             <span className="text-green-600 font-medium shrink-0">merged</span>
           )}
