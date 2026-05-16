@@ -13,7 +13,7 @@ import { suggestBranchName } from "../lib/branch.js";
 import { CommandPalette } from "../components/CommandPalette.js";
 import { ShortcutHelp } from "../components/ShortcutHelp.js";
 import { apiFetch } from "../lib/api.js";
-import { useBoardEvents } from "../lib/useBoardEvents.js";
+import { useBoardEvents, type LiveSessionStats } from "../lib/useBoardEvents.js";
 import { sendDesktopNotification } from "../lib/desktop.js";
 import { registerAction } from "../lib/actions.js";
 import type {
@@ -55,6 +55,7 @@ export function BoardPage() {
     new Set(["archive"]),
   );
   const [sessionActivity, setSessionActivity] = useState<Record<string, string>>({});
+  const [liveStats, setLiveStats] = useState<Record<string, LiveSessionStats>>({});
   const pendingBoardRefreshRef = useRef(false);
 
   const refetchBoard = useCallback(async (projectId?: string) => {
@@ -113,6 +114,11 @@ export function BoardPage() {
       }
       if (prev[issueId] === activity) return prev;
       return { ...prev, [issueId]: activity };
+    });
+  }, []), useCallback((issueId: string, stats: LiveSessionStats) => {
+    setLiveStats((prev) => {
+      if (prev[issueId]?.model === stats.model && prev[issueId]?.contextTokens === stats.contextTokens) return prev;
+      return { ...prev, [issueId]: stats };
     });
   }, []));
 
@@ -590,6 +596,7 @@ export function BoardPage() {
               onDrop={handleDrop}
               searchQuery={searchQuery}
               sessionActivity={sessionActivity}
+              liveStats={liveStats}
             >
               <CreateIssueForm
                 projectId={activeProjectId}

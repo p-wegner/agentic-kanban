@@ -1,4 +1,5 @@
 import type { IssueWithStatus } from "@agentic-kanban/shared";
+import type { LiveSessionStats } from "../lib/useBoardEvents.js";
 
 const priorityColors: Record<string, string> = {
   low: "bg-gray-200 text-gray-700",
@@ -21,6 +22,7 @@ interface IssueCardProps {
   tags?: TagBadge[];
   searchQuery?: string;
   liveActivity?: string;
+  liveStats?: LiveSessionStats;
 }
 
 function HighlightedText({ text, query }: { text: string; query: string }) {
@@ -43,7 +45,7 @@ function HighlightedText({ text, query }: { text: string; query: string }) {
   );
 }
 
-export function IssueCard({ issue, onClick, onWorkspaceClick, onDragStart, tags, searchQuery, liveActivity }: IssueCardProps) {
+export function IssueCard({ issue, onClick, onWorkspaceClick, onDragStart, tags, searchQuery, liveActivity, liveStats }: IssueCardProps) {
   const badgeColor = priorityColors[issue.priority] ?? "bg-gray-200 text-gray-700";
   const ws = issue.workspaceSummary;
 
@@ -124,6 +126,14 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onDragStart, tags,
         <div className="flex items-center gap-1.5 mt-1 text-xs text-gray-400 px-1">
           <span className="inline-block w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse shrink-0" />
           <span className="truncate">{liveActivity}</span>
+        </div>
+      )}
+      {liveStats && (ws?.total === 1) && (
+        <div className="flex items-center gap-2 mt-0.5 text-[10px] text-gray-400 px-1">
+          {liveStats.model && <span className="font-mono">{liveStats.model}</span>}
+          {liveStats.contextTokens > 0 && (
+            <span>{Math.round(liveStats.contextTokens / 1000)}k ctx</span>
+          )}
         </div>
       )}
     </div>

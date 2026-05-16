@@ -19,6 +19,7 @@ interface SessionContext {
 interface SessionManagerOptions {
   onSessionExit?: (workspaceId: string, sessionId: string, exitCode: number | null) => void;
   onActivity?: (projectId: string, issueId: string, sessionId: string, activity: string) => void;
+  onLiveStats?: (projectId: string, issueId: string, model: string, contextTokens: number) => void;
 }
 
 function createSessionManager(
@@ -89,6 +90,17 @@ function createSessionManager(
             .set({ stats })
             .where(eq(sessions.id, sessionId))
             .catch((err) => console.error("Failed to update session stats:", err));
+        }
+
+        // Broadcast live model + context size from each assistant turn
+        if (obj.type === "assistant" && obj.message) {
+          const usage = obj.message.usage as Record<string, unknown> | undefined;
+          const model = (obj.message.model as string) ?? "";
+          const contextTokens = ((usage?.cache_read_input_tokens as number) ?? 0) + ((usage?.input_tokens as number) ?? 0);
+          const ctx = sessionContexts.get(sessionId);
+          if (ctx && (model || contextTokens)) {
+            options?.onLiveStats?.(ctx.projectId, ctx.issueId, model, contextTokens);
+          }
         }
 
         // Parse tool_use events for live activity

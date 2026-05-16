@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
+import type { LiveSessionStats } from "../lib/useBoardEvents.js";
 import { IssueCard } from "./IssueCard.js";
 
 interface BoardColumnProps {
@@ -14,6 +15,7 @@ interface BoardColumnProps {
   onDrop: (statusId: string, sortOrder?: number) => void;
   searchQuery?: string;
   sessionActivity?: Record<string, string>;
+  liveStats?: Record<string, LiveSessionStats>;
   children?: React.ReactNode;
 }
 
@@ -29,6 +31,7 @@ export function BoardColumn({
   onDrop,
   searchQuery,
   sessionActivity,
+  liveStats,
   children,
 }: BoardColumnProps) {
   const [dragOver, setDragOver] = useState(false);
@@ -120,6 +123,7 @@ export function BoardColumn({
               onDragStart={onDragStart}
               searchQuery={searchQuery}
               liveActivity={sessionActivity?.[issue.id]}
+              liveStats={liveStats?.[issue.id]}
             />
           </div>
         ))}

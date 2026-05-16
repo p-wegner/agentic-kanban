@@ -16,19 +16,35 @@ interface SessionActivityEvent {
   activity: string;
 }
 
-type BoardWsEvent = BoardChangedEvent | SessionActivityEvent;
+interface SessionStatsEvent {
+  type: "session_stats";
+  projectId: string;
+  issueId: string;
+  model: string;
+  contextTokens: number;
+}
+
+type BoardWsEvent = BoardChangedEvent | SessionActivityEvent | SessionStatsEvent;
+
+export interface LiveSessionStats {
+  model: string;
+  contextTokens: number;
+}
 
 export function useBoardEvents(
   projectId: string | null,
   onBoardChange: (reason: string) => void,
   onSessionActivity?: (issueId: string, activity: string) => void,
+  onSessionStats?: (issueId: string, stats: LiveSessionStats) => void,
 ) {
   const wsRef = useRef<WebSocket | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const onBoardChangeRef = useRef(onBoardChange);
   const onSessionActivityRef = useRef(onSessionActivity);
+  const onSessionStatsRef = useRef(onSessionStats);
   onBoardChangeRef.current = onBoardChange;
   onSessionActivityRef.current = onSessionActivity;
+  onSessionStatsRef.current = onSessionStats;
 
   const connect = useCallback(() => {
     if (!projectId) return;
@@ -52,6 +68,8 @@ export function useBoardEvents(
           onBoardChangeRef.current(msg.reason);
         } else if (msg.type === "session_activity") {
           onSessionActivityRef.current?.(msg.issueId, msg.activity);
+        } else if (msg.type === "session_stats") {
+          onSessionStatsRef.current?.(msg.issueId, { model: msg.model, contextTokens: msg.contextTokens });
         }
       } catch {
         // Ignore malformed messages
