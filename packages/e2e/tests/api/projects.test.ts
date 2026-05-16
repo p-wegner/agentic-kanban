@@ -3,19 +3,20 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { execSync } from "node:child_process";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { SERVER_URL } from "../helpers/port.js";
 
 test.describe("Projects API", () => {
   let projectId: string;
 
   test.beforeAll(async ({ request }) => {
     // Get the default project (created by global-setup)
-    const projectsRes = await request.get("http://localhost:3001/api/projects");
+    const projectsRes = await request.get(`${SERVER_URL}/api/projects`);
     const projects = await projectsRes.json();
     projectId = projects[0].id;
   });
 
   test("GET /api/projects returns list", async ({ request }) => {
-    const res = await request.get("http://localhost:3001/api/projects");
+    const res = await request.get(`${SERVER_URL}/api/projects`);
     expect(res.ok()).toBeTruthy();
     const body = await res.json();
     expect(Array.isArray(body)).toBe(true);
@@ -36,7 +37,7 @@ test.describe("Projects API", () => {
     execSync("git config user.email test@test.com", { cwd: tmpDir });
     execSync("git config user.name Test", { cwd: tmpDir });
 
-    const res = await request.post("http://localhost:3001/api/projects", {
+    const res = await request.post(`${SERVER_URL}/api/projects`, {
       data: {
         name: "E2E Test Project " + Date.now(),
         repoPath: tmpDir,
@@ -56,7 +57,7 @@ test.describe("Projects API", () => {
   });
 
   test("POST /api/projects rejects missing repoPath", async ({ request }) => {
-    const res = await request.post("http://localhost:3001/api/projects", {
+    const res = await request.post(`${SERVER_URL}/api/projects`, {
       data: { name: "No repo project" },
     });
     expect(res.status()).toBe(400);
@@ -68,7 +69,7 @@ test.describe("Projects API", () => {
     request,
   }) => {
     const res = await request.get(
-      `http://localhost:3001/api/projects/${projectId}/statuses`,
+      `${SERVER_URL}/api/projects/${projectId}/statuses`,
     );
     expect(res.ok()).toBeTruthy();
     const body = await res.json();
@@ -88,7 +89,7 @@ test.describe("Projects API", () => {
   }) => {
     const statusName = `Test Status ${Date.now()}`;
     const res = await request.post(
-      `http://localhost:3001/api/projects/${projectId}/statuses`,
+      `${SERVER_URL}/api/projects/${projectId}/statuses`,
       {
         data: { name: statusName, sortOrder: 99 },
       },
@@ -101,7 +102,7 @@ test.describe("Projects API", () => {
 
     // Verify it appears in the list
     const listRes = await request.get(
-      `http://localhost:3001/api/projects/${projectId}/statuses`,
+      `${SERVER_URL}/api/projects/${projectId}/statuses`,
     );
     const list = await listRes.json();
     expect(
@@ -113,7 +114,7 @@ test.describe("Projects API", () => {
     request,
   }) => {
     const res = await request.get(
-      `http://localhost:3001/api/projects/${projectId}/branches`,
+      `${SERVER_URL}/api/projects/${projectId}/branches`,
     );
     expect(res.ok()).toBeTruthy();
     const body = await res.json();
@@ -129,7 +130,7 @@ test.describe("Projects API", () => {
     request,
   }) => {
     const res = await request.get(
-      "http://localhost:3001/api/projects/non-existent-id/branches",
+      `${SERVER_URL}/api/projects/non-existent-id/branches`,
     );
     expect(res.status()).toBe(404);
     const body = await res.json();

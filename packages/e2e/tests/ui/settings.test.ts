@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { SERVER_URL } from "../helpers/port.js";
 
 test.describe("Settings UI", () => {
   test.beforeEach(async ({ page }) => {
@@ -112,7 +113,7 @@ test.describe("Settings UI", () => {
 
 test.afterAll(async ({ request }) => {
   // Clean up settings
-  await request.put("http://localhost:3001/api/preferences/settings", {
+  await request.put(`${SERVER_URL}/api/preferences/settings`, {
     data: {
       agent_command: "",
       agent_args: "",

@@ -1,6 +1,5 @@
 import { test, expect } from "@playwright/test";
-
-const BASE = "http://localhost:3001";
+import { SERVER_URL as BASE } from "../helpers/port.js";
 
 test.describe("Tags API", () => {
   let projectId: string;

@@ -66,7 +66,7 @@ async function main() {
   count++;
 
   console.log(`Inserted ${count} session messages`);
-  console.log(`\nNow open http://localhost:5173`);
+  console.log(`\nNow open http://localhost:${process.env.VITE_PORT || 5173}`);
   console.log(`Click "Verify output parser" → View Workspaces → expand workspace`);
 }
 
