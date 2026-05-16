@@ -140,6 +140,7 @@ function createSessionManager(
     multiTurn?: boolean,
     permissionPromptTool?: string,
     planMode?: boolean,
+    resumeWithNewModel?: boolean,
   ) {
     // Look up workspace to get workingDir
     const wsRows = await db
@@ -233,7 +234,8 @@ function createSessionManager(
             })
             .catch((err) => console.error("Failed to update session:", err));
         }
-      }, claudeSessionId, agentCommand, claudeProfile, multiTurn, permissionPromptTool, planMode);
+      // When resumeWithNewModel is true, omit --resume so the new profile/provider is used instead
+      }, resumeWithNewModel ? undefined : claudeSessionId, agentCommand, claudeProfile, multiTurn, permissionPromptTool, planMode);
     } catch (err) {
       throw err;
     }
