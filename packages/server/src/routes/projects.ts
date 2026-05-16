@@ -8,7 +8,7 @@ import { existsSync, readdirSync } from "node:fs";
 import { detectRepoInfo } from "../services/git-info.service.js";
 import { listBranches, listWorktrees, getDiffShortstat, removeWorktree } from "../services/git.service.js";
 import type { Database } from "../db/index.js";
-import { sep, join, resolve } from "node:path";
+import { sep, join } from "node:path";
 import { homedir } from "node:os";
 
 const DEFAULT_STATUSES = [
