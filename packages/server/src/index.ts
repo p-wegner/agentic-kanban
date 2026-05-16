@@ -252,6 +252,9 @@ const sessionManager = createSessionManager(upgradeWebSocket, {
   onLiveStats: (projectId, issueId, model, contextTokens) => {
     boardEvents.broadcastLiveStats(projectId, issueId, model, contextTokens);
   },
+  onTodos: (projectId, issueId, todos) => {
+    boardEvents.broadcastTodos(projectId, issueId, todos);
+  },
 });
 
 // Manual review trigger endpoint

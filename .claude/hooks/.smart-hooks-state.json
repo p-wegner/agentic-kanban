@@ -1,5 +1,12 @@
 {
   "editedFiles": [
-    "C:/andrena/agentic-kanban/.claude/hooks/.smart-hooks-state.json"
+    "C:/andrena/agentic-kanban/.claude/hooks/.smart-hooks-state.json",
+    "packages/server/src/services/board-events.ts",
+    "packages/server/src/services/session.manager.ts",
+    "packages/server/src/index.ts",
+    "packages/client/src/lib/useBoardEvents.ts",
+    "packages/client/src/routes/BoardPage.tsx",
+    "packages/client/src/components/BoardColumn.tsx",
+    "packages/client/src/components/IssueCard.tsx"
   ]
 }
