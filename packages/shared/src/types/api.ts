@@ -49,6 +49,7 @@ export interface MainWorkspaceInfo {
   status: "active" | "reviewing" | "idle" | "closed";
   claudeProfile?: string | null;
   agentCommand?: string | null;
+  diffStats?: { filesChanged: number; insertions: number; deletions: number } | null;
 }
 
 export interface WorkspaceSummary {
