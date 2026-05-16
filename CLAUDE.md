@@ -28,8 +28,8 @@ All documented features have been visually verified (2026-05-16):
 - Issue numbers: auto-incrementing #1, #2, #3 per project on cards and detail panel
 - Panel animations: slide-in transitions on detail/workspace/settings/worktree panels
 - Favicon: inline SVG kanban-board icon
-- MCP server: 21 tools via stdio JSON-RPC
-- CLI: `pnpm cli -- register <path>` to register a git repo as a project; also `issue list/create/move` and `workspace list/create` for board operations
+- MCP server: 21 tools via stdio JSON-RPC (22 with get_board_status)
+- CLI: `pnpm cli -- register <path>` to register a git repo as a project; also `issue list/create/move`, `workspace list/create`, and `status` for board overview
 - Desktop app: Tauri v2 native window with system tray (Show/Quit), minimize-to-tray on close, OS notifications on session_completed/workspace_merged events
 
 ## What This Is
@@ -122,6 +122,7 @@ When performing kanban board operations (creating issues, moving issues, managin
 - `mcp__agentic-kanban__merge_workspace` — merge a workspace branch and close it
 - `mcp__agentic-kanban__get_workspace_diff` — inspect changes before merging
 - `mcp__agentic-kanban__get_context` — get project info and issue counts
+- `mcp__agentic-kanban__get_board_status` — comprehensive overview: all active agents, workspace state, diff stats, session stats, last output
 - `mcp__agentic-kanban__list_tags`, `mcp__agentic-kanban__create_tag` — tag management
 
 **Use the CLI (`pnpm cli -- ...`) when MCP is unavailable:**
@@ -143,6 +144,7 @@ When performing kanban board operations (creating issues, moving issues, managin
 - `pnpm db:reset` — wipe and recreate DB from scratch (deletes kanban.db, re-migrates, re-seeds; stop dev server first)
 - `pnpm cli -- register <path>` — register a git repo as a project
 - `pnpm cli -- list` — list registered projects
+- `pnpm cli -- status` — show board status overview (agents, workspaces, diff stats, session progress)
 - `pnpm cli -- unregister <name>` — remove a project by name or ID
 - `pnpm cli -- cleanup` — show stale worktrees for closed workspaces
 - `pnpm cli -- issue list` — list issues for active project
@@ -150,6 +152,7 @@ When performing kanban board operations (creating issues, moving issues, managin
 - `pnpm cli -- issue move <id> <status>` — move issue to a status
 - `pnpm cli -- workspace list` — list workspaces for active project
 - `pnpm cli -- workspace create <issueId>` — create a workspace
+- `pnpm cli -- status` — board overview: all agents, workspaces, diff stats, session progress, last output
 
 ## Worktree Port Strategy
 `pnpm dev` uses `scripts/dev.mjs` which auto-detects whether the CWD is a git worktree and assigns deterministic ports:

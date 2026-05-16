@@ -95,3 +95,31 @@ export async function getWorkingTreeDiff(workdirPath: string): Promise<string> {
 export async function mergeBranch(repoPath: string, branch: string): Promise<string> {
   return execGit(["merge", "--no-ff", branch, "-m", `Merge branch '${branch}'`], repoPath);
 }
+
+/** Get lightweight diff stats using --shortstat (no full diff transfer). */
+export async function getDiffShortstat(
+  worktreePath: string,
+  baseBranch: string,
+): Promise<{ filesChanged: number; insertions: number; deletions: number }> {
+  try {
+    const output = await execGit(["diff", "--shortstat", baseBranch], worktreePath);
+    if (!output.trim()) return { filesChanged: 0, insertions: 0, deletions: 0 };
+
+    let filesChanged = 0;
+    let insertions = 0;
+    let deletions = 0;
+
+    const filesMatch = output.match(/(\d+) files? changed/);
+    if (filesMatch) filesChanged = parseInt(filesMatch[1], 10);
+
+    const insertionsMatch = output.match(/(\d+) insertion/);
+    if (insertionsMatch) insertions = parseInt(insertionsMatch[1], 10);
+
+    const deletionsMatch = output.match(/(\d+) deletion/);
+    if (deletionsMatch) deletions = parseInt(deletionsMatch[1], 10);
+
+    return { filesChanged, insertions, deletions };
+  } catch {
+    return { filesChanged: 0, insertions: 0, deletions: 0 };
+  }
+}

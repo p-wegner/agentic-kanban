@@ -250,6 +250,114 @@ program
     }
   });
 
+function timeSince(date: Date): string {
+  const seconds = Math.floor((Date.now() - date.getTime()) / 1000);
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ${minutes % 60}m`;
+  return `${Math.floor(hours / 24)}d ${hours % 24}h`;
+}
+
+program
+  .command("status")
+  .description("Show board status overview: all active agents, workspaces, and progress")
+  .option("-p, --project <id>", "Project ID (defaults to active project)")
+  .option("-a, --all", "Include closed/done issues", false)
+  .option("--json", "Output raw JSON instead of formatted text")
+  .option("-w, --watch", "Auto-refresh every N seconds")
+  .option("-i, --interval <seconds>", "Refresh interval in seconds (default: 5)", "5")
+  .action(async (options: { project?: string; all?: boolean; json?: boolean; watch?: boolean; interval?: string }) => {
+    try {
+      await runMigrations();
+      const { getBoardStatus } = await import("./services/board-status.js");
+
+      const render = async () => {
+        const status = await getBoardStatus({
+          projectId: options.project,
+          includeClosed: options.all,
+          tailLines: 5,
+        });
+
+        if (options.json) {
+          console.log(JSON.stringify(status, null, 2));
+          return;
+        }
+
+        console.log(`\n  Board Status: ${status.project.name}`);
+        console.log(`  ${status.totals.totalIssues} issues (${status.totals.inProgress} in-progress) | ${status.totals.activeWorkspaces} active workspaces | ${status.totals.runningSessions} running sessions`);
+        console.log(`  Generated: ${new Date(status.generatedAt).toLocaleTimeString()}\n`);
+
+        if (status.issues.length === 0) {
+          console.log("  No active issues found. Use --all to include completed items.");
+          return;
+        }
+
+        for (const issue of status.issues) {
+          const num = issue.issueNumber != null ? `#${issue.issueNumber}` : "???";
+          const wsStatus = issue.workspace?.status ?? "no workspace";
+          const marker = wsStatus === "active" ? "●" : wsStatus === "idle" ? "○" : wsStatus === "reviewing" ? "◎" : "·";
+
+          console.log(`  ${marker} ${num.padEnd(4)} ${issue.title}`);
+          console.log(`         [${issue.statusName}]  priority: ${issue.priority}  workspace: ${wsStatus}`);
+
+          if (issue.workspace) {
+            console.log(`         branch: ${issue.workspace.branch}`);
+          }
+
+          if (issue.session) {
+            console.log(`         session: ${issue.session.status}  started: ${issue.session.startedAt ? new Date(issue.session.startedAt).toLocaleTimeString() : "?"}`);
+          }
+
+          if (issue.diffStats && (issue.diffStats.filesChanged > 0 || issue.diffStats.insertions > 0 || issue.diffStats.deletions > 0)) {
+            console.log(`         diff: ${issue.diffStats.filesChanged} files  +${issue.diffStats.insertions} -${issue.diffStats.deletions}`);
+          }
+
+          if (issue.sessionStats) {
+            const s = issue.sessionStats;
+            const parts: string[] = [];
+            if (s.model) parts.push(`model: ${s.model}`);
+            if (s.numTurns > 0) parts.push(`turns: ${s.numTurns}`);
+            if (s.totalCostUsd > 0) parts.push(`cost: $${s.totalCostUsd.toFixed(2)}`);
+            if (s.durationMs > 0) parts.push(`duration: ${Math.round(s.durationMs / 1000)}s`);
+            if (parts.length > 0) console.log(`         ${parts.join("  ")}`);
+          }
+
+          if (issue.lastOutput.length > 0) {
+            console.log(`         last output:`);
+            for (const line of issue.lastOutput) {
+              console.log(`           ${line}`);
+            }
+          }
+
+          if (issue.lastActivity) {
+            console.log(`         last activity: ${timeSince(new Date(issue.lastActivity))} ago`);
+          }
+
+          console.log("");
+        }
+      };
+
+      if (options.watch) {
+        const intervalSec = Math.max(parseInt(options.interval ?? "5", 10), 2);
+        const renderAndClear = async () => {
+          console.clear();
+          await render();
+          console.log(`\n  Refreshing every ${intervalSec}s. Press Ctrl+C to exit.`);
+        };
+        await renderAndClear();
+        setInterval(renderAndClear, intervalSec * 1000);
+      } else {
+        await render();
+        process.exit(0);
+      }
+    } catch (err) {
+      console.error("Error:", err instanceof Error ? err.message : String(err));
+      process.exit(1);
+    }
+  });
+
 async function getActiveProjectId(): Promise<string> {
   const pref = await db.select().from(preferences).where(eq(preferences.key, "activeProjectId")).limit(1);
   if (pref.length === 0) throw new Error("No active project. Run `pnpm cli -- register <path>` first.");
