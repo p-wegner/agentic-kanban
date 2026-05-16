@@ -22,7 +22,21 @@ interface SessionStatsMessage {
   contextTokens: number;
 }
 
-type BoardWsMessage = BoardEventMessage | SessionActivityMessage | SessionStatsMessage;
+export interface TodoItem {
+  id: string;
+  content: string;
+  status: "pending" | "in_progress" | "completed";
+  priority: "high" | "medium" | "low";
+}
+
+interface SessionTodosMessage {
+  type: "session_todos";
+  projectId: string;
+  issueId: string;
+  todos: TodoItem[];
+}
+
+type BoardWsMessage = BoardEventMessage | SessionActivityMessage | SessionStatsMessage | SessionTodosMessage;
 
 interface BoardEventSubscriber {
   ws: WSContext;
@@ -88,6 +102,18 @@ function createBoardEvents(
     }
   }
 
+  function broadcastTodos(projectId: string, issueId: string, todos: TodoItem[]) {
+    const subs = subscribers.get(projectId);
+    if (!subs) return;
+    const message: SessionTodosMessage = { type: "session_todos", projectId, issueId, todos };
+    const payload = JSON.stringify(message);
+    for (const sub of subs.values()) {
+      if (sub.ws.readyState === 1) {
+        sub.ws.send(payload);
+      }
+    }
+  }
+
   function wsRoute() {
     return upgradeWebSocket((c: any) => {
       const projectId = c.req.param("projectId");
@@ -102,7 +128,7 @@ function createBoardEvents(
     });
   }
 
-  return { subscribe, unsubscribe, broadcast, broadcastActivity, broadcastLiveStats, wsRoute };
+  return { subscribe, unsubscribe, broadcast, broadcastActivity, broadcastLiveStats, broadcastTodos, wsRoute };
 }
 
 export { createBoardEvents };

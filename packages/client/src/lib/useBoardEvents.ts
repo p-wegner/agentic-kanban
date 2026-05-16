@@ -24,7 +24,21 @@ interface SessionStatsEvent {
   contextTokens: number;
 }
 
-type BoardWsEvent = BoardChangedEvent | SessionActivityEvent | SessionStatsEvent;
+export interface TodoItem {
+  id: string;
+  content: string;
+  status: "pending" | "in_progress" | "completed";
+  priority: "high" | "medium" | "low";
+}
+
+interface SessionTodosEvent {
+  type: "session_todos";
+  projectId: string;
+  issueId: string;
+  todos: TodoItem[];
+}
+
+type BoardWsEvent = BoardChangedEvent | SessionActivityEvent | SessionStatsEvent | SessionTodosEvent;
 
 export interface LiveSessionStats {
   model: string;
@@ -36,15 +50,18 @@ export function useBoardEvents(
   onBoardChange: (reason: string) => void,
   onSessionActivity?: (issueId: string, activity: string) => void,
   onSessionStats?: (issueId: string, stats: LiveSessionStats) => void,
+  onSessionTodos?: (issueId: string, todos: TodoItem[]) => void,
 ) {
   const wsRef = useRef<WebSocket | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const onBoardChangeRef = useRef(onBoardChange);
   const onSessionActivityRef = useRef(onSessionActivity);
   const onSessionStatsRef = useRef(onSessionStats);
+  const onSessionTodosRef = useRef(onSessionTodos);
   onBoardChangeRef.current = onBoardChange;
   onSessionActivityRef.current = onSessionActivity;
   onSessionStatsRef.current = onSessionStats;
+  onSessionTodosRef.current = onSessionTodos;
 
   const connect = useCallback(() => {
     if (!projectId) return;
@@ -70,6 +87,8 @@ export function useBoardEvents(
           onSessionActivityRef.current?.(msg.issueId, msg.activity);
         } else if (msg.type === "session_stats") {
           onSessionStatsRef.current?.(msg.issueId, { model: msg.model, contextTokens: msg.contextTokens });
+        } else if (msg.type === "session_todos") {
+          onSessionTodosRef.current?.(msg.issueId, msg.todos);
         }
       } catch {
         // Ignore malformed messages

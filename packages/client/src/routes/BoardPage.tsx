@@ -15,7 +15,7 @@ import { suggestBranchName } from "../lib/branch.js";
 import { CommandPalette } from "../components/CommandPalette.js";
 import { ShortcutHelp } from "../components/ShortcutHelp.js";
 import { apiFetch } from "../lib/api.js";
-import { useBoardEvents, type LiveSessionStats } from "../lib/useBoardEvents.js";
+import { useBoardEvents, type LiveSessionStats, type TodoItem } from "../lib/useBoardEvents.js";
 import { sendDesktopNotification } from "../lib/desktop.js";
 import { registerAction } from "../lib/actions.js";
 import type {
@@ -58,6 +58,7 @@ export function BoardPage() {
   );
   const [sessionActivity, setSessionActivity] = useState<Record<string, string>>({});
   const [liveStats, setLiveStats] = useState<Record<string, LiveSessionStats>>({});
+  const [sessionTodos, setSessionTodos] = useState<Record<string, TodoItem[]>>({});
   const pendingBoardRefreshRef = useRef(false);
   const [expandedCreatePanel, setExpandedCreatePanel] = useState<{ statusId: string; statusName: string; state: Partial<CreateIssueFormState> } | null>(null);
 
@@ -123,6 +124,8 @@ export function BoardPage() {
       if (prev[issueId]?.model === stats.model && prev[issueId]?.contextTokens === stats.contextTokens) return prev;
       return { ...prev, [issueId]: stats };
     });
+  }, []), useCallback((issueId: string, todos: TodoItem[]) => {
+    setSessionTodos((prev) => ({ ...prev, [issueId]: todos }));
   }, []));
 
   // Process pending board refresh when create form closes
@@ -601,6 +604,7 @@ export function BoardPage() {
               searchQuery={searchQuery}
               sessionActivity={sessionActivity}
               liveStats={liveStats}
+              sessionTodos={sessionTodos}
             >
               <CreateIssueForm
                 projectId={activeProjectId}
@@ -639,6 +643,7 @@ export function BoardPage() {
           onDrop={handleDrop}
           searchQuery={searchQuery}
           sessionActivity={sessionActivity}
+          sessionTodos={sessionTodos}
           canStartWorkspace={canStartWorkspace}
         />
       </div>

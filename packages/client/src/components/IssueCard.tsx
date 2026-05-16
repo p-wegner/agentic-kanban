@@ -1,5 +1,5 @@
 import type { IssueWithStatus } from "@agentic-kanban/shared";
-import type { LiveSessionStats } from "../lib/useBoardEvents.js";
+import type { LiveSessionStats, TodoItem } from "../lib/useBoardEvents.js";
 
 const priorityColors: Record<string, string> = {
   low: "bg-gray-200 text-gray-700",
@@ -23,6 +23,7 @@ interface IssueCardProps {
   searchQuery?: string;
   liveActivity?: string;
   liveStats?: LiveSessionStats;
+  todos?: TodoItem[];
 }
 
 function HighlightedText({ text, query }: { text: string; query: string }) {
@@ -45,7 +46,7 @@ function HighlightedText({ text, query }: { text: string; query: string }) {
   );
 }
 
-export function IssueCard({ issue, onClick, onWorkspaceClick, onDragStart, tags, searchQuery, liveActivity, liveStats }: IssueCardProps) {
+export function IssueCard({ issue, onClick, onWorkspaceClick, onDragStart, tags, searchQuery, liveActivity, liveStats, todos }: IssueCardProps) {
   const badgeColor = priorityColors[issue.priority] ?? "bg-gray-200 text-gray-700";
   const ws = issue.workspaceSummary;
 
@@ -142,6 +143,34 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onDragStart, tags,
           )}
         </div>
       )}
+      {todos && todos.length > 0 && <TodoProgress todos={todos} />}
+    </div>
+  );
+}
+
+function TodoProgress({ todos }: { todos: TodoItem[] }) {
+  const total = todos.length;
+  const completed = todos.filter((t) => t.status === "completed").length;
+  const inProgress = todos.filter((t) => t.status === "in_progress").length;
+
+  return (
+    <div className="mt-1.5 px-1" title={todos.map((t) => `${t.status === "completed" ? "✓" : t.status === "in_progress" ? "▶" : "○"} ${t.content}`).join("\n")}>
+      <div className="flex items-center gap-1.5 mb-0.5">
+        <span className="text-[10px] text-gray-400">{completed}/{total} tasks</span>
+        {inProgress > 0 && (
+          <span className="text-[10px] text-blue-500 font-medium">{inProgress} active</span>
+        )}
+      </div>
+      <div className="h-1 bg-gray-200 rounded-full overflow-hidden flex">
+        <div
+          className="h-full bg-green-500 transition-all duration-300"
+          style={{ width: `${(completed / total) * 100}%` }}
+        />
+        <div
+          className="h-full bg-blue-400 transition-all duration-300"
+          style={{ width: `${(inProgress / total) * 100}%` }}
+        />
+      </div>
     </div>
   );
 }
