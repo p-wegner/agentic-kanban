@@ -70,8 +70,12 @@ async function runWorkflowOnExit(workspaceId: string, sessionId: string, exitCod
 
     const findStatus = (name: string) => statuses.find(s => s.name === name);
 
+    const prefRows = await db.select().from(preferences);
+    const prefMap = new Map(prefRows.map(r => [r.key, r.value]));
+    const autoMergeEnabled = prefMap.get("auto_merge") !== "false";
+
     if (reviewSessionIds.has(sessionId)) {
-      // Review session completed — auto-merge and move to AI Reviewed
+      // Review session completed
       reviewSessionIds.delete(sessionId);
 
       // Check if the review agent moved the issue back to "In Progress" (found and fixed critical issues)
@@ -79,18 +83,24 @@ async function runWorkflowOnExit(workspaceId: string, sessionId: string, exitCod
       const currentStatus = currentIssueRows.length > 0 ? statuses.find(s => s.id === currentIssueRows[0].statusId) : null;
 
       if (currentStatus?.name === "In Progress") {
-        // Review agent fixed issues — move to AI Reviewed and auto-merge
-        console.log(`[workflow] review session ${sessionId} fixed issues — moving to AI Reviewed and auto-merging`);
         const aiReviewedStatus = findStatus("AI Reviewed");
         if (aiReviewedStatus) {
           await db.update(issues).set({ statusId: aiReviewedStatus.id, updatedAt: now }).where(eq(issues.id, issueId));
           boardEvents.broadcast(projectId, "issue_updated");
         }
-      } else {
-        console.log(`[workflow] review session ${sessionId} completed — auto-merging`);
       }
 
-      await autoMerge(workspace, projectId, issueId, findStatus("AI Reviewed")?.id ?? null, now);
+      if (autoMergeEnabled) {
+        console.log(`[workflow] review session ${sessionId} completed — auto-merging`);
+        await autoMerge(workspace, projectId, issueId, findStatus("AI Reviewed")?.id ?? null, now);
+      } else {
+        console.log(`[workflow] review session ${sessionId} completed — auto-merge disabled, leaving in AI Reviewed`);
+        const aiReviewedStatus = findStatus("AI Reviewed");
+        if (aiReviewedStatus && currentStatus?.name !== "In Progress") {
+          await db.update(issues).set({ statusId: aiReviewedStatus.id, updatedAt: now }).where(eq(issues.id, issueId));
+          boardEvents.broadcast(projectId, "issue_updated");
+        }
+      }
       return;
     }
 
@@ -120,8 +130,6 @@ async function runWorkflowOnExit(workspaceId: string, sessionId: string, exitCod
 
       // Check if auto-review is enabled (requiresReview checkbox or auto_review setting)
       // Issue-level skipAutoReview overrides everything
-      const prefRows = await db.select().from(preferences);
-      const prefMap = new Map(prefRows.map(r => [r.key, r.value]));
       const autoReview = !skipAutoReview && (workspace.requiresReview || prefMap.get("auto_review") !== "false");
 
       if (autoReview) {
