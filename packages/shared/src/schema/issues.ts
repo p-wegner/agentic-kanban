@@ -15,6 +15,7 @@ export const issues = sqliteTable("issues", {
   createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
   updatedAt: text("updated_at").notNull().$defaultFn(() => new Date().toISOString()),
   statusChangedAt: text("status_changed_at"),
+  skipAutoReview: integer("skip_auto_review", { mode: "boolean" }).notNull().default(false),
 });
 
 export const issuesRelations = relations(issues, ({ one, many }) => ({

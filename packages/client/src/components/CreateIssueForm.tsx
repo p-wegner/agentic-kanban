@@ -20,6 +20,7 @@ export function CreateIssueForm({
   const [description, setDescription] = useState("");
   const [priority, setPriority] = useState<CreateIssueRequest["priority"]>("medium");
   const [startWorkspace, setStartWorkspace] = useState(false);
+  const [skipAutoReview, setSkipAutoReview] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
   async function handleSubmit(e: React.FormEvent) {
@@ -34,6 +35,7 @@ export function CreateIssueForm({
         statusId,
         projectId,
         startWorkspace: startWorkspace || undefined,
+        skipAutoReview: skipAutoReview || undefined,
       });
     } finally {
       setSubmitting(false);
@@ -86,6 +88,17 @@ export function CreateIssueForm({
             className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
           />
           Start workspace
+        </label>
+      )}
+      {canStartWorkspace && (
+        <label className="flex items-center gap-2 text-xs text-gray-600 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={skipAutoReview}
+            onChange={(e) => setSkipAutoReview(e.target.checked)}
+            className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+          />
+          Skip auto AI code review
         </label>
       )}
       <div className="flex gap-2">
