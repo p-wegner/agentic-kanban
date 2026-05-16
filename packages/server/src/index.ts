@@ -39,6 +39,53 @@ const boardEvents = createBoardEvents(upgradeWebSocket);
 // Track which sessions are review sessions (in-memory — fine for single-process server)
 const reviewSessionIds = new Set<string>();
 
+function buildReviewArgs(prefMap: Map<string, string>): string | undefined {
+  const skipPerms = prefMap.get("skip_permissions") === "true";
+  const baseArgs = prefMap.get("agent_args") || "";
+  if (skipPerms) {
+    return baseArgs ? baseArgs + " --dangerously-skip-permissions" : "--dangerously-skip-permissions";
+  }
+  return baseArgs || undefined;
+}
+
+function buildReviewPrompt(branch: string, baseBranch: string | null, issueId: string, autoFix: boolean): string {
+  const lines = [
+    `You are an AI code reviewer. Review the changes on branch '${branch}'.`,
+    `Run 'git diff ${baseBranch ?? "HEAD"}' to see the diff.`,
+    ``,
+    `Review for: correctness bugs, security vulnerabilities, logic errors, and missing error handling.`,
+    `Classify each issue as CRITICAL (must fix — bugs, security, data loss), MAJOR (should fix — broken edge cases, poor error handling), or MINOR (nice to have — style, naming).`,
+    ``,
+  ];
+  if (autoFix) {
+    lines.push(
+      `If you find CRITICAL or MAJOR issues:`,
+      `1. Use the move_issue MCP tool to move issue ${issueId} to 'In Progress' (so the board shows the issue needs fixes)`,
+      `2. Fix all critical and major issues directly in the code`,
+      `3. Commit the fixes with a descriptive message`,
+      `4. Exit normally (the system will handle merging)`,
+      ``,
+      `If only MINOR issues or no issues: just exit normally (the system will auto-merge).`,
+    );
+  } else {
+    lines.push(
+      `If you find CRITICAL or MAJOR issues:`,
+      `1. Use the move_issue MCP tool to move issue ${issueId} to 'In Progress'`,
+      `2. Describe each issue clearly so the developer knows what to fix`,
+      `3. Do NOT edit any files — report only`,
+      ``,
+      `If only MINOR issues or no issues: just exit normally (the system will auto-merge).`,
+    );
+  }
+  lines.push(
+    ``,
+    `Do NOT move the issue to 'AI Reviewed' yourself — the system handles that on merge.`,
+    ``,
+    `Issue ID: ${issueId}`,
+  );
+  return lines.join("\n");
+}
+
 async function runWorkflowOnExit(workspaceId: string, sessionId: string, exitCode: number | null) {
   try {
     const wsRows = await db.select().from(workspaces).where(eq(workspaces.id, workspaceId)).limit(1);
@@ -136,34 +183,17 @@ async function runWorkflowOnExit(workspaceId: string, sessionId: string, exitCod
       if (autoReview) {
         const useMock = prefMap.get("mock_agent") === "true" || process.env.MOCK_AGENT === "1";
         const agentCommand = useMock ? MOCK_AGENT_COMMAND : (prefMap.get("agent_command") || undefined);
-        const agentArgs = prefMap.get("agent_args") || undefined;
         const claudeProfile = useMock ? undefined : (prefMap.get("claude_profile") || undefined);
-
-        const reviewPrompt = [
-          `You are an AI code reviewer. Review the changes on branch '${workspace.branch}'.`,
-          `Run 'git diff ${workspace.baseBranch ?? "HEAD"}' to see the diff.`,
-          ``,
-          `Review for: correctness bugs, security vulnerabilities, logic errors, and missing error handling.`,
-          `Classify each issue as CRITICAL (must fix — bugs, security, data loss), MAJOR (should fix — broken edge cases, poor error handling), or MINOR (nice to have — style, naming).`,
-          ``,
-          `If you find CRITICAL or MAJOR issues:`,
-          `1. Use the move_issue MCP tool to move issue ${issueId} to 'In Progress' (so the board shows the issue needs fixes)`,
-          `2. Fix all critical and major issues directly in the code`,
-          `3. Commit the fixes with a descriptive message`,
-          `4. Exit normally (the system will handle merging)`,
-          ``,
-          `If only MINOR issues or no issues: just exit normally (the system will auto-merge).`,
-          `Do NOT move the issue to 'AI Reviewed' yourself — the system handles that on merge.`,
-          ``,
-          `Issue ID: ${issueId}`,
-        ].join("\n");
+        const reviewArgs = buildReviewArgs(prefMap);
+        const autoFix = prefMap.get("review_auto_fix") !== "false";
+        const reviewPrompt = buildReviewPrompt(workspace.branch, workspace.baseBranch, issueId, autoFix);
 
         try {
           // Set workspace to "reviewing" so the board shows "AI Reviewing" badge
           await db.update(workspaces).set({ status: "reviewing", updatedAt: now }).where(eq(workspaces.id, workspaceId));
           boardEvents.broadcast(projectId, "issue_updated");
 
-          const reviewSessionId = await sessionManager.startSession(workspaceId, reviewPrompt, agentCommand, agentArgs, undefined, claudeProfile);
+          const reviewSessionId = await sessionManager.startSession(workspaceId, reviewPrompt, agentCommand, reviewArgs, undefined, claudeProfile);
           reviewSessionIds.add(reviewSessionId);
           console.log(`[workflow] launched review session ${reviewSessionId} for workspace ${workspaceId}`);
         } catch (err) {
@@ -242,33 +272,16 @@ app.post("/api/workspaces/:id/review", async (c) => {
     const prefMap = new Map(prefRows.map(r => [r.key, r.value]));
     const useMock = prefMap.get("mock_agent") === "true" || process.env.MOCK_AGENT === "1";
     const agentCommand = useMock ? MOCK_AGENT_COMMAND : (prefMap.get("agent_command") || undefined);
-    const agentArgs = prefMap.get("agent_args") || undefined;
     const claudeProfile = useMock ? undefined : (prefMap.get("claude_profile") || undefined);
-
-    const reviewPrompt = [
-      `You are an AI code reviewer. Review the changes on branch '${workspace.branch}'.`,
-      `Run 'git diff ${workspace.baseBranch ?? "HEAD"}' to see the diff.`,
-      ``,
-      `Review for: correctness bugs, security vulnerabilities, logic errors, and missing error handling.`,
-      `Classify each issue as CRITICAL (must fix — bugs, security, data loss), MAJOR (should fix — broken edge cases, poor error handling), or MINOR (nice to have — style, naming).`,
-      ``,
-      `If you find CRITICAL or MAJOR issues:`,
-      `1. Use the move_issue MCP tool to move issue ${issueId} to 'In Progress' (so the board shows the issue needs fixes)`,
-      `2. Fix all critical and major issues directly in the code`,
-      `3. Commit the fixes with a descriptive message`,
-      `4. Exit normally (the system will handle merging)`,
-      ``,
-      `If only MINOR issues or no issues: just exit normally (the system will auto-merge).`,
-      `Do NOT move the issue to 'AI Reviewed' yourself — the system handles that on merge.`,
-      ``,
-      `Issue ID: ${issueId}`,
-    ].join("\n");
+    const reviewArgs = buildReviewArgs(prefMap);
+    const autoFix = prefMap.get("review_auto_fix") !== "false";
+    const reviewPrompt = buildReviewPrompt(workspace.branch, workspace.baseBranch, issueId, autoFix);
 
     const now = new Date().toISOString();
     await db.update(workspaces).set({ status: "reviewing", updatedAt: now }).where(eq(workspaces.id, workspaceId));
     boardEvents.broadcast(projectId, "issue_updated");
 
-    const reviewSessionId = await sessionManager.startSession(workspaceId, reviewPrompt, agentCommand, agentArgs, undefined, claudeProfile);
+    const reviewSessionId = await sessionManager.startSession(workspaceId, reviewPrompt, agentCommand, reviewArgs, undefined, claudeProfile);
     reviewSessionIds.add(reviewSessionId);
     console.log(`[workflow] manual review session ${reviewSessionId} for workspace ${workspaceId}`);
 

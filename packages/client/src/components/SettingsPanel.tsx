@@ -16,6 +16,7 @@ interface Settings {
   permission_prompt_tool?: string;
   auto_review?: string;
   auto_merge?: string;
+  review_auto_fix?: string;
   resume_with_new_model?: string;
 }
 
@@ -29,6 +30,7 @@ const DEFAULT_SETTINGS: Settings = {
   permission_prompt_tool: "true",
   auto_review: "true",
   auto_merge: "true",
+  review_auto_fix: "true",
   resume_with_new_model: "false",
 };
 
@@ -216,6 +218,13 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                     hint="When an agent commits and exits successfully, automatically launch a review agent that checks the diff for issues."
                   />
                   <div className={`pl-5 space-y-3 border-l-2 ${autoReviewOn ? "border-blue-200" : "border-gray-100"}`}>
+                    <Toggle
+                      checked={settings.review_auto_fix !== "false"}
+                      onChange={setBool("review_auto_fix")}
+                      label="Auto-fix issues found in review"
+                      hint="When the review agent finds CRITICAL or MAJOR issues, it edits the code and commits fixes directly. Requires 'Skip permission prompts' to be enabled so the agent can write files. When disabled, the agent reports issues but makes no changes."
+                      disabled={!autoReviewOn}
+                    />
                     <Toggle
                       checked={settings.auto_merge !== "false"}
                       onChange={setBool("auto_merge")}
