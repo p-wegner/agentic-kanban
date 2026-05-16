@@ -120,6 +120,13 @@
       "when": 1778657600000,
       "tag": "0016_skip_auto_review",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "6",
+      "when": 1778744000000,
+      "tag": "0017_agent_config",
+      "breakpoints": true
     }
   ]
 }

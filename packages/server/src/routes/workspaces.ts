@@ -40,6 +40,8 @@ export function createWorkspacesRoute(
     let worktreePath: string | null = null;
     let baseBranch: string | null = null;
     let branch: string = body.branch;
+    let claudeProfile: string | undefined;
+    let agentCommand: string | undefined;
 
     try {
       // Resolve issue → project to get repoPath and defaultBranch
@@ -88,7 +90,6 @@ export function createWorkspacesRoute(
       const prefRows = await database.select().from(preferences);
       const prefMap = new Map(prefRows.map(r => [r.key, r.value]));
 
-      let agentCommand: string | undefined;
       const useMock = prefMap.get("mock_agent") === "true" || process.env.MOCK_AGENT === "1";
       if (useMock) {
         agentCommand = MOCK_AGENT_COMMAND;
@@ -100,7 +101,7 @@ export function createWorkspacesRoute(
       const agentArgs = skipPerms
         ? (baseArgs ? baseArgs + " --dangerously-skip-permissions" : "--dangerously-skip-permissions")
         : (baseArgs || undefined);
-      const claudeProfile = prefMap.get("claude_profile") || undefined;
+      claudeProfile = prefMap.get("claude_profile") || undefined;
 
       // Insert DB record with workingDir and baseBranch
       await database.insert(workspaces).values({
@@ -113,6 +114,8 @@ export function createWorkspacesRoute(
         requiresReview,
         planMode,
         status: "active",
+        claudeProfile: claudeProfile ?? null,
+        agentCommand: agentCommand ?? null,
         createdAt: now,
         updatedAt: now,
       });
@@ -179,6 +182,8 @@ export function createWorkspacesRoute(
           requiresReview,
           planMode,
           status: "active",
+          claudeProfile: claudeProfile ?? null,
+          agentCommand: agentCommand ?? null,
           createdAt: now,
           updatedAt: now,
         });

@@ -57,6 +57,12 @@ export function registerStartWorkspace(server: McpServer) {
           worktreePath = await gitService.createWorktree(resolvedRepoPath, branchName, resolvedBaseBranch);
         }
 
+        // Read agent settings to store on workspace
+        const prefRows = await db.select().from(schema.preferences);
+        const prefMap = new Map(prefRows.map(r => [r.key, r.value]));
+        const claudeProfile = prefMap.get("claude_profile") || null;
+        const agentCommand = prefMap.get("agent_command") || null;
+
         await db.insert(schema.workspaces).values({
           id,
           issueId,
@@ -65,6 +71,8 @@ export function registerStartWorkspace(server: McpServer) {
           baseBranch: isDirect ? null : resolvedBaseBranch,
           isDirect: isDirect ?? false,
           status: "active",
+          claudeProfile,
+          agentCommand,
           createdAt: now,
           updatedAt: now,
         });
