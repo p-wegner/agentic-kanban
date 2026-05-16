@@ -3,6 +3,8 @@ import { Layout } from "../components/Layout.js";
 import { BoardColumn } from "../components/BoardColumn.js";
 import { ColumnGroup } from "../components/ColumnGroup.js";
 import { CreateIssueForm } from "../components/CreateIssueForm.js";
+import { CreateIssuePanel } from "../components/CreateIssuePanel.js";
+import type { CreateIssueFormState } from "../components/CreateIssueForm.js";
 import { IssueDetailPanel } from "../components/IssueDetailPanel.js";
 import { WorkspacePanel } from "../components/WorkspacePanel.js";
 import { WorktreeOverview } from "../components/WorktreeOverview.js";
@@ -57,6 +59,7 @@ export function BoardPage() {
   const [sessionActivity, setSessionActivity] = useState<Record<string, string>>({});
   const [liveStats, setLiveStats] = useState<Record<string, LiveSessionStats>>({});
   const pendingBoardRefreshRef = useRef(false);
+  const [expandedCreatePanel, setExpandedCreatePanel] = useState<{ statusId: string; statusName: string; state: Partial<CreateIssueFormState> } | null>(null);
 
   const refetchBoard = useCallback(async (projectId?: string) => {
     const pid = projectId || activeProjectId;
@@ -205,6 +208,7 @@ export function BoardPage() {
         { method: "POST", body: JSON.stringify(issueData) },
       );
       setCreatingInColumnId(null);
+      setExpandedCreatePanel(null);
       const board = await refetchBoard();
       pendingBoardRefreshRef.current = false;
 
@@ -604,6 +608,10 @@ export function BoardPage() {
                 onSubmit={handleCreateIssue}
                 onCancel={() => setCreatingInColumnId(null)}
                 canStartWorkspace={canStartWorkspace}
+                onExpand={(state) => {
+                  setCreatingInColumnId(null);
+                  setExpandedCreatePanel({ statusId: col.id, statusName: col.name, state });
+                }}
               />
             </BoardColumn>
           ))}
@@ -618,6 +626,7 @@ export function BoardPage() {
           onCreateClick={setCreatingInColumnId}
           onCreateCancel={() => setCreatingInColumnId(null)}
           onCreateSubmit={handleCreateIssue}
+          onExpandCreate={(statusId, statusName, state) => setExpandedCreatePanel({ statusId, statusName, state })}
           onIssueClick={handleIssueClick}
           onWorkspaceClick={handleManageWorkspaces}
           onDragStart={(e, issue) => {
@@ -689,6 +698,17 @@ export function BoardPage() {
       )}
       {showShortcutHelp && (
         <ShortcutHelp onClose={() => setShowShortcutHelp(false)} />
+      )}
+      {expandedCreatePanel && activeProjectId && (
+        <CreateIssuePanel
+          projectId={activeProjectId}
+          statusId={expandedCreatePanel.statusId}
+          statusName={expandedCreatePanel.statusName}
+          initialState={expandedCreatePanel.state}
+          onSubmit={handleCreateIssue}
+          onClose={() => setExpandedCreatePanel(null)}
+          canStartWorkspace={canStartWorkspace}
+        />
       )}
     </Layout>
   );
