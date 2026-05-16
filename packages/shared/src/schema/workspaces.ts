@@ -1,6 +1,7 @@
 import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
 import { relations } from "drizzle-orm";
 import { issues } from "./issues.js";
+import { agentSkills } from "./agent-skills.js";
 
 export const workspaces = sqliteTable("workspaces", {
   id: text("id").primaryKey(),
@@ -14,6 +15,7 @@ export const workspaces = sqliteTable("workspaces", {
   status: text("status").notNull().default("active"),
   claudeProfile: text("claude_profile"),
   agentCommand: text("agent_command"),
+  skillId: text("skill_id").references(() => agentSkills.id),
   createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
   updatedAt: text("updated_at").notNull().$defaultFn(() => new Date().toISOString()),
   closedAt: text("closed_at"),
@@ -23,6 +25,10 @@ export const workspacesRelations = relations(workspaces, ({ one, many }) => ({
   issue: one(issues, {
     fields: [workspaces.issueId],
     references: [issues.id],
+  }),
+  skill: one(agentSkills, {
+    fields: [workspaces.skillId],
+    references: [agentSkills.id],
   }),
   sessions: many(sessions),
   diffComments: many(diffComments),

@@ -2,7 +2,7 @@
 import { Command } from "commander";
 import { migrate } from "drizzle-orm/libsql/migrator";
 import { db } from "./db/index.js";
-import { projects, projectStatuses, preferences, workspaces, issues, issueTags, sessions } from "@agentic-kanban/shared/schema";
+import { projects, projectStatuses, preferences, workspaces, issues, issueTags, sessions, agentSkills } from "@agentic-kanban/shared/schema";
 import { eq, inArray, sql } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { detectRepoInfo } from "./services/git-info.service.js";
@@ -492,6 +492,100 @@ wsCmd
       console.log(`  id: ${id}`);
       console.log(`  branch: ${branchName}`);
       console.log(`  dir: ${worktreePath}`);
+      process.exit(0);
+    } catch (err) {
+      console.error("Error:", err instanceof Error ? err.message : String(err));
+      process.exit(1);
+    }
+  });
+
+// ── skill commands ────────────────────────────────────────────────────────────
+
+const skillCmd = program.command("skill").description("Manage agent skills");
+
+skillCmd
+  .command("list")
+  .description("List all agent skills")
+  .action(async () => {
+    try {
+      await runMigrations();
+      const rows = await db.select().from(agentSkills).orderBy(agentSkills.name);
+      if (rows.length === 0) {
+        console.log("No agent skills found.");
+        process.exit(0);
+      }
+      for (const s of rows) {
+        const builtin = s.isBuiltin ? " [builtin]" : "";
+        const model = s.model ? ` (model: ${s.model})` : "";
+        console.log(`  ${s.name}${builtin}${model}`);
+        console.log(`    id: ${s.id}`);
+        console.log(`    ${s.description}`);
+      }
+      process.exit(0);
+    } catch (err) {
+      console.error("Error:", err instanceof Error ? err.message : String(err));
+      process.exit(1);
+    }
+  });
+
+skillCmd
+  .command("get <name-or-id>")
+  .description("Show full details of a skill including its prompt")
+  .action(async (nameOrId: string) => {
+    try {
+      await runMigrations();
+      let rows = await db.select().from(agentSkills).where(eq(agentSkills.name, nameOrId)).limit(1);
+      if (rows.length === 0) {
+        rows = await db.select().from(agentSkills).where(eq(agentSkills.id, nameOrId)).limit(1);
+      }
+      if (rows.length === 0) {
+        console.error(`Skill '${nameOrId}' not found.`);
+        process.exit(1);
+      }
+      const s = rows[0];
+      console.log(`Name: ${s.name}`);
+      console.log(`ID: ${s.id}`);
+      console.log(`Description: ${s.description}`);
+      console.log(`Model: ${s.model ?? "default"}`);
+      console.log(`Builtin: ${s.isBuiltin}`);
+      console.log(`\n--- Prompt ---\n${s.prompt}`);
+      process.exit(0);
+    } catch (err) {
+      console.error("Error:", err instanceof Error ? err.message : String(err));
+      process.exit(1);
+    }
+  });
+
+skillCmd
+  .command("create <name>")
+  .description("Create a new agent skill")
+  .option("-d, --description <description>", "Skill description")
+  .option("-p, --prompt <prompt>", "Skill prompt (or omit to read from stdin)")
+  .option("-m, --model <model>", "Model override (haiku, sonnet, opus)")
+  .action(async (name: string, options: { description?: string; prompt?: string; model?: string }) => {
+    try {
+      await runMigrations();
+      const existing = await db.select().from(agentSkills).where(eq(agentSkills.name, name)).limit(1);
+      if (existing.length > 0) {
+        console.error(`Skill '${name}' already exists.`);
+        process.exit(1);
+      }
+      const prompt = options.prompt ?? "No prompt provided.";
+      const description = options.description ?? name;
+      const id = randomUUID();
+      const now = new Date().toISOString();
+      await db.insert(agentSkills).values({
+        id,
+        name,
+        description,
+        prompt,
+        model: options.model ?? null,
+        isBuiltin: false,
+        createdAt: now,
+        updatedAt: now,
+      });
+      console.log(`Created skill '${name}'`);
+      console.log(`  id: ${id}`);
       process.exit(0);
     } catch (err) {
       console.error("Error:", err instanceof Error ? err.message : String(err));

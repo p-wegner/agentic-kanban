@@ -9,3 +9,4 @@ export { repos } from "./repos.js";
 export { preferences } from "./preferences.js";
 export { diffComments, diffCommentsRelations } from "./diff-comments.js";
 export { issueDependencies, issueDependenciesRelations } from "./issue-dependencies.js";
+export { agentSkills } from "./agent-skills.js";
