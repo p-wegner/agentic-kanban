@@ -15,6 +15,7 @@ interface Settings {
   claude_profile?: string;
   permission_prompt_tool?: string;
   auto_review?: string;
+  resume_with_new_model?: string;
 }
 
 const DEFAULT_SETTINGS: Settings = {
@@ -26,6 +27,7 @@ const DEFAULT_SETTINGS: Settings = {
   claude_profile: "",
   permission_prompt_tool: "true",
   auto_review: "true",
+  resume_with_new_model: "false",
 };
 
 export function SettingsPanel({ onClose }: SettingsPanelProps) {
@@ -249,6 +251,27 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                   When an agent commits and exits successfully, automatically launch
                   a review agent that checks the diff for issues. The issue moves to
                   In Review, then AI Reviewed after review passes.
+                </p>
+              </div>
+
+              {/* Resume with new model */}
+              <div>
+                <label className="flex items-center gap-2 text-sm font-medium text-gray-700 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={settings.resume_with_new_model === "true"}
+                    onChange={(e) =>
+                      setSettings((s) => ({ ...s, resume_with_new_model: e.target.checked ? "true" : "false" }))
+                    }
+                    className="rounded border-gray-300"
+                  />
+                  Use new profile on resume
+                </label>
+                <p className="text-xs text-gray-500 mt-1">
+                  When enabled, continuing a chat starts a fresh Claude session using the current
+                  profile instead of resuming the previous one. Use this when switching providers
+                  via a different Claude profile — <code>--resume</code> locks the session to the
+                  original provider regardless of profile changes.
                 </p>
               </div>
 
