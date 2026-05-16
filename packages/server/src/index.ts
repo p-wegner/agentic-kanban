@@ -121,6 +121,10 @@ async function runWorkflowOnExit(workspaceId: string, sessionId: string, exitCod
     const prefMap = new Map(prefRows.map(r => [r.key, r.value]));
     const autoMergeEnabled = prefMap.get("auto_merge") !== "false";
 
+    // Resolve project's default branch (needed for base branch comparison)
+    const projectRows = await db.select({ defaultBranch: projects.defaultBranch }).from(projects).where(eq(projects.id, projectId)).limit(1);
+    const defaultBranch = projectRows.length > 0 ? projectRows[0].defaultBranch : "main";
+
     if (reviewSessionIds.has(sessionId)) {
       // Review session completed
       reviewSessionIds.delete(sessionId);
@@ -151,16 +155,27 @@ async function runWorkflowOnExit(workspaceId: string, sessionId: string, exitCod
       return;
     }
 
-    // Main agent session completed — check if changes were committed
+    // Main agent session completed — check if there are changes vs the base branch
     let hasCommittedChanges = false;
     if (workspace.workingDir) {
       try {
-        hasCommittedChanges = await new Promise<boolean>((resolve) => {
-          execFile("git", ["diff", "--quiet", "HEAD"], { cwd: workspace.workingDir! }, (err: Error | null) => {
-            // git diff --quiet exits 0 if clean, 1 if dirty
-            resolve(!err);
+        if (workspace.isDirect) {
+          // For direct workspaces, check if working tree is clean (agent committed everything)
+          hasCommittedChanges = await new Promise<boolean>((resolve) => {
+            execFile("git", ["diff", "--quiet", "HEAD"], { cwd: workspace.workingDir! }, (err: Error | null) => {
+              resolve(!err);
+            });
           });
-        });
+        } else {
+          // For worktree workspaces, check if there are actual changes vs the base branch
+          const baseBranch = workspace.baseBranch || defaultBranch;
+          hasCommittedChanges = await new Promise<boolean>((resolve) => {
+            execFile("git", ["diff", "--quiet", baseBranch], { cwd: workspace.workingDir! }, (err: Error | null) => {
+              // git diff --quiet exits 1 if there IS a diff (changes exist) → err is set → true
+              resolve(!!err);
+            });
+          });
+        }
       } catch {
         hasCommittedChanges = false;
       }
@@ -186,7 +201,18 @@ async function runWorkflowOnExit(workspaceId: string, sessionId: string, exitCod
         const claudeProfile = useMock ? undefined : (prefMap.get("claude_profile") || undefined);
         const reviewArgs = buildReviewArgs(prefMap);
         const autoFix = prefMap.get("review_auto_fix") !== "false";
-        const reviewPrompt = buildReviewPrompt(workspace.branch, workspace.baseBranch, issueId, autoFix);
+
+        // Merge base branch into workspace before review so diff is accurate
+        let diffRef = workspace.baseBranch || defaultBranch;
+        if (!workspace.isDirect && workspace.workingDir) {
+          const baseBranch = workspace.baseBranch || defaultBranch;
+          const prep = await gitService.prepareForReview(workspace.workingDir, baseBranch);
+          if (!prep.success) {
+            console.warn(`[workflow] merge-base failed for workspace ${workspaceId}: ${prep.error} — launching review with stale base`);
+          }
+          diffRef = prep.diffRef;
+        }
+        const reviewPrompt = buildReviewPrompt(workspace.branch, diffRef, issueId, autoFix);
 
         try {
           // Set workspace to "reviewing" so the board shows "AI Reviewing" badge
@@ -281,7 +307,20 @@ app.post("/api/workspaces/:id/review", async (c) => {
     const claudeProfile = useMock ? undefined : (prefMap.get("claude_profile") || undefined);
     const reviewArgs = buildReviewArgs(prefMap);
     const autoFix = prefMap.get("review_auto_fix") !== "false";
-    const reviewPrompt = buildReviewPrompt(workspace.branch, workspace.baseBranch, issueId, autoFix);
+
+    // Merge base branch before review so diff is accurate
+    const projectRows = await db.select({ defaultBranch: projects.defaultBranch }).from(projects).where(eq(projects.id, projectId)).limit(1);
+    const defaultBranch = projectRows.length > 0 ? projectRows[0].defaultBranch : "main";
+    let diffRef = workspace.baseBranch || defaultBranch;
+    if (!workspace.isDirect && workspace.workingDir) {
+      const baseBranch = workspace.baseBranch || defaultBranch;
+      const prep = await gitService.prepareForReview(workspace.workingDir, baseBranch);
+      if (!prep.success) {
+        console.warn(`[workflow] merge-base failed for manual review ${workspaceId}: ${prep.error}`);
+      }
+      diffRef = prep.diffRef;
+    }
+    const reviewPrompt = buildReviewPrompt(workspace.branch, diffRef, issueId, autoFix);
 
     const now = new Date().toISOString();
     await db.update(workspaces).set({ status: "reviewing", updatedAt: now }).where(eq(workspaces.id, workspaceId));
