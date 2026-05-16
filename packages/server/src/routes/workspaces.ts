@@ -4,6 +4,7 @@ import { workspaces, issues, projects, preferences, sessions, sessionMessages, d
 import { eq, inArray } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import * as gitService from "../services/git.service.js";
+import { runSetupScript } from "../services/setup-script.js";
 import type { SessionManager } from "../services/session.manager.js";
 import type { BoardEvents } from "../services/board-events.js";
 import type { Database } from "../db/index.js";
@@ -69,6 +70,15 @@ export function createWorkspacesRoute(
 
       const project = projectRows[0];
 
+      // Fetch setup script config from project
+      const setupConfigRows = await database
+        .select({ setupScript: projects.setupScript, setupBlocking: projects.setupBlocking })
+        .from(projects)
+        .where(eq(projects.id, issue.projectId))
+        .limit(1);
+      const setupScript = setupConfigRows[0]?.setupScript;
+      const setupBlocking = setupConfigRows[0]?.setupBlocking ?? true;
+
       if (isDirect) {
         // Direct workspace: use main checkout, auto-detect branch
         branch = await gitService.getCurrentBranch(project.repoPath);
@@ -78,6 +88,33 @@ export function createWorkspacesRoute(
         // Normal workspace: create worktree
         baseBranch = body.baseBranch || project.defaultBranch;
         worktreePath = await gitService.createWorktree(project.repoPath, branch, baseBranch ?? undefined);
+      }
+
+      // Run setup script if configured
+      if (setupScript && worktreePath) {
+        if (setupBlocking) {
+          try {
+            const result = await runSetupScript(worktreePath, setupScript);
+            if (result.exitCode === 0) {
+              console.log(`[workspaces] setup complete: workspaceId=${id}`);
+            } else {
+              console.warn(`[workspaces] setup failed (exit ${result.exitCode}): ${result.stderr || result.stdout}`);
+            }
+          } catch (err) {
+            console.warn(`[workspaces] setup error: ${err instanceof Error ? err.message : String(err)}`);
+          }
+        } else {
+          // Parallel: fire-and-forget
+          runSetupScript(worktreePath, setupScript).then(result => {
+            if (result.exitCode === 0) {
+              console.log(`[workspaces] parallel setup complete: workspaceId=${id}`);
+            } else {
+              console.warn(`[workspaces] parallel setup failed (exit ${result.exitCode}): ${result.stderr || result.stdout}`);
+            }
+          }).catch(err => {
+            console.warn(`[workspaces] parallel setup error: ${err instanceof Error ? err.message : String(err)}`);
+          });
+        }
       }
 
       // Build prompt from issue title + description
