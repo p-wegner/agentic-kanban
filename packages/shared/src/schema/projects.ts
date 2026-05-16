@@ -9,6 +9,8 @@ export const projects = sqliteTable("projects", {
   repoName: text("repo_name").notNull().default(""),
   defaultBranch: text("default_branch").notNull().default("main"),
   remoteUrl: text("remote_url"),
+  setupScript: text("setup_script"),
+  setupBlocking: integer("setup_blocking", { mode: "boolean" }).notNull().default(true),
   createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
   updatedAt: text("updated_at").notNull().$defaultFn(() => new Date().toISOString()),
 });

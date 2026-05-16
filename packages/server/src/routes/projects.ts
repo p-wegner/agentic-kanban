@@ -1,12 +1,15 @@
 import { Hono } from "hono";
 import { db } from "../db/index.js";
-import { projects, projectStatuses, issues, workspaces, sessions, sessionMessages, diffComments, issueDependencies } from "@agentic-kanban/shared/schema";
+import { projects, projectStatuses, issues, workspaces, sessions, sessionMessages, diffComments, issueDependencies, preferences } from "@agentic-kanban/shared/schema";
 import { eq, inArray, sql, and } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
+import { execSync, spawnSync } from "node:child_process";
+import { existsSync, readdirSync } from "node:fs";
 import { detectRepoInfo } from "../services/git-info.service.js";
 import { listBranches, listWorktrees, getDiffShortstat, removeWorktree } from "../services/git.service.js";
 import type { Database } from "../db/index.js";
-import { sep } from "node:path";
+import { sep, join } from "node:path";
+import { homedir } from "node:os";
 
 const DEFAULT_STATUSES = [
   { name: "Todo", sortOrder: 0, isDefault: true },
@@ -83,6 +86,120 @@ export function createProjectsRoute(database: Database = db) {
     }
 
     return c.json({ id, name, repoPath: repoInfo.repoPath }, 201);
+  });
+
+  // PATCH /api/projects/:id — update project fields
+  router.patch("/:id", async (c) => {
+    const id = c.req.param("id");
+    const body = await c.req.json();
+    const now = new Date().toISOString();
+
+    const updates: Record<string, unknown> = { updatedAt: now };
+    if (body.name !== undefined) updates.name = body.name;
+    if (body.description !== undefined) updates.description = body.description;
+    if (body.color !== undefined) updates.color = body.color;
+    if (body.setupScript !== undefined) updates.setupScript = body.setupScript || null;
+    if (body.setupBlocking !== undefined) updates.setupBlocking = !!body.setupBlocking;
+
+    await database.update(projects).set(updates).where(eq(projects.id, id));
+    return c.json({ id });
+  });
+
+  // POST /api/projects/generate-setup-script — AI-generate a setup script for a project
+  router.post("/generate-setup-script", async (c) => {
+    let body: { projectId?: string };
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ error: "invalid JSON body" }, 400);
+    }
+    if (!body.projectId) {
+      return c.json({ error: "projectId is required" }, 400);
+    }
+
+    const projectRows = await database
+      .select({ repoPath: projects.repoPath, repoName: projects.repoName })
+      .from(projects)
+      .where(eq(projects.id, body.projectId))
+      .limit(1);
+    if (projectRows.length === 0) {
+      return c.json({ error: "Project not found" }, 404);
+    }
+
+    const { repoPath, repoName } = projectRows[0];
+
+    // Detect project marker files
+    const markers = [
+      "package.json", "pnpm-lock.yaml", "yarn.lock", "bun.lockb", "bun.lock",
+      "Cargo.toml", "go.mod", "requirements.txt", "Pipfile", "pyproject.toml",
+      "pom.xml", "build.gradle", "build.gradle.kts", "Gemfile", "mix.exs",
+      "Makefile", "justfile", "Taskfile.yml",
+    ];
+    const detected: string[] = [];
+    try {
+      const files = readdirSync(repoPath);
+      for (const f of files) {
+        if (markers.includes(f)) detected.push(f);
+      }
+    } catch {
+      // Can't read directory
+    }
+
+    // Read agent_command and claude_profile from global preferences
+    let agentCommand = "claude";
+    let claudeProfile: string | undefined;
+    const prefs = await database
+      .select({ key: preferences.key, value: preferences.value })
+      .from(preferences)
+      .where(inArray(preferences.key, ["agent_command", "claude_profile"]));
+    for (const p of prefs) {
+      if (p.key === "agent_command" && p.value) agentCommand = p.value;
+      if (p.key === "claude_profile" && p.value) claudeProfile = p.value;
+    }
+
+    if (process.platform === "win32" && agentCommand === "claude") {
+      try {
+        const resolved = execSync("where claude.exe 2>nul", { encoding: "utf8" }).trim().split("\n")[0]?.trim();
+        if (resolved) agentCommand = resolved;
+      } catch {}
+    }
+
+    const prompt = `You are analyzing a software project to determine the correct setup command(s) to run after cloning the repository into a fresh git worktree.
+Based on the files detected in the project root, suggest the appropriate setup command(s) for the project "${repoName}".
+
+IMPORTANT: Respond ONLY with the raw shell command(s) to run. No explanation, no markdown, no code fences.
+If multiple commands are needed, chain them with &&.
+Use platform-neutral syntax (e.g., "pnpm install" not "npm i", prefer the package manager indicated by lock files).
+If no setup is needed, respond with an empty string.
+
+Detected files: ${detected.length > 0 ? detected.join(", ") : "none"}`;
+
+    const args: string[] = ["--output-format", "text", "-p"];
+    if (claudeProfile) {
+      const settingsPath = join(homedir(), ".claude", `settings_${claudeProfile}.json`);
+      if (existsSync(settingsPath)) {
+        args.push("--settings", settingsPath);
+      }
+    }
+
+    const result = spawnSync(agentCommand, args, {
+      input: prompt,
+      encoding: "utf8",
+      timeout: 30000,
+      shell: false,
+    });
+
+    if (result.error || result.status !== 0) {
+      const parts: string[] = [];
+      if (result.error) parts.push(result.error.message);
+      if (result.stderr) parts.push(result.stderr.trim());
+      const msg = parts.length > 0 ? parts.join(" | ") : `claude CLI exited with status ${result.status}`;
+      console.error("[generate-setup-script] claude error:", msg);
+      return c.json({ error: "AI generation failed", detail: msg }, 500);
+    }
+
+    const setupScript = result.stdout?.trim() ?? "";
+    return c.json({ setupScript });
   });
 
   // GET /api/projects/:id/statuses
