@@ -1,8 +1,12 @@
 import { Hono } from "hono";
 import { db } from "../db/index.js";
-import { issues, projectStatuses, workspaces, tags, issueTags, sessions, sessionMessages, diffComments, issueDependencies } from "@agentic-kanban/shared/schema";
+import { issues, projectStatuses, workspaces, tags, issueTags, sessions, sessionMessages, diffComments, issueDependencies, preferences } from "@agentic-kanban/shared/schema";
 import { eq, and, sql, inArray } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
+import { spawnSync, execSync } from "node:child_process";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
+import { homedir } from "node:os";
 import type { Database } from "../db/index.js";
 import type { BoardEvents } from "../services/board-events.js";
 
@@ -38,6 +42,88 @@ export function createIssuesRoute(database: Database = db, options?: { boardEven
       .orderBy(issues.sortOrder);
 
     return c.json(result);
+  });
+
+  // POST /api/issues/enhance — AI-enhance a ticket title and description
+  router.post("/enhance", async (c) => {
+    let body: { title: string; description?: string; projectId?: string };
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ error: "invalid JSON body" }, 400);
+    }
+    if (!body.title?.trim()) {
+      return c.json({ error: "title is required" }, 400);
+    }
+
+    // Read agent_command and claude_profile from global preferences
+    let agentCommand = "claude";
+    let claudeProfile: string | undefined;
+    const prefs = await database
+      .select({ key: preferences.key, value: preferences.value })
+      .from(preferences)
+      .where(inArray(preferences.key, ["agent_command", "claude_profile"]));
+    for (const p of prefs) {
+      if (p.key === "agent_command" && p.value) agentCommand = p.value;
+      if (p.key === "claude_profile" && p.value) claudeProfile = p.value;
+    }
+
+    // On Windows, resolve claude.exe to avoid cmd.exe stdout buffering
+    if (process.platform === "win32" && agentCommand === "claude") {
+      try {
+        const resolved = execSync("where claude.exe 2>nul", { encoding: "utf8" }).trim().split("\n")[0]?.trim();
+        if (resolved) agentCommand = resolved;
+      } catch {}
+    }
+
+    const prompt = `You are helping enhance a kanban issue ticket for an AI coding agent.
+Given a title and optional description, return an improved version that is clear, actionable, and well-structured.
+Keep the title concise (under 80 chars). Expand the description with context, acceptance criteria, and agent instructions if helpful.
+Respond ONLY with valid JSON — no markdown, no explanation:
+{"title": "...", "description": "..."}
+
+Current title: ${body.title}
+Current description: ${body.description?.trim() || "(none)"}`;
+
+    // Pass prompt via stdin (-p without value reads from stdin) to avoid shell quoting issues
+    const args: string[] = ["--output-format", "text", "-p"];
+    if (claudeProfile) {
+      const settingsPath = join(homedir(), ".claude", `settings_${claudeProfile}.json`);
+      if (existsSync(settingsPath)) {
+        args.push("--settings", settingsPath);
+      }
+    }
+
+    const result = spawnSync(agentCommand, args, {
+      input: prompt,
+      encoding: "utf8",
+      timeout: 60000,
+      shell: false,
+    });
+
+    if (result.error || result.status !== 0) {
+      const parts: string[] = [];
+      if (result.error) parts.push(result.error.message);
+      if (result.stderr) parts.push(result.stderr.trim());
+      if (result.stdout) parts.push(result.stdout.trim().slice(0, 200));
+      const msg = parts.length > 0 ? parts.join(" | ") : `claude CLI exited with status ${result.status}`;
+      console.error("[enhance] claude error:", msg);
+      return c.json({ error: "AI enhancement failed", detail: msg }, 500);
+    }
+
+    const output = result.stdout?.trim() ?? "";
+    // Strip markdown code fences if present
+    const cleaned = output.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
+    try {
+      const enhanced = JSON.parse(cleaned) as { title?: string; description?: string };
+      return c.json({
+        title: enhanced.title?.trim() || body.title,
+        description: enhanced.description?.trim() ?? body.description ?? "",
+      });
+    } catch {
+      console.error("[enhance] failed to parse claude output:", output);
+      return c.json({ error: "Failed to parse AI response", raw: output }, 500);
+    }
   });
 
   // POST /api/issues
