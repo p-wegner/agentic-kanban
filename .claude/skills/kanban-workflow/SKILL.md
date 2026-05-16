@@ -73,14 +73,25 @@ update_issue(issueId, statusName="In Review")
 ```
 This signals that the implementation is complete and ready for review. An automated code review will be triggered.
 
-### 7. Close the issue
+### 7. AI Code Review (automatic)
+When auto-review is enabled, the system launches a review agent after your session exits. The board shows a purple **AI Reviewing** badge on the issue card during review.
+
+**Review agent behavior:**
+- Reviews the git diff for correctness, security, and code quality
+- If **CRITICAL or MAJOR** issues found: moves issue to **In Progress**, fixes the issues, commits, then exits → system auto-merges
+- If **only MINOR or no issues**: exits normally → system auto-merges and moves to **AI Reviewed**
+- If review agent crashes (non-zero exit): issue stays where it is, no merge happens
+
+The review-then-fix loop is: implement → review → fix (if needed) → merge. No manual intervention required.
+
+### 8. Close the issue
 After review approval:
 ```
 update_issue(issueId, statusName="Done")
 ```
 Do this only after the work is actually complete (tests pass, code committed, review approved). Do **not** mark Done while work is still in progress.
 
-### 8. Cancel if work is abandoned
+### 9. Cancel if work is abandoned
 ```
 update_issue(issueId, statusName="Cancelled")
 ```
@@ -88,10 +99,11 @@ Use **Cancelled** for issues that are no longer relevant or were superseded. Add
 
 ## Status Names (exact strings)
 
-The board has 5 statuses. Pass these exact strings to `statusName`:
+The board has 6 statuses. Pass these exact strings to `statusName`:
 - `"Todo"` — not started
 - `"In Progress"` — actively being worked on
 - `"In Review"` — implementation complete, awaiting review
+- `"AI Reviewed"` — passed automated code review, ready to merge
 - `"Done"` — complete
 - `"Cancelled"` — abandoned/irrelevant
 

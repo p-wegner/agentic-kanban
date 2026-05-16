@@ -46,7 +46,7 @@ export interface UpdateIssueRequest {
 export interface MainWorkspaceInfo {
   id: string;
   branch: string;
-  status: "active" | "idle" | "closed";
+  status: "active" | "reviewing" | "idle" | "closed";
 }
 
 export interface WorkspaceSummary {
