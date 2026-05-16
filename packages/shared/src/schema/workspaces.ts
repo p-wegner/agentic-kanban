@@ -15,7 +15,6 @@ export const workspaces = sqliteTable("workspaces", {
   createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
   updatedAt: text("updated_at").notNull().$defaultFn(() => new Date().toISOString()),
   closedAt: text("closed_at"),
-  planMode: integer("plan_mode", { mode: "boolean" }).notNull().default(false),
 });
 
 export const workspacesRelations = relations(workspaces, ({ one, many }) => ({
