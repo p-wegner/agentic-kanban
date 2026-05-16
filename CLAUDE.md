@@ -5,9 +5,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Project Status
 This project is **Stage 13 complete + Tauri desktop** (Stages 0-13 done). Tech stack: TypeScript monorepo — Hono + Drizzle + React + MCP SDK + Tauri v2. Progress tracked in `docs/state.md`.
 
-All documented features have been visually verified (2026-05-15):
+All documented features have been visually verified (2026-05-16):
 - Board renders 3 active columns (Todo, In Progress, In Review) with collapsible "Completed" group for Done/Cancelled
-- Create issue: inline form with title, description, priority, Add/Cancel
+- Create issue: inline form with title, description, priority, plan mode, skip review, Add/Cancel; expandable full-screen panel via Expand button
 - Issue detail panel: slide-in with view/edit/delete, status dropdown, description placeholder, priority badge, status, workspaces, tags, timestamps, issue number
 - Edit issue: title/description/priority editable, Save/Cancel; all sections visible in edit mode; unsaved changes warning
 - Tags: CRUD via dropdown in detail panel, removable badges with colors, 4 seed tags (bug, feature, improvement, docs)
@@ -17,9 +17,11 @@ All documented features have been visually verified (2026-05-15):
 - Worktree overview: branch icon in header, slide-in panel listing all git worktrees with issue linking, diff stats, and status badges
 - Project switcher: dropdown in header when multiple projects registered
 - API routes: health, projects (with git info + worktrees), preferences (active-project + settings), board aggregation, issues (CRUD), workspaces (CRUD + one-step create with worktree+launch + actions), tags (CRUD), sessions (WebSocket + output history)
-- Settings panel: gear icon in header, agent command/args, output parsing, mock agent toggle
+- Settings panel: tabbed modal (gear icon in header), agent command/args, output parsing, mock agent toggle, auto_merge, review_auto_fix, claude_profile
 - Session history: inline session selector in workspace panel, click between past sessions without leaving workspace context
 - Chat-like agent interaction: persistent chat input with Send/Stop toggle, --resume support, auto-clear on exit, Ctrl+Enter to send, multi-turn follow-up messages via stdin JSONL, turn state tracking (processing/waiting), "Turn complete — waiting for input" display
+- AI code review: auto-review on agent session exit (configurable per-issue), manual review button, reviewing indicator badge, review sessions inherit claude_profile, auto_fix setting
+- Live session stats: real-time model name and context token count on issue cards via WebSocket
 - Real-time board updates: board auto-refreshes via WebSocket when mutations happen
 - Command palette: Ctrl+K searchable action list, keyboard navigation
 - Keyboard shortcut help: `?` overlay showing all shortcuts
@@ -27,7 +29,7 @@ All documented features have been visually verified (2026-05-15):
 - Panel animations: slide-in transitions on detail/workspace/settings/worktree panels
 - Favicon: inline SVG kanban-board icon
 - MCP server: 21 tools via stdio JSON-RPC
-- CLI: `pnpm cli -- register <path>` to register a git repo as a project
+- CLI: `pnpm cli -- register <path>` to register a git repo as a project; also `issue list/create/move` and `workspace list/create` for board operations
 - Desktop app: Tauri v2 native window with system tray (Show/Quit), minimize-to-tray on close, OS notifications on session_completed/workspace_merged events
 
 ## What This Is
@@ -68,7 +70,7 @@ Cleanroom reimplementation of [vibe-kanban](https://github.com/BloopAI/vibe-kanb
 - **Direct workspaces**: When `isDirect: true` in the POST body, no worktree is created — `workingDir` is set to the project's `repoPath` and `branch` is auto-detected via `gitService.getCurrentBranch()`. The `baseBranch` is null for direct workspaces. Diff uses `git diff HEAD` (working tree changes) instead of `git diff <baseBranch>`. Merge is a no-op (just closes the workspace). The UI shows a checkbox "Work directly on main checkout" that hides branch/base fields. Direct workspaces show a purple "direct" badge and use "Close" instead of "Merge" and "View Changes" instead of "View Diff".
 - **Session resume chain**: Claude's internal `session_id` is captured from `system/init` stream-json events in `session.manager.ts` broadcast() and stored in `sessions.claudeSessionId`. On relaunch, `resumeFromId` looks up the previous session's `claudeSessionId` and passes `--resume <id>` to the agent.
 - **Mock agent tsx resolution**: The mock agent runs from the worktree CWD (no `node_modules`). It must use `pathToFileURL()` to resolve the absolute path to `packages/server/node_modules/tsx/dist/loader.mjs` as a `file://` URL in the `--import` flag. Bare `--import tsx` would fail with `ERR_MODULE_NOT_FOUND`.
-- **Branch suggestion/listing**: The workspace creation form auto-suggests a branch name via `suggestBranchName()` (format: `feature/<issue-number>-<sanitized-title>`). The `sanitizeBranchName()` function lowercases, replaces non-alphanumeric chars with hyphens, collapses runs, and limits to 80 chars. Base branch uses a `<select>` dropdown populated from `GET /api/projects/:id/branches` (calls `listBranches()` in git service), with "Default (main)" as the first option. Falls back to text input if the branches API fails.
+- **Branch suggestion/listing**: The workspace creation form auto-suggests a branch name via `suggestBranchName()` (format: `feature/ak-<issue-number>-<sanitized-title>`). The `sanitizeBranchName()` function lowercases, replaces non-alphanumeric chars with hyphens, collapses runs, and limits to 80 chars. Base branch uses a `<select>` dropdown populated from `GET /api/projects/:id/branches` (calls `listBranches()` in git service), with "Default (main)" as the first option. Falls back to text input if the branches API fails.
 - **Git worktree base branch**: `createWorktree()` in both server and MCP git services accepts an optional `baseBranch` parameter. When creating a new branch, it runs `git branch <branch> <baseBranch>` instead of `git branch <branch>` (which defaults to HEAD). This ensures worktrees start from the correct base.
 - **DB file locations**: The server DB lives at `packages/server/kanban.db` (relative to `file:kanban.db` CWD resolution under pnpm). The MCP server has its own copy at `packages/mcp-server/kanban.db`. Scripts using `import.meta.dirname` relative paths must account for which package they run in — `../../../kanban.db` from `packages/server/src/scripts/` points to the repo root, not the actual DB.
 - **Issue numbers**: Auto-incrementing per project via `MAX(issue_number) + 1` in `POST /api/issues`. The `issue_number` column was added in migration 0006. The test migration list in `api.test.ts` (`MIGRATION_FILES` array) must be updated when new migrations are added.
@@ -143,6 +145,11 @@ When performing kanban board operations (creating issues, moving issues, managin
 - `pnpm cli -- list` — list registered projects
 - `pnpm cli -- unregister <name>` — remove a project by name or ID
 - `pnpm cli -- cleanup` — show stale worktrees for closed workspaces
+- `pnpm cli -- issue list` — list issues for active project
+- `pnpm cli -- issue create <title>` — create an issue
+- `pnpm cli -- issue move <id> <status>` — move issue to a status
+- `pnpm cli -- workspace list` — list workspaces for active project
+- `pnpm cli -- workspace create <issueId>` — create a workspace
 
 ## Worktree Port Strategy
 `pnpm dev` uses `scripts/dev.mjs` which auto-detects whether the CWD is a git worktree and assigns deterministic ports:

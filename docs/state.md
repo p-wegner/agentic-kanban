@@ -235,11 +235,11 @@ Claude Code with `--output-format stream-json --verbose -p <prompt>` emits NDJSO
 ## Monorepo Structure
 ```
 packages/
-  shared/     - Drizzle schema (11 tables, 12 migrations) + TypeScript types
-  server/     - Hono API + @libsql/client + SQLite (port 3001) + CLI (commander)
+  shared/     - Drizzle schema (11 tables, 17 migrations) + TypeScript types
+  server/     - Hono API + @libsql/client + SQLite (port 3001) + CLI (commander with issue/workspace commands)
   client/     - React + Vite + Tailwind v4 (port 5173)
   mcp-server/ - MCP stdio server (21 tools: full CRUD for issues/workspaces/tags/sessions/comments + move/stop/stats)
-  e2e/        - Playwright tests (100 tests: API + UI, global setup creates project)
+  e2e/        - Playwright tests (101 tests: API + UI, global setup creates project)
 ```
 
 ## API Routes
@@ -339,3 +339,11 @@ packages/
 | 2026-05-12 | Workspace deletion | Added delete button to WorkspacePanel for both active/idle and closed workspaces. Red button with confirmation dialog calls existing DELETE /api/workspaces/:id endpoint. Board and workspace list refresh after deletion. |
 | 2026-05-14 | Workflow fixes | Three fixes to the ticket-to-code workflow: (1) Removed auto-merge on agent session exit — workspaces now stay active after agent finishes, users merge explicitly from UI. (2) Fixed migration 0011 — `closed_at` column was never added because drizzle-kit requires `--> statement-breakpoint` between SQL statements and journal timestamps must be monotonically increasing. (3) Direct workspace diff now includes untracked files via `git ls-files --others`. Verified full workflow end-to-end with both mock and real Claude Code agent: create issue → workspace → agent runs → chat again (relaunch) → view diff → merge/close. |
 | 2026-05-15 | Server resilience + UX fixes | (1) Fixed fullscreen chat input — textarea had no explicit bg/text color, invisible against dark bg-gray-950 overlay. (2) Added process lifecycle logging: uncaughtException/unhandledRejection handlers with [fatal] prefix, graceful SIGTERM/SIGINT shutdown with agent killAll(), pid/signal in agent spawn/exit/kill logs. (3) Wrapped agent onOutput callbacks in try/catch so subprocess failures cannot crash the server. (4) Stale session cleanup on startup: sessions still marked "running" after crash/restart are set to "stopped" and their workspaces to "idle". (5) Workspace action buttons (View Diff, Terminal, Merge, Delete) now always visible, not hidden behind !isRunning guard. Merge and Delete auto-stop running agents with confirmation. |
+| 2026-05-16 | Plan mode + skip review + branch prefix | (1) Plan mode: `--permission-mode plan` flag passed to agent when workspace has `planMode` enabled. Migration 0013 adds `planMode` column to workspaces table. Plan mode badge shown in workspace list. (2) Skip auto-review: `skipAutoReview` field on issues, checkbox in create form and detail panel. Controls whether post-agent AI code review runs. (3) Branch name prefix: `suggestBranchName()` now generates `feature/ak-<issueNumber>-<title>` format. Unit tests for sanitizeBranchName. |
+| 2026-05-16 | AI code review workflow | Reviewing indicator badge on workspace during AI review. Manual review button in workspace panel. Auto-review triggers on agent session exit (if issue doesn't skip auto-review). Review sessions inherit `claude_profile` for gateway auth. `review_auto_fix` setting controls whether review agent auto-fixes issues. Review-then-fix flow: review → if findings → auto-fix session. |
+| 2026-05-16 | Live session stats on issue cards | Real-time model name and context token count displayed on issue cards when agent is running. `LiveSessionStats` includes model and token data extracted from stream-json `usage` events. Updated via WebSocket board events. |
+| 2026-05-16 | Agent profile badge on issue cards | `claudeProfile` stored on workspace at creation time and included in board API workspace summary. Displayed as a small badge on IssueCard near workspace status line. |
+| 2026-05-16 | Settings redesign + auto_merge | Settings panel redesigned as tabbed modal. New `auto_merge` toggle: when enabled, workspaces auto-merge on agent session exit. New `review_auto_fix` setting for auto-fix during review. |
+| 2026-05-16 | Expandable issue creation panel | Full-screen CreateIssuePanel accessible via "Expand" button in inline CreateIssueForm. Supports all fields: title, description, priority, start workspace, plan mode, skip review. Inline quick-add form unchanged for simple issues. |
+| 2026-05-16 | MCP/CLI over REST | Fixed `issueNumber` in MCP tools (create_issue now returns it). Added CLI `issue list/create/move` and `workspace list/create` commands. Updated CLAUDE.md with MCP/CLI preference section. MCP tools and CLI now cover the full workflow without needing REST fallback. |
+| 2026-05-16 | Uncommitted check scoping | Smart hooks `check-uncommitted.js` scoped to the stopping session's own workspace (not all workspaces). Skips gracefully when running from main checkout (no worktree context). |
