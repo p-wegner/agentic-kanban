@@ -46,6 +46,7 @@ export interface ParsedResultEvent {
 
 export interface ParsedToolUseEvent {
   kind: "tool_use";
+  id: string;
   name: string;
   input: string;
   inputParsed: Record<string, unknown>;
@@ -54,6 +55,7 @@ export interface ParsedToolUseEvent {
 export interface ParsedToolResultEvent {
   kind: "tool_result";
   toolName: string;
+  toolUseId: string;
   output: string;
   isError: boolean;
 }
@@ -205,6 +207,7 @@ export class ClaudeOutputParser {
           }
           events.push({
             kind: "tool_use",
+            id: toolUseId,
             name: toolName,
             input: JSON.stringify(block.input, null, 2),
             inputParsed: (typeof block.input === "object" && block.input !== null && !Array.isArray(block.input))
@@ -235,6 +238,7 @@ export class ClaudeOutputParser {
           events.push({
             kind: "tool_result",
             toolName,
+            toolUseId,
             output,
             isError: (block.is_error as boolean) || false,
           });
