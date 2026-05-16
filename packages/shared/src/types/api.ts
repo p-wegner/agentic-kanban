@@ -94,7 +94,7 @@ export interface CreateWorkspaceRequest {
 }
 
 export interface UpdateWorkspaceRequest {
-  status?: "active" | "idle" | "closed";
+  status?: "active" | "reviewing" | "idle" | "closed";
   workingDir?: string;
 }
 

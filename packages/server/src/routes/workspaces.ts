@@ -242,9 +242,9 @@ export function createWorkspacesRoute(
     const body = await c.req.json();
     const now = new Date().toISOString();
 
-    const validStatuses = ["active", "idle", "closed"];
+    const validStatuses = ["active", "reviewing", "idle", "closed"];
     if (body.status && !validStatuses.includes(body.status)) {
-      return c.json({ error: "Invalid status. Must be active, idle, or closed" }, 400);
+      return c.json({ error: "Invalid status. Must be active, reviewing, idle, or closed" }, 400);
     }
 
     const updates: Record<string, unknown> = { updatedAt: now };
