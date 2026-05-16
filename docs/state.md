@@ -1,6 +1,14 @@
 # Project State
 
-## Current Stage: Stage 13 — Output Parser V2 + Responsive Layout (DONE)
+## Current Stage: Post-Stage 13 — Feature Extensions (DONE)
+
+### Recent Features (2026-05-16)
+- [x] AI enhancement for ticket creation — "Enhance with AI" button spawns claude CLI to improve title/description (inline + expanded forms)
+- [x] Subagent visibility in terminal — proper ID-based tracking, visual indentation, styled headers, parsed results, todo-list task rendering
+- [x] Agent task progress on issue cards — TodoWrite events broadcast via WebSocket, TodoProgress component with progress bar on IssueCard
+- [x] Extended dependency types — 6 types (depends_on, blocked_by, related_to, duplicates, parent_of, child_of), color-coded badges, "Analyze Deps" button with haiku model
+- [x] Agent skills system — 3 built-in skills (board-navigator, dependency-analyzer, ticket-enhancer), custom skills via DB, CLI skill commands, MCP tools
+- [x] All features merged to master, visually verified
 
 ### Post-Stage 13 — Worktree Overview + Workspace Deletion
 - [x] `getDiffShortstat()` in git.service.ts — lightweight diff stats via `git diff --shortstat`
@@ -231,14 +239,15 @@ Claude Code with `--output-format stream-json --verbose -p <prompt>` emits NDJSO
 | 11 | Search & Navigation Enhancements | DONE |
 | 12 | Inline Diff Comments | DONE |
 | 13 | Output Parser V2 + Responsive Layout | DONE |
+| 14 | Feature Extensions (AI enhance, subagent viz, task progress, deps, skills) | DONE |
 
 ## Monorepo Structure
 ```
 packages/
-  shared/     - Drizzle schema (11 tables, 17 migrations) + TypeScript types
-  server/     - Hono API + @libsql/client + SQLite (port 3001) + CLI (commander with issue/workspace commands)
+  shared/     - Drizzle schema (13 tables, 20 migrations) + TypeScript types
+  server/     - Hono API + @libsql/client + SQLite (port 3001) + CLI (commander with issue/workspace/skill commands)
   client/     - React + Vite + Tailwind v4 (port 5173)
-  mcp-server/ - MCP stdio server (21 tools: full CRUD for issues/workspaces/tags/sessions/comments + move/stop/stats)
+  mcp-server/ - MCP stdio server (26 tools: full CRUD + agent skills + board status + dependency management)
   e2e/        - Playwright tests (101 tests: API + UI, global setup creates project)
 ```
 
@@ -255,6 +264,7 @@ packages/
 | DELETE | /api/projects/:id/worktrees | Remove worktree (+ cascade delete workspace/sessions if linked) |
 | GET | /api/issues?projectId= | List issues for a project |
 | POST | /api/issues | Create an issue |
+| POST | /api/issues/enhance | AI-enhance ticket title and description |
 | PATCH | /api/issues/:id | Update an issue |
 | DELETE | /api/issues/:id | Delete an issue |
 | GET | /api/issues/:id/workspaces | List workspaces for an issue |
@@ -282,6 +292,9 @@ packages/
 | GET | /api/issues/:id/tags | Get tags for an issue |
 | POST | /api/issues/:id/tags | Assign tag to issue |
 | DELETE | /api/issues/:id/tags/:tagId | Remove tag from issue |
+| GET | /api/issues/:id/dependencies | Get dependencies for an issue |
+| POST | /api/issues/:id/dependencies | Add dependency |
+| DELETE | /api/issues/:id/dependencies/:depId | Remove dependency |
 | GET | /api/preferences/active-project | Get active project ID |
 | PUT | /api/preferences/active-project | Set active project ID |
 | GET | /api/preferences/settings | Get agent settings (agent_command, agent_args, output_parser, mock_agent) |
@@ -311,6 +324,10 @@ packages/
 | get_session_stats | Parse token usage, cost, duration from session output |
 | get_diff_comments | Get diff review comments for a workspace |
 | create_diff_comment | Add a review comment on a file in a workspace diff |
+| get_board_status | Board status overview for a project |
+| list_agent_skills | List all agent skills (built-in + custom) |
+| get_agent_skill | Get skill details including prompt |
+| create_agent_skill | Create a custom agent skill |
 
 ## Session Log
 | Date | Session | Summary |
@@ -347,3 +364,8 @@ packages/
 | 2026-05-16 | Expandable issue creation panel | Full-screen CreateIssuePanel accessible via "Expand" button in inline CreateIssueForm. Supports all fields: title, description, priority, start workspace, plan mode, skip review. Inline quick-add form unchanged for simple issues. |
 | 2026-05-16 | MCP/CLI over REST | Fixed `issueNumber` in MCP tools (create_issue now returns it). Added CLI `issue list/create/move` and `workspace list/create` commands. Updated CLAUDE.md with MCP/CLI preference section. MCP tools and CLI now cover the full workflow without needing REST fallback. |
 | 2026-05-16 | Uncommitted check scoping | Smart hooks `check-uncommitted.js` scoped to the stopping session's own workspace (not all workspaces). Skips gracefully when running from main checkout (no worktree context). |
+| 2026-05-16 | AI enhance for tickets (#10) | "Enhance with AI" button on inline CreateIssueForm and expanded CreateIssuePanel. POST /api/issues/enhance spawns claude CLI via spawnSync with structured JSON prompt, parses response to update title/description. Reads agent_command and claude_profile from preferences. |
+| 2026-05-16 | Subagent terminal visibility (#11) | TerminalView improvements: proper ID-based subagent tracking (toolUseId matching), visual indentation (ml-6) for nested events, styled purple headers with spinner, parsed tool_result with completion/failure banners, TaskCreate/TaskUpdate as styled todo lists with status icons. |
+| 2026-05-16 | Agent task progress on cards (#12) | TodoProgress component on IssueCard showing "N/M tasks" + "K active" with colored progress bar. Server detects TodoWrite tool calls from stream-json, broadcasts session_todos via WebSocket. Auto-clears on session exit. Full passthrough: BoardPage → ColumnGroup → BoardColumn → IssueCard. |
+| 2026-05-16 | Extended dependency types (#13) | 6 dependency types: depends_on, blocked_by, related_to, duplicates, parent_of, child_of. Migration 0018 adds type column with unique index. Updated API (GET/POST/DELETE with typed deps), MCP tools (add/remove with type validation, cycle detection), CLI (`issue dependency list/add/remove`). UI: grouped color-coded badges, "Analyze Deps" button with haiku model, direction-aware display (incoming depends_on shows as "Blocking"). |
+| 2026-05-16 | Agent skills system (#14) | 3 built-in skills: board-navigator (guide for MCP/CLI board ops), dependency-analyzer (haiku, analyze ticket deps), ticket-enhancer (haiku, improve title/description). DB table with migrations 0018+0019. REST routes (GET/POST), MCP tools (list/get/create), CLI commands (`skill list/get/create`). Skills injected into agent context at workspace creation. |
