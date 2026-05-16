@@ -297,7 +297,7 @@ export function createProjectsRoute(database: Database = db) {
     const projectId = c.req.param("id");
 
     const projectRows = await database
-      .select({ id: projects.id })
+      .select({ id: projects.id, defaultBranch: projects.defaultBranch })
       .from(projects)
       .where(eq(projects.id, projectId));
     if (projectRows.length === 0) {
@@ -333,7 +333,7 @@ export function createProjectsRoute(database: Database = db) {
 
     // Fetch workspace summaries grouped by issueId
     const issueIds = projectIssues.map((i) => i.id);
-    const workspaceSummaryMap = new Map<string, { total: number; active: number; idle: number; closed: number; branches: string[]; main?: { id: string; branch: string; status: "active" | "reviewing" | "idle" | "closed"; claudeProfile: string | null; agentCommand: string | null } }>();
+    const workspaceSummaryMap = new Map<string, { total: number; active: number; idle: number; closed: number; branches: string[]; main?: { id: string; branch: string; status: "active" | "reviewing" | "idle" | "closed"; claudeProfile: string | null; agentCommand: string | null; diffStats?: { filesChanged: number; insertions: number; deletions: number } | null } }>();
 
     if (issueIds.length > 0) {
       const wsRows = await database
@@ -376,11 +376,14 @@ export function createProjectsRoute(database: Database = db) {
           updatedAt: workspaces.updatedAt,
           claudeProfile: workspaces.claudeProfile,
           agentCommand: workspaces.agentCommand,
+          workingDir: workspaces.workingDir,
+          baseBranch: workspaces.baseBranch,
+          isDirect: workspaces.isDirect,
         })
         .from(workspaces)
         .where(inArray(workspaces.issueId, issueIds));
 
-      const mainWorkspaceMap = new Map<string, { id: string; branch: string; status: string; updatedAt: string; claudeProfile: string | null; agentCommand: string | null }>();
+      const mainWorkspaceMap = new Map<string, { id: string; branch: string; status: string; updatedAt: string; claudeProfile: string | null; agentCommand: string | null; workingDir: string | null; baseBranch: string | null; isDirect: boolean }>();
       const statusPriority = (s: string) => s === "active" || s === "reviewing" ? 0 : s === "idle" ? 1 : 2;
       for (const row of wsDetailRows) {
         const existing = mainWorkspaceMap.get(row.issueId);
@@ -395,11 +398,33 @@ export function createProjectsRoute(database: Database = db) {
         }
       }
 
+      // Compute diff stats for each main workspace
+      const defaultBranch = projectRows[0].defaultBranch;
+      const diffStatsPromises: Promise<void>[] = [];
+
       for (const [issueId, summary] of workspaceSummaryMap) {
         const mainWs = mainWorkspaceMap.get(issueId);
         if (mainWs) {
           summary.main = { id: mainWs.id, branch: mainWs.branch, status: mainWs.status as "active" | "reviewing" | "idle" | "closed", claudeProfile: mainWs.claudeProfile, agentCommand: mainWs.agentCommand };
+
+          if (mainWs.workingDir && mainWs.status !== "closed") {
+            const diffRef = mainWs.isDirect ? "HEAD" : (mainWs.baseBranch || defaultBranch);
+            const mainRef = summary.main;
+            diffStatsPromises.push(
+              getDiffShortstat(mainWs.workingDir, diffRef)
+                .then(stats => {
+                  if (stats.filesChanged > 0 || stats.insertions > 0 || stats.deletions > 0) {
+                    mainRef.diffStats = stats;
+                  }
+                })
+                .catch(() => {})
+            );
+          }
         }
+      }
+
+      if (diffStatsPromises.length > 0) {
+        await Promise.all(diffStatsPromises);
       }
     }
 

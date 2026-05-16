@@ -118,6 +118,13 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onDragStart, tags,
           {ws.main.status === "closed" && (
             <span className="text-green-600 font-medium shrink-0">merged</span>
           )}
+          {ws.main.diffStats && (
+            <span className="inline-flex items-center gap-1 text-[10px] font-mono shrink-0 ml-auto">
+              <span className="text-green-600">+{ws.main.diffStats.insertions}</span>
+              <span className="text-red-500">-{ws.main.diffStats.deletions}</span>
+              <span className="text-gray-400">· {ws.main.diffStats.filesChanged}f</span>
+            </span>
+          )}
           {ws.main.claudeProfile && (
             <span className="inline-flex items-center px-1 rounded bg-indigo-50 text-indigo-600 font-medium shrink-0">{ws.main.claudeProfile}</span>
           )}
