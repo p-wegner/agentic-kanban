@@ -84,6 +84,7 @@ async function runWorkflowOnExit(workspaceId: string, sessionId: string, exitCod
         const aiReviewedStatus = findStatus("AI Reviewed");
         if (aiReviewedStatus) {
           await db.update(issues).set({ statusId: aiReviewedStatus.id, updatedAt: now }).where(eq(issues.id, issueId));
+          boardEvents.broadcast(projectId, "issue_updated");
         }
       } else {
         console.log(`[workflow] review session ${sessionId} completed — auto-merging`);
