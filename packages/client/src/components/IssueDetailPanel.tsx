@@ -61,7 +61,7 @@ export function IssueDetailPanel({
   const [workspaceCount, setWorkspaceCount] = useState(0);
   const [issueTags, setIssueTags] = useState<{ id: string; name: string; color: string | null }[]>([]);
   const [allTags, setAllTags] = useState<{ id: string; name: string; color: string | null }[]>([]);
-  const [dependencies, setDependencies] = useState<DependencyInfo>({ dependsOn: [], blockedBy: [] });
+  const [dependencies, setDependencies] = useState<DependencyInfo>({ dependencies: [] });
   const [availableIssues, setAvailableIssues] = useState<IssueWithStatus[]>([]);
 
   // Track unsaved changes for warning
@@ -385,104 +385,188 @@ export function IssueDetailPanel({
           {/* Dependencies section */}
           {!editing && (
             <div>
-              <label className="text-xs font-medium text-gray-600 block mb-1">
-                Dependencies
-              </label>
-              {dependencies.dependsOn.length > 0 && (
-                <div className="mb-2">
-                  <span className="text-xs text-gray-500 block mb-1">Depends on:</span>
-                  <div className="flex flex-wrap gap-1.5">
-                    {dependencies.dependsOn.map((dep) => (
-                      <span
-                        key={dep.id}
-                        className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 cursor-pointer hover:bg-blue-100"
-                        onClick={() => onNavigateToIssue?.(dep.dependsOnId)}
-                        title={`#${dep.issueNumber ?? ""} ${dep.issueTitle}`}
-                      >
-                        {dep.issueStatusName !== "Done" && (
-                          <span className="w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0" />
-                        )}
-                        {dep.issueStatusName === "Done" && (
-                          <span className="w-1.5 h-1.5 rounded-full bg-green-400 shrink-0" />
-                        )}
-                        <span className="truncate max-w-[120px]">{dep.issueTitle}</span>
-                        <button
-                          onClick={async (e) => {
-                            e.stopPropagation();
-                            try {
-                              await apiFetch(`/api/issues/${issue.id}/dependencies/${dep.dependsOnId}`, { method: "DELETE" });
-                              setDependencies((prev) => ({
-                                ...prev,
-                                dependsOn: prev.dependsOn.filter((d) => d.dependsOnId !== dep.dependsOnId),
-                              }));
-                              onIssueUpdate(issue);
-                            } catch {
-                              showToast("Failed to remove dependency", "error");
-                            }
-                          }}
-                          className="text-blue-300 hover:text-blue-500"
-                        >
-                          &times;
-                        </button>
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              )}
-              {dependencies.blockedBy.length > 0 && (
-                <div className="mb-2">
-                  <span className="text-xs text-gray-500 block mb-1">Blocked by:</span>
-                  <div className="flex flex-wrap gap-1.5">
-                    {dependencies.blockedBy.map((dep) => (
-                      <span
-                        key={dep.id}
-                        className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-orange-50 text-orange-700 cursor-pointer hover:bg-orange-100"
-                        onClick={() => onNavigateToIssue?.(dep.issueId)}
-                        title={`#${dep.issueNumber ?? ""} ${dep.issueTitle}`}
-                      >
-                        {dep.issueStatusName !== "Done" && (
-                          <span className="w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0" />
-                        )}
-                        {dep.issueStatusName === "Done" && (
-                          <span className="w-1.5 h-1.5 rounded-full bg-green-400 shrink-0" />
-                        )}
-                        <span className="truncate max-w-[120px]">{dep.issueTitle}</span>
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              )}
-              {(() => {
-                const existingDepIds = new Set(dependencies.dependsOn.map((d) => d.dependsOnId));
-                const candidates = availableIssues.filter((i) => !existingDepIds.has(i.id));
-                return candidates.length > 0 ? (
-                  <select
-                    className="text-xs border border-gray-300 rounded px-1 py-0.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                    value=""
-                    onChange={async (e) => {
-                      const depId = e.target.value;
-                      if (!depId) return;
-                      try {
-                        await apiFetch(`/api/issues/${issue.id}/dependencies`, {
-                          method: "POST",
-                          body: JSON.stringify({ dependsOnId: depId }),
-                        });
-                        const deps = await apiFetch<DependencyInfo>(`/api/issues/${issue.id}/dependencies`);
-                        setDependencies(deps);
-                        onIssueUpdate(issue);
-                      } catch (err: any) {
-                        const msg = err?.message ?? "Failed to add dependency";
-                        showToast(msg, "error");
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-xs font-medium text-gray-600">
+                  Dependencies
+                </label>
+                <button
+                  onClick={() => {
+                    const prompt = `Analyze issue #${issue.issueNumber ?? ""} "${issue.title}" and its dependencies to other open issues. Look at the description, title, and existing dependencies. For each dependency you identify, use the add_dependency MCP tool or the CLI to create it. Only create dependencies that are genuinely useful for scheduling parallel work. Use types: depends_on (prerequisite), blocked_by (inverse), related_to (related work), duplicates (duplicate issue), parent_of (epic/subtask), child_of (subtask of epic). After creating dependencies, list what you found and added.`;
+                    const encoded = encodeURIComponent(prompt);
+                    window.open(`claude://chat?model=claude-3-5-haiku-2024-10-22&prompt=${encoded}`, "_blank");
+                  }}
+                  className="text-[10px] text-purple-600 hover:text-purple-700 font-medium px-1.5 py-0.5 rounded border border-purple-200 hover:bg-purple-50"
+                  title="Launch a Claude session to analyze and create dependencies"
+                >
+                  Analyze Deps
+                </button>
+              </div>
+              {dependencies.dependencies.length > 0 ? (
+                <div className="space-y-1.5">
+                  {(() => {
+                    // Compute effective display type based on direction
+                    // For incoming deps, we show the inverse perspective
+                    type DisplayCategory = "depends_on" | "blocked_by" | "blocking" | "child_of" | "parent_of" | "related_to" | "duplicates";
+
+                    function getDisplayType(dep: typeof dependencies.dependencies[number]): DisplayCategory {
+                      const isOutgoing = dep.issueId === issue.id;
+                      if (isOutgoing) {
+                        // Outgoing: use the type as-is (but depends_on stays depends_on, blocked_by stays blocked_by)
+                        return dep.type as DisplayCategory;
                       }
-                    }}
-                  >
-                    <option value="">+ Add dependency</option>
-                    {candidates.map((i) => (
-                      <option key={i.id} value={i.id}>
-                        {i.issueNumber != null ? `#${i.issueNumber} ` : ""}{i.title}
-                      </option>
-                    ))}
-                  </select>
+                      // Incoming: invert
+                      switch (dep.type) {
+                        case "depends_on": return "blocking";    // someone depends on me = I'm blocking them
+                        case "blocked_by": return "blocking";   // someone blocked by me = I'm blocking them
+                        case "parent_of": return "child_of";    // someone is my parent = I'm their child
+                        case "child_of": return "parent_of";    // someone is my child = I'm their parent
+                        case "related_to": return "related_to";
+                        case "duplicates": return "duplicates";
+                        default: return "related_to";
+                      }
+                    }
+
+                    const DISPLAY_LABELS: Record<DisplayCategory, string> = {
+                      depends_on: "Depends on",
+                      blocked_by: "Blocked by",
+                      blocking: "Blocking",
+                      related_to: "Related to",
+                      duplicates: "Duplicates",
+                      parent_of: "Parent of",
+                      child_of: "Child of",
+                    };
+
+                    type DepWithDisplay = typeof dependencies.dependencies[number] & { displayType: DisplayCategory };
+                    const depsWithDisplay: DepWithDisplay[] = dependencies.dependencies.map((dep) => ({
+                      ...dep,
+                      displayType: getDisplayType(dep),
+                    }));
+
+                    // Group by display type
+                    const byDisplayType = new Map<DisplayCategory, DepWithDisplay[]>();
+                    for (const dep of depsWithDisplay) {
+                      const list = byDisplayType.get(dep.displayType) ?? [];
+                      list.push(dep);
+                      byDisplayType.set(dep.displayType, list);
+                    }
+
+                    const typeOrder: DisplayCategory[] = ["depends_on", "blocked_by", "blocking", "child_of", "parent_of", "related_to", "duplicates"];
+                    const typeColors: Record<DisplayCategory, string> = {
+                      depends_on: "bg-blue-50 text-blue-700",
+                      blocked_by: "bg-red-50 text-red-700",
+                      blocking: "bg-orange-50 text-orange-700",
+                      related_to: "bg-gray-50 text-gray-700",
+                      duplicates: "bg-yellow-50 text-yellow-700",
+                      parent_of: "bg-green-50 text-green-700",
+                      child_of: "bg-purple-50 text-purple-700",
+                    };
+                    return typeOrder
+                      .filter((t) => byDisplayType.has(t))
+                      .map((t) => (
+                        <div key={t}>
+                          <span className="text-xs text-gray-500 block mb-0.5">
+                            {DISPLAY_LABELS[t]}:
+                          </span>
+                          <div className="flex flex-wrap gap-1.5">
+                            {byDisplayType.get(t)!.map((dep) => {
+                              const isOutgoing = dep.issueId === issue.id;
+                              const targetIssueId = isOutgoing ? dep.dependsOnId : dep.issueId;
+                              const showBlockingDot = dep.issueStatusName !== "Done" && dep.issueStatusName !== "AI Reviewed" &&
+                                (dep.displayType === "depends_on" || dep.displayType === "blocked_by" || dep.displayType === "child_of");
+                              return (
+                                <span
+                                  key={dep.id}
+                                  className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full cursor-pointer hover:opacity-80 ${typeColors[t]}`}
+                                  onClick={() => onNavigateToIssue?.(targetIssueId)}
+                                  title={`#${dep.issueNumber ?? ""} ${dep.issueTitle}`}
+                                >
+                                  {showBlockingDot && (
+                                    <span className="w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0" />
+                                  )}
+                                  {!showBlockingDot && dep.issueStatusName !== "Done" && dep.issueStatusName !== "AI Reviewed" && (
+                                    <span className="w-1.5 h-1.5 rounded-full bg-gray-300 shrink-0" />
+                                  )}
+                                  {(dep.issueStatusName === "Done" || dep.issueStatusName === "AI Reviewed") && (
+                                    <span className="w-1.5 h-1.5 rounded-full bg-green-400 shrink-0" />
+                                  )}
+                                  <span className="truncate max-w-[120px]">{dep.issueTitle}</span>
+                                  <button
+                                    onClick={async (e) => {
+                                      e.stopPropagation();
+                                      try {
+                                        await apiFetch(`/api/issues/${issue.id}/dependencies/${dep.id}`, { method: "DELETE" });
+                                        setDependencies((prev) => ({
+                                          dependencies: prev.dependencies.filter((d) => d.id !== dep.id),
+                                        }));
+                                        onIssueUpdate(issue);
+                                      } catch {
+                                        showToast("Failed to remove dependency", "error");
+                                      }
+                                    }}
+                                    className="opacity-50 hover:opacity-100"
+                                  >
+                                    &times;
+                                  </button>
+                                </span>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ));
+                  })()}
+                </div>
+              ) : null}
+              {(() => {
+                const existingTargetIds = new Set(
+                  dependencies.dependencies
+                    .filter((d) => d.issueId === issue.id)
+                    .map((d) => d.dependsOnId)
+                );
+                const candidates = availableIssues.filter((i) => !existingTargetIds.has(i.id));
+                return candidates.length > 0 ? (
+                  <div className="flex gap-1 mt-1.5">
+                    <select
+                      className="text-xs border border-gray-300 rounded px-1 py-0.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                      value=""
+                      onChange={async (e) => {
+                        const depId = e.target.value;
+                        if (!depId) return;
+                        const typeSelect = document.getElementById("dep-type-select") as HTMLSelectElement;
+                        const depType = typeSelect?.value || "depends_on";
+                        try {
+                          await apiFetch(`/api/issues/${issue.id}/dependencies`, {
+                            method: "POST",
+                            body: JSON.stringify({ dependsOnId: depId, type: depType }),
+                          });
+                          const deps = await apiFetch<DependencyInfo>(`/api/issues/${issue.id}/dependencies`);
+                          setDependencies(deps);
+                          onIssueUpdate(issue);
+                        } catch (err: any) {
+                          const msg = err?.message ?? "Failed to add dependency";
+                          showToast(msg, "error");
+                        }
+                      }}
+                    >
+                      <option value="">+ Add</option>
+                      {candidates.map((i) => (
+                        <option key={i.id} value={i.id}>
+                          {i.issueNumber != null ? `#${i.issueNumber} ` : ""}{i.title}
+                        </option>
+                      ))}
+                    </select>
+                    <select
+                      id="dep-type-select"
+                      className="text-xs border border-gray-300 rounded px-1 py-0.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                      defaultValue="depends_on"
+                    >
+                      <option value="depends_on">depends on</option>
+                      <option value="blocked_by">blocked by</option>
+                      <option value="related_to">related to</option>
+                      <option value="duplicates">duplicates</option>
+                      <option value="parent_of">parent of</option>
+                      <option value="child_of">child of</option>
+                    </select>
+                  </div>
                 ) : null;
               })()}
             </div>
