@@ -161,6 +161,51 @@ export async function getWorkingTreeDiff(workdirPath: string): Promise<string> {
   ).join("\n");
 }
 
+/**
+ * Fetch the latest base branch and merge it into the current workspace branch.
+ * Returns the diff ref to use for review (e.g., "origin/main" or "main").
+ * If the merge fails (conflicts), returns success=false and the merge is aborted.
+ */
+export async function prepareForReview(
+  worktreePath: string,
+  baseBranch: string,
+): Promise<{ diffRef: string; success: boolean; error?: string }> {
+  // Try to fetch from origin (best effort — no remote is fine)
+  let hasRemote = false;
+  try {
+    await execGit(["fetch", "origin", baseBranch], worktreePath);
+    hasRemote = true;
+  } catch {
+    // No remote configured — use local branches only
+  }
+
+  // Determine merge source: prefer remote ref, fall back to local
+  let mergeSource: string;
+  if (hasRemote) {
+    try {
+      await execGit(["rev-parse", "--verify", `remotes/origin/${baseBranch}`], worktreePath);
+      mergeSource = `origin/${baseBranch}`;
+    } catch {
+      mergeSource = baseBranch;
+    }
+  } else {
+    mergeSource = baseBranch;
+  }
+
+  // Merge the base branch into the current workspace branch
+  try {
+    await execGit(["merge", mergeSource, "--no-edit"], worktreePath);
+  } catch (err) {
+    // Merge conflict or failure — abort and report
+    try {
+      await execGit(["merge", "--abort"], worktreePath);
+    } catch { /* best effort */ }
+    return { diffRef: mergeSource, success: false, error: err instanceof Error ? err.message : String(err) };
+  }
+
+  return { diffRef: mergeSource, success: true };
+}
+
 /** Get lightweight diff stats using --shortstat (no full diff transfer). */
 export async function getDiffShortstat(
   worktreePath: string,
