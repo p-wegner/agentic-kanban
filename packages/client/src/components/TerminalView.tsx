@@ -17,6 +17,7 @@ interface RenderContext {
   expandedSections: Set<number>;
   toggleExpand: (idx: number) => void;
   parseOutput: "true" | "false" | "minimal";
+  activeSubagentToolUseIds: Set<string>;
 }
 
 const SCROLL_THRESHOLD = 50;
@@ -43,7 +44,7 @@ function summarizeToolCall(name: string, input: Record<string, unknown>): string
     case "Glob":
       return `Finding ${input.pattern || "files"}`;
     case "Agent":
-      return "Delegating to agent";
+      return `Subagent: ${(input.description as string) || "delegating to agent"}`;
     case "WebSearch":
       return "Searching web";
     case "WebFetch":
@@ -175,11 +176,35 @@ export function TerminalView({ messages, connectionState, parseOutput = "true", 
 
   const toggleMaximize = () => setIsMaximized((v) => !v);
 
+  // Compute which subagent tool_use_ids are still active (started but no result yet)
+  const activeSubagentToolUseIds = (() => {
+    const started = new Set<string>();
+    const completed = new Set<string>();
+    for (const ev of displayEvents) {
+      if (ev.kind === "task_started" && ev.toolUseId) {
+        started.add(ev.toolUseId);
+      }
+      if (ev.kind === "tool_result" && ev.toolName === "Agent") {
+        // tool_result doesn't carry tool_use_id directly; we resolve by order
+        // Instead track via the toolName matching — if Agent result arrives, mark all started as done
+        // For simplicity: count Agent tool_results to match against task_started entries in order
+        completed.add("__agent_result__");
+      }
+    }
+    // Count Agent tool_results to determine how many subagents have finished
+    const agentResults = displayEvents.filter((e) => e.kind === "tool_result" && e.toolName === "Agent").length;
+    const startedArr = Array.from(started);
+    // Mark the first N as completed (FIFO)
+    const activeSet = new Set(startedArr.slice(agentResults));
+    return activeSet;
+  })();
+
   const ctx: RenderContext = {
     multiTurn,
     expandedSections,
     toggleExpand,
     parseOutput,
+    activeSubagentToolUseIds,
   };
 
   const content = (
@@ -225,7 +250,7 @@ export function TerminalView({ messages, connectionState, parseOutput = "true", 
       switch (event.kind) {
         case "assistant": color = "bg-green-500"; break;
         case "thinking": color = "bg-gray-500"; break;
-        case "tool_use": color = "bg-yellow-500"; break;
+        case "tool_use": color = (event.kind === "tool_use" && event.name === "Agent") ? "bg-purple-500" : "bg-yellow-500"; break;
         case "tool_result": color = event.isError ? "bg-red-500" : "bg-purple-500"; break;
         case "result": color = event.success ? "bg-emerald-400" : "bg-red-400"; break;
         case "init": color = "bg-cyan-400"; break;
@@ -343,7 +368,7 @@ export function TerminalView({ messages, connectionState, parseOutput = "true", 
 }
 
 function renderParsedEvent(event: DisplayEvent, key: number, ctx: RenderContext): React.ReactNode {
-  const { multiTurn, expandedSections, toggleExpand, parseOutput } = ctx;
+  const { multiTurn, expandedSections, toggleExpand, parseOutput, activeSubagentToolUseIds } = ctx;
   const isExpanded = expandedSections.has(key);
   const isMinimal = parseOutput === "minimal";
 
@@ -423,6 +448,27 @@ function renderParsedEvent(event: DisplayEvent, key: number, ctx: RenderContext)
     return (
       <div key={key} data-event-idx={key} className="mb-1 text-gray-500 italic text-[11px]">
         Thinking: {event.text.length > 200 ? event.text.slice(0, 200) + "..." : event.text}
+      </div>
+    );
+  }
+
+  if (event.kind === "tool_use" && event.name === "Agent") {
+    const description = (event.inputParsed?.description as string) || (event.inputParsed?.prompt as string) || "";
+    const subagentType = (event.inputParsed?.subagent_type as string) || "";
+    if (isMinimal) {
+      return (
+        <div key={key} data-event-idx={key} className="mb-0.5 ml-1 text-[11px]">
+          <span className="text-purple-400">⇢ Subagent: </span>
+          <span className="text-gray-300">{description.slice(0, 80) || "delegating to agent"}</span>
+          {subagentType && <span className="text-gray-500 ml-1">({subagentType})</span>}
+        </div>
+      );
+    }
+    return (
+      <div key={key} data-event-idx={key} className="mb-1 ml-2 pl-2 border-l-2 border-purple-600">
+        <span className="text-purple-400">⇢ Launching subagent</span>
+        {subagentType && <span className="text-purple-300 text-[10px] ml-2">{subagentType}</span>}
+        {description && <div className="text-gray-300 text-[11px] mt-0.5">{description}</div>}
       </div>
     );
   }
@@ -596,19 +642,31 @@ function renderParsedEvent(event: DisplayEvent, key: number, ctx: RenderContext)
   }
 
   if (event.kind === "task_started") {
+    const isRunning = event.toolUseId ? activeSubagentToolUseIds.has(event.toolUseId) : false;
     if (isMinimal) {
       return (
-        <div key={key} data-event-idx={key} className="mb-0.5 ml-1 text-[11px]">
-          <span className="text-blue-400">Background: </span>
-          <span className="text-gray-400">{event.description}</span>
+        <div key={key} data-event-idx={key} className="mb-0.5 ml-1 text-[11px] flex items-center gap-1">
+          {isRunning
+            ? <span className="text-blue-400 animate-pulse">⟳</span>
+            : <span className="text-green-500">✓</span>}
+          <span className={isRunning ? "text-blue-300" : "text-gray-400"}>{event.description}</span>
+          {isRunning && <span className="text-blue-500 text-[10px]">running</span>}
         </div>
       );
     }
     return (
-      <div key={key} data-event-idx={key} className="mb-1 ml-2 pl-2 border-l-2 border-blue-600">
-        <span className="text-blue-400">Background task started</span>
-        <div className="text-gray-400 text-[10px]">{event.description}</div>
-        <div className="text-gray-600 text-[10px]">{event.taskType} | {event.taskId}</div>
+      <div key={key} data-event-idx={key} className={`mb-1 ml-2 pl-2 border-l-2 ${isRunning ? "border-blue-500" : "border-blue-800"}`}>
+        <div className="flex items-center gap-1">
+          {isRunning
+            ? <span className="text-blue-400 animate-pulse text-[11px]">⟳</span>
+            : <span className="text-green-500 text-[11px]">✓</span>}
+          <span className={isRunning ? "text-blue-400" : "text-blue-600"}>
+            {isRunning ? "Subagent running" : "Subagent completed"}
+          </span>
+          {event.taskType && <span className="text-gray-600 text-[10px] ml-1">{event.taskType}</span>}
+        </div>
+        <div className="text-gray-400 text-[10px] ml-4">{event.description}</div>
+        {!isRunning && <div className="text-gray-600 text-[10px] ml-4">{event.taskId}</div>}
       </div>
     );
   }
