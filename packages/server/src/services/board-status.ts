@@ -2,95 +2,13 @@ import { db } from "../db/index.js";
 import { projects, projectStatuses, issues, workspaces, sessions, sessionMessages, preferences } from "@agentic-kanban/shared/schema";
 import { eq, inArray, desc } from "drizzle-orm";
 import { getDiffShortstat } from "./git.service.js";
+import { extractMeaningfulOutput } from "@agentic-kanban/shared";
 import type { BoardStatusResponse, BoardStatusIssue } from "@agentic-kanban/shared";
 
 export interface BoardStatusOptions {
   projectId?: string;
   includeClosed?: boolean;
   tailLines?: number;
-}
-
-const NOISE_PATTERNS = [
-  /"subtype"\s*:\s*"api_retry"/,
-  /"type"\s*:\s*"system".*"subtype"\s*:\s*"init"/,
-];
-
-// eslint-disable-next-line no-control-regex
-const ANSI_RE = /\x1b\[[0-9;]*[a-zA-Z]|\x1b\].*?\x07|\x1b\[.*?[mGKH]/g;
-
-function stripAnsi(str: string): string {
-  return str.replace(ANSI_RE, "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
-}
-
-function parseJsonLine(line: string): { type?: string; subtype?: string; message?: { content?: any[] }; result?: string; is_error?: boolean; summary?: string; status?: string } | null {
-  try {
-    return JSON.parse(line);
-  } catch {
-    return null;
-  }
-}
-
-function extractMeaningfulOutput(
-  messages: { type: string; data: string | null }[],
-  maxLines: number,
-): string[] {
-  const lines: string[] = [];
-
-  for (const msg of messages) {
-    if (msg.type !== "stdout" || !msg.data) continue;
-
-    const cleaned = stripAnsi(msg.data);
-
-    // Each data may contain multiple JSON objects separated by newlines
-    for (const rawLine of cleaned.split("\n")) {
-      const trimmedLine = rawLine.trim();
-      if (!trimmedLine) continue;
-
-      // Skip noise
-      if (NOISE_PATTERNS.some(p => p.test(trimmedLine))) continue;
-
-      const obj = parseJsonLine(trimmedLine);
-
-      if (obj) {
-        if (obj.type === "assistant" && obj.message?.content) {
-          const content = Array.isArray(obj.message.content) ? obj.message.content : [obj.message.content];
-          for (const block of content) {
-            if (block.type === "text" && block.text?.trim()) {
-              const text = block.text.trim().split("\n").pop() ?? "";
-              if (text) lines.push(text.slice(0, 200));
-            }
-            if (block.type === "tool_use") {
-              lines.push(`[tool] ${block.name}(${Object.keys(block.input || {}).join(", ")})`);
-            }
-          }
-        }
-
-        if (obj.type === "result") {
-          const resultText = typeof obj.result === "string" ? obj.result : obj.subtype ?? "";
-          if (resultText) {
-            const trimmed = resultText.trim().split("\n").pop() ?? "";
-            if (trimmed && trimmed !== "success") lines.push(trimmed.slice(0, 200));
-          }
-        }
-
-        if (obj.type === "system" && obj.subtype === "task_notification") {
-          const summary = obj.summary || obj.status || "";
-          if (summary) lines.push(`[task] ${summary}`);
-        }
-      } else {
-        // Non-JSON plain text
-        if (trimmedLine.length > 2) {
-          lines.push(trimmedLine.slice(0, 200));
-        }
-      }
-
-      if (lines.length >= maxLines * 3) break;
-    }
-
-    if (lines.length >= maxLines * 3) break;
-  }
-
-  return lines.slice(0, maxLines);
 }
 
 export async function getBoardStatus(
@@ -159,9 +77,7 @@ export async function getBoardStatus(
   const issueIds = projectIssues.map(i => i.id);
 
   // 4. Get workspaces for these issues
-  const wsRows = issueIds.length > 0
-    ? await database.select().from(workspaces).where(inArray(workspaces.issueId, issueIds))
-    : [];
+  const wsRows = await database.select().from(workspaces).where(inArray(workspaces.issueId, issueIds));
 
   // 5. Get sessions for these workspaces
   const wsIds = wsRows.map(w => w.id);
@@ -241,21 +157,13 @@ export async function getBoardStatus(
     // For non-closed workspaces with a workingDir: compute diff stats + last output
     if (mainWs && mainWs.workingDir && mainWs.status !== "closed") {
       const baseBranch = mainWs.baseBranch || project.defaultBranch;
+      const diffRef = mainWs.isDirect ? "HEAD" : baseBranch;
 
-      if (!mainWs.isDirect) {
-        asyncWork.push(
-          getDiffShortstat(mainWs.workingDir, baseBranch)
-            .then(stats => { entry.diffStats = stats; })
-            .catch(() => {}),
-        );
-      } else {
-        // For direct workspaces, diff HEAD for working tree changes
-        asyncWork.push(
-          getDiffShortstat(mainWs.workingDir, "HEAD")
-            .then(stats => { entry.diffStats = stats; })
-            .catch(() => {}),
-        );
-      }
+      asyncWork.push(
+        getDiffShortstat(mainWs.workingDir, diffRef)
+          .then(stats => { entry.diffStats = stats; })
+          .catch((err) => { console.error(`[board-status] diff failed for ${mainWs.branch}:`, err instanceof Error ? err.message : String(err)); }),
+      );
 
       if (latestSession) {
         asyncWork.push(

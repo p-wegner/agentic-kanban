@@ -119,7 +119,8 @@ export async function getDiffShortstat(
     if (deletionsMatch) deletions = parseInt(deletionsMatch[1], 10);
 
     return { filesChanged, insertions, deletions };
-  } catch {
+  } catch (err) {
+    console.error(`[git] diff --shortstat failed in ${worktreePath}:`, err instanceof Error ? err.message : String(err));
     return { filesChanged: 0, insertions: 0, deletions: 0 };
   }
 }
