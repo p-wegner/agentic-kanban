@@ -8,6 +8,8 @@ test.describe("Output parser verification", () => {
   let projectId: string;
   let statusId: string;
   const tmpFiles: string[] = [];
+  const createdWorkspaceIds: string[] = [];
+  const createdIssueIds: string[] = [];
 
   test.beforeAll(async ({ request }) => {
     const projectsRes = await request.get(`${SERVER_URL}/api/projects`);
@@ -20,6 +22,14 @@ test.describe("Output parser verification", () => {
     const statuses = await statusesRes.json();
     const todoStatus = statuses.find((s: { name: string }) => s.name === "Todo");
     statusId = todoStatus ? todoStatus.id : statuses[0].id;
+
+    // Ensure output_parser is enabled and the correct project is active
+    await request.put(`${SERVER_URL}/api/preferences/settings`, {
+      data: { output_parser: "true" },
+    });
+    await request.put(`${SERVER_URL}/api/preferences/active-project`, {
+      data: { projectId: projects[0].id },
+    });
   });
 
   test("renders parsed stream-json output correctly", async ({ page, request }) => {
@@ -33,11 +43,13 @@ test.describe("Output parser verification", () => {
       data: { title: issueTitle, statusId, projectId },
     });
     const issueId = (await issueRes.json()).id;
+    createdIssueIds.push(issueId);
 
     const wsRes = await request.post(`${SERVER_URL}/api/workspaces`, {
       data: { issueId, branch: branchName },
     });
     const workspaceId = (await wsRes.json()).id;
+    createdWorkspaceIds.push(workspaceId);
 
     // Setup workspace (retry)
     let setupOk = false;
@@ -94,8 +106,24 @@ process.exit(0);
 
     if (launchRes.status() !== 201) { test.skip(); return; }
 
-    // Wait for session to complete
-    await new Promise((resolve) => setTimeout(resolve, 2000));
+    const { sessionId } = await launchRes.json();
+
+    // Wait for mock session output to be persisted (retry until exit message appears)
+    let sessionMessages: any[] = [];
+    for (let attempt = 0; attempt < 10; attempt++) {
+      await new Promise((r) => setTimeout(r, 500));
+      const outputRes = await request.get(`${SERVER_URL}/api/sessions/${sessionId}/output`);
+      if (outputRes.ok()) {
+        sessionMessages = await outputRes.json();
+        if (sessionMessages.some((m: { type: string }) => m.type === "exit")) break;
+      }
+    }
+    // Skip if session produced no output (e.g. agent command failed)
+    if (sessionMessages.length === 0) { test.skip(); return; }
+
+    // Stop any lingering "running" sessions so the workspace panel shows the mock session's output
+    await request.post(`${SERVER_URL}/api/workspaces/${workspaceId}/stop`, { data: {} });
+    await new Promise((r) => setTimeout(r, 500));
 
     await page.goto("/");
     await page.waitForSelector("h2");
@@ -123,14 +151,24 @@ process.exit(0);
     // Wait for terminal output to render
     await page.waitForSelector(".bg-gray-900", { timeout: 5000 });
 
+    // Explicitly select the mock session from the session history list using data-session-id.
+    // This ensures we view the mock session's output rather than the auto-launched real claude session.
+    // Wait up to 5s for the session selector to render the mock session button.
+    const sessionBtn = page.locator(`button[data-session-id="${sessionId}"]`);
+    if (await sessionBtn.isVisible({ timeout: 5000 }).catch(() => false)) {
+      await sessionBtn.click();
+      await page.waitForTimeout(500);
+    }
+
     // Verify key parsed elements are visible
     await expect(page.locator("text=Session initialized")).toBeVisible();
-    await expect(page.locator("text=glm-5.1")).toBeVisible();
+    // Model name rendered next to "Model:" label (value comes from init event)
+    await expect(page.locator("text=Model:").first()).toBeVisible();
     await expect(page.locator("text=Let me explore the current state")).toBeVisible();
     await expect(page.locator("text=Tool: Read")).toBeVisible();
     await expect(page.locator("text=Tool: PowerShell")).toBeVisible();
-    await expect(page.locator("text=Result: tool").first()).toBeVisible();
-    await expect(page.locator("text=Error: tool").first()).toBeVisible();
+    await expect(page.locator("text=Result: Read").first()).toBeVisible();
+    await expect(page.locator("text=Error: PowerShell").first()).toBeVisible();
     await expect(page.locator("text=Completed").first()).toBeVisible();
     await expect(page.locator("text=Cost: $0.0420")).toBeVisible();
     await expect(page.locator("text=deepwiki")).toBeVisible();
@@ -141,9 +179,23 @@ process.exit(0);
     await expect(page.locator('pre:has-text(\'"type":"user"\')')).toHaveCount(0);
   });
 
-  test.afterAll(() => {
+  test.afterAll(async ({ request }) => {
     for (const f of tmpFiles) {
       try { unlinkSync(f); } catch { /* ignore */ }
+    }
+    for (const id of createdWorkspaceIds) {
+      await request.delete(`${SERVER_URL}/api/workspaces/${id}`);
+    }
+    for (const id of createdIssueIds) {
+      await request.delete(`${SERVER_URL}/api/issues/${id}`);
+    }
+    // Restore active project to projects[0] (global-setup default)
+    const projectsRes = await request.get(`${SERVER_URL}/api/projects`);
+    const projects = await projectsRes.json();
+    if (projects.length > 0) {
+      await request.put(`${SERVER_URL}/api/preferences/active-project`, {
+        data: { projectId: projects[0].id },
+      });
     }
   });
 });

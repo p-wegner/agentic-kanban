@@ -848,6 +848,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                           return (
                             <div key={session.id} className="flex items-center gap-1">
                               <button
+                                data-session-id={session.id}
                                 onClick={() => handleViewHistory(session.id)}
                                 className={`flex-1 flex items-center gap-2 py-1 px-2 rounded text-left text-xs ${
                                   isActive
