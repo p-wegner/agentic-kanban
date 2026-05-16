@@ -212,6 +212,64 @@ const sessionManager = createSessionManager(upgradeWebSocket, {
   },
 });
 
+// Manual review trigger endpoint
+app.post("/api/workspaces/:id/review", async (c) => {
+  const workspaceId = c.req.param("id");
+  try {
+    const wsRows = await db.select().from(workspaces).where(eq(workspaces.id, workspaceId)).limit(1);
+    if (wsRows.length === 0) return c.json({ error: "Workspace not found" }, 404);
+    const workspace = wsRows[0];
+    if (workspace.status !== "idle") return c.json({ error: "Workspace is not idle" }, 409);
+
+    const issueRows = await db
+      .select({ projectId: issues.projectId, id: issues.id })
+      .from(issues)
+      .where(eq(issues.id, workspace.issueId))
+      .limit(1);
+    if (issueRows.length === 0) return c.json({ error: "Issue not found" }, 404);
+    const { projectId, id: issueId } = issueRows[0];
+
+    const prefRows = await db.select().from(preferences);
+    const prefMap = new Map(prefRows.map(r => [r.key, r.value]));
+    const useMock = prefMap.get("mock_agent") === "true" || process.env.MOCK_AGENT === "1";
+    const agentCommand = useMock ? MOCK_AGENT_COMMAND : (prefMap.get("agent_command") || undefined);
+    const agentArgs = prefMap.get("agent_args") || undefined;
+    const claudeProfile = useMock ? undefined : (prefMap.get("claude_profile") || undefined);
+
+    const reviewPrompt = [
+      `You are an AI code reviewer. Review the changes on branch '${workspace.branch}'.`,
+      `Run 'git diff ${workspace.baseBranch ?? "HEAD"}' to see the diff.`,
+      ``,
+      `Review for: correctness bugs, security vulnerabilities, logic errors, and missing error handling.`,
+      `Classify each issue as CRITICAL (must fix — bugs, security, data loss), MAJOR (should fix — broken edge cases, poor error handling), or MINOR (nice to have — style, naming).`,
+      ``,
+      `If you find CRITICAL or MAJOR issues:`,
+      `1. Use the move_issue MCP tool to move issue ${issueId} to 'In Progress' (so the board shows the issue needs fixes)`,
+      `2. Fix all critical and major issues directly in the code`,
+      `3. Commit the fixes with a descriptive message`,
+      `4. Exit normally (the system will handle merging)`,
+      ``,
+      `If only MINOR issues or no issues: just exit normally (the system will auto-merge).`,
+      `Do NOT move the issue to 'AI Reviewed' yourself — the system handles that on merge.`,
+      ``,
+      `Issue ID: ${issueId}`,
+    ].join("\n");
+
+    const now = new Date().toISOString();
+    await db.update(workspaces).set({ status: "reviewing", updatedAt: now }).where(eq(workspaces.id, workspaceId));
+    boardEvents.broadcast(projectId, "issue_updated");
+
+    const reviewSessionId = await sessionManager.startSession(workspaceId, reviewPrompt, agentCommand, agentArgs, undefined, claudeProfile);
+    reviewSessionIds.add(reviewSessionId);
+    console.log(`[workflow] manual review session ${reviewSessionId} for workspace ${workspaceId}`);
+
+    return c.json({ sessionId: reviewSessionId });
+  } catch (err) {
+    console.error("[workflow] manual review trigger failed:", err);
+    return c.json({ error: String(err) }, 500);
+  }
+});
+
 // Mount WebSocket routes
 app.get(
   "/ws/sessions/:sessionId",
