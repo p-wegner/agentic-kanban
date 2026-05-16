@@ -319,14 +319,66 @@ function createSessionManager(
     });
   }
 
+  /** Check if an agent process is actually alive. Returns false if process is gone. */
+  function isProcessAlive(sessionId: string): boolean {
+    const proc = agentService.getProcess(sessionId);
+    if (!proc) return false;
+    // On Windows, check if the process still exists via PID
+    if (process.platform === "win32") {
+      try {
+        // Sending signal 0 checks existence without killing
+        process.kill(proc.pid!, 0);
+        return true;
+      } catch {
+        return false;
+      }
+    }
+    return !proc.killed;
+  }
+
+  /** Clean up stale in-memory state for a session whose process is gone. */
+  async function cleanupStaleSession(sessionId: string): Promise<void> {
+    console.log(`[session] cleaning up stale session: sessionId=${sessionId}`);
+    sessionContexts.delete(sessionId);
+    turnStates.delete(sessionId);
+    const now = new Date().toISOString();
+    await db.update(sessions)
+      .set({ status: "stopped", endedAt: now })
+      .where(eq(sessions.id, sessionId));
+    // Also reset workspace status to idle
+    const sessionRows = await db.select({ workspaceId: sessions.workspaceId })
+      .from(sessions)
+      .where(eq(sessions.id, sessionId))
+      .limit(1);
+    if (sessionRows.length > 0) {
+      await db.update(workspaces)
+        .set({ status: "idle", updatedAt: now })
+        .where(eq(workspaces.id, sessionRows[0].workspaceId));
+    }
+  }
+
   /** Send a follow-up message to a running session (multi-turn). */
-  function sendTurn(sessionId: string, content: string): { ok: boolean; error?: string } {
+  function sendTurn(sessionId: string, content: string): { ok: boolean; error?: string; stale?: boolean } {
     const state = turnStates.get(sessionId);
     if (!state) {
+      // Session exited (turnStates cleared on exit) — treat as stale so caller can --resume
+      if (!isProcessAlive(sessionId)) {
+        return { ok: false, error: "Agent process has exited", stale: true };
+      }
       return { ok: false, error: "Session not found or not in multi-turn mode" };
     }
     if (state !== "waiting") {
+      // Check if the process is actually still alive before reporting "still processing"
+      if (!isProcessAlive(sessionId)) {
+        cleanupStaleSession(sessionId).catch(err => console.error("Failed to cleanup stale session:", err));
+        return { ok: false, error: "Agent process is no longer running", stale: true };
+      }
       return { ok: false, error: "Agent is still processing the previous turn" };
+    }
+    // Even in "waiting" state, verify the process is alive
+    if (!isProcessAlive(sessionId)) {
+      cleanupStaleSession(sessionId).catch(err => console.error("Failed to cleanup stale session:", err));
+      return { ok: false, error: "Agent process is no longer running", stale: true };
     }
     const sent = agentService.sendInput(sessionId, content);
     if (!sent) {

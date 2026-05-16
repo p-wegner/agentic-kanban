@@ -238,6 +238,7 @@ export function createWorkspaceActionsRoute(
   });
 
   // POST /api/workspaces/:id/turn — send follow-up message to active session (multi-turn)
+  // If the agent process is gone (stale session), launches a new session with --resume
   router.post("/:id/turn", async (c) => {
     const id = c.req.param("id");
     const body = await c.req.json();
@@ -246,19 +247,54 @@ export function createWorkspaceActionsRoute(
       return c.json({ error: "content is required" }, 400);
     }
 
-    // Find running session for this workspace
-    const runningSessions = await database
+    // Find running session for this workspace; fall back to most recent completed session for stale-resume
+    const allSessions = await database
       .select()
       .from(sessions)
       .where(eq(sessions.workspaceId, id));
 
-    const running = runningSessions.find(s => s.status === "running");
+    const running = allSessions.find(s => s.status === "running")
+      ?? allSessions.filter(s => s.status === "completed" || s.status === "stopped")
+           .sort((a, b) => (b.startedAt ?? "").localeCompare(a.startedAt ?? ""))[0];
+
     if (!running) {
-      return c.json({ error: "No running session found" }, 404);
+      return c.json({ error: "No session found for this workspace" }, 404);
     }
 
-    const result = getSessionManager().sendTurn(running.id, body.content);
+    const result = running.status === "running"
+      ? getSessionManager().sendTurn(running.id, body.content)
+      : { ok: false as const, error: "Agent process has exited", stale: true };
     if (!result.ok) {
+      if ((result as any).stale) {
+        // Process is gone — launch a new session with --resume
+        const prefRows = await database.select().from(preferences);
+        const prefMap = new Map(prefRows.map((r) => [r.key, r.value]));
+        const useMock = prefMap.get("mock_agent") === "true" || process.env.MOCK_AGENT === "1";
+        const agentCommand = useMock ? MOCK_AGENT_COMMAND : (prefMap.get("agent_command") || undefined);
+        const skipPerms = prefMap.get("skip_permissions") === "true";
+        const baseArgs = prefMap.get("agent_args") || "";
+        const agentArgs = skipPerms
+          ? (baseArgs ? baseArgs + " --dangerously-skip-permissions" : "--dangerously-skip-permissions")
+          : (baseArgs || undefined);
+        const claudeProfile = prefMap.get("claude_profile") || undefined;
+        const wsRows = await database.select({ planMode: workspaces.planMode }).from(workspaces).where(eq(workspaces.id, id)).limit(1);
+        const planMode = wsRows.length > 0 ? wsRows[0].planMode : false;
+
+        const sessionId = await getSessionManager().startSession(
+          id,
+          body.content,
+          agentCommand,
+          agentArgs,
+          running.id,
+          claudeProfile,
+          true,
+          undefined,
+          planMode,
+        );
+        const projectId = await resolveProjectId(id, database);
+        if (projectId) options?.boardEvents?.broadcast(projectId, "session_launched");
+        return c.json({ sessionId, resumed: true }, 201);
+      }
       return c.json({ error: result.error }, 409);
     }
 
