@@ -2,6 +2,16 @@ import { useEffect, useRef, useState } from "react";
 import type { CreateIssueRequest } from "@agentic-kanban/shared";
 import type { CreateIssueFormState } from "./CreateIssueForm.js";
 
+async function enhanceIssue(projectId: string, title: string, description: string) {
+  const res = await fetch("/api/issues/enhance", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ title, description, projectId }),
+  });
+  if (!res.ok) throw new Error("Enhancement failed");
+  return res.json() as Promise<{ title: string; description: string }>;
+}
+
 interface CreateIssuePanelProps {
   projectId: string;
   statusId: string;
@@ -28,7 +38,22 @@ export function CreateIssuePanel({
   const [planMode, setPlanMode] = useState(initialState?.planMode ?? false);
   const [skipAutoReview, setSkipAutoReview] = useState(initialState?.skipAutoReview ?? false);
   const [submitting, setSubmitting] = useState(false);
+  const [enhancing, setEnhancing] = useState(false);
   const titleRef = useRef<HTMLInputElement>(null);
+
+  async function handleEnhance() {
+    if (!title.trim() || enhancing) return;
+    setEnhancing(true);
+    try {
+      const result = await enhanceIssue(projectId, title, description);
+      setTitle(result.title);
+      setDescription(result.description);
+    } catch {
+      // silently ignore — user keeps their original text
+    } finally {
+      setEnhancing(false);
+    }
+  }
 
   useEffect(() => {
     titleRef.current?.focus();
@@ -157,7 +182,7 @@ export function CreateIssuePanel({
             </div>
           )}
 
-          <div className="flex gap-2 pt-2 border-t border-gray-100">
+          <div className="flex gap-2 pt-2 border-t border-gray-100 flex-wrap">
             <button
               type="submit"
               disabled={!title.trim() || submitting}
@@ -173,6 +198,25 @@ export function CreateIssuePanel({
               className="text-sm text-gray-500 px-4 py-2 hover:text-gray-700"
             >
               Cancel
+            </button>
+            <button
+              type="button"
+              onClick={handleEnhance}
+              disabled={!title.trim() || enhancing}
+              title="Enhance with AI"
+              className="text-sm text-purple-600 px-3 py-2 hover:text-purple-800 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5 ml-auto"
+            >
+              {enhancing ? (
+                <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+                </svg>
+              ) : (
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 3l1.5 3.5L10 8l-3.5 1.5L5 13l-1.5-3.5L0 8l3.5-1.5L5 3zM19 11l1 2.5L22.5 14l-2.5 1L19 17.5l-1-2.5L15.5 14l2.5-1L19 11z" />
+                </svg>
+              )}
+              {enhancing ? "Enhancing…" : "Enhance with AI"}
             </button>
           </div>
         </form>
