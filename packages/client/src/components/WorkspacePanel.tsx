@@ -432,7 +432,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
     setActionLoading(true);
     setError(null);
     try {
-      await apiFetch<{ ok: boolean }>(
+      const result = await apiFetch<{ ok?: boolean; sessionId?: string; resumed?: boolean }>(
         `/api/workspaces/${wsId}/turn`,
         {
           method: "POST",
@@ -441,6 +441,11 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
       );
       setLastPrompt(prompt.trim());
       setPrompt("");
+      // If server resumed via a new process, wire up the new session
+      if (result.resumed && result.sessionId) {
+        setCompletedMessages([]);
+        setActiveSession(result.sessionId);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to send message");
     } finally {
