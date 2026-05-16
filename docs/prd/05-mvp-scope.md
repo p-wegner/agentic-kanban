@@ -15,27 +15,35 @@ A local web application where you can:
 
 | Feature | In MVP? | Notes |
 |---------|---------|-------|
-| Project + kanban columns | YES | Single project, 5 default columns |
-| Create/edit/delete issues | YES | Title, description, priority, status |
-| Drag-and-drop on board | YES | Basic DnD between columns |
-| Workspace creation | YES | Git worktree + branch |
+| Project + kanban columns | YES | Multi-project, 5 default columns, project switcher |
+| Create/edit/delete issues | YES | Title, description, priority, status, plan mode, skip review |
+| Drag-and-drop on board | YES | HTML5 DnD between columns |
+| Workspace creation | YES | Git worktree + branch, one-step create + auto-launch |
 | Workspace deletion | YES | Delete with confirmation, cascade removes sessions/messages |
-| Claude Code execution | YES | Via Agent SDK or subprocess |
-| Diff viewer | YES | Basic unified diff |
-| MCP server | YES | At least get_context + list_issues |
+| Direct workspaces | YES | Work on main checkout without worktree |
+| Claude Code execution | YES | Subprocess CLI with stream-json parsing |
+| Diff viewer | YES | Unified + split view with inline comments |
+| MCP server | YES | 26 tools: full CRUD + agent skills + board status |
+| CLI | YES | register, issue list/create/move, workspace list/create, skill list/get/create, status |
 | SQLite persistence | YES | Local DB |
-| Tags | NO | Simple text labels in description |
-| Issue relationships | NO | Flat issue list only |
-| Inline code comments | NO | View-only diff |
+| Tags | YES | CRUD API, colored badges, 4 seed tags |
+| Issue relationships | YES | 6 dependency types + analyze deps button |
+| AI enhancement | YES | "Enhance with AI" button on issue creation |
+| Inline code comments | YES | Create/edit/delete on diff lines |
 | PR creation | NO | Manual merge |
-| Real-time WebSocket | YES | Agent output streaming |
-| Multi-project | NO | Single project |
+| Real-time WebSocket | YES | Agent output streaming + board change events |
+| Command palette | YES | Ctrl+K with searchable actions |
+| Session history | YES | Inline session selector with replayable output |
+| Chat-like agent UI | YES | Persistent chat input with multi-turn --resume |
+| AI code review | YES | Auto-review on session exit, manual review, auto-fix |
+| Live session stats | YES | Real-time model name + token count on cards |
+| Agent skills | YES | 3 built-in skills + custom skills via DB |
+| Agent task progress | YES | TodoWrite progress on issue cards via WebSocket |
+| Worktree overview | YES | Branch icon, slide-in panel with diff stats |
+| Desktop app | YES | Tauri v2 with system tray + OS notifications |
 | Dark/light theme | NO | One theme |
-| Command palette | NO | Standard UI |
 | File attachments | NO | |
-| Notifications | NO | |
 | Multi-repo workspaces | NO | Single repo per workspace |
-| Session history | NO | Current session only |
 | Mobile support | NO | Desktop browser only |
 
 ## Staging Plan
