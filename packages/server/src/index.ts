@@ -129,8 +129,9 @@ async function runWorkflowOnExit(workspaceId: string, sessionId: string, exitCod
       boardEvents.broadcast(projectId, "issue_updated");
 
       // requiresReview is set at workspace creation time (pre-populated from auto_review global default).
+      // null means created before the per-workspace flag existed — fall back to the global auto_review setting.
       // skipAutoReview (set by MCP/CLI) can still override.
-      const autoReview = !skipAutoReview && workspace.requiresReview;
+      const autoReview = !skipAutoReview && (workspace.requiresReview ?? prefMap.get("auto_review") !== "false");
 
       if (autoReview) {
         const useMock = prefMap.get("mock_agent") === "true" || process.env.MOCK_AGENT === "1";
