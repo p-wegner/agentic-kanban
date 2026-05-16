@@ -13,6 +13,7 @@ export function registerGetIssue(server: McpServer) {
     async ({ issueId }) => {
       const issues = await db.select({
         id: schema.issues.id,
+        issueNumber: schema.issues.issueNumber,
         title: schema.issues.title,
         description: schema.issues.description,
         priority: schema.issues.priority,

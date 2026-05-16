@@ -107,6 +107,30 @@ Every feature that has a UI component must be visually verified using the `playw
 - `docs/diary.md` — session log for talk/presentation material
 - `docs/state.md` — current progress tracking (API routes, MCP tools, stage checklists)
 
+## Board Operations: Prefer MCP Tools or CLI over REST
+
+When performing kanban board operations (creating issues, moving issues, managing workspaces, etc.), **always prefer the agentic-kanban MCP tools** (`mcp__agentic-kanban__*`) over direct REST API calls via curl. The MCP tools are the intended interface and are always available in Claude Code sessions when the MCP server is configured.
+
+**Use MCP tools for:**
+- `mcp__agentic-kanban__create_issue` — create issues (returns `issueNumber`)
+- `mcp__agentic-kanban__list_issues` — list/filter issues by status, priority, tag
+- `mcp__agentic-kanban__get_issue` — get issue details including workspaces and dependencies
+- `mcp__agentic-kanban__update_issue` / `mcp__agentic-kanban__move_issue` — update status, priority, description
+- `mcp__agentic-kanban__start_workspace` — create a git worktree for an issue
+- `mcp__agentic-kanban__merge_workspace` — merge a workspace branch and close it
+- `mcp__agentic-kanban__get_workspace_diff` — inspect changes before merging
+- `mcp__agentic-kanban__get_context` — get project info and issue counts
+- `mcp__agentic-kanban__list_tags`, `mcp__agentic-kanban__create_tag` — tag management
+
+**Use the CLI (`pnpm cli -- ...`) when MCP is unavailable:**
+- `pnpm cli -- issue list` — list issues for active project
+- `pnpm cli -- issue create <title>` — create an issue
+- `pnpm cli -- issue move <id> <status>` — move issue to a status
+- `pnpm cli -- workspace list` — list workspaces for active project
+- `pnpm cli -- workspace create <issueId>` — create a git worktree workspace
+
+**Only fall back to REST API curl** when an operation has no MCP tool or CLI equivalent.
+
 ## Monorepo Commands
 - `pnpm dev` — start server + client concurrently (auto-detects worktree ports; default: server 3001, client 5173)
 - `pnpm dev:desktop` — start server + client + Tauri native window (requires MSVC C++ Build Tools + Rust)
