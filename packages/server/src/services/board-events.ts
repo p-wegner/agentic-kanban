@@ -14,7 +14,15 @@ interface SessionActivityMessage {
   activity: string;
 }
 
-type BoardWsMessage = BoardEventMessage | SessionActivityMessage;
+interface SessionStatsMessage {
+  type: "session_stats";
+  projectId: string;
+  issueId: string;
+  model: string;
+  contextTokens: number;
+}
+
+type BoardWsMessage = BoardEventMessage | SessionActivityMessage | SessionStatsMessage;
 
 interface BoardEventSubscriber {
   ws: WSContext;
@@ -68,6 +76,18 @@ function createBoardEvents(
     }
   }
 
+  function broadcastLiveStats(projectId: string, issueId: string, model: string, contextTokens: number) {
+    const subs = subscribers.get(projectId);
+    if (!subs) return;
+    const message: SessionStatsMessage = { type: "session_stats", projectId, issueId, model, contextTokens };
+    const payload = JSON.stringify(message);
+    for (const sub of subs.values()) {
+      if (sub.ws.readyState === 1) {
+        sub.ws.send(payload);
+      }
+    }
+  }
+
   function wsRoute() {
     return upgradeWebSocket((c: any) => {
       const projectId = c.req.param("projectId");
@@ -82,7 +102,7 @@ function createBoardEvents(
     });
   }
 
-  return { subscribe, unsubscribe, broadcast, broadcastActivity, wsRoute };
+  return { subscribe, unsubscribe, broadcast, broadcastActivity, broadcastLiveStats, wsRoute };
 }
 
 export { createBoardEvents };
