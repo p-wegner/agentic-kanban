@@ -22,7 +22,7 @@ function stripAnsi(str: string): string {
   return str.replace(ANSI_RE, "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
 }
 
-function parseJsonLine(line: string): { type?: string; subtype?: string; message?: { content?: any[] }; result?: string; is_error?: boolean } | null {
+function parseJsonLine(line: string): { type?: string; subtype?: string; message?: { content?: any[] }; result?: string; is_error?: boolean; summary?: string; status?: string } | null {
   try {
     return JSON.parse(line);
   } catch {
