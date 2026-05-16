@@ -128,9 +128,9 @@ async function runWorkflowOnExit(workspaceId: string, sessionId: string, exitCod
       }
       boardEvents.broadcast(projectId, "issue_updated");
 
-      // Check if auto-review is enabled (requiresReview checkbox or auto_review setting)
-      // Issue-level skipAutoReview overrides everything
-      const autoReview = !skipAutoReview && (workspace.requiresReview || prefMap.get("auto_review") !== "false");
+      // requiresReview is set at workspace creation time (pre-populated from auto_review global default).
+      // skipAutoReview (set by MCP/CLI) can still override.
+      const autoReview = !skipAutoReview && workspace.requiresReview;
 
       if (autoReview) {
         const useMock = prefMap.get("mock_agent") === "true" || process.env.MOCK_AGENT === "1";
