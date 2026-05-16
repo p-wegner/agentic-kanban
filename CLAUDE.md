@@ -152,7 +152,6 @@ When performing kanban board operations (creating issues, moving issues, managin
 - `pnpm cli -- issue move <id> <status>` — move issue to a status
 - `pnpm cli -- workspace list` — list workspaces for active project
 - `pnpm cli -- workspace create <issueId>` — create a workspace
-- `pnpm cli -- status` — board overview: all agents, workspaces, diff stats, session progress, last output
 
 ## Worktree Port Strategy
 `pnpm dev` uses `scripts/dev.mjs` which auto-detects whether the CWD is a git worktree and assigns deterministic ports:
