@@ -160,6 +160,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
   const [baseBranch, setBaseBranch] = useState("");
   const [isDirect, setIsDirect] = useState(false);
   const [requiresReview, setRequiresReview] = useState(false);
+  const [planMode, setPlanMode] = useState(false);
   const [prompt, setPrompt] = useState("");
   const [prefs, setPrefs] = useState<Record<string, string>>({});
   const [branches, setBranches] = useState<{ local: string[]; remote: string[] } | null>(null);
@@ -368,7 +369,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
     setError(null);
     setCompletedMessages([]);
     try {
-      const body: Record<string, unknown> = { issueId: issue.id, isDirect, requiresReview };
+      const body: Record<string, unknown> = { issueId: issue.id, isDirect, requiresReview, planMode };
       if (!isDirect) {
         body.branch = branchName.trim();
         if (baseBranch.trim()) {
@@ -758,6 +759,15 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                 />
                 <span>Request code review before merge</span>
               </label>
+              <label className="flex items-center gap-2 text-xs text-gray-600">
+                <input
+                  type="checkbox"
+                  checked={planMode}
+                  onChange={(e) => setPlanMode(e.target.checked)}
+                  className="rounded border-gray-300"
+                />
+                <span>Plan mode (agent plans before implementing)</span>
+              </label>
               <div className="flex gap-2">
                 <button
                   onClick={handleCreateWorkspace}
@@ -767,7 +777,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                   {actionLoading ? "Creating..." : isDirect ? "Create Direct & Launch" : "Create & Launch"}
                 </button>
                 <button
-                  onClick={() => { setShowCreate(false); setBaseBranch(""); setBranchName(""); setIsDirect(false); setRequiresReview(false); }}
+                  onClick={() => { setShowCreate(false); setBaseBranch(""); setBranchName(""); setIsDirect(false); setRequiresReview(false); setPlanMode(false); }}
                   className="text-sm text-gray-500 px-3 py-1.5 hover:text-gray-700"
                 >
                   Cancel
