@@ -165,6 +165,8 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
   const [prompt, setPrompt] = useState("");
   const [prefs, setPrefs] = useState<Record<string, string>>({});
   const [branches, setBranches] = useState<{ local: string[]; remote: string[] } | null>(null);
+  const [availableSkills, setAvailableSkills] = useState<{ id: string; name: string; description: string }[]>([]);
+  const [selectedSkillId, setSelectedSkillId] = useState<string>("");
   const suggestion = suggestBranchName(issue);
 
   const { state: wsState, messages, disconnect, isWaitingForInput } = useWebSocket(activeSession);
@@ -374,6 +376,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
     setCompletedMessages([]);
     try {
       const body: Record<string, unknown> = { issueId: issue.id, isDirect, requiresReview, planMode };
+      if (selectedSkillId) body.skillId = selectedSkillId;
       if (!isDirect) {
         body.branch = branchName.trim();
         if (baseBranch.trim()) {
@@ -387,6 +390,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
       setBranchName("");
       setBaseBranch("");
       setIsDirect(false);
+      setSelectedSkillId("");
       setShowCreate(false);
       // If auto-launched, set active session to show terminal immediately
       if (result.sessionId) {
@@ -764,7 +768,15 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                     </button>
                     <div className="border-t border-gray-100" />
                     <button
-                      onClick={() => { setQuickDropdownOpen(false); setShowCreate(true); }}
+                      onClick={() => {
+                        setQuickDropdownOpen(false);
+                        setShowCreate(true);
+                        if (availableSkills.length === 0) {
+                          apiFetch<{ id: string; name: string; description: string }[]>("/api/agent-skills")
+                            .then(setAvailableSkills)
+                            .catch(() => {});
+                        }
+                      }}
                       className="w-full text-left text-sm px-3 py-2 hover:bg-gray-50 text-gray-500"
                     >
                       Custom options...
@@ -853,6 +865,23 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                 />
                 <span>Plan mode (agent plans before implementing)</span>
               </label>
+              {availableSkills.length > 0 && (
+                <div>
+                  <label className="text-xs font-medium text-gray-600 block">
+                    Agent Skill
+                  </label>
+                  <select
+                    value={selectedSkillId}
+                    onChange={(e) => setSelectedSkillId(e.target.value)}
+                    className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  >
+                    <option value="">None (default)</option>
+                    {availableSkills.map((s) => (
+                      <option key={s.id} value={s.id}>{s.name} — {s.description}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
               <div className="flex gap-2">
                 <button
                   onClick={handleCreateWorkspace}

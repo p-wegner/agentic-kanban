@@ -127,6 +127,20 @@
       "when": 1778744000000,
       "tag": "0017_agent_config",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "6",
+      "when": 1778830400000,
+      "tag": "0018_agent_skills",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "6",
+      "when": 1778916800000,
+      "tag": "0019_workspace_skill",
+      "breakpoints": true
     }
   ]
 }

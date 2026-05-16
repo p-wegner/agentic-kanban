@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { db } from "../db/index.js";
-import { workspaces, issues, projects, preferences, sessions, sessionMessages, diffComments, projectStatuses } from "@agentic-kanban/shared/schema";
+import { workspaces, issues, projects, preferences, sessions, sessionMessages, diffComments, projectStatuses, agentSkills } from "@agentic-kanban/shared/schema";
 import { eq, inArray } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import * as gitService from "../services/git.service.js";
@@ -86,6 +86,15 @@ export function createWorkspacesRoute(
         agentPrompt += `\n\n${issue.description}`;
       }
 
+      // Prepend skill prompt if skillId is provided
+      const skillId: string | null = body.skillId || null;
+      if (skillId) {
+        const skillRows = await database.select().from(agentSkills).where(eq(agentSkills.id, skillId)).limit(1);
+        if (skillRows.length > 0) {
+          agentPrompt = `${skillRows[0].prompt}\n\n---\n\n${agentPrompt}`;
+        }
+      }
+
       // Read agent settings from preferences
       const prefRows = await database.select().from(preferences);
       const prefMap = new Map(prefRows.map(r => [r.key, r.value]));
@@ -113,6 +122,7 @@ export function createWorkspacesRoute(
         isDirect,
         requiresReview,
         planMode,
+        skillId,
         status: "active",
         claudeProfile: claudeProfile ?? null,
         agentCommand: agentCommand ?? null,
