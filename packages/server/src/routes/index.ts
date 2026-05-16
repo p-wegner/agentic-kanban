@@ -5,6 +5,7 @@ import { createWorkspacesRoute, workspacesRoute } from "./workspaces.js";
 import { createWorkspaceActionsRoute } from "./workspace-actions.js";
 import { createTagsRoute, tagsRoute } from "./tags.js";
 import { createPreferencesRoute, preferencesRoute } from "./preferences.js";
+import { createAgentSkillsRoute, agentSkillsRoute } from "./agent-skills.js";
 import type { Database } from "../db/index.js";
 import type { SessionManager } from "../services/session.manager.js";
 import type { BoardEvents } from "../services/board-events.js";
@@ -21,6 +22,7 @@ export function createRoutes(database: Database, getSessionManager: () => Sessio
   routes.route("/workspaces", createWorkspaceActionsRoute(getSessionManager, database, options));
   routes.route("/tags", createTagsRoute(database));
   routes.route("/preferences", createPreferencesRoute(database));
+  routes.route("/agent-skills", createAgentSkillsRoute(database));
 
   // Internal endpoint for MCP/CLI tools to trigger immediate board refresh
   routes.post("/internal/board-notify", async (c) => {
@@ -61,4 +63,5 @@ routes.route("/issues", issuesRoute);
 routes.route("/workspaces", workspacesRoute);
 routes.route("/tags", tagsRoute);
 routes.route("/preferences", preferencesRoute);
+routes.route("/agent-skills", agentSkillsRoute);
 // Note: workspace-actions route is mounted separately in index.ts to avoid circular imports
