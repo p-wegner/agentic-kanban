@@ -841,8 +841,8 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
 
                 {isSelected && (
                   <div className="space-y-2 pt-2 border-t border-gray-200" onClick={(e) => e.stopPropagation()}>
-                    {/* Session selector — shown when there are completed sessions and workspace is idle */}
-                    {completedSessions.length > 0 && !isRunning && ws.workingDir && ws.status !== "closed" && (
+                    {/* Session selector — shown when there are completed sessions */}
+                    {completedSessions.length > 0 && !isRunning && (
                       <div className="space-y-0.5">
                         {/* Latest tab */}
                         <button
@@ -903,16 +903,15 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                     )}
 
                     {/* TerminalView — show history output or live/completed output */}
-                    {ws.workingDir && ws.status !== "closed" && (
-                      (selectedHistoryId ? historyMessages : (activeSession || completedMessages.length > 0)) ? (
-                        <TerminalView
-                          messages={selectedHistoryId ? historyMessages : (activeSession ? messages : completedMessages)}
-                          connectionState={selectedHistoryId ? "closed" : (activeSession ? wsState : "closed")}
-                          parseOutput={prefs.output_parser === "false" ? "false" : (prefs.output_parser === "minimal" ? "minimal" : "true")}
-                          prompt={selectedHistoryId ? undefined : lastPrompt}
-                          title={issue.title}
-                          multiTurn={isSessionAlive}
-                          footer={!selectedHistoryId ? (
+                    {(selectedHistoryId ? historyMessages : (activeSession || completedMessages.length > 0)) ? (
+                      <TerminalView
+                        messages={selectedHistoryId ? historyMessages : (activeSession ? messages : completedMessages)}
+                        connectionState={selectedHistoryId ? "closed" : (activeSession ? wsState : "closed")}
+                        parseOutput={prefs.output_parser === "false" ? "false" : (prefs.output_parser === "minimal" ? "minimal" : "true")}
+                        prompt={selectedHistoryId ? undefined : lastPrompt}
+                        title={issue.title}
+                        multiTurn={isSessionAlive}
+                        footer={!selectedHistoryId && ws.status !== "closed" ? (
                             <div className="flex gap-2">
                               <textarea
                                 ref={textareaRef}
@@ -956,11 +955,10 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                             </div>
                           ) : undefined}
                         />
-                      ) : null
-                    )}
+                    ) : null}
 
                     {/* Session stats summary — shown below terminal for completed sessions */}
-                    {ws.workingDir && ws.status !== "closed" && !isRunning && (
+                    {!isRunning && (
                       <SessionStatsSummary
                         stats={selectedHistoryId
                           ? completedSessions.find(s => s.id === selectedHistoryId)?.stats ?? null
@@ -970,7 +968,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                     )}
 
                     {/* "Back to latest" link when viewing history */}
-                    {selectedHistoryId && ws.workingDir && ws.status !== "closed" && (
+                    {selectedHistoryId && (
                       <button
                         onClick={() => { setSelectedHistoryId(null); setHistoryMessages([]); }}
                         className="text-xs text-blue-600 hover:text-blue-700"
