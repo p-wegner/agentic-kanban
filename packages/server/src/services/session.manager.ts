@@ -5,6 +5,7 @@ import { eq } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import * as agentService from "./agent.service.js";
 import type { AgentOutputMessage } from "@agentic-kanban/shared";
+import type { TodoItem } from "./board-events.js";
 
 interface Subscriber {
   ws: WSContext;
@@ -20,6 +21,7 @@ interface SessionManagerOptions {
   onSessionExit?: (workspaceId: string, sessionId: string, exitCode: number | null) => void;
   onActivity?: (projectId: string, issueId: string, sessionId: string, activity: string) => void;
   onLiveStats?: (projectId: string, issueId: string, model: string, contextTokens: number) => void;
+  onTodos?: (projectId: string, issueId: string, todos: TodoItem[]) => void;
 }
 
 function createSessionManager(
@@ -103,7 +105,7 @@ function createSessionManager(
           }
         }
 
-        // Parse tool_use events for live activity
+        // Parse tool_use events for live activity and todos
         if (obj.type === "assistant" && obj.message?.content) {
           const content = obj.message.content;
           if (Array.isArray(content)) {
@@ -114,6 +116,13 @@ function createSessionManager(
                 if (ctx && activity) {
                   options?.onActivity?.(ctx.projectId, ctx.issueId, sessionId, activity);
                 }
+                // Capture TodoWrite calls to show task progress on the board
+                if (block.name === "TodoWrite" && Array.isArray(block.input?.todos)) {
+                  const ctx = sessionContexts.get(sessionId);
+                  if (ctx) {
+                    options?.onTodos?.(ctx.projectId, ctx.issueId, block.input.todos as TodoItem[]);
+                  }
+                }
               }
             }
           }
@@ -123,11 +132,12 @@ function createSessionManager(
       }
     }
 
-    // On exit, clear activity
+    // On exit, clear activity and todos
     if (message.type === "exit") {
       const ctx = sessionContexts.get(sessionId);
       if (ctx) {
         options?.onActivity?.(ctx.projectId, ctx.issueId, sessionId, "");
+        options?.onTodos?.(ctx.projectId, ctx.issueId, []);
       }
     }
 

@@ -2,7 +2,7 @@ import { BoardColumn } from "./BoardColumn.js";
 import { CreateIssueForm } from "./CreateIssueForm.js";
 import type { CreateIssueFormState } from "./CreateIssueForm.js";
 import type { CreateIssueRequest, IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
-import type { LiveSessionStats } from "../lib/useBoardEvents.js";
+import type { LiveSessionStats, TodoItem } from "../lib/useBoardEvents.js";
 
 interface ColumnGroupProps {
   label: string;
@@ -21,6 +21,7 @@ interface ColumnGroupProps {
   searchQuery: string;
   sessionActivity?: Record<string, string>;
   liveStats?: Record<string, LiveSessionStats>;
+  sessionTodos?: Record<string, TodoItem[]>;
   canStartWorkspace?: boolean;
   onExpandCreate?: (statusId: string, statusName: string, state: CreateIssueFormState) => void;
 }
@@ -42,6 +43,7 @@ export function ColumnGroup({
   searchQuery,
   sessionActivity,
   liveStats,
+  sessionTodos,
   canStartWorkspace = false,
   onExpandCreate,
 }: ColumnGroupProps) {
@@ -113,6 +115,7 @@ export function ColumnGroup({
             searchQuery={searchQuery}
             sessionActivity={sessionActivity}
             liveStats={liveStats}
+            sessionTodos={sessionTodos}
           >
             <CreateIssueForm
               projectId={projectId}
