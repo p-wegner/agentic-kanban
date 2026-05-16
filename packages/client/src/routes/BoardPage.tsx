@@ -189,10 +189,10 @@ export function BoardPage() {
     showToast(`Registered "${result.name}"`, "success");
   }
 
-  async function handleCreateIssue(data: CreateIssueRequest & { startWorkspace?: boolean }) {
+  async function handleCreateIssue(data: CreateIssueRequest & { startWorkspace?: boolean; planMode?: boolean }) {
     setMutating(true);
     setError(null);
-    const { startWorkspace, ...issueData } = data;
+    const { startWorkspace, planMode, ...issueData } = data;
     try {
       const created = await apiFetch<{ id: string; issueNumber: number; title: string }>(
         "/api/issues",
@@ -214,6 +214,7 @@ export function BoardPage() {
               issueId: created.id,
               branch,
               baseBranch: activeProject.defaultBranch,
+              planMode: planMode || undefined,
             }),
           });
           for (const col of board ?? columns) {
