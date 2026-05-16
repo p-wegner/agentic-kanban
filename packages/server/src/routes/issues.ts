@@ -29,6 +29,7 @@ export function createIssuesRoute(database: Database = db, options?: { boardEven
         createdAt: issues.createdAt,
         updatedAt: issues.updatedAt,
         statusChangedAt: issues.statusChangedAt,
+        skipAutoReview: issues.skipAutoReview,
         statusName: projectStatuses.name,
       })
       .from(issues)
@@ -72,6 +73,7 @@ export function createIssuesRoute(database: Database = db, options?: { boardEven
       title: body.title,
       description: body.description ?? null,
       priority: body.priority ?? "medium",
+      skipAutoReview: body.skipAutoReview ?? false,
       sortOrder: body.sortOrder ?? 0,
       statusId,
       projectId: body.projectId,
