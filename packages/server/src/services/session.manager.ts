@@ -140,7 +140,6 @@ function createSessionManager(
     multiTurn?: boolean,
     permissionPromptTool?: string,
     planMode?: boolean,
-    resumeWithNewModel?: boolean,
   ) {
     // Look up workspace to get workingDir
     const wsRows = await db
@@ -207,8 +206,6 @@ function createSessionManager(
     });
 
     try {
-      // When resumeWithNewModel is true, skip --resume so the new model from agentArgs is used
-      const effectiveClaudeSessionId = resumeWithNewModel ? undefined : claudeSessionId;
       agentService.launch(workspace.workingDir, sessionId, prompt, agentArgs, (event) => { // onOutput callback
         // Broadcast to WebSocket subscribers
         const message: AgentOutputMessage = event;
@@ -236,7 +233,7 @@ function createSessionManager(
             })
             .catch((err) => console.error("Failed to update session:", err));
         }
-      }, effectiveClaudeSessionId, agentCommand, claudeProfile, multiTurn, permissionPromptTool, planMode);
+      }, claudeSessionId, agentCommand, claudeProfile, multiTurn, permissionPromptTool, planMode);
     } catch (err) {
       throw err;
     }
