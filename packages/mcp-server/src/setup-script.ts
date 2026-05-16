@@ -29,12 +29,12 @@ export function runSetupScript(worktreePath: string, script: string): Promise<Se
       reject(new Error("Setup script timed out after 5 minutes"));
     }, 5 * 60 * 1000);
 
-    proc.on("exit", (code) => {
+    proc.on("exit", (code: number | null) => {
       clearTimeout(timeout);
       resolve({ exitCode: code ?? 1, stdout, stderr });
     });
 
-    proc.on("error", (err) => {
+    proc.on("error", (err: Error) => {
       clearTimeout(timeout);
       reject(err);
     });

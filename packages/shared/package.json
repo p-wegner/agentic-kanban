@@ -9,8 +9,7 @@
     ".": "./src/index.ts",
     "./schema": "./src/schema/index.ts",
     "./types": "./src/types/index.ts",
-    "./lib": "./src/lib/index.ts",
-    "./lib/setup-script": "./src/lib/setup-script.ts"
+    "./lib": "./src/lib/index.ts"
   },
   "scripts": {
     "db:generate": "drizzle-kit generate",
