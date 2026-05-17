@@ -74,7 +74,7 @@ process.env.SERVER_PORT = String(serverPort);
 process.env.KANBAN_SERVER_PORT = String(serverPort);
 process.env.KANBAN_CLIENT_PORT = String(clientPort);
 
-const child = spawn('pnpm exec concurrently "pnpm --filter server dev" "pnpm --filter client dev"', {
+const child = spawn('pnpm exec concurrently "pnpm --filter agentic-kanban dev" "pnpm --filter client dev"', {
   stdio: "inherit",
   shell: true,
   env: process.env,

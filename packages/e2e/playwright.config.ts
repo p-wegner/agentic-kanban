@@ -13,7 +13,7 @@ export default defineConfig({
   },
   webServer: [
     {
-      command: "pnpm --filter @agentic-kanban/server dev",
+      command: "pnpm --filter agentic-kanban dev",
       port: serverPort,
       reuseExistingServer: true,
       cwd: "../..",

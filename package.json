@@ -9,21 +9,25 @@
   },
   "scripts": {
     "dev": "node scripts/dev.mjs",
-    "dev:server": "pnpm --filter server dev",
+    "dev:server": "pnpm --filter agentic-kanban dev",
     "dev:client": "pnpm --filter client dev",
-    "build": "pnpm --filter shared build && pnpm --filter server build && pnpm --filter client build",
-    "test": "pnpm --filter server test",
+    "build": "pnpm --filter shared build && node scripts/build-server.mjs && node scripts/build-mcp.mjs && pnpm --filter client build && node scripts/copy-assets.mjs",
+    "test": "pnpm --filter agentic-kanban test",
     "test:e2e": "pnpm --filter e2e test",
-    "cli": "pnpm --filter @agentic-kanban/server exec tsx src/cli.ts",
+    "cli": "pnpm --filter agentic-kanban exec tsx src/cli.ts",
     "db:generate": "pnpm --filter shared db:generate",
-    "db:migrate": "pnpm --filter server db:migrate",
-    "db:seed": "pnpm --filter server db:seed",
-    "db:reset": "pnpm --filter server db:reset",
+    "db:migrate": "pnpm --filter agentic-kanban db:migrate",
+    "db:seed": "pnpm --filter agentic-kanban db:seed",
+    "db:reset": "pnpm --filter agentic-kanban db:reset",
     "db:setup": "pnpm db:migrate && pnpm db:seed && pnpm cli -- register .",
-    "dev:desktop": "concurrently \"pnpm --filter server dev\" \"pnpm --filter client dev\" \"pnpm --filter @agentic-kanban/desktop dev\""
+    "dev:desktop": "concurrently \"pnpm --filter agentic-kanban dev\" \"pnpm --filter client dev\" \"pnpm --filter @agentic-kanban/desktop dev\"",
+    "version": "changeset version",
+    "release": "pnpm build && changeset publish"
   },
   "devDependencies": {
+    "@changesets/cli": "^2.31.0",
     "concurrently": "^9.1.2",
+    "esbuild": "^0.25.12",
     "typescript": "^5.8.3"
   }
 }
