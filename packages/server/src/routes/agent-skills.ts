@@ -1,16 +1,32 @@
 import { Hono } from "hono";
 import { db } from "../db/index.js";
 import { agentSkills } from "@agentic-kanban/shared/schema";
-import { eq } from "drizzle-orm";
+import { eq, and, isNull, sql } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import type { Database } from "../db/index.js";
 
 export function createAgentSkillsRoute(database: Database = db) {
   const router = new Hono();
 
-  // GET /api/agent-skills — list all skills
+  // GET /api/agent-skills — list skills
+  // ?projectId=<id> — returns global skills + project-specific skills
+  // ?global=true — returns only global skills (no project_id)
   router.get("/", async (c) => {
-    const rows = await database.select().from(agentSkills).orderBy(agentSkills.name);
+    const projectId = c.req.query("projectId");
+    const globalOnly = c.req.query("global") === "true";
+
+    let rows;
+    if (globalOnly) {
+      rows = await database.select().from(agentSkills)
+        .where(isNull(agentSkills.projectId))
+        .orderBy(agentSkills.name);
+    } else if (projectId) {
+      rows = await database.select().from(agentSkills)
+        .where(sql`${agentSkills.projectId} IS NULL OR ${agentSkills.projectId} = ${projectId}`)
+        .orderBy(agentSkills.name);
+    } else {
+      rows = await database.select().from(agentSkills).orderBy(agentSkills.name);
+    }
     return c.json(rows);
   });
 
@@ -31,10 +47,15 @@ export function createAgentSkillsRoute(database: Database = db) {
       return c.json({ error: "name, description, and prompt are required" }, 400);
     }
 
-    // Check for duplicate name
-    const existing = await database.select().from(agentSkills).where(eq(agentSkills.name, body.name)).limit(1);
+    const projectId = body.projectId || null;
+
+    // Check for duplicate name within the same scope (global or same project)
+    const scopeCondition = projectId
+      ? and(eq(agentSkills.name, body.name), eq(agentSkills.projectId, projectId))
+      : and(eq(agentSkills.name, body.name), isNull(agentSkills.projectId));
+    const existing = await database.select().from(agentSkills).where(scopeCondition).limit(1);
     if (existing.length > 0) {
-      return c.json({ error: `Skill '${body.name}' already exists` }, 409);
+      return c.json({ error: `Skill '${body.name}' already exists in this scope` }, 409);
     }
 
     const id = randomUUID();
@@ -45,6 +66,7 @@ export function createAgentSkillsRoute(database: Database = db) {
       description: body.description,
       prompt: body.prompt,
       model: body.model ?? null,
+      projectId,
       isBuiltin: false,
       createdAt: now,
       updatedAt: now,
@@ -73,16 +95,20 @@ export function createAgentSkillsRoute(database: Database = db) {
     const updates: Record<string, unknown> = { updatedAt: now };
 
     if (body.name !== undefined) {
-      // Check for duplicate name (excluding self)
-      const dup = await database.select().from(agentSkills).where(eq(agentSkills.name, body.name)).limit(1);
+      const effectiveProjectId = body.projectId !== undefined ? (body.projectId || null) : skill.projectId;
+      const scopeCondition = effectiveProjectId
+        ? and(eq(agentSkills.name, body.name), eq(agentSkills.projectId, effectiveProjectId))
+        : and(eq(agentSkills.name, body.name), isNull(agentSkills.projectId));
+      const dup = await database.select().from(agentSkills).where(scopeCondition).limit(1);
       if (dup.length > 0 && dup[0].id !== id) {
-        return c.json({ error: `Skill '${body.name}' already exists` }, 409);
+        return c.json({ error: `Skill '${body.name}' already exists in this scope` }, 409);
       }
       updates.name = body.name;
     }
     if (body.description !== undefined) updates.description = body.description;
     if (body.prompt !== undefined) updates.prompt = body.prompt;
     if (body.model !== undefined) updates.model = body.model || null;
+    if (body.projectId !== undefined) updates.projectId = body.projectId || null;
 
     await database.update(agentSkills).set(updates).where(eq(agentSkills.id, id));
     const updated = await database.select().from(agentSkills).where(eq(agentSkills.id, id)).limit(1);
