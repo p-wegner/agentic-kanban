@@ -7,6 +7,9 @@
     "packages/client/src/lib/useBoardEvents.ts",
     "packages/client/src/routes/BoardPage.tsx",
     "packages/client/src/components/BoardColumn.tsx",
-    "packages/client/src/components/IssueCard.tsx"
+    "packages/client/src/components/IssueCard.tsx",
+    "packages/server/src/routes/workspaces.ts",
+    "packages/mcp-server/src/tools/start-workspace.ts",
+    "CLAUDE.md"
   ]
 }
