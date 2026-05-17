@@ -381,8 +381,8 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
     }
   }
 
-  async function handleFetchSummary(sessionId: string) {
-    if (summarySessionId === sessionId && summaryData) return; // already loaded
+  async function handleFetchSummary(sessionId: string, force = false) {
+    if (!force && summarySessionId === sessionId && summaryData) return;
     setSummaryLoading(true);
     setSummaryData(null);
     try {
@@ -487,6 +487,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
       setActiveSession(result.sessionId);
       setLastPrompt(prompt.trim());
       setPrompt("");
+      setViewMode("output");
       await fetchWorkspaces();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Launch failed");
@@ -513,6 +514,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
       if (result.resumed && result.sessionId) {
         setCompletedMessages([]);
         setActiveSession(result.sessionId);
+        setViewMode("output");
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to send message");
@@ -1089,7 +1091,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                     )}
 
                     {/* Output/Summary toggle — shown when there is session content */}
-                    {(selectedHistoryId ? historyMessages : (activeSession || completedMessages.length > 0)) && !isRunning && (
+                    {(selectedHistoryId ? historyMessages : (activeSession || completedMessages.length > 0)) && (
                       <div className="flex border-b border-gray-200">
                         <button
                           onClick={() => { setViewMode("output"); }}
@@ -1104,8 +1106,8 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                         <button
                           onClick={() => {
                             setViewMode("summary");
-                            const sid = selectedHistoryId || lastSessionPerWorkspace[ws.id];
-                            if (sid) handleFetchSummary(sid);
+                            const sid = selectedHistoryId || activeSession || lastSessionPerWorkspace[ws.id];
+                            if (sid) handleFetchSummary(sid, isRunning);
                           }}
                           className={`flex-1 text-xs py-1.5 text-center font-medium ${
                             viewMode === "summary"
@@ -1119,8 +1121,8 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                     )}
 
                     {/* Summary view */}
-                    {viewMode === "summary" && !isRunning && (() => {
-                      const sid = selectedHistoryId || lastSessionPerWorkspace[ws.id];
+                    {viewMode === "summary" && (() => {
+                      const sid = selectedHistoryId || activeSession || lastSessionPerWorkspace[ws.id];
                       const summary = sid === summarySessionId ? summaryData : null;
                       const sessionStats = selectedHistoryId
                         ? completedSessions.find(s => s.id === selectedHistoryId)?.stats ?? null
