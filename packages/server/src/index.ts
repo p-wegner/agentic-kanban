@@ -8,8 +8,8 @@ import { migrate } from "drizzle-orm/libsql/migrator";
 import { db } from "./db/index.js";
 import { createSessionManager } from "./services/session.manager.js";
 import { createBoardEvents } from "./services/board-events.js";
-import { workspaces, issues, projects, projectStatuses, preferences, sessions } from "@agentic-kanban/shared/schema";
-import { eq } from "drizzle-orm";
+import { workspaces, issues, projects, projectStatuses, preferences, sessions, agentSkills } from "@agentic-kanban/shared/schema";
+import { eq, sql } from "drizzle-orm";
 import * as agentService from "./services/agent.service.js";
 import * as gitService from "./services/git.service.js";
 import { execFile } from "node:child_process";
@@ -48,42 +48,52 @@ function buildReviewArgs(prefMap: Map<string, string>): string | undefined {
   return baseArgs || undefined;
 }
 
-function buildReviewPrompt(branch: string, baseBranch: string | null, issueId: string, autoFix: boolean): string {
-  const lines = [
-    `You are an AI code reviewer. Review the changes on branch '${branch}'.`,
-    `Run 'git diff ${baseBranch ?? "HEAD"}' to see the diff.`,
-    ``,
-    `Review for: correctness bugs, security vulnerabilities, logic errors, and missing error handling.`,
-    `Classify each issue as CRITICAL (must fix — bugs, security, data loss), MAJOR (should fix — broken edge cases, poor error handling), or MINOR (nice to have — style, naming).`,
-    ``,
-  ];
-  if (autoFix) {
-    lines.push(
-      `If you find CRITICAL or MAJOR issues:`,
-      `1. Use the move_issue MCP tool to move issue ${issueId} to 'In Progress' (so the board shows the issue needs fixes)`,
-      `2. Fix all critical and major issues directly in the code`,
-      `3. Commit the fixes with a descriptive message`,
-      `4. Exit normally (the system will handle merging)`,
-      ``,
-      `If only MINOR issues or no issues: just exit normally (the system will auto-merge).`,
-    );
-  } else {
-    lines.push(
-      `If you find CRITICAL or MAJOR issues:`,
-      `1. Use the move_issue MCP tool to move issue ${issueId} to 'In Progress'`,
-      `2. Describe each issue clearly so the developer knows what to fix`,
-      `3. Do NOT edit any files — report only`,
-      ``,
-      `If only MINOR issues or no issues: just exit normally (the system will auto-merge).`,
-    );
+const DEFAULT_REVIEW_PROMPT = `You are an AI code reviewer. Review the changes on branch '{{branch}}'.
+Run 'git diff {{baseBranch}}' to see the diff.
+
+Review for: correctness bugs, security vulnerabilities, logic errors, and missing error handling.
+Classify each issue as CRITICAL (must fix — bugs, security, data loss), MAJOR (should fix — broken edge cases, poor error handling), or MINOR (nice to have — style, naming).
+
+{{autoFixInstructions}}
+
+Do NOT move the issue to 'AI Reviewed' yourself — the system handles that on merge.
+
+Issue ID: {{issueId}}`;
+
+async function buildReviewPrompt(branch: string, baseBranch: string | null, issueId: string, autoFix: boolean, projectId?: string): Promise<string> {
+  // Try to find a "code-review" skill (project-specific first, then global)
+  let template: string | null = null;
+  if (projectId) {
+    const projectSkill = await db.select({ prompt: agentSkills.prompt }).from(agentSkills)
+      .where(sql`${agentSkills.name} = 'code-review' AND (${agentSkills.projectId} = ${projectId} OR ${agentSkills.projectId} IS NULL)`)
+      .orderBy(agentSkills.projectId) // project-specific first (non-null sorts before null)
+      .limit(1);
+    template = projectSkill[0]?.prompt ?? null;
   }
-  lines.push(
-    ``,
-    `Do NOT move the issue to 'AI Reviewed' yourself — the system handles that on merge.`,
-    ``,
-    `Issue ID: ${issueId}`,
-  );
-  return lines.join("\n");
+  if (!template) {
+    template = DEFAULT_REVIEW_PROMPT;
+  }
+
+  const autoFixInstructions = autoFix
+    ? `If you find CRITICAL or MAJOR issues:
+1. Use the move_issue MCP tool to move issue ${issueId} to 'In Progress' (so the board shows the issue needs fixes)
+2. Fix all critical and major issues directly in the code
+3. Commit the fixes with a descriptive message
+4. Exit normally (the system will handle merging)
+
+If only MINOR issues or no issues: just exit normally (the system will auto-merge).`
+    : `If you find CRITICAL or MAJOR issues:
+1. Use the move_issue MCP tool to move issue ${issueId} to 'In Progress'
+2. Describe each issue clearly so the developer knows what to fix
+3. Do NOT edit any files — report only
+
+If only MINOR issues or no issues: just exit normally (the system will auto-merge).`;
+
+  return template
+    .replace(/\{\{branch}}/g, branch)
+    .replace(/\{\{baseBranch}}/g, baseBranch ?? "HEAD")
+    .replace(/\{\{issueId}}/g, issueId)
+    .replace(/\{\{autoFixInstructions}}/g, autoFixInstructions);
 }
 
 async function runWorkflowOnExit(workspaceId: string, sessionId: string, exitCode: number | null) {
@@ -212,7 +222,7 @@ async function runWorkflowOnExit(workspaceId: string, sessionId: string, exitCod
           }
           diffRef = prep.diffRef;
         }
-        const reviewPrompt = buildReviewPrompt(workspace.branch, diffRef, issueId, autoFix);
+        const reviewPrompt = await buildReviewPrompt(workspace.branch, diffRef, issueId, autoFix, projectId);
 
         try {
           // Set workspace to "reviewing" so the board shows "AI Reviewing" badge
@@ -320,7 +330,7 @@ app.post("/api/workspaces/:id/review", async (c) => {
       }
       diffRef = prep.diffRef;
     }
-    const reviewPrompt = buildReviewPrompt(workspace.branch, diffRef, issueId, autoFix);
+    const reviewPrompt = await buildReviewPrompt(workspace.branch, diffRef, issueId, autoFix, projectId);
 
     const now = new Date().toISOString();
     await db.update(workspaces).set({ status: "reviewing", updatedAt: now }).where(eq(workspaces.id, workspaceId));

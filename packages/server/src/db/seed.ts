@@ -75,6 +75,22 @@ Todo → In Progress → In Review → AI Reviewed → Done / Cancelled
         model: null,
       },
       {
+        name: "code-review",
+        description: "Default AI code review prompt — customize per project to change review behavior",
+        prompt: `You are an AI code reviewer. Review the changes on branch '{{branch}}'.
+Run 'git diff {{baseBranch}}' to see the diff.
+
+Review for: correctness bugs, security vulnerabilities, logic errors, and missing error handling.
+Classify each issue as CRITICAL (must fix — bugs, security, data loss), MAJOR (should fix — broken edge cases, poor error handling), or MINOR (nice to have — style, naming).
+
+{{autoFixInstructions}}
+
+Do NOT move the issue to 'AI Reviewed' yourself — the system handles that on merge.
+
+Issue ID: {{issueId}}`,
+        model: null,
+      },
+      {
         name: "dependency-analyzer",
         description: "Analyze a ticket and its relationships to other open tickets, suggest dependency updates",
         prompt: `Analyze the given issue and its relationship to other open (non-Done, non-Cancelled) issues on the board.

@@ -28,9 +28,9 @@ All documented features have been visually verified (2026-05-16):
 - Issue numbers: auto-incrementing #1, #2, #3 per project on cards and detail panel
 - Panel animations: slide-in transitions on detail/workspace/settings/worktree panels
 - Favicon: inline SVG kanban-board icon
-- MCP server: 26 tools via stdio JSON-RPC (includes agent skills: list/get/create, get_board_status)
+- MCP server: 27 tools via stdio JSON-RPC (includes agent skills: list/get/create/export, get_board_status)
 - CLI: `pnpm cli -- register <path>` to register a git repo as a project; also `issue list/create/move`, `workspace list/create`, `skill list/get/create`, and `status` for board overview
-- Agent skills: 3 built-in skills (board-navigator, dependency-analyzer, ticket-enhancer) + custom skills via DB. Skills are prompt templates injected into agent context at workspace creation time.
+- Agent skills: 4 built-in skills (board-navigator, code-review, dependency-analyzer, ticket-enhancer) + custom skills via DB. Skills are prompt templates injected into agent context at workspace creation time. Skills can be global or project-scoped.
 - Desktop app: Tauri v2 native window with system tray (Show/Quit), minimize-to-tray on close, OS notifications on session_completed/workspace_merged events
 - Workspace setup scripts: project-specific shell commands (e.g., `pnpm install`) that run automatically after worktree creation. Configurable in Settings > Project tab with AI-generate button. Supports blocking (wait for setup before agent) and parallel modes.
 
@@ -155,9 +155,10 @@ When performing kanban board operations (creating issues, moving issues, managin
 - `pnpm cli -- issue move <id> <status>` — move issue to a status
 - `pnpm cli -- workspace list` — list workspaces for active project
 - `pnpm cli -- workspace create <issueId>` — create a workspace
-- `pnpm cli -- skill list` — list agent skills
+- `pnpm cli -- skill list` — list agent skills (`-p <projectId>` to filter by project)
 - `pnpm cli -- skill get <name-or-id>` — show skill details and prompt
-- `pnpm cli -- skill create <name>` — create a new agent skill (-d description, -p prompt, -m model)
+- `pnpm cli -- skill create <name>` — create a new agent skill (-d description, -p prompt, -m model, --project <id>)
+- `pnpm cli -- skill export <path>` — export skills as Claude Code SKILL.md files (-p project, -n names)
 
 ## Worktree Port Strategy
 `pnpm dev` uses `scripts/dev.mjs` which auto-detects whether the CWD is a git worktree and assigns deterministic ports:
@@ -208,15 +209,17 @@ The `baseBranch` column on the workspaces table tracks which branch the worktree
 Register repo (`pnpm cli -- register <path>`) → Create issue → Click "New Workspace" (one step: branch + worktree + agent launch) → View diff → Merge
 
 ## Agent Skills
-Agent skills are prompt templates stored in the `agent_skills` DB table. When a workspace is created with a `skillId`, the skill's prompt is prepended to the agent's context (before the issue title/description). Skills have a `model` override field (e.g., "haiku" for quick tasks).
+Agent skills are prompt templates stored in the `agent_skills` DB table. When a workspace is created with a `skillId`, the skill's prompt is prepended to the agent's context (before the issue title/description). Skills have a `model` override field (e.g., "haiku" for quick tasks). Skills can be **global** (available to all projects) or **project-scoped** (only available to a specific project via `project_id`).
 
-- **Built-in skills**: Seeded on `pnpm db:seed` with `isBuiltin: true`. Cannot be modified or deleted via API. Three defaults: `board-navigator` (comprehensive board interaction guide), `dependency-analyzer` (analyze issue dependencies), `ticket-enhancer` (improve ticket clarity).
-- **Custom skills**: Created via API, CLI, or MCP tools. Can be edited and deleted.
-- **Storage**: `agent_skills` table (id, name, description, prompt, model, is_builtin, timestamps). Referenced by `workspaces.skill_id`.
-- **API**: `GET/POST/PUT/DELETE /api/agent-skills` — CRUD with builtin protection.
-- **MCP tools**: `list_agent_skills`, `get_agent_skill`, `create_agent_skill`.
-- **CLI**: `pnpm cli -- skill list/get/create`.
-- **UI**: Skills tab in Settings panel for management; skill selector dropdown in workspace creation form.
+- **Built-in skills**: Seeded on `pnpm db:seed` with `isBuiltin: true`. Cannot be modified or deleted via API. Four defaults: `board-navigator` (comprehensive board interaction guide), `code-review` (default AI code review prompt — customizable per project), `dependency-analyzer` (analyze issue dependencies), `ticket-enhancer` (improve ticket clarity).
+- **Custom skills**: Created via API, CLI, or MCP tools. Can be edited and deleted. Support optional `projectId` to scope to a project.
+- **Storage**: `agent_skills` table (id, name, description, prompt, model, project_id, is_builtin, timestamps). Referenced by `workspaces.skill_id`. `name` uniqueness is per-scope (global or same project_id).
+- **API**: `GET/POST/PUT/DELETE /api/agent-skills` — CRUD with builtin protection. `GET ?projectId=<id>` returns global + project-specific skills. `GET ?global=true` returns only global skills.
+- **MCP tools**: `list_agent_skills` (optional `projectId` filter), `get_agent_skill`, `create_agent_skill` (optional `projectId`), `export_agent_skills`.
+- **CLI**: `pnpm cli -- skill list/get/create/export`. `list -p <projectId>` filters by project. `create --project <id>` scopes to project. `export <path>` writes SKILL.md files to `.claude/skills/`.
+- **UI**: Skills tab in Settings panel for management; skill selector dropdown in workspace creation form (filtered by current issue's project).
+- **Review prompt**: The code review workflow uses a built-in `code-review` skill as its prompt template. Users can create a custom `code-review` skill scoped to their project to override review behavior. The template supports `{{branch}}`, `{{baseBranch}}`, `{{issueId}}`, and `{{autoFixInstructions}}` placeholders.
+- **Export**: The `export_agent_skills` MCP tool and `pnpm cli -- skill export <path>` write skills as Claude Code's native `.claude/skills/<name>/SKILL.md` format with frontmatter, making them available to Claude Code in the terminal for any project.
 
 ## Reference Codebase
 The original vibe-kanban is at `F:/projects/vibe-kanban` for reference. Key files:
