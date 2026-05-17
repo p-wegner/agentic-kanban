@@ -11,7 +11,6 @@ A personal kanban board for managing AI-driven coding tasks. Unlike generic proj
 Vibe Kanban (the original) is being sunset and is massively over-engineered for personal use:
 - 34 Rust crates, 4 frontend packages, 10+ agent executors
 - Remote/cloud deployment with PostgreSQL + ElectricSQL
-- Tauri desktop app wrapper
 - Multi-tenant organizations, OAuth, billing
 - Relay/WebRTC tunnel system
 
@@ -24,9 +23,9 @@ We need a **focused, testable** tool that does one thing well.
 - Kanban board with issues, statuses, priorities, tags
 - Workspace = isolated git branch + agent execution
 - MCP server for agent integration
-- Real-time updates (simplified)
+- Real-time updates (WebSocket + polling fallback)
 - Diff viewer with inline comments
-- Tauri desktop app with system tray
+- Tauri desktop app with system tray + OS notifications
 
 ## What We Skip (from original)
 - Multi-tenant / organizations / team collaboration
@@ -48,7 +47,10 @@ TypeScript monorepo — Hono + Drizzle + React + MCP SDK + Tauri v2. See `docs/s
 The stack must support **automated E2E testing** that an AI agent can run in tight feedback loops without human intervention.
 
 ## Success Metrics
-1. Can create a task, launch a Claude Code session, review the diff, and merge - all from the UI
-2. Full E2E test suite covering the happy path
+1. Can create a task, launch a Claude Code session, review the diff, and merge — all from the UI
+2. Full E2E test suite covering the happy path (76 unit tests + 101 E2E tests)
 3. AI agent can iterate on the codebase using E2E tests as feedback
-4. Single-command local setup
+4. Single-command local setup (`pnpm db:setup && pnpm dev`)
+
+## Current Status
+All 14 stages complete (Stages 0–13 + feature extensions). The implementation exceeds the original MVP scope with features like AI code review, agent skills, live session stats, and a desktop app. See `docs/state.md` for detailed progress tracking.
