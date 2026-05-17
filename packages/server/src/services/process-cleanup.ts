@@ -20,8 +20,8 @@ export async function killProcessesInDir(dir: string): Promise<number> {
 
       // Parse output and find PIDs whose command line references the worktree dir
       const dirNormalized = dir.replace(/\\/g, "/");
-      const pidRegex = /ProcessId=(\d+)/g;
-      const cmdRegex = /CommandLine=(.*)/g;
+      const pidRegex = /ProcessId=(\d+)/;
+      const cmdRegex = /CommandLine=(.*)/;
 
       const procs: { pid: string; cmd: string }[] = [];
       let currentPid = "";
