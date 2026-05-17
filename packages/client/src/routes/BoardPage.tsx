@@ -121,7 +121,7 @@ export function BoardPage() {
     });
   }, []), useCallback((issueId: string, stats: LiveSessionStats) => {
     setLiveStats((prev) => {
-      if (prev[issueId]?.model === stats.model && prev[issueId]?.contextTokens === stats.contextTokens && prev[issueId]?.toolUses === stats.toolUses) return prev;
+      if (prev[issueId]?.model === stats.model && prev[issueId]?.contextTokens === stats.contextTokens && prev[issueId]?.toolUses === stats.toolUses && prev[issueId]?.subagentCount === stats.subagentCount) return prev;
       return { ...prev, [issueId]: stats };
     });
   }, []), useCallback((issueId: string, todos: TodoItem[]) => {
