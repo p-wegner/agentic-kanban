@@ -95,6 +95,7 @@ function createSessionManager(
           if (obj.type === "result") {
             const usage = obj.usage as Record<string, unknown> | undefined;
             const rawCost = obj.total_cost_usd ?? obj.cost_usd;
+            const agentSummary = typeof obj.result === "string" ? obj.result : undefined;
             const stats = JSON.stringify({
               durationMs: (obj.duration_ms as number) ?? 0,
               totalCostUsd: typeof rawCost === "number" ? rawCost : 0,
@@ -103,6 +104,7 @@ function createSessionManager(
               numTurns: (obj.num_turns as number) ?? 1,
               model: (obj.model as string) ?? "",
               success: obj.subtype === "success" && !obj.is_error,
+              agentSummary,
             });
             db.update(sessions)
               .set({ stats })

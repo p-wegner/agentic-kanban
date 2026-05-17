@@ -205,6 +205,7 @@ export interface SessionSummaryResponse {
   startedAt: string;
   endedAt: string | null;
   overview: string;
+  agentSummary: string | null;
   actions: SessionSummaryAction[];
   keyExcerpts: string[];
   errors: string[];
@@ -260,6 +261,7 @@ export interface BoardStatusIssue {
     numTurns: number;
     model: string;
     success: boolean;
+    agentSummary?: string;
   } | null;
   diffStats: { filesChanged: number; insertions: number; deletions: number } | null;
   conflicts: { hasConflicts: boolean; conflictingFiles: string[] } | null;
