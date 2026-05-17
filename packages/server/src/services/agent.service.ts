@@ -80,8 +80,14 @@ export function launch(
 
   let args: string[];
   if (isTestMock) {
-    // Test mock agents: run bare, no flags
+    // Test mock agents: run bare, but pass --resume and --profile multi-turn when applicable
     args = [];
+    if (claudeSessionId) {
+      args.push("--resume", claudeSessionId);
+    }
+    if (keepAlive) {
+      args.push("--profile", "multi-turn");
+    }
   } else {
     // Real claude binary (default or custom name): always use stream-json + stdin
     args = ["--output-format", "stream-json", "--verbose"];
@@ -140,6 +146,10 @@ export function launch(
   // Multi-turn follow-ups are handled via --resume (new process per turn).
   if (!isTestMock) {
     proc.stdin?.end(prompt + "\n");
+  } else if (keepAlive) {
+    // Multi-turn mock agent: write prompt via stdin, keep open for follow-ups
+    stdinOpen.set(sessionId, true);
+    proc.stdin?.write(prompt + "\n");
   }
 
   activeProcesses.set(sessionId, proc);

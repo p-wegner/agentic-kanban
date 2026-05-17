@@ -47,6 +47,8 @@ function createSessionManager(
   const sessionAgentToolUseIds = new Map<string, Set<string>>();
   // Track tasks from TaskCreate/TaskUpdate calls per session
   const sessionTasks = new Map<string, Map<string, { subject: string; status: string }>>();
+  // Track whether a TodoWrite has been seen for each session (takes precedence over TaskCreate/TaskUpdate)
+  const sessionHasTodoWrite = new Set<string>();
 
   function broadcast(sessionId: string, message: AgentOutputMessage) {
     // Buffer the message for late subscribers
@@ -160,6 +162,7 @@ function createSessionManager(
                 if (block.name === "TodoWrite" && Array.isArray(block.input?.todos)) {
                   const ctx = sessionContexts.get(sessionId);
                   if (ctx) {
+                    sessionHasTodoWrite.add(sessionId);
                     options?.onTodos?.(ctx.projectId, ctx.issueId, block.input.todos as TodoItem[]);
                   }
                 }
@@ -177,8 +180,8 @@ function createSessionManager(
                     options?.onLiveStats?.(ctx.projectId, ctx.issueId, model, 0, toolUses, count);
                   }
                 }
-                // Track TaskCreate calls
-                if (block.name === "TaskCreate" && block.input?.subject) {
+                // Track TaskCreate calls (skip if TodoWrite has taken precedence)
+                if (block.name === "TaskCreate" && block.input?.subject && !sessionHasTodoWrite.has(sessionId)) {
                   if (!sessionTasks.has(sessionId)) sessionTasks.set(sessionId, new Map());
                   const tasks = sessionTasks.get(sessionId)!;
                   const taskIdx = String(tasks.size + 1);
@@ -187,8 +190,8 @@ function createSessionManager(
                     options?.onTodos?.(ctx.projectId, ctx.issueId, tasksToTodoItems(tasks));
                   }
                 }
-                // Track TaskUpdate calls
-                if (block.name === "TaskUpdate" && block.input?.taskId && block.input?.status) {
+                // Track TaskUpdate calls (skip if TodoWrite has taken precedence)
+                if (block.name === "TaskUpdate" && block.input?.taskId && block.input?.status && !sessionHasTodoWrite.has(sessionId)) {
                   const tasks = sessionTasks.get(sessionId);
                   if (tasks) {
                     const task = tasks.get(block.input.taskId as string);
@@ -245,6 +248,7 @@ function createSessionManager(
       }
       sessionSubagents.delete(sessionId);
       sessionTasks.delete(sessionId);
+      sessionHasTodoWrite.delete(sessionId);
       sessionToolUses.delete(sessionId);
       sessionModels.delete(sessionId);
       sessionAgentToolUseIds.delete(sessionId);
