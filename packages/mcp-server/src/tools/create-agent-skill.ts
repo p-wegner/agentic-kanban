@@ -16,6 +16,10 @@ export function registerCreateAgentSkill(server: McpServer) {
       projectId: z.string().optional().describe("Optional project ID to scope this skill to a specific project. Omit for global."),
     },
     async ({ name, description, prompt, model, projectId }) => {
+      if (/[\/\\]|\.\./.test(name)) {
+        return { content: [{ type: "text" as const, text: "Error: Skill name cannot contain '/', '\\', or '..'" }] };
+      }
+
       const scopeProjectId = projectId || null;
 
       // Check for duplicate name within same scope
