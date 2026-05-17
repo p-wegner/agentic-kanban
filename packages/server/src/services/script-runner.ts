@@ -3,12 +3,8 @@ import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 
-const SCRIPT_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
+const SCRIPT_TIMEOUT_MS = 5 * 60 * 1000;
 
-/**
- * Run a setup or teardown script in a directory.
- * Returns { ok, output } — never throws.
- */
 export async function runScript(
   script: string,
   cwd: string,

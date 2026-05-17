@@ -152,7 +152,7 @@ When performing kanban board operations (creating issues, moving issues, managin
 ## Monorepo Commands
 - `pnpm dev` — start server + client concurrently (auto-detects worktree ports; default: server 3001, client 5173)
 - `pnpm dev:desktop` — start server + client + Tauri native window (requires MSVC C++ Build Tools + Rust)
-- `pnpm --filter @agentic-kanban/server test` — Vitest unit tests (28 tests)
+- `pnpm --filter agentic-kanban test` — Vitest unit tests (28 tests)
 - `pnpm test:e2e` — Playwright E2E tests (60 tests)
 - `pnpm --filter @agentic-kanban/mcp-server dev` — run MCP server for testing
 - `pnpm db:migrate && pnpm db:seed` — initialize DB (apply migrations + seed tags)
