@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { db } from "../db/index.js";
-import { issues, projectStatuses, workspaces, tags, issueTags, sessions, sessionMessages, diffComments, issueDependencies, preferences } from "@agentic-kanban/shared/schema";
+import { issues, projectStatuses, workspaces, tags, issueTags, sessions, sessionMessages, diffComments, issueDependencies, preferences, agentSkills } from "@agentic-kanban/shared/schema";
+import type { DependencyType } from "@agentic-kanban/shared/schema";
 import { eq, and, sql, inArray } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { execFile, execSync } from "node:child_process";
@@ -129,6 +130,183 @@ Current description: ${body.description?.trim() || "(none)"}`;
       });
     } catch {
       console.error("[enhance] failed to parse claude output:", output);
+      return c.json({ error: "Failed to parse AI response", raw: output }, 500);
+    }
+  });
+
+  // POST /api/issues/analyze-dependencies — AI-analyze dependencies for an issue
+  router.post("/analyze-dependencies", async (c) => {
+    let body: { issueId: string; projectId: string };
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ error: "invalid JSON body" }, 400);
+    }
+    if (!body.issueId || !body.projectId) {
+      return c.json({ error: "issueId and projectId are required" }, 400);
+    }
+
+    // Look up the issue
+    const issueRows = await database
+      .select({ id: issues.id, issueNumber: issues.issueNumber, title: issues.title, description: issues.description })
+      .from(issues)
+      .where(eq(issues.id, body.issueId))
+      .limit(1);
+    if (issueRows.length === 0) {
+      return c.json({ error: "Issue not found" }, 404);
+    }
+    const targetIssue = issueRows[0];
+
+    // Get all open issues in the project (exclude Done/Cancelled)
+    const doneCancelledStatuses = await database
+      .select({ id: projectStatuses.id })
+      .from(projectStatuses)
+      .where(and(
+        eq(projectStatuses.projectId, body.projectId),
+        inArray(projectStatuses.name, ["Done", "Cancelled"]),
+      ));
+    const excludeStatusIds = doneCancelledStatuses.map(s => s.id);
+
+    let openIssues: { id: string; issueNumber: number | null; title: string; description: string | null }[];
+    if (excludeStatusIds.length > 0) {
+      openIssues = await database
+        .select({ id: issues.id, issueNumber: issues.issueNumber, title: issues.title, description: issues.description })
+        .from(issues)
+        .where(and(
+          eq(issues.projectId, body.projectId),
+          sql`${issues.statusId} NOT IN (${sql.join(excludeStatusIds.map(id => sql`${id}`), sql`, `)})`,
+        ));
+    } else {
+      openIssues = await database
+        .select({ id: issues.id, issueNumber: issues.issueNumber, title: issues.title, description: issues.description })
+        .from(issues)
+        .where(eq(issues.projectId, body.projectId));
+    }
+
+    // Look up the dependency-analyzer skill (prefer project-scoped, fall back to global)
+    const skillRows = await database
+      .select({ prompt: agentSkills.prompt })
+      .from(agentSkills)
+      .where(and(
+        eq(agentSkills.name, "dependency-analyzer"),
+        sql`(${agentSkills.projectId} = ${body.projectId} OR ${agentSkills.projectId} IS NULL)`,
+      ))
+      .orderBy(sql`${agentSkills.projectId} IS NULL`)
+      .limit(1);
+
+    const skillPrompt = skillRows[0]?.prompt || `Analyze the given issue and its relationship to other open issues on the board.`;
+
+    const issuesSummary = openIssues
+      .filter(i => i.id !== body.issueId)
+      .map(i => `  [${i.id}] #${i.issueNumber ?? "?"} ${i.title}${i.description ? `\n    ${i.description.split("\n")[0].slice(0, 100)}` : ""}`)
+      .join("\n");
+
+    const prompt = `${skillPrompt}
+
+Target issue: [${targetIssue.id}] #${targetIssue.issueNumber ?? "?"} "${targetIssue.title}"
+${targetIssue.description ? `Description: ${targetIssue.description}` : ""}
+
+Other open issues on the board (each prefixed with its [id]):
+${issuesSummary || "(no other open issues)"}
+
+IMPORTANT: You must respond ONLY with valid JSON, no markdown, no explanation:
+{"dependencies": [{"issueId": "<id from brackets>", "type": "depends_on|blocked_by|related_to|parent_of|child_of", "reason": "..."}]}
+
+Use the exact id value from the [brackets] prefix for the issueId field.
+Use "depends_on" when the target issue requires another issue to be done first.
+Use "blocked_by" when another issue blocks this one.
+Use "related_to" when issues share code or functionality.
+Use "parent_of" when the target is an epic containing another issue.
+Use "child_of" when the target is a subtask of another issue.
+Only include genuinely useful dependencies, not just topical similarity.`;
+
+    // Read agent_command and claude_profile from global preferences
+    let agentCommand = "claude";
+    let claudeProfile: string | undefined;
+    const prefs = await database
+      .select({ key: preferences.key, value: preferences.value })
+      .from(preferences)
+      .where(inArray(preferences.key, ["agent_command", "claude_profile"]));
+    for (const p of prefs) {
+      if (p.key === "agent_command" && p.value) agentCommand = p.value;
+      if (p.key === "claude_profile" && p.value) claudeProfile = p.value;
+    }
+
+    if (process.platform === "win32" && agentCommand === "claude") {
+      try {
+        const resolved = execSync("where claude.exe 2>nul", { encoding: "utf8" }).trim().split("\n")[0]?.trim();
+        if (resolved) agentCommand = resolved;
+      } catch {}
+    }
+
+    const args: string[] = ["--output-format", "text", "-p"];
+    if (claudeProfile) {
+      const settingsPath = join(homedir(), ".claude", `settings_${claudeProfile}.json`);
+      if (existsSync(settingsPath)) {
+        args.push("--settings", settingsPath);
+      }
+    }
+
+    let stdout: string;
+    try {
+      ({ stdout } = await new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
+        const child = execFile(agentCommand, args, {
+          encoding: "utf8",
+          timeout: 60000,
+          shell: false,
+          maxBuffer: 1024 * 1024,
+        }, (err, out, se) => {
+          if (err) reject(err);
+          else resolve({ stdout: out ?? "", stderr: se ?? "" });
+        });
+        child.stdin?.end(prompt);
+      }));
+    } catch (err: any) {
+      const parts: string[] = [];
+      if (err.message) parts.push(err.message);
+      if (err.stderr) parts.push(String(err.stderr).trim());
+      const msg = parts.length > 0 ? parts.join(" | ") : "claude CLI failed";
+      console.error("[analyze-deps] claude error:", msg);
+      return c.json({ error: "AI dependency analysis failed", detail: msg }, 500);
+    }
+
+    const output = stdout.trim();
+    const cleaned = output.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
+    try {
+      const parsed = JSON.parse(cleaned) as { dependencies?: Array<{ issueId: string; type: string; reason: string }> };
+      const deps = parsed.dependencies ?? [];
+
+      // Create the dependencies in the DB
+      const created: Array<{ id: string; type: string; issueId: string; reason: string }> = [];
+      for (const dep of deps) {
+        if (!dep.issueId || !dep.type) continue;
+        const validTypes: DependencyType[] = ["depends_on", "blocked_by", "related_to", "parent_of", "child_of"];
+        if (!validTypes.includes(dep.type as DependencyType)) continue;
+        if (dep.issueId === body.issueId) continue;
+
+        try {
+          const id = randomUUID();
+          await database.insert(issueDependencies).values({
+            id,
+            issueId: body.issueId,
+            dependsOnId: dep.issueId,
+            type: dep.type as DependencyType,
+            createdAt: new Date().toISOString(),
+          });
+          created.push({ id, type: dep.type, issueId: dep.issueId, reason: dep.reason ?? "" });
+        } catch (err: any) {
+          if (err.message?.includes("UNIQUE constraint")) continue; // skip duplicates
+          console.error("[analyze-deps] failed to create dependency:", err.message);
+        }
+      }
+
+      if (created.length > 0) {
+        options?.boardEvents?.broadcast(body.projectId, "dependency_added");
+      }
+
+      return c.json({ dependencies: created, total: created.length });
+    } catch {
+      console.error("[analyze-deps] failed to parse claude output:", output);
       return c.json({ error: "Failed to parse AI response", raw: output }, 500);
     }
   });
