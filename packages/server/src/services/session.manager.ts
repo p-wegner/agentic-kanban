@@ -73,137 +73,140 @@ function createSessionManager(
       }
     });
 
-    // Detect system/init events to capture claudeSessionId
+    // Parse stdout data — may contain multiple JSONL lines in a single chunk
     if (message.type === "stdout" && message.data) {
-      try {
-        const obj = JSON.parse(message.data);
-        if (obj.type === "system" && obj.subtype === "init" && obj.session_id) {
-          db.update(sessions)
-            .set({ claudeSessionId: obj.session_id })
-            .where(eq(sessions.id, sessionId))
-            .catch((err) => console.error("Failed to update claudeSessionId:", err));
-        }
-
-        // Detect result events — in multi-turn mode, this means turn complete, not session complete
-        if (obj.type === "result" && agentService.isStdinOpen(sessionId)) {
-          turnStates.set(sessionId, "waiting");
-        }
-
-        // Extract stats from result events and persist to sessions table
-        if (obj.type === "result") {
-          const usage = obj.usage as Record<string, unknown> | undefined;
-          const rawCost = obj.total_cost_usd ?? obj.cost_usd;
-          const stats = JSON.stringify({
-            durationMs: (obj.duration_ms as number) ?? 0,
-            totalCostUsd: typeof rawCost === "number" ? rawCost : 0,
-            inputTokens: (usage?.input_tokens as number) ?? 0,
-            outputTokens: (usage?.output_tokens as number) ?? 0,
-            numTurns: (obj.num_turns as number) ?? 1,
-            model: (obj.model as string) ?? "",
-            success: obj.subtype === "success" && !obj.is_error,
-          });
-          db.update(sessions)
-            .set({ stats })
-            .where(eq(sessions.id, sessionId))
-            .catch((err) => console.error("Failed to update session stats:", err));
-        }
-
-        // Broadcast live model + context size from each assistant turn
-        if (obj.type === "assistant" && obj.message) {
-          const usage = obj.message.usage as Record<string, unknown> | undefined;
-          const model = (obj.message.model as string) ?? "";
-          const contextTokens = ((usage?.cache_read_input_tokens as number) ?? 0) + ((usage?.input_tokens as number) ?? 0);
-          if (model) sessionModels.set(sessionId, model);
-          if (contextTokens > 0) sessionContextTokens.set(sessionId, contextTokens);
-          const toolUses = sessionToolUses.get(sessionId) ?? 0;
-          const subagentCount = sessionSubagents.get(sessionId) ?? 0;
-          const ctx = sessionContexts.get(sessionId);
-          if (ctx && (model || contextTokens || toolUses || subagentCount)) {
-            options?.onLiveStats?.(ctx.projectId, ctx.issueId, model, contextTokens, toolUses, subagentCount);
+      for (const line of message.data.split("\n")) {
+        if (!line.trim()) continue;
+        try {
+          const obj = JSON.parse(line);
+          if (obj.type === "system" && obj.subtype === "init" && obj.session_id) {
+            db.update(sessions)
+              .set({ claudeSessionId: obj.session_id })
+              .where(eq(sessions.id, sessionId))
+              .catch((err) => console.error("Failed to update claudeSessionId:", err));
           }
-        }
 
-        // Track tool_uses from task_progress events (live proxy for providers that don't report tokens per-turn)
-        if (obj.type === "system" && obj.subtype === "task_progress" && obj.usage) {
-          const tpUsage = obj.usage as { tool_uses?: number };
-          if (tpUsage.tool_uses) {
-            sessionToolUses.set(sessionId, tpUsage.tool_uses);
-            const model = sessionModels.get(sessionId) ?? "";
+          // Detect result events — in multi-turn mode, this means turn complete, not session complete
+          if (obj.type === "result" && agentService.isStdinOpen(sessionId)) {
+            turnStates.set(sessionId, "waiting");
+          }
+
+          // Extract stats from result events and persist to sessions table
+          if (obj.type === "result") {
+            const usage = obj.usage as Record<string, unknown> | undefined;
+            const rawCost = obj.total_cost_usd ?? obj.cost_usd;
+            const stats = JSON.stringify({
+              durationMs: (obj.duration_ms as number) ?? 0,
+              totalCostUsd: typeof rawCost === "number" ? rawCost : 0,
+              inputTokens: (usage?.input_tokens as number) ?? 0,
+              outputTokens: (usage?.output_tokens as number) ?? 0,
+              numTurns: (obj.num_turns as number) ?? 1,
+              model: (obj.model as string) ?? "",
+              success: obj.subtype === "success" && !obj.is_error,
+            });
+            db.update(sessions)
+              .set({ stats })
+              .where(eq(sessions.id, sessionId))
+              .catch((err) => console.error("Failed to update session stats:", err));
+          }
+
+          // Broadcast live model + context size from each assistant turn
+          if (obj.type === "assistant" && obj.message) {
+            const usage = obj.message.usage as Record<string, unknown> | undefined;
+            const model = (obj.message.model as string) ?? "";
+            const contextTokens = ((usage?.cache_read_input_tokens as number) ?? 0) + ((usage?.input_tokens as number) ?? 0);
+            if (model) sessionModels.set(sessionId, model);
+            if (contextTokens > 0) sessionContextTokens.set(sessionId, contextTokens);
+            const toolUses = sessionToolUses.get(sessionId) ?? 0;
             const subagentCount = sessionSubagents.get(sessionId) ?? 0;
-            const lastContextTokens = sessionContextTokens.get(sessionId) ?? 0;
             const ctx = sessionContexts.get(sessionId);
-            if (ctx) {
-              options?.onLiveStats?.(ctx.projectId, ctx.issueId, model, lastContextTokens, tpUsage.tool_uses, subagentCount);
+            if (ctx && (model || contextTokens || toolUses || subagentCount)) {
+              options?.onLiveStats?.(ctx.projectId, ctx.issueId, model, contextTokens, toolUses, subagentCount);
             }
           }
-        }
 
-        // Broadcast final stats from result event (some providers only report usage here)
-        if (obj.type === "result" && obj.usage) {
-          const rUsage = obj.usage as Record<string, unknown>;
-          const contextTokens = ((rUsage.cache_read_input_tokens as number) ?? 0) + ((rUsage.input_tokens as number) ?? 0);
-          const model = sessionModels.get(sessionId) ?? "";
-          const toolUses = sessionToolUses.get(sessionId) ?? 0;
-          const subagentCount = sessionSubagents.get(sessionId) ?? 0;
-          const ctx = sessionContexts.get(sessionId);
-          if (ctx && (contextTokens || toolUses || subagentCount)) {
-            options?.onLiveStats?.(ctx.projectId, ctx.issueId, model, contextTokens, toolUses, subagentCount);
+          // Track tool_uses from task_progress events (live proxy for providers that don't report tokens per-turn)
+          if (obj.type === "system" && obj.subtype === "task_progress" && obj.usage) {
+            const tpUsage = obj.usage as { tool_uses?: number };
+            if (tpUsage.tool_uses) {
+              sessionToolUses.set(sessionId, tpUsage.tool_uses);
+              const model = sessionModels.get(sessionId) ?? "";
+              const subagentCount = sessionSubagents.get(sessionId) ?? 0;
+              const lastContextTokens = sessionContextTokens.get(sessionId) ?? 0;
+              const ctx = sessionContexts.get(sessionId);
+              if (ctx) {
+                options?.onLiveStats?.(ctx.projectId, ctx.issueId, model, lastContextTokens, tpUsage.tool_uses, subagentCount);
+              }
+            }
           }
-        }
 
-        // Parse tool_use events for live activity, todos, and subagent tracking
-        if (obj.type === "assistant" && obj.message?.content) {
-          const content = obj.message.content;
-          if (Array.isArray(content)) {
-            for (const block of content) {
-              if (block.type === "tool_use") {
-                const activity = formatToolActivity(block.name, block.input);
-                const ctx = sessionContexts.get(sessionId);
-                if (ctx && activity) {
-                  options?.onActivity?.(ctx.projectId, ctx.issueId, sessionId, activity);
-                }
-                // Capture TodoWrite calls to show task progress on the board
-                if (block.name === "TodoWrite" && Array.isArray(block.input?.todos)) {
+          // Broadcast final stats from result event (some providers only report usage here)
+          if (obj.type === "result" && obj.usage) {
+            const rUsage = obj.usage as Record<string, unknown>;
+            const contextTokens = ((rUsage.cache_read_input_tokens as number) ?? 0) + ((rUsage.input_tokens as number) ?? 0);
+            const model = sessionModels.get(sessionId) ?? "";
+            const toolUses = sessionToolUses.get(sessionId) ?? 0;
+            const subagentCount = sessionSubagents.get(sessionId) ?? 0;
+            const ctx = sessionContexts.get(sessionId);
+            if (ctx && (contextTokens || toolUses || subagentCount)) {
+              options?.onLiveStats?.(ctx.projectId, ctx.issueId, model, contextTokens, toolUses, subagentCount);
+            }
+          }
+
+          // Parse tool_use events for live activity, todos, and subagent tracking
+          if (obj.type === "assistant" && obj.message?.content) {
+            const content = obj.message.content;
+            if (Array.isArray(content)) {
+              for (const block of content) {
+                if (block.type === "tool_use") {
+                  const activity = formatToolActivity(block.name, block.input);
                   const ctx = sessionContexts.get(sessionId);
-                  if (ctx) {
-                    sessionHasTodoWrite.add(sessionId);
-                    options?.onTodos?.(ctx.projectId, ctx.issueId, block.input.todos as TodoItem[]);
+                  if (ctx && activity) {
+                    options?.onActivity?.(ctx.projectId, ctx.issueId, sessionId, activity);
                   }
-                }
-                // Track Agent tool calls as active subagents
-                if (block.name === "Agent") {
-                  if (block.id) {
-                    if (!sessionAgentToolUseIds.has(sessionId)) sessionAgentToolUseIds.set(sessionId, new Set());
-                    sessionAgentToolUseIds.get(sessionId)!.add(block.id);
+                  // Capture TodoWrite calls to show task progress on the board
+                  if (block.name === "TodoWrite" && Array.isArray(block.input?.todos)) {
+                    const ctx = sessionContexts.get(sessionId);
+                    if (ctx) {
+                      sessionHasTodoWrite.add(sessionId);
+                      options?.onTodos?.(ctx.projectId, ctx.issueId, block.input.todos as TodoItem[]);
+                    }
                   }
-                  const count = (sessionSubagents.get(sessionId) ?? 0) + 1;
-                  sessionSubagents.set(sessionId, count);
-                  const model = sessionModels.get(sessionId) ?? "";
-                  const toolUses = sessionToolUses.get(sessionId) ?? 0;
-                  const lastContextTokens = sessionContextTokens.get(sessionId) ?? 0;
-                  if (ctx) {
-                    options?.onLiveStats?.(ctx.projectId, ctx.issueId, model, lastContextTokens, toolUses, count);
+                  // Track Agent tool calls as active subagents
+                  if (block.name === "Agent") {
+                    if (block.id) {
+                      if (!sessionAgentToolUseIds.has(sessionId)) sessionAgentToolUseIds.set(sessionId, new Set());
+                      sessionAgentToolUseIds.get(sessionId)!.add(block.id);
+                    }
+                    const count = (sessionSubagents.get(sessionId) ?? 0) + 1;
+                    sessionSubagents.set(sessionId, count);
+                    const model = sessionModels.get(sessionId) ?? "";
+                    const toolUses = sessionToolUses.get(sessionId) ?? 0;
+                    const lastContextTokens = sessionContextTokens.get(sessionId) ?? 0;
+                    if (ctx) {
+                      options?.onLiveStats?.(ctx.projectId, ctx.issueId, model, lastContextTokens, toolUses, count);
+                    }
                   }
-                }
-                // Track TaskCreate calls (skip if TodoWrite has taken precedence)
-                if (block.name === "TaskCreate" && block.input?.subject && !sessionHasTodoWrite.has(sessionId)) {
-                  if (!sessionTasks.has(sessionId)) sessionTasks.set(sessionId, new Map());
-                  const tasks = sessionTasks.get(sessionId)!;
-                  const taskIdx = String(tasks.size + 1);
-                  tasks.set(taskIdx, { subject: block.input.subject as string, status: "pending" });
-                  if (ctx) {
-                    options?.onTodos?.(ctx.projectId, ctx.issueId, tasksToTodoItems(tasks));
+                  // Track TaskCreate calls (skip if TodoWrite has taken precedence)
+                  if (block.name === "TaskCreate" && block.input?.subject && !sessionHasTodoWrite.has(sessionId)) {
+                    if (!sessionTasks.has(sessionId)) sessionTasks.set(sessionId, new Map());
+                    const tasks = sessionTasks.get(sessionId)!;
+                    const taskIdx = String(tasks.size + 1);
+                    tasks.set(taskIdx, { subject: block.input.subject as string, status: "pending" });
+                    if (ctx) {
+                      options?.onTodos?.(ctx.projectId, ctx.issueId, tasksToTodoItems(tasks));
+                    }
                   }
-                }
-                // Track TaskUpdate calls (skip if TodoWrite has taken precedence)
-                if (block.name === "TaskUpdate" && block.input?.taskId && block.input?.status && !sessionHasTodoWrite.has(sessionId)) {
-                  const tasks = sessionTasks.get(sessionId);
-                  if (tasks) {
-                    const task = tasks.get(block.input.taskId as string);
-                    if (task) {
-                      task.status = block.input.status as string;
-                      if (ctx) {
-                        options?.onTodos?.(ctx.projectId, ctx.issueId, tasksToTodoItems(tasks));
+                  // Track TaskUpdate calls (skip if TodoWrite has taken precedence)
+                  if (block.name === "TaskUpdate" && block.input?.taskId && block.input?.status && !sessionHasTodoWrite.has(sessionId)) {
+                    const tasks = sessionTasks.get(sessionId);
+                    if (tasks) {
+                      const task = tasks.get(block.input.taskId as string);
+                      if (task) {
+                        task.status = block.input.status as string;
+                        if (ctx) {
+                          options?.onTodos?.(ctx.projectId, ctx.issueId, tasksToTodoItems(tasks));
+                        }
                       }
                     }
                   }
@@ -211,33 +214,33 @@ function createSessionManager(
               }
             }
           }
-        }
 
-        // Decrement subagent count when tool_result arrives for a tracked Agent tool_use
-        if (obj.type === "user" && obj.message?.content) {
-          const content = obj.message.content;
-          if (Array.isArray(content)) {
-            const agentIds = sessionAgentToolUseIds.get(sessionId);
-            if (agentIds && agentIds.size > 0) {
-              for (const block of content) {
-                if (block.type === "tool_result" && block.tool_use_id && agentIds.has(block.tool_use_id)) {
-                  agentIds.delete(block.tool_use_id);
-                  const newCount = Math.max(0, (sessionSubagents.get(sessionId) ?? 1) - 1);
-                  sessionSubagents.set(sessionId, newCount);
-                  const ctx = sessionContexts.get(sessionId);
-                  if (ctx) {
-                    const model = sessionModels.get(sessionId) ?? "";
-                    const toolUses = sessionToolUses.get(sessionId) ?? 0;
-                    const lastContextTokens = sessionContextTokens.get(sessionId) ?? 0;
-                    options?.onLiveStats?.(ctx.projectId, ctx.issueId, model, lastContextTokens, toolUses, newCount);
+          // Decrement subagent count when tool_result arrives for a tracked Agent tool_use
+          if (obj.type === "user" && obj.message?.content) {
+            const content = obj.message.content;
+            if (Array.isArray(content)) {
+              const agentIds = sessionAgentToolUseIds.get(sessionId);
+              if (agentIds && agentIds.size > 0) {
+                for (const block of content) {
+                  if (block.type === "tool_result" && block.tool_use_id && agentIds.has(block.tool_use_id)) {
+                    agentIds.delete(block.tool_use_id);
+                    const newCount = Math.max(0, (sessionSubagents.get(sessionId) ?? 1) - 1);
+                    sessionSubagents.set(sessionId, newCount);
+                    const ctx = sessionContexts.get(sessionId);
+                    if (ctx) {
+                      const model = sessionModels.get(sessionId) ?? "";
+                      const toolUses = sessionToolUses.get(sessionId) ?? 0;
+                      const lastContextTokens = sessionContextTokens.get(sessionId) ?? 0;
+                      options?.onLiveStats?.(ctx.projectId, ctx.issueId, model, lastContextTokens, toolUses, newCount);
+                    }
                   }
                 }
               }
             }
           }
+        } catch {
+          // Not JSON or not a recognized event — ignore
         }
-      } catch {
-        // Not JSON or not a system/init event — ignore
       }
     }
 
