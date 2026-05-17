@@ -1,9 +1,13 @@
 import { db } from "../db/index.js";
 import { projects, projectStatuses, issues, workspaces, sessions, sessionMessages, preferences } from "@agentic-kanban/shared/schema";
 import { eq, inArray, desc } from "drizzle-orm";
-import { getDiffShortstat } from "./git.service.js";
+import { getDiffShortstat, detectConflicts } from "./git.service.js";
 import { extractMeaningfulOutput } from "@agentic-kanban/shared";
 import type { BoardStatusResponse, BoardStatusIssue } from "@agentic-kanban/shared";
+
+// In-memory conflict cache: workspaceId → { result, timestamp }
+const conflictCache = new Map<string, { result: { hasConflicts: boolean; conflictingFiles: string[] }; ts: number }>();
+const CONFLICT_CACHE_TTL = 60_000; // 60 seconds
 
 export interface BoardStatusOptions {
   projectId?: string;
@@ -150,6 +154,7 @@ export async function getBoardStatus(
       } : null,
       sessionStats,
       diffStats: null,
+      conflicts: null,
       lastActivity: null,
       lastOutput: [],
     };
@@ -164,6 +169,23 @@ export async function getBoardStatus(
           .then(stats => { entry.diffStats = stats; })
           .catch((err) => { console.error(`[board-status] diff failed for ${mainWs.branch}:`, err instanceof Error ? err.message : String(err)); }),
       );
+
+      // Conflict detection for non-direct idle workspaces (cached, non-blocking)
+      if (!mainWs.isDirect && mainWs.status === "idle") {
+        const cached = conflictCache.get(mainWs.id);
+        if (cached && Date.now() - cached.ts < CONFLICT_CACHE_TTL) {
+          entry.conflicts = cached.result;
+        } else {
+          asyncWork.push(
+            detectConflicts(mainWs.workingDir, baseBranch)
+              .then(result => {
+                conflictCache.set(mainWs.id, { result, ts: Date.now() });
+                entry.conflicts = result;
+              })
+              .catch(() => { /* non-critical */ }),
+          );
+        }
+      }
 
       if (latestSession) {
         asyncWork.push(

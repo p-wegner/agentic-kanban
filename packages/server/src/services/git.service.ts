@@ -139,7 +139,7 @@ export async function getDiff(
   worktreePath: string,
   baseBranch: string = "main",
 ): Promise<string> {
-  const tracked = await execGit(["diff", baseBranch], worktreePath);
+  const tracked = await execGit(["diff", `${baseBranch}...HEAD`], worktreePath);
   const untracked = await getUntrackedDiffEntries(worktreePath);
   if (!untracked) return tracked;
   return tracked ? tracked + "\n" + untracked : untracked;
@@ -243,7 +243,7 @@ export async function getDiffShortstat(
   baseBranch: string,
 ): Promise<{ filesChanged: number; insertions: number; deletions: number }> {
   try {
-    const output = await execGit(["diff", "--shortstat", baseBranch], worktreePath);
+    const output = await execGit(["diff", "--shortstat", `${baseBranch}...HEAD`], worktreePath);
 
     let filesChanged = 0;
     let insertions = 0;
@@ -277,5 +277,34 @@ export async function getDiffShortstat(
   } catch (err) {
     console.error(`[git] diff --shortstat failed in ${worktreePath}:`, err instanceof Error ? err.message : String(err));
     return { filesChanged: 0, insertions: 0, deletions: 0 };
+  }
+}
+
+/**
+ * Detect merge conflicts between the current branch and the base branch.
+ * Uses a dry-run merge (no-commit) then aborts — safe for the working tree.
+ */
+export async function detectConflicts(
+  worktreePath: string,
+  baseBranch: string,
+): Promise<{ hasConflicts: boolean; conflictingFiles: string[] }> {
+  try {
+    // Try to merge without committing
+    await execGit(["merge", "--no-commit", "--no-ff", baseBranch], worktreePath);
+    // No conflict — clean up
+    await execGit(["merge", "--abort"], worktreePath);
+    return { hasConflicts: false, conflictingFiles: [] };
+  } catch {
+    // Merge failed — likely conflicts
+    try {
+      const unmerged = await execGit(["diff", "--name-only", "--diff-filter=U"], worktreePath);
+      const conflictingFiles = unmerged.trim().split("\n").filter(Boolean);
+      await execGit(["merge", "--abort"], worktreePath);
+      return { hasConflicts: conflictingFiles.length > 0, conflictingFiles };
+    } catch {
+      // Could not read conflicts or abort — assume no conflicts
+      try { await execGit(["merge", "--abort"], worktreePath); } catch { /* best effort */ }
+      return { hasConflicts: false, conflictingFiles: [] };
+    }
   }
 }

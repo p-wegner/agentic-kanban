@@ -125,6 +125,11 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onDragStart, tags,
               <span className="text-gray-400">· {ws.main.diffStats.filesChanged}f</span>
             </span>
           )}
+          {ws.main.conflicts?.hasConflicts && (
+            <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-red-100 text-red-700 text-[10px] font-medium shrink-0">
+              {ws.main.conflicts.conflictingFiles.length} conflict{ws.main.conflicts.conflictingFiles.length !== 1 ? "s" : ""}
+            </span>
+          )}
           {ws.main.claudeProfile && (
             <span className="inline-flex items-center px-1 rounded bg-indigo-50 text-indigo-600 font-medium shrink-0">{ws.main.claudeProfile}</span>
           )}
