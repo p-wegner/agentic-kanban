@@ -1,6 +1,6 @@
 ---
 name: kanban-workflow
-description: Guide for using the agentic-kanban MCP tools to reflect implementation progress on the board. Use when starting work on an issue, moving through implementation steps, or closing out a task.
+description: Guide for using the agentic-kanban MCP tools to reflect implementation progress on the board. Use when starting work on an issue, moving through implementation steps, reviewing completed work, or closing out a task.
 argument-hint: [issue-id or issue-number]
 ---
 
@@ -13,14 +13,16 @@ Use the **agentic-kanban MCP** tools (prefix: `mcp__agentic-kanban__`) to keep t
 | Tool | Purpose |
 |------|---------|
 | `get_context` | Get current project, issue counts by status, active workspaces |
+| `get_board_status` | Comprehensive dashboard: all issues with workspace state, diff stats, session stats, last output |
 | `list_issues` | List issues (filter by status, priority, tag) |
-| `get_issue` | Get full details for a specific issue |
+| `get_issue` | Get full details for a specific issue (includes workspaces and dependencies) |
 | `create_issue` | Create a new issue on the board |
 | `update_issue` | Move an issue to a new status, change title/description/priority |
 | `delete_issue` | Permanently delete an issue |
 | `move_issue` | Move an issue to a different status (shorthand) |
 | `list_workspaces` | List workspaces (filter by issue ID) |
 | `start_workspace` | Create a git worktree workspace for an issue |
+| `merge_workspace` | Merge a workspace branch and close it |
 | `stop_workspace` | Stop a running agent session |
 | `get_workspace_diff` | Get the git diff for a workspace |
 | `list_tags` | List all tags |
@@ -148,6 +150,24 @@ get_workspace_diff(workspaceId)   → see git diff
 get_workspace_diff(workspaceId)   → see all changes
 get_session_stats(sessionId)      → see token usage and cost
 ```
+
+### "Review #N and merge if fine"
+
+When the user says "review #N" or "review #N and merge", this refers to **board issue #N**, not a GitHub PR. Follow this exact workflow:
+
+1. **Find the issue** — use `get_board_status` or `list_issues` to find the issue by `issueNumber`
+2. **Find the workspace** — the issue's workspace is shown in the board data (or use `list_workspaces` with the issue ID)
+3. **Review the diff** — use `get_workspace_diff(workspaceId)` to see all changes
+4. **Assess the changes** — look for correctness, security issues, broken patterns, missing cleanup
+5. **If fine: merge** — use the merge REST endpoint (`POST /api/workspaces/:id/merge`) or workspace merge action
+6. **Move to Done** — use `update_issue(issueId, statusName="Done")`
+7. **If not fine: report issues** to the user and leave the issue in its current status
+
+**Never assume `#N` means a GitHub PR.** This project uses manual merge (no PRs). The `#N` format always refers to a kanban board issue number.
+
+### "Merge #N"
+
+Shorthand for "review #N and merge if fine" — same workflow as above.
 
 ## Rules of Thumb
 
