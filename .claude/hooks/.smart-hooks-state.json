@@ -1,5 +1,6 @@
 {
   "editedFiles": [
-    "C:/andrena/agentic-kanban/packages/client/src/components/IssueDetailPanel.tsx"
+    "C:/andrena/agentic-kanban/packages/client/src/components/IssueDetailPanel.tsx",
+    "packages/mcp-server/src/index.ts"
   ]
 }
