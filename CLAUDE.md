@@ -114,6 +114,16 @@ Every feature that has a UI component must be visually verified using the `playw
 
 ## Board Operations: Prefer MCP Tools or CLI over REST
 
+### `#N` means kanban issue, not GitHub PR
+
+When the user references `#N` (e.g., "review #70", "merge #65", "what's the status of #72"), this **always refers to a kanban board issue number**, never a GitHub pull request. This project does not use PRs — merges are done directly from worktree branches.
+
+- **"review #N"** → invoke the `/kanban-workflow` skill, then use MCP tools to find issue #N, get its workspace diff, review the changes, and merge if acceptable
+- **"merge #N"** → same as "review #N and merge"
+- **"status of #N"** → use `get_board_status` or `get_issue` to look up issue #N by `issueNumber`
+
+### MCP Tools are the primary interface
+
 When performing kanban board operations (creating issues, moving issues, managing workspaces, etc.), **always prefer the agentic-kanban MCP tools** (`mcp__agentic-kanban__*`) over direct REST API calls via curl. The MCP tools are the intended interface and are always available in Claude Code sessions when the MCP server is configured.
 
 **Use MCP tools for:**
