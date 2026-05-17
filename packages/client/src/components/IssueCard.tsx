@@ -1,4 +1,3 @@
-import { useState } from "react";
 import type { IssueWithStatus } from "@agentic-kanban/shared";
 import type { LiveSessionStats, TodoItem } from "../lib/useBoardEvents.js";
 
@@ -167,58 +166,29 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onDragStart, tags,
   );
 }
 
-const statusIcons: Record<TodoItem["status"], { icon: string; color: string }> = {
-  completed: { icon: "✓", color: "text-green-500" },
-  in_progress: { icon: "▶", color: "text-blue-500" },
-  pending: { icon: "○", color: "text-gray-400" },
-};
-
 function TodoProgress({ todos }: { todos: TodoItem[] }) {
-  const [expanded, setExpanded] = useState(false);
   const total = todos.length;
   const completed = todos.filter((t) => t.status === "completed").length;
   const inProgress = todos.filter((t) => t.status === "in_progress").length;
 
   return (
-    <div className="mt-1.5 px-1">
-      <button
-        type="button"
-        className="w-full text-left group"
-        onClick={(e) => { e.stopPropagation(); setExpanded((v) => !v); }}
-      >
-        <div className="flex items-center gap-1.5 mb-0.5">
-          <svg
-            className={`w-2.5 h-2.5 text-gray-400 transition-transform ${expanded ? "rotate-90" : ""}`}
-            fill="currentColor" viewBox="0 0 16 16"
-          >
-            <path d="M6 3l5 5-5 5z" />
-          </svg>
-          <span className="text-[10px] text-gray-400">{completed}/{total} tasks</span>
-          {inProgress > 0 && (
-            <span className="text-[10px] text-blue-500 font-medium">{inProgress} active</span>
-          )}
-        </div>
-        <div className="h-1 bg-gray-200 rounded-full overflow-hidden flex">
-          <div
-            className="h-full bg-green-500 transition-all duration-300"
-            style={{ width: `${(completed / total) * 100}%` }}
-          />
-          <div
-            className="h-full bg-blue-400 transition-all duration-300"
-            style={{ width: `${(inProgress / total) * 100}%` }}
-          />
-        </div>
-      </button>
-      {expanded && (
-        <ul className="mt-1 space-y-0.5">
-          {todos.map((t) => (
-            <li key={t.id} className="flex items-start gap-1 text-[10px] leading-tight">
-              <span className={`shrink-0 mt-px ${statusIcons[t.status].color}`}>{statusIcons[t.status].icon}</span>
-              <span className={t.status === "completed" ? "text-gray-400 line-through" : "text-gray-600"}>{t.content}</span>
-            </li>
-          ))}
-        </ul>
-      )}
+    <div className="mt-1.5 px-1" title={todos.map((t) => `${t.status === "completed" ? "✓" : t.status === "in_progress" ? "▶" : "○"} ${t.content}`).join("\n")}>
+      <div className="flex items-center gap-1.5 mb-0.5">
+        <span className="text-[10px] text-gray-400">{completed}/{total} tasks</span>
+        {inProgress > 0 && (
+          <span className="text-[10px] text-blue-500 font-medium">{inProgress} active</span>
+        )}
+      </div>
+      <div className="h-1 bg-gray-200 rounded-full overflow-hidden flex">
+        <div
+          className="h-full bg-green-500 transition-all duration-300"
+          style={{ width: `${(completed / total) * 100}%` }}
+        />
+        <div
+          className="h-full bg-blue-400 transition-all duration-300"
+          style={{ width: `${(inProgress / total) * 100}%` }}
+        />
+      </div>
     </div>
   );
 }
