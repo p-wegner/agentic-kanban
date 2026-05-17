@@ -237,6 +237,36 @@ Detected files: ${detected.length > 0 ? detected.join(", ") : "none"}`;
     return c.json({ id, projectId, name: body.name }, 201);
   });
 
+  // DELETE /api/projects/:id/statuses/:statusId
+  router.delete("/:id/statuses/:statusId", async (c) => {
+    const projectId = c.req.param("id");
+    const statusId = c.req.param("statusId");
+
+    const statusRows = await database
+      .select()
+      .from(projectStatuses)
+      .where(and(eq(projectStatuses.id, statusId), eq(projectStatuses.projectId, projectId)));
+
+    if (statusRows.length === 0) {
+      return c.json({ error: "Status not found" }, 404);
+    }
+
+    // Prevent deleting a status that has issues
+    const linkedIssues = await database
+      .select({ id: issues.id })
+      .from(issues)
+      .where(eq(issues.statusId, statusId))
+      .limit(1);
+
+    if (linkedIssues.length > 0) {
+      return c.json({ error: "Cannot delete status with linked issues" }, 409);
+    }
+
+    await database.delete(projectStatuses).where(eq(projectStatuses.id, statusId));
+
+    return c.json({ success: true });
+  });
+
   // GET /api/projects/:id/branches
   router.get("/:id/branches", async (c) => {
     const projectId = c.req.param("id");
