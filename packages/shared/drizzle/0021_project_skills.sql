@@ -15,3 +15,5 @@ INSERT INTO `agent_skills_new` SELECT `id`, `name`, `description`, `prompt`, `mo
 DROP TABLE `agent_skills`;
 --> statement-breakpoint
 ALTER TABLE `agent_skills_new` RENAME TO `agent_skills`;
+--> statement-breakpoint
+CREATE UNIQUE INDEX `agent_skills_name_scope_unique` ON `agent_skills` (`name`, `project_id`);
