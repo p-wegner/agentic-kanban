@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Layout } from "../components/Layout.js";
 import { BoardColumn } from "../components/BoardColumn.js";
-import { ColumnGroup } from "../components/ColumnGroup.js";
+import { CompletedGrid } from "../components/CompletedGrid.js";
 import { CreateIssueForm } from "../components/CreateIssueForm.js";
 import { CreateIssuePanel } from "../components/CreateIssuePanel.js";
 import type { CreateIssueFormState } from "../components/CreateIssueForm.js";
@@ -654,20 +654,11 @@ export function BoardPage() {
             </BoardColumn>
           ))}
         </div>
-        <ColumnGroup
-          label="Completed"
+        <CompletedGrid
           columns={archiveColumns}
           collapsed={collapsedGroups.has("archive")}
           onToggle={() => toggleGroup("archive")}
-          projectId={activeProjectId}
-          creatingInColumn={creatingInColumnId}
-          onCreateClick={setCreatingInColumnId}
-          onCreateCancel={() => setCreatingInColumnId(null)}
-          onCreateSubmit={handleCreateIssue}
-          onExpandCreate={(statusId, statusName, state) => setExpandedCreatePanel({ statusId, statusName, state })}
           onIssueClick={handleIssueClick}
-          onWorkspaceClick={handleManageWorkspaces}
-          onStartWorkspace={handleStartWorkspace}
           onDragStart={(e, issue) => {
             (window as unknown as Record<string, unknown>).__dragData = {
               issueId: issue.id,
@@ -677,9 +668,6 @@ export function BoardPage() {
           }}
           onDrop={handleDrop}
           searchQuery={searchQuery}
-          sessionActivity={sessionActivity}
-          sessionTodos={sessionTodos}
-          canStartWorkspace={canStartWorkspace}
         />
       </div>
       {selectedIssue && (
