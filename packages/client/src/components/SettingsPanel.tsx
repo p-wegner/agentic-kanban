@@ -154,6 +154,7 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
     teardownScript: "",
   });
   const [generatingScript, setGeneratingScript] = useState(false);
+  const [generatingTeardown, setGeneratingTeardown] = useState(false);
 
   // Skills state
   const [skills, setSkills] = useState<{ id: string; name: string; description: string; prompt: string; model: string | null; projectId: string | null; isBuiltin: boolean }[]>([]);
@@ -529,6 +530,47 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                           className="w-full rounded border border-zinc-700 bg-zinc-800 px-3 py-2 font-mono text-sm text-zinc-100 placeholder-zinc-500 focus:border-blue-500 focus:outline-none"
                         />
                       </Field>
+                      <button
+                        onClick={async () => {
+                          if (!activeProjectId || generatingTeardown) return;
+                          setGeneratingTeardown(true);
+                          try {
+                            const result = await apiFetch<{ teardownScript: string }>(
+                              "/api/projects/generate-teardown-script",
+                              {
+                                method: "POST",
+                                body: JSON.stringify({ projectId: activeProjectId }),
+                              },
+                            );
+                            if (result.teardownScript) {
+                              setProjectSettings(s => ({ ...s, teardownScript: result.teardownScript }));
+                            }
+                          } catch {
+                            showToast("Failed to generate teardown script", "error");
+                          } finally {
+                            setGeneratingTeardown(false);
+                          }
+                        }}
+                        disabled={generatingTeardown || !activeProjectId}
+                        className="text-xs text-purple-600 px-2 py-1.5 hover:text-purple-800 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
+                      >
+                        {generatingTeardown ? (
+                          <>
+                            <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+                            </svg>
+                            Generating...
+                          </>
+                        ) : (
+                          <>
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M5 3l1.5 3.5L10 8l-3.5 1.5L5 13l-1.5-3.5L0 8l3.5-1.5L5 3zM19 11l1 2.5L22.5 14l-2.5 1L19 17.5l-1-2.5L15.5 14l2.5-1L19 11z" />
+                            </svg>
+                            Generate with AI
+                          </>
+                        )}
+                      </button>
                     </>
                   )}
                 </>
