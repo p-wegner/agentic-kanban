@@ -115,6 +115,7 @@ export function launch(
     }
     if (planMode) {
       args.push("--permission-mode", "plan");
+      args.push("--append-system-prompt", "IMPORTANT: This is a PLAN-ONLY session. Do NOT implement, write, edit, or modify any files. Do NOT run commands that make changes (git, npm, pip, etc.). Only read and explore the codebase, analyze the issue, and produce a detailed implementation plan. Output your plan and stop.");
     }
     args.push("-p");
   }
