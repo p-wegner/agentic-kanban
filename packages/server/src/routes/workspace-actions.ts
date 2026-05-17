@@ -428,6 +428,16 @@ export function createWorkspaceActionsRoute(
 
       const { repoPath } = await resolveProjectRepo(id, database);
       console.log(`[workspace-actions] merge: workspaceId=${id} branch=${workspace.branch} repoPath=${repoPath}`);
+
+      // Before merging, sync the branch ref to the worktree's HEAD.
+      // If the agent committed in detached HEAD, the branch pointer lags behind.
+      if (workspace.workingDir) {
+        const synced = await gitService.syncBranchToHead(workspace.workingDir, workspace.branch);
+        if (synced) {
+          console.log(`[workspace-actions] merge: synced branch ${workspace.branch} to worktree HEAD (was detached or ahead)`);
+        }
+      }
+
       const result = await gitService.mergeBranch(repoPath, workspace.branch);
 
       // Cleanup worktree if it exists
@@ -519,7 +529,7 @@ export function createWorkspaceActionsRoute(
       if (mode === "merge") {
         result = await gitService.mergeBaseIntoBranch(workspace.workingDir, baseBranch);
       } else {
-        result = await gitService.rebaseOntoBase(workspace.workingDir, baseBranch);
+        result = await gitService.rebaseOntoBase(workspace.workingDir, baseBranch, workspace.branch);
       }
 
       console.log(`[workspace-actions] update-base: workspaceId=${id} mode=${mode} success=${result.success} conflicts=${result.conflictingFiles?.length ?? 0}`);

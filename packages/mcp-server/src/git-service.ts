@@ -69,6 +69,15 @@ export async function createWorktree(repoPath: string, branch: string, baseBranc
   }
 
   await execGit(["worktree", "add", worktreePath, branch], repoPath);
+
+  // Verify worktree is on the correct branch (not detached HEAD)
+  const current = await execGit(["rev-parse", "--abbrev-ref", "HEAD"], worktreePath);
+  if (current.trim() !== branch) {
+    const headCommit = (await execGit(["rev-parse", "HEAD"], worktreePath)).trim();
+    await execGit(["branch", "-f", branch, headCommit], worktreePath);
+    await execGit(["checkout", branch], worktreePath);
+  }
+
   return worktreePath;
 }
 
@@ -131,6 +140,29 @@ export async function getWorkingTreeDiff(workdirPath: string): Promise<string> {
 /** Merge a branch into the current HEAD of the repo. */
 export async function mergeBranch(repoPath: string, branch: string): Promise<string> {
   return execGit(["merge", "--no-ff", branch, "-m", `Merge branch '${branch}'`], repoPath);
+}
+
+/**
+ * Sync the branch ref to match the worktree's HEAD.
+ * Before merging, call this to ensure the branch pointer reflects
+ * any commits the agent made (even if they were in detached HEAD).
+ */
+export async function syncBranchToHead(
+  worktreePath: string,
+  branch: string,
+): Promise<boolean> {
+  try {
+    const headCommit = (await execGit(["rev-parse", "HEAD"], worktreePath)).trim();
+    const branchCommit = (await execGit(["rev-parse", branch], worktreePath)).trim();
+
+    if (headCommit !== branchCommit) {
+      await execGit(["branch", "-f", branch, headCommit], worktreePath);
+      return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
 }
 
 /** Get lightweight diff stats using --shortstat (no full diff transfer). Includes untracked files. */

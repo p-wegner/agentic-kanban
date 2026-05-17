@@ -61,6 +61,11 @@ export function registerMergeWorkspace(server: McpServer) {
         }
 
         // Regular workspace: merge branch
+        // Sync branch ref to worktree HEAD first — agent may have committed in detached HEAD
+        if (workspace.workingDir) {
+          await gitService.syncBranchToHead(workspace.workingDir, workspace.branch);
+        }
+
         const mergeOutput = await gitService.mergeBranch(repoPath, workspace.branch);
 
         // Cleanup worktree
