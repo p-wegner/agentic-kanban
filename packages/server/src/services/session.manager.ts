@@ -73,11 +73,13 @@ function createSessionManager(
       }
     });
 
-    // Detect system/init events to capture claudeSessionId
+    // Parse stdout data — may contain multiple JSONL lines in a single chunk
     if (message.type === "stdout" && message.data) {
-      try {
-        const obj = JSON.parse(message.data);
-        if (obj.type === "system" && obj.subtype === "init" && obj.session_id) {
+      for (const line of message.data.split("\n")) {
+        if (!line.trim()) continue;
+          try {
+            const obj = JSON.parse(line);
+            if (obj.type === "system" && obj.subtype === "init" && obj.session_id) {
           db.update(sessions)
             .set({ claudeSessionId: obj.session_id })
             .where(eq(sessions.id, sessionId))
@@ -237,8 +239,9 @@ function createSessionManager(
           }
         }
       } catch {
-        // Not JSON or not a system/init event — ignore
+        // Not JSON or not a recognized event — ignore
       }
+      } // end for-of lines
     }
 
     // On exit, clear activity, todos, and subagent state
