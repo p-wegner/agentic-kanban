@@ -141,6 +141,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
   const [diffComments, setDiffComments] = useState<DiffComment[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
+  const [conflictState, setConflictState] = useState<{ hasConflicts: boolean; conflictingFiles: string[] } | null>(null);
 
   // Session history state
   const [workspaceSessions, setWorkspaceSessions] = useState<Record<string, SessionInfo[]>>({});
@@ -602,7 +603,63 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
         body: JSON.stringify({}),
       });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to open terminal");
+      setError(err instanceof Error ? err.message : "Terminal launch failed");
+    } finally {
+      setActionLoading(false);
+    }
+  }
+
+  async function handleUpdateBase(wsId: string, mode: "rebase" | "merge") {
+    setActionLoading(true);
+    setError(null);
+    setConflictState(null);
+    try {
+      const result = await apiFetch<{ success: boolean; conflictingFiles?: string[]; error?: string }>(
+        `/api/workspaces/${wsId}/update-base`,
+        { method: "POST", body: JSON.stringify({ mode }) },
+      );
+      if (!result.success && result.conflictingFiles?.length) {
+        setConflictState({ hasConflicts: true, conflictingFiles: result.conflictingFiles });
+      } else if (!result.success) {
+        setError(result.error || "Update base failed");
+      } else {
+        await fetchWorkspaces();
+        onWorkspaceChange?.();
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Update base failed");
+    } finally {
+      setActionLoading(false);
+    }
+  }
+
+  async function handleAbortRebase(wsId: string) {
+    setActionLoading(true);
+    setError(null);
+    try {
+      await apiFetch(`/api/workspaces/${wsId}/abort-rebase`, { method: "POST" });
+      setConflictState(null);
+      await fetchWorkspaces();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Abort failed");
+    } finally {
+      setActionLoading(false);
+    }
+  }
+
+  async function handleResolveConflicts(wsId: string) {
+    setActionLoading(true);
+    setError(null);
+    try {
+      const result = await apiFetch<{ sessionId: string }>(
+        `/api/workspaces/${wsId}/resolve-conflicts`,
+        { method: "POST" },
+      );
+      setActiveSession(result.sessionId);
+      setCompletedMessages([]);
+      setConflictState(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Resolve conflicts failed");
     } finally {
       setActionLoading(false);
     }
@@ -1122,6 +1179,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
 
                     {/* Action buttons — visible even while agent runs */}
                     {!selectedHistoryId && ws.workingDir && ws.status !== "closed" && (
+                      <>
                       <div className="flex gap-2 flex-wrap">
                         {/* Resume button — shown when workspace active but no session running */}
                         {canResume(ws) && (
@@ -1131,6 +1189,17 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                             className="text-sm bg-green-600 text-white px-3 py-1.5 rounded hover:bg-green-700 disabled:opacity-50"
                           >
                             Resume
+                          </button>
+                        )}
+                        {/* Update Base — rebase or merge latest base into workspace */}
+                        {!ws.isDirect && ws.workingDir && ws.status !== "closed" && !isRunning && (
+                          <button
+                            onClick={() => handleUpdateBase(ws.id, "rebase")}
+                            disabled={actionLoading}
+                            className="text-sm bg-teal-600 text-white px-3 py-1.5 rounded hover:bg-teal-700 disabled:opacity-50"
+                            title="Rebase onto latest base branch"
+                          >
+                            Update Base
                           </button>
                         )}
                         <button
@@ -1171,6 +1240,38 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                           Delete
                         </button>
                       </div>
+                      {/* Conflict display */}
+                      {conflictState && conflictState.hasConflicts && (
+                        <div className="mt-2 p-2 bg-red-50 border border-red-200 rounded">
+                          <div className="flex items-center justify-between">
+                            <span className="text-sm font-medium text-red-700">
+                              {conflictState.conflictingFiles.length} conflicting file{conflictState.conflictingFiles.length !== 1 ? "s" : ""}
+                            </span>
+                            <div className="flex gap-2">
+                              <button
+                                onClick={() => handleResolveConflicts(ws.id)}
+                                disabled={actionLoading}
+                                className="text-xs bg-green-600 text-white px-2 py-1 rounded hover:bg-green-700 disabled:opacity-50"
+                              >
+                                Resolve with AI
+                              </button>
+                              <button
+                                onClick={() => handleAbortRebase(ws.id)}
+                                disabled={actionLoading}
+                                className="text-xs bg-gray-500 text-white px-2 py-1 rounded hover:bg-gray-600 disabled:opacity-50"
+                              >
+                                Abort
+                              </button>
+                            </div>
+                          </div>
+                          <ul className="mt-1 text-xs text-red-600 space-y-0.5">
+                            {conflictState.conflictingFiles.map(f => (
+                              <li key={f} className="font-mono">{f}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                      </>
                     )}
 
                     {/* Delete button for closed workspaces */}

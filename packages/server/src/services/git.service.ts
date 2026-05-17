@@ -308,3 +308,89 @@ export async function detectConflicts(
     }
   }
 }
+
+/**
+ * Rebase the current branch onto the latest base branch.
+ * On conflict, returns conflicting files and leaves rebase in-progress for resolution.
+ */
+export async function rebaseOntoBase(
+  worktreePath: string,
+  baseBranch: string,
+): Promise<{ success: boolean; conflictingFiles?: string[]; error?: string }> {
+  try {
+    await execGit(["fetch", "origin", baseBranch], worktreePath);
+  } catch { /* no remote */ }
+
+  let source = baseBranch;
+  try {
+    await execGit(["rev-parse", "--verify", `remotes/origin/${baseBranch}`], worktreePath);
+    source = `origin/${baseBranch}`;
+  } catch { /* use local */ }
+
+  try {
+    await execGit(["rebase", source], worktreePath);
+    return { success: true };
+  } catch (err) {
+    try {
+      const unmerged = await execGit(["diff", "--name-only", "--diff-filter=U"], worktreePath);
+      const conflictingFiles = unmerged.trim().split("\n").filter(Boolean);
+      return { success: false, conflictingFiles, error: err instanceof Error ? err.message : String(err) };
+    } catch {
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  }
+}
+
+/**
+ * Merge the base branch into the current workspace branch.
+ * On conflict, returns conflicting files and leaves merge in-progress for resolution.
+ */
+export async function mergeBaseIntoBranch(
+  worktreePath: string,
+  baseBranch: string,
+): Promise<{ success: boolean; conflictingFiles?: string[]; error?: string }> {
+  try {
+    await execGit(["fetch", "origin", baseBranch], worktreePath);
+  } catch { /* no remote */ }
+
+  let source = baseBranch;
+  try {
+    await execGit(["rev-parse", "--verify", `remotes/origin/${baseBranch}`], worktreePath);
+    source = `origin/${baseBranch}`;
+  } catch { /* use local */ }
+
+  try {
+    await execGit(["merge", source, "--no-edit"], worktreePath);
+    return { success: true };
+  } catch (err) {
+    try {
+      const unmerged = await execGit(["diff", "--name-only", "--diff-filter=U"], worktreePath);
+      const conflictingFiles = unmerged.trim().split("\n").filter(Boolean);
+      return { success: false, conflictingFiles, error: err instanceof Error ? err.message : String(err) };
+    } catch {
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  }
+}
+
+/** Abort an in-progress rebase. */
+export async function abortRebase(worktreePath: string): Promise<void> {
+  await execGit(["rebase", "--abort"], worktreePath);
+}
+
+/** Abort an in-progress merge. */
+export async function abortMerge(worktreePath: string): Promise<void> {
+  await execGit(["merge", "--abort"], worktreePath);
+}
+
+/** Check if a rebase is in progress in the worktree. */
+export async function isRebaseInProgress(worktreePath: string): Promise<boolean> {
+  try {
+    const dir = (await execGit(["rev-parse", "--git-dir"], worktreePath)).trim();
+    const { existsSync } = await import("node:fs");
+    const { join: pathJoin } = await import("node:path");
+    return existsSync(pathJoin(worktreePath, dir, "rebase-merge")) || existsSync(pathJoin(worktreePath, dir, "rebase-apply"));
+  } catch {
+    return false;
+  }
+}
