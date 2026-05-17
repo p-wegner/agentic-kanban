@@ -47,6 +47,10 @@ export function createAgentSkillsRoute(database: Database = db) {
       return c.json({ error: "name, description, and prompt are required" }, 400);
     }
 
+    if (/[\/\\]|\.\./.test(body.name)) {
+      return c.json({ error: "Skill name cannot contain '/', '\\', or '..'" }, 400);
+    }
+
     const projectId = body.projectId || null;
 
     // Check for duplicate name within the same scope (global or same project)
@@ -95,6 +99,9 @@ export function createAgentSkillsRoute(database: Database = db) {
     const updates: Record<string, unknown> = { updatedAt: now };
 
     if (body.name !== undefined) {
+      if (/[\/\\]|\.\./.test(body.name)) {
+        return c.json({ error: "Skill name cannot contain '/', '\\', or '..'" }, 400);
+      }
       const effectiveProjectId = body.projectId !== undefined ? (body.projectId || null) : skill.projectId;
       const scopeCondition = effectiveProjectId
         ? and(eq(agentSkills.name, body.name), eq(agentSkills.projectId, effectiveProjectId))
