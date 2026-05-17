@@ -394,4 +394,3 @@ export async function isRebaseInProgress(worktreePath: string): Promise<boolean>
     return false;
   }
 }
-// CONFLICT TEST - master change

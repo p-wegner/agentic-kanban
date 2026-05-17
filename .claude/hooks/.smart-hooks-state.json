@@ -1,0 +1,18 @@
+{
+  "editedFiles": [
+    "C:/andrena/agentic-kanban/.claude/hooks/.smart-hooks-state.json",
+    "packages/server/src/services/board-events.ts",
+    "packages/server/src/services/session.manager.ts",
+    "packages/server/src/index.ts",
+    "packages/client/src/lib/useBoardEvents.ts",
+    "packages/client/src/routes/BoardPage.tsx",
+    "packages/client/src/components/BoardColumn.tsx",
+    "packages/client/src/components/IssueCard.tsx",
+    "packages/server/src/routes/workspaces.ts",
+    "packages/mcp-server/src/tools/start-workspace.ts",
+    "CLAUDE.md",
+    "packages/client/src/components/IssueDetailPanel.tsx",
+    "packages/client/src/components/CreateIssueForm.tsx",
+    "packages/client/src/components/CreateIssuePanel.tsx"
+  ]
+}
