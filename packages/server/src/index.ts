@@ -9,7 +9,7 @@ import { db } from "./db/index.js";
 import { createSessionManager } from "./services/session.manager.js";
 import { createBoardEvents } from "./services/board-events.js";
 import { workspaces, issues, projects, projectStatuses, preferences, sessions, agentSkills } from "@agentic-kanban/shared/schema";
-import { eq, sql } from "drizzle-orm";
+import { eq, sql, desc } from "drizzle-orm";
 import * as agentService from "./services/agent.service.js";
 import * as gitService from "./services/git.service.js";
 import { execFile } from "node:child_process";
@@ -66,7 +66,7 @@ async function buildReviewPrompt(branch: string, baseBranch: string | null, issu
   if (projectId) {
     const projectSkill = await db.select({ prompt: agentSkills.prompt }).from(agentSkills)
       .where(sql`${agentSkills.name} = 'code-review' AND (${agentSkills.projectId} = ${projectId} OR ${agentSkills.projectId} IS NULL)`)
-      .orderBy(agentSkills.projectId) // project-specific first (non-null sorts before null)
+      .orderBy(desc(agentSkills.projectId)) // project-specific first (DESC puts non-null before NULL in SQLite)
       .limit(1);
     template = projectSkill[0]?.prompt ?? null;
   }
