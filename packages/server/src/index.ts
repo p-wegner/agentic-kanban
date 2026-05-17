@@ -392,6 +392,28 @@ if (staleSessions.length > 0) {
   }
 }
 
+// Fix workspaces stuck in active/reviewing with no running session
+// (happens if server crashes after session DB update but before workspace status update)
+{
+  const runningWsIds = new Set(
+    (await db.selectDistinct({ workspaceId: sessions.workspaceId })
+      .from(sessions)
+      .where(eq(sessions.status, "running")))
+    .map(r => r.workspaceId)
+  );
+  const stuck = (await db.select({ id: workspaces.id })
+    .from(workspaces)
+    .where(sql`status IN ('active', 'reviewing')`))
+    .filter(ws => !runningWsIds.has(ws.id));
+  if (stuck.length > 0) {
+    console.log(`[startup] Fixing ${stuck.length} workspace(s) stuck in active/reviewing`);
+    const now = new Date().toISOString();
+    for (const ws of stuck) {
+      await db.update(workspaces).set({ status: "idle", updatedAt: now }).where(eq(workspaces.id, ws.id));
+    }
+  }
+}
+
 // Clean up stale worktrees: closed non-direct workspaces that still have a workingDir
 {
   const staleWs = await db.select({ id: workspaces.id, branch: workspaces.branch, workingDir: workspaces.workingDir, issueId: workspaces.issueId })
