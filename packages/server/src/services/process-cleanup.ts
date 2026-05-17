@@ -29,9 +29,9 @@ export async function killProcessesInDir(dir: string): Promise<number> {
 
       for (const line of stdout.split("\n")) {
         const trimmed = line.trim();
-        const pidMatch = pidRegex.exec(trimmed);
+        const pidMatch = trimmed.match(pidRegex);
         if (pidMatch) currentPid = pidMatch[1];
-        const cmdMatch = cmdRegex.exec(trimmed);
+        const cmdMatch = trimmed.match(cmdRegex);
         if (cmdMatch) currentCmd = cmdMatch[1];
 
         if (currentPid && currentCmd) {
