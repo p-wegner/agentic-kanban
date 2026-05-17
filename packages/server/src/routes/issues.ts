@@ -198,20 +198,21 @@ Current description: ${body.description?.trim() || "(none)"}`;
 
     const issuesSummary = openIssues
       .filter(i => i.id !== body.issueId)
-      .map(i => `  #${i.issueNumber ?? "?"} ${i.title}${i.description ? `\n    ${i.description.split("\n")[0].slice(0, 100)}` : ""}`)
+      .map(i => `  [${i.id}] #${i.issueNumber ?? "?"} ${i.title}${i.description ? `\n    ${i.description.split("\n")[0].slice(0, 100)}` : ""}`)
       .join("\n");
 
     const prompt = `${skillPrompt}
 
-Target issue: #${targetIssue.issueNumber ?? "?"} "${targetIssue.title}"
+Target issue: [${targetIssue.id}] #${targetIssue.issueNumber ?? "?"} "${targetIssue.title}"
 ${targetIssue.description ? `Description: ${targetIssue.description}` : ""}
 
-Other open issues on the board:
+Other open issues on the board (each prefixed with its [id]):
 ${issuesSummary || "(no other open issues)"}
 
 IMPORTANT: You must respond ONLY with valid JSON, no markdown, no explanation:
-{"dependencies": [{"issueId": "...", "type": "depends_on|blocked_by|related_to|parent_of|child_of", "reason": "..."}]}
+{"dependencies": [{"issueId": "<id from brackets>", "type": "depends_on|blocked_by|related_to|parent_of|child_of", "reason": "..."}]}
 
+Use the exact id value from the [brackets] prefix for the issueId field.
 Use "depends_on" when the target issue requires another issue to be done first.
 Use "blocked_by" when another issue blocks this one.
 Use "related_to" when issues share code or functionality.
