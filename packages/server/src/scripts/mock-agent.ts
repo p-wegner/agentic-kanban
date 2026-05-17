@@ -9,7 +9,7 @@
  *
  * Configuration:
  *   --session-id <uuid>   / MOCK_SESSION_ID     - Deterministic session UUID
- *   --delay-ms <ms>       / MOCK_AGENT_DELAY_MS  - Delay between events (default: 500)
+ *   --delay-ms <ms>       / MOCK_DELAY_MS        - Delay between events (default: 500)
  *   --profile <name>      / MOCK_AGENT_PROFILE   - Behavior profile (default: standard)
  *   --resume <id>         - Resume a previous session (logged to stderr)
  *
