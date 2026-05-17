@@ -8,8 +8,9 @@ import { runSetupScript } from "../services/setup-script.js";
 import type { SessionManager } from "../services/session.manager.js";
 import type { BoardEvents } from "../services/board-events.js";
 import type { Database } from "../db/index.js";
-import { resolve, dirname } from "node:path";
+import { resolve, dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { mkdir, writeFile } from "node:fs/promises";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const MOCK_AGENT_PATH = resolve(__dirname, "../scripts/mock-agent.ts");
@@ -123,12 +124,22 @@ export function createWorkspacesRoute(
         agentPrompt += `\n\n${issue.description}`;
       }
 
-      // Prepend skill prompt if skillId is provided
+      // Write skill as a SKILL.md file for progressive disclosure (agent invokes on demand)
       const skillId: string | null = body.skillId || null;
-      if (skillId) {
+      if (skillId && worktreePath) {
         const skillRows = await database.select().from(agentSkills).where(eq(agentSkills.id, skillId)).limit(1);
         if (skillRows.length > 0) {
-          agentPrompt = `${skillRows[0].prompt}\n\n---\n\n${agentPrompt}`;
+          const skill = skillRows[0];
+          const skillDir = join(worktreePath, ".claude", "skills", skill.name);
+          await mkdir(skillDir, { recursive: true });
+          const skillContent = [
+            "---",
+            `description: ${skill.description}`,
+            "---",
+            "",
+            skill.prompt,
+          ].join("\n");
+          await writeFile(join(skillDir, "SKILL.md"), skillContent, "utf-8");
         }
       }
 

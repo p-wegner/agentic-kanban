@@ -6,6 +6,8 @@ import { randomUUID } from "node:crypto";
 import * as gitService from "../git-service.js";
 import { notifyBoard } from "../notify.js";
 import { runSetupScript } from "../setup-script.js";
+import { mkdir, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 
 export function registerStartWorkspace(server: McpServer) {
   server.tool(
@@ -17,7 +19,7 @@ export function registerStartWorkspace(server: McpServer) {
       branch: z.string().optional().describe("Branch name (defaults to 'workspace/{issueId-short}'). Not needed when isDirect is true."),
       baseBranch: z.string().optional().describe("Base branch to create from (defaults to project's defaultBranch)"),
       isDirect: z.boolean().optional().describe("Work directly on the main checkout instead of creating a worktree"),
-      skillId: z.string().optional().describe("Agent skill ID to apply — the skill's prompt will be prepended to the agent's context"),
+      skillId: z.string().optional().describe("Agent skill ID to apply — the skill will be written as a SKILL.md file in the worktree for the agent to discover and invoke on demand"),
     },
     async ({ issueId, repoPath, branch, baseBranch, isDirect, skillId }) => {
       // Look up the issue
@@ -71,6 +73,24 @@ export function registerStartWorkspace(server: McpServer) {
             }
           } catch (err) {
             console.warn(`[mcp] setup error: ${err instanceof Error ? err.message : String(err)}`);
+          }
+        }
+
+        // Write skill as SKILL.md for progressive disclosure (agent invokes on demand)
+        if (skillId && worktreePath) {
+          const skillRows = await db.select().from(schema.agentSkills).where(eq(schema.agentSkills.id, skillId)).limit(1);
+          if (skillRows.length > 0) {
+            const skill = skillRows[0];
+            const skillDir = join(worktreePath, ".claude", "skills", skill.name);
+            await mkdir(skillDir, { recursive: true });
+            const skillContent = [
+              "---",
+              `description: ${skill.description}`,
+              "---",
+              "",
+              skill.prompt,
+            ].join("\n");
+            await writeFile(join(skillDir, "SKILL.md"), skillContent, "utf-8");
           }
         }
 
