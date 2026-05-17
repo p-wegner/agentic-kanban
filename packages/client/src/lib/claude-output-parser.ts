@@ -228,9 +228,18 @@ export class ClaudeOutputParser {
       for (const block of content) {
         if (block.type === "tool_result") {
           const rawContent = block.content;
-          const output = typeof rawContent === "string"
-            ? rawContent
-            : JSON.stringify(rawContent);
+          let output: string;
+          if (typeof rawContent === "string") {
+            output = rawContent;
+          } else if (Array.isArray(rawContent)) {
+            // Content blocks array: extract text parts
+            const textParts = (rawContent as Array<Record<string, unknown>>)
+              .filter((b) => b.type === "text" && typeof b.text === "string")
+              .map((b) => b.text as string);
+            output = textParts.length > 0 ? textParts.join("\n") : JSON.stringify(rawContent);
+          } else {
+            output = JSON.stringify(rawContent);
+          }
           const toolUseId = (block.tool_use_id as string) || "";
           const toolName = toolUseId
             ? (this.toolNameMap.get(toolUseId) || `tool_${toolUseId}`)
