@@ -351,20 +351,22 @@ export function createWorkspaceActionsRoute(
 
     try {
       let diff: string;
+      let conflicts: { hasConflicts: boolean; conflictingFiles: string[] } | null = null;
       if (workspace.isDirect) {
         diff = await gitService.getWorkingTreeDiff(workspace.workingDir);
       } else {
         const { defaultBranch } = await resolveProjectRepo(id, database);
         const baseBranch = workspace.baseBranch || defaultBranch;
         diff = await gitService.getDiff(workspace.workingDir, baseBranch);
+        conflicts = await gitService.detectConflicts(workspace.workingDir, baseBranch);
       }
       const stats = parseDiffStats(diff);
       const comments = await database
         .select()
         .from(diffComments)
         .where(eq(diffComments.workspaceId, id));
-      console.log(`[workspace-actions] diff: workspaceId=${id} isDirect=${workspace.isDirect} files=${stats.filesChanged} +${stats.insertions} -${stats.deletions} comments=${comments.length}`);
-      return c.json({ diff, stats, comments });
+      console.log(`[workspace-actions] diff: workspaceId=${id} isDirect=${workspace.isDirect} files=${stats.filesChanged} +${stats.insertions} -${stats.deletions} conflicts=${conflicts?.hasConflicts ?? "n/a"} comments=${comments.length}`);
+      return c.json({ diff, stats, comments, conflicts });
     } catch (err) {
       return c.json(
         { error: `Diff failed: ${err instanceof Error ? err.message : String(err)}` },
@@ -413,6 +415,17 @@ export function createWorkspaceActionsRoute(
         return c.json({ id, mergeOutput: "Direct workspace closed (no merge needed)" });
       }
 
+      // Check for merge conflicts before attempting merge
+      if (workspace.workingDir) {
+        const { repoPath: projectRepo } = await resolveProjectRepo(id, database);
+        const projectRows = await database.select({ defaultBranch: projects.defaultBranch }).from(projects).where(eq(projects.repoPath, projectRepo)).limit(1);
+        const baseBranch = workspace.baseBranch || projectRows[0]?.defaultBranch || "main";
+        const conflicts = await gitService.detectConflicts(workspace.workingDir, baseBranch);
+        if (conflicts.hasConflicts) {
+          return c.json({ error: "Merge conflicts detected", conflictingFiles: conflicts.conflictingFiles }, 409);
+        }
+      }
+
       const { repoPath } = await resolveProjectRepo(id, database);
       console.log(`[workspace-actions] merge: workspaceId=${id} branch=${workspace.branch} repoPath=${repoPath}`);
       const result = await gitService.mergeBranch(repoPath, workspace.branch);
@@ -456,6 +469,27 @@ export function createWorkspaceActionsRoute(
         { error: `Merge failed: ${err instanceof Error ? err.message : String(err)}` },
         500,
       );
+    }
+  });
+
+  // GET /api/workspaces/:id/conflicts — on-demand conflict detection
+  router.get("/:id/conflicts", async (c) => {
+    const id = c.req.param("id");
+    const rows = await database.select().from(workspaces).where(eq(workspaces.id, id)).limit(1);
+    if (rows.length === 0) {
+      return c.json({ error: "Workspace not found" }, 404);
+    }
+    const workspace = rows[0];
+    if (!workspace.workingDir || workspace.isDirect) {
+      return c.json({ hasConflicts: false, conflictingFiles: [] });
+    }
+    try {
+      const { defaultBranch } = await resolveProjectRepo(id, database);
+      const baseBranch = workspace.baseBranch || defaultBranch;
+      const result = await gitService.detectConflicts(workspace.workingDir, baseBranch);
+      return c.json(result);
+    } catch (err) {
+      return c.json({ error: `Conflict detection failed: ${err instanceof Error ? err.message : String(err)}` }, 500);
     }
   });
 
