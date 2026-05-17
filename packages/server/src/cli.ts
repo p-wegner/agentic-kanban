@@ -684,6 +684,10 @@ skillCmd
   .action(async (name: string, options: { description?: string; prompt?: string; model?: string; project?: string }) => {
     try {
       await runMigrations();
+      if (/[\/\\]|\.\./.test(name)) {
+        console.error("Skill name cannot contain '/', '\\', or '..'.");
+        process.exit(1);
+      }
       const scopeProjectId = options.project || null;
       // Check for duplicate name in same scope
       const scopeCondition = scopeProjectId
@@ -762,6 +766,10 @@ skillCmd
       await mkdir(skillsDir, { recursive: true });
 
       for (const skill of rows) {
+        if (/[\/\\]|\.\./.test(skill.name)) {
+          console.warn(`  Skipping skill with unsafe name: ${skill.name}`);
+          continue;
+        }
         const skillDir = join(skillsDir, skill.name);
         await mkdir(skillDir, { recursive: true });
         const content = [
