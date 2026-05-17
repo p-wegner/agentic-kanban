@@ -279,3 +279,4 @@ export async function getDiffShortstat(
     return { filesChanged: 0, insertions: 0, deletions: 0 };
   }
 }
+// CONFLICT TEST - branch change
