@@ -366,7 +366,16 @@ Status indicators:
             if (parts.length > 0) console.log(`         ${parts.join("  ")}`);
           }
 
-          if (issue.lastOutput.length > 0) {
+          if (issue.sessionStats?.agentSummary) {
+            const lines = issue.sessionStats.agentSummary.split("\n").slice(0, 8);
+            console.log(`         agent summary:`);
+            for (const line of lines) {
+              console.log(`           ${line}`);
+            }
+            if (issue.sessionStats.agentSummary.split("\n").length > 8) {
+              console.log(`           ...`);
+            }
+          } else if (issue.lastOutput.length > 0) {
             console.log(`         last output:`);
             for (const line of issue.lastOutput) {
               console.log(`           ${line}`);

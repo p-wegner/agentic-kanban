@@ -1119,6 +1119,16 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                           )}
                           {summary && (
                             <>
+                              {/* Agent Summary — the final result text from Claude Code */}
+                              {summary.agentSummary && (
+                                <div>
+                                  <h4 className="text-xs font-semibold text-gray-700 uppercase tracking-wide mb-1">Summary</h4>
+                                  <div className="text-xs text-gray-700 bg-blue-50 border border-blue-100 rounded p-2.5 whitespace-pre-wrap leading-relaxed">
+                                    {summary.agentSummary}
+                                  </div>
+                                </div>
+                              )}
+
                               {/* Overview */}
                               <div>
                                 <h4 className="text-xs font-semibold text-gray-700 uppercase tracking-wide mb-1">Overview</h4>
