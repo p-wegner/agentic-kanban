@@ -11,6 +11,7 @@ export const projects = sqliteTable("projects", {
   remoteUrl: text("remote_url"),
   setupScript: text("setup_script"),
   setupBlocking: integer("setup_blocking", { mode: "boolean" }).notNull().default(true),
+  teardownScript: text("teardown_script"),
   createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
   updatedAt: text("updated_at").notNull().$defaultFn(() => new Date().toISOString()),
 });
