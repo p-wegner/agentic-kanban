@@ -292,6 +292,21 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
       .catch(() => {});
   }, [selectedWorkspace]);
 
+  // Auto-load diff/conflicts when an idle non-direct workspace is selected
+  useEffect(() => {
+    if (!selectedWorkspace) return;
+    const ws = workspaces.find(w => w.id === selectedWorkspace);
+    if (!ws || ws.isDirect || ws.status !== "idle") return;
+    if (diff || conflictState) return;
+    apiFetch<DiffResponse>(`/api/workspaces/${selectedWorkspace}/diff`)
+      .then((result) => {
+        setDiff(result);
+        setDiffComments(result.comments ?? []);
+        if (result.conflicts) setConflictState(result.conflicts);
+      })
+      .catch(() => {});
+  }, [selectedWorkspace, workspaces]);
+
   // Auto-load session output when expanding a workspace
   useEffect(() => {
     if (!selectedWorkspace) return;
@@ -539,6 +554,9 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
       const result = await apiFetch<DiffResponse>(`/api/workspaces/${wsId}/diff`);
       setDiff(result);
       setDiffComments(result.comments ?? []);
+      if (result.conflicts) {
+        setConflictState(result.conflicts);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to get diff");
     } finally {
