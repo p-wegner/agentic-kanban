@@ -234,6 +234,7 @@ export interface BoardStatusIssue {
     success: boolean;
   } | null;
   diffStats: { filesChanged: number; insertions: number; deletions: number } | null;
+  conflicts: { hasConflicts: boolean; conflictingFiles: string[] } | null;
   lastActivity: string | null;
   lastOutput: string[];
 }
