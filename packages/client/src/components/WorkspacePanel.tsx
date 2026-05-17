@@ -10,6 +10,7 @@ import type {
   DiffResponse,
   DiffComment,
   CreateDiffCommentRequest,
+  SessionSummaryResponse,
 } from "@agentic-kanban/shared";
 
 interface Project {
@@ -148,6 +149,12 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
   const [selectedHistoryId, setSelectedHistoryId] = useState<string | null>(null);
   const [historyMessages, setHistoryMessages] = useState<AgentOutputMessage[]>([]);
 
+  // Session summary state
+  const [viewMode, setViewMode] = useState<"output" | "summary">("output");
+  const [summaryData, setSummaryData] = useState<SessionSummaryResponse | null>(null);
+  const [summaryLoading, setSummaryLoading] = useState(false);
+  const [summarySessionId, setSummarySessionId] = useState<string | null>(null);
+
   // Chat-like state: tracks the last session per workspace for resume
   const [lastSessionPerWorkspace, setLastSessionPerWorkspace] = useState<Record<string, string>>({});
   // Track messages from completed sessions so TerminalView stays visible after exit
@@ -276,6 +283,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
         if (selectedHistoryId) {
           setSelectedHistoryId(null);
           setHistoryMessages([]);
+          setViewMode("output");
           return;
         }
         onClose();
@@ -365,8 +373,24 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
       const msgs = await apiFetch<AgentOutputMessage[]>(`/api/sessions/${sessionId}/output`);
       setHistoryMessages(msgs);
       setSelectedHistoryId(sessionId);
+      setViewMode("output");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load session output");
+    }
+  }
+
+  async function handleFetchSummary(sessionId: string) {
+    if (summarySessionId === sessionId && summaryData) return; // already loaded
+    setSummaryLoading(true);
+    setSummaryData(null);
+    try {
+      const data = await apiFetch<SessionSummaryResponse>(`/api/sessions/${sessionId}/summary`);
+      setSummaryData(data);
+      setSummarySessionId(sessionId);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load session summary");
+    } finally {
+      setSummaryLoading(false);
     }
   }
 
@@ -970,7 +994,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                 className={`border rounded p-3 space-y-2 cursor-pointer transition-colors ${
                   isSelected ? "border-blue-400 bg-blue-50" : "border-gray-200 hover:border-gray-300"
                 }`}
-                onClick={() => { setSelectedWorkspace(isSelected ? null : ws.id); setSelectedHistoryId(null); setHistoryMessages([]); }}
+                onClick={() => { setSelectedWorkspace(isSelected ? null : ws.id); setSelectedHistoryId(null); setHistoryMessages([]); setViewMode("output"); }}
               >
                 <div className="flex items-center justify-between">
                   <span className="text-sm font-medium text-gray-900">
@@ -1003,7 +1027,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                       <div className="space-y-0.5">
                         {/* Latest tab */}
                         <button
-                          onClick={() => { setSelectedHistoryId(null); setHistoryMessages([]); }}
+                          onClick={() => { setSelectedHistoryId(null); setHistoryMessages([]); setViewMode("output"); }}
                           className={`w-full flex items-center gap-2 py-1 px-2 rounded text-left text-xs ${
                             selectedHistoryId === null
                               ? "bg-blue-50 text-blue-700 font-medium"
@@ -1059,8 +1083,167 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                       </div>
                     )}
 
-                    {/* TerminalView — show history output or live/completed output */}
-                    {(selectedHistoryId ? historyMessages : (activeSession || completedMessages.length > 0)) ? (
+                    {/* Output/Summary toggle — shown when there is session content */}
+                    {(selectedHistoryId ? historyMessages : (activeSession || completedMessages.length > 0)) && !isRunning && (
+                      <div className="flex border-b border-gray-200">
+                        <button
+                          onClick={() => { setViewMode("output"); }}
+                          className={`flex-1 text-xs py-1.5 text-center font-medium ${
+                            viewMode === "output"
+                              ? "text-blue-700 border-b-2 border-blue-600"
+                              : "text-gray-500 hover:text-gray-700"
+                          }`}
+                        >
+                          Output
+                        </button>
+                        <button
+                          onClick={() => {
+                            setViewMode("summary");
+                            const sid = selectedHistoryId || lastSessionPerWorkspace[ws.id];
+                            if (sid) handleFetchSummary(sid);
+                          }}
+                          className={`flex-1 text-xs py-1.5 text-center font-medium ${
+                            viewMode === "summary"
+                              ? "text-blue-700 border-b-2 border-blue-600"
+                              : "text-gray-500 hover:text-gray-700"
+                          }`}
+                        >
+                          Summary
+                        </button>
+                      </div>
+                    )}
+
+                    {/* Summary view */}
+                    {viewMode === "summary" && !isRunning && (() => {
+                      const sid = selectedHistoryId || lastSessionPerWorkspace[ws.id];
+                      const summary = sid === summarySessionId ? summaryData : null;
+                      const sessionStats = selectedHistoryId
+                        ? completedSessions.find(s => s.id === selectedHistoryId)?.stats ?? null
+                        : completedSessions.find(s => s.id === lastSessionPerWorkspace[ws.id])?.stats ?? null;
+                      return (
+                        <div className="border border-gray-200 rounded p-3 space-y-3 text-sm max-h-96 overflow-y-auto">
+                          {summaryLoading && (
+                            <div className="text-gray-500 text-xs animate-pulse">Loading summary...</div>
+                          )}
+                          {!summaryLoading && !summary && (
+                            <div className="text-gray-400 text-xs">No summary available. Click Summary again to load.</div>
+                          )}
+                          {summary && (
+                            <>
+                              {/* Overview */}
+                              <div>
+                                <h4 className="text-xs font-semibold text-gray-700 uppercase tracking-wide mb-1">Overview</h4>
+                                <p className="text-gray-600 text-xs">{summary.overview}</p>
+                                {summary.model && (
+                                  <p className="text-gray-400 text-[10px] mt-0.5">Model: {summary.model}</p>
+                                )}
+                              </div>
+
+                              {/* Stats row */}
+                              {summary.stats && (() => {
+                                const s = parseStats(JSON.stringify(summary.stats));
+                                if (!s) return null;
+                                return (
+                                  <div className="flex items-center gap-3 text-[10px] text-gray-400">
+                                    {s.inputTokens > 0 && <span>{formatTokenCount(s.inputTokens)} in / {formatTokenCount(s.outputTokens)} out</span>}
+                                    {s.totalCostUsd > 0 && <span>${s.totalCostUsd.toFixed(2)}</span>}
+                                    {s.durationMs > 0 && <span>{(s.durationMs / 1000).toFixed(0)}s</span>}
+                                    {s.numTurns > 1 && <span>{s.numTurns} turns</span>}
+                                    {summary.duration && <span>({summary.duration})</span>}
+                                  </div>
+                                );
+                              })()}
+
+                              {/* Files read */}
+                              {summary.filesRead.length > 0 && (
+                                <div>
+                                  <h4 className="text-xs font-semibold text-gray-700 uppercase tracking-wide mb-1">Files Read ({summary.filesRead.length})</h4>
+                                  <ul className="text-xs text-gray-500 space-y-0.5">
+                                    {summary.filesRead.slice(0, 20).map((f) => (
+                                      <li key={f} className="font-mono text-[11px] truncate">{f}</li>
+                                    ))}
+                                    {summary.filesRead.length > 20 && (
+                                      <li className="text-gray-400">...and {summary.filesRead.length - 20} more</li>
+                                    )}
+                                  </ul>
+                                </div>
+                              )}
+
+                              {/* Files edited */}
+                              {summary.filesEdited.length > 0 && (
+                                <div>
+                                  <h4 className="text-xs font-semibold text-gray-700 uppercase tracking-wide mb-1">Files Edited ({summary.filesEdited.length})</h4>
+                                  <ul className="text-xs text-gray-500 space-y-0.5">
+                                    {summary.filesEdited.map((f) => (
+                                      <li key={f} className="font-mono text-[11px] truncate">{f}</li>
+                                    ))}
+                                  </ul>
+                                </div>
+                              )}
+
+                              {/* Files written */}
+                              {summary.filesWritten.length > 0 && (
+                                <div>
+                                  <h4 className="text-xs font-semibold text-gray-700 uppercase tracking-wide mb-1">Files Written ({summary.filesWritten.length})</h4>
+                                  <ul className="text-xs text-gray-500 space-y-0.5">
+                                    {summary.filesWritten.map((f) => (
+                                      <li key={f} className="font-mono text-[11px] truncate">{f}</li>
+                                    ))}
+                                  </ul>
+                                </div>
+                              )}
+
+                              {/* Commands run */}
+                              {summary.commandsRun.length > 0 && (
+                                <div>
+                                  <h4 className="text-xs font-semibold text-gray-700 uppercase tracking-wide mb-1">Commands ({summary.commandsRun.length})</h4>
+                                  <ul className="text-xs text-gray-500 space-y-0.5">
+                                    {summary.commandsRun.slice(0, 15).map((cmd, i) => (
+                                      <li key={i} className="font-mono text-[11px] truncate">{cmd}</li>
+                                    ))}
+                                    {summary.commandsRun.length > 15 && (
+                                      <li className="text-gray-400">...and {summary.commandsRun.length - 15} more</li>
+                                    )}
+                                  </ul>
+                                </div>
+                              )}
+
+                              {/* Key excerpts */}
+                              {summary.keyExcerpts.length > 0 && (
+                                <div>
+                                  <h4 className="text-xs font-semibold text-gray-700 uppercase tracking-wide mb-1">Agent Excerpts</h4>
+                                  <div className="space-y-1.5">
+                                    {summary.keyExcerpts.slice(0, 5).map((excerpt, i) => (
+                                      <div key={i} className="text-xs text-gray-600 bg-gray-50 rounded p-2 whitespace-pre-wrap">
+                                        {excerpt}
+                                      </div>
+                                    ))}
+                                    {summary.keyExcerpts.length > 5 && (
+                                      <p className="text-gray-400 text-[10px]">...and {summary.keyExcerpts.length - 5} more excerpts</p>
+                                    )}
+                                  </div>
+                                </div>
+                              )}
+
+                              {/* Errors */}
+                              {summary.errors.length > 0 && (
+                                <div>
+                                  <h4 className="text-xs font-semibold text-red-700 uppercase tracking-wide mb-1">Errors ({summary.errors.length})</h4>
+                                  <ul className="text-xs text-red-600 space-y-0.5">
+                                    {summary.errors.slice(0, 5).map((err, i) => (
+                                      <li key={i} className="font-mono text-[11px] break-all">{err}</li>
+                                    ))}
+                                  </ul>
+                                </div>
+                              )}
+                            </>
+                          )}
+                        </div>
+                      );
+                    })()}
+
+                    {/* TerminalView — show history output or live/completed output (only when viewMode is "output" or agent is running) */}
+                    {(viewMode === "output" || isRunning) && (selectedHistoryId ? historyMessages : (activeSession || completedMessages.length > 0)) ? (
                       <TerminalView
                         messages={selectedHistoryId ? historyMessages : (activeSession ? messages : completedMessages)}
                         connectionState={selectedHistoryId ? "closed" : (activeSession ? wsState : "closed")}
@@ -1115,7 +1298,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                     ) : null}
 
                     {/* Session stats summary — shown below terminal for completed sessions */}
-                    {!isRunning && (
+                    {!isRunning && viewMode === "output" && (
                       <SessionStatsSummary
                         stats={selectedHistoryId
                           ? completedSessions.find(s => s.id === selectedHistoryId)?.stats ?? null
@@ -1127,7 +1310,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                     {/* "Back to latest" link when viewing history */}
                     {selectedHistoryId && (
                       <button
-                        onClick={() => { setSelectedHistoryId(null); setHistoryMessages([]); }}
+                        onClick={() => { setSelectedHistoryId(null); setHistoryMessages([]); setViewMode("output"); }}
                         className="text-xs text-blue-600 hover:text-blue-700"
                       >
                         &larr; Back to latest session

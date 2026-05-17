@@ -188,6 +188,30 @@ export interface AgentOutputMessage {
   exitCode?: number | null;
 }
 
+export interface SessionSummaryAction {
+  type: string;
+  files?: string[];
+  commands?: string[];
+}
+
+export interface SessionSummaryResponse {
+  sessionId: string;
+  duration: string | null;
+  stats: Record<string, unknown> | null;
+  status: string;
+  startedAt: string;
+  endedAt: string | null;
+  overview: string;
+  actions: SessionSummaryAction[];
+  keyExcerpts: string[];
+  errors: string[];
+  filesRead: string[];
+  filesEdited: string[];
+  filesWritten: string[];
+  commandsRun: string[];
+  model: string;
+}
+
 import type { DependencyType } from "../schema/index.js";
 
 export interface DependencyItem {
