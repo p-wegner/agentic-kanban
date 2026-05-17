@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { IssueWithStatus, UpdateIssueRequest, DependencyInfo } from "@agentic-kanban/shared";
 import { apiFetch } from "../lib/api.js";
 import { showToast } from "./Toast.js";
@@ -15,6 +15,7 @@ interface IssueDetailPanelProps {
   onDelete: (id: string) => Promise<void>;
   onClose: () => void;
   onManageWorkspaces: (issue: IssueWithStatus, workspaceId?: string) => void;
+  onStartWorkspace?: (issue: IssueWithStatus) => void;
   onIssueUpdate: (issue: IssueWithStatus) => void;
   onNavigateToIssue?: (issueId: string) => void;
 }
@@ -49,6 +50,7 @@ export function IssueDetailPanel({
   onDelete,
   onClose,
   onManageWorkspaces,
+  onStartWorkspace,
   onIssueUpdate,
   onNavigateToIssue,
 }: IssueDetailPanelProps) {
@@ -57,6 +59,7 @@ export function IssueDetailPanel({
   const [description, setDescription] = useState(issue.description ?? "");
   const [priority, setPriority] = useState(issue.priority);
   const [saving, setSaving] = useState(false);
+  const depTypeRef = useRef<HTMLSelectElement>(null);
   const [enhancing, setEnhancing] = useState(false);
   const [preEnhanceSnapshot, setPreEnhanceSnapshot] = useState<{ title: string; description: string } | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -341,12 +344,25 @@ export function IssueDetailPanel({
                   )}
                 </button>
               ) : (
-                <button
-                  onClick={() => onManageWorkspaces(issue)}
-                  className="text-sm text-blue-600 hover:text-blue-700"
-                >
-                  {workspaceCount === 0 ? "New Workspace" : "View Workspaces"}
-                </button>
+                <div className="flex items-center gap-2">
+                  {onStartWorkspace && (
+                    <button
+                      onClick={() => onStartWorkspace(issue)}
+                      className="flex items-center gap-1.5 text-sm font-medium px-3 py-1.5 rounded bg-blue-600 text-white hover:bg-blue-700 transition-colors"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                      </svg>
+                      Start Workspace
+                    </button>
+                  )}
+                  <button
+                    onClick={() => onManageWorkspaces(issue)}
+                    className="text-sm text-blue-600 hover:text-blue-700"
+                  >
+                    {workspaceCount === 0 ? "Custom options..." : "View Workspaces"}
+                  </button>
+                </div>
               )}
             </div>
           )}
@@ -560,8 +576,7 @@ export function IssueDetailPanel({
                       onChange={async (e) => {
                         const depId = e.target.value;
                         if (!depId) return;
-                        const typeSelect = document.getElementById("dep-type-select") as HTMLSelectElement;
-                        const depType = typeSelect?.value || "depends_on";
+                        const depType = depTypeRef.current?.value || "depends_on";
                         try {
                           await apiFetch(`/api/issues/${issue.id}/dependencies`, {
                             method: "POST",
@@ -584,7 +599,7 @@ export function IssueDetailPanel({
                       ))}
                     </select>
                     <select
-                      id="dep-type-select"
+                      ref={depTypeRef}
                       className="text-xs border border-gray-300 rounded px-1 py-0.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
                       defaultValue="depends_on"
                     >
