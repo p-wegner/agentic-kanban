@@ -163,6 +163,7 @@ export function registerGetBoardStatus(server: McpServer) {
             } : null,
             sessionStats,
             diffStats: null,
+            conflicts: null,
             lastActivity: null,
             lastOutput: [],
           };
