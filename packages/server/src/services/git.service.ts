@@ -243,7 +243,12 @@ export async function getDiffShortstat(
   baseBranch: string,
 ): Promise<{ filesChanged: number; insertions: number; deletions: number }> {
   try {
-    const output = await execGit(["diff", "--shortstat", `${baseBranch}...HEAD`], worktreePath);
+    // For direct workspaces (baseBranch="HEAD"), compare working tree against HEAD
+    // For feature branches, use three-dot to show changes since branching
+    const diffArgs = baseBranch === "HEAD"
+      ? ["diff", "--shortstat", "HEAD"]
+      : ["diff", "--shortstat", `${baseBranch}...HEAD`];
+    const output = await execGit(diffArgs, worktreePath);
 
     let filesChanged = 0;
     let insertions = 0;
