@@ -161,6 +161,7 @@ export interface DiffResponse {
     deletions: number;
   };
   comments: DiffComment[];
+  conflicts?: { hasConflicts: boolean; conflictingFiles: string[] } | null;
 }
 
 export interface DiffComment {
