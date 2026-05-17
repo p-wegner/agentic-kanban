@@ -4,6 +4,8 @@ import { workspaces, sessions, issues, projects, preferences, diffComments, proj
 import { eq, and } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import * as gitService from "../services/git.service.js";
+import { killProcessesInDir } from "../services/process-cleanup.js";
+import { runScript } from "../services/script-runner.js";
 import type { SessionManager } from "../services/session.manager.js";
 import type { BoardEvents } from "../services/board-events.js";
 import type { Database } from "../db/index.js";
@@ -387,6 +389,27 @@ export function createWorkspaceActionsRoute(
     const workspace = rows[0];
 
     try {
+      // Resolve project for teardown script
+      const issueRows = await database.select({ projectId: issues.projectId }).from(issues).where(eq(issues.id, workspace.issueId)).limit(1);
+      const projectRows = issueRows.length > 0
+        ? await database.select().from(projects).where(eq(projects.id, issueRows[0].projectId)).limit(1)
+        : [];
+      const project = projectRows[0] ?? null;
+
+      // Pre-merge cleanup: kill processes and run teardown script (best effort)
+      if (workspace.workingDir) {
+        try {
+          const killed = await killProcessesInDir(workspace.workingDir);
+          if (killed > 0) console.log(`[workspace-actions] killed ${killed} process(es) in ${workspace.workingDir}`);
+        } catch { /* ignore */ }
+        if (project?.teardownScript) {
+          try {
+            const r = await runScript(project.teardownScript, workspace.workingDir, `teardown:${id}`);
+            console.log(`[workspace-actions] teardown script: ${r.ok ? "ok" : "failed"} — ${r.output.slice(0, 100)}`);
+          } catch { /* ignore */ }
+        }
+      }
+
       // Direct workspace: no merge needed, just close
       if (workspace.isDirect) {
         const now = new Date().toISOString();
@@ -447,6 +470,14 @@ export function createWorkspaceActionsRoute(
         } catch {
           // Best effort — worktree may already be removed
         }
+      }
+
+      // Delete the merged branch (best effort)
+      try {
+        await gitService.deleteBranch(repoPath, workspace.branch);
+        console.log(`[workspace-actions] deleted branch ${workspace.branch}`);
+      } catch {
+        // Branch may not exist or may not be fully merged — ignore
       }
 
       const now = new Date().toISOString();

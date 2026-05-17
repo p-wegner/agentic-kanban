@@ -100,6 +100,7 @@ export function createProjectsRoute(database: Database = db) {
     if (body.color !== undefined) updates.color = body.color;
     if (body.setupScript !== undefined) updates.setupScript = body.setupScript || null;
     if (body.setupBlocking !== undefined) updates.setupBlocking = !!body.setupBlocking;
+    if (body.teardownScript !== undefined) updates.teardownScript = body.teardownScript || null;
 
     await database.update(projects).set(updates).where(eq(projects.id, id));
     return c.json({ id });
