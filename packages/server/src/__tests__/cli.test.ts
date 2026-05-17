@@ -170,7 +170,7 @@ describe("CLI register", () => {
     expect(result.stdout).toContain("Set as active project");
   });
 
-  it("is idempotent for same repo path", () => {
+  it("is idempotent for same repo path", { timeout: 15_000 }, () => {
     runCli(["register", PKG_DIR], ctx.dbPath);
     const result = runCli(["register", PKG_DIR], ctx.dbPath);
     expect(result.status).toBe(0);

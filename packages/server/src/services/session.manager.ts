@@ -372,13 +372,13 @@ function createSessionManager(
           }
 
           const endNow = new Date().toISOString();
+          const exitCode = event.exitCode ?? null;
           db.update(sessions)
-            .set({ status: "completed", endedAt: endNow, exitCode: String(event.exitCode ?? 0) })
+            .set({ status: "completed", endedAt: endNow, exitCode: String(exitCode ?? 0) })
             .where(eq(sessions.id, sessionId))
-            .then(() => {
-              options?.onSessionExit?.(workspaceId, sessionId, event.exitCode ?? null);
-            })
             .catch((err) => console.error("Failed to update session:", err));
+          // Always fire the workflow callback — don't gate it on the DB update
+          options?.onSessionExit?.(workspaceId, sessionId, exitCode);
         }
       // When resumeWithNewModel is true, omit --resume so the new profile/provider is used instead
       }, resumeWithNewModel ? undefined : claudeSessionId, agentCommand, claudeProfile, multiTurn, permissionPromptTool, planMode);
