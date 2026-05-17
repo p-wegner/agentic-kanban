@@ -223,7 +223,7 @@ export function createWorkspaceActionsRoute(
       const sessionId = await getSessionManager().startSession(id, body.prompt, agentCommand, agentArgs, body.resumeFromId, claudeProfile, body.multiTurn !== false, undefined, planMode, resumeWithNewModel);
 
       const now = new Date().toISOString();
-      await database.update(workspaces).set({ status: "active", updatedAt: now }).where(eq(workspaces.id, id));
+      await database.update(workspaces).set({ status: "active", claudeProfile: claudeProfile ?? null, agentCommand: agentCommand ?? null, updatedAt: now }).where(eq(workspaces.id, id));
 
       // Broadcast board event
       const projectId = await resolveProjectId(id, database);
@@ -294,6 +294,8 @@ export function createWorkspaceActionsRoute(
           planMode,
           resumeWithNewModel,
         );
+        const now = new Date().toISOString();
+        await database.update(workspaces).set({ status: "active", claudeProfile: claudeProfile ?? null, agentCommand: agentCommand ?? null, updatedAt: now }).where(eq(workspaces.id, id));
         const projectId = await resolveProjectId(id, database);
         if (projectId) options?.boardEvents?.broadcast(projectId, "session_launched");
         return c.json({ sessionId, resumed: true }, 201);
