@@ -194,7 +194,7 @@ Each project maps 1:1 to a git repo. The CLI reads git info automatically:
 The registered project gets 5 default statuses (Todo, In Progress, In Review, Done, Cancelled) and is set as the active project. Registering additional projects adds a dropdown switcher in the header.
 
 ## Workspace Flow
-Workspaces are created in a single step: `POST /api/workspaces` accepts `issueId`, `branch`, optional `baseBranch` (defaults to project's `defaultBranch`), and optional `skillId`. The server creates the DB record, creates the git worktree, and auto-launches the agent with the issue title + description as the prompt. If `skillId` is provided, the skill's prompt is prepended to the agent's context. The response includes `sessionId` so the client can immediately show terminal output.
+Workspaces are created in a single step: `POST /api/workspaces` accepts `issueId`, `branch`, optional `baseBranch` (defaults to project's `defaultBranch`), and optional `skillId`. The server creates the DB record, creates the git worktree, and auto-launches the agent with the issue title + description as the prompt. If `skillId` is provided, the skill is written as a SKILL.md file in the worktree for the agent to discover on demand. The response includes `sessionId` so the client can immediately show terminal output.
 
 - `POST /api/workspaces` — one-step: DB record + worktree + auto-launch agent
 - `POST /api/workspaces/:id/setup` — legacy no-op if worktree already exists (backward compat)
@@ -209,7 +209,7 @@ The `baseBranch` column on the workspaces table tracks which branch the worktree
 Register repo (`pnpm cli -- register <path>`) → Create issue → Click "New Workspace" (one step: branch + worktree + agent launch) → View diff → Merge
 
 ## Agent Skills
-Agent skills are prompt templates stored in the `agent_skills` DB table. When a workspace is created with a `skillId`, the skill's prompt is prepended to the agent's context (before the issue title/description). Skills have a `model` override field (e.g., "haiku" for quick tasks). Skills can be **global** (available to all projects) or **project-scoped** (only available to a specific project via `project_id`).
+Agent skills are prompt templates stored in the `agent_skills` DB table. When a workspace is created with a `skillId`, the skill is written as a `.claude/skills/<name>/SKILL.md` file in the worktree — the agent discovers and invokes it on demand (progressive disclosure), rather than having the full prompt injected upfront. Skills have a `model` override field (e.g., "haiku" for quick tasks). Skills can be **global** (available to all projects) or **project-scoped** (only available to a specific project via `project_id`).
 
 - **Built-in skills**: Seeded on `pnpm db:seed` with `isBuiltin: true`. Cannot be modified or deleted via API. Four defaults: `board-navigator` (comprehensive board interaction guide), `code-review` (default AI code review prompt — customizable per project), `dependency-analyzer` (analyze issue dependencies), `ticket-enhancer` (improve ticket clarity).
 - **Custom skills**: Created via API, CLI, or MCP tools. Can be edited and deleted. Support optional `projectId` to scope to a project.
