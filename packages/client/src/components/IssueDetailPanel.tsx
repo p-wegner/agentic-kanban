@@ -52,6 +52,7 @@ export function IssueDetailPanel({
   const [issueTags, setIssueTags] = useState<{ id: string; name: string; color: string | null }[]>([]);
   const [allTags, setAllTags] = useState<{ id: string; name: string; color: string | null }[]>([]);
   const [dependencies, setDependencies] = useState<DependencyInfo>({ dependencies: [] });
+  const [analyzingDeps, setAnalyzingDeps] = useState(false);
   const [availableIssues, setAvailableIssues] = useState<IssueWithStatus[]>([]);
 
   // Track unsaved changes for warning
@@ -141,6 +142,29 @@ export function IssueDetailPanel({
     setTitle(preEnhanceSnapshot.title);
     setDescription(preEnhanceSnapshot.description);
     setPreEnhanceSnapshot(null);
+  }
+
+  async function handleAnalyzeDeps() {
+    if (analyzingDeps) return;
+    setAnalyzingDeps(true);
+    try {
+      const result = await apiFetch<{ dependencies: Array<{ id: string; type: string; issueId: string; reason: string }>; total: number }>("/api/issues/analyze-dependencies", {
+        method: "POST",
+        body: JSON.stringify({ issueId: issue.id, projectId: issue.projectId }),
+      });
+      // Reload dependencies to show newly created ones
+      const deps = await apiFetch<DependencyInfo>(`/api/issues/${issue.id}/dependencies`);
+      setDependencies(deps);
+      if (result.total > 0) {
+        showToast(`Added ${result.total} dependenc${result.total === 1 ? "y" : "ies"}`, "success");
+      } else {
+        showToast("No new dependencies found");
+      }
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Dependency analysis failed", "error");
+    } finally {
+      setAnalyzingDeps(false);
+    }
   }
 
   async function handleSave() {
@@ -307,27 +331,49 @@ export function IssueDetailPanel({
                 Workspaces
               </label>
               {issue.workspaceSummary?.main ? (
-                <button
-                  onClick={() => onManageWorkspaces(issue, issue.workspaceSummary!.main!.id)}
-                  className="w-full flex items-center gap-2 p-2 rounded border border-gray-200 hover:border-blue-300 hover:bg-blue-50 transition-colors text-left"
-                >
-                  <span className={`inline-block w-2 h-2 rounded-full shrink-0 ${
-                    issue.workspaceSummary.main.status === "active" ? "bg-green-500" :
-                    issue.workspaceSummary.main.status === "idle" ? "bg-amber-500" :
-                    "bg-gray-400"
-                  }`} />
-                  <span className="text-sm font-mono text-gray-700 truncate">{issue.workspaceSummary.main.branch}</span>
-                  <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${
-                    issue.workspaceSummary.main.status === "active" ? "bg-green-100 text-green-700" :
-                    issue.workspaceSummary.main.status === "idle" ? "bg-amber-100 text-amber-700" :
-                    "bg-gray-100 text-gray-500"
-                  }`}>
-                    {issue.workspaceSummary.main.status}
-                  </span>
-                  {issue.workspaceSummary!.total > 1 && (
-                    <span className="text-xs text-gray-400 ml-auto">+{issue.workspaceSummary!.total - 1}</span>
+                <div className="flex flex-col gap-1">
+                  <button
+                    onClick={() => onManageWorkspaces(issue, issue.workspaceSummary!.main!.id)}
+                    className={`w-full flex items-center gap-2 p-2 rounded border transition-colors text-left ${
+                      issue.workspaceSummary.main.conflicts?.hasConflicts
+                        ? "border-red-200 hover:border-red-300 hover:bg-red-50"
+                        : "border-gray-200 hover:border-blue-300 hover:bg-blue-50"
+                    }`}
+                  >
+                    <span className={`inline-block w-2 h-2 rounded-full shrink-0 ${
+                      issue.workspaceSummary.main.status === "active" ? "bg-green-500" :
+                      issue.workspaceSummary.main.status === "idle" ? "bg-amber-500" :
+                      "bg-gray-400"
+                    }`} />
+                    <span className="text-sm font-mono text-gray-700 truncate">{issue.workspaceSummary.main.branch}</span>
+                    <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${
+                      issue.workspaceSummary.main.status === "active" ? "bg-green-100 text-green-700" :
+                      issue.workspaceSummary.main.status === "idle" ? "bg-amber-100 text-amber-700" :
+                      "bg-gray-100 text-gray-500"
+                    }`}>
+                      {issue.workspaceSummary.main.status}
+                    </span>
+                    {issue.workspaceSummary.main.conflicts?.hasConflicts && (
+                      <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-red-100 text-red-700 text-[10px] font-medium shrink-0">
+                        {issue.workspaceSummary.main.conflicts.conflictingFiles.length} conflict{issue.workspaceSummary.main.conflicts.conflictingFiles.length !== 1 ? "s" : ""}
+                      </span>
+                    )}
+                    {issue.workspaceSummary!.total > 1 && (
+                      <span className="text-xs text-gray-400 ml-auto">+{issue.workspaceSummary!.total - 1}</span>
+                    )}
+                  </button>
+                  {issue.workspaceSummary.main.conflicts?.hasConflicts && (
+                    <button
+                      onClick={() => onManageWorkspaces(issue, issue.workspaceSummary!.main!.id)}
+                      className="flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded bg-red-600 text-white hover:bg-red-700 transition-colors self-start"
+                    >
+                      <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                      </svg>
+                      Fix with AI
+                    </button>
                   )}
-                </button>
+                </div>
               ) : (
                 <div className="flex items-center gap-2">
                   {onStartWorkspace && (
@@ -420,15 +466,18 @@ export function IssueDetailPanel({
                   Dependencies
                 </label>
                 <button
-                  onClick={() => {
-                    const prompt = `Analyze issue #${issue.issueNumber ?? ""} "${issue.title}" and its dependencies to other open issues. Look at the description, title, and existing dependencies. For each dependency you identify, use the add_dependency MCP tool or the CLI to create it. Only create dependencies that are genuinely useful for scheduling parallel work. Use types: depends_on (prerequisite), blocked_by (inverse), related_to (related work), duplicates (duplicate issue), parent_of (epic/subtask), child_of (subtask of epic). After creating dependencies, list what you found and added.`;
-                    const encoded = encodeURIComponent(prompt);
-                    window.open(`claude://chat?model=claude-3-5-haiku-2024-10-22&prompt=${encoded}`, "_blank");
-                  }}
-                  className="text-[10px] text-purple-600 hover:text-purple-700 font-medium px-1.5 py-0.5 rounded border border-purple-200 hover:bg-purple-50"
-                  title="Launch a Claude session to analyze and create dependencies"
+                  onClick={handleAnalyzeDeps}
+                  disabled={analyzingDeps}
+                  className="text-[10px] text-purple-600 hover:text-purple-700 font-medium px-1.5 py-0.5 rounded border border-purple-200 hover:bg-purple-50 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
+                  title="Analyze dependencies with AI"
                 >
-                  Analyze Deps
+                  {analyzingDeps && (
+                    <svg className="animate-spin h-3 w-3" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+                    </svg>
+                  )}
+                  {analyzingDeps ? "Analyzing..." : "Analyze Deps"}
                 </button>
               </div>
               {dependencies.dependencies.length > 0 ? (
