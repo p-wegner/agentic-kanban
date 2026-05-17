@@ -488,8 +488,10 @@ function createSessionManager(
     turnStates.delete(sessionId);
     sessionSubagents.delete(sessionId);
     sessionTasks.delete(sessionId);
+    sessionHasTodoWrite.delete(sessionId);
     sessionToolUses.delete(sessionId);
     sessionModels.delete(sessionId);
+    sessionContextTokens.delete(sessionId);
     sessionAgentToolUseIds.delete(sessionId);
     const now = new Date().toISOString();
     await db.update(sessions)
