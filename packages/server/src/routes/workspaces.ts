@@ -159,6 +159,10 @@ export function createWorkspacesRoute(
         ? (baseArgs ? baseArgs + " --dangerously-skip-permissions" : "--dangerously-skip-permissions")
         : (baseArgs || undefined);
       claudeProfile = prefMap.get("claude_profile") || undefined;
+      const permissionPromptToolPref = prefMap.get("permission_prompt_tool");
+      const permissionPromptTool = permissionPromptToolPref === "true"
+        ? "mcp__agentic-kanban__approve_tool_use"
+        : (permissionPromptToolPref && permissionPromptToolPref !== "false" ? permissionPromptToolPref : undefined);
 
       // Insert DB record with workingDir and baseBranch
       await database.insert(workspaces).values({
@@ -199,7 +203,7 @@ export function createWorkspacesRoute(
       if (getSessionManager) {
         const truncatedPrompt = agentPrompt.length > 80 ? agentPrompt.slice(0, 80) + "..." : agentPrompt;
         console.log(`[workspaces] auto-launch: workspaceId=${id} branch=${branch} isDirect=${isDirect} prompt="${truncatedPrompt}" agentCommand=${agentCommand ?? "default"}`);
-        sessionId = await getSessionManager().startSession(id, agentPrompt, agentCommand, agentArgs, undefined, claudeProfile, undefined, undefined, planMode);
+        sessionId = await getSessionManager().startSession(id, agentPrompt, agentCommand, agentArgs, undefined, claudeProfile, undefined, permissionPromptTool, planMode);
       }
 
       // Broadcast board event

@@ -40,7 +40,25 @@ interface SessionTodosEvent {
   todos: TodoItem[];
 }
 
-type BoardWsEvent = BoardChangedEvent | SessionActivityEvent | SessionStatsEvent | SessionTodosEvent;
+export interface ApprovalRequest {
+  id: string;
+  sessionId: string;
+  toolName: string;
+  toolInput: Record<string, unknown>;
+  workspaceId?: string;
+}
+
+interface ApprovalRequestedEvent {
+  type: "approval_requested";
+  projectId: string;
+  id: string;
+  sessionId: string;
+  toolName: string;
+  toolInput: Record<string, unknown>;
+  workspaceId?: string;
+}
+
+type BoardWsEvent = BoardChangedEvent | SessionActivityEvent | SessionStatsEvent | SessionTodosEvent | ApprovalRequestedEvent;
 
 export interface LiveSessionStats {
   model: string;
@@ -55,6 +73,7 @@ export function useBoardEvents(
   onSessionActivity?: (issueId: string, activity: string) => void,
   onSessionStats?: (issueId: string, stats: LiveSessionStats) => void,
   onSessionTodos?: (issueId: string, todos: TodoItem[]) => void,
+  onApprovalRequested?: (req: ApprovalRequest) => void,
 ) {
   const wsRef = useRef<WebSocket | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -62,10 +81,12 @@ export function useBoardEvents(
   const onSessionActivityRef = useRef(onSessionActivity);
   const onSessionStatsRef = useRef(onSessionStats);
   const onSessionTodosRef = useRef(onSessionTodos);
+  const onApprovalRequestedRef = useRef(onApprovalRequested);
   onBoardChangeRef.current = onBoardChange;
   onSessionActivityRef.current = onSessionActivity;
   onSessionStatsRef.current = onSessionStats;
   onSessionTodosRef.current = onSessionTodos;
+  onApprovalRequestedRef.current = onApprovalRequested;
 
   const connect = useCallback(() => {
     if (!projectId) return;
@@ -93,6 +114,8 @@ export function useBoardEvents(
           onSessionStatsRef.current?.(msg.issueId, { model: msg.model, contextTokens: msg.contextTokens, toolUses: msg.toolUses ?? 0, subagentCount: msg.subagentCount ?? 0 });
         } else if (msg.type === "session_todos") {
           onSessionTodosRef.current?.(msg.issueId, msg.todos);
+        } else if (msg.type === "approval_requested") {
+          onApprovalRequestedRef.current?.({ id: msg.id, sessionId: msg.sessionId, toolName: msg.toolName, toolInput: msg.toolInput, workspaceId: msg.workspaceId });
         }
       } catch {
         // Ignore malformed messages

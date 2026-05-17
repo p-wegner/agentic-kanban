@@ -38,7 +38,17 @@ interface SessionTodosMessage {
   todos: TodoItem[];
 }
 
-type BoardWsMessage = BoardEventMessage | SessionActivityMessage | SessionStatsMessage | SessionTodosMessage;
+export interface ApprovalRequestMessage {
+  type: "approval_requested";
+  projectId: string;
+  id: string;
+  sessionId: string;
+  toolName: string;
+  toolInput: unknown;
+  workspaceId?: string;
+}
+
+type BoardWsMessage = BoardEventMessage | SessionActivityMessage | SessionStatsMessage | SessionTodosMessage | ApprovalRequestMessage;
 
 interface BoardEventSubscriber {
   ws: WSContext;
@@ -104,6 +114,18 @@ function createBoardEvents(
     }
   }
 
+  function broadcastApprovalRequest(projectId: string, data: Omit<ApprovalRequestMessage, "type" | "projectId">) {
+    const subs = subscribers.get(projectId);
+    if (!subs) return;
+    const message: ApprovalRequestMessage = { type: "approval_requested", projectId, ...data };
+    const payload = JSON.stringify(message);
+    for (const sub of subs.values()) {
+      if (sub.ws.readyState === 1) {
+        sub.ws.send(payload);
+      }
+    }
+  }
+
   function broadcastTodos(projectId: string, issueId: string, todos: TodoItem[]) {
     const subs = subscribers.get(projectId);
     if (!subs) return;
@@ -130,7 +152,7 @@ function createBoardEvents(
     });
   }
 
-  return { subscribe, unsubscribe, broadcast, broadcastActivity, broadcastLiveStats, broadcastTodos, wsRoute };
+  return { subscribe, unsubscribe, broadcast, broadcastActivity, broadcastLiveStats, broadcastTodos, broadcastApprovalRequest, wsRoute };
 }
 
 export { createBoardEvents };
