@@ -6,7 +6,7 @@ import { randomUUID } from "node:crypto";
 import { execFile, execSync } from "node:child_process";
 import { existsSync, readdirSync } from "node:fs";
 import { detectRepoInfo } from "../services/git-info.service.js";
-import { listBranches, listWorktrees, getDiffShortstat, removeWorktree } from "../services/git.service.js";
+import { listBranches, listWorktrees, getDiffShortstat, removeWorktree, detectConflicts } from "../services/git.service.js";
 import type { Database } from "../db/index.js";
 import { sep, join } from "node:path";
 import { homedir } from "node:os";
@@ -456,7 +456,7 @@ Detected files: ${detected.length > 0 ? detected.join(", ") : "none"}`;
 
     // Fetch workspace summaries grouped by issueId
     const issueIds = projectIssues.map((i) => i.id);
-    const workspaceSummaryMap = new Map<string, { total: number; active: number; idle: number; closed: number; branches: string[]; main?: { id: string; branch: string; status: "active" | "reviewing" | "idle" | "closed"; claudeProfile: string | null; agentCommand: string | null; diffStats?: { filesChanged: number; insertions: number; deletions: number } | null } }>();
+    const workspaceSummaryMap = new Map<string, { total: number; active: number; idle: number; closed: number; branches: string[]; main?: { id: string; branch: string; status: "active" | "reviewing" | "idle" | "closed"; claudeProfile: string | null; agentCommand: string | null; diffStats?: { filesChanged: number; insertions: number; deletions: number } | null; conflicts?: { hasConflicts: boolean; conflictingFiles: string[] } | null } }>();
 
     if (issueIds.length > 0) {
       const wsRows = await database
@@ -542,6 +542,14 @@ Detected files: ${detected.length > 0 ? detected.join(", ") : "none"}`;
                 })
                 .catch(() => {})
             );
+            // Conflict detection for non-direct idle workspaces
+            if (!mainWs.isDirect && mainWs.status === "idle") {
+              diffStatsPromises.push(
+                detectConflicts(mainWs.workingDir, mainWs.baseBranch || defaultBranch)
+                  .then(result => { mainRef.conflicts = result; })
+                  .catch(() => {})
+              );
+            }
           }
         }
       }
