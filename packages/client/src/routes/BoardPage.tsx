@@ -15,7 +15,8 @@ import { suggestBranchName } from "../lib/branch.js";
 import { CommandPalette } from "../components/CommandPalette.js";
 import { ShortcutHelp } from "../components/ShortcutHelp.js";
 import { apiFetch } from "../lib/api.js";
-import { useBoardEvents, type LiveSessionStats, type TodoItem } from "../lib/useBoardEvents.js";
+import { useBoardEvents, type LiveSessionStats, type TodoItem, type ApprovalRequest } from "../lib/useBoardEvents.js";
+import { ApprovalDialog } from "../components/ApprovalDialog.js";
 import { sendDesktopNotification } from "../lib/desktop.js";
 import { registerAction } from "../lib/actions.js";
 import type {
@@ -59,6 +60,7 @@ export function BoardPage() {
   const [sessionActivity, setSessionActivity] = useState<Record<string, string>>({});
   const [liveStats, setLiveStats] = useState<Record<string, LiveSessionStats>>({});
   const [sessionTodos, setSessionTodos] = useState<Record<string, TodoItem[]>>({});
+  const [approvalRequests, setApprovalRequests] = useState<ApprovalRequest[]>([]);
   const pendingBoardRefreshRef = useRef(false);
   const [expandedCreatePanel, setExpandedCreatePanel] = useState<{ statusId: string; statusName: string; state: Partial<CreateIssueFormState> } | null>(null);
 
@@ -126,6 +128,8 @@ export function BoardPage() {
     });
   }, []), useCallback((issueId: string, todos: TodoItem[]) => {
     setSessionTodos((prev) => ({ ...prev, [issueId]: todos }));
+  }, []), useCallback((req: ApprovalRequest) => {
+    setApprovalRequests((prev) => [...prev, req]);
   }, []));
 
   // Process pending board refresh when create form closes
@@ -701,6 +705,10 @@ export function BoardPage() {
           initialSessionId={workspaceInitial?.sessionId}
         />
       )}
+      <ApprovalDialog
+        requests={approvalRequests}
+        onResolve={(id) => setApprovalRequests((prev) => prev.filter((r) => r.id !== id))}
+      />
       <ToastContainer />
       {showSettings && (
         <SettingsPanel onClose={() => setShowSettings(false)} activeProjectId={activeProjectId} />

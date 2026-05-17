@@ -31,6 +31,7 @@ import { registerListAgentSkills } from "./tools/list-agent-skills.js";
 import { registerGetAgentSkill } from "./tools/get-agent-skill.js";
 import { registerCreateAgentSkill } from "./tools/create-agent-skill.js";
 import { registerExportAgentSkills } from "./tools/export-agent-skills.js";
+import { registerApproveToolUse } from "./tools/approve-tool-use.js";
 
 const server = new McpServer({
   name: "agentic-kanban",
@@ -67,6 +68,7 @@ registerListAgentSkills(server);
 registerGetAgentSkill(server);
 registerCreateAgentSkill(server);
 registerExportAgentSkills(server);
+registerApproveToolUse(server);
 
 async function main() {
   const transport = new StdioServerTransport();

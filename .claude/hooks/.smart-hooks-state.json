@@ -1,5 +1,7 @@
 {
   "editedFiles": [
-    "C:/the-organisation/agentic-kanban/packages/client/src/components/IssueDetailPanel.tsx"
+    "packages/server/src/routes/issues.ts",
+    "packages/client/src/components/IssueDetailPanel.tsx",
+    "C:/the-organisation/agentic-kanban/.claude/hooks/.smart-hooks-state.json"
   ]
 }
