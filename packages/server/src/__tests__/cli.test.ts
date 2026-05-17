@@ -44,6 +44,7 @@ const MIGRATION_FILES = [
   "../../../shared/drizzle/0019_workspace_skill.sql",
   "../../../shared/drizzle/0020_setup_script.sql",
   "../../../shared/drizzle/0021_project_skills.sql",
+  "../../../shared/drizzle/0022_teardown_script.sql",
 ];
 
 const DEFAULT_STATUSES = [
