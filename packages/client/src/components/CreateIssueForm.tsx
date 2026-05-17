@@ -47,19 +47,28 @@ export function CreateIssueForm({
   const [skipAutoReview, setSkipAutoReview] = useState(initialState?.skipAutoReview ?? false);
   const [submitting, setSubmitting] = useState(false);
   const [enhancing, setEnhancing] = useState(false);
+  const [preEnhanceSnapshot, setPreEnhanceSnapshot] = useState<{ title: string; description: string } | null>(null);
 
   async function handleEnhance() {
     if (!title.trim() || enhancing) return;
     setEnhancing(true);
     try {
+      setPreEnhanceSnapshot({ title, description });
       const result = await enhanceIssue(projectId, title, description);
       setTitle(result.title);
       setDescription(result.description);
     } catch {
-      // silently ignore — user keeps their original text
+      setPreEnhanceSnapshot(null);
     } finally {
       setEnhancing(false);
     }
+  }
+
+  function handleUndoEnhance() {
+    if (!preEnhanceSnapshot) return;
+    setTitle(preEnhanceSnapshot.title);
+    setDescription(preEnhanceSnapshot.description);
+    setPreEnhanceSnapshot(null);
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -188,6 +197,19 @@ export function CreateIssueForm({
           )}
           {enhancing ? "Enhancing..." : "Enhance"}
         </button>
+        {preEnhanceSnapshot && (
+          <button
+            type="button"
+            onClick={handleUndoEnhance}
+            title="Undo enhancement"
+            className="text-xs text-gray-500 px-2 py-1.5 hover:text-gray-700 flex items-center gap-1"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" />
+            </svg>
+            Undo
+          </button>
+        )}
         {onExpand && (
           <button
             type="button"
