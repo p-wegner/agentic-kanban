@@ -772,7 +772,8 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                         setQuickDropdownOpen(false);
                         setShowCreate(true);
                         if (availableSkills.length === 0) {
-                          apiFetch<{ id: string; name: string; description: string }[]>("/api/agent-skills")
+                          const url = project ? `/api/agent-skills?projectId=${project.id}` : "/api/agent-skills";
+                          apiFetch<{ id: string; name: string; description: string }[]>(url)
                             .then(setAvailableSkills)
                             .catch(() => {});
                         }

@@ -81,9 +81,9 @@ function Toggle({ checked, onChange, label, hint, disabled }: {
 }
 
 function EditSkillForm({ skill, isNew, onSave, onCancel }: {
-  skill: { id?: string; name: string; description: string; prompt: string; model: string | null };
+  skill: { id?: string; name: string; description: string; prompt: string; model: string | null; projectId?: string | null };
   isNew?: boolean;
-  onSave: (data: { name: string; description: string; prompt: string; model: string }) => void;
+  onSave: (data: { name: string; description: string; prompt: string; model: string; projectId?: string | null }) => void;
   onCancel: () => void;
 }) {
   const [name, setName] = useState(skill.name);
@@ -155,7 +155,7 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
   const [generatingScript, setGeneratingScript] = useState(false);
 
   // Skills state
-  const [skills, setSkills] = useState<{ id: string; name: string; description: string; prompt: string; model: string | null; isBuiltin: boolean }[]>([]);
+  const [skills, setSkills] = useState<{ id: string; name: string; description: string; prompt: string; model: string | null; projectId: string | null; isBuiltin: boolean }[]>([]);
   const [editingSkill, setEditingSkill] = useState<string | null>(null);
   const [newSkill, setNewSkill] = useState<{ name: string; description: string; prompt: string; model: string } | null>(null);
 
@@ -165,7 +165,7 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
         const [data, profileData, skillsData] = await Promise.all([
           apiFetch<Record<string, string>>("/api/preferences/settings"),
           apiFetch<{ profiles: string[] }>("/api/preferences/claude-profiles"),
-          apiFetch<{ id: string; name: string; description: string; prompt: string; model: string | null; isBuiltin: boolean }[]>("/api/agent-skills"),
+          apiFetch<{ id: string; name: string; description: string; prompt: string; model: string | null; projectId: string | null; isBuiltin: boolean }[]>("/api/agent-skills"),
         ]);
         setSettings({ ...DEFAULT_SETTINGS, ...data });
         setProfiles(profileData.profiles);
@@ -353,7 +353,7 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
               {tab === "skills" && (
                 <div className="space-y-3">
                   <p className="text-xs text-gray-500">
-                    Agent skills are prompt templates injected into the agent's context when launching a workspace. They teach the agent how to interact with the board and perform specific tasks.
+                    Agent skills are prompt templates injected into the agent's context when launching a workspace. They teach the agent how to interact with the board and perform specific tasks. Skills can be global or scoped to a specific project.
                   </p>
                   {skills.map((skill) => (
                     <div key={skill.id} className="border border-gray-200 rounded-md p-3">
@@ -377,6 +377,11 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                               <span className="text-sm font-medium text-gray-900">{skill.name}</span>
                               {skill.isBuiltin && (
                                 <span className="text-[10px] px-1.5 py-0.5 bg-gray-100 text-gray-500 rounded">builtin</span>
+                              )}
+                              {skill.projectId ? (
+                                <span className="text-[10px] px-1.5 py-0.5 bg-purple-50 text-purple-600 rounded">project</span>
+                              ) : (
+                                <span className="text-[10px] px-1.5 py-0.5 bg-green-50 text-green-600 rounded">global</span>
                               )}
                               {skill.model && (
                                 <span className="text-[10px] px-1.5 py-0.5 bg-blue-50 text-blue-600 rounded">{skill.model}</span>
@@ -410,14 +415,14 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                   {newSkill ? (
                     <div className="border border-gray-200 rounded-md p-3">
                       <EditSkillForm
-                        skill={{ name: newSkill.name, description: newSkill.description, prompt: newSkill.prompt, model: newSkill.model || null }}
+                        skill={{ name: newSkill.name, description: newSkill.description, prompt: newSkill.prompt, model: newSkill.model || null, projectId: null }}
                         isNew
                         onSave={async (data) => {
                           const created = await apiFetch<{ id: string }>("/api/agent-skills", {
                             method: "POST",
                             body: JSON.stringify(data),
                           });
-                          setSkills((s) => [...s, { ...data, id: created.id, isBuiltin: false }]);
+                          setSkills((s) => [...s, { ...data, id: created.id, isBuiltin: false, projectId: null }]);
                           setNewSkill(null);
                         }}
                         onCancel={() => setNewSkill(null)}
