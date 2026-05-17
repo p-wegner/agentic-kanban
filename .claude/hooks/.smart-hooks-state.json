@@ -10,6 +10,9 @@
     "packages/client/src/components/IssueCard.tsx",
     "packages/server/src/routes/workspaces.ts",
     "packages/mcp-server/src/tools/start-workspace.ts",
-    "CLAUDE.md"
+    "CLAUDE.md",
+    "packages/client/src/components/IssueDetailPanel.tsx",
+    "packages/client/src/components/CreateIssueForm.tsx",
+    "packages/client/src/components/CreateIssuePanel.tsx"
   ]
 }
