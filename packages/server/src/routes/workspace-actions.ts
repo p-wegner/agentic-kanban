@@ -490,18 +490,18 @@ export function createWorkspaceActionsRoute(
         .set({ status: "closed", workingDir: null, closedAt: now, updatedAt: now })
         .where(eq(workspaces.id, id));
 
-      // Auto-move issue to "In Review"
+      // Auto-move issue to "Done"
       try {
         const projectId = await resolveProjectId(id, database);
         if (projectId) {
           const statuses = await database.select().from(projectStatuses).where(eq(projectStatuses.projectId, projectId));
-          const reviewStatus = statuses.find(s => s.name === "In Review");
-          if (reviewStatus) {
-            await database.update(issues).set({ statusId: reviewStatus.id, updatedAt: now, statusChangedAt: now }).where(eq(issues.id, workspace.issueId));
+          const doneStatus = statuses.find(s => s.name === "Done");
+          if (doneStatus) {
+            await database.update(issues).set({ statusId: doneStatus.id, updatedAt: now, statusChangedAt: now }).where(eq(issues.id, workspace.issueId));
           }
         }
       } catch (err) {
-        console.warn("[workspaces] Failed to move issue to In Review:", err);
+        console.warn("[workspaces] Failed to move issue to Done:", err);
       }
 
       // Broadcast board event
