@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { IssueWithStatus, UpdateIssueRequest, DependencyInfo } from "@agentic-kanban/shared";
 import { apiFetch } from "../lib/api.js";
 import { showToast } from "./Toast.js";
@@ -69,6 +69,7 @@ export function IssueDetailPanel({
   const [description, setDescription] = useState(issue.description ?? "");
   const [priority, setPriority] = useState(issue.priority);
   const [saving, setSaving] = useState(false);
+  const depTypeRef = useRef<HTMLSelectElement>(null);
   const [enhancing, setEnhancing] = useState(false);
   const [preEnhanceSnapshot, setPreEnhanceSnapshot] = useState<{ title: string; description: string } | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -581,8 +582,7 @@ export function IssueDetailPanel({
                       onChange={async (e) => {
                         const depId = e.target.value;
                         if (!depId) return;
-                        const typeSelect = document.getElementById("dep-type-select") as HTMLSelectElement;
-                        const depType = typeSelect?.value || "depends_on";
+                        const depType = depTypeRef.current?.value || "depends_on";
                         try {
                           await apiFetch(`/api/issues/${issue.id}/dependencies`, {
                             method: "POST",
@@ -605,7 +605,7 @@ export function IssueDetailPanel({
                       ))}
                     </select>
                     <select
-                      id="dep-type-select"
+                      ref={depTypeRef}
                       className="text-xs border border-gray-300 rounded px-1 py-0.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
                       defaultValue="depends_on"
                     >
