@@ -3,16 +3,6 @@ import type { IssueWithStatus, UpdateIssueRequest, DependencyInfo } from "@agent
 import { apiFetch } from "../lib/api.js";
 import { showToast } from "./Toast.js";
 
-async function enhanceIssue(projectId: string, title: string, description: string) {
-  const res = await fetch("/api/issues/enhance", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ title, description, projectId }),
-  });
-  if (!res.ok) throw new Error("Enhancement failed");
-  return res.json() as Promise<{ title: string; description: string }>;
-}
-
 interface StatusOption {
   id: string;
   name: string;
@@ -144,11 +134,15 @@ export function IssueDetailPanel({
     setEnhancing(true);
     try {
       setPreEnhanceSnapshot({ title, description });
-      const result = await enhanceIssue(issue.projectId, title, description);
+      const result = await apiFetch<{ title: string; description: string }>("/api/issues/enhance", {
+        method: "POST",
+        body: JSON.stringify({ title, description, projectId: issue.projectId }),
+      });
       setTitle(result.title);
       setDescription(result.description);
-    } catch {
+    } catch (err) {
       setPreEnhanceSnapshot(null);
+      showToast(err instanceof Error ? err.message : "Enhancement failed", "error");
     } finally {
       setEnhancing(false);
     }
