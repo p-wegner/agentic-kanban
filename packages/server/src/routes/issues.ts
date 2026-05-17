@@ -3,7 +3,7 @@ import { db } from "../db/index.js";
 import { issues, projectStatuses, workspaces, tags, issueTags, sessions, sessionMessages, diffComments, issueDependencies, preferences } from "@agentic-kanban/shared/schema";
 import { eq, and, sql, inArray } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
-import { spawnSync, execSync } from "node:child_process";
+import { execFile, execSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
@@ -94,24 +94,31 @@ Current description: ${body.description?.trim() || "(none)"}`;
       }
     }
 
-    const result = spawnSync(agentCommand, args, {
-      input: prompt,
-      encoding: "utf8",
-      timeout: 60000,
-      shell: false,
-    });
-
-    if (result.error || result.status !== 0) {
+    let stdout: string;
+    let stderr: string;
+    try {
+      ({ stdout, stderr } = await new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
+        const child = execFile(agentCommand, args, {
+          encoding: "utf8",
+          timeout: 60000,
+          shell: false,
+          maxBuffer: 1024 * 1024,
+        }, (err, out, se) => {
+          if (err) reject(err);
+          else resolve({ stdout: out ?? "", stderr: se ?? "" });
+        });
+        child.stdin?.end(prompt);
+      }));
+    } catch (err: any) {
       const parts: string[] = [];
-      if (result.error) parts.push(result.error.message);
-      if (result.stderr) parts.push(result.stderr.trim());
-      if (result.stdout) parts.push(result.stdout.trim().slice(0, 200));
-      const msg = parts.length > 0 ? parts.join(" | ") : `claude CLI exited with status ${result.status}`;
+      if (err.message) parts.push(err.message);
+      if (err.stderr) parts.push(String(err.stderr).trim());
+      const msg = parts.length > 0 ? parts.join(" | ") : "claude CLI failed";
       console.error("[enhance] claude error:", msg);
       return c.json({ error: "AI enhancement failed", detail: msg }, 500);
     }
 
-    const output = result.stdout?.trim() ?? "";
+    const output = stdout.trim();
     // Strip markdown code fences if present
     const cleaned = output.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
     try {

@@ -3,7 +3,7 @@ import { db } from "../db/index.js";
 import { projects, projectStatuses, issues, workspaces, sessions, sessionMessages, diffComments, issueDependencies, preferences } from "@agentic-kanban/shared/schema";
 import { eq, inArray, sql, and } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
-import { execSync, spawnSync } from "node:child_process";
+import { execFile, execSync } from "node:child_process";
 import { existsSync, readdirSync } from "node:fs";
 import { detectRepoInfo } from "../services/git-info.service.js";
 import { listBranches, listWorktrees, getDiffShortstat, removeWorktree } from "../services/git.service.js";
@@ -182,23 +182,29 @@ Detected files: ${detected.length > 0 ? detected.join(", ") : "none"}`;
       }
     }
 
-    const result = spawnSync(agentCommand, args, {
-      input: prompt,
-      encoding: "utf8",
-      timeout: 30000,
-      shell: false,
-    });
-
-    if (result.error || result.status !== 0) {
+    let setupScript: string;
+    try {
+      const result = await new Promise<string>((resolve, reject) => {
+        const child = execFile(agentCommand, args, {
+          encoding: "utf8",
+          timeout: 30000,
+          shell: false,
+          maxBuffer: 1024 * 1024,
+        }, (err, stdout) => {
+          if (err) reject(err);
+          else resolve(stdout ?? "");
+        });
+        child.stdin?.end(prompt);
+      });
+      setupScript = result.trim();
+    } catch (err: any) {
       const parts: string[] = [];
-      if (result.error) parts.push(result.error.message);
-      if (result.stderr) parts.push(result.stderr.trim());
-      const msg = parts.length > 0 ? parts.join(" | ") : `claude CLI exited with status ${result.status}`;
+      if (err.message) parts.push(err.message);
+      if (err.stderr) parts.push(String(err.stderr).trim());
+      const msg = parts.length > 0 ? parts.join(" | ") : "claude CLI failed";
       console.error("[generate-setup-script] claude error:", msg);
       return c.json({ error: "AI generation failed", detail: msg }, 500);
     }
-
-    const setupScript = result.stdout?.trim() ?? "";
     return c.json({ setupScript });
   });
 
