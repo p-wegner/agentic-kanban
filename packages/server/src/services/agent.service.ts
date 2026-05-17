@@ -1,5 +1,5 @@
 import { spawn, execSync, type ChildProcess } from "node:child_process";
-import { writeFileSync, existsSync } from "node:fs";
+import { writeFileSync, existsSync, readFileSync } from "node:fs";
 import { resolve, dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { tmpdir, homedir } from "node:os";
@@ -124,11 +124,35 @@ export function launch(
   // Default claude is resolved to .exe above, so shell:false works for real-time streaming.
   const useShell = isWindows && (isTestMock || !!agentCommand);
 
+  // When a profile is specified, read its env section and apply to spawn env.
+  // This prevents inherited env vars (e.g. ANTHROPIC_API_KEY from parent shell)
+  // from overriding the profile's auth configuration.
+  const spawnEnv: Record<string, string> = { ...process.env as Record<string, string> };
+  if (claudeProfile) {
+    const settingsPath = join(homedir(), ".claude", `settings_${claudeProfile}.json`);
+    if (existsSync(settingsPath)) {
+      try {
+        const profileSettings = JSON.parse(readFileSync(settingsPath, "utf-8"));
+        if (profileSettings.env && typeof profileSettings.env === "object") {
+          const profileEnv = profileSettings.env as Record<string, string>;
+          // If the profile provides ANTHROPIC_AUTH_TOKEN but not ANTHROPIC_API_KEY,
+          // remove inherited ANTHROPIC_API_KEY so Claude Code uses the profile's auth.
+          if (profileEnv.ANTHROPIC_AUTH_TOKEN && !profileEnv.ANTHROPIC_API_KEY) {
+            delete spawnEnv.ANTHROPIC_API_KEY;
+          }
+          Object.assign(spawnEnv, profileEnv);
+        }
+      } catch (err) {
+        console.warn(`[agent] Failed to read profile env from ${settingsPath}: ${err}`);
+      }
+    }
+  }
+
   const proc = spawn(command, args, {
     cwd: worktreePath,
     shell: useShell,
     env: {
-    ...process.env,
+    ...spawnEnv,
     FORCE_COLOR: "0",
     NO_COLOR: "1",
     KANBAN_SERVER_PORT: process.env.KANBAN_SERVER_PORT || process.env.PORT || "3001",
