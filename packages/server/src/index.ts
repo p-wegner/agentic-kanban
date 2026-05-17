@@ -121,9 +121,6 @@ async function runWorkflowOnExit(workspaceId: string, sessionId: string, exitCod
     await db.update(workspaces).set({ status: "idle", updatedAt: now }).where(eq(workspaces.id, workspaceId));
     boardEvents.broadcast(projectId, "workspace_idle");
 
-    // Only run auto-workflow on successful exit (code 0)
-    if (exitCode !== 0) return;
-
     const statuses = await db
       .select()
       .from(projectStatuses)
@@ -139,9 +136,15 @@ async function runWorkflowOnExit(workspaceId: string, sessionId: string, exitCod
     const projectRows = await db.select({ defaultBranch: projects.defaultBranch }).from(projects).where(eq(projects.id, projectId)).limit(1);
     const defaultBranch = projectRows.length > 0 ? projectRows[0].defaultBranch : "main";
 
+    const isCleanExit = exitCode === 0;
+
     if (reviewSessionIds.has(sessionId)) {
-      // Review session completed
+      // Review session completed — only process on clean exit
       reviewSessionIds.delete(sessionId);
+      if (!isCleanExit) {
+        console.log(`[workflow] review session ${sessionId} exited with code ${exitCode} — skipping post-review workflow`);
+        return;
+      }
 
       // Check if the review agent moved the issue back to "In Progress" (found and fixed critical issues)
       const currentIssueRows = await db.select({ statusId: issues.statusId }).from(issues).where(eq(issues.id, issueId)).limit(1);
@@ -170,6 +173,7 @@ async function runWorkflowOnExit(workspaceId: string, sessionId: string, exitCod
     }
 
     // Main agent session completed — check if there are changes vs the base branch
+    // Do this even for non-zero exit codes (agent may have committed before crashing)
     let hasCommittedChanges = false;
     if (workspace.workingDir) {
       try {
@@ -196,13 +200,19 @@ async function runWorkflowOnExit(workspaceId: string, sessionId: string, exitCod
     }
 
     if (hasCommittedChanges) {
-      // Agent committed changes — auto-move to In Review and optionally launch review
-      console.log(`[workflow] agent session ${sessionId} completed with committed changes — moving to In Review`);
+      // Agent committed changes — auto-move to In Review
+      console.log(`[workflow] agent session ${sessionId} ${isCleanExit ? "completed" : `exited with code ${exitCode}`} with committed changes — moving to In Review`);
       const inReview = findStatus("In Review");
       if (inReview) {
         await db.update(issues).set({ statusId: inReview.id, updatedAt: now }).where(eq(issues.id, issueId));
       }
       boardEvents.broadcast(projectId, "issue_updated");
+
+      // Only launch auto-review on clean exit — crashed agents may have left partial state
+      if (!isCleanExit) {
+        console.log(`[workflow] skipping auto-review due to non-zero exit code ${exitCode}`);
+        return;
+      }
 
       // requiresReview is set at workspace creation time (pre-populated from auto_review global default).
       // null means created before the per-workspace flag existed — fall back to the global auto_review setting.
@@ -241,7 +251,7 @@ async function runWorkflowOnExit(workspaceId: string, sessionId: string, exitCod
         }
       }
     } else {
-      console.log(`[workflow] agent session ${sessionId} completed but no committed changes — leaving issue in current status`);
+      console.log(`[workflow] agent session ${sessionId} ${isCleanExit ? "completed" : `exited with code ${exitCode}`} but no committed changes — leaving issue in current status`);
     }
   } catch (err) {
     console.error("[workflow] onSessionExit error:", err);
