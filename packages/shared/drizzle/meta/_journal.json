@@ -162,6 +162,13 @@
       "when": 1779092800000,
       "tag": "0021_project_skills",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "6",
+      "when": 1779265600000,
+      "tag": "0022_teardown_script",
+      "breakpoints": true
     }
   ]
 }

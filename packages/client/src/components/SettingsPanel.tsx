@@ -148,9 +148,10 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
   const [tab, setTab] = useState<Tab>("agent");
 
   // Project-specific settings
-  const [projectSettings, setProjectSettings] = useState<{ setupScript: string; setupBlocking: boolean }>({
+  const [projectSettings, setProjectSettings] = useState<{ setupScript: string; setupBlocking: boolean; teardownScript: string }>({
     setupScript: "",
     setupBlocking: true,
+    teardownScript: "",
   });
   const [generatingScript, setGeneratingScript] = useState(false);
 
@@ -180,6 +181,7 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
               setProjectSettings({
                 setupScript: project.setupScript || "",
                 setupBlocking: project.setupBlocking !== false,
+                teardownScript: (project as any).teardownScript || "",
               });
             }
           } catch {
@@ -219,6 +221,7 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
             body: JSON.stringify({
               setupScript: projectSettings.setupScript || null,
               setupBlocking: projectSettings.setupBlocking,
+              teardownScript: projectSettings.teardownScript || null,
             }),
           }),
         );
@@ -517,6 +520,15 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                         label="Run setup before agent"
                         hint="When enabled, the setup script must complete before the agent starts. When disabled, both run in parallel (faster but the agent may start before dependencies are installed)."
                       />
+                      <Field label="Teardown Script" hint="Shell command(s) to run in the worktree before it is removed on merge (e.g. stop services, rm -rf node_modules). Leave empty to skip.">
+                        <textarea
+                          value={projectSettings.teardownScript}
+                          onChange={(e) => setProjectSettings(s => ({ ...s, teardownScript: e.target.value }))}
+                          placeholder="pkill -f dev-server || true"
+                          rows={3}
+                          className="w-full rounded border border-zinc-700 bg-zinc-800 px-3 py-2 font-mono text-sm text-zinc-100 placeholder-zinc-500 focus:border-blue-500 focus:outline-none"
+                        />
+                      </Field>
                     </>
                   )}
                 </>

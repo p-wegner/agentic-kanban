@@ -13,6 +13,7 @@ export interface UpdateProjectRequest {
   color?: string;
   setupScript?: string | null;
   setupBlocking?: boolean;
+  teardownScript?: string | null;
 }
 
 export interface ProjectResponse {
@@ -26,6 +27,7 @@ export interface ProjectResponse {
   remoteUrl: string | null;
   setupScript: string | null;
   setupBlocking: boolean;
+  teardownScript: string | null;
   createdAt: string;
   updatedAt: string;
 }

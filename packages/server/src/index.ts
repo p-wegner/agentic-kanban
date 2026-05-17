@@ -12,6 +12,8 @@ import { workspaces, issues, projects, projectStatuses, preferences, sessions, a
 import { eq, sql, desc } from "drizzle-orm";
 import * as agentService from "./services/agent.service.js";
 import * as gitService from "./services/git.service.js";
+import { killProcessesInDir } from "./services/process-cleanup.js";
+import { runScript } from "./services/script-runner.js";
 import { execFile } from "node:child_process";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -255,13 +257,20 @@ async function autoMerge(
 ) {
   try {
     if (!workspace.isDirect) {
-      const projectRows = await db.select({ repoPath: projects.repoPath }).from(projects).where(eq(projects.id, projectId)).limit(1);
+      const projectRows = await db.select({ repoPath: projects.repoPath, teardownScript: projects.teardownScript }).from(projects).where(eq(projects.id, projectId)).limit(1);
       if (projectRows.length > 0) {
-        const { repoPath } = projectRows[0];
+        const { repoPath, teardownScript } = projectRows[0];
+        if (workspace.workingDir) {
+          try { await killProcessesInDir(workspace.workingDir); } catch { /* best effort */ }
+          if (teardownScript) {
+            try { await runScript(teardownScript, workspace.workingDir, `teardown:${workspace.id}`); } catch { /* best effort */ }
+          }
+        }
         await gitService.mergeBranch(repoPath, workspace.branch);
         if (workspace.workingDir) {
           try { await gitService.removeWorktree(repoPath, workspace.workingDir); } catch { /* best effort */ }
         }
+        try { await gitService.deleteBranch(repoPath, workspace.branch); } catch { /* best effort */ }
       }
     }
     await db.update(workspaces).set({ status: "closed", workingDir: null, updatedAt: now }).where(eq(workspaces.id, workspace.id));
@@ -380,6 +389,32 @@ if (staleSessions.length > 0) {
   const workspaceIds = [...new Set(staleSessions.map(s => s.workspaceId))];
   for (const wsId of workspaceIds) {
     await db.update(workspaces).set({ status: "idle", updatedAt: now }).where(eq(workspaces.id, wsId));
+  }
+}
+
+// Clean up stale worktrees: closed non-direct workspaces that still have a workingDir
+{
+  const staleWs = await db.select({ id: workspaces.id, branch: workspaces.branch, workingDir: workspaces.workingDir, issueId: workspaces.issueId })
+    .from(workspaces)
+    .where(eq(workspaces.status, "closed"));
+  const staleWithWorktrees = staleWs.filter(ws => ws.workingDir);
+  if (staleWithWorktrees.length > 0) {
+    console.log(`[startup] Pruning ${staleWithWorktrees.length} stale worktree(s)`);
+    for (const ws of staleWithWorktrees) {
+      try {
+        const issueRows = await db.select({ projectId: issues.projectId }).from(issues).where(eq(issues.id, ws.issueId)).limit(1);
+        if (issueRows.length > 0) {
+          const projRows = await db.select({ repoPath: projects.repoPath }).from(projects).where(eq(projects.id, issueRows[0].projectId)).limit(1);
+          if (projRows.length > 0) {
+            const { repoPath } = projRows[0];
+            try { await gitService.removeWorktree(repoPath, ws.workingDir!); } catch { /* locked — skip */ }
+          }
+        }
+        await db.update(workspaces).set({ workingDir: null, updatedAt: new Date().toISOString() }).where(eq(workspaces.id, ws.id));
+      } catch (err) {
+        console.warn(`[startup] Failed to prune worktree for workspace ${ws.id}:`, err);
+      }
+    }
   }
 }
 

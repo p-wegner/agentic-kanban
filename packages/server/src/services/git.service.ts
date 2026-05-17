@@ -173,6 +173,14 @@ export async function listBranches(
   return { local, remote };
 }
 
+/** Delete a local branch. */
+export async function deleteBranch(
+  repoPath: string,
+  branch: string,
+): Promise<void> {
+  await execGit(["branch", "-d", branch], repoPath);
+}
+
 /** Merge a branch into the current HEAD of the repo. */
 export async function mergeBranch(
   repoPath: string,
