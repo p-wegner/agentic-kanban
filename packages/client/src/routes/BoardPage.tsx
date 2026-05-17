@@ -338,6 +338,39 @@ export function BoardPage() {
     }
   }
 
+  async function handleStartWorkspace(issue: IssueWithStatus) {
+    if (!activeProject) return;
+    setMutating(true);
+    try {
+      const branch = suggestBranchName({
+        issueNumber: issue.issueNumber,
+        title: issue.title,
+      });
+      const ws = await apiFetch<{ id: string; sessionId?: string }>("/api/workspaces", {
+        method: "POST",
+        body: JSON.stringify({
+          issueId: issue.id,
+          branch,
+          baseBranch: activeProject.defaultBranch,
+        }),
+      });
+      setSelectedIssue(null);
+      const board = await refetchBoard();
+      const updated = board?.flatMap((col) => col.issues).find((i) => i.id === issue.id) ?? issue;
+      setWorkspaceIssue(updated);
+      if (ws.sessionId) {
+        setWorkspaceInitial({ workspaceId: ws.id, sessionId: ws.sessionId });
+      } else {
+        setWorkspaceInitial({ workspaceId: ws.id, sessionId: "" });
+      }
+      showToast("Workspace created", "success");
+    } catch (err) {
+      showToast("Failed to create workspace", "error");
+    } finally {
+      setMutating(false);
+    }
+  }
+
   // Filter columns by search query and priority
   const filteredColumns = useMemo(
     () =>
@@ -593,6 +626,7 @@ export function BoardPage() {
               onCreateCancel={() => setCreatingInColumnId(null)}
               onIssueClick={handleIssueClick}
               onWorkspaceClick={handleManageWorkspaces}
+              onStartWorkspace={handleStartWorkspace}
               onDragStart={(e, issue) => {
                 (window as unknown as Record<string, unknown>).__dragData = {
                   issueId: issue.id,
@@ -633,6 +667,7 @@ export function BoardPage() {
           onExpandCreate={(statusId, statusName, state) => setExpandedCreatePanel({ statusId, statusName, state })}
           onIssueClick={handleIssueClick}
           onWorkspaceClick={handleManageWorkspaces}
+          onStartWorkspace={handleStartWorkspace}
           onDragStart={(e, issue) => {
             (window as unknown as Record<string, unknown>).__dragData = {
               issueId: issue.id,
@@ -655,6 +690,7 @@ export function BoardPage() {
           onDelete={handleDeleteIssue}
           onClose={() => setSelectedIssue(null)}
           onManageWorkspaces={handleManageWorkspaces}
+          onStartWorkspace={handleStartWorkspace}
           onIssueUpdate={setSelectedIssue}
           onNavigateToIssue={(issueId) => {
             for (const col of columns) {

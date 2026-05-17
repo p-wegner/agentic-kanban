@@ -25,6 +25,7 @@ interface IssueDetailPanelProps {
   onDelete: (id: string) => Promise<void>;
   onClose: () => void;
   onManageWorkspaces: (issue: IssueWithStatus, workspaceId?: string) => void;
+  onStartWorkspace?: (issue: IssueWithStatus) => void;
   onIssueUpdate: (issue: IssueWithStatus) => void;
   onNavigateToIssue?: (issueId: string) => void;
 }
@@ -59,6 +60,7 @@ export function IssueDetailPanel({
   onDelete,
   onClose,
   onManageWorkspaces,
+  onStartWorkspace,
   onIssueUpdate,
   onNavigateToIssue,
 }: IssueDetailPanelProps) {
@@ -347,12 +349,25 @@ export function IssueDetailPanel({
                   )}
                 </button>
               ) : (
-                <button
-                  onClick={() => onManageWorkspaces(issue)}
-                  className="text-sm text-blue-600 hover:text-blue-700"
-                >
-                  {workspaceCount === 0 ? "New Workspace" : "View Workspaces"}
-                </button>
+                <div className="flex items-center gap-2">
+                  {onStartWorkspace && (
+                    <button
+                      onClick={() => onStartWorkspace(issue)}
+                      className="flex items-center gap-1.5 text-sm font-medium px-3 py-1.5 rounded bg-blue-600 text-white hover:bg-blue-700 transition-colors"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                      </svg>
+                      Start Workspace
+                    </button>
+                  )}
+                  <button
+                    onClick={() => onManageWorkspaces(issue)}
+                    className="text-sm text-blue-600 hover:text-blue-700"
+                  >
+                    {workspaceCount === 0 ? "Custom options..." : "View Workspaces"}
+                  </button>
+                </div>
               )}
             </div>
           )}

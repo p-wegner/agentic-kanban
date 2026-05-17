@@ -16,6 +16,7 @@ interface ColumnGroupProps {
   onCreateSubmit: (data: CreateIssueRequest & { startWorkspace?: boolean; planMode?: boolean }) => Promise<void>;
   onIssueClick: (issue: IssueWithStatus) => void;
   onWorkspaceClick?: (issue: IssueWithStatus, workspaceId?: string) => void;
+  onStartWorkspace?: (issue: IssueWithStatus) => void;
   onDragStart: (e: React.DragEvent, issue: IssueWithStatus) => void;
   onDrop: (statusId: string, sortOrder?: number) => void;
   searchQuery: string;
@@ -38,6 +39,7 @@ export function ColumnGroup({
   onCreateSubmit,
   onIssueClick,
   onWorkspaceClick,
+  onStartWorkspace,
   onDragStart,
   onDrop,
   searchQuery,
@@ -110,6 +112,7 @@ export function ColumnGroup({
             onCreateCancel={onCreateCancel}
             onIssueClick={onIssueClick}
             onWorkspaceClick={onWorkspaceClick}
+            onStartWorkspace={onStartWorkspace}
             onDragStart={onDragStart}
             onDrop={onDrop}
             searchQuery={searchQuery}
