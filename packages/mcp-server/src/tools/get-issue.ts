@@ -63,8 +63,10 @@ export function registerGetIssue(server: McpServer) {
           .where(eq(schema.issueDependencies.dependsOnId, issueId)),
       ]);
 
-      // An issue is blocked if it has unmet "depends_on" or "blocked_by" dependencies
-      const isBlocked = [...outgoing, ...incoming].some((dep) => {
+      // An issue is blocked if it has unmet outgoing "depends_on" or "blocked_by" dependencies
+      // Only outgoing deps matter — incoming deps mean OTHER issues depend on this one, which
+      // doesn't block THIS issue.
+      const isBlocked = outgoing.some((dep) => {
         const type = (dep as any).type;
         return (type === "depends_on" || type === "blocked_by") &&
           dep.issueStatusName !== "Done" && dep.issueStatusName !== "AI Reviewed";
