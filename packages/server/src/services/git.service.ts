@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdir } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
 import { join, dirname, sep } from "node:path";
 
 function execGit(args: string[], cwd: string): Promise<string> {
@@ -103,12 +103,46 @@ export async function removeWorktree(
   await execGit(["worktree", "remove", "--force", worktreePath], repoPath);
 }
 
-/** Get a unified diff between the worktree's branch and a base branch. */
+/** Generate unified diff entries for untracked files (not yet git-add'd). */
+async function getUntrackedDiffEntries(workdirPath: string): Promise<string> {
+  const untrackedFiles = await execGit(["ls-files", "--others", "--exclude-standard"], workdirPath);
+  if (!untrackedFiles.trim()) return "";
+
+  const entries: string[] = [];
+  for (const f of untrackedFiles.trim().split("\n").filter(Boolean)) {
+    try {
+      const content = await readFile(join(workdirPath, ...f.split("/")), "utf-8");
+      const lines = content.split("\n");
+      if (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
+      entries.push([
+        `diff --git a/${f} b/${f}`,
+        `new file mode 100644`,
+        `--- /dev/null`,
+        `+++ b/${f}`,
+        `@@ -0,0 +1,${lines.length} @@`,
+        ...lines.map((l) => `+${l}`),
+      ].join("\n"));
+    } catch {
+      entries.push([
+        `diff --git a/${f} b/${f}`,
+        `new file mode 100644`,
+        `--- /dev/null`,
+        `+++ b/${f}`,
+      ].join("\n"));
+    }
+  }
+  return entries.join("\n");
+}
+
+/** Get a unified diff between the worktree's branch and a base branch, including untracked files. */
 export async function getDiff(
   worktreePath: string,
   baseBranch: string = "main",
 ): Promise<string> {
-  return execGit(["diff", baseBranch], worktreePath);
+  const tracked = await execGit(["diff", baseBranch], worktreePath);
+  const untracked = await getUntrackedDiffEntries(worktreePath);
+  if (!untracked) return tracked;
+  return tracked ? tracked + "\n" + untracked : untracked;
 }
 
 /** List all local and remote branches, sorted by most recent committer date. */
@@ -150,15 +184,12 @@ export async function getCurrentBranch(repoPath: string): Promise<string> {
   return output.trim();
 }
 
-/** Get diff of working tree changes against HEAD (for direct workspaces). */
+/** Get diff of working tree changes against HEAD (for direct workspaces), including untracked files. */
 export async function getWorkingTreeDiff(workdirPath: string): Promise<string> {
   const tracked = await execGit(["diff", "HEAD"], workdirPath);
-  const untrackedFiles = await execGit(["ls-files", "--others", "--exclude-standard"], workdirPath);
-  if (!untrackedFiles.trim()) return tracked;
-  const header = tracked ? tracked + "\n" : "";
-  return header + untrackedFiles.trim().split("\n").filter(Boolean).map(f =>
-    `diff --git a/${f} b/${f}\nnew file mode 100644`
-  ).join("\n");
+  const untracked = await getUntrackedDiffEntries(workdirPath);
+  if (!untracked) return tracked;
+  return tracked ? tracked + "\n" + untracked : untracked;
 }
 
 /**
@@ -206,27 +237,41 @@ export async function prepareForReview(
   return { diffRef: mergeSource, success: true };
 }
 
-/** Get lightweight diff stats using --shortstat (no full diff transfer). */
+/** Get lightweight diff stats using --shortstat (no full diff transfer). Includes untracked files. */
 export async function getDiffShortstat(
   worktreePath: string,
   baseBranch: string,
 ): Promise<{ filesChanged: number; insertions: number; deletions: number }> {
   try {
     const output = await execGit(["diff", "--shortstat", baseBranch], worktreePath);
-    if (!output.trim()) return { filesChanged: 0, insertions: 0, deletions: 0 };
 
     let filesChanged = 0;
     let insertions = 0;
     let deletions = 0;
 
-    const filesMatch = output.match(/(\d+) files? changed/);
-    if (filesMatch) filesChanged = parseInt(filesMatch[1], 10);
+    if (output.trim()) {
+      const filesMatch = output.match(/(\d+) files? changed/);
+      if (filesMatch) filesChanged = parseInt(filesMatch[1], 10);
 
-    const insertionsMatch = output.match(/(\d+) insertion/);
-    if (insertionsMatch) insertions = parseInt(insertionsMatch[1], 10);
+      const insertionsMatch = output.match(/(\d+) insertion/);
+      if (insertionsMatch) insertions = parseInt(insertionsMatch[1], 10);
 
-    const deletionsMatch = output.match(/(\d+) deletion/);
-    if (deletionsMatch) deletions = parseInt(deletionsMatch[1], 10);
+      const deletionsMatch = output.match(/(\d+) deletion/);
+      if (deletionsMatch) deletions = parseInt(deletionsMatch[1], 10);
+    }
+
+    const untracked = await execGit(["ls-files", "--others", "--exclude-standard"], worktreePath);
+    if (untracked.trim()) {
+      const untrackedList = untracked.trim().split("\n").filter(Boolean);
+      filesChanged += untrackedList.length;
+      for (const f of untrackedList) {
+        try {
+          const content = await readFile(join(worktreePath, ...f.split("/")), "utf-8");
+          const lineCount = content.split("\n").length - (content.endsWith("\n") ? 1 : 0);
+          insertions += lineCount;
+        } catch { /* binary or unreadable */ }
+      }
+    }
 
     return { filesChanged, insertions, deletions };
   } catch (err) {
