@@ -9,120 +9,142 @@ Every feature must be verifiable through automated tests that an AI agent can ru
 
 ```
          ┌──────────┐
-         │   E2E    │  ← Playwright (user workflows)
+         │   E2E    │  ← Playwright (user workflows + API calls)
          │  Tests   │
         ┌┴──────────┴┐
-        │ Integration │  ← API + MCP + Git (cross-cutting)
+        │ Integration │  ← MCP stdio + Git worktree lifecycle
         │   Tests     │
        ┌┴────────────┴┐
-       │   API Tests   │  ← HTTP against real server
+       │   Unit Tests   │  ← Vitest (pure logic, in-memory DB)
        └──────────────┘
-      ┌┴──────────────┴┐
-      │   Unit Tests    │  ← Pure logic, no I/O
-      └────────────────┘
 ```
 
-## Stage-Specific Test Plans
+## Test Infrastructure
 
-### Stage 1: Data Layer + API
-**API Tests** (primary)
-```python
-# Example: pytest + httpx
-def test_create_issue(client, project):
-    response = client.post("/api/issues", json={
-        "project_id": project.id,
-        "title": "Fix login bug",
-        "priority": "high"
-    })
-    assert response.status_code == 201
-    data = response.json()
-    assert data["title"] == "Fix login bug"
-    assert data["priority"] == "high"
-    assert data["status"]["name"] == "Todo"  # default
+### Unit Tests (Vitest)
+- Run via `pnpm --filter @agentic-kanban/server test`
+- In-memory SQLite database for isolation
+- Factory-style test data setup
+- 76 tests covering: tags CRUD, preferences, issue numbers, API routes, git service
 
-def test_list_issues_by_status(client, project, issues_factory):
-    issues_factory.create(status="todo", count=3)
-    issues_factory.create(status="done", count=2)
-    response = client.get("/api/issues?status=todo")
-    assert len(response.json()) == 3
+### E2E Tests (Playwright)
+- Run via `pnpm test:e2e`
+- Full server + client startup via global setup
+- Tests create their own data, no shared state dependencies
+- 101 tests covering: API endpoints, UI interactions, MCP tools, board events, sessions
 
-def test_update_issue_status(client, issue):
-    response = client.patch(f"/api/issues/{issue.id}", json={
-        "status": "in_progress"
-    })
-    assert response.status_code == 200
-    # Verify in DB
-    fresh = client.get(f"/api/issues/{issue.id}")
-    assert fresh.json()["status"]["name"] == "In Progress"
+### MCP Protocol Tests
+- Custom stdio JSON-RPC client against MCP server
+- Round-trip tests: create → list → update → get_issue
+- Validates MCP tools work correctly with the shared DB
+
+## Test Examples
+
+### Unit Test (Vitest)
+```typescript
+// packages/server/src/__tests__/api.test.ts
+import { describe, it, expect, beforeEach } from "vitest";
+
+describe("Tags API", () => {
+  let db: Database;
+
+  beforeEach(() => {
+    db = createTestDb(); // in-memory SQLite with migrations applied
+  });
+
+  it("should create a tag", async () => {
+    const tag = await createTag(db, { name: "bug", color: "#EF4444" });
+    expect(tag.name).toBe("bug");
+    expect(tag.color).toBe("#EF4444");
+  });
+
+  it("should cascade delete tag associations", async () => {
+    const tag = await createTag(db, { name: "feature" });
+    const issue = await createIssue(db, { title: "Test", projectId });
+    await assignTag(db, { issueId: issue.id, tagId: tag.id });
+    await deleteTag(db, tag.id);
+    const associations = await getIssueTags(db, issue.id);
+    expect(associations).toHaveLength(0);
+  });
+});
 ```
 
-### Stage 2: Kanban UI
-**E2E Tests** (Playwright)
-```python
-def test_kanban_board_shows_columns(page, project_with_statuses):
-    page.goto(f"/projects/{project_with_statuses.id}")
-    columns = page.locator("[data-testid='kanban-column']")
-    expect(columns).to_have_count(5)
-    expect(columns.nth(0)).to_contain_text("Todo")
+### E2E API Test (Playwright)
+```typescript
+// packages/e2e/tests/api.test.ts
+import { test, expect } from "@playwright/test";
 
-def test_drag_issue_between_columns(page, project, issue):
-    page.goto(f"/projects/{project.id}")
-    issue_card = page.locator(f"[data-issue-id='{issue.id}']")
-    todo_column = page.locator("[data-status='todo']")
-    in_progress_column = page.locator("[data-status='in_progress']")
+test("should create and retrieve issue", async ({ request }) => {
+  const response = await request.post("/api/issues", {
+    data: {
+      projectId,
+      title: "Fix login bug",
+      priority: "high",
+      statusId: todoStatusId,
+    },
+  });
+  expect(response.ok()).toBeTruthy();
+  const issue = await response.json();
+  expect(issue.title).toBe("Fix login bug");
 
-    issue_card.drag_to(in_progress_column)
-
-    # Verify API updated
-    response = page.request.get(f"/api/issues/{issue.id}")
-    assert response.json()["status"]["name"] == "In Progress"
+  // Verify retrieval
+  const getResponse = await request.get(`/api/issues/${issue.id}`);
+  const fetched = await getResponse.json();
+  expect(fetched.priority).toBe("high");
+});
 ```
 
-### Stage 3: Workspace + Agent
-**Integration Tests**
-```python
-def test_workspace_creates_git_branch(app, issue, tmp_git_repo):
-    workspace = app.workspaces.create(
-        issue_id=issue.id,
-        repo_path=tmp_git_repo
-    )
-    assert workspace.branch.startswith("issue-")
-    # Verify worktree exists
-    assert Path(workspace.working_dir).exists()
-    # Verify branch created
-    repo = git.Repo(tmp_git_repo)
-    assert workspace.branch in [b.name for b in repo.branches]
+### E2E UI Test (Playwright)
+```typescript
+// packages/e2e/tests/board.test.ts
+import { test, expect } from "@playwright/test";
 
-def test_claude_code_launches_in_workspace(app, workspace):
-    session = app.sessions.start(
-        workspace_id=workspace.id,
-        executor="claude_code"
-    )
-    assert session.status == "running"
-    # Wait for output
-    time.sleep(2)
-    assert len(session.output_lines) > 0
+test("should create issue inline and show on board", async ({ page }) => {
+  await page.goto(`/projects/${projectId}`);
+
+  // Click "Add Issue" in Todo column
+  const todoColumn = page.locator("[data-testid='column-Todo']");
+  await todoColumn.locator("button", { hasText: "+" }).click();
+
+  // Fill and submit inline form
+  await todoColumn.locator("input[placeholder*='title']").fill("My new task");
+  await todoColumn.locator("button", { hasText: "Add" }).click();
+
+  // Verify card appears
+  await expect(page.locator("text=My new task")).toBeVisible();
+});
 ```
 
-### Stage 4: MCP Integration
-**MCP Protocol Tests**
-```python
-async def test_mcp_list_issues(mcp_client, project_with_issues):
-    result = await mcp_client.call_tool("list_issues", {
-        "project_id": project_with_issues.id
-    })
-    assert len(result.content) > 0
-    issues = json.loads(result.content[0].text)
-    assert all("title" in i for i in issues)
+### MCP Tool Test (Playwright)
+```typescript
+// packages/e2e/tests/mcp.test.ts
+import { test, expect } from "@playwright/test";
 
-async def test_mcp_update_issue_status(mcp_client, issue):
-    result = await mcp_client.call_tool("update_issue", {
-        "issue_id": issue.id,
-        "status": "in_progress"
-    })
-    # Verify via API
-    api_issue = httpx.get(f"/api/issues/{issue.id}")
-    assert api_issue.json()["status"]["name"] == "In Progress"
+test("MCP round-trip: create → list → update", async () => {
+  const client = createMcpClient(); // stdio JSON-RPC client
+
+  // Create issue via MCP
+  const created = await client.callTool("create_issue", {
+    title: "MCP test issue",
+    priority: "medium",
+  });
+  const issueId = JSON.parse(created.content[0].text).id;
+
+  // List and find
+  const listed = await client.callTool("list_issues", { projectId });
+  const issues = JSON.parse(listed.content[0].text);
+  expect(issues.find((i: any) => i.id === issueId)).toBeDefined();
+
+  // Update status
+  await client.callTool("update_issue", {
+    issueId,
+    statusName: "In Progress",
+  });
+
+  // Verify via API
+  const response = await request.get(`/api/issues/${issueId}`);
+  expect((await response.json()).status.name).toBe("In Progress");
+});
 ```
 
 ## AI-Driven Development Loop
@@ -130,7 +152,7 @@ async def test_mcp_update_issue_status(mcp_client, issue):
 ### The Feedback Cycle
 ```
 1. AI writes code
-2. AI runs tests
+2. AI runs tests (pnpm --filter @agentic-kanban/server test or pnpm test:e2e)
 3. AI reads test output
 4. If tests fail → AI reads error + screenshot → fixes code → goto 2
 5. If tests pass → AI moves to next feature
@@ -145,24 +167,31 @@ async def test_mcp_update_issue_status(mcp_client, issue):
 6. **Parallel-safe**: Tests can run concurrently
 
 ### Test Data Strategy
-- **Factory pattern**: `issue_factory.create(title="...", priority="high")`
-- **Fixtures per test**: Each test gets a clean slate
-- **Temp directories**: Git repos in temp dirs, cleaned up after test
-- **In-memory DB option**: For unit tests, use in-memory SQLite
+- **Global setup**: Creates project via API before all tests
+- **Per-test data**: Tests create issues/tags/workspaces as needed
+- **Unique suffixes**: `Date.now()` for titles to avoid cross-run collisions
+- **Cleanup**: `test.afterAll` resets preferences/settings state
 
-## CI/CD Integration
-While this is a personal project, the test suite should be runnable:
-- **Locally**: `pytest` / `playwright test`
-- **Pre-commit**: Run fast tests before each commit
-- **Full suite**: Run all tests including E2E before merging
-
-## Testing Tools Recommendation
+## Test Tools
 
 | Tool | Purpose |
 |------|---------|
-| **pytest** | Unit + API + integration tests |
-| **Playwright** | E2E browser tests |
-| **httpx** | HTTP client for API tests |
-| **factory_boy** | Test data factories |
-| **freezegun** | Time mocking |
-| **tmp_path** (pytest) | Temporary directories |
+| **Vitest** | Unit tests with in-memory DB |
+| **Playwright** | E2E browser + API tests |
+| **In-memory SQLite** | Fast unit test isolation |
+| **Custom MCP client** | Stdio JSON-RPC tool testing |
+
+## Test Commands
+
+```bash
+pnpm --filter @agentic-kanban/server test    # Unit tests (76 tests)
+pnpm test:e2e                                  # E2E tests (101 tests)
+```
+
+## Known Test Considerations
+
+- **Windows git output**: Use `.trim()` for file content assertions (CRLF vs LF)
+- **Session/workspace tests**: Use retry loops (3 attempts, 500ms–1s delays) for flaky worktree setup
+- **Edit test uniqueness**: Use `Date.now()` suffixes to avoid accumulated data matching
+- **E2E locator specificity**: Avoid `text=X` locators — use scoped selectors or `.first()`
+- **Collapse/expand**: Archive column "Cancelled" text matches `button:has-text("Cancel")` — use regex `/^Cancel$/`
