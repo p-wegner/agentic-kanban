@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { IssueWithStatus } from "@agentic-kanban/shared";
 import type { LiveSessionStats, TodoItem } from "../lib/useBoardEvents.js";
 
@@ -186,19 +187,31 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
 }
 
 function TodoProgress({ todos }: { todos: TodoItem[] }) {
+  const [expanded, setExpanded] = useState(false);
   const total = todos.length;
   const completed = todos.filter((t) => t.status === "completed").length;
   const inProgress = todos.filter((t) => t.status === "in_progress").length;
 
   return (
-    <div className="mt-1.5 px-1" title={todos.map((t) => `${t.status === "completed" ? "✓" : t.status === "in_progress" ? "▶" : "○"} ${t.content}`).join("\n")}>
-      <div className="flex items-center gap-1.5 mb-0.5">
-        <span className="text-[10px] text-gray-400">{completed}/{total} tasks</span>
-        {inProgress > 0 && (
-          <span className="text-[10px] text-blue-500 font-medium">{inProgress} active</span>
-        )}
-      </div>
-      <div className="h-1 bg-gray-200 rounded-full overflow-hidden flex">
+    <div className="mt-1.5 px-1">
+      <button
+        onClick={(e) => { e.stopPropagation(); setExpanded(!expanded); }}
+        className="w-full text-left"
+      >
+        <div className="flex items-center gap-1.5 mb-0.5">
+          <svg
+            className={`w-2.5 h-2.5 text-gray-400 shrink-0 transition-transform ${expanded ? "rotate-90" : ""}`}
+            fill="currentColor" viewBox="0 0 16 16"
+          >
+            <path d="M6 12l4-4-4-4v8z" />
+          </svg>
+          <span className="text-[10px] text-gray-400">{completed}/{total} tasks</span>
+          {inProgress > 0 && (
+            <span className="text-[10px] text-blue-500 font-medium">{inProgress} active</span>
+          )}
+        </div>
+      </button>
+      <div className="h-1 bg-gray-200 rounded-full overflow-hidden flex ml-3">
         <div
           className="h-full bg-green-500 transition-all duration-300"
           style={{ width: `${(completed / total) * 100}%` }}
@@ -208,6 +221,26 @@ function TodoProgress({ todos }: { todos: TodoItem[] }) {
           style={{ width: `${(inProgress / total) * 100}%` }}
         />
       </div>
+      {expanded && (
+        <div className="mt-1 ml-3 space-y-0.5">
+          {todos.map((t, i) => (
+            <div key={i} className="flex items-start gap-1 text-[10px]">
+              <span className="shrink-0 mt-0.5">
+                {t.status === "completed" ? (
+                  <svg className="w-2.5 h-2.5 text-green-500" fill="currentColor" viewBox="0 0 16 16"><path d="M13.854 3.646a.5.5 0 010 .708l-7 7a.5.5 0 01-.708 0l-3.5-3.5a.5.5 0 11.708-.708L6.5 10.293l6.646-6.647a.5.5 0 01.708 0z"/></svg>
+                ) : t.status === "in_progress" ? (
+                  <svg className="w-2.5 h-2.5 text-blue-500" fill="currentColor" viewBox="0 0 16 16"><path d="M8 1a2 2 0 012 2v4H6V3a2 2 0 012-2zm3 6V3a3 3 0 00-6 0v4a2 2 0 002 2v2.5a.5.5 0 001 0V9a2 2 0 002-2z"/></svg>
+                ) : (
+                  <svg className="w-2.5 h-2.5 text-gray-300" fill="currentColor" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6"/></svg>
+                )}
+              </span>
+              <span className={t.status === "completed" ? "text-gray-400 line-through" : "text-gray-600"}>
+                {t.content}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
