@@ -67,6 +67,7 @@ export function IssueDetailPanel({
   const [issueTags, setIssueTags] = useState<{ id: string; name: string; color: string | null }[]>([]);
   const [allTags, setAllTags] = useState<{ id: string; name: string; color: string | null }[]>([]);
   const [dependencies, setDependencies] = useState<DependencyInfo>({ dependencies: [] });
+  const [analyzingDeps, setAnalyzingDeps] = useState(false);
   const [availableIssues, setAvailableIssues] = useState<IssueWithStatus[]>([]);
 
   // Track unsaved changes for warning
@@ -156,6 +157,29 @@ export function IssueDetailPanel({
     setTitle(preEnhanceSnapshot.title);
     setDescription(preEnhanceSnapshot.description);
     setPreEnhanceSnapshot(null);
+  }
+
+  async function handleAnalyzeDeps() {
+    if (analyzingDeps) return;
+    setAnalyzingDeps(true);
+    try {
+      const result = await apiFetch<{ dependencies: Array<{ id: string; type: string; issueId: string; reason: string }>; total: number }>("/api/issues/analyze-dependencies", {
+        method: "POST",
+        body: JSON.stringify({ issueId: issue.id, projectId: issue.projectId }),
+      });
+      // Reload dependencies to show newly created ones
+      const deps = await apiFetch<DependencyInfo>(`/api/issues/${issue.id}/dependencies`);
+      setDependencies(deps);
+      if (result.total > 0) {
+        showToast(`Added ${result.total} dependenc${result.total === 1 ? "y" : "ies"}`, "success");
+      } else {
+        showToast("No new dependencies found");
+      }
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Dependency analysis failed", "error");
+    } finally {
+      setAnalyzingDeps(false);
+    }
   }
 
   async function handleSave() {
@@ -435,15 +459,18 @@ export function IssueDetailPanel({
                   Dependencies
                 </label>
                 <button
-                  onClick={() => {
-                    const prompt = `Analyze issue #${issue.issueNumber ?? ""} "${issue.title}" and its dependencies to other open issues. Look at the description, title, and existing dependencies. For each dependency you identify, use the add_dependency MCP tool or the CLI to create it. Only create dependencies that are genuinely useful for scheduling parallel work. Use types: depends_on (prerequisite), blocked_by (inverse), related_to (related work), duplicates (duplicate issue), parent_of (epic/subtask), child_of (subtask of epic). After creating dependencies, list what you found and added.`;
-                    const encoded = encodeURIComponent(prompt);
-                    window.open(`claude://chat?model=claude-3-5-haiku-2024-10-22&prompt=${encoded}`, "_blank");
-                  }}
-                  className="text-[10px] text-purple-600 hover:text-purple-700 font-medium px-1.5 py-0.5 rounded border border-purple-200 hover:bg-purple-50"
-                  title="Launch a Claude session to analyze and create dependencies"
+                  onClick={handleAnalyzeDeps}
+                  disabled={analyzingDeps}
+                  className="text-[10px] text-purple-600 hover:text-purple-700 font-medium px-1.5 py-0.5 rounded border border-purple-200 hover:bg-purple-50 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
+                  title="Analyze dependencies with AI"
                 >
-                  Analyze Deps
+                  {analyzingDeps && (
+                    <svg className="animate-spin h-3 w-3" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+                    </svg>
+                  )}
+                  {analyzingDeps ? "Analyzing..." : "Analyze Deps"}
                 </button>
               </div>
               {dependencies.dependencies.length > 0 ? (
