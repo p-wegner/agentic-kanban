@@ -3,7 +3,7 @@ import { Command } from "commander";
 import { migrate } from "drizzle-orm/libsql/migrator";
 import { db } from "./db/index.js";
 import { projects, projectStatuses, preferences, workspaces, issues, issueTags, sessions, agentSkills, issueDependencies, DEPENDENCY_TYPES } from "@agentic-kanban/shared/schema";
-import { eq, inArray, sql } from "drizzle-orm";
+import { eq, inArray, sql, and, isNull } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { detectRepoInfo } from "./services/git-info.service.js";
 
@@ -613,11 +613,19 @@ const skillCmd = program.command("skill").description("Manage agent skills");
 
 skillCmd
   .command("list")
-  .description("List all agent skills")
-  .action(async () => {
+  .description("List agent skills")
+  .option("-p, --project <projectId>", "Filter to project-specific + global skills")
+  .action(async (options: { project?: string }) => {
     try {
       await runMigrations();
-      const rows = await db.select().from(agentSkills).orderBy(agentSkills.name);
+      let rows;
+      if (options.project) {
+        rows = await db.select().from(agentSkills)
+          .where(sql`${agentSkills.projectId} IS NULL OR ${agentSkills.projectId} = ${options.project}`)
+          .orderBy(agentSkills.name);
+      } else {
+        rows = await db.select().from(agentSkills).orderBy(agentSkills.name);
+      }
       if (rows.length === 0) {
         console.log("No agent skills found.");
         process.exit(0);
@@ -625,7 +633,8 @@ skillCmd
       for (const s of rows) {
         const builtin = s.isBuiltin ? " [builtin]" : "";
         const model = s.model ? ` (model: ${s.model})` : "";
-        console.log(`  ${s.name}${builtin}${model}`);
+        const scope = s.projectId ? ` (project)` : " (global)";
+        console.log(`  ${s.name}${builtin}${model}${scope}`);
         console.log(`    id: ${s.id}`);
         console.log(`    ${s.description}`);
       }
@@ -655,6 +664,7 @@ skillCmd
       console.log(`ID: ${s.id}`);
       console.log(`Description: ${s.description}`);
       console.log(`Model: ${s.model ?? "default"}`);
+      console.log(`Scope: ${s.projectId ? `project (${s.projectId})` : "global"}`);
       console.log(`Builtin: ${s.isBuiltin}`);
       console.log(`\n--- Prompt ---\n${s.prompt}`);
       process.exit(0);
@@ -670,12 +680,18 @@ skillCmd
   .option("-d, --description <description>", "Skill description")
   .option("-p, --prompt <prompt>", "Skill prompt (or omit to read from stdin)")
   .option("-m, --model <model>", "Model override (haiku, sonnet, opus)")
-  .action(async (name: string, options: { description?: string; prompt?: string; model?: string }) => {
+  .option("--project <projectId>", "Scope skill to a specific project (omit for global)")
+  .action(async (name: string, options: { description?: string; prompt?: string; model?: string; project?: string }) => {
     try {
       await runMigrations();
-      const existing = await db.select().from(agentSkills).where(eq(agentSkills.name, name)).limit(1);
+      const scopeProjectId = options.project || null;
+      // Check for duplicate name in same scope
+      const scopeCondition = scopeProjectId
+        ? and(eq(agentSkills.name, name), eq(agentSkills.projectId, scopeProjectId))
+        : and(eq(agentSkills.name, name), isNull(agentSkills.projectId));
+      const existing = await db.select().from(agentSkills).where(scopeCondition).limit(1);
       if (existing.length > 0) {
-        console.error(`Skill '${name}' already exists.`);
+        console.error(`Skill '${name}' already exists in this scope.`);
         process.exit(1);
       }
       const prompt = options.prompt ?? "No prompt provided.";
@@ -688,12 +704,83 @@ skillCmd
         description,
         prompt,
         model: options.model ?? null,
+        projectId: scopeProjectId,
         isBuiltin: false,
         createdAt: now,
         updatedAt: now,
       });
-      console.log(`Created skill '${name}'`);
+      const scope = scopeProjectId ? ` (project: ${scopeProjectId})` : " (global)";
+      console.log(`Created skill '${name}'${scope}`);
       console.log(`  id: ${id}`);
+      process.exit(0);
+    } catch (err) {
+      console.error("Error:", err instanceof Error ? err.message : String(err));
+      process.exit(1);
+    }
+  });
+
+skillCmd
+  .command("export <target-path>")
+  .description("Export skills as Claude Code SKILL.md files to a project directory")
+  .option("-p, --project <projectId>", "Export only project-specific + global skills")
+  .option("-n, --names <names>", "Comma-separated list of skill names to export")
+  .action(async (targetPath: string, options: { project?: string; names?: string }) => {
+    try {
+      await runMigrations();
+      const { mkdir, writeFile, access } = await import("node:fs/promises");
+      const { join } = await import("node:path");
+
+      // Verify target path
+      try {
+        await access(targetPath);
+      } catch {
+        console.error(`Target path does not exist: ${targetPath}`);
+        process.exit(1);
+      }
+
+      // Fetch skills
+      let rows;
+      if (options.project) {
+        rows = await db.select().from(agentSkills)
+          .where(sql`${agentSkills.projectId} IS NULL OR ${agentSkills.projectId} = ${options.project}`)
+          .orderBy(agentSkills.name);
+      } else {
+        rows = await db.select().from(agentSkills).orderBy(agentSkills.name);
+      }
+
+      if (options.names) {
+        const nameSet = new Set(options.names.split(",").map(n => n.trim()));
+        rows = rows.filter(s => nameSet.has(s.name));
+      }
+
+      if (rows.length === 0) {
+        console.log("No skills found to export.");
+        process.exit(0);
+      }
+
+      const skillsDir = join(targetPath, ".claude", "skills");
+      await mkdir(skillsDir, { recursive: true });
+
+      for (const skill of rows) {
+        const skillDir = join(skillsDir, skill.name);
+        await mkdir(skillDir, { recursive: true });
+        const content = [
+          "---",
+          `name: ${skill.name}`,
+          `description: ${skill.description}`,
+          "---",
+          "",
+          skill.prompt,
+        ].join("\n");
+        await writeFile(join(skillDir, "SKILL.md"), content, "utf-8");
+      }
+
+      console.log(`Exported ${rows.length} skill(s) to ${skillsDir}:`);
+      for (const s of rows) {
+        const scope = s.projectId ? "project" : "global";
+        const builtin = s.isBuiltin ? " [builtin]" : "";
+        console.log(`  - ${s.name} (${scope}${builtin})`);
+      }
       process.exit(0);
     } catch (err) {
       console.error("Error:", err instanceof Error ? err.message : String(err));

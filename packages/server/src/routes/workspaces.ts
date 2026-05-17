@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { db } from "../db/index.js";
 import { workspaces, issues, projects, preferences, sessions, sessionMessages, diffComments, projectStatuses, agentSkills } from "@agentic-kanban/shared/schema";
-import { eq, inArray } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import * as gitService from "../services/git.service.js";
 import { runSetupScript } from "../services/setup-script.js";
