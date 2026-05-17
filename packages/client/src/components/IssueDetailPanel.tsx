@@ -3,6 +3,16 @@ import type { IssueWithStatus, UpdateIssueRequest, DependencyInfo } from "@agent
 import { apiFetch } from "../lib/api.js";
 import { showToast } from "./Toast.js";
 
+async function enhanceIssue(projectId: string, title: string, description: string) {
+  const res = await fetch("/api/issues/enhance", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ title, description, projectId }),
+  });
+  if (!res.ok) throw new Error("Enhancement failed");
+  return res.json() as Promise<{ title: string; description: string }>;
+}
+
 interface StatusOption {
   id: string;
   name: string;
@@ -57,6 +67,8 @@ export function IssueDetailPanel({
   const [description, setDescription] = useState(issue.description ?? "");
   const [priority, setPriority] = useState(issue.priority);
   const [saving, setSaving] = useState(false);
+  const [enhancing, setEnhancing] = useState(false);
+  const [preEnhanceSnapshot, setPreEnhanceSnapshot] = useState<{ title: string; description: string } | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [workspaceCount, setWorkspaceCount] = useState(0);
   const [issueTags, setIssueTags] = useState<{ id: string; name: string; color: string | null }[]>([]);
@@ -121,9 +133,32 @@ export function IssueDetailPanel({
       if (!window.confirm("You have unsaved changes. Discard?")) return;
     }
     setEditing(false);
+    setPreEnhanceSnapshot(null);
     setTitle(issue.title);
     setDescription(issue.description ?? "");
     setPriority(issue.priority);
+  }
+
+  async function handleEnhance() {
+    if (!title.trim() || enhancing) return;
+    setEnhancing(true);
+    try {
+      setPreEnhanceSnapshot({ title, description });
+      const result = await enhanceIssue(issue.projectId, title, description);
+      setTitle(result.title);
+      setDescription(result.description);
+    } catch {
+      setPreEnhanceSnapshot(null);
+    } finally {
+      setEnhancing(false);
+    }
+  }
+
+  function handleUndoEnhance() {
+    if (!preEnhanceSnapshot) return;
+    setTitle(preEnhanceSnapshot.title);
+    setDescription(preEnhanceSnapshot.description);
+    setPreEnhanceSnapshot(null);
   }
 
   async function handleSave() {
@@ -600,6 +635,38 @@ export function IssueDetailPanel({
               >
                 Cancel
               </button>
+              <button
+                type="button"
+                onClick={handleEnhance}
+                disabled={!title.trim() || enhancing}
+                title="Enhance with AI"
+                className="ml-auto text-sm text-purple-600 px-2 py-1.5 hover:text-purple-800 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
+              >
+                {enhancing ? (
+                  <svg className="animate-spin h-3.5 w-3.5" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+                  </svg>
+                ) : (
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 3l1.5 3.5L10 8l-3.5 1.5L5 13l-1.5-3.5L0 8l3.5-1.5L5 3zM19 11l1 2.5L22.5 14l-2.5 1L19 17.5l-1-2.5L15.5 14l2.5-1L19 11z" />
+                  </svg>
+                )}
+                {enhancing ? "Enhancing..." : "Enhance"}
+              </button>
+              {preEnhanceSnapshot && (
+                <button
+                  type="button"
+                  onClick={handleUndoEnhance}
+                  title="Undo enhancement"
+                  className="text-sm text-gray-500 px-2 py-1.5 hover:text-gray-700 flex items-center gap-1"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" />
+                  </svg>
+                  Undo
+                </button>
+              )}
             </>
           ) : (
             <>
