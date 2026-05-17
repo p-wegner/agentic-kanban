@@ -209,6 +209,118 @@ Detected files: ${detected.length > 0 ? detected.join(", ") : "none"}`;
     return c.json({ setupScript });
   });
 
+  // POST /api/projects/generate-teardown-script — AI-generate a teardown script for a project
+  router.post("/generate-teardown-script", async (c) => {
+    let body: { projectId?: string };
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ error: "invalid JSON body" }, 400);
+    }
+    if (!body.projectId) {
+      return c.json({ error: "projectId is required" }, 400);
+    }
+
+    const projectRows = await database
+      .select({ repoPath: projects.repoPath, repoName: projects.repoName, setupScript: projects.setupScript })
+      .from(projects)
+      .where(eq(projects.id, body.projectId))
+      .limit(1);
+    if (projectRows.length === 0) {
+      return c.json({ error: "Project not found" }, 404);
+    }
+
+    const { repoPath, repoName, setupScript } = projectRows[0];
+
+    // Detect project marker files
+    const markers = [
+      "package.json", "pnpm-lock.yaml", "yarn.lock", "bun.lockb", "bun.lock",
+      "Cargo.toml", "go.mod", "requirements.txt", "Pipfile", "pyproject.toml",
+      "pom.xml", "build.gradle", "build.gradle.kts", "Gemfile", "mix.exs",
+      "Makefile", "justfile", "Taskfile.yml",
+    ];
+    const detected: string[] = [];
+    try {
+      const files = readdirSync(repoPath);
+      for (const f of files) {
+        if (markers.includes(f)) detected.push(f);
+      }
+    } catch {
+      // Can't read directory
+    }
+
+    // Read agent_command and claude_profile from global preferences
+    let agentCommand = "claude";
+    let claudeProfile: string | undefined;
+    const prefs = await database
+      .select({ key: preferences.key, value: preferences.value })
+      .from(preferences)
+      .where(inArray(preferences.key, ["agent_command", "claude_profile"]));
+    for (const p of prefs) {
+      if (p.key === "agent_command" && p.value) agentCommand = p.value;
+      if (p.key === "claude_profile" && p.value) claudeProfile = p.value;
+    }
+
+    if (process.platform === "win32" && agentCommand === "claude") {
+      try {
+        const resolved = execSync("where claude.exe 2>nul", { encoding: "utf8" }).trim().split("\n")[0]?.trim();
+        if (resolved) agentCommand = resolved;
+      } catch {}
+    }
+
+    const contextParts: string[] = [];
+    if (detected.length > 0) contextParts.push(`Detected files: ${detected.join(", ")}`);
+    if (setupScript) contextParts.push(`Current setup script: ${setupScript}`);
+
+    const prompt = `You are analyzing a software project to determine the correct teardown/cleanup command(s) to run before removing a git worktree.
+Based on the project context, suggest appropriate teardown command(s) for the project "${repoName}".
+
+The teardown runs in the worktree directory before the worktree is removed after merging. It should clean up:
+- Background processes/servers started during setup or by the agent (e.g. dev servers, watchers)
+- Large generated directories (e.g. node_modules, build artifacts) to free disk space
+- Any temp files or lock files specific to the worktree
+
+IMPORTANT: Respond ONLY with the raw shell command(s) to run. No explanation, no markdown, no code fences.
+If multiple commands are needed, chain them with &&.
+Use || true for commands that may fail (e.g. "pkill -f dev-server || true").
+If no teardown is needed, respond with an empty string.
+
+${contextParts.join("\n")}`;
+
+    const args: string[] = ["--output-format", "text", "-p"];
+    if (claudeProfile) {
+      const settingsPath = join(homedir(), ".claude", `settings_${claudeProfile}.json`);
+      if (existsSync(settingsPath)) {
+        args.push("--settings", settingsPath);
+      }
+    }
+
+    let teardownScript: string;
+    try {
+      const result = await new Promise<string>((resolve, reject) => {
+        const child = execFile(agentCommand, args, {
+          encoding: "utf8",
+          timeout: 30000,
+          shell: false,
+          maxBuffer: 1024 * 1024,
+        }, (err, stdout) => {
+          if (err) reject(err);
+          else resolve(stdout ?? "");
+        });
+        child.stdin?.end(prompt);
+      });
+      teardownScript = result.trim();
+    } catch (err: any) {
+      const parts: string[] = [];
+      if (err.message) parts.push(err.message);
+      if (err.stderr) parts.push(String(err.stderr).trim());
+      const msg = parts.length > 0 ? parts.join(" | ") : "claude CLI failed";
+      console.error("[generate-teardown-script] claude error:", msg);
+      return c.json({ error: "AI generation failed", detail: msg }, 500);
+    }
+    return c.json({ teardownScript });
+  });
+
   // GET /api/projects/:id/statuses
   router.get("/:id/statuses", async (c) => {
     const projectId = c.req.param("id");
