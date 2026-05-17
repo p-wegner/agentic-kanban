@@ -145,11 +145,12 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onDragStart, tags,
       {liveStats && (ws?.total === 1) && (
         <div className="flex items-center gap-2 mt-0.5 text-[10px] text-gray-400 px-1">
           {liveStats.model && <span className="font-mono">{liveStats.model}</span>}
-          {liveStats.contextTokens > 0 ? (
+          {liveStats.contextTokens > 0 && (
             <span>{Math.round(liveStats.contextTokens / 1000)}k ctx</span>
-          ) : liveStats.toolUses > 0 ? (
+          )}
+          {liveStats.toolUses > 0 && liveStats.contextTokens === 0 && (
             <span>{liveStats.toolUses} tools</span>
-          ) : null}
+          )}
           {liveStats.subagentCount > 0 && (
             <span className="inline-flex items-center gap-0.5 px-1 rounded bg-violet-50 text-violet-600 font-medium">
               <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>

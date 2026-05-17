@@ -43,6 +43,8 @@ function createSessionManager(
   const sessionModels = new Map<string, string>();
   // Track active subagent count per session (Agent tool_use calls)
   const sessionSubagents = new Map<string, number>();
+  // Track last known context token count per session for subagent/task_progress broadcasts
+  const sessionContextTokens = new Map<string, number>();
   // Track Agent tool_use IDs per session to decrement count when tool_result arrives
   const sessionAgentToolUseIds = new Map<string, Set<string>>();
   // Track tasks from TaskCreate/TaskUpdate calls per session
@@ -112,6 +114,7 @@ function createSessionManager(
           const model = (obj.message.model as string) ?? "";
           const contextTokens = ((usage?.cache_read_input_tokens as number) ?? 0) + ((usage?.input_tokens as number) ?? 0);
           if (model) sessionModels.set(sessionId, model);
+          if (contextTokens > 0) sessionContextTokens.set(sessionId, contextTokens);
           const toolUses = sessionToolUses.get(sessionId) ?? 0;
           const subagentCount = sessionSubagents.get(sessionId) ?? 0;
           const ctx = sessionContexts.get(sessionId);
@@ -127,9 +130,10 @@ function createSessionManager(
             sessionToolUses.set(sessionId, tpUsage.tool_uses);
             const model = sessionModels.get(sessionId) ?? "";
             const subagentCount = sessionSubagents.get(sessionId) ?? 0;
+            const lastContextTokens = sessionContextTokens.get(sessionId) ?? 0;
             const ctx = sessionContexts.get(sessionId);
             if (ctx) {
-              options?.onLiveStats?.(ctx.projectId, ctx.issueId, model, 0, tpUsage.tool_uses, subagentCount);
+              options?.onLiveStats?.(ctx.projectId, ctx.issueId, model, lastContextTokens, tpUsage.tool_uses, subagentCount);
             }
           }
         }
@@ -176,8 +180,9 @@ function createSessionManager(
                   sessionSubagents.set(sessionId, count);
                   const model = sessionModels.get(sessionId) ?? "";
                   const toolUses = sessionToolUses.get(sessionId) ?? 0;
+                  const lastContextTokens = sessionContextTokens.get(sessionId) ?? 0;
                   if (ctx) {
-                    options?.onLiveStats?.(ctx.projectId, ctx.issueId, model, 0, toolUses, count);
+                    options?.onLiveStats?.(ctx.projectId, ctx.issueId, model, lastContextTokens, toolUses, count);
                   }
                 }
                 // Track TaskCreate calls (skip if TodoWrite has taken precedence)
@@ -223,7 +228,8 @@ function createSessionManager(
                   if (ctx) {
                     const model = sessionModels.get(sessionId) ?? "";
                     const toolUses = sessionToolUses.get(sessionId) ?? 0;
-                    options?.onLiveStats?.(ctx.projectId, ctx.issueId, model, 0, toolUses, newCount);
+                    const lastContextTokens = sessionContextTokens.get(sessionId) ?? 0;
+                    options?.onLiveStats?.(ctx.projectId, ctx.issueId, model, lastContextTokens, toolUses, newCount);
                   }
                 }
               }
@@ -244,13 +250,15 @@ function createSessionManager(
         // Broadcast final stats with zero subagents
         const model = sessionModels.get(sessionId) ?? "";
         const toolUses = sessionToolUses.get(sessionId) ?? 0;
-        options?.onLiveStats?.(ctx.projectId, ctx.issueId, model, 0, toolUses, 0);
+        const lastContextTokens = sessionContextTokens.get(sessionId) ?? 0;
+        options?.onLiveStats?.(ctx.projectId, ctx.issueId, model, lastContextTokens, toolUses, 0);
       }
       sessionSubagents.delete(sessionId);
       sessionTasks.delete(sessionId);
       sessionHasTodoWrite.delete(sessionId);
       sessionToolUses.delete(sessionId);
       sessionModels.delete(sessionId);
+      sessionContextTokens.delete(sessionId);
       sessionAgentToolUseIds.delete(sessionId);
     }
 
