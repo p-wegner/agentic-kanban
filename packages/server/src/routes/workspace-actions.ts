@@ -493,6 +493,143 @@ export function createWorkspaceActionsRoute(
     }
   });
 
+  // POST /api/workspaces/:id/update-base — rebase or merge base branch into workspace
+  router.post("/:id/update-base", async (c) => {
+    const id = c.req.param("id");
+    const body = await c.req.json();
+    const mode = body.mode === "merge" ? "merge" : "rebase";
+
+    const rows = await database.select().from(workspaces).where(eq(workspaces.id, id)).limit(1);
+    if (rows.length === 0) {
+      return c.json({ error: "Workspace not found" }, 404);
+    }
+    const workspace = rows[0];
+    if (!workspace.workingDir || workspace.isDirect) {
+      return c.json({ error: "Not supported for direct workspaces" }, 400);
+    }
+    if (workspace.status === "closed") {
+      return c.json({ error: "Workspace is closed" }, 400);
+    }
+
+    try {
+      const { defaultBranch } = await resolveProjectRepo(id, database);
+      const baseBranch = workspace.baseBranch || defaultBranch;
+
+      let result: { success: boolean; conflictingFiles?: string[]; error?: string };
+      if (mode === "merge") {
+        result = await gitService.mergeBaseIntoBranch(workspace.workingDir, baseBranch);
+      } else {
+        result = await gitService.rebaseOntoBase(workspace.workingDir, baseBranch);
+      }
+
+      console.log(`[workspace-actions] update-base: workspaceId=${id} mode=${mode} success=${result.success} conflicts=${result.conflictingFiles?.length ?? 0}`);
+
+      // Broadcast board event
+      const projectId = await resolveProjectId(id, database);
+      if (projectId) options?.boardEvents?.broadcast(projectId, "board_changed");
+
+      return c.json(result);
+    } catch (err) {
+      return c.json({ error: `Update base failed: ${err instanceof Error ? err.message : String(err)}` }, 500);
+    }
+  });
+
+  // POST /api/workspaces/:id/abort-rebase — abort in-progress rebase
+  router.post("/:id/abort-rebase", async (c) => {
+    const id = c.req.param("id");
+    const rows = await database.select().from(workspaces).where(eq(workspaces.id, id)).limit(1);
+    if (rows.length === 0) {
+      return c.json({ error: "Workspace not found" }, 404);
+    }
+    const workspace = rows[0];
+    if (!workspace.workingDir) {
+      return c.json({ error: "Workspace not set up" }, 400);
+    }
+
+    try {
+      await gitService.abortRebase(workspace.workingDir);
+      const projectId = await resolveProjectId(id, database);
+      if (projectId) options?.boardEvents?.broadcast(projectId, "board_changed");
+      return c.json({ ok: true });
+    } catch (err) {
+      return c.json({ error: `Abort rebase failed: ${err instanceof Error ? err.message : String(err)}` }, 500);
+    }
+  });
+
+  // POST /api/workspaces/:id/resolve-conflicts — launch AI agent to resolve conflicts
+  router.post("/:id/resolve-conflicts", async (c) => {
+    const id = c.req.param("id");
+    const rows = await database.select().from(workspaces).where(eq(workspaces.id, id)).limit(1);
+    if (rows.length === 0) {
+      return c.json({ error: "Workspace not found" }, 404);
+    }
+    const workspace = rows[0];
+    if (!workspace.workingDir) {
+      return c.json({ error: "Workspace not set up" }, 400);
+    }
+
+    try {
+      // Get conflicting files from the in-progress rebase/merge
+      let conflictingFiles: string[] = [];
+      try {
+        const unmerged = await gitService.getDiff(workspace.workingDir, "HEAD");
+        // Parse file names from the diff output — but simpler to just use diff --name-only
+        const { execFile } = await import("node:child_process");
+        const output = await new Promise<string>((res, rej) => {
+          execFile("git", ["diff", "--name-only", "--diff-filter=U"], { cwd: workspace.workingDir! }, (err, stdout) => {
+            if (err) rej(err); else res(stdout.toString());
+          });
+        });
+        conflictingFiles = output.trim().split("\n").filter(Boolean);
+      } catch { /* no conflicts or not in merge state */ }
+
+      const { defaultBranch } = await resolveProjectRepo(id, database);
+      const baseBranch = workspace.baseBranch || defaultBranch;
+
+      const prompt = `Resolve the merge/rebase conflicts in this workspace.
+
+Conflicting files:
+${conflictingFiles.map(f => `- ${f}`).join("\n")}
+
+For each conflicting file:
+1. Read the file and examine the conflict markers (<<<<<<<, =======, >>>>>>>)
+2. Understand the intent of both changes
+3. Resolve the conflict by keeping the correct code from both sides — prefer the feature branch changes unless the base branch change is clearly needed
+4. Remove all conflict markers
+5. Stage the resolved file with: git add <filename> (use the actual filename)
+
+After resolving all conflicts:
+- If this was a rebase: run "git rebase --continue"
+- If this was a merge: run "git commit --no-edit"
+
+Base branch: ${baseBranch}`;
+
+      // Read preferences for agent launch
+      const prefRows = await database.select().from(preferences);
+      const prefMap = new Map(prefRows.map(r => [r.key, r.value]));
+      const useMock = prefMap.get("mock_agent") === "true" || process.env.MOCK_AGENT === "1";
+      const agentCommand = useMock ? MOCK_AGENT_COMMAND : (prefMap.get("agent_command") || undefined);
+      const skipPerms = prefMap.get("skip_permissions") === "true";
+      const baseArgs = prefMap.get("agent_args") || "";
+      const agentArgs = skipPerms
+        ? (baseArgs ? baseArgs + " --dangerously-skip-permissions" : "--dangerously-skip-permissions")
+        : (baseArgs || undefined);
+      const claudeProfile = prefMap.get("claude_profile") || undefined;
+
+      const sessionId = await getSessionManager().startSession(id, prompt, agentCommand, agentArgs, undefined, claudeProfile, true);
+
+      const now = new Date().toISOString();
+      await database.update(workspaces).set({ status: "active", updatedAt: now }).where(eq(workspaces.id, id));
+
+      const projectId = await resolveProjectId(id, database);
+      if (projectId) options?.boardEvents?.broadcast(projectId, "session_launched");
+
+      return c.json({ sessionId });
+    } catch (err) {
+      return c.json({ error: `Resolve conflicts failed: ${err instanceof Error ? err.message : String(err)}` }, 500);
+    }
+  });
+
   // GET /api/workspaces/:id/comments — list diff comments
   router.get("/:id/comments", async (c) => {
     const id = c.req.param("id");
