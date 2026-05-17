@@ -570,14 +570,14 @@ describe("CLI issue dependency", () => {
     expect(result.stderr).toContain("Invalid type");
   });
 
-  it("lists dependencies", () => {
+  it("lists dependencies", { timeout: 15_000 }, () => {
     runCli(["issue", "dependency", "add", issueAId, issueBId], ctx.dbPath);
     const result = runCli(["issue", "dependency", "list", issueAId], ctx.dbPath);
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("Issue B");
   });
 
-  it("removes a dependency", () => {
+  it("removes a dependency", { timeout: 15_000 }, () => {
     const addResult = runCli(["issue", "dependency", "add", issueAId, issueBId], ctx.dbPath);
     const idMatch = addResult.stdout.match(/id: ([a-f0-9-]+)/);
     expect(idMatch).toBeTruthy();

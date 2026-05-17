@@ -25,13 +25,29 @@ const program = new Command();
 program
   .name("agentic-kanban")
   .description("CLI for managing agentic-kanban projects")
-  .version("0.0.1");
+  .version("0.0.1")
+  .usage("<command> [options]")
+  .addHelpText("after", `
+Examples:
+  $ agentic-kanban register .                        # register current repo
+  $ agentic-kanban issue list -s Todo                # list todo issues
+  $ agentic-kanban issue create "Fix login bug"      # create an issue
+  $ agentic-kanban workspace create <issue-id>       # create a worktree for an issue
+  $ agentic-kanban status                            # show board overview
+  $ agentic-kanban skill list                        # list agent skills
+`);
 
 program
   .command("register")
-  .description("Register a git repo as a project")
+  .description("Register a git repo as a project.\n\nAuto-detects repo name, default branch, and remote URL from the git repo at <path>. Creates 6 default statuses (Todo, In Progress, In Review, AI Reviewed, Done, Cancelled) and sets the project as the active project.\n\nIf the repo is already registered (same path), it skips without error.")
   .argument("<path>", "Path to the git repository")
   .option("-n, --name <name>", "Custom project name (defaults to repo directory name)")
+  .addHelpText("after", `
+Examples:
+  $ agentic-kanban register .                 # register current directory
+  $ agentic-kanban register /path/to/my-repo  # register a specific repo
+  $ agentic-kanban register . --name "My App" # custom project name
+`)
   .action(async (path: string, options: { name?: string }) => {
     try {
       await runMigrations();
@@ -106,8 +122,13 @@ program
 
 program
   .command("unregister")
-  .description("Remove a registered project by name or ID")
+  .description("Remove a registered project by name or ID.\n\nCascading deletes all associated data: issues, workspaces, sessions, issue tags, and project statuses.")
   .argument("<name-or-id>", "Project name or ID")
+  .addHelpText("after", `
+Examples:
+  $ agentic-kanban unregister "My App"
+  $ agentic-kanban unregister 180b7363-24d4-4ce8-be11-1e6212dabbfd
+`)
   .action(async (nameOrId: string) => {
     try {
       await runMigrations();
@@ -181,7 +202,11 @@ program
 
 program
   .command("list")
-  .description("List registered projects")
+  .description("List all registered projects.\n\nShows project name, repo path, default branch, and remote URL. The active project is marked with (active).")
+  .addHelpText("after", `
+Example:
+  $ agentic-kanban list
+`)
   .action(async () => {
     try {
       await runMigrations();
@@ -220,7 +245,13 @@ program
 
 program
   .command("cleanup")
-  .description("Remove stale worktrees for closed workspaces")
+  .description("Show stale worktrees for closed workspaces.\n\nLists git worktrees belonging to closed/merged workspaces. These worktrees are no longer needed and can be removed manually with 'git worktree remove --force <path>'.\n\nThis command does NOT auto-remove worktrees — it only reports them.")
+  .addHelpText("after", `
+Example:
+  $ agentic-kanban cleanup
+  # Then manually remove with:
+  $ git worktree remove --force <path>
+`)
   .action(async () => {
     try {
       await runMigrations();
@@ -262,12 +293,23 @@ function timeSince(date: Date): string {
 
 program
   .command("status")
-  .description("Show board status overview: all active agents, workspaces, and progress")
+  .description("Show board status overview with all active agents, workspaces, and progress.\n\nDisplays a summary of issues, their workspace/session state, diff stats, token usage, and last agent output. By default only shows active (non-completed) issues.")
   .option("-p, --project <id>", "Project ID (defaults to active project)")
   .option("-a, --all", "Include closed/done issues", false)
   .option("--json", "Output raw JSON instead of formatted text")
-  .option("-w, --watch", "Auto-refresh every N seconds")
-  .option("-i, --interval <seconds>", "Refresh interval in seconds (default: 5)", "5")
+  .option("-w, --watch", "Auto-refresh display at regular intervals")
+  .option("-i, --interval <seconds>", "Refresh interval in seconds (default: 5, minimum: 2)", "5")
+  .addHelpText("after", `
+Examples:
+  $ agentic-kanban status                       # active issues only
+  $ agentic-kanban status --all                 # include completed issues
+  $ agentic-kanban status --json                # machine-readable output
+  $ agentic-kanban status --watch               # auto-refresh every 5s
+  $ agentic-kanban status -w -i 10              # auto-refresh every 10s
+
+Status indicators:
+  ● = active workspace   ○ = idle workspace   ◎ = reviewing   · = no workspace
+`)
   .action(async (options: { project?: string; all?: boolean; json?: boolean; watch?: boolean; interval?: string }) => {
     try {
       await runMigrations();
@@ -366,13 +408,20 @@ async function getActiveProjectId(): Promise<string> {
 
 // ── issue commands ────────────────────────────────────────────────────────────
 
-const issueCmd = program.command("issue").description("Manage issues");
+const issueCmd = program.command("issue").description("Manage issues on the board.\n\nSubcommands: list, create, move, dependency");
 
 issueCmd
   .command("list")
-  .description("List issues for the active project")
-  .option("-s, --status <status>", "Filter by status name (e.g. Todo, 'In Progress')")
+  .description("List issues for the active project.\n\nShows issue number, priority, status, and title. Filters can be combined.")
+  .option("-s, --status <status>", "Filter by status name (e.g. Todo, 'In Progress', Done)")
   .option("-p, --priority <priority>", "Filter by priority (low, medium, high, critical)")
+  .addHelpText("after", `
+Examples:
+  $ agentic-kanban issue list                        # all issues
+  $ agentic-kanban issue list -s Todo                # only todo issues
+  $ agentic-kanban issue list -p critical            # only critical priority
+  $ agentic-kanban issue list -s "In Progress" -p high
+`)
   .action(async (options: { status?: string; priority?: string }) => {
     try {
       await runMigrations();
@@ -413,10 +462,16 @@ issueCmd
 
 issueCmd
   .command("create <title>")
-  .description("Create a new issue in the active project")
-  .option("-d, --description <description>", "Issue description")
+  .description("Create a new issue in the active project.\n\nIssue numbers are auto-incrementing per project. The issue is placed in the first project status (typically Todo) unless overridden with -s.")
+  .option("-d, --description <description>", "Issue description (markdown supported)")
   .option("-p, --priority <priority>", "Priority: low, medium, high, critical (default: medium)")
-  .option("-s, --status <status>", "Initial status name (default: Todo)")
+  .option("-s, --status <status>", "Initial status name (default: first project status, typically Todo)")
+  .addHelpText("after", `
+Examples:
+  $ agentic-kanban issue create "Fix login bug"
+  $ agentic-kanban issue create "Add dark mode" -d "Support theme switching" -p high
+  $ agentic-kanban issue create "Hotfix" -p critical -s "In Progress"
+`)
   .action(async (title: string, options: { description?: string; priority?: string; status?: string }) => {
     try {
       await runMigrations();
@@ -473,7 +528,14 @@ issueCmd
 
 issueCmd
   .command("move <issue-id> <status>")
-  .description("Move an issue to a different status")
+  .description("Move an issue to a different status.\n\nThe status name must match one of the project's configured statuses exactly (case-sensitive). Use 'issue list' to see available status names.")
+  .addHelpText("after", `
+Examples:
+  $ agentic-kanban issue move abc123 "In Progress"
+  $ agentic-kanban issue move abc123 Done
+
+Tip: Use 'issue list' to find the issue ID and see available status names.
+`)
   .action(async (issueId: string, statusName: string) => {
     try {
       await runMigrations();
@@ -506,12 +568,18 @@ issueCmd
 
 // ── workspace commands ────────────────────────────────────────────────────────
 
-const wsCmd = program.command("workspace").description("Manage workspaces");
+const wsCmd = program.command("workspace").description("Manage workspaces (git worktrees linked to issues).\n\nWorkspaces create isolated git worktrees where agents can work on issues. Each workspace is tied to a single issue.\n\nSubcommands: list, create");
 
 wsCmd
   .command("list")
-  .description("List workspaces for the active project")
+  .description("List workspaces for the active project.\n\nShows workspace status, branch name, ID, and working directory.")
   .option("-s, --status <status>", "Filter by status: active, idle, closed")
+  .addHelpText("after", `
+Examples:
+  $ agentic-kanban workspace list              # all workspaces
+  $ agentic-kanban workspace list -s active    # only active workspaces
+  $ agentic-kanban workspace list -s closed    # only closed/merged workspaces
+`)
   .action(async (options: { status?: string }) => {
     try {
       await runMigrations();
@@ -551,9 +619,17 @@ wsCmd
 
 wsCmd
   .command("create <issue-id>")
-  .description("Create a git worktree workspace for an issue")
+  .description("Create a git worktree workspace for an issue.\n\nCreates a new git worktree from the project's default branch (or a specified base branch) and links it to the issue. The worktree provides an isolated working directory where agents can make changes.\n\nNote: This only creates the worktree. To launch an agent, use the web UI or MCP tools.")
   .option("-b, --branch <branch>", "Branch name (default: workspace/<issue-id-short>)")
   .option("--base <baseBranch>", "Base branch to create from (default: project default branch)")
+  .addHelpText("after", `
+Examples:
+  $ agentic-kanban workspace create abc123                           # auto branch name
+  $ agentic-kanban workspace create abc123 -b fix/login              # custom branch name
+  $ agentic-kanban workspace create abc123 --base develop            # base off 'develop' branch
+
+Tip: Use 'issue list' to find the issue ID.
+`)
   .action(async (issueId: string, options: { branch?: string; base?: string }) => {
     try {
       await runMigrations();
@@ -634,12 +710,17 @@ program
     }
   });
 
-const skillCmd = program.command("skill").description("Manage agent skills");
+const skillCmd = program.command("skill").description("Manage agent skills.\n\nSkills are prompt templates that can be injected into agent context when creating workspaces. Built-in skills (board-navigator, code-review, dependency-analyzer, ticket-enhancer) are seeded on first run and cannot be modified.\n\nSkills can be global (available to all projects) or project-scoped.\n\nSubcommands: list, get, create, export");
 
 skillCmd
   .command("list")
-  .description("List agent skills")
+  .description("List agent skills.\n\nShows skill name, scope (global/project), model override, and description. Built-in skills are marked with [builtin].")
   .option("-p, --project <projectId>", "Filter to project-specific + global skills")
+  .addHelpText("after", `
+Examples:
+  $ agentic-kanban skill list                         # all skills
+  $ agentic-kanban skill list -p 180b7363-...         # project + global skills
+`)
   .action(async (options: { project?: string }) => {
     try {
       await runMigrations();
@@ -672,7 +753,12 @@ skillCmd
 
 skillCmd
   .command("get <name-or-id>")
-  .description("Show full details of a skill including its prompt")
+  .description("Show full details of a skill including its prompt template.\n\nDisplays the skill name, ID, description, model override, scope, and the full prompt text. Useful for reviewing or debugging skill prompts.")
+  .addHelpText("after", `
+Examples:
+  $ agentic-kanban skill get code-review
+  $ agentic-kanban skill get abc123-def456-...
+`)
   .action(async (nameOrId: string) => {
     try {
       await runMigrations();
@@ -701,11 +787,17 @@ skillCmd
 
 skillCmd
   .command("create <name>")
-  .description("Create a new agent skill")
-  .option("-d, --description <description>", "Skill description")
-  .option("-p, --prompt <prompt>", "Skill prompt (or omit to read from stdin)")
-  .option("-m, --model <model>", "Model override (haiku, sonnet, opus)")
+  .description("Create a new agent skill.\n\nCreates a custom prompt template that can be selected when creating a workspace. Skill names must be unique within their scope (global or same project). Names cannot contain '/', '\\', or '..'.")
+  .option("-d, --description <description>", "Skill description (defaults to name)")
+  .option("-p, --prompt <prompt>", "Skill prompt template text (defaults to 'No prompt provided.')")
+  .option("-m, --model <model>", "Model override: haiku, sonnet, opus (default: no override)")
   .option("--project <projectId>", "Scope skill to a specific project (omit for global)")
+  .addHelpText("after", `
+Examples:
+  $ agentic-kanban skill create my-reviewer -d "Custom code reviewer" -p "Review for..."
+  $ agentic-kanban skill create quick-fix -m haiku -p "Apply quick fixes"
+  $ agentic-kanban skill create project-skill --project 180b7363-... -p "Project-specific prompt"
+`)
   .action(async (name: string, options: { description?: string; prompt?: string; model?: string; project?: string }) => {
     try {
       await runMigrations();
@@ -750,9 +842,15 @@ skillCmd
 
 skillCmd
   .command("export <target-path>")
-  .description("Export skills as Claude Code SKILL.md files to a project directory")
+  .description("Export skills as Claude Code SKILL.md files.\n\nWrites skills into the .claude/skills/ directory of the target project, making them available to Claude Code in the terminal. Each skill is written as <name>/SKILL.md with frontmatter.")
   .option("-p, --project <projectId>", "Export only project-specific + global skills")
   .option("-n, --names <names>", "Comma-separated list of skill names to export")
+  .addHelpText("after", `
+Examples:
+  $ agentic-kanban skill export /path/to/my-project
+  $ agentic-kanban skill export . -n "code-review,dependency-analyzer"
+  $ agentic-kanban skill export . -p 180b7363-...
+`)
   .action(async (targetPath: string, options: { project?: string; names?: string }) => {
     try {
       await runMigrations();
@@ -823,11 +921,15 @@ skillCmd
 
 // ── dependency commands ─────────────────────────────────────────────────────────
 
-const depCmd = issueCmd.command("dependency").description("Manage issue dependencies");
+const depCmd = issueCmd.command("dependency").description("Manage issue dependencies.\n\nDependencies link issues together with typed relationships. Available types: depends_on, blocked_by, related_to, duplicates, parent_of, child_of.\n\nSubcommands: list, add, remove");
 
 depCmd
   .command("list <issue-id>")
-  .description("List dependencies for an issue")
+  .description("List dependencies for an issue.\n\nShows both outgoing (this issue depends on others) and incoming (others depend on this issue) dependencies.")
+  .addHelpText("after", `
+Example:
+  $ agentic-kanban issue dependency list abc123-def456-...
+`)
   .action(async (issueId: string) => {
     try {
       await runMigrations();
@@ -891,8 +993,14 @@ depCmd
 
 depCmd
   .command("add <issue-id> <target-id>")
-  .description("Add a dependency between two issues")
+  .description("Add a dependency between two issues.\n\nCreates a typed link from <issue-id> to <target-id>. Both issues must belong to the same project. Self-dependencies and duplicate links are rejected.")
   .option("-t, --type <type>", "Dependency type: depends_on, blocked_by, related_to, duplicates, parent_of, child_of (default: depends_on)")
+  .addHelpText("after", `
+Examples:
+  $ agentic-kanban issue dependency add abc123 def456                       # abc123 depends_on def456
+  $ agentic-kanban issue dependency add abc123 def456 -t blocked_by         # abc123 is blocked_by def456
+  $ agentic-kanban issue dependency add abc123 def456 -t parent_of          # abc123 is parent_of def456
+`)
   .action(async (issueId: string, targetId: string, options: { type?: string }) => {
     try {
       await runMigrations();
@@ -955,7 +1063,12 @@ depCmd
 
 depCmd
   .command("remove <dependency-id>")
-  .description("Remove a dependency by its ID")
+  .description("Remove a dependency by its ID.\n\nUse 'issue dependency list' to find the dependency ID.")
+  .addHelpText("after", `
+Example:
+  $ agentic-kanban issue dependency list abc123  # find the dependency ID
+  $ agentic-kanban issue dependency remove dep-abc-def
+`)
   .action(async (dependencyId: string) => {
     try {
       await runMigrations();
