@@ -1,0 +1,6 @@
+{
+  "editedFiles": [
+    "packages/server/src/routes/issues.ts",
+    "packages/client/src/components/IssueDetailPanel.tsx"
+  ]
+}
