@@ -18,6 +18,7 @@ interface IssueCardProps {
   issue: IssueWithStatus;
   onClick: (issue: IssueWithStatus) => void;
   onWorkspaceClick?: (issue: IssueWithStatus, workspaceId?: string) => void;
+  onStartWorkspace?: (issue: IssueWithStatus) => void;
   onDragStart: (e: React.DragEvent, issue: IssueWithStatus) => void;
   tags?: TagBadge[];
   searchQuery?: string;
@@ -46,16 +47,17 @@ function HighlightedText({ text, query }: { text: string; query: string }) {
   );
 }
 
-export function IssueCard({ issue, onClick, onWorkspaceClick, onDragStart, tags, searchQuery, liveActivity, liveStats, todos }: IssueCardProps) {
+export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, onDragStart, tags, searchQuery, liveActivity, liveStats, todos }: IssueCardProps) {
   const badgeColor = priorityColors[issue.priority] ?? "bg-gray-200 text-gray-700";
   const ws = issue.workspaceSummary;
+  const hasActiveWorkspace = ws?.main && ws.main.status !== "closed";
 
   return (
     <div
       draggable
       onDragStart={(e) => onDragStart(e, issue)}
       onClick={() => onClick(issue)}
-      className="bg-white rounded-md shadow-sm p-3 border border-gray-200 cursor-pointer hover:shadow-md hover:border-gray-300 transition-shadow"
+      className="group bg-white rounded-md shadow-sm p-3 border border-gray-200 cursor-pointer hover:shadow-md hover:border-gray-300 transition-shadow relative"
     >
       <div className="flex items-start justify-between gap-2">
         <p className="text-sm text-gray-900">
@@ -162,6 +164,18 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onDragStart, tags,
         </div>
       )}
       {todos && todos.length > 0 && <TodoProgress todos={todos} />}
+      {!hasActiveWorkspace && onStartWorkspace && (
+        <button
+          onClick={(e) => { e.stopPropagation(); onStartWorkspace(issue); }}
+          className="mt-1.5 w-full flex items-center justify-center gap-1 text-xs text-blue-600 hover:text-white hover:bg-blue-600 border border-blue-200 hover:border-blue-600 rounded px-2 py-1 transition-colors opacity-0 group-hover:opacity-100"
+          title="Start a new workspace for this issue"
+        >
+          <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+          </svg>
+          Start Workspace
+        </button>
+      )}
     </div>
   );
 }
