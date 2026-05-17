@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { apiFetch } from "../lib/api.js";
+import { formatRelativeTime } from "../lib/formatRelativeTime.js";
 import { useWebSocket } from "../lib/useWebSocket.js";
 import { TerminalView } from "./TerminalView.js";
 import { DiffViewer } from "./DiffViewer.js";
@@ -66,20 +67,6 @@ const SESSION_STATUS_COLORS: Record<string, string> = {
   completed: "bg-green-100 text-green-700",
   stopped: "bg-yellow-100 text-yellow-700",
 };
-
-function formatRelativeTime(dateStr: string): string {
-  const now = Date.now();
-  const then = new Date(dateStr).getTime();
-  const diffMs = now - then;
-  const diffSec = Math.floor(diffMs / 1000);
-  if (diffSec < 60) return "just now";
-  const diffMin = Math.floor(diffSec / 60);
-  if (diffMin < 60) return `${diffMin}m ago`;
-  const diffHr = Math.floor(diffMin / 60);
-  if (diffHr < 24) return `${diffHr}h ago`;
-  const diffDay = Math.floor(diffHr / 24);
-  return `${diffDay}d ago`;
-}
 
 function formatDuration(start: string, end: string | null): string {
   if (!end) return "running";
