@@ -267,12 +267,6 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
       if (e.key === "Escape") {
-        if (selectedHistoryId) {
-          setSelectedHistoryId(null);
-          setHistoryMessages([]);
-          setViewMode("output");
-          return;
-        }
         onClose();
       }
     }
@@ -326,6 +320,8 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
             // Has exit message — definitely stale
             setLastSessionPerWorkspace((prev) => ({ ...prev, [wsId]: running.id }));
             setCompletedMessages(msgs);
+            setSelectedHistoryId(running.id);
+            setHistoryMessages(msgs);
           } else if (msgs.length === 0) {
             // 0 output — stale if running >2min
             const ageMs = Date.now() - new Date(running.startedAt).getTime();
@@ -361,6 +357,8 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
           setLastSessionPerWorkspace((prev) => ({ ...prev, [wsId]: session.id }));
           if (msgs.length > 0) {
             setCompletedMessages(msgs);
+            setSelectedHistoryId(session.id);
+            setHistoryMessages(msgs);
             break;
           }
         } catch {
@@ -1032,22 +1030,6 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                     {/* Session selector — shown when there are completed sessions */}
                     {completedSessions.length > 0 && !isRunning && (
                       <div className="space-y-0.5">
-                        {/* Latest tab */}
-                        <button
-                          onClick={() => { setSelectedHistoryId(null); setHistoryMessages([]); setViewMode("output"); }}
-                          className={`w-full flex items-center gap-2 py-1 px-2 rounded text-left text-xs ${
-                            selectedHistoryId === null
-                              ? "bg-blue-50 text-blue-700 font-medium"
-                              : "hover:bg-gray-50 text-gray-600"
-                          }`}
-                        >
-                          <span className={`w-1.5 h-1.5 rounded-full ${completedMessages.length > 0 ? "bg-green-500" : "bg-gray-300"}`} />
-                          <span>Latest</span>
-                          {completedMessages.length > 0 && (
-                            <span className="text-[10px] text-gray-400 ml-auto">just now</span>
-                          )}
-                        </button>
-                        {/* Past sessions */}
                         {completedSessions.map((session) => {
                           const sessionBadge = SESSION_STATUS_COLORS[session.status] ?? "bg-gray-100 text-gray-500";
                           const isActive = selectedHistoryId === session.id;
@@ -1258,7 +1240,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                         prompt={selectedHistoryId ? undefined : lastPrompt}
                         title={issue.title}
                         multiTurn={isSessionAlive}
-                        footer={!selectedHistoryId && ws.status !== "closed" ? (
+                        footer={isRunning && ws.status !== "closed" ? (
                             <div className="flex gap-2">
                               <textarea
                                 ref={textareaRef}
@@ -1314,18 +1296,8 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                       />
                     )}
 
-                    {/* "Back to latest" link when viewing history */}
-                    {selectedHistoryId && (
-                      <button
-                        onClick={() => { setSelectedHistoryId(null); setHistoryMessages([]); setViewMode("output"); }}
-                        className="text-xs text-blue-600 hover:text-blue-700"
-                      >
-                        &larr; Back to latest session
-                      </button>
-                    )}
-
-                    {/* Chat input — only when TerminalView is not shown */}
-                    {!selectedHistoryId && ws.workingDir && ws.status !== "closed" && !(selectedHistoryId ? historyMessages : (activeSession || completedMessages.length > 0)) && (
+                    {/* Chat input — only when TerminalView is not shown (no sessions yet) */}
+                    {!selectedHistoryId && !activeSession && ws.workingDir && ws.status !== "closed" && (
                       <div className="flex gap-2">
                         <textarea
                           ref={textareaRef}
@@ -1368,7 +1340,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                     )}
 
                     {/* Action buttons — visible even while agent runs */}
-                    {!selectedHistoryId && ws.workingDir && ws.status !== "closed" && (
+                    {ws.workingDir && ws.status !== "closed" && (
                       <>
                       <div className="flex gap-2 flex-wrap">
                         {/* Resume button — shown when workspace active but no session running */}
