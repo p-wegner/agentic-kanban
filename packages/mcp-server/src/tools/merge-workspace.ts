@@ -8,7 +8,7 @@ import { notifyBoard } from "../notify.js";
 export function registerMergeWorkspace(server: McpServer) {
   server.tool(
     "merge_workspace",
-    "Merge a workspace branch into the project's default branch, close the workspace, and auto-transition the issue to AI Reviewed",
+    "Merge a workspace branch into the project's default branch, close the workspace, and auto-transition the issue to Done",
     {
       workspaceId: z.string().describe("The workspace ID to merge"),
     },
@@ -97,7 +97,7 @@ async function autoTransitionDone(projectId: string, issueId: string, now: strin
   try {
     const statuses = await db.select().from(schema.projectStatuses)
       .where(eq(schema.projectStatuses.projectId, projectId));
-    const targetStatus = statuses.find(s => s.name === "AI Reviewed") ?? statuses.find(s => s.name === "Done");
+    const targetStatus = statuses.find(s => s.name === "Done");
     if (targetStatus) {
       await db.update(schema.issues)
         .set({ statusId: targetStatus.id, updatedAt: now })
