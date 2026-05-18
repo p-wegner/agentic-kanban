@@ -351,20 +351,39 @@ export function createWorkspaceActionsRoute(
     }
 
     const workspace = rows[0];
-    if (!workspace.workingDir) {
+    if (!workspace.workingDir && !workspace.branch) {
       return c.json({ error: "Workspace not set up" }, 400);
     }
 
     try {
       let diff: string;
       let conflicts: { hasConflicts: boolean; conflictingFiles: string[] } | null = null;
+      const { repoPath, defaultBranch } = await resolveProjectRepo(id, database);
+      const baseBranch = workspace.baseBranch || defaultBranch;
+
       if (workspace.isDirect) {
-        diff = await gitService.getWorkingTreeDiff(workspace.workingDir);
+        diff = workspace.workingDir
+          ? await gitService.getWorkingTreeDiff(workspace.workingDir)
+          : "";
       } else {
-        const { defaultBranch } = await resolveProjectRepo(id, database);
-        const baseBranch = workspace.baseBranch || defaultBranch;
-        diff = await gitService.getDiff(workspace.workingDir, baseBranch);
-        conflicts = await gitService.detectConflicts(workspace.workingDir, baseBranch);
+        // Try the worktree first; fall back to main repo if the worktree is prunable/broken
+        let usedWorktree = false;
+        if (workspace.workingDir) {
+          try {
+            diff = await gitService.getDiff(workspace.workingDir, baseBranch);
+            conflicts = await gitService.detectConflicts(workspace.workingDir, baseBranch);
+            usedWorktree = true;
+          } catch {
+            // Worktree directory exists but is not a valid git repo — fall through to branch-based diff
+          }
+        }
+        if (!usedWorktree) {
+          if (workspace.branch) {
+            diff = await gitService.getDiffFromRepo(repoPath, workspace.branch, baseBranch);
+          } else {
+            diff = "";
+          }
+        }
       }
       const stats = parseDiffStats(diff);
       const comments = await database

@@ -148,6 +148,15 @@ export async function getDiff(
   return tracked ? tracked + "\n" + untracked : untracked;
 }
 
+/** Get diff for a branch by name from the main repo (used when the worktree directory is gone). */
+export async function getDiffFromRepo(
+  repoPath: string,
+  branch: string,
+  baseBranch: string = "main",
+): Promise<string> {
+  return execGit(["diff", `${baseBranch}...${branch}`], repoPath);
+}
+
 /** List all local and remote branches, sorted by most recent committer date. */
 export async function listBranches(
   repoPath: string,
