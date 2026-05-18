@@ -728,8 +728,34 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
   async function handleRestart(wsId: string) {
     setActionLoading(true);
     setError(null);
-    const restartPrompt = "Continue where you left off. If you were in the middle of implementing something, pick up from where you stopped. If the implementation is complete, commit your changes and move this issue to In Review.";
     try {
+      // Try to fetch the previous session's summary to give the new session context
+      const prevSessionId = lastSessionPerWorkspace[wsId];
+      let contextSection = "";
+      if (prevSessionId) {
+        try {
+          const summary = await apiFetch<SessionSummaryResponse>(`/api/sessions/${prevSessionId}/summary`);
+          const parts: string[] = [];
+          if (summary.agentSummary) {
+            parts.push(`## Previous session summary\n${summary.agentSummary}`);
+          }
+          if (summary.filesRead.length > 0) {
+            parts.push(`## Files already explored\n${summary.filesRead.join("\n")}`);
+          }
+          if (summary.filesEdited.length > 0) {
+            parts.push(`## Files already modified\n${summary.filesEdited.join("\n")}`);
+          }
+          if (summary.keyExcerpts.length > 0) {
+            parts.push(`## Key findings from previous session\n${summary.keyExcerpts.join("\n")}`);
+          }
+          if (parts.length > 0) {
+            contextSection = `\n\nA previous session worked on this task but was interrupted before finishing. Here is what was already explored so you can pick up without re-reading the same files:\n\n${parts.join("\n\n")}`;
+          }
+        } catch {
+          // Summary fetch failed — proceed without context
+        }
+      }
+      const restartPrompt = `Continue where the previous session left off. If you were in the middle of implementing something, pick up from where it stopped. If the implementation is complete, commit your changes and move this issue to In Review.${contextSection}`;
       const result = await apiFetch<{ sessionId: string }>(
         `/api/workspaces/${wsId}/launch`,
         { method: "POST", body: JSON.stringify({ prompt: restartPrompt }) },
