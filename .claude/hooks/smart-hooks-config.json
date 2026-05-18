@@ -30,6 +30,14 @@
         "enabled": true,
         "blocking": true,
         "timeout": 10
+      },
+      {
+        "name": "Remind Cleanup",
+        "command": "node .claude/hooks/remind-cleanup.js",
+        "enabled": true,
+        "blocking": true,
+        "timeout": 10,
+        "alwaysRun": true
       }
     ]
   }
