@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+﻿import { useEffect, useRef, useState } from "react";
 import { apiFetch } from "../lib/api.js";
 import { formatRelativeTime } from "../lib/formatRelativeTime.js";
 import { useWebSocket } from "../lib/useWebSocket.js";
@@ -1427,11 +1427,16 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                     )}
 
                     {/* Action buttons — visible even while agent runs */}
-                    {ws.workingDir && ws.status !== "closed" && (
+                    {ws.status !== "closed" && (
                       <>
+                      {!ws.workingDir && (
+                        <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded px-2 py-1">
+                          Worktree directory unavailable — some actions are disabled.
+                        </p>
+                      )}
                       <div className="flex gap-2 flex-wrap">
                         {/* Resume/Restart button — shown when workspace idle/active but no session running */}
-                        {canResume(ws, sessions) && (
+                        {ws.workingDir && canResume(ws, sessions) && (
                           <button
                             onClick={() => handleResume(ws.id)}
                             disabled={actionLoading}
@@ -1440,7 +1445,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                             Resume
                           </button>
                         )}
-                        {canRestart(ws, sessions) && (
+                        {ws.workingDir && canRestart(ws, sessions) && (
                           <button
                             onClick={() => handleRestart(ws.id)}
                             disabled={actionLoading}
@@ -1461,6 +1466,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                             Update Base
                           </button>
                         )}
+                        {ws.workingDir && (
                         <button
                           onClick={() => handleOpenTerminal(ws.id)}
                           disabled={actionLoading}
@@ -1469,6 +1475,8 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                         >
                           Terminal
                         </button>
+                        )}
+                        {ws.workingDir && (
                         <button
                           onClick={() => handleReview(ws.id)}
                           disabled={actionLoading || isRunning}
@@ -1477,6 +1485,8 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                         >
                           Review
                         </button>
+                        )}
+                        {ws.workingDir && (
                         <button
                           onClick={() => handleViewDiff(ws.id)}
                           disabled={actionLoading}
@@ -1484,6 +1494,8 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                         >
                           {ws.isDirect ? "View Changes" : "View Diff"}
                         </button>
+                        )}
+                        {ws.workingDir && (
                         <button
                           onClick={() => handleMerge(ws.id)}
                           disabled={actionLoading}
@@ -1491,6 +1503,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                         >
                           {ws.isDirect ? "Close" : "Merge"}
                         </button>
+                        )}
                         <button
                           onClick={() => handleDeleteWorkspace(ws.id)}
                           disabled={actionLoading}
@@ -1533,8 +1546,8 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                       </>
                     )}
 
-                    {/* Delete button for closed workspaces or workspaces with no working directory */}
-                    {!selectedHistoryId && (ws.status === "closed" || !ws.workingDir) && (
+                    {/* Delete button for closed workspaces */}
+                    {!selectedHistoryId && ws.status === "closed" && (
                       <div className="pt-2 border-t border-gray-200">
                         <button
                           onClick={() => handleDeleteWorkspace(ws.id)}

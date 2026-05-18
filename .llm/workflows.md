@@ -214,3 +214,148 @@ The server or client port may still be bound from a prior run:
 $proc = Get-NetTCPConnection -LocalPort <port> -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess
 if ($proc) { $proc | ForEach-Object { Stop-Process -Id $_ -Force } }
 ```
+
+---
+
+## Cleaning Up Git Worktrees
+
+When worktrees accumulate from completed or abandoned agent sessions, use this workflow to audit and clean them up.
+
+### 1. Audit: list all worktrees with their status
+
+```bash
+# List registered worktrees
+git worktree list
+
+# For each worktree, check commits ahead of master and uncommitted changes
+for wt in $(git worktree list --porcelain | grep "^worktree " | cut -d' ' -f2); do
+  name=$(basename "$wt")
+  ahead=$(git -C "$wt" rev-list --count master..HEAD 2>/dev/null)
+  dirty=$(git -C "$wt" status --porcelain 2>/dev/null)
+  dirty_count=$(echo "$dirty" | grep -c . 2>/dev/null || echo 0)
+  echo "$name  ahead=$ahead  dirty=$dirty_count"
+done
+```
+
+### 2. Decide what to keep
+
+For each worktree with commits ahead of master:
+
+```bash
+# Show commit messages
+git -C "<worktree-path>" log --oneline master..HEAD
+
+# Show actual file changes (use --stat for summary, --name-only for file list)
+git -C "<worktree-path>" diff --stat master..HEAD
+```
+
+**Before merging a branch, verify the changes aren't already on master** — old agent branches can contain hundreds of stale diffs from rebases that were already merged through other paths:
+
+```bash
+# Check if the fix/feature is already on master
+git log --oneline master --grep="<keyword from commit message>"
+git grep "<unique function name>" HEAD -- "*.ts"
+```
+
+### 3. Cherry-pick useful commits (if needed)
+
+If a branch has a real fix not yet on master, cherry-pick just that commit:
+
+```bash
+git cherry-pick <commit-sha>
+```
+
+**Do not merge stale branches** — they accumulate unrelated refactoring and deletions from the point they diverged. A branch 30+ commits behind master with 50+ changed files is not a clean merge; cherry-pick the specific commit instead.
+
+### 4. Remove worktrees and branches
+
+```bash
+# Remove git worktree registration (stops if directory has untracked files)
+git worktree remove --force <path>
+
+# Prune stale refs (worktrees whose directories were already deleted)
+git worktree prune
+
+# Delete the local branch
+git branch -D <branch-name>
+```
+
+### 5. Clean up leftover directories
+
+On Windows, `git worktree remove --force` often fails with "Directory not empty" (leftover `node_modules/`, `dist/`, `kanban.db` from agent sessions). After removing the git registration, force-delete the directories:
+
+```powershell
+# Remove all leftover worktree directories at once
+Get-ChildItem "C:/andrena/.worktrees/" -Directory | ForEach-Object {
+    Remove-Item -Recurse -Force $_.FullName -ErrorAction SilentlyContinue
+    if (Test-Path $_.FullName) { Write-Output "LOCKED: $($_.Name)" } else { Write-Output "Removed: $($_.Name)" }
+}
+```
+
+Locked directories (held by another process) are harmless once empty — they can be deleted after a reboot. Git no longer tracks them after `git worktree prune`.
+
+### 6. Clean up Claude Code session history (optional)
+
+Claude Code stores per-project conversation history under `~/.claude/projects/`, keyed by the working directory path. Each worktree gets its own project dir (e.g. `C--andrena--worktrees-feature-ak-114-prepare-npx-deployment-of-app`). After removing worktrees, these session logs are orphaned.
+
+**Impact**: 246+ directories, 120+ MB accumulated over time. Each contains JSONL conversation transcripts and session metadata.
+
+**Before deleting**, decide whether any session history is worth keeping (e.g. an important investigation or design discussion). You can review individual sessions by opening the `.jsonl` files.
+
+**Important: preserve non-kanban project sessions.** The `~/.claude/projects/` folder also contains sessions from other projects. The filter below uses two patterns to target only agentic-kanban worktree sessions while leaving everything else untouched.
+
+**Two path patterns produce worktree session dirs:**
+- `C:/andrena/.worktrees/...` encodes as `C--andrena--worktrees-*` (no "kanban" in the name)
+- `C:/andrena/agentic-kanban/packages/.worktrees/...` encodes as `C--andrena-agentic-kanban-packages--worktrees-*`
+- Claude Code's internal worktrees at `.claude/worktrees/` encode as `C--andrena-agentic-kanban--claude-worktrees-*`
+
+Both patterns are needed — a single `*kanban*worktrees*` filter misses the first category.
+
+**What gets preserved (not matched by filter):**
+- `C--andrena-agentic-kanban` — main checkout sessions
+- `C--andrena-agentic-kanban-packages-server` — server package sessions
+- `C--andrena-andrena-ai-blog` — other projects
+- `C--andrena-beyond-vibe-coding` — other projects
+- `C--andrena-beyond-vibe-coding-demo` — other projects
+- `C--andrena-KI-Themen` — other projects
+- `C--andrena-without-hook-demo` — other projects
+- `C--Tools`, `C--Tools-claude-pick` — other projects
+- `C--Users-pwegner` — other projects
+
+```powershell
+# Preview: list all agentic-kanban worktree session dirs
+Get-ChildItem "$env:USERPROFILE\.claude\projects\" -Directory |
+    Where-Object {
+        ($_.Name -like "*kanban*worktrees*") -or
+        ($_.Name -like "*andrena--worktrees*")
+    } |
+    ForEach-Object { Write-Output $_.Name }
+
+# Check total size
+$dirs = Get-ChildItem "$env:USERPROFILE\.claude\projects\" -Directory |
+    Where-Object {
+        ($_.Name -like "*kanban*worktrees*") -or
+        ($_.Name -like "*andrena--worktrees*")
+    }
+$size = ($dirs | ForEach-Object {
+    (Get-ChildItem $_.FullName -Recurse -File -ErrorAction SilentlyContinue |
+     Measure-Object -Property Length -Sum).Sum
+} | Measure-Object -Sum).Sum
+Write-Output "Dirs: $($dirs.Count), Size: $([math]::Round($size / 1MB, 1)) MB"
+
+# Delete all agentic-kanban worktree session history
+Get-ChildItem "$env:USERPROFILE\.claude\projects\" -Directory |
+    Where-Object {
+        ($_.Name -like "*kanban*worktrees*") -or
+        ($_.Name -like "*andrena--worktrees*")
+    } |
+    Remove-Item -Recurse -Force
+```
+
+### 7. Verify cleanup
+
+```bash
+git worktree list          # Should show only main checkout
+git worktree prune         # Clean up any dangling refs
+ls C:/andrena/.worktrees/  # Should be empty (or contain only locked empty dirs)
+```

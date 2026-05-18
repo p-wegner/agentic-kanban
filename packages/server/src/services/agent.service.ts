@@ -1,35 +1,5 @@
-import { spawn, execSync, type ChildProcess } from "node:child_process";
-import { writeFileSync, existsSync, readFileSync } from "node:fs";
-import { resolve, dirname, join } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
-import { tmpdir, homedir } from "node:os";
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
-
-// Resolve MCP server entry point and tsx loader (relative to this file)
-const MCP_SERVER_PATH = resolve(__dirname, "../../../mcp-server/src/index.ts");
-const TSX_LOADER = resolve(__dirname, "../../node_modules/tsx/dist/loader.mjs");
-const TSX_URL = pathToFileURL(TSX_LOADER).href;
-
-// Write MCP config JSON once and reuse the path
-let mcpConfigPath: string | null = null;
-
-function getMcpConfigPath(): string {
-  if (mcpConfigPath && existsSync(mcpConfigPath)) return mcpConfigPath;
-  const config = {
-    mcpServers: {
-      "agentic-kanban": {
-        command: "node",
-        args: ["--import", TSX_URL, MCP_SERVER_PATH],
-      },
-    },
-  };
-  const path = resolve(tmpdir(), "agentic-kanban-mcp-config.json");
-  writeFileSync(path, JSON.stringify(config, null, 2), "utf-8");
-  mcpConfigPath = path;
-  console.log(`[agent] MCP config written to ${path}`);
-  return path;
-}
+import { spawn, type ChildProcess } from "node:child_process";
+import { buildAgentLaunchConfig } from "./agent-provider.js";
 
 export interface AgentOutputEvent {
   type: "stdout" | "stderr" | "exit";
@@ -61,105 +31,31 @@ export function launch(
   permissionPromptTool?: string,
   planMode?: boolean,
 ): ChildProcess {
-  // Mock agents (env var or preference-based) need no claude-specific flags.
-  // Real claude (default or configured via preferences) gets stream-json args + stdin prompt.
-  const isTestMock = !!process.env.AGENT_COMMAND || (agentCommand?.includes("mock-agent") ?? false);
-  let command = process.env.AGENT_COMMAND || agentCommand || "claude";
-  const isWindows = process.platform === "win32";
-
-  // On Windows, resolve .cmd wrappers to the actual .exe to avoid cmd.exe stdout buffering.
-  // shell:false is required for real-time stream-json output; cmd.exe buffers everything.
-  if (isWindows && !isTestMock && !agentCommand) {
-    try {
-      const resolved = execSync("where claude.exe 2>nul", { encoding: "utf8" }).trim().split("\n")[0]?.trim();
-      if (resolved) command = resolved;
-    } catch {}
-  }
+  const launchConfig = buildAgentLaunchConfig({
+    agentArgs,
+    providerSessionId: claudeSessionId,
+    agentCommand,
+    claudeProfile,
+    keepAlive,
+    permissionPromptTool,
+    planMode,
+  });
+  const { command, args, useShell, isMockAgent, env: spawnEnv, keepStdinOpen } = launchConfig;
 
   console.log(`[agent] launching: command=${command} worktree=${worktreePath} sessionId=${sessionId} resume=${claudeSessionId ?? "none"}`);
-
-  let args: string[];
-  if (isTestMock) {
-    // Test mock agents: run bare, but pass --resume and --profile multi-turn when applicable
-    args = [];
-    if (claudeSessionId) {
-      args.push("--resume", claudeSessionId);
-    }
-    if (keepAlive) {
-      args.push("--profile", "multi-turn");
-    }
-  } else {
-    // Real claude binary (default or custom name): always use stream-json + stdin
-    args = ["--output-format", "stream-json", "--verbose"];
-    // Pass MCP config so the agent can use agentic-kanban tools
-    try {
-      const configPath = getMcpConfigPath();
-      args.push("--mcp-config", configPath);
-    } catch (err) {
-      console.warn(`[agent] Failed to generate MCP config: ${err}`);
-    }
-    if (agentArgs) {
-      args.push(...splitArgs(agentArgs));
-    }
-    if (claudeProfile) {
-      const settingsPath = join(homedir(), ".claude", `settings_${claudeProfile}.json`);
-      if (existsSync(settingsPath)) {
-        args.push("--settings", settingsPath);
-      }
-    }
-    if (claudeSessionId) {
-      args.push("--resume", claudeSessionId);
-    }
-    if (permissionPromptTool) {
-      args.push("--permission-prompt-tool", permissionPromptTool);
-    }
-    if (planMode) {
-      args.push("--permission-mode", "plan");
-      args.push("--append-system-prompt", "IMPORTANT: This is a PLAN-ONLY session. Do NOT implement, write, edit, or modify any files. Do NOT run commands that make changes (git, npm, pip, etc.). Only read and explore the codebase, analyze the issue, and produce a detailed implementation plan. Output your plan and stop.");
-    }
-    args.push("-p");
-  }
-
-  // On Windows, use shell:true for mock/custom commands (.bat/.cmd need cmd.exe).
-  // Default claude is resolved to .exe above, so shell:false works for real-time streaming.
-  const useShell = isWindows && (isTestMock || !!agentCommand);
-
-  // When a profile is specified, read its env section and apply to spawn env.
-  // This prevents inherited env vars (e.g. ANTHROPIC_API_KEY from parent shell)
-  // from overriding the profile's auth configuration.
-  const spawnEnv: Record<string, string> = { ...process.env as Record<string, string> };
-  if (claudeProfile) {
-    const settingsPath = join(homedir(), ".claude", `settings_${claudeProfile}.json`);
-    if (existsSync(settingsPath)) {
-      try {
-        const profileSettings = JSON.parse(readFileSync(settingsPath, "utf-8"));
-        if (profileSettings.env && typeof profileSettings.env === "object") {
-          const profileEnv = profileSettings.env as Record<string, string>;
-          // If the profile provides ANTHROPIC_AUTH_TOKEN but not ANTHROPIC_API_KEY,
-          // remove inherited ANTHROPIC_API_KEY so Claude Code uses the profile's auth.
-          if (profileEnv.ANTHROPIC_AUTH_TOKEN && !profileEnv.ANTHROPIC_API_KEY) {
-            delete spawnEnv.ANTHROPIC_API_KEY;
-          }
-          Object.assign(spawnEnv, profileEnv);
-        }
-      } catch (err) {
-        console.warn(`[agent] Failed to read profile env from ${settingsPath}: ${err}`);
-      }
-    }
-  }
 
   const proc = spawn(command, args, {
     cwd: worktreePath,
     shell: useShell,
     env: {
-    ...spawnEnv,
-    FORCE_COLOR: "0",
-    NO_COLOR: "1",
-    KANBAN_SERVER_PORT: process.env.KANBAN_SERVER_PORT || process.env.PORT || "3001",
-    KANBAN_CLIENT_PORT: process.env.KANBAN_CLIENT_PORT || process.env.VITE_PORT || "5173",
-    SERVER_PORT: process.env.SERVER_PORT || process.env.PORT || "3001",
-    PORT: process.env.PORT || "3001",
-  },
+      ...spawnEnv,
+      FORCE_COLOR: "0",
+      NO_COLOR: "1",
+      KANBAN_SERVER_PORT: process.env.KANBAN_SERVER_PORT || process.env.PORT || "3001",
+      KANBAN_CLIENT_PORT: process.env.KANBAN_CLIENT_PORT || process.env.VITE_PORT || "5173",
+      SERVER_PORT: process.env.SERVER_PORT || process.env.PORT || "3001",
+      PORT: process.env.PORT || "3001",
+    },
     stdio: ["pipe", "pipe", "pipe"] as const,
   });
 
@@ -169,12 +65,11 @@ export function launch(
   // Note: On Windows, claude.exe buffers stdout until stdin is closed,
   // so keeping stdin open for multi-turn causes no output to arrive.
   // Multi-turn follow-ups are handled via --resume (new process per turn).
-  if (!isTestMock) {
-    proc.stdin?.end(prompt + "\n");
-  } else if (keepAlive) {
-    // Multi-turn mock agent: write prompt via stdin, keep open for follow-ups
+  if (keepStdinOpen) {
     stdinOpen.set(sessionId, true);
     proc.stdin?.write(prompt + "\n");
+  } else {
+    proc.stdin?.end(prompt + "\n");
   }
 
   activeProcesses.set(sessionId, proc);
@@ -291,31 +186,4 @@ export function killAll(): number {
 /** Get the active process for a session, if any. */
 export function getProcess(sessionId: string): ChildProcess | undefined {
   return activeProcesses.get(sessionId);
-}
-
-/** Split a shell-like args string into an array, respecting quoted segments. */
-function splitArgs(input: string): string[] {
-  const args: string[] = [];
-  let current = "";
-  let inQuote: string | null = null;
-  for (const ch of input) {
-    if (inQuote) {
-      if (ch === inQuote) {
-        inQuote = null;
-      } else {
-        current += ch;
-      }
-    } else if (ch === '"' || ch === "'") {
-      inQuote = ch;
-    } else if (ch === " " || ch === "\t") {
-      if (current) {
-        args.push(current);
-        current = "";
-      }
-    } else {
-      current += ch;
-    }
-  }
-  if (current) args.push(current);
-  return args;
 }

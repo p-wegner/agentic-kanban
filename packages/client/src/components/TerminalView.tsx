@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import type { AgentOutputMessage } from "@agentic-kanban/shared";
-import { ClaudeOutputParser, type DisplayEvent } from "../lib/claude-output-parser.js";
+import { createAgentOutputParser, type DisplayEvent } from "../lib/agent-output-parser.js";
 
 interface TerminalViewProps {
   messages: AgentOutputMessage[];
@@ -111,7 +111,7 @@ export function TerminalView({ messages, connectionState, parseOutput = "true", 
       return;
     }
 
-    const parser = new ClaudeOutputParser();
+    const parser = createAgentOutputParser("claude-stream-json");
     const events: DisplayEvent[] = [];
 
     for (const msg of messages) {

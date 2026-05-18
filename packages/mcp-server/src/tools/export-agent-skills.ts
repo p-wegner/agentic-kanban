@@ -1,16 +1,17 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { db, schema } from "../db.js";
-import { eq, and, isNull, sql } from "drizzle-orm";
-import { mkdir, writeFile, access, rm } from "node:fs/promises";
+import { sql } from "drizzle-orm";
+import { access } from "node:fs/promises";
 import { join } from "node:path";
+import { ensureCodexSkillsLink, writeAgentSkillFile } from "@agentic-kanban/shared/lib/agent-skill-files";
 
 export function registerExportAgentSkills(server: McpServer) {
   server.tool(
     "export_agent_skills",
-    "Export agent skills as Claude Code SKILL.md files into a project's .claude/skills/ directory. This makes skills available to Claude Code in the terminal.",
+    "Export agent skills as SKILL.md files for Claude Code and Codex. Writes .claude/skills and links .codex/skills to the same directory.",
     {
-      targetPath: z.string().describe("Absolute path to the project directory where .claude/skills/ will be written"),
+      targetPath: z.string().describe("Absolute path to the project directory where .claude/skills/ will be written and .codex/skills will be linked"),
       projectId: z.string().optional().describe("Optional project ID to export only project-specific + global skills"),
       skillNames: z.array(z.string()).optional().describe("Optional list of specific skill names to export. If omitted, exports all accessible skills."),
     },
@@ -43,9 +44,7 @@ export function registerExportAgentSkills(server: McpServer) {
         }
 
         const skillsDir = join(targetPath, ".claude", "skills");
-
-        // Create .claude/skills/ directory
-        await mkdir(skillsDir, { recursive: true });
+        await ensureCodexSkillsLink(targetPath);
 
         // Track existing skill directories we manage (to clean up stale ones)
         const exportedNames = new Set<string>();
@@ -55,20 +54,7 @@ export function registerExportAgentSkills(server: McpServer) {
             console.warn(`[export] skipping skill with unsafe name: ${skill.name}`);
             continue;
           }
-          const skillDir = join(skillsDir, skill.name);
-          await mkdir(skillDir, { recursive: true });
-
-          // Build SKILL.md with frontmatter
-          const frontmatter = [
-            "---",
-            `name: ${skill.name}`,
-            `description: ${skill.description}`,
-          ];
-          frontmatter.push("---");
-          frontmatter.push("");
-          frontmatter.push(skill.prompt);
-
-          await writeFile(join(skillDir, "SKILL.md"), frontmatter.join("\n"), "utf-8");
+          await writeAgentSkillFile(targetPath, skill);
           exportedNames.add(skill.name);
         }
 
@@ -76,7 +62,7 @@ export function registerExportAgentSkills(server: McpServer) {
         return {
           content: [{
             type: "text" as const,
-            text: `Exported ${rows.length} skill(s) to ${skillsDir}:\n${rows.map(s => `  - ${s.name} (${s.isBuiltin ? "builtin" : "custom"}${s.projectId ? ", project-scoped" : ", global"})`).join("\n")}\n\nThese skills are now available in Claude Code when working in ${targetPath}.`,
+            text: `Exported ${rows.length} skill(s) to ${skillsDir} and linked .codex/skills to the same directory:\n${rows.map(s => `  - ${s.name} (${s.isBuiltin ? "builtin" : "custom"}${s.projectId ? ", project-scoped" : ", global"})`).join("\n")}\n\nThese skills are now available in Claude Code and Codex when working in ${targetPath}.`,
           }],
         };
       } catch (err) {
