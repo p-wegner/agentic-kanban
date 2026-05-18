@@ -214,6 +214,10 @@ export function createWorkspaceActionsRoute(
         : (baseArgs || undefined);
       const claudeProfile = prefMap.get("claude_profile") || undefined;
       const resumeWithNewModel = prefMap.get("resume_with_new_model") === "true";
+      const permissionPromptToolPref = prefMap.get("permission_prompt_tool");
+      const permissionPromptTool = permissionPromptToolPref === "true"
+        ? "mcp__agentic-kanban__approve_tool_use"
+        : (permissionPromptToolPref && permissionPromptToolPref !== "false" ? permissionPromptToolPref : undefined);
 
       const truncatedPrompt = body.prompt.length > 80 ? body.prompt.slice(0, 80) + "..." : body.prompt;
       console.log(`[workspace-actions] launch: workspaceId=${id} prompt="${truncatedPrompt}" agentCommand=${agentCommand ?? "default"} agentArgs=${agentArgs ?? "none"} profile=${claudeProfile ?? "none"} resumeFromId=${body.resumeFromId ?? "none"} multiTurn=${body.multiTurn !== false} resumeWithNewModel=${resumeWithNewModel}`);
@@ -222,7 +226,7 @@ export function createWorkspaceActionsRoute(
       const wsRows = await database.select({ planMode: workspaces.planMode }).from(workspaces).where(eq(workspaces.id, id)).limit(1);
       const planMode = wsRows.length > 0 ? wsRows[0].planMode : false;
 
-      const sessionId = await getSessionManager().startSession(id, body.prompt, agentCommand, agentArgs, body.resumeFromId, claudeProfile, body.multiTurn !== false, undefined, planMode, resumeWithNewModel);
+      const sessionId = await getSessionManager().startSession(id, body.prompt, agentCommand, agentArgs, body.resumeFromId, claudeProfile, body.multiTurn !== false, permissionPromptTool, planMode, resumeWithNewModel);
 
       const now = new Date().toISOString();
       await database.update(workspaces).set({ status: "active", claudeProfile: claudeProfile ?? null, agentCommand: agentCommand ?? null, updatedAt: now }).where(eq(workspaces.id, id));
@@ -418,18 +422,18 @@ export function createWorkspaceActionsRoute(
           .set({ status: "closed", closedAt: now, updatedAt: now })
           .where(eq(workspaces.id, id));
 
-        // Auto-move issue to "In Review"
+        // Move issue to Done — work is complete after merge
         try {
           const projectId = await resolveProjectId(id, database);
           if (projectId) {
             const statuses = await database.select().from(projectStatuses).where(eq(projectStatuses.projectId, projectId));
-            const reviewStatus = statuses.find(s => s.name === "In Review");
-            if (reviewStatus) {
-              await database.update(issues).set({ statusId: reviewStatus.id, updatedAt: now, statusChangedAt: now }).where(eq(issues.id, workspace.issueId));
+            const doneStatus = statuses.find(s => s.name === "Done") ?? statuses.find(s => s.name === "AI Reviewed");
+            if (doneStatus) {
+              await database.update(issues).set({ statusId: doneStatus.id, updatedAt: now, statusChangedAt: now }).where(eq(issues.id, workspace.issueId));
             }
           }
         } catch (err) {
-          console.warn("[workspaces] Failed to move issue to In Review:", err);
+          console.warn("[workspaces] Failed to move issue to Done:", err);
         }
 
         const projectId = await resolveProjectId(id, database);
@@ -486,18 +490,18 @@ export function createWorkspaceActionsRoute(
         .set({ status: "closed", workingDir: null, closedAt: now, updatedAt: now })
         .where(eq(workspaces.id, id));
 
-      // Auto-move issue to "In Review"
+      // Auto-move issue to "Done"
       try {
         const projectId = await resolveProjectId(id, database);
         if (projectId) {
           const statuses = await database.select().from(projectStatuses).where(eq(projectStatuses.projectId, projectId));
-          const reviewStatus = statuses.find(s => s.name === "In Review");
-          if (reviewStatus) {
-            await database.update(issues).set({ statusId: reviewStatus.id, updatedAt: now, statusChangedAt: now }).where(eq(issues.id, workspace.issueId));
+          const doneStatus = statuses.find(s => s.name === "Done");
+          if (doneStatus) {
+            await database.update(issues).set({ statusId: doneStatus.id, updatedAt: now, statusChangedAt: now }).where(eq(issues.id, workspace.issueId));
           }
         }
       } catch (err) {
-        console.warn("[workspaces] Failed to move issue to In Review:", err);
+        console.warn("[workspaces] Failed to move issue to Done:", err);
       }
 
       // Broadcast board event

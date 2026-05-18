@@ -347,31 +347,32 @@ export async function getDiffShortstat(
 
 /**
  * Detect merge conflicts between the current branch and the base branch.
- * Uses a dry-run merge (no-commit) then aborts — safe for the working tree.
+ * Uses git merge-tree (read-only, no working tree changes) — safe for concurrent calls.
  */
 export async function detectConflicts(
   worktreePath: string,
   baseBranch: string,
 ): Promise<{ hasConflicts: boolean; conflictingFiles: string[] }> {
-  try {
-    // Try to merge without committing
-    await execGit(["merge", "--no-commit", "--no-ff", baseBranch], worktreePath);
-    // No conflict — clean up
-    await execGit(["merge", "--abort"], worktreePath);
-    return { hasConflicts: false, conflictingFiles: [] };
-  } catch {
-    // Merge failed — likely conflicts
-    try {
-      const unmerged = await execGit(["diff", "--name-only", "--diff-filter=U"], worktreePath);
-      const conflictingFiles = unmerged.trim().split("\n").filter(Boolean);
-      await execGit(["merge", "--abort"], worktreePath);
-      return { hasConflicts: conflictingFiles.length > 0, conflictingFiles };
-    } catch {
-      // Could not read conflicts or abort — assume no conflicts
-      try { await execGit(["merge", "--abort"], worktreePath); } catch { /* best effort */ }
-      return { hasConflicts: false, conflictingFiles: [] };
-    }
-  }
+  return new Promise((resolve) => {
+    // merge-tree exits 0 for clean merge, 1 for conflicts.
+    // Stdout: tree SHA on line 1, then conflict entries (mode sha stage\tfile) for conflicting files.
+    execFile(
+      "git",
+      ["merge-tree", "--write-tree", "--no-messages", "HEAD", baseBranch],
+      { cwd: worktreePath, maxBuffer: 10 * 1024 * 1024 },
+      (_err, stdout) => {
+        const lines = stdout.toString().trim().split("\n").slice(1).filter(Boolean);
+        // Lines with stage 1/2/3 indicate conflicting files: "<mode> <sha> <stage>\t<file>"
+        const seen = new Set<string>();
+        for (const line of lines) {
+          const m = line.match(/^\d+ \w+ [123]\t(.+)$/);
+          if (m) seen.add(m[1].replace(/\r$/, ""));
+        }
+        const conflictingFiles = [...seen];
+        resolve({ hasConflicts: conflictingFiles.length > 0, conflictingFiles });
+      },
+    );
+  });
 }
 
 /**

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { apiFetch } from "../lib/api.js";
 import { showToast } from "./Toast.js";
+import { MCP_TOOL_DEFINITIONS, MCP_TOOL_CATEGORIES } from "@agentic-kanban/shared/lib";
 
 interface SettingsPanelProps {
   onClose: () => void;
@@ -19,6 +20,7 @@ interface Settings {
   auto_merge?: string;
   review_auto_fix?: string;
   resume_with_new_model?: string;
+  disabled_mcp_tools?: string;
 }
 
 const DEFAULT_SETTINGS: Settings = {
@@ -33,14 +35,16 @@ const DEFAULT_SETTINGS: Settings = {
   auto_merge: "true",
   review_auto_fix: "true",
   resume_with_new_model: "false",
+  disabled_mcp_tools: "",
 };
 
-type Tab = "agent" | "workflow" | "skills" | "ui" | "project" | "advanced";
+type Tab = "agent" | "workflow" | "skills" | "mcp" | "ui" | "project" | "advanced";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "agent", label: "Agent" },
   { id: "workflow", label: "Workflow" },
   { id: "skills", label: "Skills" },
+  { id: "mcp", label: "MCP Tools" },
   { id: "ui", label: "UI" },
   { id: "project", label: "Project" },
   { id: "advanced", label: "Advanced" },
@@ -140,6 +144,28 @@ function EditSkillForm({ skill, isNew, onSave, onCancel }: {
   );
 }
 
+function ToolToggle({ name, description, disabled, onToggle }: {
+  name: string;
+  description: string;
+  disabled: boolean;
+  onToggle: (disabled: boolean) => void;
+}) {
+  return (
+    <div className="flex items-start gap-2">
+      <label className="flex items-center gap-2 cursor-pointer select-none pt-0.5">
+        <input
+          type="checkbox"
+          checked={!disabled}
+          onChange={(e) => onToggle(!e.target.checked)}
+          className="rounded border-gray-300"
+        />
+        <span className="text-sm font-mono text-gray-800">{name}</span>
+      </label>
+      <p className="text-xs text-gray-500 flex-1">{description}</p>
+    </div>
+  );
+}
+
 export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) {
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [profiles, setProfiles] = useState<string[]>([]);
@@ -154,11 +180,23 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
     teardownScript: "",
   });
   const [generatingScript, setGeneratingScript] = useState(false);
+  const [generatingTeardown, setGeneratingTeardown] = useState(false);
 
   // Skills state
   const [skills, setSkills] = useState<{ id: string; name: string; description: string; prompt: string; model: string | null; projectId: string | null; isBuiltin: boolean }[]>([]);
   const [editingSkill, setEditingSkill] = useState<string | null>(null);
   const [newSkill, setNewSkill] = useState<{ name: string; description: string; prompt: string; model: string } | null>(null);
+
+  const disabledTools = new Set((settings.disabled_mcp_tools || "").split(",").filter(Boolean));
+  function isToolDisabled(name: string) {
+    return disabledTools.has(name);
+  }
+  function toggleTool(name: string, disabled: boolean) {
+    const next = new Set(disabledTools);
+    if (disabled) next.add(name);
+    else next.delete(name);
+    setSettings((s) => ({ ...s, disabled_mcp_tools: [...next].join(",") }));
+  }
 
   useEffect(() => {
     async function load() {
@@ -442,6 +480,34 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                 </div>
               )}
 
+              {/* MCP Tools tab */}
+              {tab === "mcp" && (
+                <div className="space-y-4">
+                  <p className="text-xs text-gray-500">
+                    Enable or disable individual MCP tools. Disabled tools won't be registered with the MCP server and won't be available to connected AI agents. Requires MCP server restart to take effect.
+                  </p>
+                  {MCP_TOOL_CATEGORIES.map((cat) => {
+                    const catTools = MCP_TOOL_DEFINITIONS.filter((t) => t.category === cat.id);
+                    return (
+                      <div key={cat.id}>
+                        <h4 className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-2">{cat.label}</h4>
+                        <div className="space-y-1.5">
+                          {catTools.map((tool) => (
+                            <ToolToggle
+                              key={tool.name}
+                              name={tool.name}
+                              description={tool.description}
+                              disabled={isToolDisabled(tool.name)}
+                              onToggle={(disabled) => toggleTool(tool.name, disabled)}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
               {/* UI tab */}
               {tab === "ui" && (
                 <Field label="Output Parsing" hint={`When enabled, the terminal view parses Claude's stream-json output and displays structured info. "Minimal" shows a compact activity timeline.`}>
@@ -529,6 +595,47 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                           className="w-full rounded border border-zinc-700 bg-zinc-800 px-3 py-2 font-mono text-sm text-zinc-100 placeholder-zinc-500 focus:border-blue-500 focus:outline-none"
                         />
                       </Field>
+                      <button
+                        onClick={async () => {
+                          if (!activeProjectId || generatingTeardown) return;
+                          setGeneratingTeardown(true);
+                          try {
+                            const result = await apiFetch<{ teardownScript: string }>(
+                              "/api/projects/generate-teardown-script",
+                              {
+                                method: "POST",
+                                body: JSON.stringify({ projectId: activeProjectId }),
+                              },
+                            );
+                            if (result.teardownScript) {
+                              setProjectSettings(s => ({ ...s, teardownScript: result.teardownScript }));
+                            }
+                          } catch {
+                            showToast("Failed to generate teardown script", "error");
+                          } finally {
+                            setGeneratingTeardown(false);
+                          }
+                        }}
+                        disabled={generatingTeardown || !activeProjectId}
+                        className="text-xs text-purple-600 px-2 py-1.5 hover:text-purple-800 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
+                      >
+                        {generatingTeardown ? (
+                          <>
+                            <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+                            </svg>
+                            Generating...
+                          </>
+                        ) : (
+                          <>
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M5 3l1.5 3.5L10 8l-3.5 1.5L5 13l-1.5-3.5L0 8l3.5-1.5L5 3zM19 11l1 2.5L22.5 14l-2.5 1L19 17.5l-1-2.5L15.5 14l2.5-1L19 11z" />
+                            </svg>
+                            Generate with AI
+                          </>
+                        )}
+                      </button>
                     </>
                   )}
                 </>

@@ -143,6 +143,7 @@ export function registerGetBoardStatus(server: McpServer) {
                 numTurns: p.numTurns ?? 1,
                 model: p.model ?? "",
                 success: p.success ?? false,
+                agentSummary: p.agentSummary,
               };
             } catch { /* ignore bad stats JSON */ }
           }

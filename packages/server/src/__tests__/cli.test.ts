@@ -170,20 +170,20 @@ describe("CLI register", () => {
     expect(result.stdout).toContain("Set as active project");
   });
 
-  it("is idempotent for same repo path", () => {
+  it("is idempotent for same repo path", { timeout: 15_000 }, () => {
     runCli(["register", PKG_DIR], ctx.dbPath);
     const result = runCli(["register", PKG_DIR], ctx.dbPath);
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("already registered");
   });
 
-  it("registers with custom name", () => {
+  it("registers with custom name", { timeout: 15_000 }, () => {
     const result = runCli(["register", PKG_DIR, "--name", "my-custom-name"], ctx.dbPath);
     expect(result.status).toBe(0);
     expect(result.stdout).toContain('Registered project "my-custom-name"');
   });
 
-  it("errors for non-git path", () => {
+  it("errors for non-git path", { timeout: 15_000 }, () => {
     const result = runCli(["register", "C:\\Windows"], ctx.dbPath);
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("Error:");

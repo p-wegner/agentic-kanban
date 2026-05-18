@@ -104,6 +104,11 @@ export function createSessionsRoute(database: Database = db) {
     // Parse stream events from message data
     const summary = parseSessionSummary(rows, sessionId);
 
+    // Fast-path: pull agentSummary from stored stats if available (already parsed above)
+    if (!summary.agentSummary && stats && typeof stats.agentSummary === "string") {
+      summary.agentSummary = stats.agentSummary;
+    }
+
     return c.json({
       sessionId,
       duration,
@@ -131,6 +136,7 @@ function formatDurationStr(diffMs: number): string {
 
 interface SessionSummary {
   overview: string;
+  agentSummary: string | null;
   actions: Array<{ type: string; files?: string[]; commands?: string[] }>;
   keyExcerpts: string[];
   errors: string[];
@@ -155,6 +161,7 @@ function parseSessionSummary(
   const errors: string[] = [];
   let model = "";
   let initFound = false;
+  let agentSummary: string | null = null;
 
   for (const row of rows) {
     if (row.type !== "stdout" || !row.data) continue;
@@ -237,12 +244,10 @@ function parseSessionSummary(
         continue;
       }
 
-      // Parse result event
+      // Parse result event — capture full agent summary, don't truncate
       if (type === "result") {
         const resultText = (obj.result as string) || "";
-        if (resultText && keyExcerpts.length < 10) {
-          keyExcerpts.push(resultText.length > 300 ? resultText.slice(0, 300) + "..." : resultText);
-        }
+        if (resultText) agentSummary = resultText;
         continue;
       }
     }
@@ -266,6 +271,7 @@ function parseSessionSummary(
 
   return {
     overview,
+    agentSummary,
     actions,
     keyExcerpts,
     errors,

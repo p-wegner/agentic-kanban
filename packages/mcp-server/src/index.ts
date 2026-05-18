@@ -2,6 +2,8 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { db, schema } from "./db.js";
+import { eq } from "drizzle-orm";
 import { registerGetContext } from "./tools/get-context.js";
 import { registerListIssues } from "./tools/list-issues.js";
 import { registerGetIssue } from "./tools/get-issue.js";
@@ -31,47 +33,80 @@ import { registerListAgentSkills } from "./tools/list-agent-skills.js";
 import { registerGetAgentSkill } from "./tools/get-agent-skill.js";
 import { registerCreateAgentSkill } from "./tools/create-agent-skill.js";
 import { registerExportAgentSkills } from "./tools/export-agent-skills.js";
+import { registerApproveToolUse } from "./tools/approve-tool-use.js";
+
+const TOOL_REGISTRARS: Record<string, (server: McpServer) => void> = {
+  get_context: registerGetContext,
+  list_issues: registerListIssues,
+  get_issue: registerGetIssue,
+  create_issue: registerCreateIssue,
+  update_issue: registerUpdateIssue,
+  delete_issue: registerDeleteIssue,
+  move_issue: registerMoveIssue,
+  list_workspaces: registerListWorkspaces,
+  start_workspace: registerStartWorkspace,
+  get_workspace_diff: registerGetWorkspaceDiff,
+  merge_workspace: registerMergeWorkspace,
+  close_workspace: registerCloseWorkspace,
+  stop_workspace: registerStopWorkspace,
+  delete_workspace: registerDeleteWorkspace,
+  delete_status: registerDeleteStatus,
+  list_tags: registerListTags,
+  create_tag: registerCreateTag,
+  read_terminal: registerReadTerminal,
+  list_sessions: registerListSessions,
+  get_session_stats: registerGetSessionStats,
+  get_diff_comments: registerGetDiffComments,
+  create_diff_comment: registerCreateDiffComment,
+  add_dependency: registerAddDependency,
+  remove_dependency: registerRemoveDependency,
+  get_board_status: registerGetBoardStatus,
+  list_agent_skills: registerListAgentSkills,
+  get_agent_skill: registerGetAgentSkill,
+  create_agent_skill: registerCreateAgentSkill,
+  export_agent_skills: registerExportAgentSkills,
+  approve_tool_use: registerApproveToolUse,
+};
+
+async function getDisabledTools(): Promise<Set<string>> {
+  try {
+    const rows = await db.select({ value: schema.preferences.value })
+      .from(schema.preferences)
+      .where(eq(schema.preferences.key, "disabled_mcp_tools"))
+      .limit(1);
+    if (rows.length > 0 && rows[0].value) {
+      return new Set(rows[0].value.split(",").filter(Boolean));
+    }
+  } catch {}
+  return new Set();
+}
 
 const server = new McpServer({
   name: "agentic-kanban",
   version: "0.0.1",
 });
 
-// Register all tools
-registerGetContext(server);
-registerListIssues(server);
-registerGetIssue(server);
-registerCreateIssue(server);
-registerUpdateIssue(server);
-registerDeleteIssue(server);
-registerMoveIssue(server);
-registerListWorkspaces(server);
-registerStartWorkspace(server);
-registerGetWorkspaceDiff(server);
-registerMergeWorkspace(server);
-registerCloseWorkspace(server);
-registerStopWorkspace(server);
-registerDeleteWorkspace(server);
-registerDeleteStatus(server);
-registerListTags(server);
-registerCreateTag(server);
-registerReadTerminal(server);
-registerListSessions(server);
-registerGetSessionStats(server);
-registerGetDiffComments(server);
-registerCreateDiffComment(server);
-registerAddDependency(server);
-registerRemoveDependency(server);
-registerGetBoardStatus(server);
-registerListAgentSkills(server);
-registerGetAgentSkill(server);
-registerCreateAgentSkill(server);
-registerExportAgentSkills(server);
-
 async function main() {
+  const disabledTools = await getDisabledTools();
+
+  let registered = 0;
+  let skipped = 0;
+  for (const [name, register] of Object.entries(TOOL_REGISTRARS)) {
+    if (disabledTools.has(name)) {
+      skipped++;
+    } else {
+      register(server);
+      registered++;
+    }
+  }
+
+  if (skipped > 0) {
+    console.error(`Skipped ${skipped} disabled tool(s): ${[...disabledTools].filter(t => TOOL_REGISTRARS[t]).join(", ")}`);
+  }
+
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error("Agentic Kanban MCP server running on stdio");
+  console.error(`Agentic Kanban MCP server running on stdio (${registered} tools registered)`);
 }
 
 main().catch((err) => {
