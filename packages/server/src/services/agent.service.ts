@@ -40,7 +40,7 @@ export function launch(
     permissionPromptTool,
     planMode,
   });
-  const { command, args, useShell, isMockAgent, env: spawnEnv } = launchConfig;
+  const { command, args, useShell, isMockAgent, env: spawnEnv, keepStdinOpen } = launchConfig;
 
   console.log(`[agent] launching: command=${command} worktree=${worktreePath} sessionId=${sessionId} resume=${claudeSessionId ?? "none"}`);
 
@@ -65,12 +65,11 @@ export function launch(
   // Note: On Windows, claude.exe buffers stdout until stdin is closed,
   // so keeping stdin open for multi-turn causes no output to arrive.
   // Multi-turn follow-ups are handled via --resume (new process per turn).
-  if (!isMockAgent) {
-    proc.stdin?.end(prompt + "\n");
-  } else if (keepAlive) {
-    // Multi-turn mock agent: write prompt via stdin, keep open for follow-ups
+  if (keepStdinOpen) {
     stdinOpen.set(sessionId, true);
     proc.stdin?.write(prompt + "\n");
+  } else {
+    proc.stdin?.end(prompt + "\n");
   }
 
   activeProcesses.set(sessionId, proc);
