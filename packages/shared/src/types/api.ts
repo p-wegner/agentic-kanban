@@ -120,6 +120,7 @@ export interface WorkspaceResponse {
   baseBranch: string | null;
   isDirect: boolean;
   planMode: boolean;
+  agentCommand?: string | null;
   sessionId?: string;
   createdAt: string;
   updatedAt: string;

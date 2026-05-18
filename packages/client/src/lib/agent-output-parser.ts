@@ -41,6 +41,15 @@ export class RawOutputParser implements AgentOutputParser {
   }
 }
 
+const CLAUDE_COMMANDS = ["claude", "claude.exe"];
+
+export function getOutputFormatForAgent(agentCommand?: string): AgentOutputFormat {
+  if (!agentCommand) return "claude-stream-json";
+  const base = agentCommand.split(/[\\/]/).pop()?.replace(/\.exe$/i, "")?.toLowerCase() ?? "";
+  if (CLAUDE_COMMANDS.includes(base) || base.includes("mock-agent")) return "claude-stream-json";
+  return "raw";
+}
+
 export function createAgentOutputParser(format: AgentOutputFormat = "claude-stream-json"): AgentOutputParser {
   switch (format) {
     case "raw":
