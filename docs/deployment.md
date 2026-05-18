@@ -4,13 +4,76 @@ This guide covers running agentic-kanban outside of development mode — from so
 
 ## Table of Contents
 
+- [npx / Published Package (Recommended)](#npx--published-package-recommended)
 - [Running from Source](#running-from-source)
 - [Database Management](#database-management)
 - [Environment Variables](#environment-variables)
 - [MCP Server for Claude Code](#mcp-server-for-claude-code)
 - [Tauri Desktop App](#tauri-desktop-app)
 - [Running as a Background Service](#running-as-a-background-service)
+- [Publishing a New Release](#publishing-a-new-release)
 - [Troubleshooting](#troubleshooting)
+
+---
+
+## npx / Published Package (Recommended)
+
+The easiest way to run agentic-kanban without cloning the repo is via the published npm package.
+
+### Quick Start
+
+```powershell
+# Start the full app (server + UI) — opens browser automatically
+npx agentic-kanban dev
+
+# Register a git repo as a project
+npx agentic-kanban register /path/to/your/repo
+
+# Useful CLI commands
+npx agentic-kanban list      # list registered projects
+npx agentic-kanban status    # show board overview
+npx agentic-kanban --help    # all available commands
+```
+
+The `dev` command starts the server in-process, serves the bundled React UI from the same port, and opens your browser. No separate client build or static file server needed.
+
+### Custom Port
+
+```powershell
+npx agentic-kanban dev --port 8080
+```
+
+### MCP Server via npx
+
+```json
+{
+  "mcpServers": {
+    "agentic-kanban": {
+      "command": "npx",
+      "args": ["-y", "agentic-kanban-mcp"],
+      "env": {
+        "DB_URL": "/absolute/path/to/kanban.db"
+      }
+    }
+  }
+}
+```
+
+`DB_URL` must point to the same `kanban.db` file the web server is using. If omitted, the MCP server creates its own isolated database — changes from the UI won't be visible to Claude Code and vice versa.
+
+### Build Output Structure
+
+When published, the package has this layout inside `dist/`:
+
+```
+cli.js          ← CLI entry (npx agentic-kanban)
+server.js       ← server entry (spawned by dev command)
+mcp.js          ← MCP server entry (npx agentic-kanban-mcp)
+client/         ← Vite-built React app
+migrations/     ← Drizzle SQL migrations + journal
+```
+
+esbuild bundles server and MCP source into single files; `@agentic-kanban/shared` is inlined. npm runtime dependencies (hono, drizzle-orm, etc.) remain as regular `dependencies` in package.json and are installed by npm on `npx` invocation.
 
 ---
 
@@ -191,8 +254,24 @@ The MCP server provides 27 tools for Claude Code to interact with the kanban boa
 
 ### Configuration
 
-Add to your Claude Code settings (`~/.claude/settings.json` or project `.claude/settings.json`):
+Add to your Claude Code settings (`~/.claude/settings.json` or project `.claude/settings.json`).
 
+**Via published package (recommended):**
+```json
+{
+  "mcpServers": {
+    "agentic-kanban": {
+      "command": "npx",
+      "args": ["-y", "agentic-kanban-mcp"],
+      "env": {
+        "DB_URL": "/absolute/path/to/kanban.db"
+      }
+    }
+  }
+}
+```
+
+**From a source checkout (compiled):**
 ```json
 {
   "mcpServers": {
@@ -205,7 +284,7 @@ Add to your Claude Code settings (`~/.claude/settings.json` or project `.claude/
 }
 ```
 
-Or run from source with tsx:
+**From a source checkout (tsx, no build step):**
 ```json
 {
   "mcpServers": {
@@ -355,6 +434,56 @@ docker run -p 3001:3001 -v /path/to/your/repos:/repos agentic-kanban
 ```
 
 **Note:** Git operations (worktree creation, branching, merging) require the container to have access to the host's git repositories via volume mounts. This is only practical for local Docker usage.
+
+---
+
+## Publishing a New Release
+
+The project uses [changesets](https://github.com/changesets/changesets) for versioning. The published package is `agentic-kanban` on npm.
+
+### Standard Release
+
+```powershell
+# 1. Record what changed
+pnpm changeset          # select packages + version bump type (patch/minor/major)
+
+# 2. Bump versions (consumes changesets, updates package.json)
+pnpm version
+
+# 3. Build and publish
+pnpm release            # runs: pnpm build && changeset publish
+```
+
+### Verify Build Before Publishing
+
+```powershell
+pnpm build
+
+# Check dist output
+ls packages/server/dist/
+# Expected: cli.js, server.js, mcp.js, client/, migrations/
+
+# Smoke-test locally
+node packages/server/dist/cli.js --help
+node packages/server/dist/cli.js dev
+
+# Dry-run publish
+npm publish --dry-run --workspaces=false --prefix packages/server
+```
+
+### Beta / Prerelease
+
+```powershell
+pnpm changeset pre enter beta
+pnpm changeset version
+pnpm release
+pnpm changeset pre exit
+```
+
+Users install the beta with:
+```powershell
+npx agentic-kanban@beta dev
+```
 
 ---
 
