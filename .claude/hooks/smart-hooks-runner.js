@@ -140,27 +140,30 @@ function handlePostToolUse(input) {
 // --- Stop: run full checks (tests, tsc, reminders) ---
 
 function handleStop(input) {
-  // Already re-prompted once — let the agent stop
-  if (input.stop_hook_active === true) {
-    clearState();
-    process.exit(0);
-  }
-
   const state = loadState();
   const config = loadConfig();
   const checks = config.hooks?.Stop || [];
-
-  if (checks.length === 0 || state.editedFiles.length === 0) {
+  if (checks.length === 0) {
     clearState();
     process.exit(0);
   }
 
   const blockReasons = [];
+  const alwaysRun = input.stop_hook_active !== true;
+  // On re-prompt, only run hooks marked alwaysRun (e.g. cleanup reminders)
+  // File-dependent hooks (tests, tsc, playwright) are skipped on re-prompt
 
   for (const check of checks) {
     if (!check.enabled) continue;
+
+    // File-dependent checks: skip if no files were edited, or on re-prompt
     if (check.filePatterns && check.filePatterns.length > 0) {
+      if (!alwaysRun) continue;
+      if (state.editedFiles.length === 0) continue;
       if (!state.editedFiles.some((f) => matchesPatterns(f, check.filePatterns))) continue;
+    } else if (!check.alwaysRun && !alwaysRun) {
+      // Checks without filePatterns that aren't marked alwaysRun: skip on re-prompt
+      continue;
     }
 
     const result = runCheck(check);
