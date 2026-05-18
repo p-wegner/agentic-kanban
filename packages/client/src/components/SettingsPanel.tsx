@@ -84,6 +84,42 @@ function Toggle({ checked, onChange, label, hint, disabled }: {
   );
 }
 
+function CollapsibleSection({ title, configured, defaultOpen, children }: {
+  title: string;
+  configured?: boolean;
+  defaultOpen?: boolean;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen ?? false);
+  return (
+    <div className="border border-gray-200 rounded-md">
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        className="w-full flex items-center justify-between px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 rounded-md"
+      >
+        <span className="flex items-center gap-2">
+          {title}
+          {configured && !open && (
+            <span className="text-[10px] px-1.5 py-0.5 bg-blue-50 text-blue-600 rounded">configured</span>
+          )}
+        </span>
+        <svg
+          className={`w-4 h-4 text-gray-400 transition-transform ${open ? "rotate-90" : ""}`}
+          fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+        </svg>
+      </button>
+      {open && (
+        <div className="px-3 pb-3 pt-2 space-y-2 border-t border-gray-100">
+          {children}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function EditSkillForm({ skill, isNew, onSave, onCancel }: {
   skill: { id?: string; name: string; description: string; prompt: string; model: string | null; projectId?: string | null };
   isNew?: boolean;
@@ -529,8 +565,13 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                   {!activeProjectId ? (
                     <p className="text-sm text-gray-500">No active project selected.</p>
                   ) : (
-                    <>
-                      <Field label="Setup Script" hint="Shell command(s) to run in each new workspace after the git worktree is created. Use && to chain multiple commands. Leave empty to skip setup.">
+                    <div className="space-y-3">
+                      <CollapsibleSection
+                        title="Setup Script"
+                        configured={!!projectSettings.setupScript}
+                        defaultOpen={!!projectSettings.setupScript}
+                      >
+                        <p className="text-xs text-gray-500">Shell command(s) to run in each new workspace after the git worktree is created. Use && to chain multiple commands.</p>
                         <textarea
                           value={projectSettings.setupScript}
                           onChange={(e) => setProjectSettings(s => ({ ...s, setupScript: e.target.value }))}
@@ -538,105 +579,110 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                           rows={3}
                           className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 font-mono"
                         />
-                      </Field>
-                      <button
-                        onClick={async () => {
-                          if (!activeProjectId || generatingScript) return;
-                          setGeneratingScript(true);
-                          try {
-                            const result = await apiFetch<{ setupScript: string }>(
-                              "/api/projects/generate-setup-script",
-                              {
-                                method: "POST",
-                                body: JSON.stringify({ projectId: activeProjectId }),
-                              },
-                            );
-                            if (result.setupScript) {
-                              setProjectSettings(s => ({ ...s, setupScript: result.setupScript }));
+                        <button
+                          onClick={async () => {
+                            if (!activeProjectId || generatingScript) return;
+                            setGeneratingScript(true);
+                            try {
+                              const result = await apiFetch<{ setupScript: string }>(
+                                "/api/projects/generate-setup-script",
+                                {
+                                  method: "POST",
+                                  body: JSON.stringify({ projectId: activeProjectId }),
+                                },
+                              );
+                              if (result.setupScript) {
+                                setProjectSettings(s => ({ ...s, setupScript: result.setupScript }));
+                              }
+                            } catch {
+                              showToast("Failed to generate setup script", "error");
+                            } finally {
+                              setGeneratingScript(false);
                             }
-                          } catch {
-                            showToast("Failed to generate setup script", "error");
-                          } finally {
-                            setGeneratingScript(false);
-                          }
-                        }}
-                        disabled={generatingScript || !activeProjectId}
-                        className="text-xs text-purple-600 px-2 py-1.5 hover:text-purple-800 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
+                          }}
+                          disabled={generatingScript || !activeProjectId}
+                          className="text-xs text-purple-600 px-2 py-1.5 hover:text-purple-800 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
+                        >
+                          {generatingScript ? (
+                            <>
+                              <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+                              </svg>
+                              Generating...
+                            </>
+                          ) : (
+                            <>
+                              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M5 3l1.5 3.5L10 8l-3.5 1.5L5 13l-1.5-3.5L0 8l3.5-1.5L5 3zM19 11l1 2.5L22.5 14l-2.5 1L19 17.5l-1-2.5L15.5 14l2.5-1L19 11z" />
+                              </svg>
+                              Generate with AI
+                            </>
+                          )}
+                        </button>
+                        <Toggle
+                          checked={projectSettings.setupBlocking}
+                          onChange={(v) => setProjectSettings(s => ({ ...s, setupBlocking: v }))}
+                          label="Run setup before agent"
+                          hint="When enabled, the setup script must complete before the agent starts. When disabled, both run in parallel (faster but the agent may start before dependencies are installed)."
+                        />
+                      </CollapsibleSection>
+                      <CollapsibleSection
+                        title="Teardown Script"
+                        configured={!!projectSettings.teardownScript}
+                        defaultOpen={!!projectSettings.teardownScript}
                       >
-                        {generatingScript ? (
-                          <>
-                            <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
-                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
-                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
-                            </svg>
-                            Generating...
-                          </>
-                        ) : (
-                          <>
-                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M5 3l1.5 3.5L10 8l-3.5 1.5L5 13l-1.5-3.5L0 8l3.5-1.5L5 3zM19 11l1 2.5L22.5 14l-2.5 1L19 17.5l-1-2.5L15.5 14l2.5-1L19 11z" />
-                            </svg>
-                            Generate with AI
-                          </>
-                        )}
-                      </button>
-                      <Toggle
-                        checked={projectSettings.setupBlocking}
-                        onChange={(v) => setProjectSettings(s => ({ ...s, setupBlocking: v }))}
-                        label="Run setup before agent"
-                        hint="When enabled, the setup script must complete before the agent starts. When disabled, both run in parallel (faster but the agent may start before dependencies are installed)."
-                      />
-                      <Field label="Teardown Script" hint="Shell command(s) to run in the worktree before it is removed on merge (e.g. stop services, rm -rf node_modules). Leave empty to skip.">
+                        <p className="text-xs text-gray-500">Shell command(s) to run in the worktree before it is removed on merge (e.g. stop services, rm -rf node_modules).</p>
                         <textarea
                           value={projectSettings.teardownScript}
                           onChange={(e) => setProjectSettings(s => ({ ...s, teardownScript: e.target.value }))}
                           placeholder="pkill -f dev-server || true"
                           rows={3}
-                          className="w-full rounded border border-zinc-700 bg-zinc-800 px-3 py-2 font-mono text-sm text-zinc-100 placeholder-zinc-500 focus:border-blue-500 focus:outline-none"
+                          className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 font-mono"
                         />
-                      </Field>
-                      <button
-                        onClick={async () => {
-                          if (!activeProjectId || generatingTeardown) return;
-                          setGeneratingTeardown(true);
-                          try {
-                            const result = await apiFetch<{ teardownScript: string }>(
-                              "/api/projects/generate-teardown-script",
-                              {
-                                method: "POST",
-                                body: JSON.stringify({ projectId: activeProjectId }),
-                              },
-                            );
-                            if (result.teardownScript) {
-                              setProjectSettings(s => ({ ...s, teardownScript: result.teardownScript }));
+                        <button
+                          onClick={async () => {
+                            if (!activeProjectId || generatingTeardown) return;
+                            setGeneratingTeardown(true);
+                            try {
+                              const result = await apiFetch<{ teardownScript: string }>(
+                                "/api/projects/generate-teardown-script",
+                                {
+                                  method: "POST",
+                                  body: JSON.stringify({ projectId: activeProjectId }),
+                                },
+                              );
+                              if (result.teardownScript) {
+                                setProjectSettings(s => ({ ...s, teardownScript: result.teardownScript }));
+                              }
+                            } catch {
+                              showToast("Failed to generate teardown script", "error");
+                            } finally {
+                              setGeneratingTeardown(false);
                             }
-                          } catch {
-                            showToast("Failed to generate teardown script", "error");
-                          } finally {
-                            setGeneratingTeardown(false);
-                          }
-                        }}
-                        disabled={generatingTeardown || !activeProjectId}
-                        className="text-xs text-purple-600 px-2 py-1.5 hover:text-purple-800 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
-                      >
-                        {generatingTeardown ? (
-                          <>
-                            <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
-                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
-                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
-                            </svg>
-                            Generating...
-                          </>
-                        ) : (
-                          <>
-                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M5 3l1.5 3.5L10 8l-3.5 1.5L5 13l-1.5-3.5L0 8l3.5-1.5L5 3zM19 11l1 2.5L22.5 14l-2.5 1L19 17.5l-1-2.5L15.5 14l2.5-1L19 11z" />
-                            </svg>
-                            Generate with AI
-                          </>
-                        )}
-                      </button>
-                    </>
+                          }}
+                          disabled={generatingTeardown || !activeProjectId}
+                          className="text-xs text-purple-600 px-2 py-1.5 hover:text-purple-800 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
+                        >
+                          {generatingTeardown ? (
+                            <>
+                              <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+                              </svg>
+                              Generating...
+                            </>
+                          ) : (
+                            <>
+                              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M5 3l1.5 3.5L10 8l-3.5 1.5L5 13l-1.5-3.5L0 8l3.5-1.5L5 3zM19 11l1 2.5L22.5 14l-2.5 1L19 17.5l-1-2.5L15.5 14l2.5-1L19 11z" />
+                              </svg>
+                              Generate with AI
+                            </>
+                          )}
+                        </button>
+                      </CollapsibleSection>
+                    </div>
                   )}
                 </>
               )}
