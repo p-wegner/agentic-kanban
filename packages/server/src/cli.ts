@@ -1,11 +1,15 @@
 #!/usr/bin/env node
 import { Command } from "commander";
+import { readFileSync } from "node:fs";
+import { resolve, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import { migrate } from "drizzle-orm/libsql/migrator";
 import { db } from "./db/index.js";
 import { projects, projectStatuses, preferences, workspaces, issues, issueTags, sessions, agentSkills, issueDependencies, DEPENDENCY_TYPES } from "@agentic-kanban/shared/schema";
 import { eq, inArray, sql, and, isNull } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { detectRepoInfo } from "./services/git-info.service.js";
+import { getMigrationsFolder } from "./db/migrations.js";
 
 const DEFAULT_STATUSES = [
   { name: "Todo", sortOrder: 0, isDefault: true },
@@ -17,7 +21,7 @@ const DEFAULT_STATUSES = [
 ];
 
 async function runMigrations() {
-  await migrate(db, { migrationsFolder: "../shared/drizzle" });
+  await migrate(db, { migrationsFolder: getMigrationsFolder() });
 }
 
 const program = new Command();
@@ -25,7 +29,7 @@ const program = new Command();
 program
   .name("agentic-kanban")
   .description("CLI for managing agentic-kanban projects")
-  .version("0.0.1")
+  .version(JSON.parse(readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), "../package.json"), "utf8")).version)
   .usage("<command> [options]")
   .addHelpText("after", `
 Examples:
@@ -1090,6 +1094,37 @@ Example:
 
       console.log(`Removed dependency '${dependencyId}'.`);
       process.exit(0);
+    } catch (err) {
+      console.error("Error:", err instanceof Error ? err.message : String(err));
+      process.exit(1);
+    }
+  });
+
+program
+  .command("dev")
+  .description("Start the development server (server + built client UI)")
+  .option("-p, --port <port>", "Server port", process.env.PORT || "3001")
+  .option("--no-open", "Do not open browser")
+  .action(async (options: { port: string; open: boolean }) => {
+    try {
+      const port = Number(options.port);
+      process.env.PORT = String(port);
+
+      const { startServer } = await import("./server-start.js");
+      await startServer(port);
+
+      console.log(`\n  Agentic Kanban running at http://localhost:${port}`);
+      console.log("  Press Ctrl+C to stop\n");
+
+      // Open browser
+      if (options.open) {
+        const { execFile } = await import("node:child_process");
+        const cmd = process.platform === "win32" ? "cmd" : "open";
+        const args = process.platform === "win32" ? ["/c", "start", `http://localhost:${port}`] : [`http://localhost:${port}`];
+        execFile(cmd, args, (err) => {
+          if (err) console.warn("  Could not open browser:", err.message);
+        });
+      }
     } catch (err) {
       console.error("Error:", err instanceof Error ? err.message : String(err));
       process.exit(1);

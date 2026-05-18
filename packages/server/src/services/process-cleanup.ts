@@ -3,22 +3,16 @@ import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 
-/**
- * Kill processes whose CWD is in the given directory.
- * Best-effort — logs errors but never throws.
- */
 export async function killProcessesInDir(dir: string): Promise<number> {
   let killed = 0;
   try {
     if (process.platform === "win32") {
-      // Use wmic to find processes with this CWD, then taskkill them
       const { stdout } = await execFileAsync("wmic", [
         "process", "where",
         `ExecutablePath is not null and CommandLine is not null`,
         "get", "ProcessId,CommandLine", "/format:list",
       ], { timeout: 10000 });
 
-      // Parse output and find PIDs whose command line references the worktree dir
       const dirNormalized = dir.replace(/\\/g, "/");
       const pidRegex = /ProcessId=(\d+)/;
       const cmdRegex = /CommandLine=(.*)/;
@@ -54,7 +48,6 @@ export async function killProcessesInDir(dir: string): Promise<number> {
         }
       }
     } else {
-      // Unix: use lsof to find processes with this CWD
       try {
         const { stdout } = await execFileAsync("lsof", ["+D", dir, "-t"], { timeout: 10000 });
         const pids = stdout.trim().split("\n").filter(Boolean);
