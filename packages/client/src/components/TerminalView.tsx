@@ -157,6 +157,7 @@ export function TerminalView({ messages, connectionState, parseOutput = "true", 
 
   useEffect(() => {
     if (!isMaximized) return;
+    document.body.style.overflow = "hidden";
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.preventDefault();
@@ -165,7 +166,10 @@ export function TerminalView({ messages, connectionState, parseOutput = "true", 
       }
     };
     window.addEventListener("keydown", handleKeyDown, true);
-    return () => window.removeEventListener("keydown", handleKeyDown, true);
+    return () => {
+      document.body.style.overflow = "";
+      window.removeEventListener("keydown", handleKeyDown, true);
+    };
   }, [isMaximized]);
 
   const statusColors: Record<string, string> = {
