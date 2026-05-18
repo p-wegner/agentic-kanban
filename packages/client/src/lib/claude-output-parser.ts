@@ -97,6 +97,9 @@ export type DisplayEvent = ParsedEvent | RawTextEvent;
  * Handles partial lines from chunked stdout.
  */
 export class ClaudeOutputParser {
+  readonly format = "claude-stream-json";
+  readonly label = "stream-json";
+
   private buffer = "";
   private _isClaudeJson = false;
   private toolNameMap = new Map<string, string>();

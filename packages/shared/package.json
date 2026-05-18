@@ -9,7 +9,8 @@
     ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js", "default": "./src/index.ts" },
     "./schema": { "types": "./dist/schema/index.d.ts", "import": "./dist/schema/index.js", "default": "./src/schema/index.ts" },
     "./types": { "types": "./dist/types/index.d.ts", "import": "./dist/types/index.js", "default": "./src/types/index.ts" },
-    "./lib": { "types": "./dist/lib/index.d.ts", "import": "./dist/lib/index.js", "default": "./src/lib/index.ts" }
+    "./lib": { "types": "./dist/lib/index.d.ts", "import": "./dist/lib/index.js", "default": "./src/lib/index.ts" },
+    "./lib/agent-skill-files": { "types": "./dist/lib/agent-skill-files.d.ts", "import": "./dist/lib/agent-skill-files.js", "default": "./src/lib/agent-skill-files.ts" }
   },
   "scripts": {
     "build": "tsc",
@@ -20,6 +21,7 @@
     "drizzle-orm": "^0.45.0"
   },
   "devDependencies": {
+    "@types/node": "^25.6.0",
     "drizzle-kit": "^0.31.0",
     "typescript": "^5.8.3"
   }

@@ -10,7 +10,7 @@ import type { BoardEvents } from "../services/board-events.js";
 import type { Database } from "../db/index.js";
 import { resolve, dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { mkdir, writeFile } from "node:fs/promises";
+import { writeAgentSkillFile } from "@agentic-kanban/shared/lib/agent-skill-files";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const MOCK_AGENT_PATH = resolve(__dirname, "../scripts/mock-agent.ts");
@@ -132,16 +132,7 @@ export function createWorkspacesRoute(
         const skillRows = await database.select().from(agentSkills).where(eq(agentSkills.id, skillId)).limit(1);
         if (skillRows.length > 0) {
           const skill = skillRows[0];
-          const skillDir = join(worktreePath, ".claude", "skills", skill.name);
-          await mkdir(skillDir, { recursive: true });
-          const skillContent = [
-            "---",
-            `description: ${skill.description}`,
-            "---",
-            "",
-            skill.prompt,
-          ].join("\n");
-          await writeFile(join(skillDir, "SKILL.md"), skillContent, "utf-8");
+          await writeAgentSkillFile(worktreePath, skill);
         }
       }
 
