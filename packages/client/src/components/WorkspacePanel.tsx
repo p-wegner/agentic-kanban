@@ -170,9 +170,16 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
   const isRunning = activeSession !== null && !messages.some(m => m.type === "exit");
   // Whether a session is alive (may be processing or waiting for input)
   const isSessionAlive = activeSession !== null && isRunning;
-  // Whether we can resume (workspace active, no session running, has previous session)
-  const canResume = (ws: WorkspaceResponse) =>
-    ws.status === "active" && !isRunning && !activeSession && !!lastSessionPerWorkspace[ws.id];
+  // Whether we can resume (workspace not closed, no session running, has previous session with claudeSessionId)
+  const canResume = (ws: WorkspaceResponse, sessions: SessionInfo[]) =>
+    (ws.status === "active" || ws.status === "idle") && !isRunning && !activeSession &&
+    !!lastSessionPerWorkspace[ws.id] &&
+    sessions.some(s => s.id === lastSessionPerWorkspace[ws.id] && s.claudeSessionId);
+  // Whether we can restart (workspace not closed, no session running, but last session has no claudeSessionId)
+  const canRestart = (ws: WorkspaceResponse, sessions: SessionInfo[]) =>
+    (ws.status === "active" || ws.status === "idle") && !isRunning && !activeSession &&
+    !!lastSessionPerWorkspace[ws.id] &&
+    sessions.some(s => s.id === lastSessionPerWorkspace[ws.id] && !s.claudeSessionId);
 
   // Auto-clear activeSession when agent completes.
   // Primary: detect exit via WS messages.
@@ -718,6 +725,26 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
     }
   }
 
+  async function handleRestart(wsId: string) {
+    setActionLoading(true);
+    setError(null);
+    const restartPrompt = "Continue where you left off. If you were in the middle of implementing something, pick up from where you stopped. If the implementation is complete, commit your changes and move this issue to In Review.";
+    try {
+      const result = await apiFetch<{ sessionId: string }>(
+        `/api/workspaces/${wsId}/launch`,
+        { method: "POST", body: JSON.stringify({ prompt: restartPrompt }) },
+      );
+      setActiveSession(result.sessionId);
+      setLastPrompt(restartPrompt);
+      setPrompt("");
+      await fetchWorkspaces();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Restart failed");
+    } finally {
+      setActionLoading(false);
+    }
+  }
+
   async function handleContinueFromSession(wsId: string, sessionId: string) {
     setActionLoading(true);
     setError(null);
@@ -1056,15 +1083,26 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                                 </span>
                                 <SessionStatsBadge stats={session.stats} />
                               </button>
-                              {session.claudeSessionId && ws.status !== "closed" && (
-                                <button
-                                  onClick={() => handleContinueFromSession(ws.id, session.id)}
-                                  disabled={actionLoading}
-                                  className="text-[10px] bg-green-600 text-white px-1.5 py-0.5 rounded hover:bg-green-700 disabled:opacity-50 shrink-0"
-                                  title="Continue this session with --resume"
-                                >
-                                  Continue
-                                </button>
+                              {ws.status !== "closed" && (
+                                session.claudeSessionId ? (
+                                  <button
+                                    onClick={() => handleContinueFromSession(ws.id, session.id)}
+                                    disabled={actionLoading}
+                                    className="text-[10px] bg-green-600 text-white px-1.5 py-0.5 rounded hover:bg-green-700 disabled:opacity-50 shrink-0"
+                                    title="Continue this session with --resume"
+                                  >
+                                    Continue
+                                  </button>
+                                ) : (
+                                  <button
+                                    onClick={() => handleRestart(ws.id)}
+                                    disabled={actionLoading}
+                                    className="text-[10px] bg-blue-600 text-white px-1.5 py-0.5 rounded hover:bg-blue-700 disabled:opacity-50 shrink-0"
+                                    title="Start a new session (previous session has no resume ID)"
+                                  >
+                                    Restart
+                                  </button>
+                                )
                               )}
                             </div>
                           );
@@ -1353,14 +1391,24 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                     {ws.workingDir && ws.status !== "closed" && (
                       <>
                       <div className="flex gap-2 flex-wrap">
-                        {/* Resume button — shown when workspace active but no session running */}
-                        {canResume(ws) && (
+                        {/* Resume/Restart button — shown when workspace idle/active but no session running */}
+                        {canResume(ws, sessions) && (
                           <button
                             onClick={() => handleResume(ws.id)}
                             disabled={actionLoading}
                             className="text-sm bg-green-600 text-white px-3 py-1.5 rounded hover:bg-green-700 disabled:opacity-50"
                           >
                             Resume
+                          </button>
+                        )}
+                        {canRestart(ws, sessions) && (
+                          <button
+                            onClick={() => handleRestart(ws.id)}
+                            disabled={actionLoading}
+                            className="text-sm bg-blue-600 text-white px-3 py-1.5 rounded hover:bg-blue-700 disabled:opacity-50"
+                            title="Start a new session (previous session has no resume ID)"
+                          >
+                            Restart
                           </button>
                         )}
                         {/* Update Base — rebase or merge latest base into workspace */}
