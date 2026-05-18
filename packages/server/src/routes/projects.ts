@@ -599,7 +599,7 @@ ${contextParts.join("\n")}`;
 
     // Fetch workspace summaries grouped by issueId
     const issueIds = projectIssues.map((i) => i.id);
-    const workspaceSummaryMap = new Map<string, { total: number; active: number; idle: number; closed: number; branches: string[]; main?: { id: string; branch: string; status: "active" | "reviewing" | "idle" | "closed"; claudeProfile: string | null; agentCommand: string | null; diffStats?: { filesChanged: number; insertions: number; deletions: number } | null; conflicts?: { hasConflicts: boolean; conflictingFiles: string[] } | null } }>();
+    const workspaceSummaryMap = new Map<string, { total: number; active: number; idle: number; closed: number; branches: string[]; main?: { id: string; branch: string; status: "active" | "reviewing" | "idle" | "closed"; claudeProfile: string | null; agentCommand: string | null; diffStats?: { filesChanged: number; insertions: number; deletions: number } | null; conflicts?: { hasConflicts: boolean; conflictingFiles: string[] } | null; lastSessionAt?: string | null } }>();
 
     if (issueIds.length > 0) {
       const wsRows = await database
@@ -699,6 +699,38 @@ ${contextParts.join("\n")}`;
 
       if (diffStatsPromises.length > 0) {
         await Promise.all(diffStatsPromises);
+      }
+
+      // Fetch latest session per main workspace for timing info
+      const mainWsIds = [...mainWorkspaceMap.values()].map(w => w.id);
+      if (mainWsIds.length > 0) {
+        const sessionRows = await database
+          .select({
+            workspaceId: sessions.workspaceId,
+            status: sessions.status,
+            startedAt: sessions.startedAt,
+            endedAt: sessions.endedAt,
+          })
+          .from(sessions)
+          .where(inArray(sessions.workspaceId, mainWsIds))
+          .orderBy(sessions.startedAt);
+
+        // Group by workspace, pick latest per workspace
+        const latestByWs = new Map<string, { status: string; startedAt: string; endedAt: string | null }>();
+        for (const s of sessionRows) {
+          if (!latestByWs.has(s.workspaceId)) {
+            latestByWs.set(s.workspaceId, { status: s.status, startedAt: s.startedAt, endedAt: s.endedAt });
+          }
+        }
+
+        for (const [issueId, summary] of workspaceSummaryMap) {
+          if (summary.main) {
+            const sess = latestByWs.get(summary.main.id);
+            if (sess) {
+              summary.main.lastSessionAt = sess.status === "running" ? sess.startedAt : sess.endedAt;
+            }
+          }
+        }
       }
     }
 

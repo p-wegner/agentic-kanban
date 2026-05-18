@@ -2,6 +2,17 @@ import { useState } from "react";
 import type { IssueWithStatus } from "@agentic-kanban/shared";
 import type { LiveSessionStats, TodoItem } from "../lib/useBoardEvents.js";
 
+function relativeTime(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime();
+  const mins = Math.floor(diff / 60_000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  return `${days}d ago`;
+}
+
 const priorityColors: Record<string, string> = {
   low: "bg-gray-200 text-gray-700",
   medium: "bg-blue-100 text-blue-700",
@@ -121,13 +132,18 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
           {ws.main.status === "closed" && (
             <span className="text-green-600 font-medium shrink-0">merged</span>
           )}
-          {ws.main.diffStats && (
-            <span className="inline-flex items-center gap-1 text-[10px] font-mono shrink-0 ml-auto">
-              <span className="text-green-600">+{ws.main.diffStats.insertions}</span>
-              <span className="text-red-500">-{ws.main.diffStats.deletions}</span>
-              <span className="text-gray-400">· {ws.main.diffStats.filesChanged}f</span>
-            </span>
-          )}
+          <span className="inline-flex items-center gap-1 text-[10px] font-mono shrink-0 ml-auto">
+            {ws.main.diffStats && (
+              <>
+                <span className="text-green-600">+{ws.main.diffStats.insertions}</span>
+                <span className="text-red-500">-{ws.main.diffStats.deletions}</span>
+                <span className="text-gray-400">{ws.main.diffStats.filesChanged}f</span>
+              </>
+            )}
+            {ws.main.lastSessionAt && ws.main.status !== "active" && ws.main.status !== "reviewing" && (
+              <span className="text-gray-400">{ws.main.diffStats ? "· " : ""}{relativeTime(ws.main.lastSessionAt)}</span>
+            )}
+          </span>
           {ws.main.conflicts?.hasConflicts && (
             <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-red-100 text-red-700 text-[10px] font-medium shrink-0">
               {ws.main.conflicts.conflictingFiles.length} conflict{ws.main.conflicts.conflictingFiles.length !== 1 ? "s" : ""}

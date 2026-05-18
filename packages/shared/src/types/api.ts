@@ -57,6 +57,7 @@ export interface MainWorkspaceInfo {
   agentCommand?: string | null;
   diffStats?: { filesChanged: number; insertions: number; deletions: number } | null;
   conflicts?: { hasConflicts: boolean; conflictingFiles: string[] } | null;
+  lastSessionAt?: string | null;
 }
 
 export interface WorkspaceSummary {
