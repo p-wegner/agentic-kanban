@@ -7,6 +7,11 @@ const clientPort = Number(process.env.VITE_PORT) || 5173;
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  resolve: {
+    // Use the "default" export condition so workspace packages resolve to
+    // their TypeScript source directly, without requiring a pre-build step.
+    conditions: ["default", "browser", "module", "import"],
+  },
   server: {
     port: clientPort,
     strictPort: true,
