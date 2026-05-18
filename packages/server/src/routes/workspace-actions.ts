@@ -425,7 +425,7 @@ export function createWorkspaceActionsRoute(
           const killed = await killProcessesInDir(workspace.workingDir);
           if (killed > 0) console.log(`[workspace-actions] killed ${killed} process(es) in ${workspace.workingDir}`);
         } catch { /* ignore */ }
-        if (project?.teardownScript) {
+        if (project?.teardownScript && project.setupEnabled !== false) {
           try {
             const r = await runScript(project.teardownScript, workspace.workingDir, `teardown:${id}`);
             console.log(`[workspace-actions] teardown script: ${r.ok ? "ok" : "failed"} — ${r.output.slice(0, 100)}`);

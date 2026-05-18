@@ -21,8 +21,9 @@ export function registerStartWorkspace(server: McpServer) {
       isDirect: z.boolean().optional().describe("Work directly on the main checkout instead of creating a worktree"),
       skillId: z.string().optional().describe("Agent skill ID to apply — the skill will be written as a SKILL.md file in the worktree for the agent to discover and invoke on demand"),
       planMode: z.boolean().optional().describe("If true, agent plans but does not implement. Restricts to read-only exploration and plan output."),
+      skipSetup: z.boolean().optional().describe("If true, skip running the project's setup script for this workspace"),
     },
-    async ({ issueId, repoPath, branch, baseBranch, isDirect, skillId, planMode }) => {
+    async ({ issueId, repoPath, branch, baseBranch, isDirect, skillId, planMode, skipSetup }) => {
       // Look up the issue
       const issues = await db.select().from(schema.issues).where(eq(schema.issues.id, issueId)).limit(1);
       if (issues.length === 0) {
@@ -34,7 +35,7 @@ export function registerStartWorkspace(server: McpServer) {
       let resolvedBaseBranch = baseBranch;
       const issue = issues[0];
       const projectRows = await db
-        .select({ repoPath: schema.projects.repoPath, defaultBranch: schema.projects.defaultBranch, setupScript: schema.projects.setupScript })
+        .select({ repoPath: schema.projects.repoPath, defaultBranch: schema.projects.defaultBranch, setupScript: schema.projects.setupScript, setupEnabled: schema.projects.setupEnabled })
         .from(schema.projects)
         .where(eq(schema.projects.id, issue.projectId))
         .limit(1);
@@ -62,9 +63,10 @@ export function registerStartWorkspace(server: McpServer) {
           worktreePath = await gitService.createWorktree(resolvedRepoPath, branchName, resolvedBaseBranch);
         }
 
-        // Run setup script if configured
+        // Run setup script if configured and enabled
         const setupScript = projectRows[0].setupScript;
-        if (setupScript) {
+        const setupEnabled = projectRows[0].setupEnabled ?? true;
+        if (setupScript && setupEnabled && !skipSetup) {
           try {
             const result = await runSetupScript(worktreePath, setupScript);
             if (result.exitCode === 0) {
