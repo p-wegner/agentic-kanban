@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdir, readFile } from "node:fs/promises";
+import { mkdir, readFile, rm, stat } from "node:fs/promises";
 import { join, dirname, sep } from "node:path";
 
 function execGit(args: string[], cwd: string): Promise<string> {
@@ -79,6 +79,16 @@ export async function createWorktree(
 
   await mkdir(worktreesDir, { recursive: true });
 
+  // If the target directory exists but isn't a registered worktree (e.g. leftover from a
+  // deleted workspace), remove it so git worktree add doesn't fail with "already exists".
+  try {
+    await stat(worktreePath);
+    // Directory exists — remove it (git already confirmed it's not a registered worktree above)
+    await rm(worktreePath, { recursive: true, force: true });
+  } catch {
+    // Directory doesn't exist — nothing to clean up
+  }
+
   // Check if branch exists; if not, create it from baseBranch (or HEAD)
   try {
     await execGit(["rev-parse", "--verify", branch], repoPath);
@@ -104,6 +114,11 @@ export async function removeWorktree(
   worktreePath: string,
 ): Promise<void> {
   await execGit(["worktree", "remove", "--force", worktreePath], repoPath);
+}
+
+/** Prune stale worktree references (worktrees whose directories no longer exist). */
+export async function pruneWorktrees(repoPath: string): Promise<void> {
+  await execGit(["worktree", "prune"], repoPath);
 }
 
 /** Generate unified diff entries for untracked files (not yet git-add'd). */

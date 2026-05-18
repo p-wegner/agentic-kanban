@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdir, readFile } from "node:fs/promises";
+import { mkdir, readFile, rm, stat } from "node:fs/promises";
 import { join, dirname } from "node:path";
 
 function execGit(args: string[], cwd: string): Promise<string> {
@@ -61,6 +61,14 @@ export async function createWorktree(repoPath: string, branch: string, baseBranc
 
   await mkdir(worktreesDir, { recursive: true });
 
+  // If the target directory exists but isn't a registered worktree, remove it
+  try {
+    await stat(worktreePath);
+    await rm(worktreePath, { recursive: true, force: true });
+  } catch {
+    // Directory doesn't exist — nothing to clean up
+  }
+
   try {
     await execGit(["rev-parse", "--verify", branch], repoPath);
   } catch {
@@ -121,6 +129,10 @@ export async function getDiff(worktreePath: string, baseBranch: string = "main")
 
 export async function removeWorktree(repoPath: string, worktreePath: string): Promise<void> {
   await execGit(["worktree", "remove", "--force", worktreePath], repoPath);
+}
+
+export async function pruneWorktrees(repoPath: string): Promise<void> {
+  await execGit(["worktree", "prune"], repoPath);
 }
 
 /** Get the current branch name of a repo. */
