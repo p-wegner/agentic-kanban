@@ -55,6 +55,10 @@ export async function createWorktree(
   branch: string,
   baseBranch?: string,
 ): Promise<string> {
+  // Prune stale worktree references (directories deleted but git still tracks them).
+  // This is critical on Windows where locked directories can survive removal.
+  try { await pruneWorktrees(repoPath); } catch { /* best effort */ }
+
   // Check if a worktree for this branch already exists — reuse if healthy
   const existing = await listWorktrees(repoPath);
   const match = existing.find(

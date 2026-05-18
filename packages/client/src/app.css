@@ -32,3 +32,11 @@ html, body {
 .animate-slide-in-left {
   animation: slide-in-left 0.2s ease-out;
 }
+
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
