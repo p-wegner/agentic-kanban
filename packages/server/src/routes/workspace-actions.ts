@@ -9,6 +9,7 @@ import { runScript } from "../services/script-runner.js";
 import type { SessionManager } from "../services/session.manager.js";
 import type { BoardEvents } from "../services/board-events.js";
 import type { Database } from "../db/index.js";
+import type { ProviderId } from "../services/agent-provider.js";
 import { resolve, dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { tmpdir } from "node:os";
@@ -218,15 +219,16 @@ export function createWorkspaceActionsRoute(
       const permissionPromptTool = permissionPromptToolPref === "true"
         ? "mcp__agentic-kanban__approve_tool_use"
         : (permissionPromptToolPref && permissionPromptToolPref !== "false" ? permissionPromptToolPref : undefined);
+      const provider = (prefMap.get("provider") || undefined) as ProviderId | undefined;
 
       const truncatedPrompt = body.prompt.length > 80 ? body.prompt.slice(0, 80) + "..." : body.prompt;
-      console.log(`[workspace-actions] launch: workspaceId=${id} prompt="${truncatedPrompt}" agentCommand=${agentCommand ?? "default"} agentArgs=${agentArgs ?? "none"} profile=${claudeProfile ?? "none"} resumeFromId=${body.resumeFromId ?? "none"} multiTurn=${body.multiTurn !== false} resumeWithNewModel=${resumeWithNewModel}`);
+      console.log(`[workspace-actions] launch: workspaceId=${id} prompt="${truncatedPrompt}" agentCommand=${agentCommand ?? "default"} agentArgs=${agentArgs ?? "none"} profile=${claudeProfile ?? "none"} provider=${provider ?? "default"} resumeFromId=${body.resumeFromId ?? "none"} multiTurn=${body.multiTurn !== false} resumeWithNewModel=${resumeWithNewModel}`);
 
       // Read planMode from workspace record
       const wsRows = await database.select({ planMode: workspaces.planMode }).from(workspaces).where(eq(workspaces.id, id)).limit(1);
       const planMode = wsRows.length > 0 ? wsRows[0].planMode : false;
 
-      const sessionId = await getSessionManager().startSession(id, body.prompt, agentCommand, agentArgs, body.resumeFromId, claudeProfile, body.multiTurn !== false, permissionPromptTool, planMode, resumeWithNewModel);
+      const sessionId = await getSessionManager().startSession(id, body.prompt, agentCommand, agentArgs, body.resumeFromId, claudeProfile, body.multiTurn !== false, permissionPromptTool, planMode, resumeWithNewModel, provider);
 
       const now = new Date().toISOString();
       await database.update(workspaces).set({ status: "active", claudeProfile: claudeProfile ?? null, agentCommand: agentCommand ?? null, updatedAt: now }).where(eq(workspaces.id, id));
@@ -285,6 +287,7 @@ export function createWorkspaceActionsRoute(
           : (baseArgs || undefined);
         const claudeProfile = prefMap.get("claude_profile") || undefined;
         const resumeWithNewModel = prefMap.get("resume_with_new_model") === "true";
+        const provider = (prefMap.get("provider") || undefined) as ProviderId | undefined;
         const wsRows = await database.select({ planMode: workspaces.planMode }).from(workspaces).where(eq(workspaces.id, id)).limit(1);
         const planMode = wsRows.length > 0 ? wsRows[0].planMode : false;
 
@@ -299,6 +302,7 @@ export function createWorkspaceActionsRoute(
           undefined,
           planMode,
           resumeWithNewModel,
+          provider,
         );
         const now = new Date().toISOString();
         await database.update(workspaces).set({ status: "active", claudeProfile: claudeProfile ?? null, agentCommand: agentCommand ?? null, updatedAt: now }).where(eq(workspaces.id, id));
@@ -679,8 +683,9 @@ Base branch: ${baseBranch}`;
         ? (baseArgs ? baseArgs + " --dangerously-skip-permissions" : "--dangerously-skip-permissions")
         : (baseArgs || undefined);
       const claudeProfile = prefMap.get("claude_profile") || undefined;
+      const provider = (prefMap.get("provider") || undefined) as ProviderId | undefined;
 
-      const sessionId = await getSessionManager().startSession(id, prompt, agentCommand, agentArgs, undefined, claudeProfile, true);
+      const sessionId = await getSessionManager().startSession(id, prompt, agentCommand, agentArgs, undefined, claudeProfile, true, undefined, undefined, undefined, provider);
 
       const now = new Date().toISOString();
       await database.update(workspaces).set({ status: "active", updatedAt: now }).where(eq(workspaces.id, id));

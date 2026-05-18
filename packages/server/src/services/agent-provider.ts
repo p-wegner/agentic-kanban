@@ -10,7 +10,9 @@ const MCP_SERVER_PATH = resolve(__dirname, "../../../mcp-server/src/index.ts");
 const TSX_LOADER = resolve(__dirname, "../../node_modules/tsx/dist/loader.mjs");
 const TSX_URL = pathToFileURL(TSX_LOADER).href;
 
-let mcpConfigPath: string | null = null;
+let claudeMcpConfigPath: string | null = null;
+
+export type ProviderId = "claude-code" | "codex";
 
 export interface BuildAgentLaunchConfigOptions {
   agentArgs?: string;
@@ -20,6 +22,8 @@ export interface BuildAgentLaunchConfigOptions {
   keepAlive?: boolean;
   permissionPromptTool?: string;
   planMode?: boolean;
+  provider?: ProviderId;
+  prompt?: string;
 }
 
 export interface AgentLaunchConfig {
@@ -27,84 +31,193 @@ export interface AgentLaunchConfig {
   args: string[];
   useShell: boolean;
   isMockAgent: boolean;
+  isStdinPrompt: boolean;
   env: Record<string, string>;
 }
 
-export function buildAgentLaunchConfig(options: BuildAgentLaunchConfigOptions = {}): AgentLaunchConfig {
-  const {
-    agentArgs,
-    providerSessionId,
-    agentCommand,
-    claudeProfile,
-    keepAlive,
-    permissionPromptTool,
-    planMode,
-  } = options;
+// --- Provider interface ---
 
-  // Mock agents (env var or preference-based) need no Claude-specific flags.
-  // Real Claude (default or configured via preferences) gets stream-json args + stdin prompt.
-  const isMockAgent = !!process.env.AGENT_COMMAND || (agentCommand?.includes("mock-agent") ?? false);
-  let command = process.env.AGENT_COMMAND || agentCommand || "claude";
-  const isWindows = process.platform === "win32";
+export interface AgentProvider {
+  id: ProviderId;
+  label: string;
 
-  // On Windows, resolve .cmd wrappers to the actual .exe to avoid cmd.exe stdout buffering.
-  // shell:false is required for real-time stream-json output; cmd.exe buffers everything.
-  if (isWindows && !isMockAgent && !agentCommand) {
-    try {
-      const resolved = execSync("where claude.exe 2>nul", { encoding: "utf8" }).trim().split("\n")[0]?.trim();
-      if (resolved) command = resolved;
-    } catch {}
-  }
-
-  let args: string[];
-  if (isMockAgent) {
-    args = [];
-    if (providerSessionId) {
-      args.push("--resume", providerSessionId);
-    }
-    if (keepAlive) {
-      args.push("--profile", "multi-turn");
-    }
-  } else {
-    args = ["--output-format", "stream-json", "--verbose"];
-    try {
-      args.push("--mcp-config", getMcpConfigPath());
-    } catch (err) {
-      console.warn(`[agent] Failed to generate MCP config: ${err}`);
-    }
-    if (agentArgs) {
-      args.push(...splitArgs(agentArgs));
-    }
-    if (claudeProfile) {
-      const settingsPath = join(homedir(), ".claude", `settings_${claudeProfile}.json`);
-      if (existsSync(settingsPath)) {
-        args.push("--settings", settingsPath);
-      }
-    }
-    if (providerSessionId) {
-      args.push("--resume", providerSessionId);
-    }
-    if (permissionPromptTool) {
-      args.push("--permission-prompt-tool", permissionPromptTool);
-    }
-    if (planMode) {
-      args.push("--permission-mode", "plan");
-      args.push("--append-system-prompt", "IMPORTANT: This is a PLAN-ONLY session. Do NOT implement, write, edit, or modify any files. Do NOT run commands that make changes (git, npm, pip, etc.). Only read and explore the codebase, analyze the issue, and produce a detailed implementation plan. Output your plan and stop.");
-    }
-    args.push("-p");
-  }
-
-  return {
-    command,
-    args,
-    useShell: isWindows && (isMockAgent || !!agentCommand),
-    isMockAgent,
-    env: buildSpawnEnv(claudeProfile),
-  };
+  buildLaunchConfig(opts: BuildAgentLaunchConfigOptions & { isWindows: boolean }): AgentLaunchConfig;
 }
 
-function getMcpConfigPath(): string {
-  if (mcpConfigPath && existsSync(mcpConfigPath)) return mcpConfigPath;
+// --- Claude Code provider ---
+
+const claudeProvider: AgentProvider = {
+  id: "claude-code",
+  label: "Claude Code",
+
+  buildLaunchConfig({ agentArgs, providerSessionId, agentCommand, claudeProfile, keepAlive, permissionPromptTool, planMode, isWindows }) {
+    const isMockAgent = !!process.env.AGENT_COMMAND || (agentCommand?.includes("mock-agent") ?? false);
+    let command = process.env.AGENT_COMMAND || agentCommand || "claude";
+
+    // On Windows, resolve .cmd wrappers to the actual .exe to avoid cmd.exe stdout buffering.
+    if (isWindows && !isMockAgent && !agentCommand) {
+      try {
+        const resolved = execSync("where claude.exe 2>nul", { encoding: "utf8" }).trim().split("\n")[0]?.trim();
+        if (resolved) command = resolved;
+      } catch {}
+    }
+
+    let args: string[];
+    if (isMockAgent) {
+      args = [];
+      if (providerSessionId) {
+        args.push("--resume", providerSessionId);
+      }
+      if (keepAlive) {
+        args.push("--profile", "multi-turn");
+      }
+    } else {
+      args = ["--output-format", "stream-json", "--verbose"];
+      try {
+        args.push("--mcp-config", getClaudeMcpConfigPath());
+      } catch (err) {
+        console.warn(`[agent] Failed to generate MCP config: ${err}`);
+      }
+      if (agentArgs) {
+        args.push(...splitArgs(agentArgs));
+      }
+      if (claudeProfile) {
+        const settingsPath = join(homedir(), ".claude", `settings_${claudeProfile}.json`);
+        if (existsSync(settingsPath)) {
+          args.push("--settings", settingsPath);
+        }
+      }
+      if (providerSessionId) {
+        args.push("--resume", providerSessionId);
+      }
+      if (permissionPromptTool) {
+        args.push("--permission-prompt-tool", permissionPromptTool);
+      }
+      if (planMode) {
+        args.push("--permission-mode", "plan");
+        args.push("--append-system-prompt", "IMPORTANT: This is a PLAN-ONLY session. Do NOT implement, write, edit, or modify any files. Do NOT run commands that make changes (git, npm, pip, etc.). Only read and explore the codebase, analyze the issue, and produce a detailed implementation plan. Output your plan and stop.");
+      }
+      args.push("-p");
+    }
+
+    return {
+      command,
+      args,
+      useShell: isWindows && (isMockAgent || !!agentCommand),
+      isMockAgent,
+      isStdinPrompt: !isMockAgent || !!keepAlive,
+      env: buildClaudeSpawnEnv(claudeProfile),
+    };
+  },
+};
+
+// --- Codex provider ---
+
+const codexProvider: AgentProvider = {
+  id: "codex",
+  label: "Codex",
+
+  buildLaunchConfig({ agentArgs, providerSessionId, agentCommand, keepAlive, planMode, prompt, isWindows }) {
+    const isMockAgent = !!process.env.AGENT_COMMAND || (agentCommand?.includes("mock-agent") ?? false);
+    let command = process.env.AGENT_COMMAND || agentCommand || "codex";
+
+    // On Windows, resolve .cmd wrappers to the actual .exe
+    if (isWindows && !isMockAgent && !agentCommand) {
+      try {
+        const resolved = execSync("where codex.exe 2>nul", { encoding: "utf8" }).trim().split("\n")[0]?.trim();
+        if (resolved) command = resolved;
+      } catch {}
+    }
+
+    // Set CODEX_HOME to temp dir with our MCP config.toml
+    const codexHome = getCodexHome();
+    const env: Record<string, string> = { ...process.env as Record<string, string>, CODEX_HOME: codexHome };
+
+    let args: string[];
+    if (isMockAgent) {
+      args = [];
+      if (providerSessionId) {
+        args.push("--resume", providerSessionId);
+      }
+      if (keepAlive) {
+        args.push("--profile", "multi-turn");
+      }
+    } else {
+      // codex exec --json [flags] -- <prompt>
+      // codex exec resume <session_id> <prompt>
+      if (providerSessionId) {
+        args = ["exec", "resume", providerSessionId];
+      } else {
+        args = ["exec", "--json"];
+      }
+
+      if (agentArgs) {
+        args.push(...splitArgs(agentArgs));
+      }
+      if (planMode) {
+        args.push("--sandbox", "read-only");
+      } else {
+        args.push("--sandbox", "workspace-write");
+      }
+      args.push("--ask-for-approval", "never");
+
+      // Positional prompt after -- separator (not for resume, which takes prompt as arg)
+      if (prompt) {
+        if (providerSessionId) {
+          args.push(prompt);
+        } else {
+          args.push("--", prompt);
+        }
+      } else if (!providerSessionId) {
+        args.push("--", "");
+      }
+    }
+
+    return {
+      command,
+      args,
+      useShell: isWindows && (isMockAgent || !!agentCommand),
+      isMockAgent,
+      isStdinPrompt: isMockAgent && !!keepAlive,
+      env,
+    };
+  },
+};
+
+// --- Provider registry ---
+
+const providers: Map<ProviderId, AgentProvider> = new Map([
+  ["claude-code", claudeProvider],
+  ["codex", codexProvider],
+]);
+
+export function getProvider(id: ProviderId): AgentProvider {
+  const provider = providers.get(id);
+  if (!provider) throw new Error(`Unknown agent provider: ${id}`);
+  return provider;
+}
+
+export function resolveProvider(agentCommand?: string, providerId?: ProviderId): AgentProvider {
+  // Explicit provider takes priority
+  if (providerId) return getProvider(providerId);
+  // Detect from agent command
+  if (agentCommand?.includes("codex") || agentCommand?.includes("Codex")) return codexProvider;
+  // Default: Claude Code
+  return claudeProvider;
+}
+
+// --- Main entry point (backward-compatible) ---
+
+export function buildAgentLaunchConfig(options: BuildAgentLaunchConfigOptions = {}): AgentLaunchConfig {
+  const { agentCommand, provider: providerId } = options;
+  const provider = resolveProvider(agentCommand, providerId);
+  return provider.buildLaunchConfig({ ...options, isWindows: process.platform === "win32" });
+}
+
+// --- MCP config helpers ---
+
+function getClaudeMcpConfigPath(): string {
+  if (claudeMcpConfigPath && existsSync(claudeMcpConfigPath)) return claudeMcpConfigPath;
   const config = {
     mcpServers: {
       "agentic-kanban": {
@@ -115,12 +228,32 @@ function getMcpConfigPath(): string {
   };
   const path = resolve(tmpdir(), "agentic-kanban-mcp-config.json");
   writeFileSync(path, JSON.stringify(config, null, 2), "utf-8");
-  mcpConfigPath = path;
-  console.log(`[agent] MCP config written to ${path}`);
+  claudeMcpConfigPath = path;
+  console.log(`[agent] Claude MCP config written to ${path}`);
   return path;
 }
 
-function buildSpawnEnv(claudeProfile?: string): Record<string, string> {
+let codexHome: string | null = null;
+
+function getCodexHome(): string {
+  if (codexHome && existsSync(join(codexHome, "config.toml"))) return codexHome;
+  // Create a temp CODEX_HOME with config.toml containing MCP server
+  const home = resolve(tmpdir(), "agentic-kanban-codex-home");
+  const config = `# Auto-generated by agentic-kanban
+[mcp_servers.agentic-kanban]
+command = "node"
+args = ["--import", "${TSX_URL}", "${MCP_SERVER_PATH}"]
+default_tools_approval_mode = "approve"
+`;
+  writeFileSync(join(home, "config.toml"), config, "utf-8");
+  codexHome = home;
+  console.log(`[agent] Codex home written to ${home}`);
+  return home;
+}
+
+// --- Claude profile env helper ---
+
+function buildClaudeSpawnEnv(claudeProfile?: string): Record<string, string> {
   const spawnEnv: Record<string, string> = { ...process.env as Record<string, string> };
   if (!claudeProfile) return spawnEnv;
 
@@ -142,6 +275,8 @@ function buildSpawnEnv(claudeProfile?: string): Record<string, string> {
 
   return spawnEnv;
 }
+
+// --- Utility ---
 
 function splitArgs(input: string): string[] {
   const args: string[] = [];

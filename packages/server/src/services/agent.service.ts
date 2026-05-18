@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { buildAgentLaunchConfig } from "./agent-provider.js";
+import { buildAgentLaunchConfig, type ProviderId } from "./agent-provider.js";
 
 export interface AgentOutputEvent {
   type: "stdout" | "stderr" | "exit";
@@ -24,25 +24,28 @@ export function launch(
   prompt: string,
   agentArgs: string | undefined,
   onOutput: AgentOutputCallback,
-  claudeSessionId?: string,
+  providerSessionId?: string,
   agentCommand?: string,
   claudeProfile?: string,
   keepAlive?: boolean,
   permissionPromptTool?: string,
   planMode?: boolean,
+  provider?: ProviderId,
 ): ChildProcess {
   const launchConfig = buildAgentLaunchConfig({
     agentArgs,
-    providerSessionId: claudeSessionId,
+    providerSessionId,
     agentCommand,
     claudeProfile,
     keepAlive,
     permissionPromptTool,
     planMode,
+    provider,
+    prompt,
   });
-  const { command, args, useShell, isMockAgent, env: spawnEnv } = launchConfig;
+  const { command, args, useShell, isMockAgent, isStdinPrompt, env: spawnEnv } = launchConfig;
 
-  console.log(`[agent] launching: command=${command} worktree=${worktreePath} sessionId=${sessionId} resume=${claudeSessionId ?? "none"}`);
+  console.log(`[agent] launching: command=${command} provider=${provider ?? "auto"} worktree=${worktreePath} sessionId=${sessionId} resume=${providerSessionId ?? "none"}`);
 
   const proc = spawn(command, args, {
     cwd: worktreePath,
@@ -61,16 +64,21 @@ export function launch(
 
   console.log(`[agent] spawned: sessionId=${sessionId} pid=${proc.pid} command=${command} shell=${useShell}`);
 
-  // Send prompt via stdin and close immediately.
-  // Note: On Windows, claude.exe buffers stdout until stdin is closed,
-  // so keeping stdin open for multi-turn causes no output to arrive.
-  // Multi-turn follow-ups are handled via --resume (new process per turn).
-  if (!isMockAgent) {
+  // Send prompt via stdin if provider uses stdin (Claude Code, mock agents).
+  // Codex passes prompt as positional arg — no stdin needed.
+  if (isStdinPrompt && !isMockAgent) {
+    // Claude Code: write prompt to stdin and close (Windows stdout buffering)
     proc.stdin?.end(prompt + "\n");
-  } else if (keepAlive) {
+  } else if (isStdinPrompt && isMockAgent && keepAlive) {
     // Multi-turn mock agent: write prompt via stdin, keep open for follow-ups
     stdinOpen.set(sessionId, true);
     proc.stdin?.write(prompt + "\n");
+  } else if (isMockAgent && !keepAlive) {
+    // Non-keep-alive mock agent: close stdin
+    proc.stdin?.end();
+  } else {
+    // Codex-style: prompt is a CLI arg, just close stdin
+    proc.stdin?.end();
   }
 
   activeProcesses.set(sessionId, proc);

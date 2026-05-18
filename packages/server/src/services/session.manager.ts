@@ -81,9 +81,86 @@ function createSessionManager(
           const obj = JSON.parse(line);
           if (obj.type === "system" && obj.subtype === "init" && obj.session_id) {
             db.update(sessions)
-              .set({ claudeSessionId: obj.session_id })
+              .set({ providerSessionId: obj.session_id })
               .where(eq(sessions.id, sessionId))
-              .catch((err) => console.error("Failed to update claudeSessionId:", err));
+              .catch((err) => console.error("Failed to update providerSessionId:", err));
+          }
+
+          // Codex: extract thread_id from thread.started event
+          if (obj.type === "thread.started" && obj.thread_id) {
+            db.update(sessions)
+              .set({ providerSessionId: obj.thread_id })
+              .where(eq(sessions.id, sessionId))
+              .catch((err) => console.error("Failed to update providerSessionId:", err));
+          }
+
+          // Codex: extract live activity from item events
+          if ((obj.type === "item.started" || obj.type === "item.updated" || obj.type === "item.completed") && obj.item) {
+            const item = obj.item as Record<string, unknown>;
+            const itemType = item.type as string;
+            const ctx = sessionContexts.get(sessionId);
+            if (ctx) {
+              if (itemType === "command_execution") {
+                const command = (item.command as string) || "";
+                const status = item.status as string;
+                if (command && status === "in_progress") {
+                  options?.onActivity?.(ctx.projectId, ctx.issueId, sessionId, `Running: ${command.slice(0, 60)}`);
+                }
+              } else if (itemType === "agent_message" && obj.type === "item.completed") {
+                options?.onActivity?.(ctx.projectId, ctx.issueId, sessionId, "");
+              } else if (itemType === "mcp_tool_call") {
+                const toolName = (item.name as string) || "mcp_tool";
+                options?.onActivity?.(ctx.projectId, ctx.issueId, sessionId, `Calling ${toolName}`);
+              }
+            }
+          }
+
+          // Codex: extract stats from turn.completed
+          if (obj.type === "turn.completed" && obj.usage) {
+            const tUsage = obj.usage as Record<string, unknown>;
+            const inputTokens = ((tUsage.input_tokens as number) ?? 0) + ((tUsage.cached_input_tokens as number) ?? 0);
+            const outputTokens = (tUsage.output_tokens as number) ?? 0;
+            const ctx = sessionContexts.get(sessionId);
+            if (ctx) {
+              sessionModels.set(sessionId, "codex");
+              const toolUses = sessionToolUses.get(sessionId) ?? 0;
+              const subagentCount = sessionSubagents.get(sessionId) ?? 0;
+              options?.onLiveStats?.(ctx.projectId, ctx.issueId, "codex", inputTokens, toolUses, subagentCount);
+            }
+            // Persist stats to session
+            const stats = JSON.stringify({
+              durationMs: 0,
+              totalCostUsd: 0,
+              inputTokens,
+              outputTokens,
+              numTurns: 1,
+              model: "codex",
+              success: true,
+              agentSummary: "",
+            });
+            db.update(sessions)
+              .set({ stats })
+              .where(eq(sessions.id, sessionId))
+              .catch((err) => console.error("Failed to update session stats:", err));
+          }
+
+          // Codex: handle turn.failed
+          if (obj.type === "turn.failed") {
+            const error = obj.error as Record<string, unknown> | undefined;
+            const stats = JSON.stringify({
+              durationMs: 0,
+              totalCostUsd: 0,
+              inputTokens: 0,
+              outputTokens: 0,
+              numTurns: 1,
+              model: "codex",
+              success: false,
+              agentSummary: (error?.message as string) || "Turn failed",
+            });
+            db.update(sessions)
+              .set({ stats })
+              .where(eq(sessions.id, sessionId))
+              .catch((err) => console.error("Failed to update session stats:", err));
           }
 
           // Detect result events — in multi-turn mode, this means turn complete, not session complete
@@ -289,6 +366,7 @@ function createSessionManager(
     permissionPromptTool?: string,
     planMode?: boolean,
     resumeWithNewModel?: boolean,
+    provider?: import("./agent-provider.js").ProviderId,
   ) {
     // Look up workspace to get workingDir
     const wsRows = await db
@@ -314,22 +392,22 @@ function createSessionManager(
       .limit(1);
     const projectId = issueRows.length > 0 ? issueRows[0].projectId : "";
 
-    // If resuming, look up the previous session's claudeSessionId
-    let claudeSessionId: string | undefined;
+    // If resuming, look up the previous session's providerSessionId
+    let providerSessionId: string | undefined;
     if (resumeFromId) {
       const prevRows = await db
-        .select({ claudeSessionId: sessions.claudeSessionId })
+        .select({ providerSessionId: sessions.providerSessionId })
         .from(sessions)
         .where(eq(sessions.id, resumeFromId))
         .limit(1);
-      if (prevRows.length > 0 && prevRows[0].claudeSessionId) {
+      if (prevRows.length > 0 && prevRows[0].providerSessionId) {
         // Skip non-UUID session IDs (e.g. mock agent "mock-session-xxx")
-        const sid = prevRows[0].claudeSessionId;
+        const sid = prevRows[0].providerSessionId;
         if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(sid)) {
-          claudeSessionId = sid;
-          console.log(`[session] resuming: resumeFromId=${resumeFromId} claudeSessionId=${claudeSessionId}`);
+          providerSessionId = sid;
+          console.log(`[session] resuming: resumeFromId=${resumeFromId} providerSessionId=${providerSessionId}`);
         } else {
-          console.log(`[session] skipping resume: claudeSessionId=${sid} is not a valid UUID`);
+          console.log(`[session] skipping resume: providerSessionId=${sid} is not a valid UUID`);
         }
       }
     }
@@ -344,10 +422,11 @@ function createSessionManager(
       turnStates.set(sessionId, "processing");
     }
 
+    const executor = provider ?? "claude-code";
     await db.insert(sessions).values({
       id: sessionId,
       workspaceId,
-      executor: "claude-code",
+      executor,
       status: "running",
       startedAt: now,
       endedAt: null,
@@ -383,7 +462,7 @@ function createSessionManager(
           options?.onSessionExit?.(workspaceId, sessionId, exitCode);
         }
       // When resumeWithNewModel is true, omit --resume so the new profile/provider is used instead
-      }, resumeWithNewModel ? undefined : claudeSessionId, agentCommand, claudeProfile, multiTurn, permissionPromptTool, planMode);
+      }, resumeWithNewModel ? undefined : providerSessionId, agentCommand, claudeProfile, multiTurn, permissionPromptTool, planMode, provider);
     } catch (err) {
       throw err;
     }
