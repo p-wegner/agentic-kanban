@@ -89,7 +89,7 @@ export function BoardColumn({
 
   return (
     <div
-      className={`w-full sm:flex-shrink-0 sm:min-w-[200px] sm:flex-1 bg-gray-100 rounded-lg p-3 flex flex-col transition-all ${
+      className={`w-72 shrink-0 bg-gray-100 rounded-lg p-3 flex flex-col transition-all ${
         dragOver ? "ring-2 ring-blue-400 ring-offset-1" : ""
       }`}
       onDragEnter={handleDragEnter}
@@ -113,7 +113,7 @@ export function BoardColumn({
         )}
       </div>
 
-      <div className="space-y-2 flex-1 min-h-0 overflow-y-auto">
+      <div className="space-y-2 flex-1 min-h-0 overflow-y-auto scrollbar-hide">
         {column.issues.map((issue: IssueWithStatus, idx: number) => (
           <div key={issue.id}>
             <DropGap
