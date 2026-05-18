@@ -3,6 +3,15 @@
   "version": "0.1.0",
   "type": "module",
   "description": "Kanban board for managing AI-driven coding tasks",
+  "license": "MIT",
+  "homepage": "https://github.com/p-wegner/agentic-kanban#readme",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/p-wegner/agentic-kanban.git"
+  },
+  "bugs": {
+    "url": "https://github.com/p-wegner/agentic-kanban/issues"
+  },
   "bin": {
     "agentic-kanban": "./dist/cli.js",
     "agentic-kanban-mcp": "./dist/mcp.js"

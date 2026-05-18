@@ -117,7 +117,7 @@ Key patterns:
 
 ## License
 
-Private — personal use only.
+MIT
 
 ---
 
