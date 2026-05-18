@@ -21,6 +21,7 @@ interface Settings {
   review_auto_fix?: string;
   resume_with_new_model?: string;
   disabled_mcp_tools?: string;
+  provider?: string;
 }
 
 const DEFAULT_SETTINGS: Settings = {
@@ -36,6 +37,7 @@ const DEFAULT_SETTINGS: Settings = {
   review_auto_fix: "true",
   resume_with_new_model: "false",
   disabled_mcp_tools: "",
+  provider: "claude-code",
 };
 
 type Tab = "agent" | "workflow" | "skills" | "mcp" | "ui" | "project" | "advanced";
@@ -356,33 +358,45 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
               {/* Agent tab */}
               {tab === "agent" && (
                 <>
-                  <Field label="Agent Command" hint="Binary name or path. Leave empty for default (claude). Examples: claude, claude-glm, /usr/local/bin/claude">
+                  <Field label="Agent Provider" hint="The AI agent CLI to use for workspace sessions.">
+                    <select
+                      value={settings.provider || "claude-code"}
+                      onChange={(e) => set("provider")(e.target.value)}
+                      className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    >
+                      <option value="claude-code">Claude Code</option>
+                      <option value="codex">Codex</option>
+                    </select>
+                  </Field>
+                  <Field label="Agent Command" hint="Binary name or path. Leave empty for default. Examples: claude, codex, /usr/local/bin/claude">
                     <input
                       type="text"
                       value={settings.agent_command || ""}
                       onChange={(e) => set("agent_command")(e.target.value)}
-                      placeholder="claude"
+                      placeholder={settings.provider === "codex" ? "codex" : "claude"}
                       className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
                     />
                   </Field>
-                  <Field label="Claude Profile" hint={`Passes --settings to Claude Code pointing to ~/.claude/settings_*.json`}>
-                    <select
-                      value={settings.claude_profile || ""}
-                      onChange={(e) => set("claude_profile")(e.target.value)}
-                      className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
-                    >
-                      <option value="">Default (no profile)</option>
-                      {profiles.map((p) => (
-                        <option key={p} value={p}>{p}</option>
-                      ))}
-                    </select>
-                  </Field>
+                  {(settings.provider === "claude-code" || !settings.provider) && (
+                    <Field label="Claude Profile" hint={`Passes --settings to Claude Code pointing to ~/.claude/settings_*.json`}>
+                      <select
+                        value={settings.claude_profile || ""}
+                        onChange={(e) => set("claude_profile")(e.target.value)}
+                        className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
+                      >
+                        <option value="">Default (no profile)</option>
+                        {profiles.map((p) => (
+                          <option key={p} value={p}>{p}</option>
+                        ))}
+                      </select>
+                    </Field>
+                  )}
                   <Field label="Additional Arguments" hint="Extra CLI arguments passed to the agent command. Arguments are shell-split (supports quoting).">
                     <input
                       type="text"
                       value={settings.agent_args || ""}
                       onChange={(e) => set("agent_args")(e.target.value)}
-                      placeholder="--model opus --settings .claude/settings.json"
+                      placeholder="--model opus"
                       className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
                     />
                   </Field>
@@ -390,7 +404,7 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                     checked={settings.mock_agent === "true"}
                     onChange={setBool("mock_agent")}
                     label="Mock Agent"
-                    hint="Use a mock agent that emits fake stream-json output instead of launching Claude Code. Useful for testing and development."
+                    hint="Use a mock agent that emits fake stream-json output instead of launching a real agent. Useful for testing and development."
                   />
                 </>
               )}

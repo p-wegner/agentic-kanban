@@ -152,7 +152,7 @@ export interface SessionResponse {
   status: string;
   startedAt: string;
   endedAt: string | null;
-  claudeSessionId?: string | null;
+  providerSessionId?: string | null;
   resumeFromId?: string | null;
 }
 
