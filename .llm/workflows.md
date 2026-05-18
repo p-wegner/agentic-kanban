@@ -302,29 +302,43 @@ Claude Code stores per-project conversation history under `~/.claude/projects/`,
 
 **Before deleting**, decide whether any session history is worth keeping (e.g. an important investigation or design discussion). You can review individual sessions by opening the `.jsonl` files.
 
+**Important: preserve non-kanban project sessions.** The `~/.claude/projects/` folder also contains sessions from other projects. The filter below uses `-like "*kanban*worktrees*"` to target only agentic-kanban worktree sessions.
+
+**What gets deleted:**
+- `C--the-organisation--worktrees-feature-*` — git worktree agent sessions (181+ dirs)
+- `C--the-organisation-agentic-kanban-packages--worktrees-feature-*` — nested worktree sessions
+- `C--the-organisation-agentic-kanban--claude-worktrees-*` — Claude Code internal worktree sessions
+
+**What gets preserved:**
+- `C--the-organisation-agentic-kanban` — main checkout sessions
+- `C--the-organisation-agentic-kanban-packages-server` — server package sessions
+- `C--the-organisation-the-organisation-ai-blog` — other projects
+- `C--the-organisation-beyond-vibe-coding` — other projects
+- `C--the-organisation-beyond-vibe-coding-demo` — other projects
+- `C--the-organisation-KI-Themen` — other projects
+- `C--the-organisation-without-hook-demo` — other projects
+- `C--Tools`, `C--Tools-claude-pick` — other projects
+- `C--Users-pwegner` — other projects
+
 ```powershell
-# Preview: list all agentic-kanban worktree session dirs
+# Preview: list all kanban worktree session dirs (safe — won't match other projects)
 Get-ChildItem "$env:USERPROFILE\.claude\projects\" -Directory |
-    Where-Object { $_.Name -like "*worktrees*" -and $_.Name -like "*the-organisation*" } |
+    Where-Object { $_.Name -like "*kanban*worktrees*" } |
     ForEach-Object { Write-Output $_.Name }
 
 # Check total size
 $dirs = Get-ChildItem "$env:USERPROFILE\.claude\projects\" -Directory |
-    Where-Object { $_.Name -like "*worktrees*" -and $_.Name -like "*the-organisation*" }
+    Where-Object { $_.Name -like "*kanban*worktrees*" }
 $size = ($dirs | ForEach-Object {
     (Get-ChildItem $_.FullName -Recurse -File -ErrorAction SilentlyContinue |
      Measure-Object -Property Length -Sum).Sum
 } | Measure-Object -Sum).Sum
 Write-Output "Dirs: $($dirs.Count), Size: $([math]::Round($size / 1MB, 1)) MB"
 
-# Delete all worktree session history
+# Delete all kanban worktree session history
 Get-ChildItem "$env:USERPROFILE\.claude\projects\" -Directory |
-    Where-Object { $_.Name -like "*worktrees*" -and $_.Name -like "*the-organisation*" } |
+    Where-Object { $_.Name -like "*kanban*worktrees*" } |
     Remove-Item -Recurse -Force
-
-# Preserve main checkout sessions (these are NOT worktree dirs):
-#   C--the-organisation-agentic-kanban
-#   C--the-organisation-agentic-kanban-packages-server
 ```
 
 ### 7. Verify cleanup
