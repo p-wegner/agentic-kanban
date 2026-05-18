@@ -1,6 +1,7 @@
 ﻿import { useEffect, useRef, useState } from "react";
 import { apiFetch } from "../lib/api.js";
 import { formatRelativeTime } from "../lib/formatRelativeTime.js";
+import { getOutputFormatForAgent } from "../lib/agent-output-parser.js";
 import { useWebSocket } from "../lib/useWebSocket.js";
 import { TerminalView } from "./TerminalView.js";
 import { DiffViewer } from "./DiffViewer.js";
@@ -1324,6 +1325,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                         messages={selectedHistoryId ? historyMessages : (activeSession ? messages : completedMessages)}
                         connectionState={selectedHistoryId ? "closed" : (activeSession ? wsState : "closed")}
                         parseOutput={prefs.output_parser === "false" ? "false" : (prefs.output_parser === "minimal" ? "minimal" : "true")}
+                        outputFormat={getOutputFormatForAgent(ws.agentCommand ?? prefs.agent_command)}
                         prompt={selectedHistoryId ? undefined : lastPrompt}
                         title={issue.title}
                         multiTurn={isSessionAlive}
