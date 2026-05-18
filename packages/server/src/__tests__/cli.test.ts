@@ -40,7 +40,7 @@ const MIGRATION_FILES = [
   "../../../shared/drizzle/0016_skip_auto_review.sql",
   "../../../shared/drizzle/0017_agent_config.sql",
   "../../../shared/drizzle/0018_agent_skills.sql",
-  "../../../shared/drizzle/0018_dependency_types.sql",
+  "../../../shared/drizzle/0023_dependency_types.sql",
   "../../../shared/drizzle/0019_workspace_skill.sql",
   "../../../shared/drizzle/0020_setup_script.sql",
   "../../../shared/drizzle/0021_project_skills.sql",
