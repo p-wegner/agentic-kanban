@@ -37,7 +37,7 @@ function detectWorktree() {
 }
 
 function getIssueNumber(branchName) {
-  const match = branchName.match(/^feature\/(\d+)-/);
+  const match = branchName.match(/^feature\/(?:ak-)?(\d+)-/);
   return match ? parseInt(match[1], 10) : null;
 }
 
