@@ -5,11 +5,12 @@ import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { migrate } from "drizzle-orm/libsql/migrator";
 import { db } from "./db/index.js";
-import { projects, projectStatuses, preferences, workspaces, issues, issueTags, sessions, agentSkills, issueDependencies, DEPENDENCY_TYPES } from "@agentic-kanban/shared/schema";
-import { eq, inArray, sql, and, isNull } from "drizzle-orm";
+import { projects, projectStatuses, preferences, workspaces, issues, issueTags, sessions, sessionMessages, agentSkills, issueDependencies, DEPENDENCY_TYPES } from "@agentic-kanban/shared/schema";
+import { eq, inArray, sql, and, isNull, desc } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { detectRepoInfo } from "./services/git-info.service.js";
 import { getMigrationsFolder } from "./db/migrations.js";
+import { parseSessionSummary, formatDurationStr } from "@agentic-kanban/shared";
 
 const DEFAULT_STATUSES = [
   { name: "Todo", sortOrder: 0, isDefault: true },
@@ -421,7 +422,7 @@ async function getActiveProjectId(): Promise<string> {
 
 // ── issue commands ────────────────────────────────────────────────────────────
 
-const issueCmd = program.command("issue").description("Manage issues on the board.\n\nSubcommands: list, create, move, dependency");
+const issueCmd = program.command("issue").description("Manage issues on the board.\n\nSubcommands: list, create, move, summary, dependency");
 
 issueCmd
   .command("list")
@@ -572,6 +573,188 @@ Tip: Use 'issue list' to find the issue ID and see available status names.
       await db.update(issues).set({ statusId: target.id, updatedAt: new Date().toISOString() }).where(eq(issues.id, issueId));
 
       console.log(`Moved issue to '${statusName}'`);
+      process.exit(0);
+    } catch (err) {
+      console.error("Error:", err instanceof Error ? err.message : String(err));
+      process.exit(1);
+    }
+  });
+
+issueCmd
+  .command("summary <issue-number>")
+  .description("Show a summary of the latest completed agent session for an issue.\n\nResolves issue number to workspace and session, then prints agent summary text, files touched, duration, and cost. Useful for quickly reviewing what an agent did.")
+  .option("--json", "Output raw JSON instead of formatted text")
+  .addHelpText("after", `
+Examples:
+  $ agentic-kanban issue summary 1          # formatted summary
+  $ agentic-kanban issue summary 5 --json   # machine-readable JSON
+`)
+  .action(async (issueNumber: string, options: { json?: boolean }) => {
+    try {
+      await runMigrations();
+
+      const num = Number(issueNumber);
+      if (!Number.isInteger(num) || num <= 0) {
+        console.error(`Invalid issue number: ${issueNumber}`);
+        process.exit(1);
+      }
+
+      const issueRows = await db
+        .select()
+        .from(issues)
+        .where(eq(issues.issueNumber, num))
+        .limit(1);
+
+      if (issueRows.length === 0) {
+        console.error(`Issue #${num} not found.`);
+        process.exit(1);
+      }
+
+      const issue = issueRows[0];
+
+      const wsRows = await db
+        .select()
+        .from(workspaces)
+        .where(eq(workspaces.issueId, issue.id));
+
+      if (wsRows.length === 0) {
+        console.log(`#${num} ${issue.title}`);
+        console.log("  No workspace found for this issue.");
+        process.exit(0);
+      }
+
+      const wsIds = wsRows.map(w => w.id);
+      const sessionRows = await db
+        .select()
+        .from(sessions)
+        .where(inArray(sessions.workspaceId, wsIds))
+        .orderBy(desc(sessions.startedAt));
+
+      const completedSession = sessionRows.find(s => s.status === "completed" || s.status === "stopped")
+        ?? sessionRows[0]
+        ?? null;
+
+      if (!completedSession) {
+        console.log(`#${num} ${issue.title}`);
+        console.log("  No session found for this issue.");
+        process.exit(0);
+      }
+
+      const msgRows = await db
+        .select()
+        .from(sessionMessages)
+        .where(eq(sessionMessages.sessionId, completedSession.id))
+        .orderBy(sessionMessages.id);
+
+      let stats: Record<string, unknown> | null = null;
+      if (completedSession.stats) {
+        try { stats = JSON.parse(completedSession.stats); } catch { /* ignore */ }
+      }
+
+      let duration: string | null = null;
+      if (completedSession.endedAt && completedSession.startedAt) {
+        const diffMs = new Date(completedSession.endedAt).getTime() - new Date(completedSession.startedAt).getTime();
+        duration = formatDurationStr(diffMs);
+      }
+
+      const summary = parseSessionSummary(msgRows);
+      if (!summary.agentSummary && stats && typeof (stats as any).agentSummary === "string") {
+        summary.agentSummary = (stats as any).agentSummary;
+      }
+
+      const matchingWorkspace = wsRows.find(w => w.id === completedSession.workspaceId);
+
+      if (options.json) {
+        console.log(JSON.stringify({
+          issueId: issue.id,
+          issueNumber: issue.issueNumber,
+          title: issue.title,
+          workspace: matchingWorkspace ? {
+            id: matchingWorkspace.id,
+            branch: matchingWorkspace.branch,
+            status: matchingWorkspace.status,
+          } : null,
+          session: {
+            id: completedSession.id,
+            status: completedSession.status,
+            startedAt: completedSession.startedAt,
+            endedAt: completedSession.endedAt,
+            duration,
+          },
+          stats: stats ? {
+            durationMs: (stats as any).durationMs ?? 0,
+            totalCostUsd: (stats as any).totalCostUsd ?? 0,
+            inputTokens: (stats as any).inputTokens ?? 0,
+            outputTokens: (stats as any).outputTokens ?? 0,
+            numTurns: (stats as any).numTurns ?? 1,
+            model: (stats as any).model ?? summary.model,
+            success: (stats as any).success ?? false,
+          } : null,
+          ...summary,
+        }, null, 2));
+        process.exit(0);
+      }
+
+      // Formatted output
+      console.log(`\n  #${num} ${issue.title}`);
+
+      if (matchingWorkspace) {
+        console.log(`  workspace: ${matchingWorkspace.branch} (${matchingWorkspace.status})`);
+      }
+
+      console.log(`  session: ${completedSession.status}  duration: ${duration ?? "?"}`);
+
+      if (stats) {
+        const s = stats as any;
+        const parts: string[] = [];
+        if (s.model ?? summary.model) parts.push(`model: ${s.model ?? summary.model}`);
+        if (s.numTurns > 0) parts.push(`turns: ${s.numTurns}`);
+        if (s.totalCostUsd > 0) parts.push(`cost: $${s.totalCostUsd.toFixed(2)}`);
+        if (s.inputTokens > 0 || s.outputTokens > 0) parts.push(`tokens: ${s.inputTokens ?? 0} in / ${s.outputTokens ?? 0} out`);
+        if (parts.length > 0) console.log(`  ${parts.join("  ")}`);
+      }
+
+      if (summary.overview) {
+        console.log(`  ${summary.overview}`);
+      }
+
+      if (summary.agentSummary) {
+        console.log(`\n  Agent summary:`);
+        for (const line of summary.agentSummary.split("\n")) {
+          console.log(`    ${line}`);
+        }
+      }
+
+      const allFiles = [...new Set([...summary.filesRead, ...summary.filesEdited, ...summary.filesWritten])];
+      if (allFiles.length > 0) {
+        console.log(`\n  Files (${allFiles.length}):`);
+        for (const f of allFiles) {
+          const tags: string[] = [];
+          if (summary.filesEdited.includes(f)) tags.push("edited");
+          if (summary.filesWritten.includes(f)) tags.push("written");
+          if (summary.filesRead.includes(f) && tags.length === 0) tags.push("read");
+          console.log(`    ${f} (${tags.join(", ")})`);
+        }
+      }
+
+      if (summary.commandsRun.length > 0) {
+        console.log(`\n  Commands (${summary.commandsRun.length}):`);
+        for (const cmd of summary.commandsRun.slice(0, 10)) {
+          console.log(`    ${cmd}`);
+        }
+        if (summary.commandsRun.length > 10) {
+          console.log(`    ... and ${summary.commandsRun.length - 10} more`);
+        }
+      }
+
+      if (summary.errors.length > 0) {
+        console.log(`\n  Errors (${summary.errors.length}):`);
+        for (const err of summary.errors.slice(0, 5)) {
+          console.log(`    ${err}`);
+        }
+      }
+
+      console.log("");
       process.exit(0);
     } catch (err) {
       console.error("Error:", err instanceof Error ? err.message : String(err));
