@@ -57,14 +57,29 @@ export async function createWorktree(repoPath: string, branch: string, baseBranc
 
   const safeName = branch.replace(/[^a-zA-Z0-9._-]/g, "_");
   const worktreesDir = join(dirname(repoPath), ".worktrees");
-  const worktreePath = join(worktreesDir, safeName);
+  let worktreePath = join(worktreesDir, safeName);
 
   await mkdir(worktreesDir, { recursive: true });
 
-  // If the target directory exists but isn't a registered worktree, remove it
+  // If the target directory exists but isn't a registered worktree, remove it.
+  // On Windows, directories can be locked by stale process handles — if rm fails,
+  // fall back to an alternative path with a numeric suffix.
   try {
     await stat(worktreePath);
-    await rm(worktreePath, { recursive: true, force: true });
+    try {
+      await rm(worktreePath, { recursive: true, force: true });
+    } catch {
+      // Locked on Windows — find an alternative path
+      for (let suffix = 2; suffix <= 10; suffix++) {
+        const altPath = join(worktreesDir, `${safeName}-${suffix}`);
+        try {
+          await stat(altPath);
+        } catch {
+          worktreePath = altPath;
+          break;
+        }
+      }
+    }
   } catch {
     // Directory doesn't exist — nothing to clean up
   }

@@ -75,16 +75,33 @@ export async function createWorktree(
   // Sanitize branch name for directory use
   const safeName = branch.replace(/[^a-zA-Z0-9._-]/g, "_");
   const worktreesDir = join(dirname(repoPath), ".worktrees");
-  const worktreePath = join(worktreesDir, safeName);
+  let worktreePath = join(worktreesDir, safeName);
 
   await mkdir(worktreesDir, { recursive: true });
 
   // If the target directory exists but isn't a registered worktree (e.g. leftover from a
   // deleted workspace), remove it so git worktree add doesn't fail with "already exists".
+  // On Windows, directories can be locked by stale process handles — if rm fails, fall back
+  // to an alternative path with a numeric suffix.
   try {
     await stat(worktreePath);
-    // Directory exists — remove it (git already confirmed it's not a registered worktree above)
-    await rm(worktreePath, { recursive: true, force: true });
+    // Directory exists — try to remove it
+    try {
+      await rm(worktreePath, { recursive: true, force: true });
+    } catch {
+      // Locked on Windows — find an alternative path
+      for (let suffix = 2; suffix <= 10; suffix++) {
+        const altPath = join(worktreesDir, `${safeName}-${suffix}`);
+        try {
+          await stat(altPath);
+          // Alt dir also exists — skip
+        } catch {
+          // This alt path is free — use it
+          worktreePath = altPath;
+          break;
+        }
+      }
+    }
   } catch {
     // Directory doesn't exist — nothing to clean up
   }
