@@ -8,6 +8,7 @@ import { createSessionsRoute } from "./routes/sessions.js";
 import { migrate } from "drizzle-orm/libsql/migrator";
 import { db } from "./db/index.js";
 import { createSessionManager } from "./services/session.manager.js";
+import type { ProviderId } from "./services/agent-provider.js";
 import { createBoardEvents } from "./services/board-events.js";
 import { workspaces, issues, projects, projectStatuses, preferences, sessions, agentSkills } from "@agentic-kanban/shared/schema";
 import { eq, sql, desc } from "drizzle-orm";
@@ -239,6 +240,7 @@ export async function startServer(port?: number) {
           const claudeProfile = useMock ? undefined : (prefMap.get("claude_profile") || undefined);
           const reviewArgs = buildReviewArgs(prefMap);
           const autoFix = prefMap.get("review_auto_fix") !== "false";
+          const provider = (prefMap.get("provider") || undefined) as ProviderId | undefined;
 
           let diffRef = workspace.baseBranch || defaultBranch;
           let conflictingFiles: string[] | undefined;
@@ -259,7 +261,7 @@ export async function startServer(port?: number) {
             await db.update(workspaces).set({ status: "reviewing", updatedAt: now }).where(eq(workspaces.id, workspaceId));
             boardEvents.broadcast(projectId, "issue_updated");
 
-            const reviewSessionId = await sessionManager.startSession(workspaceId, reviewPrompt, agentCommand, reviewArgs, undefined, claudeProfile);
+            const reviewSessionId = await sessionManager.startSession(workspaceId, reviewPrompt, agentCommand, reviewArgs, undefined, claudeProfile, undefined, undefined, undefined, undefined, provider);
             reviewSessionIds.add(reviewSessionId);
             console.log(`[workflow] launched review session ${reviewSessionId} for workspace ${workspaceId}`);
           } catch (err) {
@@ -352,6 +354,7 @@ export async function startServer(port?: number) {
       const claudeProfile = useMock ? undefined : (prefMap.get("claude_profile") || undefined);
       const reviewArgs = buildReviewArgs(prefMap);
       const autoFix = prefMap.get("review_auto_fix") !== "false";
+      const provider = (prefMap.get("provider") || undefined) as ProviderId | undefined;
 
       const projectRows = await db.select({ defaultBranch: projects.defaultBranch }).from(projects).where(eq(projects.id, projectId)).limit(1);
       const defaultBranch = projectRows.length > 0 ? projectRows[0].defaultBranch : "main";
@@ -374,7 +377,7 @@ export async function startServer(port?: number) {
       await db.update(workspaces).set({ status: "reviewing", updatedAt: now }).where(eq(workspaces.id, workspaceId));
       boardEvents.broadcast(projectId, "issue_updated");
 
-      const reviewSessionId = await sessionManager.startSession(workspaceId, reviewPrompt, agentCommand, reviewArgs, undefined, claudeProfile);
+      const reviewSessionId = await sessionManager.startSession(workspaceId, reviewPrompt, agentCommand, reviewArgs, undefined, claudeProfile, undefined, undefined, undefined, undefined, provider);
       reviewSessionIds.add(reviewSessionId);
       console.log(`[workflow] manual review session ${reviewSessionId} for workspace ${workspaceId}`);
 

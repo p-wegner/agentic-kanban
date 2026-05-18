@@ -8,6 +8,7 @@ import { runSetupScript } from "../services/setup-script.js";
 import type { SessionManager } from "../services/session.manager.js";
 import type { BoardEvents } from "../services/board-events.js";
 import type { Database } from "../db/index.js";
+import type { ProviderId } from "../services/agent-provider.js";
 import { resolve, dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { writeAgentSkillFile } from "@agentic-kanban/shared/lib/agent-skill-files";
@@ -156,6 +157,7 @@ export function createWorkspacesRoute(
       const permissionPromptTool = permissionPromptToolPref === "true"
         ? "mcp__agentic-kanban__approve_tool_use"
         : (permissionPromptToolPref && permissionPromptToolPref !== "false" ? permissionPromptToolPref : undefined);
+      const provider = (prefMap.get("provider") || undefined) as ProviderId | undefined;
 
       // Insert DB record with workingDir and baseBranch
       await database.insert(workspaces).values({
@@ -196,7 +198,7 @@ export function createWorkspacesRoute(
       if (getSessionManager) {
         const truncatedPrompt = agentPrompt.length > 80 ? agentPrompt.slice(0, 80) + "..." : agentPrompt;
         console.log(`[workspaces] auto-launch: workspaceId=${id} branch=${branch} isDirect=${isDirect} prompt="${truncatedPrompt}" agentCommand=${agentCommand ?? "default"}`);
-        sessionId = await getSessionManager().startSession(id, agentPrompt, agentCommand, agentArgs, undefined, claudeProfile, undefined, permissionPromptTool, planMode);
+        sessionId = await getSessionManager().startSession(id, agentPrompt, agentCommand, agentArgs, undefined, claudeProfile, undefined, permissionPromptTool, planMode, undefined, provider);
       }
 
       // Broadcast board event

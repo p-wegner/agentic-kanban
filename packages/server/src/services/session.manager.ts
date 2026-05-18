@@ -4,8 +4,6 @@ import { sessions, workspaces, sessionMessages, issues } from "@agentic-kanban/s
 import { eq } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import * as agentService from "./agent.service.js";
-import { getProvider } from "./agent-provider.js";
-import type { ParsedStreamEvent } from "./agent-provider.js";
 import type { AgentOutputMessage } from "@agentic-kanban/shared";
 import type { TodoItem } from "./board-events.js";
 
@@ -77,123 +75,250 @@ function createSessionManager(
 
     // Parse stdout data — may contain multiple JSONL lines in a single chunk
     if (message.type === "stdout" && message.data) {
-      const provider = getProvider();
       for (const line of message.data.split("\n")) {
         if (!line.trim()) continue;
-        const evt = provider.parseStreamEvent(line);
-        if (!evt) continue;
-
-        const ctx = sessionContexts.get(sessionId);
-
-        // Provider session ID (e.g. Claude's system/init session_id)
-        if (evt.providerSessionId) {
-          db.update(sessions)
-            .set({ claudeSessionId: evt.providerSessionId })
-            .where(eq(sessions.id, sessionId))
-            .catch((err) => console.error("Failed to update claudeSessionId:", err));
-        }
-
-        // Turn completion in multi-turn mode
-        if (evt.turnComplete && agentService.isStdinOpen(sessionId)) {
-          turnStates.set(sessionId, "waiting");
-        }
-
-        // Persist session stats from result events
-        if (evt.stats) {
-          db.update(sessions)
-            .set({ stats: JSON.stringify(evt.stats) })
-            .where(eq(sessions.id, sessionId))
-            .catch((err) => console.error("Failed to update session stats:", err));
-        }
-
-        // Live stats updates (model, context tokens, tool uses, subagents)
-        if (evt.liveStats) {
-          const ls = evt.liveStats;
-          if (ls.model) sessionModels.set(sessionId, ls.model);
-          if (ls.contextTokens > 0) sessionContextTokens.set(sessionId, ls.contextTokens);
-          if (ls.toolUses !== undefined) sessionToolUses.set(sessionId, ls.toolUses);
-
-          // Subagent tracking
-          if (ls.subagentDelta === 1) {
-            const count = (sessionSubagents.get(sessionId) ?? 0) + 1;
-            sessionSubagents.set(sessionId, count);
+        try {
+          const obj = JSON.parse(line);
+          if (obj.type === "system" && obj.subtype === "init" && obj.session_id) {
+            db.update(sessions)
+              .set({ providerSessionId: obj.session_id })
+              .where(eq(sessions.id, sessionId))
+              .catch((err) => console.error("Failed to update providerSessionId:", err));
           }
 
-          const model = sessionModels.get(sessionId) ?? "";
-          const contextTokens = sessionContextTokens.get(sessionId) ?? 0;
-          const toolUses = sessionToolUses.get(sessionId) ?? 0;
-          const subagentCount = sessionSubagents.get(sessionId) ?? 0;
-          if (ctx && (model || contextTokens || toolUses || subagentCount)) {
-            options?.onLiveStats?.(ctx.projectId, ctx.issueId, model, contextTokens, toolUses, subagentCount);
-          }
-        }
-
-        // Tool activity broadcasting
-        if (evt.toolActivity && ctx) {
-          const activity = formatToolActivity(evt.toolActivity.name, evt.toolActivity.input);
-          if (activity) {
-            options?.onActivity?.(ctx.projectId, ctx.issueId, sessionId, activity);
+          // Codex: extract thread_id from thread.started event
+          if (obj.type === "thread.started" && obj.thread_id) {
+            db.update(sessions)
+              .set({ providerSessionId: obj.thread_id })
+              .where(eq(sessions.id, sessionId))
+              .catch((err) => console.error("Failed to update providerSessionId:", err));
           }
 
-          // Track Agent tool_use IDs for subagent count decrement
-          if (evt.toolActivity.name === "Agent" && evt.toolActivity.toolUseId) {
-            if (!sessionAgentToolUseIds.has(sessionId)) sessionAgentToolUseIds.set(sessionId, new Set());
-            sessionAgentToolUseIds.get(sessionId)!.add(evt.toolActivity.toolUseId);
-          }
-
-          // TodoWrite: set hasTodoWrite flag and broadcast
-          if (evt.toolActivity.name === "TodoWrite" && evt.todos) {
-            sessionHasTodoWrite.add(sessionId);
+          // Codex: extract live activity from item events
+          if ((obj.type === "item.started" || obj.type === "item.updated" || obj.type === "item.completed") && obj.item) {
+            const item = obj.item as Record<string, unknown>;
+            const itemType = item.type as string;
+            const ctx = sessionContexts.get(sessionId);
             if (ctx) {
-              options?.onTodos?.(ctx.projectId, ctx.issueId, evt.todos as TodoItem[]);
-            }
-          }
-
-          // TaskCreate (only when no TodoWrite has taken precedence)
-          if (!sessionHasTodoWrite.has(sessionId) && evt.toolActivity.name === "TaskCreate") {
-            const subject = evt.toolActivity.input.subject as string | undefined;
-            if (subject) {
-              if (!sessionTasks.has(sessionId)) sessionTasks.set(sessionId, new Map());
-              const tasks = sessionTasks.get(sessionId)!;
-              const taskIdx = String(tasks.size + 1);
-              tasks.set(taskIdx, { subject, status: "pending" });
-              if (ctx) {
-                options?.onTodos?.(ctx.projectId, ctx.issueId, tasksToTodoItems(tasks));
+              if (itemType === "command_execution") {
+                const command = (item.command as string) || "";
+                const status = item.status as string;
+                if (command && status === "in_progress") {
+                  options?.onActivity?.(ctx.projectId, ctx.issueId, sessionId, `Running: ${command.slice(0, 60)}`);
+                }
+              } else if (itemType === "agent_message" && obj.type === "item.completed") {
+                options?.onActivity?.(ctx.projectId, ctx.issueId, sessionId, "");
+              } else if (itemType === "mcp_tool_call") {
+                const toolName = (item.name as string) || "mcp_tool";
+                options?.onActivity?.(ctx.projectId, ctx.issueId, sessionId, `Calling ${toolName}`);
               }
             }
           }
 
-          // TaskUpdate — handle via raw parse since it needs taskId mapping
-          if (evt.toolActivity.name === "TaskUpdate" && !sessionHasTodoWrite.has(sessionId)) {
-            const taskId = evt.toolActivity.input.taskId as string | undefined;
-            const taskStatus = evt.toolActivity.input.status as string | undefined;
-            if (taskId && taskStatus) {
-              const tasks = sessionTasks.get(sessionId);
-              const task = tasks?.get(taskId);
-              if (task) {
-                task.status = taskStatus;
-                if (ctx) {
-                  options?.onTodos?.(ctx.projectId, ctx.issueId, tasksToTodoItems(tasks!));
+          // Codex: extract stats from turn.completed
+          if (obj.type === "turn.completed" && obj.usage) {
+            const tUsage = obj.usage as Record<string, unknown>;
+            const inputTokens = ((tUsage.input_tokens as number) ?? 0) + ((tUsage.cached_input_tokens as number) ?? 0);
+            const outputTokens = (tUsage.output_tokens as number) ?? 0;
+            const ctx = sessionContexts.get(sessionId);
+            if (ctx) {
+              sessionModels.set(sessionId, "codex");
+              const toolUses = sessionToolUses.get(sessionId) ?? 0;
+              const subagentCount = sessionSubagents.get(sessionId) ?? 0;
+              options?.onLiveStats?.(ctx.projectId, ctx.issueId, "codex", inputTokens, toolUses, subagentCount);
+            }
+            // Persist stats to session
+            const stats = JSON.stringify({
+              durationMs: 0,
+              totalCostUsd: 0,
+              inputTokens,
+              outputTokens,
+              numTurns: 1,
+              model: "codex",
+              success: true,
+              agentSummary: "",
+            });
+            db.update(sessions)
+              .set({ stats })
+              .where(eq(sessions.id, sessionId))
+              .catch((err) => console.error("Failed to update session stats:", err));
+          }
+
+          // Codex: handle turn.failed
+          if (obj.type === "turn.failed") {
+            const error = obj.error as Record<string, unknown> | undefined;
+            const stats = JSON.stringify({
+              durationMs: 0,
+              totalCostUsd: 0,
+              inputTokens: 0,
+              outputTokens: 0,
+              numTurns: 1,
+              model: "codex",
+              success: false,
+              agentSummary: (error?.message as string) || "Turn failed",
+            });
+            db.update(sessions)
+              .set({ stats })
+              .where(eq(sessions.id, sessionId))
+              .catch((err) => console.error("Failed to update session stats:", err));
+          }
+
+          // Detect result events — in multi-turn mode, this means turn complete, not session complete
+          if (obj.type === "result" && agentService.isStdinOpen(sessionId)) {
+            turnStates.set(sessionId, "waiting");
+          }
+
+          // Extract stats from result events and persist to sessions table
+          if (obj.type === "result") {
+            const usage = obj.usage as Record<string, unknown> | undefined;
+            const rawCost = obj.total_cost_usd ?? obj.cost_usd;
+            const agentSummary = typeof obj.result === "string" ? obj.result : undefined;
+            const stats = JSON.stringify({
+              durationMs: (obj.duration_ms as number) ?? 0,
+              totalCostUsd: typeof rawCost === "number" ? rawCost : 0,
+              inputTokens: (usage?.input_tokens as number) ?? 0,
+              outputTokens: (usage?.output_tokens as number) ?? 0,
+              numTurns: (obj.num_turns as number) ?? 1,
+              model: (obj.model as string) ?? "",
+              success: obj.subtype === "success" && !obj.is_error,
+              agentSummary,
+            });
+            db.update(sessions)
+              .set({ stats })
+              .where(eq(sessions.id, sessionId))
+              .catch((err) => console.error("Failed to update session stats:", err));
+          }
+
+          // Broadcast live model + context size from each assistant turn
+          if (obj.type === "assistant" && obj.message) {
+            const usage = obj.message.usage as Record<string, unknown> | undefined;
+            const model = (obj.message.model as string) ?? "";
+            const contextTokens = ((usage?.cache_read_input_tokens as number) ?? 0) + ((usage?.input_tokens as number) ?? 0);
+            if (model) sessionModels.set(sessionId, model);
+            if (contextTokens > 0) sessionContextTokens.set(sessionId, contextTokens);
+            const toolUses = sessionToolUses.get(sessionId) ?? 0;
+            const subagentCount = sessionSubagents.get(sessionId) ?? 0;
+            const ctx = sessionContexts.get(sessionId);
+            if (ctx && (model || contextTokens || toolUses || subagentCount)) {
+              options?.onLiveStats?.(ctx.projectId, ctx.issueId, model, contextTokens, toolUses, subagentCount);
+            }
+          }
+
+          // Track tool_uses from task_progress events (live proxy for providers that don't report tokens per-turn)
+          if (obj.type === "system" && obj.subtype === "task_progress" && obj.usage) {
+            const tpUsage = obj.usage as { tool_uses?: number };
+            if (tpUsage.tool_uses) {
+              sessionToolUses.set(sessionId, tpUsage.tool_uses);
+              const model = sessionModels.get(sessionId) ?? "";
+              const subagentCount = sessionSubagents.get(sessionId) ?? 0;
+              const lastContextTokens = sessionContextTokens.get(sessionId) ?? 0;
+              const ctx = sessionContexts.get(sessionId);
+              if (ctx) {
+                options?.onLiveStats?.(ctx.projectId, ctx.issueId, model, lastContextTokens, tpUsage.tool_uses, subagentCount);
+              }
+            }
+          }
+
+          // Broadcast final stats from result event (some providers only report usage here)
+          if (obj.type === "result" && obj.usage) {
+            const rUsage = obj.usage as Record<string, unknown>;
+            const contextTokens = ((rUsage.cache_read_input_tokens as number) ?? 0) + ((rUsage.input_tokens as number) ?? 0);
+            const model = sessionModels.get(sessionId) ?? "";
+            const toolUses = sessionToolUses.get(sessionId) ?? 0;
+            const subagentCount = sessionSubagents.get(sessionId) ?? 0;
+            const ctx = sessionContexts.get(sessionId);
+            if (ctx && (contextTokens || toolUses || subagentCount)) {
+              options?.onLiveStats?.(ctx.projectId, ctx.issueId, model, contextTokens, toolUses, subagentCount);
+            }
+          }
+
+          // Parse tool_use events for live activity, todos, and subagent tracking
+          if (obj.type === "assistant" && obj.message?.content) {
+            const content = obj.message.content;
+            if (Array.isArray(content)) {
+              for (const block of content) {
+                if (block.type === "tool_use") {
+                  const activity = formatToolActivity(block.name, block.input);
+                  const ctx = sessionContexts.get(sessionId);
+                  if (ctx && activity) {
+                    options?.onActivity?.(ctx.projectId, ctx.issueId, sessionId, activity);
+                  }
+                  // Capture TodoWrite calls to show task progress on the board
+                  if (block.name === "TodoWrite" && Array.isArray(block.input?.todos)) {
+                    const ctx = sessionContexts.get(sessionId);
+                    if (ctx) {
+                      sessionHasTodoWrite.add(sessionId);
+                      options?.onTodos?.(ctx.projectId, ctx.issueId, block.input.todos as TodoItem[]);
+                    }
+                  }
+                  // Track Agent tool calls as active subagents
+                  if (block.name === "Agent") {
+                    if (block.id) {
+                      if (!sessionAgentToolUseIds.has(sessionId)) sessionAgentToolUseIds.set(sessionId, new Set());
+                      sessionAgentToolUseIds.get(sessionId)!.add(block.id);
+                    }
+                    const count = (sessionSubagents.get(sessionId) ?? 0) + 1;
+                    sessionSubagents.set(sessionId, count);
+                    const model = sessionModels.get(sessionId) ?? "";
+                    const toolUses = sessionToolUses.get(sessionId) ?? 0;
+                    const lastContextTokens = sessionContextTokens.get(sessionId) ?? 0;
+                    if (ctx) {
+                      options?.onLiveStats?.(ctx.projectId, ctx.issueId, model, lastContextTokens, toolUses, count);
+                    }
+                  }
+                  // Track TaskCreate calls (skip if TodoWrite has taken precedence)
+                  if (block.name === "TaskCreate" && block.input?.subject && !sessionHasTodoWrite.has(sessionId)) {
+                    if (!sessionTasks.has(sessionId)) sessionTasks.set(sessionId, new Map());
+                    const tasks = sessionTasks.get(sessionId)!;
+                    const taskIdx = String(tasks.size + 1);
+                    tasks.set(taskIdx, { subject: block.input.subject as string, status: "pending" });
+                    if (ctx) {
+                      options?.onTodos?.(ctx.projectId, ctx.issueId, tasksToTodoItems(tasks));
+                    }
+                  }
+                  // Track TaskUpdate calls (skip if TodoWrite has taken precedence)
+                  if (block.name === "TaskUpdate" && block.input?.taskId && block.input?.status && !sessionHasTodoWrite.has(sessionId)) {
+                    const tasks = sessionTasks.get(sessionId);
+                    if (tasks) {
+                      const task = tasks.get(block.input.taskId as string);
+                      if (task) {
+                        task.status = block.input.status as string;
+                        if (ctx) {
+                          options?.onTodos?.(ctx.projectId, ctx.issueId, tasksToTodoItems(tasks));
+                        }
+                      }
+                    }
+                  }
                 }
               }
             }
           }
-        }
 
-        // Tool result: decrement subagent count for tracked Agent tool_use IDs
-        if (evt.toolResult) {
-          const agentIds = sessionAgentToolUseIds.get(sessionId);
-          if (agentIds && agentIds.has(evt.toolResult.toolUseId)) {
-            agentIds.delete(evt.toolResult.toolUseId);
-            const newCount = Math.max(0, (sessionSubagents.get(sessionId) ?? 1) - 1);
-            sessionSubagents.set(sessionId, newCount);
-            if (ctx) {
-              const model = sessionModels.get(sessionId) ?? "";
-              const toolUses = sessionToolUses.get(sessionId) ?? 0;
-              const lastContextTokens = sessionContextTokens.get(sessionId) ?? 0;
-              options?.onLiveStats?.(ctx.projectId, ctx.issueId, model, lastContextTokens, toolUses, newCount);
+          // Decrement subagent count when tool_result arrives for a tracked Agent tool_use
+          if (obj.type === "user" && obj.message?.content) {
+            const content = obj.message.content;
+            if (Array.isArray(content)) {
+              const agentIds = sessionAgentToolUseIds.get(sessionId);
+              if (agentIds && agentIds.size > 0) {
+                for (const block of content) {
+                  if (block.type === "tool_result" && block.tool_use_id && agentIds.has(block.tool_use_id)) {
+                    agentIds.delete(block.tool_use_id);
+                    const newCount = Math.max(0, (sessionSubagents.get(sessionId) ?? 1) - 1);
+                    sessionSubagents.set(sessionId, newCount);
+                    const ctx = sessionContexts.get(sessionId);
+                    if (ctx) {
+                      const model = sessionModels.get(sessionId) ?? "";
+                      const toolUses = sessionToolUses.get(sessionId) ?? 0;
+                      const lastContextTokens = sessionContextTokens.get(sessionId) ?? 0;
+                      options?.onLiveStats?.(ctx.projectId, ctx.issueId, model, lastContextTokens, toolUses, newCount);
+                    }
+                  }
+                }
+              }
             }
           }
+        } catch {
+          // Not JSON or not a recognized event — ignore
         }
       }
     }
@@ -241,6 +366,7 @@ function createSessionManager(
     permissionPromptTool?: string,
     planMode?: boolean,
     resumeWithNewModel?: boolean,
+    provider?: import("./agent-provider.js").ProviderId,
   ) {
     // Look up workspace to get workingDir
     const wsRows = await db
@@ -266,22 +392,22 @@ function createSessionManager(
       .limit(1);
     const projectId = issueRows.length > 0 ? issueRows[0].projectId : "";
 
-    // If resuming, look up the previous session's claudeSessionId
-    let claudeSessionId: string | undefined;
+    // If resuming, look up the previous session's providerSessionId
+    let providerSessionId: string | undefined;
     if (resumeFromId) {
       const prevRows = await db
-        .select({ claudeSessionId: sessions.claudeSessionId })
+        .select({ providerSessionId: sessions.providerSessionId })
         .from(sessions)
         .where(eq(sessions.id, resumeFromId))
         .limit(1);
-      if (prevRows.length > 0 && prevRows[0].claudeSessionId) {
+      if (prevRows.length > 0 && prevRows[0].providerSessionId) {
         // Skip non-UUID session IDs (e.g. mock agent "mock-session-xxx")
-        const sid = prevRows[0].claudeSessionId;
+        const sid = prevRows[0].providerSessionId;
         if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(sid)) {
-          claudeSessionId = sid;
-          console.log(`[session] resuming: resumeFromId=${resumeFromId} claudeSessionId=${claudeSessionId}`);
+          providerSessionId = sid;
+          console.log(`[session] resuming: resumeFromId=${resumeFromId} providerSessionId=${providerSessionId}`);
         } else {
-          console.log(`[session] skipping resume: claudeSessionId=${sid} is not a valid UUID`);
+          console.log(`[session] skipping resume: providerSessionId=${sid} is not a valid UUID`);
         }
       }
     }
@@ -296,10 +422,11 @@ function createSessionManager(
       turnStates.set(sessionId, "processing");
     }
 
+    const executor = provider ?? "claude-code";
     await db.insert(sessions).values({
       id: sessionId,
       workspaceId,
-      executor: "claude-code",
+      executor,
       status: "running",
       startedAt: now,
       endedAt: null,
@@ -335,7 +462,7 @@ function createSessionManager(
           options?.onSessionExit?.(workspaceId, sessionId, exitCode);
         }
       // When resumeWithNewModel is true, omit --resume so the new profile/provider is used instead
-      }, resumeWithNewModel ? undefined : claudeSessionId, agentCommand, claudeProfile, multiTurn, permissionPromptTool, planMode);
+      }, resumeWithNewModel ? undefined : providerSessionId, agentCommand, claudeProfile, multiTurn, permissionPromptTool, planMode, provider);
     } catch (err) {
       throw err;
     }
