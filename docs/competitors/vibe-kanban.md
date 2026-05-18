@@ -1,8 +1,14 @@
-# PRD-02: Original Architecture Analysis
+# Vibe Kanban — Competitor Profile
 
-Detailed technical analysis of the vibe-kanban codebase architecture.
+**Repository**: [github.com/BloopAI/vibe-kanban](https://github.com/BloopAI/vibe-kanban) (being sunset)
+**License**: Proprietary
+**Last analyzed**: Pre-sunset source at `F:/projects/vibe-kanban`
 
-## Overview
+## What It Is
+
+The original AI-driven kanban board. Agentic Kanban is a cleanroom reimplementation of this tool, keeping the core workflow but shedding the over-engineered architecture. Vibe Kanban is being sunset.
+
+## Architecture
 
 ### Scale
 - **34 Rust crates** in a Cargo workspace
@@ -65,7 +71,7 @@ Detailed technical analysis of the vibe-kanban codebase architecture.
 - **Serialization**: serde + ts-rs (Rust->TypeScript type generation)
 - **Async**: Tokio runtime
 - **Logging**: tracing + Sentry
-- **TLS**: rustls with AWS-LC-RS
+- **TLS**: rustls with AWS-LC-S
 
 ## Frontend Architecture (TypeScript/React)
 
@@ -78,31 +84,31 @@ Detailed technical analysis of the vibe-kanban codebase architecture.
 | `ui` | Shared UI primitives |
 
 ### Key Libraries
-- **React 18** + React Compiler
-- **Vite 7** build tool
-- **TanStack Router** for routing
-- **TanStack Query** for server state
-- **Zustand** for client state
-- **Radix UI** for accessible components
-- **Tailwind CSS** for styling
-- **Lexical** for rich text editing
-- **xterm.js** for terminal emulation
-- **@hello-pangea/dnd** + @dnd-kit for drag-and-drop
-- **react-use-websocket** for real-time updates
-- **ElectricSQL** for reactive DB sync
+- React 18 + React Compiler
+- Vite 7 build tool
+- TanStack Router for routing
+- TanStack Query for server state
+- Zustand for client state
+- Radix UI for accessible components
+- Tailwind CSS for styling
+- Lexical for rich text editing
+- xterm.js for terminal emulation
+- `@hello-pangea/dnd` + `@dnd-kit` for drag-and-drop
+- `react-use-websocket` for real-time updates
+- ElectricSQL for reactive DB sync
 
 ### Routing Structure
 ```
-/                           → Root/redirect
-/onboarding                 → First-time setup
-/onboarding/sign-in         → Authentication
-/workspaces                 → List workspaces
-/workspaces/create          → Create workspace
-/workspaces/$id             → Workspace detail
-/projects/$id               → Project kanban board
-/projects/$id/issues/$id    → Issue detail
-/notifications              → Notification center
-/export                     → Data export
+/                           -> Root/redirect
+/onboarding                 -> First-time setup
+/onboarding/sign-in         -> Authentication
+/workspaces                 -> List workspaces
+/workspaces/create          -> Create workspace
+/workspaces/$id             -> Workspace detail
+/projects/$id               -> Project kanban board
+/projects/$id/issues/$id    -> Issue detail
+/notifications              -> Notification center
+/export                     -> Data export
 ```
 
 ## MCP Server Architecture
@@ -113,7 +119,7 @@ Detailed technical analysis of the vibe-kanban codebase architecture.
 - stdio transport for communication
 - Two modes: **Global** (full access) and **Orchestrator** (scoped)
 
-### MCP Tools Provided
+### MCP Tools (18)
 | Tool | Description |
 |------|-------------|
 | `create_issue` | Create issue in project |
@@ -138,25 +144,30 @@ Detailed technical analysis of the vibe-kanban codebase architecture.
 
 ### Communication Flow
 ```
-Claude Code ←→ MCP Server (stdio) ←→ REST API ←→ Axum Server ←→ SQLite
+Claude Code <-> MCP Server (stdio) <-> REST API <-> Axum Server <-> SQLite
 ```
+
+## Strengths
+
+1. **Rust performance** — compiled, memory-safe backend
+2. **Multi-agent executors** — 10+ agent types via plugin system
+3. **Type-safe RPC** — Rust types auto-generated to TypeScript via ts-rs
+4. **ElectricSQL sync** — reactive DB sync for real-time updates
+5. **Full auth system** — SPAKE2 + Ed25519 + JWT
+6. **Cloud deployment** — PostgreSQL + ElectricSQL for remote hosting
+
+## Weaknesses (Why We Reimplemented)
+
+1. **Massive over-engineering** — 34 crates for a single-user tool
+2. **Being sunset** — no future development
+3. **Complex build** — Rust + Node.js + Docker toolchain
+4. **Multi-tenant overhead** — orgs, OAuth, billing irrelevant for personal use
+5. **Relay/WebRTC** — tunnel system unnecessary for local-first
+6. **No Windows support** — primarily macOS/Linux focused
 
 ## Build & Deployment
 
-### Local Development
-```bash
-pnpm install
-pnpm run dev          # Start both backend and frontend
-```
-
-### Production
-- Multi-stage Docker build
-- NPX CLI: `npx vibe-kanban`
-- Tauri desktop app for native install
-
-## Architecture Patterns
-1. **Workspace Isolation**: Each workspace = separate git worktree + Docker container
-2. **Type-Safe RPC**: Rust types → TypeScript via ts-rs code generation
-3. **Real-time Sync**: ElectricSQL for reactive queries, WebSocket for events
-4. **Plugin Executors**: Modular agent system with JSON schema config
-5. **Dual Backend**: Local (SQLite) and Remote (PostgreSQL) sharing api-types
+- **Local**: `pnpm install && pnpm run dev`
+- **Production**: Multi-stage Docker build
+- **NPX**: `npx vibe-kanban`
+- **Desktop**: Tauri desktop app for native install
