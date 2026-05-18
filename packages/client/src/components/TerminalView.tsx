@@ -27,6 +27,7 @@ interface RenderContext {
   activeSubagentToolUseIds: Set<string>;
   subagentGroups: Map<string, SubagentGroup>;
   eventToSubagent: Map<number, string>;
+  isMaximized: boolean;
 }
 
 const SCROLL_THRESHOLD = 50;
@@ -268,6 +269,7 @@ export function TerminalView({ messages, connectionState, parseOutput = "true", 
     activeSubagentToolUseIds,
     subagentGroups,
     eventToSubagent,
+    isMaximized,
   };
 
   const content = (
@@ -382,11 +384,10 @@ export function TerminalView({ messages, connectionState, parseOutput = "true", 
           <pre
             ref={preRef}
             onScroll={handleScroll}
-            className="absolute inset-0 overflow-auto p-4 text-xs text-green-400 font-mono whitespace-pre-wrap"
+            className="absolute inset-0 overflow-y-auto overflow-x-hidden p-4 text-xs text-green-400 font-mono whitespace-pre-wrap"
           >
             {content}
           </pre>
-          {scrollIndicator}
           {scrollButton}
         </div>
         {footer && <div className="border-t border-gray-700 p-2">{footer}</div>}
@@ -431,7 +432,7 @@ export function TerminalView({ messages, connectionState, parseOutput = "true", 
 }
 
 function renderParsedEvent(event: DisplayEvent, key: number, ctx: RenderContext): React.ReactNode {
-  const { multiTurn, expandedSections, toggleExpand, parseOutput, activeSubagentToolUseIds, subagentGroups, eventToSubagent } = ctx;
+  const { multiTurn, expandedSections, toggleExpand, parseOutput, activeSubagentToolUseIds, subagentGroups, eventToSubagent, isMaximized } = ctx;
   const isExpanded = expandedSections.has(key);
   const isMinimal = parseOutput === "minimal";
 
@@ -729,7 +730,7 @@ function renderParsedEvent(event: DisplayEvent, key: number, ctx: RenderContext)
               {truncated ? summary.slice(0, 300) + "..." : summary}
               {truncated && <span className="text-gray-600 text-[10px] ml-1">click for full output</span>}
               {isExpanded && !truncated && (
-                <pre className="text-gray-500 text-[10px] mt-0.5 max-h-60 overflow-auto whitespace-pre-wrap">{event.output}</pre>
+                <pre className={`text-gray-500 text-[10px] mt-0.5 whitespace-pre-wrap ${isMaximized ? "" : "max-h-60 overflow-auto"}`}>{event.output}</pre>
               )}
             </div>
           )}
@@ -761,7 +762,7 @@ function renderParsedEvent(event: DisplayEvent, key: number, ctx: RenderContext)
               >
                 hide
               </button>
-              <pre className="text-gray-500 text-[10px] mt-0.5 ml-2 max-h-40 overflow-auto whitespace-pre-wrap">{event.output}</pre>
+              <pre className={`text-gray-500 text-[10px] mt-0.5 ml-2 whitespace-pre-wrap ${isMaximized ? "" : "max-h-40 overflow-auto"}`}>{event.output}</pre>
             </>
           )}
         </div>
