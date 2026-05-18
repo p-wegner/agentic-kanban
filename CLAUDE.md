@@ -45,6 +45,7 @@ Cleanroom reimplementation of [vibe-kanban](https://github.com/BloopAI/vibe-kanb
 - **Server resilience**: Agent subprocess callbacks are wrapped in try/catch in `agent.service.ts` — a failing agent never crashes the server. `uncaughtException`/`unhandledRejection` handlers log with `[fatal]` prefix before exiting. Stale sessions (still "running" after crash/restart) are cleaned up on startup in `index.ts` after migrations — set to "stopped" and their workspaces to "idle".
 - **PR creation is skipped** — manual merge only
 - **Always commit** — after finishing a task, commit the changes without waiting to be asked
+- **Never use `pnpm db:reset`** — the kanban board contains vital development entries (issues, workspaces, session history). To clean up test data, delete individual issues/workspaces via MCP tools or API instead of wiping the entire database.
 - Use `uv` and `uv venv` for any Python work (never global site-packages)
 - Windows environment
 
@@ -102,7 +103,7 @@ Every feature that has a UI component must be visually verified using the `playw
 1. Determine the correct ports: in a worktree, the agent launcher sets `$env:KANBAN_CLIENT_PORT` and `$env:KANBAN_SERVER_PORT` — always use those, never hardcode 3001/5173. **Before starting `pnpm dev`, check if the server is already listening** (`Get-NetTCPConnection -LocalPort $env:KANBAN_SERVER_PORT -ErrorAction SilentlyContinue`). If it is, skip the start — running a second `pnpm dev` will kill the existing one and may collide with the main user's server.
 2. Use `/playwright-cli` to open `http://localhost:<KANBAN_CLIENT_PORT>`, take a snapshot, and confirm the UI renders correctly
 3. Take a screenshot only when needed for debugging — clean up `.png` files and `.playwright-cli/` after
-4. Clean up any test data created during verification (full reset: stop server, `pnpm db:reset`, `pnpm cli -- register .`, `pnpm dev`)
+4. Clean up any test data created during verification by deleting test issues/workspaces via MCP tools or API — **never use `pnpm db:reset`**, the board contains vital development entries that must be preserved
 
 ## Documentation Map
 - @.llm/workflows.md — dev workflows: clean-start setup, DB reset, project registration
