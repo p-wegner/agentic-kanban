@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { db } from "../db/index.js";
 import { issues, projectStatuses, workspaces, tags, issueTags, sessions, sessionMessages, diffComments, issueDependencies, preferences, agentSkills } from "@agentic-kanban/shared/schema";
 import type { DependencyType } from "@agentic-kanban/shared/schema";
-import { eq, and, sql, inArray } from "drizzle-orm";
+import { eq, and, sql, inArray, desc } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { execFile, execSync } from "node:child_process";
 import { existsSync } from "node:fs";
@@ -10,6 +10,7 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import type { Database } from "../db/index.js";
 import type { BoardEvents } from "../services/board-events.js";
+import { parseSessionSummary, formatDurationStr } from "../services/session-summary.js";
 
 export function createIssuesRoute(database: Database = db, options?: { boardEvents?: BoardEvents }) {
   const router = new Hono();
@@ -356,6 +357,127 @@ Only include genuinely useful dependencies, not just topical similarity.`;
     if (body.projectId) options?.boardEvents?.broadcast(body.projectId, "issue_created");
 
     return c.json({ id, issueNumber, title: body.title }, 201);
+  });
+
+  // GET /api/issues/:id/summary — issue summary by UUID or issue number
+  router.get("/:id/summary", async (c) => {
+    const idParam = c.req.param("id");
+
+    // Resolve issue by UUID or issue number
+    const isNumeric = /^\d+$/.test(idParam);
+    const issueRows = isNumeric
+      ? await database
+          .select()
+          .from(issues)
+          .where(eq(issues.issueNumber, Number(idParam)))
+          .limit(1)
+      : await database
+          .select()
+          .from(issues)
+          .where(eq(issues.id, idParam))
+          .limit(1);
+
+    if (issueRows.length === 0) {
+      return c.json({ error: "Issue not found" }, 404);
+    }
+
+    const issue = issueRows[0];
+
+    // Find workspaces for this issue
+    const wsRows = await database
+      .select()
+      .from(workspaces)
+      .where(eq(workspaces.issueId, issue.id));
+
+    if (wsRows.length === 0) {
+      return c.json({
+        issueId: issue.id,
+        issueNumber: issue.issueNumber,
+        title: issue.title,
+        status: "no workspace",
+        summary: null,
+      });
+    }
+
+    // Find the latest completed session across all workspaces
+    const wsIds = wsRows.map(w => w.id);
+    const sessionRows = await database
+      .select()
+      .from(sessions)
+      .where(inArray(sessions.workspaceId, wsIds))
+      .orderBy(desc(sessions.startedAt));
+
+    // Prefer completed/stopped sessions, fall back to any session
+    const completedSession = sessionRows.find(s => s.status === "completed" || s.status === "stopped")
+      ?? sessionRows[0]
+      ?? null;
+
+    if (!completedSession) {
+      return c.json({
+        issueId: issue.id,
+        issueNumber: issue.issueNumber,
+        title: issue.title,
+        status: "no session",
+        summary: null,
+      });
+    }
+
+    // Fetch session messages
+    const msgRows = await database
+      .select()
+      .from(sessionMessages)
+      .where(eq(sessionMessages.sessionId, completedSession.id))
+      .orderBy(sessionMessages.id);
+
+    // Parse stats
+    let stats: Record<string, unknown> | null = null;
+    if (completedSession.stats) {
+      try { stats = JSON.parse(completedSession.stats); } catch { /* ignore */ }
+    }
+
+    // Compute duration
+    let duration: string | null = null;
+    if (completedSession.endedAt && completedSession.startedAt) {
+      const diffMs = new Date(completedSession.endedAt).getTime() - new Date(completedSession.startedAt).getTime();
+      duration = formatDurationStr(diffMs);
+    }
+
+    const summary = parseSessionSummary(msgRows);
+
+    // Fast-path: pull agentSummary from stored stats
+    if (!summary.agentSummary && stats && typeof stats.agentSummary === "string") {
+      summary.agentSummary = stats.agentSummary;
+    }
+
+    const matchingWorkspace = wsRows.find(w => w.id === completedSession.workspaceId);
+
+    return c.json({
+      issueId: issue.id,
+      issueNumber: issue.issueNumber,
+      title: issue.title,
+      workspace: matchingWorkspace ? {
+        id: matchingWorkspace.id,
+        branch: matchingWorkspace.branch,
+        status: matchingWorkspace.status,
+      } : null,
+      session: {
+        id: completedSession.id,
+        status: completedSession.status,
+        startedAt: completedSession.startedAt,
+        endedAt: completedSession.endedAt,
+        duration,
+      },
+      stats: stats ? {
+        durationMs: (stats as any).durationMs ?? 0,
+        totalCostUsd: (stats as any).totalCostUsd ?? 0,
+        inputTokens: (stats as any).inputTokens ?? 0,
+        outputTokens: (stats as any).outputTokens ?? 0,
+        numTurns: (stats as any).numTurns ?? 1,
+        model: (stats as any).model ?? summary.model,
+        success: (stats as any).success ?? false,
+      } : null,
+      ...summary,
+    });
   });
 
   // PATCH /api/issues/:id
