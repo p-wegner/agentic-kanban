@@ -592,6 +592,7 @@ Examples:
   .action(async (issueNumber: string, options: { json?: boolean }) => {
     try {
       await runMigrations();
+      const projectId = await getActiveProjectId();
 
       const num = Number(issueNumber);
       if (!Number.isInteger(num) || num <= 0) {
@@ -602,7 +603,7 @@ Examples:
       const issueRows = await db
         .select()
         .from(issues)
-        .where(eq(issues.issueNumber, num))
+        .where(and(eq(issues.issueNumber, num), eq(issues.projectId, projectId)))
         .limit(1);
 
       if (issueRows.length === 0) {
