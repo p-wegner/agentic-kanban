@@ -294,7 +294,40 @@ Get-ChildItem "C:/andrena/.worktrees/" -Directory | ForEach-Object {
 
 Locked directories (held by another process) are harmless once empty — they can be deleted after a reboot. Git no longer tracks them after `git worktree prune`.
 
-### 6. Verify cleanup
+### 6. Clean up Claude Code session history (optional)
+
+Claude Code stores per-project conversation history under `~/.claude/projects/`, keyed by the working directory path. Each worktree gets its own project dir (e.g. `C--andrena--worktrees-feature-ak-114-prepare-npx-deployment-of-app`). After removing worktrees, these session logs are orphaned.
+
+**Impact**: 200+ directories, 100+ MB accumulated over time. Each contains JSONL conversation transcripts and session metadata.
+
+**Before deleting**, decide whether any session history is worth keeping (e.g. an important investigation or design discussion). You can review individual sessions by opening the `.jsonl` files.
+
+```powershell
+# Preview: list all agentic-kanban worktree session dirs
+Get-ChildItem "$env:USERPROFILE\.claude\projects\" -Directory |
+    Where-Object { $_.Name -like "*worktrees*" -and $_.Name -like "*andrena*" } |
+    ForEach-Object { Write-Output $_.Name }
+
+# Check total size
+$dirs = Get-ChildItem "$env:USERPROFILE\.claude\projects\" -Directory |
+    Where-Object { $_.Name -like "*worktrees*" -and $_.Name -like "*andrena*" }
+$size = ($dirs | ForEach-Object {
+    (Get-ChildItem $_.FullName -Recurse -File -ErrorAction SilentlyContinue |
+     Measure-Object -Property Length -Sum).Sum
+} | Measure-Object -Sum).Sum
+Write-Output "Dirs: $($dirs.Count), Size: $([math]::Round($size / 1MB, 1)) MB"
+
+# Delete all worktree session history
+Get-ChildItem "$env:USERPROFILE\.claude\projects\" -Directory |
+    Where-Object { $_.Name -like "*worktrees*" -and $_.Name -like "*andrena*" } |
+    Remove-Item -Recurse -Force
+
+# Preserve main checkout sessions (these are NOT worktree dirs):
+#   C--andrena-agentic-kanban
+#   C--andrena-agentic-kanban-packages-server
+```
+
+### 7. Verify cleanup
 
 ```bash
 git worktree list          # Should show only main checkout
