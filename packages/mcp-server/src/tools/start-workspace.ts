@@ -6,8 +6,7 @@ import { randomUUID } from "node:crypto";
 import * as gitService from "../git-service.js";
 import { notifyBoard } from "../notify.js";
 import { runSetupScript } from "../setup-script.js";
-import { mkdir, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { writeAgentSkillFile } from "@agentic-kanban/shared/lib/agent-skill-files";
 
 export function registerStartWorkspace(server: McpServer) {
   server.tool(
@@ -84,16 +83,7 @@ export function registerStartWorkspace(server: McpServer) {
           const skillRows = await db.select().from(schema.agentSkills).where(eq(schema.agentSkills.id, skillId)).limit(1);
           if (skillRows.length > 0) {
             const skill = skillRows[0];
-            const skillDir = join(worktreePath, ".claude", "skills", skill.name);
-            await mkdir(skillDir, { recursive: true });
-            const skillContent = [
-              "---",
-              `description: ${skill.description}`,
-              "---",
-              "",
-              skill.prompt,
-            ].join("\n");
-            await writeFile(join(skillDir, "SKILL.md"), skillContent, "utf-8");
+            await writeAgentSkillFile(worktreePath, skill);
           }
         }
 

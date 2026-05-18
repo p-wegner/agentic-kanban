@@ -356,7 +356,7 @@ export function createWorkspaceActionsRoute(
     }
 
     try {
-      let diff: string;
+      let diff = "";
       let conflicts: { hasConflicts: boolean; conflictingFiles: string[] } | null = null;
       const { repoPath, defaultBranch } = await resolveProjectRepo(id, database);
       const baseBranch = workspace.baseBranch || defaultBranch;

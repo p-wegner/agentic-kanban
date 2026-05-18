@@ -6,7 +6,7 @@ interface BoardEventMessage {
   reason: string;
 }
 
-interface SessionActivityMessage {
+export interface SessionActivityMessage {
   type: "session_activity";
   projectId: string;
   issueId: string;
@@ -14,7 +14,7 @@ interface SessionActivityMessage {
   activity: string;
 }
 
-interface SessionStatsMessage {
+export interface SessionStatsMessage {
   type: "session_stats";
   projectId: string;
   issueId: string;
@@ -31,7 +31,7 @@ export interface TodoItem {
   priority: "high" | "medium" | "low";
 }
 
-interface SessionTodosMessage {
+export interface SessionTodosMessage {
   type: "session_todos";
   projectId: string;
   issueId: string;

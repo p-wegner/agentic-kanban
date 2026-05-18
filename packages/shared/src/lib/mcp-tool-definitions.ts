@@ -61,5 +61,5 @@ export const MCP_TOOL_DEFINITIONS: McpToolDefinition[] = [
   { name: "list_agent_skills", description: "List all available agent skills that can be applied to workspaces", category: "skills" },
   { name: "get_agent_skill", description: "Get full details of an agent skill including its prompt", category: "skills" },
   { name: "create_agent_skill", description: "Create a new agent skill with a name, description, and prompt template", category: "skills" },
-  { name: "export_agent_skills", description: "Export agent skills as Claude Code SKILL.md files into a project's .claude/skills/ directory", category: "skills" },
+  { name: "export_agent_skills", description: "Export agent skills as SKILL.md files for Claude Code and Codex", category: "skills" },
 ];

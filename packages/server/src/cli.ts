@@ -1039,7 +1039,7 @@ Examples:
 
 skillCmd
   .command("export <target-path>")
-  .description("Export skills as Claude Code SKILL.md files.\n\nWrites skills into the .claude/skills/ directory of the target project, making them available to Claude Code in the terminal. Each skill is written as <name>/SKILL.md with frontmatter.")
+  .description("Export skills as SKILL.md files for Claude Code and Codex.\n\nWrites skills into the .claude/skills/ directory of the target project and links .codex/skills to the same directory. Each skill is written as <name>/SKILL.md with frontmatter.")
   .option("-p, --project <projectId>", "Export only project-specific + global skills")
   .option("-n, --names <names>", "Comma-separated list of skill names to export")
   .addHelpText("after", `
@@ -1051,8 +1051,9 @@ Examples:
   .action(async (targetPath: string, options: { project?: string; names?: string }) => {
     try {
       await runMigrations();
-      const { mkdir, writeFile, access } = await import("node:fs/promises");
+      const { access } = await import("node:fs/promises");
       const { join } = await import("node:path");
+      const { ensureCodexSkillsLink, writeAgentSkillFile } = await import("@agentic-kanban/shared/lib/agent-skill-files");
 
       // Verify target path
       try {
@@ -1083,27 +1084,17 @@ Examples:
       }
 
       const skillsDir = join(targetPath, ".claude", "skills");
-      await mkdir(skillsDir, { recursive: true });
+      await ensureCodexSkillsLink(targetPath);
 
       for (const skill of rows) {
         if (/[\/\\]|\.\./.test(skill.name)) {
           console.warn(`  Skipping skill with unsafe name: ${skill.name}`);
           continue;
         }
-        const skillDir = join(skillsDir, skill.name);
-        await mkdir(skillDir, { recursive: true });
-        const content = [
-          "---",
-          `name: ${skill.name}`,
-          `description: ${skill.description}`,
-          "---",
-          "",
-          skill.prompt,
-        ].join("\n");
-        await writeFile(join(skillDir, "SKILL.md"), content, "utf-8");
+        await writeAgentSkillFile(targetPath, skill);
       }
 
-      console.log(`Exported ${rows.length} skill(s) to ${skillsDir}:`);
+      console.log(`Exported ${rows.length} skill(s) to ${skillsDir} and linked .codex/skills to the same directory:`);
       for (const s of rows) {
         const scope = s.projectId ? "project" : "global";
         const builtin = s.isBuiltin ? " [builtin]" : "";
