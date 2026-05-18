@@ -210,9 +210,10 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
   const [tab, setTab] = useState<Tab>("agent");
 
   // Project-specific settings
-  const [projectSettings, setProjectSettings] = useState<{ setupScript: string; setupBlocking: boolean; teardownScript: string }>({
+  const [projectSettings, setProjectSettings] = useState<{ setupScript: string; setupBlocking: boolean; setupEnabled: boolean; teardownScript: string }>({
     setupScript: "",
     setupBlocking: true,
+    setupEnabled: true,
     teardownScript: "",
   });
   const [generatingScript, setGeneratingScript] = useState(false);
@@ -255,6 +256,7 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
               setProjectSettings({
                 setupScript: project.setupScript || "",
                 setupBlocking: project.setupBlocking !== false,
+                setupEnabled: (project as any).setupEnabled !== false,
                 teardownScript: (project as any).teardownScript || "",
               });
             }
@@ -295,6 +297,7 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
             body: JSON.stringify({
               setupScript: projectSettings.setupScript || null,
               setupBlocking: projectSettings.setupBlocking,
+              setupEnabled: projectSettings.setupEnabled,
               teardownScript: projectSettings.teardownScript || null,
             }),
           }),
@@ -627,6 +630,12 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                           hint="When enabled, the setup script must complete before the agent starts. When disabled, both run in parallel (faster but the agent may start before dependencies are installed)."
                         />
                       </CollapsibleSection>
+                      <Toggle
+                        checked={projectSettings.setupEnabled}
+                        onChange={(v) => setProjectSettings(s => ({ ...s, setupEnabled: v }))}
+                        label="Enable setup/teardown scripts"
+                        hint="When disabled, setup and teardown scripts won't run even if configured. Useful for tasks that don't need dependency installation (e.g. doc-only changes)."
+                      />
                       <CollapsibleSection
                         title="Teardown Script"
                         configured={!!projectSettings.teardownScript}

@@ -169,6 +169,13 @@
       "when": 1779265600000,
       "tag": "0022_teardown_script",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "6",
+      "when": 1779352000000,
+      "tag": "0024_setup_enabled",
+      "breakpoints": true
     }
   ]
 }

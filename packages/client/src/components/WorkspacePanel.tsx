@@ -21,6 +21,7 @@ interface Project {
   repoName: string;
   defaultBranch: string;
   remoteUrl: string | null;
+  setupScript?: string | null;
 }
 
 interface SessionInfo {
@@ -157,6 +158,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
   const [isDirect, setIsDirect] = useState(false);
   const [requiresReview, setRequiresReview] = useState(false);
   const [planMode, setPlanMode] = useState(false);
+  const [skipSetup, setSkipSetup] = useState(false);
   const [prompt, setPrompt] = useState("");
   const [prefs, setPrefs] = useState<Record<string, string>>({});
   const [branches, setBranches] = useState<{ local: string[]; remote: string[] } | null>(null);
@@ -407,7 +409,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
     setError(null);
     setCompletedMessages([]);
     try {
-      const body: Record<string, unknown> = { issueId: issue.id, isDirect, requiresReview, planMode };
+      const body: Record<string, unknown> = { issueId: issue.id, isDirect, requiresReview, planMode, skipSetup };
       if (selectedSkillId) body.skillId = selectedSkillId;
       if (!isDirect) {
         body.branch = branchName.trim();
@@ -1005,6 +1007,17 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                 />
                 <span>Plan mode (agent plans before implementing)</span>
               </label>
+              {project?.setupScript && (
+                <label className="flex items-center gap-2 text-xs text-gray-600">
+                  <input
+                    type="checkbox"
+                    checked={skipSetup}
+                    onChange={(e) => setSkipSetup(e.target.checked)}
+                    className="rounded border-gray-300"
+                  />
+                  <span>Skip setup script</span>
+                </label>
+              )}
               {availableSkills.length > 0 && (
                 <div>
                   <label className="text-xs font-medium text-gray-600 block">
@@ -1031,7 +1044,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                   {actionLoading ? "Creating..." : isDirect ? "Create Direct & Launch" : "Create & Launch"}
                 </button>
                 <button
-                  onClick={() => { setShowCreate(false); setBaseBranch(""); setBranchName(""); setIsDirect(false); setRequiresReview(false); setPlanMode(false); }}
+                  onClick={() => { setShowCreate(false); setBaseBranch(""); setBranchName(""); setIsDirect(false); setRequiresReview(false); setPlanMode(false); setSkipSetup(false); }}
                   className="text-sm text-gray-500 px-3 py-1.5 hover:text-gray-700"
                 >
                   Cancel

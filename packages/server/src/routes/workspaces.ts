@@ -73,12 +73,14 @@ export function createWorkspacesRoute(
 
       // Fetch setup script config from project
       const setupConfigRows = await database
-        .select({ setupScript: projects.setupScript, setupBlocking: projects.setupBlocking })
+        .select({ setupScript: projects.setupScript, setupBlocking: projects.setupBlocking, setupEnabled: projects.setupEnabled })
         .from(projects)
         .where(eq(projects.id, issue.projectId))
         .limit(1);
       const setupScript = setupConfigRows[0]?.setupScript;
       const setupBlocking = setupConfigRows[0]?.setupBlocking ?? true;
+      const setupEnabled = setupConfigRows[0]?.setupEnabled ?? true;
+      const skipSetup = body.skipSetup === true;
 
       if (isDirect) {
         // Direct workspace: use main checkout, auto-detect branch
@@ -91,8 +93,8 @@ export function createWorkspacesRoute(
         worktreePath = await gitService.createWorktree(project.repoPath, branch, baseBranch ?? undefined);
       }
 
-      // Run setup script if configured
-      if (setupScript && worktreePath) {
+      // Run setup script if configured and enabled
+      if (setupScript && worktreePath && setupEnabled && !skipSetup) {
         if (setupBlocking) {
           try {
             const result = await runSetupScript(worktreePath, setupScript);
