@@ -132,25 +132,20 @@ export async function startServer(port?: number) {
 
         const currentIssueRows = await db.select({ statusId: issues.statusId }).from(issues).where(eq(issues.id, issueId)).limit(1);
         const currentStatus = currentIssueRows.length > 0 ? statuses.find(s => s.id === currentIssueRows[0].statusId) : null;
+        const autoFix = prefMap.get("review_auto_fix") !== "false";
 
-        if (currentStatus?.name === "In Progress") {
-          const aiReviewedStatus = findStatus("AI Reviewed");
-          if (aiReviewedStatus) {
-            await db.update(issues).set({ statusId: aiReviewedStatus.id, updatedAt: now }).where(eq(issues.id, issueId));
-            boardEvents.broadcast(projectId, "issue_updated");
-          }
+        // Reviewer moved issue to "In Progress" to signal critical issues found
+        if (currentStatus?.name === "In Progress" && !autoFix) {
+          console.log(`[workflow] reviewer flagged issues (non-auto-fix mode) — skipping auto-merge, leaving in In Progress`);
+          boardEvents.broadcast(projectId, "issue_updated");
+          return;
         }
 
         if (autoMergeEnabled) {
           console.log(`[workflow] review session ${sessionId} completed — auto-merging`);
-          await autoMerge(workspace, projectId, issueId, findStatus("AI Reviewed")?.id ?? null, now);
+          await autoMerge(workspace, projectId, issueId, findStatus("Done")?.id ?? null, now);
         } else {
-          console.log(`[workflow] review session ${sessionId} completed — auto-merge disabled, leaving in AI Reviewed`);
-          const aiReviewedStatus = findStatus("AI Reviewed");
-          if (aiReviewedStatus && currentStatus?.name !== "In Progress") {
-            await db.update(issues).set({ statusId: aiReviewedStatus.id, updatedAt: now }).where(eq(issues.id, issueId));
-            boardEvents.broadcast(projectId, "issue_updated");
-          }
+          console.log(`[workflow] review session ${sessionId} completed — auto-merge disabled, leaving in In Review`);
         }
         return;
       }
@@ -161,7 +156,7 @@ export async function startServer(port?: number) {
           if (workspace.isDirect) {
             hasCommittedChanges = await new Promise<boolean>((resolve) => {
               execFile("git", ["diff", "--quiet", "HEAD"], { cwd: workspace.workingDir! }, (err: Error | null) => {
-                resolve(!err);
+                resolve(!!err);
               });
             });
           } else {
