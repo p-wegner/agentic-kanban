@@ -160,7 +160,7 @@ export function Layout({
           </div>
         </div>
       </header>
-      <main>{children}</main>
+      <main className="overflow-hidden h-[calc(100vh-57px)]">{children}</main>
 
       {showRegister && (
         <div
