@@ -29,6 +29,7 @@ import { registerCreateDiffComment } from "./tools/create-diff-comment.js";
 import { registerAddDependency } from "./tools/add-dependency.js";
 import { registerRemoveDependency } from "./tools/remove-dependency.js";
 import { registerGetBoardStatus } from "./tools/get-board-status.js";
+import { registerGetIssueSummary } from "./tools/get-issue-summary.js";
 import { registerListAgentSkills } from "./tools/list-agent-skills.js";
 import { registerGetAgentSkill } from "./tools/get-agent-skill.js";
 import { registerCreateAgentSkill } from "./tools/create-agent-skill.js";
@@ -61,6 +62,7 @@ const TOOL_REGISTRARS: Record<string, (server: McpServer) => void> = {
   add_dependency: registerAddDependency,
   remove_dependency: registerRemoveDependency,
   get_board_status: registerGetBoardStatus,
+  get_issue_summary: registerGetIssueSummary,
   list_agent_skills: registerListAgentSkills,
   get_agent_skill: registerGetAgentSkill,
   create_agent_skill: registerCreateAgentSkill,
