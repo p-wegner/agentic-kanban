@@ -344,6 +344,18 @@ export function createWorkspacesRoute(
       }
     }
 
+    // Get workspace workingDir + project repoPath before deleting, to clean up the worktree directory
+    const wsRow = await database
+      .select({ workingDir: workspaces.workingDir, isDirect: workspaces.isDirect, repoPath: projects.repoPath })
+      .from(workspaces)
+      .leftJoin(issues, eq(workspaces.issueId, issues.id))
+      .leftJoin(projects, eq(issues.projectId, projects.id))
+      .where(eq(workspaces.id, id))
+      .limit(1);
+    const workingDir = wsRow[0]?.workingDir;
+    const isDirect = wsRow[0]?.isDirect;
+    const repoPath = wsRow[0]?.repoPath;
+
     // Delete diff comments, session messages (cascade via FK on delete), sessions, workspace
     await database.delete(diffComments).where(eq(diffComments.workspaceId, id));
     if (wsSessions.length > 0) {
@@ -352,6 +364,19 @@ export function createWorkspacesRoute(
     }
     await database.delete(sessions).where(eq(sessions.workspaceId, id));
     await database.delete(workspaces).where(eq(workspaces.id, id));
+
+    // Remove the worktree directory (non-direct workspaces only)
+    if (workingDir && !isDirect && repoPath) {
+      try {
+        const { rm } = await import("node:fs/promises");
+        await rm(workingDir, { recursive: true, force: true });
+        // Prune stale worktree references from git so the branch becomes reusable
+        await gitService.pruneWorktrees(repoPath).catch(() => {});
+      } catch {
+        // Best-effort — don't fail the delete if worktree cleanup fails
+      }
+    }
+
     return c.json({ success: true });
   });
 
