@@ -19,26 +19,11 @@ We need a **focused, testable** tool that does one thing well.
 ## Core Value Proposition
 > A kanban board where each task card IS a Claude Code session, with built-in diff review and merge.
 
-## What We Keep (from original)
-- Kanban board with issues, statuses, priorities, tags
-- Workspace = isolated git branch + agent execution
-- MCP server for agent integration
-- Real-time updates (WebSocket + polling fallback)
-- Diff viewer with inline comments
-- Tauri desktop app with system tray + OS notifications
+## What We Keep / Skip
 
-## What We Skip (from original)
-- Multi-tenant / organizations / team collaboration
-- Cloud deployment / ElectricSQL / PostgreSQL
-- 9 additional agent executors (keep only Claude Code)
-- Relay / WebRTC / tunnel system
-- OAuth / billing / Sentry / PostHog
-- Mobile-specific support
-- Internationalization (i18next)
-- Preview browser / dev server proxy
-- Embedded SSH
-- Multiple host support
-- PR creation with AI descriptions
+See [docs/competitors/our-positioning.md](../competitors/our-positioning.md) for the full competitor analysis and positioning. Key decisions:
+- **Keep**: Kanban board, workspace isolation, MCP server, real-time updates, diff review, Tauri desktop
+- **Skip**: Multi-tenant, cloud deployment, multi-agent, OAuth/billing, relay tunnels
 
 ## Tech Stack
 TypeScript monorepo — Hono + Drizzle + React + MCP SDK + Tauri v2. See `docs/state.md` for current status.

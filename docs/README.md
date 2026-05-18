@@ -11,12 +11,18 @@ docs/
 ├── diary.md               # Project diary (actions, decisions, workflow)
 ├── prd/
 │   ├── 00-executive-summary.md    # High-level vision and scope
-│   ├── 01-features-catalog.md     # Complete feature inventory from original
-│   ├── 02-architecture-analysis.md # Original architecture deep-dive
+│   ├── 01-features-catalog.md     # Complete feature inventory
 │   ├── 03-data-model.md          # Core data entities and relationships
 │   ├── 04-agent-integration.md   # MCP/Agent integration architecture
 │   ├── 05-mvp-scope.md           # MVP definition and staging plan
 │   └── 06-testability-strategy.md # E2E and testing approach
+├── competitors/
+│   ├── README.md                 # Competitor analysis overview
+│   ├── feature-matrix.md         # 4-tool feature comparison table
+│   ├── vibe-kanban.md            # Vibe Kanban profile (sunset)
+│   ├── lanes.md                  # Lanes profile
+│   ├── cline-kanban.md           # Cline Kanban profile
+│   └── our-positioning.md        # Our differentiation and gap analysis
 └── decisions/
     └── 001-initial-scope.md       # Key decisions log
 ```
