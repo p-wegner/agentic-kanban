@@ -20,6 +20,7 @@ const MIGRATION_FILES = [
   "../../../shared/drizzle/0006_wide_ogun.sql",
   "../../../shared/drizzle/0022_teardown_script.sql",
   "../../../shared/drizzle/0024_setup_enabled.sql",
+  "../../../shared/drizzle/0025_provider_session_id.sql",
 ];
 
 function createTestApp() {
