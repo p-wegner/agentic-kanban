@@ -1533,8 +1533,8 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                       </>
                     )}
 
-                    {/* Delete button for closed workspaces */}
-                    {!selectedHistoryId && ws.status === "closed" && (
+                    {/* Delete button for closed workspaces or workspaces with no working directory */}
+                    {!selectedHistoryId && (ws.status === "closed" || !ws.workingDir) && (
                       <div className="pt-2 border-t border-gray-200">
                         <button
                           onClick={() => handleDeleteWorkspace(ws.id)}
