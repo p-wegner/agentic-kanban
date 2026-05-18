@@ -99,8 +99,8 @@ Cleanroom reimplementation of [vibe-kanban](https://github.com/BloopAI/vibe-kanb
 
 ## Visual Verification
 Every feature that has a UI component must be visually verified using the `playwright-cli` skill (user-scoped). After implementing or modifying a feature:
-1. Ensure dev servers are running (`pnpm dev` — use the port from the dev banner, not hardcoded ports)
-2. Use `/playwright-cli` to open the page, take a snapshot, and confirm the UI renders correctly
+1. Determine the correct ports: in a worktree, the agent launcher sets `$env:KANBAN_CLIENT_PORT` and `$env:KANBAN_SERVER_PORT` — always use those, never hardcode 3001/5173. **Before starting `pnpm dev`, check if the server is already listening** (`Get-NetTCPConnection -LocalPort $env:KANBAN_SERVER_PORT -ErrorAction SilentlyContinue`). If it is, skip the start — running a second `pnpm dev` will kill the existing one and may collide with the main user's server.
+2. Use `/playwright-cli` to open `http://localhost:<KANBAN_CLIENT_PORT>`, take a snapshot, and confirm the UI renders correctly
 3. Take a screenshot only when needed for debugging — clean up `.png` files and `.playwright-cli/` after
 4. Clean up any test data created during verification (full reset: stop server, `pnpm db:reset`, `pnpm cli -- register .`, `pnpm dev`)
 
