@@ -1,8 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Bash(pnpm --filter @agentic-kanban/server test)",
-      "Bash(pnpm --filter @agentic-kanban/server exec tsc --noEmit)",
+      "Bash(pnpm --filter agentic-kanban test)",
+      "Bash(pnpm --filter agentic-kanban exec tsc --noEmit)",
       "Bash(git add *)",
       "Bash(pnpm dev *)",
       "Skill(playwright-cli)",
