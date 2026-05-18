@@ -1,0 +1,8 @@
+{
+  "editedFiles": [
+    "packages/server/src/services/agent-provider.ts",
+    "packages/server/src/services/agent.service.ts",
+    "packages/server/src/services/session.manager.ts",
+    "packages/server/src/__tests__/agent-provider.test.ts"
+  ]
+}
