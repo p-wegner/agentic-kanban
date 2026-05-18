@@ -298,18 +298,20 @@ Locked directories (held by another process) are harmless once empty — they ca
 
 Claude Code stores per-project conversation history under `~/.claude/projects/`, keyed by the working directory path. Each worktree gets its own project dir (e.g. `C--andrena--worktrees-feature-ak-114-prepare-npx-deployment-of-app`). After removing worktrees, these session logs are orphaned.
 
-**Impact**: 200+ directories, 100+ MB accumulated over time. Each contains JSONL conversation transcripts and session metadata.
+**Impact**: 246+ directories, 120+ MB accumulated over time. Each contains JSONL conversation transcripts and session metadata.
 
 **Before deleting**, decide whether any session history is worth keeping (e.g. an important investigation or design discussion). You can review individual sessions by opening the `.jsonl` files.
 
-**Important: preserve non-kanban project sessions.** The `~/.claude/projects/` folder also contains sessions from other projects. The filter below uses `-like "*kanban*worktrees*"` to target only agentic-kanban worktree sessions.
+**Important: preserve non-kanban project sessions.** The `~/.claude/projects/` folder also contains sessions from other projects. The filter below uses two patterns to target only agentic-kanban worktree sessions while leaving everything else untouched.
 
-**What gets deleted:**
-- `C--andrena--worktrees-feature-*` — git worktree agent sessions (181+ dirs)
-- `C--andrena-agentic-kanban-packages--worktrees-feature-*` — nested worktree sessions
-- `C--andrena-agentic-kanban--claude-worktrees-*` — Claude Code internal worktree sessions
+**Two path patterns produce worktree session dirs:**
+- `C:/andrena/.worktrees/...` encodes as `C--andrena--worktrees-*` (no "kanban" in the name)
+- `C:/andrena/agentic-kanban/packages/.worktrees/...` encodes as `C--andrena-agentic-kanban-packages--worktrees-*`
+- Claude Code's internal worktrees at `.claude/worktrees/` encode as `C--andrena-agentic-kanban--claude-worktrees-*`
 
-**What gets preserved:**
+Both patterns are needed — a single `*kanban*worktrees*` filter misses the first category.
+
+**What gets preserved (not matched by filter):**
 - `C--andrena-agentic-kanban` — main checkout sessions
 - `C--andrena-agentic-kanban-packages-server` — server package sessions
 - `C--andrena-andrena-ai-blog` — other projects
@@ -321,23 +323,32 @@ Claude Code stores per-project conversation history under `~/.claude/projects/`,
 - `C--Users-pwegner` — other projects
 
 ```powershell
-# Preview: list all kanban worktree session dirs (safe — won't match other projects)
+# Preview: list all agentic-kanban worktree session dirs
 Get-ChildItem "$env:USERPROFILE\.claude\projects\" -Directory |
-    Where-Object { $_.Name -like "*kanban*worktrees*" } |
+    Where-Object {
+        ($_.Name -like "*kanban*worktrees*") -or
+        ($_.Name -like "*andrena--worktrees*")
+    } |
     ForEach-Object { Write-Output $_.Name }
 
 # Check total size
 $dirs = Get-ChildItem "$env:USERPROFILE\.claude\projects\" -Directory |
-    Where-Object { $_.Name -like "*kanban*worktrees*" }
+    Where-Object {
+        ($_.Name -like "*kanban*worktrees*") -or
+        ($_.Name -like "*andrena--worktrees*")
+    }
 $size = ($dirs | ForEach-Object {
     (Get-ChildItem $_.FullName -Recurse -File -ErrorAction SilentlyContinue |
      Measure-Object -Property Length -Sum).Sum
 } | Measure-Object -Sum).Sum
 Write-Output "Dirs: $($dirs.Count), Size: $([math]::Round($size / 1MB, 1)) MB"
 
-# Delete all kanban worktree session history
+# Delete all agentic-kanban worktree session history
 Get-ChildItem "$env:USERPROFILE\.claude\projects\" -Directory |
-    Where-Object { $_.Name -like "*kanban*worktrees*" } |
+    Where-Object {
+        ($_.Name -like "*kanban*worktrees*") -or
+        ($_.Name -like "*andrena--worktrees*")
+    } |
     Remove-Item -Recurse -Force
 ```
 
