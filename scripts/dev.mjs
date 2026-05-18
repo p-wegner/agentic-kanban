@@ -74,10 +74,55 @@ process.env.SERVER_PORT = String(serverPort);
 process.env.KANBAN_SERVER_PORT = String(serverPort);
 process.env.KANBAN_CLIENT_PORT = String(clientPort);
 
-const child = spawn('pnpm exec concurrently "pnpm --filter agentic-kanban dev" "pnpm --filter client dev"', {
-  stdio: "inherit",
-  shell: true,
-  env: process.env,
-});
+const MAX_RESTARTS = 5;
+const RESTART_DELAY_MS = 1000;
 
-child.on("exit", (code) => process.exit(code ?? 0));
+function spawnProcess(label, cmd, args, opts) {
+  let restarts = 0;
+
+  function start() {
+    const proc = spawn(cmd, args, { ...opts, stdio: "inherit", env: process.env });
+
+    proc.on("exit", (code, signal) => {
+      if (signal === "SIGINT" || signal === "SIGTERM") return; // clean shutdown
+      if (code === 0) return; // intentional exit
+      if (restarts >= MAX_RESTARTS) {
+        console.error(`[dev] ${label} exited (code=${code}), max restarts reached — giving up`);
+        return;
+      }
+      restarts++;
+      console.warn(`[dev] ${label} exited (code=${code}), restarting in ${RESTART_DELAY_MS}ms (attempt ${restarts}/${MAX_RESTARTS})...`);
+      setTimeout(start, RESTART_DELAY_MS);
+    });
+
+    return proc;
+  }
+
+  return start();
+}
+
+const serverProc = spawnProcess(
+  "server",
+  "pnpm",
+  ["--filter", "agentic-kanban", "dev"],
+  { shell: false }
+);
+
+const clientProc = spawnProcess(
+  "client",
+  "pnpm",
+  ["--filter", "client", "dev"],
+  { shell: false }
+);
+
+function shutdown() {
+  serverProc.kill();
+  clientProc.kill();
+  process.exit(0);
+}
+
+process.on("SIGINT", shutdown);
+process.on("SIGTERM", shutdown);
+
+// Keep the event loop alive so Ctrl+C works and children stay supervised.
+const keepAlive = setInterval(() => {}, 60_000);
