@@ -1,4 +1,4 @@
-import { access, mkdir, symlink, writeFile } from "node:fs/promises";
+import { access, lstat, mkdir, symlink, unlink, writeFile } from "node:fs/promises";
 import { join, relative } from "node:path";
 
 export type AgentSkillFile = {
@@ -26,16 +26,35 @@ export async function ensureCodexSkillsLink(targetPath: string) {
   await mkdir(claudeSkillsDir, { recursive: true });
   await mkdir(codexDir, { recursive: true });
 
+  // Check if the path exists as a symlink (lstat doesn't follow symlinks)
+  let existsAsSymlink = false;
   try {
-    await access(codexSkillsDir);
-    return { codexSkillsDir, created: false };
+    const stat = await lstat(codexSkillsDir);
+    existsAsSymlink = stat.isSymbolicLink();
+    if (!stat.isSymbolicLink()) {
+      // Exists as a real directory — leave it alone
+      return { codexSkillsDir, created: false };
+    }
   } catch {
-    const relativeTarget = relative(codexDir, claudeSkillsDir) || ".";
-    const target = process.platform === "win32" ? claudeSkillsDir : relativeTarget;
-    const type = process.platform === "win32" ? "junction" : "dir";
-    await symlink(target, codexSkillsDir, type);
-    return { codexSkillsDir, created: true };
+    // Path doesn't exist at all — fall through to create
   }
+
+  if (existsAsSymlink) {
+    // Symlink exists; check if its target is accessible
+    try {
+      await access(codexSkillsDir);
+      return { codexSkillsDir, created: false };
+    } catch {
+      // Broken symlink — remove it so we can recreate
+      await unlink(codexSkillsDir);
+    }
+  }
+
+  const relativeTarget = relative(codexDir, claudeSkillsDir) || ".";
+  const target = process.platform === "win32" ? claudeSkillsDir : relativeTarget;
+  const type = process.platform === "win32" ? "junction" : "dir";
+  await symlink(target, codexSkillsDir, type);
+  return { codexSkillsDir, created: true };
 }
 
 function buildSkillMarkdown(skill: AgentSkillFile) {
