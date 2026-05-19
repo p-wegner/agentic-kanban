@@ -78,6 +78,9 @@ If only MINOR issues or no issues: just exit normally (the system will auto-merg
 
 If only MINOR issues or no issues: just exit normally (the system will auto-merge).`;
 
+  // Strip "origin/" prefix so rebase instructions use the bare branch name (e.g. "master" not "origin/master")
+  const localBaseBranch = (baseBranch ?? "master").replace(/^origin\//, "");
+
   let conflictPreamble = "";
   if (uncommittedChanges && uncommittedChanges.length > 0) {
     conflictPreamble = `IMPORTANT: The worktree has uncommitted changes. You must commit or stash them before rebasing and reviewing.
@@ -88,7 +91,7 @@ ${uncommittedChanges.map(f => `  ${f}`).join("\n")}
 Steps to resolve:
 1. Review the changes: git diff (for unstaged), git diff --cached (for staged)
 2. If the changes belong to this branch: git add -A && git commit -m "WIP: uncommitted changes"
-3. Then rebase: git rebase origin/${baseBranch ?? "master"} (or git rebase ${baseBranch ?? "master"} if no remote)
+3. Then rebase: git rebase origin/${localBaseBranch} (or git rebase ${localBaseBranch} if no remote)
 4. Once the working tree is clean and rebased, proceed with the code review below.
 
 ---
@@ -101,8 +104,8 @@ Conflicting files:
 ${conflictingFiles.map(f => `- ${f}`).join("\n")}
 
 Steps to resolve:
-1. Start a fresh rebase: git rebase origin/${baseBranch ?? "master"}
-   (or use the local branch if no remote: git rebase ${baseBranch ?? "master"})
+1. Start a fresh rebase: git rebase origin/${localBaseBranch}
+   (or use the local branch if no remote: git rebase ${localBaseBranch})
 2. For each conflicting file, open it and resolve the conflict markers (<<<<<<<, =======, >>>>>>>)
 3. After resolving each file: git add <resolved-file>
 4. Continue: git rebase --continue (repeat for each conflicting commit)
