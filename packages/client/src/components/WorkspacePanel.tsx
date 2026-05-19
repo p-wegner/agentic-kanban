@@ -34,7 +34,7 @@ interface SessionInfo {
   endedAt: string | null;
   exitCode: string | null;
   stats: string | null;
-  claudeSessionId: string | null;
+  providerSessionId: string | null;
 }
 
 interface SessionStats {
@@ -174,16 +174,16 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
   const isRunning = activeSession !== null && !messages.some(m => m.type === "exit");
   // Whether a session is alive (may be processing or waiting for input)
   const isSessionAlive = activeSession !== null && isRunning;
-  // Whether we can resume (workspace not closed, no session running, has previous session with claudeSessionId)
+  // Whether we can resume (workspace not closed, no session running, has previous session with providerSessionId)
   const canResume = (ws: WorkspaceResponse, sessions: SessionInfo[]) =>
     (ws.status === "active" || ws.status === "idle") && !isRunning && !activeSession &&
     !!lastSessionPerWorkspace[ws.id] &&
-    sessions.some(s => s.id === lastSessionPerWorkspace[ws.id] && s.claudeSessionId);
-  // Whether we can restart (workspace not closed, no session running, but last session has no claudeSessionId)
+    sessions.some(s => s.id === lastSessionPerWorkspace[ws.id] && s.providerSessionId);
+  // Whether we can restart (workspace not closed, no session running, but last session has no providerSessionId)
   const canRestart = (ws: WorkspaceResponse, sessions: SessionInfo[]) =>
     (ws.status === "active" || ws.status === "idle") && !isRunning && !activeSession &&
     !!lastSessionPerWorkspace[ws.id] &&
-    sessions.some(s => s.id === lastSessionPerWorkspace[ws.id] && !s.claudeSessionId);
+    sessions.some(s => s.id === lastSessionPerWorkspace[ws.id] && !s.providerSessionId);
 
   // Auto-clear activeSession when agent completes.
   // Primary: detect exit via WS messages.
@@ -1146,7 +1146,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                                 <SessionStatsBadge stats={session.stats} />
                               </button>
                               {ws.status !== "closed" && (
-                                session.claudeSessionId ? (
+                                session.providerSessionId ? (
                                   <button
                                     onClick={() => handleContinueFromSession(ws.id, session.id)}
                                     disabled={actionLoading}

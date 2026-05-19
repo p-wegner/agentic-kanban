@@ -1,5 +1,5 @@
 import { execSync } from "node:child_process";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -10,7 +10,9 @@ const MCP_SERVER_PATH = resolve(__dirname, "../../../mcp-server/src/index.ts");
 const TSX_LOADER = resolve(__dirname, "../../node_modules/tsx/dist/loader.mjs");
 const TSX_URL = pathToFileURL(TSX_LOADER).href;
 
-let mcpConfigPath: string | null = null;
+let claudeMcpConfigPath: string | null = null;
+
+export type ProviderId = "claude-code" | "codex";
 
 // --- Provider interface ---
 
@@ -32,6 +34,8 @@ export interface ProviderLaunchOptions {
   keepAlive?: boolean;
   permissionPromptTool?: string;
   planMode?: boolean;
+  provider?: ProviderId;
+  prompt?: string;
 }
 
 /**
@@ -331,8 +335,8 @@ function getMcpConfigPath(): string {
   };
   const path = resolve(tmpdir(), "agentic-kanban-mcp-config.json");
   writeFileSync(path, JSON.stringify(config, null, 2), "utf-8");
-  mcpConfigPath = path;
-  console.log(`[agent] MCP config written to ${path}`);
+  claudeMcpConfigPath = path;
+  console.log(`[agent] Claude MCP config written to ${path}`);
   return path;
 }
 
@@ -376,6 +380,8 @@ function buildSpawnEnv(claudeProfile?: string): Record<string, string> {
 
   return spawnEnv;
 }
+
+// --- Utility ---
 
 function splitArgs(input: string): string[] {
   const args: string[] = [];
