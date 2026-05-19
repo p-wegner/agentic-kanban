@@ -432,3 +432,37 @@ git worktree list          # Should show only main checkout
 git worktree prune         # Clean up any dangling refs
 ls C:/andrena/.worktrees/  # Should be empty (or contain only locked empty dirs)
 ```
+
+---
+
+## Agent Monitoring Loop
+
+The board has a built-in auto-monitor (Settings → Workflow → Board Monitoring, or the **Monitor** toggle button in the board header). When enabled, the server re-launches idle workspaces and nudges waiting agents automatically every configured interval.
+
+For a session-level monitoring loop driven by Claude Code itself, use `/loop`:
+
+```
+/loop 3m check for stuck agents on the kanban board and make them continue their work flow if they are waiting for input or appear stuck. Check workspace statuses via the DB or API. For idle workspaces on non-Done issues, re-launch via POST /api/workspaces/:id/launch. For reviewing workspaces with stopped sessions, trigger merge via POST /api/workspaces/:id/merge. For active workspaces with waiting agents, nudge via POST /api/workspaces/:id/turn.
+```
+
+This schedules a cron that fires every 3 minutes for the duration of the session (auto-expires after 7 days). To stop it:
+
+```
+/cron list        # find the job ID
+/cron delete <id>
+```
+
+Or type `pause cron` and Claude will cancel it.
+
+### What the monitor does each cycle
+
+1. **Board scan** — fetches active columns (Todo, In Progress, In Review, AI Reviewed)
+2. **Fix stale statuses** — issues already implemented but stuck in In Progress get moved to Done using `PATCH /api/issues/:id` with the correct `statusId`
+3. **Re-launch idle workspaces** — `POST /api/workspaces/:id/launch` with the issue title as prompt (agents using `claude_profile=zai` stop every ~90s with null exit code; re-launch is the fix)
+4. **Nudge waiting agents** — `POST /api/workspaces/:id/turn` for active workspaces whose session is running but waiting for input
+5. **Trigger merge** — `POST /api/workspaces/:id/merge` for workspaces in reviewing state with a stopped session
+6. **Implement directly** — when agents consistently fail (glm-5.1 model stops immediately), implement the feature directly in code, commit, and mark Done
+
+### Note on `claude_profile=zai`
+
+The `zai` profile maps to a non-Claude model (glm-5.1) that exits after 13–101s with `exitCode: null`. These sessions never produce output. The monitoring loop works around this by re-launching repeatedly, but the reliable fix is to implement features directly or switch to a Claude profile for agent work.
