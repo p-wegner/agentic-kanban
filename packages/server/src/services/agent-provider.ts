@@ -452,7 +452,7 @@ export function buildAgentLaunchConfig(options: BuildAgentLaunchConfigOptions = 
 // --- Internal helpers ---
 
 function getMcpConfigPath(): string {
-  if (mcpConfigPath && existsSync(mcpConfigPath)) return mcpConfigPath;
+  if (claudeMcpConfigPath && existsSync(claudeMcpConfigPath)) return claudeMcpConfigPath;
   const config = {
     mcpServers: {
       "agentic-kanban": {
@@ -476,7 +476,7 @@ const PROFILE_OWNED_ENV_VARS = [
   "API_TIMEOUT_MS",
 ];
 
-function buildSpawnEnv(claudeProfile?: string): Record<string, string> {
+export function buildSpawnEnv(claudeProfile?: string): Record<string, string> {
   const spawnEnv: Record<string, string> = { ...process.env as Record<string, string> };
 
   // Always strip these so Claude Code falls back to its stored OAuth credentials.

@@ -11,6 +11,7 @@ import { homedir } from "node:os";
 import type { Database } from "../db/index.js";
 import type { BoardEvents } from "../services/board-events.js";
 import { parseSessionSummary, formatDurationStr } from "../services/session-summary.js";
+import { buildSpawnEnv } from "../services/agent-provider.js";
 
 export function createIssuesRoute(database: Database = db, options?: { boardEvents?: BoardEvents }) {
   const router = new Hono();
@@ -105,6 +106,7 @@ Current description: ${body.description?.trim() || "(none)"}`;
           timeout: 60000,
           shell: false,
           maxBuffer: 1024 * 1024,
+          env: buildSpawnEnv(claudeProfile),
         }, (err, out, se) => {
           if (err) reject(err);
           else resolve({ stdout: out ?? "", stderr: se ?? "" });
@@ -256,6 +258,7 @@ Only include genuinely useful dependencies, not just topical similarity.`;
           timeout: 60000,
           shell: false,
           maxBuffer: 1024 * 1024,
+          env: buildSpawnEnv(claudeProfile),
         }, (err, out, se) => {
           if (err) reject(err);
           else resolve({ stdout: out ?? "", stderr: se ?? "" });
