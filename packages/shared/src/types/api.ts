@@ -201,6 +201,13 @@ export interface SessionSummaryAction {
   commands?: string[];
 }
 
+export interface SessionTaskItem {
+  id: string;
+  subject: string;
+  description?: string;
+  status: "pending" | "in_progress" | "completed" | "deleted";
+}
+
 export interface SessionSummaryResponse {
   sessionId: string;
   duration: string | null;
@@ -218,6 +225,7 @@ export interface SessionSummaryResponse {
   filesWritten: string[];
   commandsRun: string[];
   model: string;
+  tasks: SessionTaskItem[];
 }
 
 import type { DependencyType } from "../schema/index.js";

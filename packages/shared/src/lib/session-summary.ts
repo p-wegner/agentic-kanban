@@ -1,3 +1,10 @@
+export interface TaskSummaryItem {
+  id: string;
+  subject: string;
+  description?: string;
+  status: "pending" | "in_progress" | "completed" | "deleted";
+}
+
 export interface SessionSummary {
   overview: string;
   agentSummary: string | null;
@@ -9,6 +16,7 @@ export interface SessionSummary {
   filesWritten: string[];
   commandsRun: string[];
   model: string;
+  tasks: TaskSummaryItem[];
 }
 
 export function formatDurationStr(diffMs: number): string {
@@ -36,6 +44,8 @@ export function parseSessionSummary(
   let model = "";
   let initFound = false;
   let agentSummary: string | null = null;
+  let taskCounter = 0;
+  const tasksMap = new Map<string, TaskSummaryItem>();
 
   for (const row of rows) {
     if (row.type !== "stdout" || !row.data) continue;
@@ -87,6 +97,23 @@ export function parseSessionSummary(
             } else if (toolName === "Bash" && input?.command) {
               const cmd = (input.command as string).slice(0, 200);
               commandsRun.push(cmd);
+            } else if (toolName === "TaskCreate" && input?.subject) {
+              taskCounter++;
+              const id = String(taskCounter);
+              tasksMap.set(id, {
+                id,
+                subject: input.subject as string,
+                description: input.description as string | undefined,
+                status: "pending",
+              });
+            } else if (toolName === "TaskUpdate" && input?.taskId) {
+              const id = String(input.taskId);
+              const existing = tasksMap.get(id);
+              if (existing) {
+                if (input.status) existing.status = input.status as TaskSummaryItem["status"];
+                if (input.subject) existing.subject = input.subject as string;
+                if (input.description) existing.description = input.description as string;
+              }
             }
           }
         }
@@ -146,5 +173,6 @@ export function parseSessionSummary(
     filesWritten: [...filesWritten],
     commandsRun,
     model,
+    tasks: [...tasksMap.values()],
   };
 }

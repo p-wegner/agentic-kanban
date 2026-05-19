@@ -1231,6 +1231,27 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                                 );
                               })()}
 
+                              {/* Tasks */}
+                              {summary.tasks && summary.tasks.length > 0 && (
+                                <div>
+                                  <h4 className="text-xs font-semibold text-gray-700 uppercase tracking-wide mb-1">
+                                    Tasks ({summary.tasks.filter(t => t.status === "completed").length}/{summary.tasks.length})
+                                  </h4>
+                                  <ul className="space-y-1">
+                                    {summary.tasks.filter(t => t.status !== "deleted").map((task) => (
+                                      <li key={task.id} className="flex items-start gap-1.5 text-xs">
+                                        <span className="mt-0.5 shrink-0">
+                                          {task.status === "completed" ? "✓" : task.status === "in_progress" ? "⟳" : "○"}
+                                        </span>
+                                        <span className={task.status === "completed" ? "text-gray-400 line-through" : "text-gray-700"}>
+                                          {task.subject}
+                                        </span>
+                                      </li>
+                                    ))}
+                                  </ul>
+                                </div>
+                              )}
+
                               {/* Files read */}
                               {summary.filesRead.length > 0 && (
                                 <div>
