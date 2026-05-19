@@ -426,7 +426,7 @@ ${contextParts.join("\n")}`;
 
     // Issue counts by status name
     const issueRows = await database
-      .select({ statusName: sql<string>`ps.name`, count: sql<number>`count(*)` })
+      .select({ statusName: projectStatuses.name, count: sql<number>`count(*)` })
       .from(issues)
       .leftJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
       .where(eq(issues.projectId, projectId))
