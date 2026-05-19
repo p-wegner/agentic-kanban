@@ -881,6 +881,9 @@ async function autoStartFollowups(
     const followupIssue = await database.select().from(issues).where(eq(issues.id, dep.issueId)).limit(1);
     if (!followupIssue[0]) continue;
 
+    // Skip if the issue is already in a terminal state (Done/Cancelled)
+    if (doneStatusIds.has(followupIssue[0].statusId)) continue;
+
     // Create workspace + launch agent for the follow-up issue
     try {
       const sanitized = followupIssue[0].title
