@@ -108,6 +108,7 @@ export function CreateIssueForm({
 
   function handleTitleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === "Escape") {
+      e.stopPropagation();
       onCancel();
       return;
     }
