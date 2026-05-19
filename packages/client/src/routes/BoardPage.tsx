@@ -479,10 +479,23 @@ export function BoardPage() {
         e.preventDefault();
         setShowShortcutHelp((prev) => !prev);
       }
+      // "c" to create issue, "w" to create issue + workspace
+      if ((e.key === "c" || e.key === "w") && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        const target = e.target as HTMLElement;
+        if (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT") return;
+        e.preventDefault();
+        const col = filteredColumns[0] ?? columns[0];
+        if (!col) return;
+        if (e.key === "w") {
+          setExpandedCreatePanel({ statusId: col.id, statusName: col.name, state: { startWorkspace: true } });
+        } else {
+          setCreatingInColumnId(col.id);
+        }
+      }
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [searchQuery, showCommandPalette, showWorktreeOverview, showShortcutHelp]);
+  }, [searchQuery, showCommandPalette, showWorktreeOverview, showShortcutHelp, filteredColumns, columns]);
 
   // Register command palette actions
   useEffect(() => {
