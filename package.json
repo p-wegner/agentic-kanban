@@ -15,6 +15,7 @@
     "test": "pnpm --filter agentic-kanban test",
     "test:e2e": "pnpm --filter e2e test",
     "cli": "pnpm --filter agentic-kanban exec tsx src/cli.ts",
+    "sh": "node -e \"const {execFileSync}=require('child_process'),a=process.argv.slice(2).filter(x=>x!=='--');execFileSync(process.execPath,['./node_modules/tsx/dist/cli.mjs','src/cli.ts','session-history',...a],{cwd:'packages/server',stdio:'inherit'})\"",
     "db:generate": "pnpm --filter shared db:generate",
     "db:migrate": "pnpm --filter agentic-kanban db:migrate",
     "db:seed": "pnpm --filter agentic-kanban db:seed",
