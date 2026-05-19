@@ -9,6 +9,7 @@ const SHORTCUTS = [
   { keys: ["?"], description: "Show keyboard shortcuts" },
   { keys: ["c"], description: "Create new issue" },
   { keys: ["w"], description: "New issue + start workspace" },
+  { keys: ["t"], description: "Open Quick Tasks panel" },
   { keys: ["g", "s"], description: "Open settings" },
 ];
 
