@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import type { StatusWithIssues } from "@agentic-kanban/shared";
+import { apiFetch } from "../lib/api.js";
 
 interface BoardStatsProps {
   activeColumns: StatusWithIssues[];
   archiveColumns: StatusWithIssues[];
   searchQuery: string;
   priorityFilter: string;
+  projectId?: string;
 }
 
 const COLUMN_COLORS: Record<string, string> = {
@@ -29,6 +31,7 @@ export function BoardStats({
   archiveColumns,
   searchQuery,
   priorityFilter,
+  projectId,
 }: BoardStatsProps) {
   const isFiltered = !!searchQuery || !!priorityFilter;
   const totalActive = activeColumns.reduce((sum, col) => sum + col.issues.length, 0);
@@ -43,6 +46,15 @@ export function BoardStats({
       if (profile) profileCounts.set(profile, (profileCounts.get(profile) ?? 0) + 1);
     }
   }
+
+  const [commitCount, setCommitCount] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!projectId) return;
+    apiFetch<{ commitCount: number }>(`/api/projects/${projectId}/stats`)
+      .then((s) => setCommitCount(s.commitCount))
+      .catch(() => {});
+  }, [projectId]);
 
   const [prevTotal, setPrevTotal] = useState(total);
   const [popKey, setPopKey] = useState(0);
@@ -103,6 +115,18 @@ export function BoardStats({
             <span className="text-gray-400">
               {totalArchive} done
             </span>
+          </div>
+        </>
+      )}
+
+      {commitCount !== null && (
+        <>
+          <div className="h-3 w-px bg-gray-200" />
+          <div className="flex items-center gap-1" title="Commits on main branch">
+            <svg className="w-3 h-3 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+              <circle cx="12" cy="12" r="3" /><line x1="12" y1="3" x2="12" y2="9" /><line x1="12" y1="15" x2="12" y2="21" />
+            </svg>
+            <span className="text-gray-400">{commitCount.toLocaleString()} commits</span>
           </div>
         </>
       )}
