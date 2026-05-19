@@ -79,15 +79,21 @@ function matchesPatterns(filePath, patterns) {
   });
 }
 
-function runCheck(check) {
+function runCheck(check, inputData, editedFiles) {
   const timeout = (check.timeout || 30) * 1000;
+  const env = {
+    ...process.env,
+    ...(editedFiles ? { SMART_HOOKS_EDITED_FILES: JSON.stringify(editedFiles) } : {}),
+  };
   try {
     execSync(check.command, {
       cwd: getProjectDir(),
       timeout,
       encoding: "utf8",
+      input: inputData ? JSON.stringify(inputData) : "",
       stdio: ["pipe", "pipe", "pipe"],
       windowsHide: true,
+      env,
     });
     return { success: true, output: "" };
   } catch (err) {
@@ -119,7 +125,7 @@ function handlePostToolUse(input) {
     if (!matchesPatterns(rel, check.filePatterns)) continue;
 
     const command = check.command.replace(/\{file\}/g, rel);
-    const result = runCheck({ ...check, command });
+    const result = runCheck({ ...check, command }, input, state.editedFiles);
 
     if (!result.success) {
       console.error(`[smart-hooks] ${check.name}: FAILED`);
@@ -149,24 +155,24 @@ function handleStop(input) {
   }
 
   const blockReasons = [];
-  const alwaysRun = input.stop_hook_active !== true;
-  // On re-prompt, only run hooks marked alwaysRun (e.g. cleanup reminders)
-  // File-dependent hooks (tests, tsc, playwright) are skipped on re-prompt
+  const isFirstStop = input.stop_hook_active !== true;
+  // On re-prompt (stop_hook_active=true), only run checks marked alwaysRun.
+  // File-dependent hooks (tests, tsc, playwright) are skipped on re-prompt.
 
   for (const check of checks) {
     if (!check.enabled) continue;
 
     // File-dependent checks: skip if no files were edited, or on re-prompt
     if (check.filePatterns && check.filePatterns.length > 0) {
-      if (!alwaysRun) continue;
+      if (!isFirstStop) continue;
       if (state.editedFiles.length === 0) continue;
       if (!state.editedFiles.some((f) => matchesPatterns(f, check.filePatterns))) continue;
-    } else if (!check.alwaysRun && !alwaysRun) {
+    } else if (!check.alwaysRun && !isFirstStop) {
       // Checks without filePatterns that aren't marked alwaysRun: skip on re-prompt
       continue;
     }
 
-    const result = runCheck(check);
+    const result = runCheck(check, input, state.editedFiles);
 
     if (!result.success && check.blocking) {
       // If the check itself output a JSON block decision, use it directly
