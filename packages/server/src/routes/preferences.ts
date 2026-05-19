@@ -47,7 +47,11 @@ export function createPreferencesRoute(database: Database = db) {
 
   // GET /api/preferences/settings — get all agent settings
   router.get("/settings", async (c) => {
+<<<<<<< HEAD
     const keys = ["agent_command", "agent_args", "output_parser", "mock_agent", "skip_permissions", "claude_profile", "permission_prompt_tool", "auto_review", "auto_merge", "resume_with_new_model", "review_auto_fix", "disabled_mcp_tools", "auto_start_followup", "require_manual_approval", "dynamic_column_scaling", "persistent_agent", "learning_step_before_merge", "auto_monitor", "auto_monitor_interval", "projects_base_path"];
+=======
+    const keys = ["agent_command", "agent_args", "output_parser", "mock_agent", "skip_permissions", "claude_profile", "permission_prompt_tool", "auto_review", "auto_merge", "resume_with_new_model", "review_auto_fix", "disabled_mcp_tools", "auto_start_followup", "require_manual_approval", "dynamic_column_scaling", "persistent_agent", "learning_step_before_merge", "auto_monitor", "auto_monitor_interval", "projects_base_dir"];
+>>>>>>> 650d5c4 (feat: implement create project flow (WIP - UI + backend route))
     const rows = await database
       .select()
       .from(preferences);
@@ -66,7 +70,11 @@ export function createPreferencesRoute(database: Database = db) {
   router.put("/settings", async (c) => {
     const body = await c.req.json() as Record<string, string>;
     const now = new Date().toISOString();
+<<<<<<< HEAD
     const allowedKeys = ["agent_command", "agent_args", "output_parser", "mock_agent", "skip_permissions", "claude_profile", "permission_prompt_tool", "auto_review", "auto_merge", "resume_with_new_model", "review_auto_fix", "disabled_mcp_tools", "auto_start_followup", "require_manual_approval", "dynamic_column_scaling", "persistent_agent", "learning_step_before_merge", "auto_monitor", "auto_monitor_interval", "projects_base_path"];
+=======
+    const allowedKeys = ["agent_command", "agent_args", "output_parser", "mock_agent", "skip_permissions", "claude_profile", "permission_prompt_tool", "auto_review", "auto_merge", "resume_with_new_model", "review_auto_fix", "disabled_mcp_tools", "auto_start_followup", "require_manual_approval", "dynamic_column_scaling", "persistent_agent", "learning_step_before_merge", "auto_monitor", "auto_monitor_interval", "projects_base_dir"];
+>>>>>>> 650d5c4 (feat: implement create project flow (WIP - UI + backend route))
 
     for (const [key, value] of Object.entries(body)) {
       if (!allowedKeys.includes(key)) continue;
