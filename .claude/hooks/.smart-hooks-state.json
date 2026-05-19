@@ -5,6 +5,8 @@
     "packages/client/src/components/WorkspacePanel.tsx",
     "packages/shared/src/types/api.ts",
     "packages/client/src/lib/agent-output-parser.test.ts",
-    "packages/client/src/components/SettingsPanel.tsx"
+    "packages/client/src/components/SettingsPanel.tsx",
+    "packages/server/src/services/git.service.ts",
+    "packages/server/src/server-start.ts"
   ]
 }
