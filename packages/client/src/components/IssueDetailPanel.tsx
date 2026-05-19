@@ -44,6 +44,7 @@ export function IssueDetailPanel({
   const dragStartRef = useRef<{ mouseX: number; mouseY: number; panelX: number; panelY: number } | null>(null);
   const [title, setTitle] = useState(issue.title);
   const [description, setDescription] = useState(issue.description ?? "");
+  const [pastedImages, setPastedImages] = useState<string[]>([]);
   const [priority, setPriority] = useState(issue.priority);
   const [saving, setSaving] = useState(false);
   const depTypeRef = useRef<HTMLSelectElement>(null);
@@ -198,11 +199,14 @@ export function IssueDetailPanel({
     if (saving) return;
     setSaving(true);
     try {
+      const imageMarkdown = pastedImages.map((url, i) => `![screenshot-${i + 1}](${url})`).join("\n");
+      const fullDescription = [description.trim(), imageMarkdown].filter(Boolean).join("\n\n");
       await onUpdate(issue.id, {
         title: title.trim(),
-        description: description.trim() || undefined,
+        description: fullDescription || undefined,
         priority: priority as UpdateIssueRequest["priority"],
       });
+      setPastedImages([]);
       setEditing(false);
       // Don't close panel — F1 fix. Parent will re-render with updated data.
     } finally {
@@ -318,6 +322,7 @@ export function IssueDetailPanel({
               Description
             </label>
             {editing ? (
+              <>
               <textarea
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
@@ -335,11 +340,7 @@ export function IssueDetailPanel({
                       const reader = new FileReader();
                       reader.onload = (ev) => {
                         const dataUrl = ev.target?.result as string;
-                        const imgMarkdown = `\n![screenshot](${dataUrl})\n`;
-                        const ta = e.target as HTMLTextAreaElement;
-                        const start = ta.selectionStart ?? description.length;
-                        const end = ta.selectionEnd ?? description.length;
-                        setDescription(description.slice(0, start) + imgMarkdown + description.slice(end));
+                        setPastedImages((prev) => [...prev, dataUrl]);
                       };
                       reader.readAsDataURL(file);
                       return;
@@ -347,6 +348,21 @@ export function IssueDetailPanel({
                   }
                 }}
               />
+              {pastedImages.length > 0 && (
+                <div className="flex flex-wrap gap-2 mt-2">
+                  {pastedImages.map((url, i) => (
+                    <div key={i} className="relative group">
+                      <img src={url} alt={`screenshot-${i + 1}`} className="h-16 w-auto rounded border border-gray-200 object-cover" />
+                      <button
+                        type="button"
+                        onClick={() => setPastedImages((prev) => prev.filter((_, j) => j !== i))}
+                        className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-red-500 text-white rounded-full text-xs leading-none flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                      >×</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              </>
             ) : issue.description ? (
               <p className="text-sm text-gray-700 whitespace-pre-wrap">
                 {issue.description}
