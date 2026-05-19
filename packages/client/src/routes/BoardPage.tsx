@@ -21,6 +21,7 @@ import { useBoardEvents, type LiveSessionStats, type TodoItem, type ApprovalRequ
 import { ApprovalDialog } from "../components/ApprovalDialog.js";
 import { sendDesktopNotification } from "../lib/desktop.js";
 import { registerAction } from "../lib/actions.js";
+import { QuickTasksPanel } from "../components/QuickTasksPanel.js";
 import type {
   CreateIssueRequest,
   IssueWithStatus,
@@ -53,6 +54,7 @@ export function BoardPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [priorityFilter, setPriorityFilter] = useState("");
   const [showSettings, setShowSettings] = useState(false);
+  const [showQuickTasks, setShowQuickTasks] = useState(false);
   const [showWorktreeOverview, setShowWorktreeOverview] = useState(false);
   const [showCommandPalette, setShowCommandPalette] = useState(false);
   const [showShortcutHelp, setShowShortcutHelp] = useState(false);
@@ -698,6 +700,16 @@ export function BoardPage() {
             projectId={activeProjectId}
           />
           <button
+            onClick={() => setShowQuickTasks(true)}
+            title="Quick Tasks — run a skill directly on the main branch"
+            className="shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium border transition-colors bg-white border-gray-200 text-gray-600 hover:bg-gray-50"
+          >
+            <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+              <polygon points="5,3 19,12 5,21" />
+            </svg>
+            Tasks
+          </button>
+          <button
             onClick={toggleAutoMonitor}
             title={autoMonitor ? "Auto-monitor ON — click to disable" : "Auto-monitor OFF — click to enable"}
             className={`shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium border transition-colors ${autoMonitor ? "bg-green-50 border-green-300 text-green-700 hover:bg-green-100" : "bg-white border-gray-200 text-gray-500 hover:bg-gray-50"}`}
@@ -837,6 +849,13 @@ export function BoardPage() {
       <ToastContainer />
       {showSettings && (
         <SettingsPanel onClose={() => setShowSettings(false)} activeProjectId={activeProjectId} />
+      )}
+      {showQuickTasks && activeProjectId && (
+        <QuickTasksPanel
+          projectId={activeProjectId}
+          onClose={() => setShowQuickTasks(false)}
+          onLaunched={() => refetchBoard()}
+        />
       )}
       {showWorktreeOverview && activeProjectId && (
         <WorktreeOverview
