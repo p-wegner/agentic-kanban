@@ -17,6 +17,7 @@ import { execFile, execSync } from "node:child_process";
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 =======
 import { existsSync, mkdirSync, readdirSync } from "node:fs";
@@ -53,6 +54,8 @@ import { existsSync, mkdirSync, readdirSync } from "node:fs";
 >>>>>>> 63066d9 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
 =======
 >>>>>>> 3e9e8d2 (fix: restore name validation and dir cleanup on git init failure)
+=======
+>>>>>>> 19a00ff (feat: implement create project flow (WIP - UI + backend route))
 import { existsSync, mkdirSync, readdirSync } from "node:fs";
 =======
 import { existsSync, readdirSync, writeFileSync } from "node:fs";
@@ -69,7 +72,13 @@ import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:
 =======
 import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 >>>>>>> 7c81e83 (fix: restore name validation and dir cleanup on git init failure)
+<<<<<<< HEAD
 >>>>>>> 3e9e8d2 (fix: restore name validation and dir cleanup on git init failure)
+=======
+=======
+import { existsSync, mkdirSync, readdirSync } from "node:fs";
+>>>>>>> 41a314b (feat: implement create project flow (WIP - UI + backend route))
+>>>>>>> 19a00ff (feat: implement create project flow (WIP - UI + backend route))
 import { detectRepoInfo } from "../services/git-info.service.js";
 import { listBranches, listWorktrees, getDiffShortstat, removeWorktree, detectConflicts } from "../services/git.service.js";
 import type { Database } from "../db/index.js";
@@ -266,6 +275,7 @@ export function createProjectsRoute(database: Database = db) {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 >>>>>>> 7695053 (feat: validate create-project edge cases (WIP))
 =======
@@ -274,6 +284,8 @@ export function createProjectsRoute(database: Database = db) {
 >>>>>>> 132b17a (feat: validate create-project edge cases (WIP))
 =======
 >>>>>>> 405a005 (feat: validate create-project edge cases (WIP))
+=======
+>>>>>>> 19a00ff (feat: implement create project flow (WIP - UI + backend route))
       // Validate folder name when deriving path from name
       if (/[/\\<>:"|?*\x00]/.test(name)) {
         return c.json({ error: 'Project name contains invalid characters. Avoid: / \\ < > : " | ? *' }, 400);
@@ -439,6 +451,7 @@ export function createProjectsRoute(database: Database = db) {
       return c.json({ error: `Failed to create directory: ${err instanceof Error ? err.message : String(err)}` }, 400);
     }
 
+<<<<<<< HEAD
 >>>>>>> e6a6ccb (feat: implement create project flow (WIP - UI + backend route))
 =======
 =======
@@ -477,10 +490,37 @@ export function createProjectsRoute(database: Database = db) {
     }
 
 >>>>>>> ec12683 (feat: implement create project flow (WIP - UI + backend route))
+=======
+=======
+      // Read projects_base_dir from preferences
+      const baseDirRows = await database
+        .select({ value: preferences.value })
+        .from(preferences)
+        .where(eq(preferences.key, "projects_base_dir"))
+        .limit(1);
+      const baseDir = baseDirRows[0]?.value?.trim();
+      if (!baseDir) {
+        return c.json({ error: "No base directory configured. Set 'Projects base directory' in Settings > Project, or provide an explicit path." }, 400);
+      }
+      targetPath = resolve(join(baseDir, name));
+    }
+
+    // Create directory if it doesn't exist
+    if (!existsSync(targetPath)) {
+      try {
+        mkdirSync(targetPath, { recursive: true });
+      } catch (err) {
+        return c.json({ error: `Failed to create directory: ${err instanceof Error ? err.message : String(err)}` }, 400);
+      }
+    }
+
+>>>>>>> 41a314b (feat: implement create project flow (WIP - UI + backend route))
+>>>>>>> 19a00ff (feat: implement create project flow (WIP - UI + backend route))
     // Run git init
     try {
       execSync("git init", { cwd: targetPath, stdio: "pipe" });
     } catch (err: any) {
+<<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
@@ -510,6 +550,11 @@ export function createProjectsRoute(database: Database = db) {
 =======
       try { rmSync(targetPath, { recursive: true, force: true }); } catch {}
 >>>>>>> 63066d9 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
+=======
+      try { rmSync(targetPath, { recursive: true, force: true }); } catch {}
+=======
+>>>>>>> 41a314b (feat: implement create project flow (WIP - UI + backend route))
+>>>>>>> 19a00ff (feat: implement create project flow (WIP - UI + backend route))
       return c.json({ error: `git init failed: ${err.stderr ? String(err.stderr).trim() : String(err)}` }, 400);
     }
 
