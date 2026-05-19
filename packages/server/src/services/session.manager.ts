@@ -401,13 +401,13 @@ function createSessionManager(
         .where(eq(sessions.id, resumeFromId))
         .limit(1);
       if (prevRows.length > 0 && prevRows[0].providerSessionId) {
-        // Skip non-UUID session IDs (e.g. mock agent "mock-session-xxx")
+        // Skip mock agent session IDs (e.g. "mock-session-xxx") — they are not resumable
         const sid = prevRows[0].providerSessionId;
-        if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(sid)) {
+        if (!sid.startsWith("mock-session-")) {
           providerSessionId = sid;
           console.log(`[session] resuming: resumeFromId=${resumeFromId} providerSessionId=${providerSessionId}`);
         } else {
-          console.log(`[session] skipping resume: providerSessionId=${sid} is not a valid UUID`);
+          console.log(`[session] skipping resume: providerSessionId=${sid} is a mock session ID`);
         }
       }
     }
