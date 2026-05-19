@@ -461,6 +461,39 @@ export function createWorkspaceActionsRoute(
         return c.json({ id, mergeOutput: "Direct workspace closed (no merge needed)" });
       }
 
+      // Optional learning step: run an agent session to extract insights before merge
+      const prefRowsLearning = await database.select().from(preferences);
+      const prefMapLearning = new Map(prefRowsLearning.map(r => [r.key, r.value]));
+      if (prefMapLearning.get("learning_step_before_merge") === "true" && workspace.workingDir && getSessionManager) {
+        try {
+          const learningPrompt = `/learning-step\n\nRun the learning step skill to extract insights from recent session transcripts and update docs/hooks before this workspace is merged.`;
+          const agentCmd = prefMapLearning.get("agent_command") || undefined;
+          const agentArgs = prefMapLearning.get("agent_args") || undefined;
+          const claudeProfile = prefMapLearning.get("claude_profile") || undefined;
+          const sm = getSessionManager();
+          const learningSessId = await sm.startSession(id, learningPrompt, agentCmd, agentArgs ? agentArgs.split(" ") : undefined, undefined, claudeProfile);
+          console.log(`[workspace-actions] learning step started: session=${learningSessId}`);
+          // Wait up to 3 minutes for the learning session to complete
+          await new Promise<void>((resolve) => {
+            const timeout = setTimeout(() => {
+              console.log("[workspace-actions] learning step timed out after 3m, proceeding with merge");
+              resolve();
+            }, 3 * 60 * 1000);
+            const poll = setInterval(async () => {
+              const sessRows = await database.select({ status: sessions.status }).from(sessions).where(eq(sessions.id, learningSessId)).limit(1);
+              if (sessRows.length > 0 && sessRows[0].status !== "running") {
+                clearInterval(poll);
+                clearTimeout(timeout);
+                console.log(`[workspace-actions] learning step finished: status=${sessRows[0].status}`);
+                resolve();
+              }
+            }, 5000);
+          });
+        } catch (err) {
+          console.warn("[workspace-actions] learning step failed (non-fatal):", err);
+        }
+      }
+
       // Check for merge conflicts before attempting merge
       if (workspace.workingDir) {
         const { repoPath: projectRepo } = await resolveProjectRepo(id, database);
