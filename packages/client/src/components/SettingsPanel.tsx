@@ -21,6 +21,7 @@ interface Settings {
   review_auto_fix?: string;
   resume_with_new_model?: string;
   disabled_mcp_tools?: string;
+  auto_start_followup?: string;
 }
 
 const DEFAULT_SETTINGS: Settings = {
@@ -36,6 +37,7 @@ const DEFAULT_SETTINGS: Settings = {
   review_auto_fix: "true",
   resume_with_new_model: "false",
   disabled_mcp_tools: "",
+  auto_start_followup: "false",
 };
 
 type Tab = "agent" | "workflow" | "skills" | "mcp" | "ui" | "project" | "advanced";
@@ -425,6 +427,12 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                     onChange={setBool("resume_with_new_model")}
                     label="Use new profile on resume"
                     hint="When continuing a chat, start a fresh session using the current profile instead of resuming the previous one. Use this when switching providers via a different Claude profile."
+                  />
+                  <Toggle
+                    checked={settings.auto_start_followup === "true"}
+                    onChange={setBool("auto_start_followup")}
+                    label="Auto-start follow-up tasks after merge"
+                    hint="When a workspace is merged and the issue has outgoing 'depends_on' or 'child_of' dependencies, automatically create workspaces for unblocked follow-up issues."
                   />
                 </>
               )}
