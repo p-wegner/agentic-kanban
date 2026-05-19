@@ -402,6 +402,41 @@ ${contextParts.join("\n")}`;
     }
   });
 
+  // GET /api/projects/:id/stats — lightweight project stats (commit count, recent commits, issue counts)
+  router.get("/:id/stats", async (c) => {
+    const projectId = c.req.param("id");
+    const projectRows = await database
+      .select({ id: projects.id, repoPath: projects.repoPath, defaultBranch: projects.defaultBranch })
+      .from(projects)
+      .where(eq(projects.id, projectId));
+    if (projectRows.length === 0) return c.json({ error: "Project not found" }, 404);
+    const { repoPath, defaultBranch } = projectRows[0];
+
+    let commitCount = 0;
+    let recentCommits: { hash: string; message: string; date: string }[] = [];
+    try {
+      const countOut = execSync(`git rev-list --count ${defaultBranch}`, { cwd: repoPath, timeout: 5000 }).toString().trim();
+      commitCount = parseInt(countOut, 10) || 0;
+      const logOut = execSync(`git log ${defaultBranch} --oneline --format="%H|%s|%cr" -10`, { cwd: repoPath, timeout: 5000 }).toString().trim();
+      recentCommits = logOut.split("\n").filter(Boolean).map((line) => {
+        const [hash, message, date] = line.split("|");
+        return { hash: hash?.slice(0, 7) ?? "", message: message ?? "", date: date ?? "" };
+      });
+    } catch { /* git unavailable or no commits */ }
+
+    // Issue counts by status name
+    const issueRows = await database
+      .select({ statusName: sql<string>`ps.name`, count: sql<number>`count(*)` })
+      .from(issues)
+      .leftJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
+      .where(eq(issues.projectId, projectId))
+      .groupBy(projectStatuses.name);
+    const issueCounts: Record<string, number> = {};
+    for (const row of issueRows) issueCounts[row.statusName] = Number(row.count);
+
+    return c.json({ commitCount, recentCommits, issueCounts });
+  });
+
   // GET /api/projects/:id/worktrees
   router.get("/:id/worktrees", async (c) => {
     const projectId = c.req.param("id");
