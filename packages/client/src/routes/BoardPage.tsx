@@ -66,6 +66,7 @@ export function BoardPage() {
   const pendingBoardRefreshRef = useRef(false);
   const [expandedCreatePanel, setExpandedCreatePanel] = useState<{ statusId: string; statusName: string; state: Partial<CreateIssueFormState> } | null>(null);
   const [viewMode, setViewMode] = useState<"kanban" | "graph">("kanban");
+  const [dynamicColumnScaling, setDynamicColumnScaling] = useState(false);
 
   const refetchBoard = useCallback(async (projectId?: string) => {
     const pid = projectId || activeProjectId;
@@ -174,6 +175,12 @@ export function BoardPage() {
             `/api/projects/${pid}/board`,
           );
           setColumns(board);
+        }
+        try {
+          const s = await apiFetch<Record<string, string>>("/api/preferences/settings");
+          setDynamicColumnScaling(s.dynamic_column_scaling === "true");
+        } catch {
+          // ignore
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to load board");
@@ -704,6 +711,7 @@ export function BoardPage() {
             <BoardColumn
               key={col.id}
               column={col}
+              style={dynamicColumnScaling ? { flexGrow: Math.max(1, col.issues.length) } : undefined}
               projectId={activeProjectId}
               creatingInColumn={creatingInColumnId}
               onCreateClick={setCreatingInColumnId}
