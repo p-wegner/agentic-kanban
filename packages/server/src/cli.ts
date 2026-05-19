@@ -45,6 +45,7 @@ Examples:
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
   $ agentic-kanban preferences set projects_base_dir /path/to/projects
 =======
   $ agentic-kanban preferences set projects_base_folder /path/to/projects
@@ -58,6 +59,9 @@ Examples:
 =======
   $ agentic-kanban preferences set projects_base_path /path/to/projects
 >>>>>>> 9e9ee57 (fix: add missing fs imports and unify projects_base_path key name)
+=======
+  $ agentic-kanban preferences set projects_base_folder /path/to/projects
+>>>>>>> a9ef19b (feat: add cli create subcommand and preferences set/get)
 `);
 
 program
@@ -149,6 +153,7 @@ program
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
   .description("Create a new git repo and register it as a project.\n\nCreates a directory under the configured projects_base_dir preference (or --path), runs 'git init', and registers the repo.\n\nUse 'pnpm cli -- register <path>' to register an existing repo instead.")
   .argument("<folder-name>", "Name of the new project folder to create")
   .option("--path <base-path>", "Base directory to create the folder in (overrides projects_base_dir preference)")
@@ -172,10 +177,16 @@ program
   .argument("<folder-name>", "Name of the new project folder to create")
   .option("--path <base-path>", "Base directory to create the folder in (overrides projects_base_path preference)")
 >>>>>>> 9e9ee57 (fix: add missing fs imports and unify projects_base_path key name)
+=======
+  .description("Create a new git repo and register it as a project.\n\nCreates a directory under the configured projects_base_folder preference (or --path), runs 'git init', and registers the repo.\n\nUse 'pnpm cli -- register <path>' to register an existing repo instead.")
+  .argument("<folder-name>", "Name of the new project folder to create")
+  .option("--path <base-path>", "Base directory to create the folder in (overrides projects_base_folder preference)")
+>>>>>>> a9ef19b (feat: add cli create subcommand and preferences set/get)
   .option("-n, --name <name>", "Custom project name (defaults to folder name)")
   .option("-b, --branch <branch>", "Initial branch name (default: main)")
   .addHelpText("after", `
 Examples:
+<<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
@@ -193,12 +204,16 @@ Examples:
 =======
   $ agentic-kanban create my-app                        # uses projects_base_path preference
 >>>>>>> 9e9ee57 (fix: add missing fs imports and unify projects_base_path key name)
+=======
+  $ agentic-kanban create my-app                        # uses projects_base_folder preference
+>>>>>>> a9ef19b (feat: add cli create subcommand and preferences set/get)
   $ agentic-kanban create my-app --path /projects       # create in /projects/my-app
   $ agentic-kanban create my-app -n "My Application"   # custom project name
   $ agentic-kanban create my-app -b master              # use 'master' as initial branch
 
 Setup:
   Set the base folder preference first:
+<<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
@@ -229,12 +244,18 @@ Setup:
       }
     };
 
+=======
+  $ agentic-kanban preferences set projects_base_folder /path/to/projects
+`)
+  .action(async (folderName: string, options: { path?: string; name?: string; branch?: string }) => {
+>>>>>>> a9ef19b (feat: add cli create subcommand and preferences set/get)
     try {
       await runMigrations();
 
       // Resolve base folder: --path flag takes precedence over preference
       let baseFolder = options.path;
       if (!baseFolder) {
+<<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
@@ -256,12 +277,16 @@ Setup:
 =======
         const pref = await db.select().from(preferences).where(eq(preferences.key, "projects_base_path")).limit(1);
 >>>>>>> 9e9ee57 (fix: add missing fs imports and unify projects_base_path key name)
+=======
+        const pref = await db.select().from(preferences).where(eq(preferences.key, "projects_base_folder")).limit(1);
+>>>>>>> a9ef19b (feat: add cli create subcommand and preferences set/get)
         if (pref.length > 0 && pref[0].value) {
           baseFolder = pref[0].value;
         }
       }
 
       if (!baseFolder) {
+<<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
@@ -333,6 +358,20 @@ Setup:
 >>>>>>> 4ff54fb (feat: add cli create subcommand and preferences set/get)
 =======
 >>>>>>> 76d53ab (fix: guard against path traversal in cli create command)
+=======
+        console.error("No base folder configured. Use --path <base-path> or set the projects_base_folder preference:");
+        console.error("  pnpm cli -- preferences set projects_base_folder /path/to/projects");
+        process.exit(1);
+      }
+
+      const { mkdir, access } = await import("node:fs/promises");
+      const { join, resolve: resolvePath } = await import("node:path");
+      const { execFile } = await import("node:child_process");
+      const { promisify } = await import("node:util");
+      const execFileAsync = promisify(execFile);
+
+      const repoPath = resolvePath(join(baseFolder, folderName));
+>>>>>>> a9ef19b (feat: add cli create subcommand and preferences set/get)
 
       // Check if directory already exists
       try {
@@ -343,6 +382,7 @@ Setup:
         // Expected: directory doesn't exist yet
       }
 
+<<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
@@ -379,6 +419,11 @@ Setup:
 
 =======
 >>>>>>> 2d6d43c (fix: add missing rmSync/writeFileSync imports in projects.ts; fix cleanupDir scope in cli create command)
+=======
+      // Create directory
+      await mkdir(repoPath, { recursive: true });
+
+>>>>>>> a9ef19b (feat: add cli create subcommand and preferences set/get)
       // Run git init
       const branch = options.branch ?? "main";
       try {
@@ -393,6 +438,7 @@ Setup:
         }
       }
 
+<<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
 =======
@@ -425,6 +471,11 @@ Setup:
 >>>>>>> 4ff54fb (feat: add cli create subcommand and preferences set/get)
 =======
 >>>>>>> a19889f (fix: resolve preference key mismatch, path traversal in skill names, and cleanup bugs)
+=======
+      // Create an initial empty commit so the repo has a HEAD
+      await execFileAsync("git", ["-C", repoPath, "commit", "--allow-empty", "-m", "Initial commit"]);
+
+>>>>>>> a9ef19b (feat: add cli create subcommand and preferences set/get)
       // Register the new repo
       const { detectRepoInfo: detectInfo } = await import("./services/git-info.service.js");
       const repoInfo = await detectInfo(repoPath);
@@ -469,12 +520,15 @@ Setup:
 
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
       dirCreated = false; // DB registration succeeded; keep the directory
 =======
 >>>>>>> 4ff54fb (feat: add cli create subcommand and preferences set/get)
 =======
       dirCreated = false; // DB registration succeeded; keep the directory
 >>>>>>> a19889f (fix: resolve preference key mismatch, path traversal in skill names, and cleanup bugs)
+=======
+>>>>>>> a9ef19b (feat: add cli create subcommand and preferences set/get)
       console.log(`Created and registered project "${projectName}"`);
       console.log(`  Path: ${repoInfo.repoPath}`);
       console.log(`  Branch: ${repoInfo.defaultBranch}`);
@@ -484,12 +538,15 @@ Setup:
     } catch (err) {
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
       await cleanupDir();
 =======
 >>>>>>> 4ff54fb (feat: add cli create subcommand and preferences set/get)
 =======
       await cleanupDir();
 >>>>>>> a19889f (fix: resolve preference key mismatch, path traversal in skill names, and cleanup bugs)
+=======
+>>>>>>> a9ef19b (feat: add cli create subcommand and preferences set/get)
       console.error("Error:", err instanceof Error ? err.message : String(err));
       process.exit(1);
     }
@@ -500,6 +557,7 @@ const prefCmd = program
   .description("Manage CLI preferences.\n\nSubcommands: get, set")
   .addHelpText("after", `
 Examples:
+<<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
@@ -522,6 +580,10 @@ Examples:
   $ agentic-kanban preferences get projects_base_path
   $ agentic-kanban preferences set projects_base_path /path/to/projects
 >>>>>>> 9e9ee57 (fix: add missing fs imports and unify projects_base_path key name)
+=======
+  $ agentic-kanban preferences get projects_base_folder
+  $ agentic-kanban preferences set projects_base_folder /path/to/projects
+>>>>>>> a9ef19b (feat: add cli create subcommand and preferences set/get)
 `);
 
 prefCmd
