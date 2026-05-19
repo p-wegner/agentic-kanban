@@ -52,7 +52,7 @@ function buildReviewArgs(prefMap: Map<string, string>): string | undefined {
   return baseArgs || undefined;
 }
 
-async function buildReviewPrompt(branch: string, baseBranch: string | null, issueId: string, autoFix: boolean, projectId?: string, conflictingFiles?: string[], uncommittedChanges?: string[]): Promise<string> {
+async function buildReviewPrompt(branch: string, baseBranch: string | null, issueId: string, autoFix: boolean, projectId?: string, conflictingFiles?: string[], uncommittedChanges?: string[], workspaceId?: string): Promise<string> {
   let template: string | null = null;
   if (projectId) {
     const projectSkill = await db.select({ prompt: agentSkills.prompt }).from(agentSkills)
@@ -261,7 +261,7 @@ export async function startServer(port?: number) {
               console.warn(`[workflow] rebase failed for workspace ${workspaceId}: ${prep.error} — reviewer will resolve conflicts`);
             }
           }
-          const reviewPrompt = await buildReviewPrompt(workspace.branch, diffRef, issueId, autoFix, projectId, conflictingFiles, uncommittedChanges);
+          const reviewPrompt = await buildReviewPrompt(workspace.branch, diffRef, issueId, autoFix, projectId, conflictingFiles, uncommittedChanges, workspaceId);
 
           try {
             await db.update(workspaces).set({ status: "reviewing", updatedAt: now }).where(eq(workspaces.id, workspaceId));
@@ -377,7 +377,7 @@ export async function startServer(port?: number) {
         }
         diffRef = prep.diffRef;
       }
-      const reviewPrompt = await buildReviewPrompt(workspace.branch, diffRef, issueId, autoFix, projectId, manualConflictingFiles, manualUncommittedChanges);
+      const reviewPrompt = await buildReviewPrompt(workspace.branch, diffRef, issueId, autoFix, projectId, manualConflictingFiles, manualUncommittedChanges, workspaceId);
 
       const now = new Date().toISOString();
       await db.update(workspaces).set({ status: "reviewing", updatedAt: now }).where(eq(workspaces.id, workspaceId));
