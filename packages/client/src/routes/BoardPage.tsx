@@ -70,6 +70,7 @@ export function BoardPage() {
   const [viewMode, setViewMode] = useState<"kanban" | "graph">("kanban");
   const [dynamicColumnScaling, setDynamicColumnScaling] = useState(false);
   const [autoMonitor, setAutoMonitor] = useState(false);
+  const [monitorLastRun, setMonitorLastRun] = useState<{ at: string; relaunched: number; merged: number; nudged: number } | null>(null);
 
   const refetchBoard = useCallback(async (projectId?: string) => {
     const pid = projectId || activeProjectId;
@@ -183,6 +184,9 @@ export function BoardPage() {
           const s = await apiFetch<Record<string, string>>("/api/preferences/settings");
           setDynamicColumnScaling(s.dynamic_column_scaling === "true");
           setAutoMonitor(s.auto_monitor === "true");
+          apiFetch<{ lastRun: typeof monitorLastRun }>("/api/internal/monitor-status")
+            .then((r) => setMonitorLastRun(r.lastRun))
+            .catch(() => {});
         } catch {
           // ignore
         }
@@ -203,6 +207,8 @@ export function BoardPage() {
         method: "PUT",
         body: JSON.stringify({ auto_monitor: String(next) }),
       });
+      const status = await apiFetch<{ lastRun: typeof monitorLastRun }>("/api/internal/monitor-status");
+      setMonitorLastRun(status.lastRun);
     } catch {
       setAutoMonitor(!next);
     }
@@ -711,7 +717,9 @@ export function BoardPage() {
           </button>
           <button
             onClick={toggleAutoMonitor}
-            title={autoMonitor ? "Auto-monitor ON — click to disable" : "Auto-monitor OFF — click to enable"}
+            title={autoMonitor
+              ? `Auto-monitor ON — click to disable${monitorLastRun ? `\nLast run: ${new Date(monitorLastRun.at).toLocaleTimeString()} · ${monitorLastRun.relaunched} relaunched, ${monitorLastRun.merged} merged, ${monitorLastRun.nudged} nudged` : ""}`
+              : `Auto-monitor OFF — click to enable${monitorLastRun ? `\nLast run: ${new Date(monitorLastRun.at).toLocaleTimeString()} · ${monitorLastRun.relaunched} relaunched, ${monitorLastRun.merged} merged, ${monitorLastRun.nudged} nudged` : ""}`}
             className={`shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium border transition-colors ${autoMonitor ? "bg-green-50 border-green-300 text-green-700 hover:bg-green-100" : "bg-white border-gray-200 text-gray-500 hover:bg-gray-50"}`}
           >
             <span className={`w-2 h-2 rounded-full ${autoMonitor ? "bg-green-500 animate-pulse" : "bg-gray-300"}`} />
