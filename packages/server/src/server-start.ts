@@ -180,7 +180,7 @@ export async function startServer(port?: number) {
         }
         boardEvents.broadcast(projectId, "issue_updated");
 
-        const autoReview = !skipAutoReview && (workspace.requiresReview ?? prefMap.get("auto_review") !== "false");
+        const autoReview = !skipAutoReview && (workspace.requiresReview || prefMap.get("auto_review") !== "false");
 
         if (autoReview) {
           const useMock = prefMap.get("mock_agent") === "true" || process.env.MOCK_AGENT === "1";
