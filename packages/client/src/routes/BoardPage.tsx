@@ -493,6 +493,19 @@ export function BoardPage() {
     }));
 
     unregisters.push(registerAction({
+      id: "create-issue-with-workspace",
+      label: "New Issue + Start Workspace",
+      shortcut: "w",
+      category: "issue",
+      handler: () => {
+        const col = filteredColumns[0] ?? columns[0];
+        if (col) {
+          setExpandedCreatePanel({ statusId: col.id, statusName: col.name, state: { startWorkspace: true } });
+        }
+      },
+    }));
+
+    unregisters.push(registerAction({
       id: "switch-project",
       label: "Switch Project",
       category: "navigation",

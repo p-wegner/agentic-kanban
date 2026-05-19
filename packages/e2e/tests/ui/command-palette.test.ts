@@ -75,6 +75,26 @@ test.describe("Command Palette", () => {
     await expect(input).not.toBeVisible({ timeout: 3000 });
   });
 
+  test("New Issue + Start Workspace opens create panel with workspace checked", async ({ page }) => {
+    await openCommandPalette(page);
+    const input = page.locator('input[placeholder="Type a command..."]');
+    await expect(input).toBeVisible({ timeout: 5000 });
+
+    await input.fill("workspace");
+
+    await expect(page.locator("text=New Issue + Start Workspace").first()).toBeVisible();
+    await page.locator("text=New Issue + Start Workspace").first().click();
+
+    // CreateIssuePanel should open
+    await expect(page.locator("text=New Issue").first()).toBeVisible({ timeout: 5000 });
+
+    // The "Start workspace" checkbox should be checked
+    const checkboxLabel = page.locator("label").filter({ hasText: /start workspace/i });
+    await expect(checkboxLabel).toBeVisible({ timeout: 3000 });
+    const checkbox = checkboxLabel.locator('input[type="checkbox"]');
+    await expect(checkbox).toBeChecked();
+  });
+
   test("click action executes it", async ({ page }) => {
     await openCommandPalette(page);
     const input = page.locator('input[placeholder="Type a command..."]');
