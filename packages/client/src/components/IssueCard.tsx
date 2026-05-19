@@ -69,7 +69,7 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
       draggable
       onDragStart={(e) => onDragStart(e, issue)}
       onClick={() => onClick(issue)}
-      className="group bg-white rounded-md shadow-sm p-3 border border-gray-200 cursor-pointer hover:shadow-md hover:border-gray-300 transition-shadow relative"
+      className="group bg-white rounded-md shadow-sm p-2 border border-gray-200 cursor-pointer hover:shadow-md hover:border-gray-300 transition-shadow relative"
     >
       <div className="flex items-start justify-between gap-2">
         <p className="text-sm text-gray-900">
@@ -84,7 +84,7 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
           <HighlightedText text={issue.description} query={searchQuery ?? ""} />
         </p>
       )}
-      <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
+      <div className="flex items-center gap-1.5 mt-1 flex-wrap">
         {issue.isBlocked && (
           <span className="inline-flex items-center gap-1 text-xs font-medium px-1.5 py-0.5 rounded bg-amber-100 text-amber-700">
             <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 16 16"><path d="M8 1a2 2 0 0 1 2 2v4H6V3a2 2 0 0 1 2-2zm3 6V3a3 3 0 0 0-6 0v4a2 2 0 0 0 2 2v2.5a.5.5 0 0 0 1 0V9a2 2 0 0 0 2-2z"/></svg>

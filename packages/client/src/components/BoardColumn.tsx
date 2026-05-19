@@ -109,7 +109,7 @@ export function BoardColumn({
   return (
     <div
       id={`column-${column.id}`}
-      className={`w-72 shrink-0 bg-gray-100 rounded-xl p-3 flex flex-col transition-all relative ${
+      className={`w-72 shrink-0 bg-gray-100 rounded-xl p-2 flex flex-col transition-all relative ${
         dragOver ? "ring-2 ring-blue-400 ring-offset-1" : ""
       }`}
       onDragEnter={handleDragEnter}
@@ -142,7 +142,7 @@ export function BoardColumn({
         <div
           ref={scrollRef}
           onScroll={updateScrollState}
-          className="space-y-2 h-full overflow-y-auto column-scroll-container"
+          className="space-y-1.5 h-full overflow-y-auto column-scroll-container"
         >
           {column.issues.map((issue: IssueWithStatus, idx: number) => (
             <div key={issue.id}>
