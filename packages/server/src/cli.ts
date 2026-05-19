@@ -41,7 +41,11 @@ Examples:
   $ agentic-kanban workspace create <issue-id>       # create a worktree for an issue
   $ agentic-kanban status                            # show board overview
   $ agentic-kanban skill list                        # list agent skills
+<<<<<<< HEAD
   $ agentic-kanban preferences set projects_base_dir /path/to/projects
+=======
+  $ agentic-kanban preferences set projects_base_folder /path/to/projects
+>>>>>>> 4ff54fb (feat: add cli create subcommand and preferences set/get)
 `);
 
 program
@@ -129,21 +133,35 @@ Examples:
 
 program
   .command("create")
+<<<<<<< HEAD
   .description("Create a new git repo and register it as a project.\n\nCreates a directory under the configured projects_base_dir preference (or --path), runs 'git init', and registers the repo.\n\nUse 'pnpm cli -- register <path>' to register an existing repo instead.")
   .argument("<folder-name>", "Name of the new project folder to create")
   .option("--path <base-path>", "Base directory to create the folder in (overrides projects_base_dir preference)")
+=======
+  .description("Create a new git repo and register it as a project.\n\nCreates a directory under the configured projects_base_folder preference (or --path), runs 'git init', and registers the repo.\n\nUse 'pnpm cli -- register <path>' to register an existing repo instead.")
+  .argument("<folder-name>", "Name of the new project folder to create")
+  .option("--path <base-path>", "Base directory to create the folder in (overrides projects_base_folder preference)")
+>>>>>>> 4ff54fb (feat: add cli create subcommand and preferences set/get)
   .option("-n, --name <name>", "Custom project name (defaults to folder name)")
   .option("-b, --branch <branch>", "Initial branch name (default: main)")
   .addHelpText("after", `
 Examples:
+<<<<<<< HEAD
   $ agentic-kanban create my-app                        # uses projects_base_dir preference
+=======
+  $ agentic-kanban create my-app                        # uses projects_base_folder preference
+>>>>>>> 4ff54fb (feat: add cli create subcommand and preferences set/get)
   $ agentic-kanban create my-app --path /projects       # create in /projects/my-app
   $ agentic-kanban create my-app -n "My Application"   # custom project name
   $ agentic-kanban create my-app -b master              # use 'master' as initial branch
 
 Setup:
   Set the base folder preference first:
+<<<<<<< HEAD
   $ agentic-kanban preferences set projects_base_dir /path/to/projects
+=======
+  $ agentic-kanban preferences set projects_base_folder /path/to/projects
+>>>>>>> 4ff54fb (feat: add cli create subcommand and preferences set/get)
 `)
   .action(async (folderName: string, options: { path?: string; name?: string; branch?: string }) => {
     try {
@@ -152,13 +170,18 @@ Setup:
       // Resolve base folder: --path flag takes precedence over preference
       let baseFolder = options.path;
       if (!baseFolder) {
+<<<<<<< HEAD
         const pref = await db.select().from(preferences).where(eq(preferences.key, "projects_base_dir")).limit(1);
+=======
+        const pref = await db.select().from(preferences).where(eq(preferences.key, "projects_base_folder")).limit(1);
+>>>>>>> 4ff54fb (feat: add cli create subcommand and preferences set/get)
         if (pref.length > 0 && pref[0].value) {
           baseFolder = pref[0].value;
         }
       }
 
       if (!baseFolder) {
+<<<<<<< HEAD
         console.error("No base folder configured. Use --path <base-path> or set the projects_base_dir preference:");
         console.error("  pnpm cli -- preferences set projects_base_dir /path/to/projects");
         process.exit(1);
@@ -166,10 +189,20 @@ Setup:
 
       const { mkdir, access, rm } = await import("node:fs/promises");
       const { join, resolve: resolvePath, sep } = await import("node:path");
+=======
+        console.error("No base folder configured. Use --path <base-path> or set the projects_base_folder preference:");
+        console.error("  pnpm cli -- preferences set projects_base_folder /path/to/projects");
+        process.exit(1);
+      }
+
+      const { mkdir, access } = await import("node:fs/promises");
+      const { join, resolve: resolvePath } = await import("node:path");
+>>>>>>> 4ff54fb (feat: add cli create subcommand and preferences set/get)
       const { execFile } = await import("node:child_process");
       const { promisify } = await import("node:util");
       const execFileAsync = promisify(execFile);
 
+<<<<<<< HEAD
       const resolvedBase = resolvePath(baseFolder);
       const repoPath = resolvePath(join(resolvedBase, folderName));
 
@@ -178,6 +211,9 @@ Setup:
         console.error(`Invalid folder name: "${folderName}" escapes the base directory.`);
         process.exit(1);
       }
+=======
+      const repoPath = resolvePath(join(baseFolder, folderName));
+>>>>>>> 4ff54fb (feat: add cli create subcommand and preferences set/get)
 
       // Check if directory already exists
       try {
@@ -188,6 +224,7 @@ Setup:
         // Expected: directory doesn't exist yet
       }
 
+<<<<<<< HEAD
       // Create directory â€” track so we can clean up on failure
       await mkdir(repoPath, { recursive: true });
       let dirCreated = true;
@@ -197,6 +234,10 @@ Setup:
           try { await rm(repoPath, { recursive: true, force: true }); } catch { /* best-effort */ }
         }
       };
+=======
+      // Create directory
+      await mkdir(repoPath, { recursive: true });
+>>>>>>> 4ff54fb (feat: add cli create subcommand and preferences set/get)
 
       // Run git init
       const branch = options.branch ?? "main";
@@ -212,6 +253,7 @@ Setup:
         }
       }
 
+<<<<<<< HEAD
       // Create an initial empty commit so the repo has a HEAD.
       // git commit requires user.name/email to be configured; give a clear error if not.
       try {
@@ -228,6 +270,11 @@ Setup:
         }
         process.exit(1);
       }
+=======
+      // Create an initial empty commit so the repo has a HEAD
+      await execFileAsync("git", ["-C", repoPath, "commit", "--allow-empty", "-m", "Initial commit"]);
+
+>>>>>>> 4ff54fb (feat: add cli create subcommand and preferences set/get)
       // Register the new repo
       const { detectRepoInfo: detectInfo } = await import("./services/git-info.service.js");
       const repoInfo = await detectInfo(repoPath);
@@ -270,7 +317,10 @@ Setup:
         .values({ key: "activeProjectId", value: projectId, updatedAt: now })
         .onConflictDoUpdate({ target: preferences.key, set: { value: projectId, updatedAt: now } });
 
+<<<<<<< HEAD
       dirCreated = false; // DB registration succeeded; keep the directory
+=======
+>>>>>>> 4ff54fb (feat: add cli create subcommand and preferences set/get)
       console.log(`Created and registered project "${projectName}"`);
       console.log(`  Path: ${repoInfo.repoPath}`);
       console.log(`  Branch: ${repoInfo.defaultBranch}`);
@@ -278,7 +328,10 @@ Setup:
       console.log(`  Set as active project.`);
       process.exit(0);
     } catch (err) {
+<<<<<<< HEAD
       await cleanupDir();
+=======
+>>>>>>> 4ff54fb (feat: add cli create subcommand and preferences set/get)
       console.error("Error:", err instanceof Error ? err.message : String(err));
       process.exit(1);
     }
@@ -289,8 +342,13 @@ const prefCmd = program
   .description("Manage CLI preferences.\n\nSubcommands: get, set")
   .addHelpText("after", `
 Examples:
+<<<<<<< HEAD
   $ agentic-kanban preferences get projects_base_dir
   $ agentic-kanban preferences set projects_base_dir /path/to/projects
+=======
+  $ agentic-kanban preferences get projects_base_folder
+  $ agentic-kanban preferences set projects_base_folder /path/to/projects
+>>>>>>> 4ff54fb (feat: add cli create subcommand and preferences set/get)
 `);
 
 prefCmd
