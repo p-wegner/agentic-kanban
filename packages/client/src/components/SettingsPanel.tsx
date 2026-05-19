@@ -549,7 +549,7 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
 
               {/* UI tab */}
               {tab === "ui" && (
-                <Field label="Output Parsing" hint={`When enabled, the terminal view parses Claude's stream-json output and displays structured info. "Minimal" shows a compact activity timeline.`}>
+                <Field label="Output Parsing" hint={`When enabled, the terminal view parses structured agent output and displays it with syntax highlighting. "Minimal" shows a compact activity timeline.`}>
                   <select
                     value={settings.output_parser || "true"}
                     onChange={(e) => set("output_parser")(e.target.value)}

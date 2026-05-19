@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import type { AgentOutputMessage } from "@agentic-kanban/shared";
-import { createAgentOutputParser, type DisplayEvent } from "../lib/agent-output-parser.js";
+import { createAgentOutputParser, type AgentOutputFormat, type DisplayEvent } from "../lib/agent-output-parser.js";
 
 interface TerminalViewProps {
   messages: AgentOutputMessage[];
   connectionState: "connecting" | "open" | "closed" | "error";
   parseOutput?: "true" | "false" | "minimal";
+  outputFormat?: AgentOutputFormat;
   prompt?: string;
   title?: string;
   footer?: ReactNode;
@@ -79,7 +80,7 @@ function summarizeToolCall(name: string, input: Record<string, unknown>): string
   }
 }
 
-export function TerminalView({ messages, connectionState, parseOutput = "true", prompt, title, footer, multiTurn }: TerminalViewProps) {
+export function TerminalView({ messages, connectionState, parseOutput = "true", outputFormat = "claude-stream-json", prompt, title, footer, multiTurn }: TerminalViewProps) {
   const [isMaximized, setIsMaximized] = useState(false);
   const preRef = useRef<HTMLPreElement>(null);
   const [displayEvents, setDisplayEvents] = useState<DisplayEvent[]>([]);
@@ -111,7 +112,7 @@ export function TerminalView({ messages, connectionState, parseOutput = "true", 
       return;
     }
 
-    const parser = createAgentOutputParser("claude-stream-json");
+    const parser = createAgentOutputParser(outputFormat);
     const events: DisplayEvent[] = [];
 
     for (const msg of messages) {
@@ -131,7 +132,7 @@ export function TerminalView({ messages, connectionState, parseOutput = "true", 
     events.push(...parser.flush());
     setDisplayEvents(events);
     setExpandedSections(new Set());
-  }, [messages, parseOutput]);
+  }, [messages, parseOutput, outputFormat]);
 
   // Smart autoscroll: only scroll when user is at bottom
   useEffect(() => {

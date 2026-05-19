@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createAgentOutputParser, RawOutputParser } from "./agent-output-parser.js";
+import { createAgentOutputParser, getOutputFormatForAgent, RawOutputParser } from "./agent-output-parser.js";
 
 describe("agent output parser factory", () => {
   it("creates the Claude stream-json parser by default", () => {
@@ -22,5 +22,40 @@ describe("agent output parser factory", () => {
     expect(parser.feed("hel")).toEqual([]);
     expect(parser.feed("lo\nnext")).toEqual([{ kind: "raw", text: "hello" }]);
     expect(parser.flush()).toEqual([{ kind: "raw", text: "next" }]);
+  });
+});
+
+describe("getOutputFormatForAgent", () => {
+  it("returns claude-stream-json for undefined (default agent)", () => {
+    expect(getOutputFormatForAgent()).toBe("claude-stream-json");
+  });
+
+  it("returns claude-stream-json for empty string", () => {
+    expect(getOutputFormatForAgent("")).toBe("claude-stream-json");
+  });
+
+  it("returns claude-stream-json for claude command", () => {
+    expect(getOutputFormatForAgent("claude")).toBe("claude-stream-json");
+    expect(getOutputFormatForAgent("claude.exe")).toBe("claude-stream-json");
+  });
+
+  it("returns claude-stream-json for full claude path", () => {
+    expect(getOutputFormatForAgent("C:\\Users\\test\\.claude\\local\\claude.exe")).toBe("claude-stream-json");
+    expect(getOutputFormatForAgent("/usr/local/bin/claude")).toBe("claude-stream-json");
+  });
+
+  it("returns claude-stream-json for mock-agent", () => {
+    expect(getOutputFormatForAgent("node mock-agent.ts")).toBe("claude-stream-json");
+    expect(getOutputFormatForAgent("/some/path/mock-agent-foo")).toBe("claude-stream-json");
+  });
+
+  it("returns raw for codex command", () => {
+    expect(getOutputFormatForAgent("codex")).toBe("raw");
+  });
+
+  it("returns raw for other agent commands", () => {
+    expect(getOutputFormatForAgent("aider")).toBe("raw");
+    expect(getOutputFormatForAgent("custom-agent")).toBe("raw");
+    expect(getOutputFormatForAgent("/usr/bin/python3 agent.py")).toBe("raw");
   });
 });
