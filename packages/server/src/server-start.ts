@@ -476,18 +476,34 @@ export async function startServer(port?: number) {
             cycleStats.merged++;
             console.log(`[monitor] Triggered merge for reviewing workspace ${ws.wsId}`);
             boardEvents.broadcast(ws.projectId, "board_changed");
+          } else if (ws.wsStatus === "active" && sess && sess.status === "stopped") {
+            // Active workspace but session has stopped — agent exited without transitioning workspace.
+            // Mark workspace as idle so the next cycle will relaunch it.
+            await db.update(workspaces).set({ status: "idle" }).where(eq(workspaces.id, ws.wsId)).catch(() => {});
+            console.log(`[monitor] Active workspace ${ws.wsId} has stopped session — marking idle for relaunch`);
+            boardEvents.broadcast(ws.projectId, "board_changed");
           } else if (ws.wsStatus === "active" && sess && sess.status === "running") {
-            // Check if agent is waiting for input (running > 5min without activity)
-            const runningMs = Date.now() - new Date(sess.startedAt).getTime();
-            if (runningMs > 5 * 60 * 1000) {
-              const baseUrl = `http://localhost:${serverPort}`;
-              await fetch(`${baseUrl}/api/workspaces/${ws.wsId}/turn`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ message: "Please continue with the task. If you are waiting for input, proceed with your best judgment." }),
-              }).catch(() => {});
-              cycleStats.nudged++;
-              console.log(`[monitor] Nudged long-running agent in workspace ${ws.wsId}`);
+            // Check if process is actually alive; if not, mark idle
+            const isAlive = sessionManager.isProcessAlive(sess.id);
+            if (!isAlive) {
+              // Process died without updating DB — treat as stopped
+              await db.update(workspaces).set({ status: "idle" }).where(eq(workspaces.id, ws.wsId)).catch(() => {});
+              await db.update(sessions).set({ status: "stopped", endedAt: new Date().toISOString() }).where(eq(sessions.id, sess.id)).catch(() => {});
+              console.log(`[monitor] Workspace ${ws.wsId} process dead — marking idle`);
+              boardEvents.broadcast(ws.projectId, "board_changed");
+            } else {
+              // Check if agent is waiting for input (running > 5min without activity)
+              const runningMs = Date.now() - new Date(sess.startedAt).getTime();
+              if (runningMs > 5 * 60 * 1000) {
+                const baseUrl = `http://localhost:${serverPort}`;
+                await fetch(`${baseUrl}/api/workspaces/${ws.wsId}/turn`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ message: "Please continue with the task. If you are waiting for input, proceed with your best judgment." }),
+                }).catch(() => {});
+                cycleStats.nudged++;
+                console.log(`[monitor] Nudged long-running agent in workspace ${ws.wsId}`);
+              }
             }
           }
         } catch (err) {
