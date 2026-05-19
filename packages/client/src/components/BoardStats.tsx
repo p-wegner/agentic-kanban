@@ -35,6 +35,15 @@ export function BoardStats({
   const totalArchive = archiveColumns.reduce((sum, col) => sum + col.issues.length, 0);
   const total = totalActive + totalArchive;
 
+  // Profile usage counts across active columns (In Progress, In Review, AI Reviewed)
+  const profileCounts = new Map<string, number>();
+  for (const col of activeColumns) {
+    for (const issue of col.issues) {
+      const profile = (issue as any).workspaceSummary?.main?.claudeProfile;
+      if (profile) profileCounts.set(profile, (profileCounts.get(profile) ?? 0) + 1);
+    }
+  }
+
   const [prevTotal, setPrevTotal] = useState(total);
   const [popKey, setPopKey] = useState(0);
   const firstRender = useRef(true);
@@ -94,6 +103,21 @@ export function BoardStats({
             <span className="text-gray-400">
               {totalArchive} done
             </span>
+          </div>
+        </>
+      )}
+
+      {profileCounts.size > 0 && (
+        <>
+          <div className="h-3 w-px bg-gray-200" />
+          <div className="flex items-center gap-2" title="Active workspaces by profile">
+            {[...profileCounts.entries()].map(([profile, count]) => (
+              <div key={profile} className="flex items-center gap-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-indigo-400" />
+                <span className="text-gray-500 hidden sm:inline">{profile}</span>
+                <span className="text-gray-400 font-medium">{count}</span>
+              </div>
+            ))}
           </div>
         </>
       )}
