@@ -164,7 +164,7 @@ Setup:
         process.exit(1);
       }
 
-      const { mkdir, access } = await import("node:fs/promises");
+      const { mkdir, access, rm } = await import("node:fs/promises");
       const { join, resolve: resolvePath } = await import("node:path");
       const { execFile } = await import("node:child_process");
       const { promisify } = await import("node:util");
@@ -181,8 +181,15 @@ Setup:
         // Expected: directory doesn't exist yet
       }
 
-      // Create directory
+      // Create directory — track so we can clean up on failure
       await mkdir(repoPath, { recursive: true });
+      let dirCreated = true;
+
+      const cleanupDir = async () => {
+        if (dirCreated) {
+          try { await rm(repoPath, { recursive: true, force: true }); } catch { /* best-effort */ }
+        }
+      };
 
       // Run git init
       const branch = options.branch ?? "main";
@@ -198,8 +205,23 @@ Setup:
         }
       }
 
-      // Create an initial empty commit so the repo has a HEAD
-      await execFileAsync("git", ["-C", repoPath, "commit", "--allow-empty", "-m", "Initial commit"]);
+      // Create an initial empty commit so the repo has a HEAD.
+      // git commit requires user.name/email to be configured; give a clear error if not.
+      try {
+        await execFileAsync("git", ["-C", repoPath, "commit", "--allow-empty", "-m", "Initial commit"]);
+      } catch (commitErr) {
+        await cleanupDir();
+        const msg = commitErr instanceof Error ? commitErr.message : String(commitErr);
+        if (msg.includes("Please tell me who you are") || msg.includes("user.email") || msg.includes("user.name")) {
+          console.error("git commit failed: git user identity not configured.");
+          console.error("  Run: git config --global user.email \"you@example.com\"");
+          console.error("       git config --global user.name \"Your Name\"");
+        } else {
+          console.error("git commit failed:", msg);
+        }
+        process.exit(1);
+      }
+      dirCreated = false; // repo is now fully initialized; don't clean up on later errors
 
       // Register the new repo
       const { detectRepoInfo: detectInfo } = await import("./services/git-info.service.js");
