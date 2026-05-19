@@ -504,7 +504,7 @@ function createSessionManager(
     return turnStates.get(sessionId);
   }
 
-  return { startSession, stopSession, sendTurn, getTurnState, subscribe, unsubscribe, wsRoute };
+  return { startSession, stopSession, sendTurn, getTurnState, subscribe, unsubscribe, wsRoute, isProcessAlive };
 }
 
 export { createSessionManager };

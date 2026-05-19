@@ -715,16 +715,14 @@ export function BoardPage() {
             </svg>
             Tasks
           </button>
-          <button
-            onClick={toggleAutoMonitor}
-            title={autoMonitor
-              ? `Auto-monitor ON — click to disable${monitorLastRun ? `\nLast run: ${new Date(monitorLastRun.at).toLocaleTimeString()} · ${monitorLastRun.relaunched} relaunched, ${monitorLastRun.merged} merged, ${monitorLastRun.nudged} nudged` : ""}`
-              : `Auto-monitor OFF — click to enable${monitorLastRun ? `\nLast run: ${new Date(monitorLastRun.at).toLocaleTimeString()} · ${monitorLastRun.relaunched} relaunched, ${monitorLastRun.merged} merged, ${monitorLastRun.nudged} nudged` : ""}`}
-            className={`shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium border transition-colors ${autoMonitor ? "bg-green-50 border-green-300 text-green-700 hover:bg-green-100" : "bg-white border-gray-200 text-gray-500 hover:bg-gray-50"}`}
-          >
-            <span className={`w-2 h-2 rounded-full ${autoMonitor ? "bg-green-500 animate-pulse" : "bg-gray-300"}`} />
-            Monitor
-          </button>
+          {autoMonitor && (
+            <div
+              title={`Auto-monitor active${monitorLastRun ? ` · Last run: ${new Date(monitorLastRun.at).toLocaleTimeString()} · ${monitorLastRun.relaunched} relaunched, ${monitorLastRun.merged} merged, ${monitorLastRun.nudged} nudged` : ""} · Configure in Settings → Agent`}
+              className="shrink-0 flex items-center gap-1.5 px-2 py-1 rounded text-xs text-green-700"
+            >
+              <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+            </div>
+          )}
           <div className="flex items-center gap-1 border border-gray-200 rounded-md p-0.5 bg-white shrink-0">
             <button
               onClick={() => setViewMode("kanban")}
