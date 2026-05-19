@@ -695,6 +695,7 @@ export function BoardPage() {
             archiveColumns={archiveColumns}
             searchQuery={searchQuery}
             priorityFilter={priorityFilter}
+            projectId={activeProjectId}
           />
           <button
             onClick={toggleAutoMonitor}
