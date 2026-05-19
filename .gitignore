@@ -13,6 +13,7 @@ playwright-report/
 blob-report/
 coverage/
 .claude/hooks/.edited-files.json
+.claude/hooks/.smart-hooks-state.json
 .claude/worktrees/
 packages/.worktrees/
 packages/desktop/src-tauri/gen/
