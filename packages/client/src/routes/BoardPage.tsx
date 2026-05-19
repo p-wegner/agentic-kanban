@@ -482,10 +482,11 @@ export function BoardPage() {
     unregisters.push(registerAction({
       id: "create-issue",
       label: "Create Issue",
+      description: "Add a new issue to the board",
+      icon: "+",
       shortcut: "c",
       category: "issue",
       handler: () => {
-        // Open create form in the first column (Todo)
         if (filteredColumns.length > 0) {
           setCreatingInColumnId(filteredColumns[0].id);
         }
@@ -495,9 +496,10 @@ export function BoardPage() {
     unregisters.push(registerAction({
       id: "switch-project",
       label: "Switch Project",
+      description: "Change the active project",
+      icon: "⇄",
       category: "navigation",
       handler: () => {
-        // Click the project switcher dropdown
         document.querySelector<HTMLButtonElement>("[data-project-switcher]")?.click();
       },
     }));
@@ -505,6 +507,8 @@ export function BoardPage() {
     unregisters.push(registerAction({
       id: "open-settings",
       label: "Open Settings",
+      description: "Configure agent, preferences, and project settings",
+      icon: "⚙",
       category: "settings",
       handler: () => setShowSettings(true),
     }));
@@ -512,6 +516,8 @@ export function BoardPage() {
     unregisters.push(registerAction({
       id: "view-worktrees",
       label: "View Worktrees",
+      description: "Inspect git worktrees and their diff stats",
+      icon: "⎇",
       category: "navigation",
       handler: () => setShowWorktreeOverview(true),
     }));
@@ -519,9 +525,21 @@ export function BoardPage() {
     unregisters.push(registerAction({
       id: "search-issues",
       label: "Search Issues",
+      description: "Filter issues by text or keyword",
+      icon: "⌕",
       shortcut: "/",
       category: "board",
       handler: () => document.getElementById("search-input")?.focus(),
+    }));
+
+    unregisters.push(registerAction({
+      id: "show-shortcuts",
+      label: "Keyboard Shortcuts",
+      description: "View all available keyboard shortcuts",
+      icon: "?",
+      shortcut: "?",
+      category: "settings",
+      handler: () => setShowShortcutHelp(true),
     }));
 
     // Register "Go to: [column]" for each column
@@ -529,6 +547,7 @@ export function BoardPage() {
       unregisters.push(registerAction({
         id: `goto-${col.id}`,
         label: `Go to: ${col.name}`,
+        description: `Scroll to the ${col.name} column`,
         category: "navigation",
         handler: () => {
           const el = document.getElementById(`column-${col.id}`);
