@@ -1,0 +1,19 @@
+{
+  "editedFiles": [
+    "packages/client/src/lib/agent-output-parser.ts",
+    "packages/client/src/components/TerminalView.tsx",
+    "packages/client/src/components/WorkspacePanel.tsx",
+    "packages/shared/src/types/api.ts",
+    "packages/client/src/lib/agent-output-parser.test.ts",
+    "packages/client/src/components/SettingsPanel.tsx",
+    "packages/server/src/services/git.service.ts",
+    "packages/server/src/server-start.ts",
+    "packages/shared/drizzle/0025_ready_for_merge.sql",
+    "packages/shared/drizzle/meta/_journal.json",
+    "packages/shared/src/schema/workspaces.ts",
+    "packages/server/src/routes/workspaces.ts",
+    "packages/mcp-server/src/tools/mark-ready-for-merge.ts",
+    "packages/mcp-server/src/index.ts",
+    "packages/shared/src/lib/mcp-tool-definitions.ts"
+  ]
+}

@@ -318,6 +318,25 @@ export function createWorkspacesRoute(
     return c.json({ id });
   });
 
+  // POST /api/workspaces/:id/ready-for-merge — mark workspace as reviewed and ready to merge
+  router.post("/:id/ready-for-merge", async (c) => {
+    const id = c.req.param("id");
+    const wsRows = await database.select({ issueId: workspaces.issueId }).from(workspaces).where(eq(workspaces.id, id)).limit(1);
+    if (wsRows.length === 0) return c.json({ error: "Workspace not found" }, 404);
+
+    const now = new Date().toISOString();
+    await database.update(workspaces).set({ readyForMerge: true, updatedAt: now }).where(eq(workspaces.id, id));
+
+    if (options?.boardEvents) {
+      const issueRows = await database.select({ projectId: issues.projectId }).from(issues).where(eq(issues.id, wsRows[0].issueId)).limit(1);
+      if (issueRows.length > 0) {
+        options.boardEvents.broadcast(issueRows[0].projectId, "workspace_ready_for_merge");
+      }
+    }
+
+    return c.json({ id, readyForMerge: true });
+  });
+
   // DELETE /api/workspaces/:id — cascade delete sessions and their messages
   router.delete("/:id", async (c) => {
     const id = c.req.param("id");

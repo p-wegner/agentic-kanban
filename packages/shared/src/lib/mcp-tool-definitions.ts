@@ -42,6 +42,7 @@ export const MCP_TOOL_DEFINITIONS: McpToolDefinition[] = [
   { name: "get_workspace_diff", description: "Get the git diff for a workspace's working directory", category: "workspaces" },
   { name: "merge_workspace", description: "Merge a workspace branch into the project's default branch, close the workspace, and auto-transition the issue", category: "workspaces" },
   { name: "close_workspace", description: "Close a workspace without merging. For direct workspaces or abandoned work.", category: "workspaces" },
+  { name: "mark_ready_for_merge", description: "Mark a workspace as reviewed and ready to merge. Call after a successful code review with no critical/major issues.", category: "workspaces" },
   { name: "stop_workspace", description: "Stop any running agent session for a workspace", category: "workspaces" },
   { name: "delete_workspace", description: "Delete a workspace and all its sessions, messages, and diff comments", category: "workspaces" },
   // sessions
