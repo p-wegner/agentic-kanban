@@ -32,3 +32,47 @@ html, body {
 .animate-slide-in-left {
   animation: slide-in-left 0.2s ease-out;
 }
+
+/* Board column scroll fade */
+.column-scroll-container {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0, 0, 0, 0.12) transparent;
+}
+
+.column-scroll-container::-webkit-scrollbar {
+  width: 4px;
+}
+
+.column-scroll-container::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.column-scroll-container::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.12);
+  border-radius: 2px;
+}
+
+.column-scroll-container::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.25);
+}
+
+/* Stats pill animated count */
+@keyframes count-pop {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.2); }
+  100% { transform: scale(1); }
+}
+
+.count-pop {
+  animation: count-pop 0.3s ease-out;
+}
+
+/* Horizontal scroll snap for active columns */
+.board-columns-scroll {
+  scroll-snap-type: x mandatory;
+  -webkit-overflow-scrolling: touch;
+}
+
+.board-columns-scroll > * {
+  scroll-snap-align: start;
+}
