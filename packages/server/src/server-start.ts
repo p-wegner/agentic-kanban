@@ -126,7 +126,7 @@ Steps to resolve:
     .replace(/\{\{branch}}/g, branch)
     .replace(/\{\{baseBranch}}/g, baseBranch ?? "HEAD")
     .replace(/\{\{issueId}}/g, issueId)
-    .replace(/\{\{workspaceId}}/g, workspaceId)
+    .replace(/\{\{workspaceId}}/g, workspaceId ?? "")
     .replace(/\{\{autoFixInstructions}}/g, autoFixInstructions);
 }
 
