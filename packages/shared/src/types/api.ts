@@ -55,6 +55,7 @@ export interface MainWorkspaceInfo {
   id: string;
   branch: string;
   status: "active" | "reviewing" | "idle" | "closed";
+  readyForMerge?: boolean;
   claudeProfile?: string | null;
   agentCommand?: string | null;
   diffStats?: { filesChanged: number; insertions: number; deletions: number } | null;
@@ -120,6 +121,7 @@ export interface WorkspaceResponse {
   baseBranch: string | null;
   isDirect: boolean;
   planMode: boolean;
+  readyForMerge: boolean;
   agentCommand?: string | null;
   sessionId?: string;
   createdAt: string;

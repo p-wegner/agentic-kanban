@@ -39,7 +39,8 @@ Classify each issue as CRITICAL (must fix — bugs, security, data loss), MAJOR 
 
 Do NOT move the issue to 'AI Reviewed' yourself — the system handles that on merge.
 
-Issue ID: {{issueId}}`;
+Issue ID: {{issueId}}
+Workspace ID: {{workspaceId}}`;
 
 function buildReviewArgs(prefMap: Map<string, string>): string | undefined {
   const skipPerms = prefMap.get("skip_permissions") === "true";
@@ -50,7 +51,7 @@ function buildReviewArgs(prefMap: Map<string, string>): string | undefined {
   return baseArgs || undefined;
 }
 
-async function buildReviewPrompt(branch: string, baseBranch: string | null, issueId: string, autoFix: boolean, projectId?: string, conflictingFiles?: string[]): Promise<string> {
+async function buildReviewPrompt(branch: string, baseBranch: string | null, issueId: string, workspaceId: string, autoFix: boolean, projectId?: string, conflictingFiles?: string[]): Promise<string> {
   let template: string | null = null;
   if (projectId) {
     const projectSkill = await db.select({ prompt: agentSkills.prompt }).from(agentSkills)
@@ -70,13 +71,17 @@ async function buildReviewPrompt(branch: string, baseBranch: string | null, issu
 3. Commit the fixes with a descriptive message
 4. Exit normally (the system will handle merging)
 
-If only MINOR issues or no issues: just exit normally (the system will auto-merge).`
+If only MINOR issues or no issues:
+1. Use the mark_ready_for_merge MCP tool with workspaceId={{workspaceId}} to signal the workspace is approved
+2. Exit normally (the system will auto-merge)`
     : `If you find CRITICAL or MAJOR issues:
 1. Use the move_issue MCP tool to move issue ${issueId} to 'In Progress'
 2. Describe each issue clearly so the developer knows what to fix
 3. Do NOT edit any files — report only
 
-If only MINOR issues or no issues: just exit normally (the system will auto-merge).`;
+If only MINOR issues or no issues:
+1. Use the mark_ready_for_merge MCP tool with workspaceId={{workspaceId}} to signal the workspace is approved
+2. Exit normally (the system will auto-merge)`;
 
   let conflictPreamble = "";
   if (conflictingFiles && conflictingFiles.length > 0) {
@@ -102,6 +107,7 @@ Steps to resolve:
     .replace(/\{\{branch}}/g, branch)
     .replace(/\{\{baseBranch}}/g, baseBranch ?? "HEAD")
     .replace(/\{\{issueId}}/g, issueId)
+    .replace(/\{\{workspaceId}}/g, workspaceId)
     .replace(/\{\{autoFixInstructions}}/g, autoFixInstructions);
 }
 
@@ -220,7 +226,7 @@ export async function startServer(port?: number) {
               console.warn(`[workflow] rebase failed for workspace ${workspaceId}: ${prep.error} — reviewer will resolve conflicts`);
             }
           }
-          const reviewPrompt = await buildReviewPrompt(workspace.branch, diffRef, issueId, autoFix, projectId, conflictingFiles);
+          const reviewPrompt = await buildReviewPrompt(workspace.branch, diffRef, issueId, workspaceId, autoFix, projectId, conflictingFiles);
 
           try {
             await db.update(workspaces).set({ status: "reviewing", updatedAt: now }).where(eq(workspaces.id, workspaceId));
@@ -331,7 +337,7 @@ export async function startServer(port?: number) {
         }
         diffRef = prep.diffRef;
       }
-      const reviewPrompt = await buildReviewPrompt(workspace.branch, diffRef, issueId, autoFix, projectId);
+      const reviewPrompt = await buildReviewPrompt(workspace.branch, diffRef, issueId, workspaceId, autoFix, projectId);
 
       const now = new Date().toISOString();
       await db.update(workspaces).set({ status: "reviewing", updatedAt: now }).where(eq(workspaces.id, workspaceId));
