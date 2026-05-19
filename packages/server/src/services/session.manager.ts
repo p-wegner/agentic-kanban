@@ -241,6 +241,7 @@ function createSessionManager(
     permissionPromptTool?: string,
     planMode?: boolean,
     resumeWithNewModel?: boolean,
+    provider?: import("./agent-provider.js").ProviderId,
   ) {
     // Look up workspace to get workingDir
     const wsRows = await db
@@ -266,22 +267,22 @@ function createSessionManager(
       .limit(1);
     const projectId = issueRows.length > 0 ? issueRows[0].projectId : "";
 
-    // If resuming, look up the previous session's claudeSessionId
-    let claudeSessionId: string | undefined;
+    // If resuming, look up the previous session's providerSessionId
+    let providerSessionId: string | undefined;
     if (resumeFromId) {
       const prevRows = await db
-        .select({ claudeSessionId: sessions.claudeSessionId })
+        .select({ providerSessionId: sessions.providerSessionId })
         .from(sessions)
         .where(eq(sessions.id, resumeFromId))
         .limit(1);
-      if (prevRows.length > 0 && prevRows[0].claudeSessionId) {
-        // Skip non-UUID session IDs (e.g. mock agent "mock-session-xxx")
-        const sid = prevRows[0].claudeSessionId;
-        if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(sid)) {
-          claudeSessionId = sid;
-          console.log(`[session] resuming: resumeFromId=${resumeFromId} claudeSessionId=${claudeSessionId}`);
+      if (prevRows.length > 0 && prevRows[0].providerSessionId) {
+        // Skip mock agent session IDs (e.g. "mock-session-xxx") — they are not resumable
+        const sid = prevRows[0].providerSessionId;
+        if (!sid.startsWith("mock-session-")) {
+          providerSessionId = sid;
+          console.log(`[session] resuming: resumeFromId=${resumeFromId} providerSessionId=${providerSessionId}`);
         } else {
-          console.log(`[session] skipping resume: claudeSessionId=${sid} is not a valid UUID`);
+          console.log(`[session] skipping resume: providerSessionId=${sid} is a mock session ID`);
         }
       }
     }
@@ -296,10 +297,11 @@ function createSessionManager(
       turnStates.set(sessionId, "processing");
     }
 
+    const executor = provider ?? "claude-code";
     await db.insert(sessions).values({
       id: sessionId,
       workspaceId,
-      executor: "claude-code",
+      executor,
       status: "running",
       startedAt: now,
       endedAt: null,
@@ -335,7 +337,7 @@ function createSessionManager(
           options?.onSessionExit?.(workspaceId, sessionId, exitCode);
         }
       // When resumeWithNewModel is true, omit --resume so the new profile/provider is used instead
-      }, resumeWithNewModel ? undefined : claudeSessionId, agentCommand, claudeProfile, multiTurn, permissionPromptTool, planMode);
+      }, resumeWithNewModel ? undefined : providerSessionId, agentCommand, claudeProfile, multiTurn, permissionPromptTool, planMode, provider);
     } catch (err) {
       throw err;
     }

@@ -176,6 +176,13 @@
       "when": 1779352000000,
       "tag": "0024_setup_enabled",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "6",
+      "when": 1779438400000,
+      "tag": "0025_provider_session_id",
+      "breakpoints": true
     }
   ]
 }

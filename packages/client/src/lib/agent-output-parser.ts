@@ -1,8 +1,9 @@
 import { ClaudeOutputParser, type DisplayEvent } from "./claude-output-parser.js";
+import { CodexOutputParser } from "./codex-output-parser.js";
 
 export type { DisplayEvent } from "./claude-output-parser.js";
 
-export type AgentOutputFormat = "claude-stream-json" | "raw";
+export type AgentOutputFormat = "claude-stream-json" | "codex-jsonl" | "raw";
 
 export interface AgentOutputParser {
   readonly format: AgentOutputFormat;
@@ -54,6 +55,8 @@ export function createAgentOutputParser(format: AgentOutputFormat = "claude-stre
   switch (format) {
     case "raw":
       return new RawOutputParser();
+    case "codex-jsonl":
+      return new CodexOutputParser();
     case "claude-stream-json":
     default:
       return new ClaudeOutputParser();

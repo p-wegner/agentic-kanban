@@ -179,7 +179,7 @@ test.describe("Mock agent profiles", () => {
     });
   });
 
-  test("UUID session_id gets stored as claudeSessionId", async ({
+  test("UUID session_id gets stored as providerSessionId", async ({
     request,
   }) => {
     const { workspaceId } = await createWorkspaceWithSetup(
@@ -203,7 +203,7 @@ test.describe("Mock agent profiles", () => {
 
     await waitForSession(request, workspaceId, sessionId);
 
-    // Check session record has claudeSessionId
+    // Check session record has providerSessionId
     const sessionsRes = await request.get(
       `${SERVER_URL}/api/workspaces/${workspaceId}/sessions`,
     );
@@ -211,7 +211,7 @@ test.describe("Mock agent profiles", () => {
     const sessions = await sessionsRes.json();
     const session = sessions.find((s: any) => s.id === sessionId);
     expect(session).toBeDefined();
-    expect(session.claudeSessionId).toBe(deterministicId);
+    expect(session.providerSessionId).toBe(deterministicId);
 
     await request.post(`${SERVER_URL}/api/workspaces/${workspaceId}/stop`, {
       data: {},
@@ -242,13 +242,13 @@ test.describe("Mock agent profiles", () => {
     await waitForSession(request, workspaceId, session1Id);
     await waitForSessionStatus(request, workspaceId, "completed");
 
-    // Verify session 1 has claudeSessionId stored
+    // Verify session 1 has providerSessionId stored
     const sessions1Res = await request.get(
       `${SERVER_URL}/api/workspaces/${workspaceId}/sessions`,
     );
     const sessions1 = await sessions1Res.json();
     const session1 = sessions1.find((s: any) => s.id === session1Id);
-    expect(session1?.claudeSessionId).toBe(deterministicId);
+    expect(session1?.providerSessionId).toBe(deterministicId);
 
     // Launch session 2 with --resume in the command string itself.
     // (On Windows with shell:true, spawn() args can get lost when the command
