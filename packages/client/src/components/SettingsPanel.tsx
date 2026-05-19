@@ -22,6 +22,9 @@ interface Settings {
   resume_with_new_model?: string;
   disabled_mcp_tools?: string;
   auto_start_followup?: string;
+  require_manual_approval?: string;
+  dynamic_column_scaling?: string;
+  persistent_agent?: string;
 }
 
 const DEFAULT_SETTINGS: Settings = {
@@ -38,6 +41,9 @@ const DEFAULT_SETTINGS: Settings = {
   resume_with_new_model: "false",
   disabled_mcp_tools: "",
   auto_start_followup: "false",
+  require_manual_approval: "false",
+  dynamic_column_scaling: "false",
+  persistent_agent: "false",
 };
 
 type Tab = "agent" | "workflow" | "skills" | "mcp" | "ui" | "project" | "advanced";
@@ -434,6 +440,12 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                     label="Auto-start follow-up tasks after merge"
                     hint="When a workspace is merged and the issue has outgoing 'depends_on' or 'child_of' dependencies, automatically create workspaces for unblocked follow-up issues."
                   />
+                  <Toggle
+                    checked={settings.require_manual_approval === "true"}
+                    onChange={setBool("require_manual_approval")}
+                    label="Require manual approval before review"
+                    hint="When enabled, issues must be manually approved before the AI review step is triggered. Useful for gating expensive review sessions on deliberate human sign-off."
+                  />
                 </>
               )}
 
@@ -568,6 +580,20 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                     <option value="false">Show raw output</option>
                   </select>
                 </Field>
+                <div className="space-y-3 mt-4">
+                  <Toggle
+                    checked={settings.dynamic_column_scaling === "true"}
+                    onChange={setBool("dynamic_column_scaling")}
+                    label="Dynamic column scaling"
+                    hint="Columns grow proportionally to their issue count, giving more space to busy columns."
+                  />
+                  <Toggle
+                    checked={settings.persistent_agent === "true"}
+                    onChange={setBool("persistent_agent")}
+                    label="Persistent agent (warm pool)"
+                    hint="Keep a warm agent process alive between sessions to reduce startup latency. Experimental."
+                  />
+                </div>
               )}
 
               {/* Project tab */}
