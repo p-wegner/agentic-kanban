@@ -713,17 +713,25 @@ Base branch: ${baseBranch}`;
       const { defaultBranch } = await resolveProjectRepo(id, database);
       const baseBranch = workspace.baseBranch || defaultBranch;
 
-      const prompt = `A merge into '${baseBranch}' failed with the following error:
+      // Get the issue title for context
+      const issueRows = await database
+        .select({ title: issues.title, description: issues.description, issueNumber: issues.issueNumber })
+        .from(issues)
+        .where(eq(issues.id, workspace.issueId))
+        .limit(1);
+      const issueInfo = issueRows.length > 0 ? `#${issueRows[0].issueNumber} ${issueRows[0].title}` : "unknown";
+
+      const prompt = `A merge into '${baseBranch}' failed for workspace on ticket ${issueInfo} with the following error:
 
 ${mergeError}
 
-Please investigate and fix the issue so the branch can be merged cleanly.
+Investigate and fix the problem so the branch can be merged cleanly.
 
 Branch: ${workspace.branch}
 Working directory: ${workspace.workingDir}
 Base branch: ${baseBranch}
 
-Steps to take:
+Steps:
 1. Understand the error above
 2. Run 'git status' and 'git log --oneline -10' to see the current state
 3. Fix whatever is causing the merge failure (e.g. resolve conflicts, fix build errors, clean up the branch)
@@ -731,7 +739,7 @@ Steps to take:
 5. Commit any changes you make
 6. Exit — the system will automatically retry the merge after you finish
 
-Do NOT run git merge yourself. Just fix the underlying issue and exit.`;
+Do NOT run git merge yourself. Just fix the underlying problem and exit.`;
 
       const prefRows = await database.select().from(preferences);
       const prefMap = new Map(prefRows.map(r => [r.key, r.value]));
