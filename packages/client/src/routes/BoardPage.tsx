@@ -67,6 +67,7 @@ export function BoardPage() {
   const [expandedCreatePanel, setExpandedCreatePanel] = useState<{ statusId: string; statusName: string; state: Partial<CreateIssueFormState> } | null>(null);
   const [viewMode, setViewMode] = useState<"kanban" | "graph">("kanban");
   const [dynamicColumnScaling, setDynamicColumnScaling] = useState(false);
+  const [autoMonitor, setAutoMonitor] = useState(false);
 
   const refetchBoard = useCallback(async (projectId?: string) => {
     const pid = projectId || activeProjectId;
@@ -179,6 +180,7 @@ export function BoardPage() {
         try {
           const s = await apiFetch<Record<string, string>>("/api/preferences/settings");
           setDynamicColumnScaling(s.dynamic_column_scaling === "true");
+          setAutoMonitor(s.auto_monitor === "true");
         } catch {
           // ignore
         }
@@ -190,6 +192,19 @@ export function BoardPage() {
     }
     load();
   }, [loadProjects]);
+
+  async function toggleAutoMonitor() {
+    const next = !autoMonitor;
+    setAutoMonitor(next);
+    try {
+      await apiFetch("/api/preferences/settings", {
+        method: "PUT",
+        body: JSON.stringify({ auto_monitor: String(next) }),
+      });
+    } catch {
+      setAutoMonitor(!next);
+    }
+  }
 
   async function handleProjectChange(id: string) {
     setActiveProjectId(id);
@@ -681,7 +696,15 @@ export function BoardPage() {
             searchQuery={searchQuery}
             priorityFilter={priorityFilter}
           />
-          <div className="flex items-center gap-1 border border-gray-200 rounded-md p-0.5 bg-white shrink-0 ml-auto">
+          <button
+            onClick={toggleAutoMonitor}
+            title={autoMonitor ? "Auto-monitor ON — click to disable" : "Auto-monitor OFF — click to enable"}
+            className={`shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium border transition-colors ${autoMonitor ? "bg-green-50 border-green-300 text-green-700 hover:bg-green-100" : "bg-white border-gray-200 text-gray-500 hover:bg-gray-50"}`}
+          >
+            <span className={`w-2 h-2 rounded-full ${autoMonitor ? "bg-green-500 animate-pulse" : "bg-gray-300"}`} />
+            Monitor
+          </button>
+          <div className="flex items-center gap-1 border border-gray-200 rounded-md p-0.5 bg-white shrink-0">
             <button
               onClick={() => setViewMode("kanban")}
               className={`px-2.5 py-1 text-xs rounded flex items-center gap-1.5 transition-colors ${viewMode === "kanban" ? "bg-blue-600 text-white" : "text-gray-600 hover:bg-gray-100"}`}
