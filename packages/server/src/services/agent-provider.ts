@@ -405,124 +405,6 @@ export class CodexProvider implements AgentProvider {
   }
 }
 
-// --- Codex provider ---
-
-export class CodexProvider implements AgentProvider {
-  readonly name = "codex";
-
-  buildLaunchConfig(options: ProviderLaunchOptions): AgentLaunchConfig {
-    const { agentArgs, providerSessionId, agentCommand, keepAlive } = options;
-    const isWindows = process.platform === "win32";
-
-    const isMockAgent = !!process.env.AGENT_COMMAND || (agentCommand?.includes("mock-agent") ?? false);
-    let command = process.env.AGENT_COMMAND || agentCommand || "codex";
-
-    const args: string[] = [];
-
-    if (isMockAgent) {
-      if (providerSessionId) {
-        args.push("--resume", providerSessionId);
-      }
-      if (keepAlive) {
-        args.push("--profile", "multi-turn");
-      }
-    } else {
-      // Use `codex exec resume` when resuming a session, otherwise `codex exec`
-      if (providerSessionId) {
-        args.push("exec", "resume", "--json", "--dangerously-bypass-approvals-and-sandbox", providerSessionId);
-      } else {
-        args.push("exec", "--json", "--dangerously-bypass-approvals-and-sandbox");
-      }
-      if (agentArgs) {
-        args.push(...splitArgs(agentArgs));
-      }
-      // Prompt is passed via stdin (using `-` as the last argument)
-      args.push("-");
-    }
-
-    return {
-      command,
-      args,
-      useShell: isWindows && (isMockAgent || !!agentCommand),
-      isMockAgent,
-      env: { ...process.env as Record<string, string> },
-      keepStdinOpen: false,
-    };
-  }
-
-  parseStreamEvent(line: string): ParsedStreamEvent | undefined {
-    let obj: Record<string, unknown>;
-    try {
-      obj = JSON.parse(line);
-    } catch {
-      return undefined;
-    }
-
-    const result: ParsedStreamEvent = {};
-
-    // thread.started: extract session/thread ID
-    if (obj.type === "thread.started" && obj.thread_id) {
-      result.providerSessionId = obj.thread_id as string;
-    }
-
-    // turn.completed: stats + turn complete
-    if (obj.type === "turn.completed") {
-      const usage = obj.usage as Record<string, unknown> | undefined;
-      const inputTokens = (usage?.input_tokens as number) ?? 0;
-      const cachedTokens = (usage?.cached_input_tokens as number) ?? 0;
-      const outputTokens = (usage?.output_tokens as number) ?? 0;
-      result.stats = {
-        durationMs: 0,
-        totalCostUsd: 0,
-        inputTokens,
-        outputTokens,
-        numTurns: 1,
-        model: "",
-        success: true,
-      };
-      result.liveStats = {
-        model: "",
-        contextTokens: inputTokens + cachedTokens,
-      };
-      result.turnComplete = true;
-    }
-
-    // item.started: tool/command activity
-    if (obj.type === "item.started" && obj.item) {
-      const item = obj.item as Record<string, unknown>;
-      if (item.type === "command_execution" && item.command) {
-        result.toolActivity = {
-          name: "shell",
-          input: { command: item.command },
-          toolUseId: item.id as string | undefined,
-        };
-      }
-    }
-
-    // item.completed: agent message or tool result
-    if (obj.type === "item.completed" && obj.item) {
-      const item = obj.item as Record<string, unknown>;
-      if (item.type === "command_execution" && item.id) {
-        result.toolResult = { toolUseId: item.id as string };
-      }
-    }
-
-    if (
-      result.providerSessionId === undefined &&
-      result.stats === undefined &&
-      result.turnComplete === undefined &&
-      result.liveStats === undefined &&
-      result.toolActivity === undefined &&
-      result.toolResult === undefined &&
-      result.todos === undefined
-    ) {
-      return undefined;
-    }
-
-    return result;
-  }
-}
-
 // --- Provider registry ---
 
 const providers = new Map<string, AgentProvider>();
@@ -585,6 +467,14 @@ function getMcpConfigPath(): string {
   console.log(`[agent] Claude MCP config written to ${path}`);
   return path;
 }
+
+const PROFILE_OWNED_ENV_VARS = [
+  "ANTHROPIC_API_KEY",
+  "ANTHROPIC_AUTH_TOKEN",
+  "ANTHROPIC_BASE_URL",
+  "ANTHROPIC_MODEL",
+  "API_TIMEOUT_MS",
+];
 
 function buildSpawnEnv(claudeProfile?: string): Record<string, string> {
   const spawnEnv: Record<string, string> = { ...process.env as Record<string, string> };
