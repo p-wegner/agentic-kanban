@@ -8,7 +8,6 @@ import { createSessionsRoute } from "./routes/sessions.js";
 import { migrate } from "drizzle-orm/libsql/migrator";
 import { db } from "./db/index.js";
 import { createSessionManager } from "./services/session.manager.js";
-import type { ProviderId } from "./services/agent-provider.js";
 import { createBoardEvents } from "./services/board-events.js";
 import { workspaces, issues, projects, projectStatuses, preferences, sessions, agentSkills } from "@agentic-kanban/shared/schema";
 import { eq, sql, desc } from "drizzle-orm";
@@ -40,7 +39,8 @@ Classify each issue as CRITICAL (must fix — bugs, security, data loss), MAJOR 
 
 Do NOT move the issue to 'AI Reviewed' yourself — the system handles that on merge.
 
-Issue ID: {{issueId}}`;
+Issue ID: {{issueId}}
+Workspace ID: {{workspaceId}}`;
 
 function buildReviewArgs(prefMap: Map<string, string>): string | undefined {
   const skipPerms = prefMap.get("skip_permissions") === "true";
@@ -51,7 +51,7 @@ function buildReviewArgs(prefMap: Map<string, string>): string | undefined {
   return baseArgs || undefined;
 }
 
-async function buildReviewPrompt(branch: string, baseBranch: string | null, issueId: string, autoFix: boolean, projectId?: string, conflictingFiles?: string[], uncommittedChanges?: string[]): Promise<string> {
+async function buildReviewPrompt(branch: string, baseBranch: string | null, issueId: string, workspaceId: string, autoFix: boolean, projectId?: string, conflictingFiles?: string[]): Promise<string> {
   let template: string | null = null;
   if (projectId) {
     const projectSkill = await db.select({ prompt: agentSkills.prompt }).from(agentSkills)
@@ -71,42 +71,28 @@ async function buildReviewPrompt(branch: string, baseBranch: string | null, issu
 3. Commit the fixes with a descriptive message
 4. Exit normally (the system will handle merging)
 
-If only MINOR issues or no issues: just exit normally (the system will auto-merge).`
+If only MINOR issues or no issues:
+1. Use the mark_ready_for_merge MCP tool with workspaceId={{workspaceId}} to signal the workspace is approved
+2. Exit normally (the system will auto-merge)`
     : `If you find CRITICAL or MAJOR issues:
 1. Use the move_issue MCP tool to move issue ${issueId} to 'In Progress'
 2. Describe each issue clearly so the developer knows what to fix
 3. Do NOT edit any files — report only
 
-If only MINOR issues or no issues: just exit normally (the system will auto-merge).`;
-
-  // Strip "origin/" prefix so rebase instructions use the bare branch name (e.g. "master" not "origin/master")
-  const localBaseBranch = (baseBranch ?? "master").replace(/^origin\//, "");
+If only MINOR issues or no issues:
+1. Use the mark_ready_for_merge MCP tool with workspaceId={{workspaceId}} to signal the workspace is approved
+2. Exit normally (the system will auto-merge)`;
 
   let conflictPreamble = "";
-  if (uncommittedChanges && uncommittedChanges.length > 0) {
-    conflictPreamble = `IMPORTANT: The worktree has uncommitted changes. You must commit or stash them before rebasing and reviewing.
-
-Uncommitted files (git status --porcelain):
-${uncommittedChanges.map(f => `  ${f}`).join("\n")}
-
-Steps to resolve:
-1. Review the changes: git diff (for unstaged), git diff --cached (for staged)
-2. If the changes belong to this branch: git add -A && git commit -m "WIP: uncommitted changes"
-3. Then rebase: git rebase origin/${localBaseBranch} (or git rebase ${localBaseBranch} if no remote)
-4. Once the working tree is clean and rebased, proceed with the code review below.
-
----
-
-`;
-  } else if (conflictingFiles && conflictingFiles.length > 0) {
+  if (conflictingFiles && conflictingFiles.length > 0) {
     conflictPreamble = `IMPORTANT: Auto-rebase onto the base branch failed due to conflicts. The rebase has been aborted, so the worktree is clean. You must resolve the conflicts and rebase manually before reviewing.
 
 Conflicting files:
 ${conflictingFiles.map(f => `- ${f}`).join("\n")}
 
 Steps to resolve:
-1. Start a fresh rebase: git rebase origin/${localBaseBranch}
-   (or use the local branch if no remote: git rebase ${localBaseBranch})
+1. Start a fresh rebase: git rebase origin/${baseBranch ?? "master"}
+   (or use the local branch if no remote: git rebase ${baseBranch ?? "master"})
 2. For each conflicting file, open it and resolve the conflict markers (<<<<<<<, =======, >>>>>>>)
 3. After resolving each file: git add <resolved-file>
 4. Continue: git rebase --continue (repeat for each conflicting commit)
@@ -121,6 +107,7 @@ Steps to resolve:
     .replace(/\{\{branch}}/g, branch)
     .replace(/\{\{baseBranch}}/g, baseBranch ?? "HEAD")
     .replace(/\{\{issueId}}/g, issueId)
+    .replace(/\{\{workspaceId}}/g, workspaceId)
     .replace(/\{\{autoFixInstructions}}/g, autoFixInstructions);
 }
 
@@ -133,7 +120,6 @@ export async function startServer(port?: number) {
   const { injectWebSocket, upgradeWebSocket } = createNodeWebSocket({ app });
   const boardEvents = createBoardEvents(upgradeWebSocket);
   const reviewSessionIds = new Set<string>();
-  const fixAndMergeSessionIds = new Set<string>();
 
   async function runWorkflowOnExit(workspaceId: string, sessionId: string, exitCode: number | null) {
     try {
@@ -155,6 +141,8 @@ export async function startServer(port?: number) {
       await db.update(workspaces).set({ status: "idle", updatedAt: now }).where(eq(workspaces.id, workspaceId));
       boardEvents.broadcast(projectId, "workspace_idle");
 
+      if (exitCode !== 0) return;
+
       const statuses = await db.select().from(projectStatuses).where(eq(projectStatuses.projectId, projectId));
       const findStatus = (name: string) => statuses.find(s => s.name === name);
 
@@ -164,20 +152,6 @@ export async function startServer(port?: number) {
 
       const projectRows = await db.select({ defaultBranch: projects.defaultBranch }).from(projects).where(eq(projects.id, projectId)).limit(1);
       const defaultBranch = projectRows.length > 0 ? projectRows[0].defaultBranch : "main";
-
-      if (fixAndMergeSessionIds.has(sessionId)) {
-        fixAndMergeSessionIds.delete(sessionId);
-        if (exitCode === 0) {
-          console.log(`[workflow] fix-and-merge session ${sessionId} completed — retrying merge`);
-          await autoMerge(workspace, projectId, issueId, findStatus("Done")?.id ?? null, now);
-        } else {
-          console.log(`[workflow] fix-and-merge session ${sessionId} exited with code ${exitCode} — not retrying merge`);
-          boardEvents.broadcast(projectId, "workflow_error");
-        }
-        return;
-      }
-
-      if (exitCode !== 0) return;
 
       if (reviewSessionIds.has(sessionId)) {
         reviewSessionIds.delete(sessionId);
@@ -240,28 +214,25 @@ export async function startServer(port?: number) {
           const claudeProfile = useMock ? undefined : (prefMap.get("claude_profile") || undefined);
           const reviewArgs = buildReviewArgs(prefMap);
           const autoFix = prefMap.get("review_auto_fix") !== "false";
-          const provider = (prefMap.get("provider") || undefined) as ProviderId | undefined;
 
           let diffRef = workspace.baseBranch || defaultBranch;
           let conflictingFiles: string[] | undefined;
-          let uncommittedChanges: string[] | undefined;
           if (!workspace.isDirect && workspace.workingDir) {
             const baseBranch = workspace.baseBranch || defaultBranch;
             const prep = await gitService.prepareForReview(workspace.workingDir, baseBranch);
             diffRef = prep.diffRef;
             if (!prep.success) {
               conflictingFiles = prep.conflictingFiles;
-              uncommittedChanges = prep.uncommittedChanges;
               console.warn(`[workflow] rebase failed for workspace ${workspaceId}: ${prep.error} — reviewer will resolve conflicts`);
             }
           }
-          const reviewPrompt = await buildReviewPrompt(workspace.branch, diffRef, issueId, autoFix, projectId, conflictingFiles, uncommittedChanges);
+          const reviewPrompt = await buildReviewPrompt(workspace.branch, diffRef, issueId, workspaceId, autoFix, projectId, conflictingFiles);
 
           try {
             await db.update(workspaces).set({ status: "reviewing", updatedAt: now }).where(eq(workspaces.id, workspaceId));
             boardEvents.broadcast(projectId, "issue_updated");
 
-            const reviewSessionId = await sessionManager.startSession(workspaceId, reviewPrompt, agentCommand, reviewArgs, undefined, claudeProfile, undefined, undefined, undefined, undefined, provider);
+            const reviewSessionId = await sessionManager.startSession(workspaceId, reviewPrompt, agentCommand, reviewArgs, undefined, claudeProfile);
             reviewSessionIds.add(reviewSessionId);
             console.log(`[workflow] launched review session ${reviewSessionId} for workspace ${workspaceId}`);
           } catch (err) {
@@ -354,30 +325,25 @@ export async function startServer(port?: number) {
       const claudeProfile = useMock ? undefined : (prefMap.get("claude_profile") || undefined);
       const reviewArgs = buildReviewArgs(prefMap);
       const autoFix = prefMap.get("review_auto_fix") !== "false";
-      const provider = (prefMap.get("provider") || undefined) as ProviderId | undefined;
 
       const projectRows = await db.select({ defaultBranch: projects.defaultBranch }).from(projects).where(eq(projects.id, projectId)).limit(1);
       const defaultBranch = projectRows.length > 0 ? projectRows[0].defaultBranch : "main";
       let diffRef = workspace.baseBranch || defaultBranch;
-      let manualConflictingFiles: string[] | undefined;
-      let manualUncommittedChanges: string[] | undefined;
       if (!workspace.isDirect && workspace.workingDir) {
         const baseBranch = workspace.baseBranch || defaultBranch;
         const prep = await gitService.prepareForReview(workspace.workingDir, baseBranch);
         if (!prep.success) {
-          manualConflictingFiles = prep.conflictingFiles;
-          manualUncommittedChanges = prep.uncommittedChanges;
-          console.warn(`[workflow] rebase failed for manual review ${workspaceId}: ${prep.error}`);
+          console.warn(`[workflow] merge-base failed for manual review ${workspaceId}: ${prep.error}`);
         }
         diffRef = prep.diffRef;
       }
-      const reviewPrompt = await buildReviewPrompt(workspace.branch, diffRef, issueId, autoFix, projectId, manualConflictingFiles, manualUncommittedChanges);
+      const reviewPrompt = await buildReviewPrompt(workspace.branch, diffRef, issueId, workspaceId, autoFix, projectId);
 
       const now = new Date().toISOString();
       await db.update(workspaces).set({ status: "reviewing", updatedAt: now }).where(eq(workspaces.id, workspaceId));
       boardEvents.broadcast(projectId, "issue_updated");
 
-      const reviewSessionId = await sessionManager.startSession(workspaceId, reviewPrompt, agentCommand, reviewArgs, undefined, claudeProfile, undefined, undefined, undefined, undefined, provider);
+      const reviewSessionId = await sessionManager.startSession(workspaceId, reviewPrompt, agentCommand, reviewArgs, undefined, claudeProfile);
       reviewSessionIds.add(reviewSessionId);
       console.log(`[workflow] manual review session ${reviewSessionId} for workspace ${workspaceId}`);
 
@@ -393,7 +359,7 @@ export async function startServer(port?: number) {
   app.get("/ws/board/:projectId", boardEvents.wsRoute());
 
   // API routes
-  app.route("/api", createRoutes(db, () => sessionManager, { boardEvents, fixAndMergeSessionIds }));
+  app.route("/api", createRoutes(db, () => sessionManager, { boardEvents }));
   app.route("/api/sessions", createSessionsRoute(db));
 
   // Serve built client assets (production/npx mode)
