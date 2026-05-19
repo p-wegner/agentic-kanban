@@ -122,6 +122,7 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery }: Gra
   const [nodes, setNodes] = useState<Node[]>([]);
   const [dragNode, setDragNode] = useState<string | null>(null);
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
+  const didDragRef = useRef(false);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [zoom, setZoom] = useState(1);
   const [isPanning, setIsPanning] = useState(false);
@@ -191,6 +192,7 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery }: Gra
     e.stopPropagation();
     const pt = svgPoint(e);
     const node = nodeMap.get(nodeId)!;
+    didDragRef.current = false;
     setDragNode(nodeId);
     setDragOffset({ x: pt.x - node.x, y: pt.y - node.y });
     setSelectedNode(nodeId);
@@ -198,6 +200,7 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery }: Gra
 
   function handleMouseMoveSvg(e: React.MouseEvent) {
     if (dragNode) {
+      didDragRef.current = true;
       const pt = svgPoint(e);
       setNodes((prev) =>
         prev.map((n) =>
@@ -365,7 +368,7 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery }: Gra
                 onMouseDown={(e) => handleMouseDownNode(e, node.id)}
                 onClick={(e) => {
                   e.stopPropagation();
-                  if (!dragNode) onIssueClick(node.issue);
+                  if (!didDragRef.current) onIssueClick(node.issue);
                 }}
               >
                 <rect
