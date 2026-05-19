@@ -1,5 +1,5 @@
 import { execSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -10,11 +10,21 @@ const MCP_SERVER_PATH = resolve(__dirname, "../../../mcp-server/src/index.ts");
 const TSX_LOADER = resolve(__dirname, "../../node_modules/tsx/dist/loader.mjs");
 const TSX_URL = pathToFileURL(TSX_LOADER).href;
 
-let claudeMcpConfigPath: string | null = null;
+let mcpConfigPath: string | null = null;
 
-export type ProviderId = "claude-code" | "codex";
+// --- Provider interface ---
 
-export interface BuildAgentLaunchConfigOptions {
+export interface AgentLaunchConfig {
+  command: string;
+  args: string[];
+  useShell: boolean;
+  isMockAgent: boolean;
+  env: Record<string, string>;
+  /** If true, write prompt to stdin and keep it open for follow-up writes. */
+  keepStdinOpen?: boolean;
+}
+
+export interface ProviderLaunchOptions {
   agentArgs?: string;
   providerSessionId?: string;
   agentCommand?: string;
@@ -22,39 +32,79 @@ export interface BuildAgentLaunchConfigOptions {
   keepAlive?: boolean;
   permissionPromptTool?: string;
   planMode?: boolean;
-  provider?: ProviderId;
-  prompt?: string;
 }
 
-export interface AgentLaunchConfig {
-  command: string;
-  args: string[];
-  useShell: boolean;
-  isMockAgent: boolean;
-  isStdinPrompt: boolean;
-  env: Record<string, string>;
+/**
+ * Provider-neutral parsed event from a single JSONL line of agent stdout.
+ * The session manager uses these to update session state, live stats, and UI.
+ */
+export interface ParsedStreamEvent {
+  /** Set when the provider emits its internal session/resume ID. */
+  providerSessionId?: string;
+  /** Set on result/final events with aggregate usage. */
+  stats?: {
+    durationMs: number;
+    totalCostUsd: number;
+    inputTokens: number;
+    outputTokens: number;
+    numTurns: number;
+    model: string;
+    success: boolean;
+    agentSummary?: string;
+  };
+  /** Set when a result event signals turn completion (multi-turn mode). */
+  turnComplete?: boolean;
+  /** Set on assistant events with model/context info. */
+  liveStats?: {
+    model: string;
+    contextTokens: number;
+    toolUses?: number;
+    subagentDelta?: number;
+  };
+  /** Set on tool_use events. */
+  toolActivity?: {
+    name: string;
+    input: Record<string, unknown>;
+    toolUseId?: string;
+  };
+  /** Set on tool_result events for tracked tool_use IDs. */
+  toolResult?: {
+    toolUseId: string;
+  };
+  /** Set on TodoWrite or equivalent task-tracking events. */
+  todos?: Array<{ subject: string; status: string }>;
 }
-
-// --- Provider interface ---
 
 export interface AgentProvider {
-  id: ProviderId;
-  label: string;
+  readonly name: string;
 
-  buildLaunchConfig(opts: BuildAgentLaunchConfigOptions & { isWindows: boolean }): AgentLaunchConfig;
+  /** Build the full spawn configuration for this provider. */
+  buildLaunchConfig(options: ProviderLaunchOptions): AgentLaunchConfig;
+
+  /** Parse a single stdout line into a provider-neutral event (or undefined if not recognized). */
+  parseStreamEvent(line: string): ParsedStreamEvent | undefined;
 }
 
-// --- Claude Code provider ---
+// --- Claude provider ---
 
-const claudeProvider: AgentProvider = {
-  id: "claude-code",
-  label: "Claude Code",
+export class ClaudeProvider implements AgentProvider {
+  readonly name = "claude";
 
-  buildLaunchConfig({ agentArgs, providerSessionId, agentCommand, claudeProfile, keepAlive, permissionPromptTool, planMode, isWindows }) {
+  buildLaunchConfig(options: ProviderLaunchOptions): AgentLaunchConfig {
+    const {
+      agentArgs,
+      providerSessionId,
+      agentCommand,
+      claudeProfile,
+      keepAlive,
+      permissionPromptTool,
+      planMode,
+    } = options;
+
     const isMockAgent = !!process.env.AGENT_COMMAND || (agentCommand?.includes("mock-agent") ?? false);
     let command = process.env.AGENT_COMMAND || agentCommand || "claude";
+    const isWindows = process.platform === "win32";
 
-    // On Windows, resolve .cmd wrappers to the actual .exe to avoid cmd.exe stdout buffering.
     if (isWindows && !isMockAgent && !agentCommand) {
       try {
         const resolved = execSync("where claude.exe 2>nul", { encoding: "utf8" }).trim().split("\n")[0]?.trim();
@@ -63,6 +113,8 @@ const claudeProvider: AgentProvider = {
     }
 
     let args: string[];
+    let keepStdinOpen = false;
+
     if (isMockAgent) {
       args = [];
       if (providerSessionId) {
@@ -70,11 +122,12 @@ const claudeProvider: AgentProvider = {
       }
       if (keepAlive) {
         args.push("--profile", "multi-turn");
+        keepStdinOpen = true;
       }
     } else {
       args = ["--output-format", "stream-json", "--verbose"];
       try {
-        args.push("--mcp-config", getClaudeMcpConfigPath());
+        args.push("--mcp-config", getMcpConfigPath());
       } catch (err) {
         console.warn(`[agent] Failed to generate MCP config: ${err}`);
       }
@@ -105,37 +158,164 @@ const claudeProvider: AgentProvider = {
       args,
       useShell: isWindows && (isMockAgent || !!agentCommand),
       isMockAgent,
-      isStdinPrompt: !isMockAgent || !!keepAlive,
-      env: buildClaudeSpawnEnv(claudeProfile),
+      env: buildSpawnEnv(claudeProfile),
+      keepStdinOpen,
     };
-  },
-};
+  }
+
+  parseStreamEvent(line: string): ParsedStreamEvent | undefined {
+    let obj: Record<string, unknown>;
+    try {
+      obj = JSON.parse(line);
+    } catch {
+      return undefined;
+    }
+
+    const result: ParsedStreamEvent = {};
+
+    // Provider session ID from init event
+    if (obj.type === "system" && obj.subtype === "init" && obj.session_id) {
+      result.providerSessionId = obj.session_id as string;
+    }
+
+    // Result event: stats + turn completion
+    if (obj.type === "result") {
+      const usage = obj.usage as Record<string, unknown> | undefined;
+      const rawCost = obj.total_cost_usd ?? obj.cost_usd;
+      const agentSummary = typeof obj.result === "string" ? obj.result : undefined;
+      result.stats = {
+        durationMs: (obj.duration_ms as number) ?? 0,
+        totalCostUsd: typeof rawCost === "number" ? rawCost : 0,
+        inputTokens: (usage?.input_tokens as number) ?? 0,
+        outputTokens: (usage?.output_tokens as number) ?? 0,
+        numTurns: (obj.num_turns as number) ?? 1,
+        model: (obj.model as string) ?? "",
+        success: obj.subtype === "success" && !obj.is_error,
+        agentSummary,
+      };
+      result.turnComplete = true;
+    }
+
+    // Assistant event: model + context tokens
+    if (obj.type === "assistant" && obj.message) {
+      const usage = obj.message.usage as Record<string, unknown> | undefined;
+      const model = (obj.message.model as string) ?? "";
+      const cacheRead = (usage?.cache_read_input_tokens as number) ?? 0;
+      const inputTokens = (usage?.input_tokens as number) ?? 0;
+      const contextTokens = cacheRead + inputTokens;
+      if (model || contextTokens > 0) {
+        result.liveStats = { model, contextTokens };
+      }
+
+      // Tool use blocks
+      const content = obj.message.content;
+      if (Array.isArray(content)) {
+        for (const block of content) {
+          if (block.type === "tool_use") {
+            result.toolActivity = {
+              name: block.name,
+              input: block.input ?? {},
+              toolUseId: block.id,
+            };
+            // TodoWrite: extract todos directly
+            if (block.name === "TodoWrite" && Array.isArray(block.input?.todos)) {
+              result.todos = (block.input.todos as Array<{ subject: string; status: string }>).map(
+                (t) => ({ subject: t.subject, status: t.status }),
+              );
+            }
+            // Agent tool_use: increment subagent count
+            if (block.name === "Agent") {
+              result.liveStats = {
+                ...(result.liveStats ?? { model, contextTokens }),
+                subagentDelta: 1,
+              };
+            }
+            break; // one tool_activity per parsed event
+          }
+        }
+      }
+    }
+
+    // task_progress: tool_uses count
+    if (obj.type === "system" && obj.subtype === "task_progress" && obj.usage) {
+      const tpUsage = obj.usage as { tool_uses?: number };
+      if (tpUsage.tool_uses) {
+        result.liveStats = { model: "", contextTokens: 0, toolUses: tpUsage.tool_uses };
+      }
+    }
+
+    // Result event live stats (final context tokens)
+    if (obj.type === "result" && obj.usage) {
+      const rUsage = obj.usage as Record<string, unknown>;
+      const contextTokens = ((rUsage.cache_read_input_tokens as number) ?? 0) + ((rUsage.input_tokens as number) ?? 0);
+      if (contextTokens > 0) {
+        result.liveStats = { ...(result.liveStats ?? { model: "", contextTokens: 0 }), contextTokens };
+      }
+    }
+
+    // User message with tool_result: check for Agent tool_use ID
+    if (obj.type === "user" && obj.message?.content) {
+      const content = obj.message.content;
+      if (Array.isArray(content)) {
+        for (const block of content) {
+          if (block.type === "tool_result" && block.tool_use_id) {
+            result.toolResult = { toolUseId: block.tool_use_id };
+            break;
+          }
+        }
+      }
+    }
+
+    // TaskCreate/TaskUpdate (only used when no TodoWrite has been seen — caller decides)
+    if (obj.type === "assistant" && obj.message?.content) {
+      const content = obj.message.content;
+      if (Array.isArray(content)) {
+        for (const block of content) {
+          if (block.type === "tool_use" && block.name === "TaskCreate" && block.input?.subject) {
+            // Signal a single task creation — caller accumulates
+            if (!result.todos) result.todos = [];
+            result.todos.push({ subject: block.input.subject as string, status: "pending" });
+          }
+          if (block.type === "tool_use" && block.name === "TaskUpdate" && block.input?.taskId && block.input?.status) {
+            // TaskUpdate doesn't map cleanly to ParsedStreamEvent.todos
+            // The session manager handles this directly
+          }
+        }
+      }
+    }
+
+    // Return undefined if nothing was extracted
+    if (
+      result.providerSessionId === undefined &&
+      result.stats === undefined &&
+      result.turnComplete === undefined &&
+      result.liveStats === undefined &&
+      result.toolActivity === undefined &&
+      result.toolResult === undefined &&
+      result.todos === undefined
+    ) {
+      return undefined;
+    }
+
+    return result;
+  }
+}
 
 // --- Codex provider ---
 
-const codexProvider: AgentProvider = {
-  id: "codex",
-  label: "Codex",
+export class CodexProvider implements AgentProvider {
+  readonly name = "codex";
 
-  buildLaunchConfig({ agentArgs, providerSessionId, agentCommand, keepAlive, planMode, prompt, isWindows }) {
+  buildLaunchConfig(options: ProviderLaunchOptions): AgentLaunchConfig {
+    const { agentArgs, providerSessionId, agentCommand, keepAlive } = options;
+    const isWindows = process.platform === "win32";
+
     const isMockAgent = !!process.env.AGENT_COMMAND || (agentCommand?.includes("mock-agent") ?? false);
     let command = process.env.AGENT_COMMAND || agentCommand || "codex";
 
-    // On Windows, resolve .cmd wrappers to the actual .exe
-    if (isWindows && !isMockAgent && !agentCommand) {
-      try {
-        const resolved = execSync("where codex.exe 2>nul", { encoding: "utf8" }).trim().split("\n")[0]?.trim();
-        if (resolved) command = resolved;
-      } catch {}
-    }
+    const args: string[] = [];
 
-    // Set CODEX_HOME to temp dir with our MCP config.toml
-    const codexHome = getCodexHome();
-    const env: Record<string, string> = { ...process.env as Record<string, string>, CODEX_HOME: codexHome };
-
-    let args: string[];
     if (isMockAgent) {
-      args = [];
       if (providerSessionId) {
         args.push("--resume", providerSessionId);
       }
@@ -143,34 +323,17 @@ const codexProvider: AgentProvider = {
         args.push("--profile", "multi-turn");
       }
     } else {
-      // codex exec --json [flags] -- <prompt>
-      // codex exec resume <session_id> <prompt>
+      // Use `codex exec resume` when resuming a session, otherwise `codex exec`
       if (providerSessionId) {
-        args = ["exec", "resume", providerSessionId];
+        args.push("exec", "resume", "--json", "--dangerously-bypass-approvals-and-sandbox", providerSessionId);
       } else {
-        args = ["exec", "--json"];
+        args.push("exec", "--json", "--dangerously-bypass-approvals-and-sandbox");
       }
-
       if (agentArgs) {
         args.push(...splitArgs(agentArgs));
       }
-      if (planMode) {
-        args.push("--sandbox", "read-only");
-      } else {
-        args.push("--sandbox", "workspace-write");
-      }
-      args.push("--ask-for-approval", "never");
-
-      // Positional prompt after -- separator (not for resume, which takes prompt as arg)
-      if (prompt) {
-        if (providerSessionId) {
-          args.push(prompt);
-        } else {
-          args.push("--", prompt);
-        }
-      } else if (!providerSessionId) {
-        args.push("--", "");
-      }
+      // Prompt is passed via stdin (using `-` as the last argument)
+      args.push("-");
     }
 
     return {
@@ -178,46 +341,132 @@ const codexProvider: AgentProvider = {
       args,
       useShell: isWindows && (isMockAgent || !!agentCommand),
       isMockAgent,
-      isStdinPrompt: isMockAgent && !!keepAlive,
-      env,
+      env: { ...process.env as Record<string, string> },
+      keepStdinOpen: false,
     };
-  },
-};
+  }
+
+  parseStreamEvent(line: string): ParsedStreamEvent | undefined {
+    let obj: Record<string, unknown>;
+    try {
+      obj = JSON.parse(line);
+    } catch {
+      return undefined;
+    }
+
+    const result: ParsedStreamEvent = {};
+
+    // thread.started: extract session/thread ID
+    if (obj.type === "thread.started" && obj.thread_id) {
+      result.providerSessionId = obj.thread_id as string;
+    }
+
+    // turn.completed: stats + turn complete
+    if (obj.type === "turn.completed") {
+      const usage = obj.usage as Record<string, unknown> | undefined;
+      const inputTokens = (usage?.input_tokens as number) ?? 0;
+      const cachedTokens = (usage?.cached_input_tokens as number) ?? 0;
+      const outputTokens = (usage?.output_tokens as number) ?? 0;
+      result.stats = {
+        durationMs: 0,
+        totalCostUsd: 0,
+        inputTokens,
+        outputTokens,
+        numTurns: 1,
+        model: "",
+        success: true,
+      };
+      result.liveStats = {
+        model: "",
+        contextTokens: inputTokens + cachedTokens,
+      };
+      result.turnComplete = true;
+    }
+
+    // item.started: tool/command activity
+    if (obj.type === "item.started" && obj.item) {
+      const item = obj.item as Record<string, unknown>;
+      if (item.type === "command_execution" && item.command) {
+        result.toolActivity = {
+          name: "shell",
+          input: { command: item.command },
+          toolUseId: item.id as string | undefined,
+        };
+      }
+    }
+
+    // item.completed: agent message or tool result
+    if (obj.type === "item.completed" && obj.item) {
+      const item = obj.item as Record<string, unknown>;
+      if (item.type === "command_execution" && item.id) {
+        result.toolResult = { toolUseId: item.id as string };
+      }
+    }
+
+    if (
+      result.providerSessionId === undefined &&
+      result.stats === undefined &&
+      result.turnComplete === undefined &&
+      result.liveStats === undefined &&
+      result.toolActivity === undefined &&
+      result.toolResult === undefined &&
+      result.todos === undefined
+    ) {
+      return undefined;
+    }
+
+    return result;
+  }
+}
 
 // --- Provider registry ---
 
-const providers: Map<ProviderId, AgentProvider> = new Map([
-  ["claude-code", claudeProvider],
-  ["codex", codexProvider],
-]);
+const providers = new Map<string, AgentProvider>();
+let defaultProviderName = "claude";
 
-export function getProvider(id: ProviderId): AgentProvider {
-  const provider = providers.get(id);
-  if (!provider) throw new Error(`Unknown agent provider: ${id}`);
+function registerProvider(provider: AgentProvider): void {
+  providers.set(provider.name, provider);
+}
+
+export function getProvider(name?: string): AgentProvider {
+  const provider = providers.get(name ?? defaultProviderName);
+  if (!provider) throw new Error(`Unknown agent provider: ${name ?? defaultProviderName}`);
   return provider;
 }
 
-export function resolveProvider(agentCommand?: string, providerId?: ProviderId): AgentProvider {
-  // Explicit provider takes priority
-  if (providerId) return getProvider(providerId);
-  // Detect from agent command
-  if (agentCommand?.includes("codex") || agentCommand?.includes("Codex")) return codexProvider;
-  // Default: Claude Code
-  return claudeProvider;
+/**
+ * Resolve the provider to use based on an agent command string.
+ * Returns "codex" if the command is the codex CLI, "claude" otherwise.
+ */
+export function getProviderForCommand(agentCommand?: string): AgentProvider {
+  const cmd = agentCommand?.trim().toLowerCase() ?? "";
+  if (cmd === "codex" || cmd.endsWith("/codex") || cmd.endsWith("\\codex") || cmd.endsWith("\\codex.exe") || cmd.endsWith("/codex.exe")) {
+    return getProvider("codex");
+  }
+  return getProvider("claude");
 }
 
-// --- Main entry point (backward-compatible) ---
+export function setDefaultProvider(name: string): void {
+  if (!providers.has(name)) throw new Error(`Unknown agent provider: ${name}`);
+  defaultProviderName = name;
+}
+
+// Register built-in providers
+registerProvider(new ClaudeProvider());
+registerProvider(new CodexProvider());
+
+// --- Backward-compatible entry point ---
+
+export interface BuildAgentLaunchConfigOptions extends ProviderLaunchOptions {}
 
 export function buildAgentLaunchConfig(options: BuildAgentLaunchConfigOptions = {}): AgentLaunchConfig {
-  const { agentCommand, provider: providerId } = options;
-  const provider = resolveProvider(agentCommand, providerId);
-  return provider.buildLaunchConfig({ ...options, isWindows: process.platform === "win32" });
+  return getProvider().buildLaunchConfig(options);
 }
 
-// --- MCP config helpers ---
+// --- Internal helpers ---
 
-function getClaudeMcpConfigPath(): string {
-  if (claudeMcpConfigPath && existsSync(claudeMcpConfigPath)) return claudeMcpConfigPath;
+function getMcpConfigPath(): string {
+  if (mcpConfigPath && existsSync(mcpConfigPath)) return mcpConfigPath;
   const config = {
     mcpServers: {
       "agentic-kanban": {
@@ -228,35 +477,12 @@ function getClaudeMcpConfigPath(): string {
   };
   const path = resolve(tmpdir(), "agentic-kanban-mcp-config.json");
   writeFileSync(path, JSON.stringify(config, null, 2), "utf-8");
-  claudeMcpConfigPath = path;
-  console.log(`[agent] Claude MCP config written to ${path}`);
+  mcpConfigPath = path;
+  console.log(`[agent] MCP config written to ${path}`);
   return path;
 }
 
-let codexHome: string | null = null;
-
-function getCodexHome(): string {
-  if (codexHome && existsSync(join(codexHome, "config.toml"))) return codexHome;
-  // Create a temp CODEX_HOME with config.toml containing MCP server
-  const home = resolve(tmpdir(), "agentic-kanban-codex-home");
-  mkdirSync(home, { recursive: true });
-  // Use forward slashes for MCP_SERVER_PATH — TOML double-quoted strings treat \ as escape
-  const safePath = MCP_SERVER_PATH.replace(/\\/g, "/");
-  const config = `# Auto-generated by agentic-kanban
-[mcp_servers.agentic-kanban]
-command = "node"
-args = ["--import", "${TSX_URL}", "${safePath}"]
-default_tools_approval_mode = "approve"
-`;
-  writeFileSync(join(home, "config.toml"), config, "utf-8");
-  codexHome = home;
-  console.log(`[agent] Codex home written to ${home}`);
-  return home;
-}
-
-// --- Claude profile env helper ---
-
-function buildClaudeSpawnEnv(claudeProfile?: string): Record<string, string> {
+function buildSpawnEnv(claudeProfile?: string): Record<string, string> {
   const spawnEnv: Record<string, string> = { ...process.env as Record<string, string> };
   if (!claudeProfile) return spawnEnv;
 
@@ -278,8 +504,6 @@ function buildClaudeSpawnEnv(claudeProfile?: string): Record<string, string> {
 
   return spawnEnv;
 }
-
-// --- Utility ---
 
 function splitArgs(input: string): string[] {
   const args: string[] = [];
