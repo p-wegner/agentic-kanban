@@ -127,7 +127,7 @@ export function BoardColumn({
             {column.issues.length}
           </span>
         </h2>
-        {!isCreating && (
+        {!isCreating && column.name === "Todo" && (
           <button
             onClick={() => onCreateClick(column.id)}
             className="text-gray-400 hover:text-gray-600 hover:bg-white/60 rounded-md w-6 h-6 flex items-center justify-center text-lg leading-none transition-colors"
