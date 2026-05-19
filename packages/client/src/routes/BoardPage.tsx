@@ -238,10 +238,10 @@ export function BoardPage() {
     showToast(`Registered "${result.name}"`, "success");
   }
 
-  async function handleCreateIssue(data: CreateIssueRequest & { startWorkspace?: boolean; planMode?: boolean; claudeProfile?: string }) {
+  async function handleCreateIssue(data: CreateIssueRequest & { startWorkspace?: boolean; planMode?: boolean; claudeProfile?: string; isDirect?: boolean }) {
     setMutating(true);
     setError(null);
-    const { startWorkspace, planMode, claudeProfile, ...issueData } = data;
+    const { startWorkspace, planMode, claudeProfile, isDirect, ...issueData } = data;
     try {
       const created = await apiFetch<{ id: string; issueNumber: number; title: string }>(
         "/api/issues",
@@ -262,8 +262,9 @@ export function BoardPage() {
             method: "POST",
             body: JSON.stringify({
               issueId: created.id,
-              branch,
-              baseBranch: activeProject.defaultBranch,
+              branch: isDirect ? undefined : branch,
+              baseBranch: isDirect ? undefined : activeProject.defaultBranch,
+              isDirect: isDirect || undefined,
               planMode: planMode || undefined,
               claudeProfile: claudeProfile || undefined,
             }),
