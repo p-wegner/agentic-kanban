@@ -484,6 +484,13 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery }: Gra
                   if (!didDragRef.current) onIssueClick(node.issue);
                 }}
               >
+                {/* Invisible hit area covering node + button zone to prevent hover flicker */}
+                <rect
+                  width={NODE_W + 32}
+                  height={NODE_H}
+                  fill="transparent"
+                  style={{ pointerEvents: "all" }}
+                />
                 <rect
                   width={NODE_W}
                   height={NODE_H}
