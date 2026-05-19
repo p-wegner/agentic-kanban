@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { db } from "../db/index.js";
-import { workspaces, sessions, issues, projects, preferences, diffComments, projectStatuses } from "@agentic-kanban/shared/schema";
-import { eq, and } from "drizzle-orm";
+import { workspaces, sessions, issues, projects, preferences, diffComments, projectStatuses, issueDependencies } from "@agentic-kanban/shared/schema";
+import { eq, and, inArray } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import * as gitService from "../services/git.service.js";
 import { killProcessesInDir } from "../services/process-cleanup.js";
@@ -527,6 +527,17 @@ export function createWorkspaceActionsRoute(
       const projectId = await resolveProjectId(id, database);
       if (projectId) options?.boardEvents?.broadcast(projectId, "workspace_merged");
 
+      // Auto-start follow-up issues if setting enabled
+      try {
+        const prefRows2 = await database.select().from(preferences);
+        const prefMap2 = new Map(prefRows2.map(r => [r.key, r.value]));
+        if (prefMap2.get("auto_start_followup") === "true" && projectId) {
+          await autoStartFollowups(workspace.issueId, projectId, database, getSessionManager, prefMap2, options);
+        }
+      } catch (err) {
+        console.warn("[workspace-actions] auto_start_followup check failed:", err);
+      }
+
       return c.json({ id, mergeOutput: result });
     } catch (err) {
       return c.json(
@@ -803,6 +814,122 @@ Base branch: ${baseBranch}`;
   });
 
   return router;
+}
+
+/**
+ * After an issue is merged, find issues that depended on it and are now unblocked.
+ * An issue is unblocked when all its depends_on/blocked_by dependencies are Done.
+ * For unblocked issues that have no active workspace, create a workspace and launch agent.
+ */
+async function autoStartFollowups(
+  mergedIssueId: string,
+  projectId: string,
+  database: Database,
+  getSessionManager: () => SessionManager,
+  prefMap: Map<string, string>,
+  options?: { boardEvents?: BoardEvents },
+): Promise<void> {
+  // Find issues that depend on the merged issue
+  const dependents = await database
+    .select({ issueId: issueDependencies.issueId, type: issueDependencies.type })
+    .from(issueDependencies)
+    .where(and(
+      eq(issueDependencies.dependsOnId, mergedIssueId),
+      inArray(issueDependencies.type, ["depends_on", "blocked_by"]),
+    ));
+
+  if (dependents.length === 0) return;
+
+  // Load Done/Cancelled statuses for the project
+  const statuses = await database.select().from(projectStatuses).where(eq(projectStatuses.projectId, projectId));
+  const terminalNames = new Set(["Done", "Cancelled"]);
+  const doneStatusIds = new Set(statuses.filter(s => terminalNames.has(s.name)).map(s => s.id));
+  const todoStatus = statuses.find(s => s.name === "Todo") ?? statuses[0];
+  const project = await database.select().from(projects).where(eq(projects.id, projectId)).limit(1);
+  if (!project[0]) return;
+
+  for (const dep of dependents) {
+    // Check all dependencies of this issue — if all are Done/Cancelled, it's unblocked
+    const allDeps = await database
+      .select({ dependsOnId: issueDependencies.dependsOnId, type: issueDependencies.type })
+      .from(issueDependencies)
+      .where(and(
+        eq(issueDependencies.issueId, dep.issueId),
+        inArray(issueDependencies.type, ["depends_on", "blocked_by"]),
+      ));
+
+    const depIssueIds = allDeps.map(d => d.dependsOnId);
+    if (depIssueIds.length === 0) continue;
+
+    const depIssueRows = await database
+      .select({ id: issues.id, statusId: issues.statusId })
+      .from(issues)
+      .where(inArray(issues.id, depIssueIds));
+
+    const allResolved = depIssueRows.every(i => doneStatusIds.has(i.statusId));
+    if (!allResolved) continue;
+
+    // Check this issue doesn't already have an active workspace
+    const existingWs = await database
+      .select({ id: workspaces.id, status: workspaces.status })
+      .from(workspaces)
+      .where(eq(workspaces.issueId, dep.issueId));
+    const hasActive = existingWs.some(w => w.status !== "closed");
+    if (hasActive) continue;
+
+    // Get the follow-up issue details
+    const followupIssue = await database.select().from(issues).where(eq(issues.id, dep.issueId)).limit(1);
+    if (!followupIssue[0]) continue;
+
+    // Create workspace + launch agent for the follow-up issue
+    try {
+      const sanitized = followupIssue[0].title
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, "")
+        .slice(0, 50);
+      const branch = `feature/ak-${followupIssue[0].issueNumber ?? "f"}-${sanitized}`;
+      const wsId = randomUUID();
+      const now = new Date().toISOString();
+
+      const worktreePath = await gitService.createWorktree(project[0].repoPath, branch, project[0].defaultBranch);
+
+      await database.insert(workspaces).values({
+        id: wsId,
+        issueId: dep.issueId,
+        branch,
+        status: "idle",
+        workingDir: worktreePath,
+        baseBranch: project[0].defaultBranch,
+        isDirect: false,
+        planMode: false,
+        createdAt: now,
+        updatedAt: now,
+      });
+
+      // Move issue to In Progress
+      const inProgressStatus = statuses.find(s => s.name === "In Progress") ?? todoStatus;
+      await database.update(issues).set({ statusId: inProgressStatus.id, updatedAt: now, statusChangedAt: now }).where(eq(issues.id, dep.issueId));
+
+      const useMock = prefMap.get("mock_agent") === "true" || process.env.MOCK_AGENT === "1";
+      const agentCommand = useMock ? MOCK_AGENT_COMMAND : (prefMap.get("agent_command") || undefined);
+      const skipPerms = prefMap.get("skip_permissions") === "true";
+      const baseArgs = prefMap.get("agent_args") || "";
+      const agentArgs = skipPerms
+        ? (baseArgs ? baseArgs + " --dangerously-skip-permissions" : "--dangerously-skip-permissions")
+        : (baseArgs || undefined);
+      const claudeProfile = prefMap.get("claude_profile") || undefined;
+      const prompt = `${followupIssue[0].title}\n\n${followupIssue[0].description ?? ""}`.trim();
+
+      await getSessionManager().startSession(wsId, prompt, agentCommand, agentArgs, undefined, claudeProfile);
+      await database.update(workspaces).set({ status: "active", updatedAt: now }).where(eq(workspaces.id, wsId));
+
+      console.log(`[workspace-actions] auto-started follow-up workspace for issue ${followupIssue[0].issueNumber ?? dep.issueId}`);
+      options?.boardEvents?.broadcast(projectId, "workspace_merged");
+    } catch (err) {
+      console.warn(`[workspace-actions] failed to auto-start follow-up for issue ${dep.issueId}:`, err);
+    }
+  }
 }
 
 /** Parse basic stats from unified diff output. */
