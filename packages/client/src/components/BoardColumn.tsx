@@ -138,7 +138,7 @@ export function BoardColumn({
         )}
       </div>
 
-      <div className="relative flex-1 min-h-0">
+      <div className="relative flex-1 min-h-0 overflow-hidden rounded-lg">
         {(scrollState === "top" || scrollState === "middle") && (
           <div className="absolute top-0 left-0 right-0 h-6 bg-gradient-to-b from-gray-100 to-transparent z-10 pointer-events-none rounded-t-lg" />
         )}
