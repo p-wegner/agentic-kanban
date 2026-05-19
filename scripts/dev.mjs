@@ -12,6 +12,7 @@
  */
 
 import { execSync, spawn } from "node:child_process";
+import { createServer } from "node:net";
 import { resolve } from "node:path";
 
 const DEFAULT_SERVER_PORT = 3001;
@@ -74,6 +75,43 @@ process.env.SERVER_PORT = String(serverPort);
 process.env.KANBAN_SERVER_PORT = String(serverPort);
 process.env.KANBAN_CLIENT_PORT = String(clientPort);
 
+function isPortFree(port) {
+  return new Promise((resolve) => {
+    const server = createServer();
+    server.once("error", () => resolve(false));
+    server.once("listening", () => { server.close(); resolve(true); });
+    server.listen(port, "127.0.0.1");
+  });
+}
+
+async function freePort(port, label) {
+  if (await isPortFree(port)) return;
+  console.warn(`[dev] Port ${port} is in use — killing occupying process...`);
+  try {
+    // Works on Windows (netstat) and Unix (lsof)
+    const isWin = process.platform === "win32";
+    if (isWin) {
+      const out = execSync(`netstat -ano | findstr ":${port} "`, { encoding: "utf8", stdio: ["pipe","pipe","pipe"] });
+      const pids = [...new Set(
+        out.split("\n")
+          .map(l => l.trim().split(/\s+/).at(-1))
+          .filter(p => /^\d+$/.test(p) && p !== "0")
+      )];
+      for (const pid of pids) {
+        try { execSync(`taskkill /PID ${pid} /F`, { stdio: "pipe" }); } catch {}
+      }
+    } else {
+      execSync(`lsof -ti :${port} | xargs kill -9`, { stdio: "pipe" });
+    }
+  } catch {}
+  // Wait up to 3s for the port to free
+  for (let i = 0; i < 6; i++) {
+    await new Promise(r => setTimeout(r, 500));
+    if (await isPortFree(port)) { console.log(`[dev] Port ${port} freed.`); return; }
+  }
+  console.error(`[dev] Could not free port ${port} — ${label} may fail to start.`);
+}
+
 const MAX_RESTARTS = 5;
 const RESTART_DELAY_MS = 1000;
 
@@ -100,6 +138,9 @@ function spawnProcess(label, cmd, args, opts) {
 
   return start();
 }
+
+await freePort(serverPort, "server");
+await freePort(clientPort, "client");
 
 const serverProc = spawnProcess(
   "server",
