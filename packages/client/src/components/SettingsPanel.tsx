@@ -25,6 +25,7 @@ interface Settings {
   require_manual_approval?: string;
   dynamic_column_scaling?: string;
   persistent_agent?: string;
+  learning_step_before_merge?: string;
 }
 
 const DEFAULT_SETTINGS: Settings = {
@@ -44,6 +45,7 @@ const DEFAULT_SETTINGS: Settings = {
   require_manual_approval: "false",
   dynamic_column_scaling: "false",
   persistent_agent: "false",
+  learning_step_before_merge: "false",
 };
 
 type Tab = "agent" | "workflow" | "skills" | "mcp" | "ui" | "project" | "advanced";
@@ -445,6 +447,12 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                     onChange={setBool("require_manual_approval")}
                     label="Require manual approval before review"
                     hint="When enabled, issues must be manually approved before the AI review step is triggered. Useful for gating expensive review sessions on deliberate human sign-off."
+                  />
+                  <Toggle
+                    checked={settings.learning_step_before_merge === "true"}
+                    onChange={setBool("learning_step_before_merge")}
+                    label="Learning step before merge"
+                    hint="When enabled, runs an agent session before merging that reads the worktree's session transcripts and updates docs and Claude hooks with extracted insights. Improves future agent sessions."
                   />
                 </>
               )}
