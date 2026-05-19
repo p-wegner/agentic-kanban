@@ -22,6 +22,8 @@ export function QuickTasksPanel({ projectId, onClose, onLaunched }: QuickTasksPa
   const [launching, setLaunching] = useState<string | null>(null);
   const [customPrompt, setCustomPrompt] = useState("");
   const [showCustom, setShowCustom] = useState(false);
+  const [extraContext, setExtraContext] = useState("");
+  const [showContext, setShowContext] = useState(false);
 
   useEffect(() => {
     apiFetch<Skill[]>(`/api/agent-skills?projectId=${projectId}`)
@@ -33,11 +35,14 @@ export function QuickTasksPanel({ projectId, onClose, onLaunched }: QuickTasksPa
   async function launch(skillId: string | null, prompt: string) {
     if (!prompt.trim()) return;
     setLaunching(skillId ?? "custom");
+    const fullPrompt = extraContext.trim()
+      ? `${prompt.trim()}\n\nAdditional context: ${extraContext.trim()}`
+      : prompt.trim();
     try {
       // Create a temporary issue for this task, then a direct workspace
       const issue = await apiFetch<{ id: string }>("/api/issues", {
         method: "POST",
-        body: JSON.stringify({ title: prompt.trim().slice(0, 100), projectId }),
+        body: JSON.stringify({ title: fullPrompt.slice(0, 100), projectId }),
       });
       await apiFetch("/api/workspaces", {
         method: "POST",
@@ -91,7 +96,20 @@ export function QuickTasksPanel({ projectId, onClose, onLaunched }: QuickTasksPa
           )}
         </div>
 
-        <div className="px-3 pb-3 border-t border-gray-100 pt-2">
+        <div className="px-3 pb-3 border-t border-gray-100 pt-2 space-y-2">
+          {showContext && (
+            <div>
+              <textarea
+                autoFocus={!showCustom}
+                value={extraContext}
+                onChange={(e) => setExtraContext(e.target.value)}
+                placeholder="Extra context appended to any task (e.g. 'focus on the auth module', 'issue #42')..."
+                rows={2}
+                className="w-full text-xs border border-amber-200 bg-amber-50 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-amber-400 resize-none"
+                onKeyDown={(e) => { if (e.key === "Escape") { setShowContext(false); setExtraContext(""); } }}
+              />
+            </div>
+          )}
           {showCustom ? (
             <div className="space-y-2">
               <textarea
@@ -117,12 +135,21 @@ export function QuickTasksPanel({ projectId, onClose, onLaunched }: QuickTasksPa
               </div>
             </div>
           ) : (
-            <button
-              onClick={() => setShowCustom(true)}
-              className="w-full text-xs text-gray-400 hover:text-gray-600 py-1.5 text-left"
-            >
-              + Custom task prompt...
-            </button>
+            <div className="flex items-center justify-between">
+              <button
+                onClick={() => setShowCustom(true)}
+                className="text-xs text-gray-400 hover:text-gray-600 py-1.5 text-left"
+              >
+                + Custom task prompt...
+              </button>
+              <button
+                onClick={() => { setShowContext(!showContext); if (showContext) setExtraContext(""); }}
+                className={`text-xs py-1.5 px-2 rounded ${showContext ? "text-amber-600 bg-amber-50" : "text-gray-400 hover:text-gray-600"}`}
+                title="Add extra context appended to every task"
+              >
+                {showContext ? "− context" : "+ context"}
+              </button>
+            </div>
           )}
         </div>
       </div>
