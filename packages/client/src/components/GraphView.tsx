@@ -44,8 +44,8 @@ const DEPENDENCY_COLORS: Record<string, string> = {
 
 const NODE_W = 160;
 const NODE_H = 60;
-const H_GAP = 60;
-const V_GAP = 40;
+const H_GAP = 40;
+const V_GAP = 24;
 
 function computeLayout(nodes: IssueWithStatus[], edges: Dependency[]): Node[] {
   if (nodes.length === 0) return [];
@@ -120,6 +120,7 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery }: Gra
   const [graphData, setGraphData] = useState<GraphData | null>(null);
   const [loading, setLoading] = useState(true);
   const [localSearch, setLocalSearch] = useState("");
+  const [hideDone, setHideDone] = useState(true);
   const [nodes, setNodes] = useState<Node[]>([]);
   const dragNodeRef = useRef<string | null>(null);
   const dragOffsetRef = useRef({ x: 0, y: 0 });
@@ -160,19 +161,42 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery }: Gra
 
   useLayoutEffect(() => {
     if (!graphData) return;
+    let baseNodes = hideDone
+      ? graphData.nodes.filter((n) => n.statusName !== "Done" && n.statusName !== "Cancelled")
+      : graphData.nodes;
     const filtered = effectiveSearch
-      ? graphData.nodes.filter(
+      ? baseNodes.filter(
           (n) =>
             n.title.toLowerCase().includes(effectiveSearch.toLowerCase()) ||
             n.description?.toLowerCase().includes(effectiveSearch.toLowerCase())
         )
-      : graphData.nodes;
+      : baseNodes;
     const filteredIds = new Set(filtered.map((n) => n.id));
     const filteredEdges = graphData.edges.filter(
       (e) => filteredIds.has(e.issueId) && filteredIds.has(e.dependsOnId)
     );
-    setNodes(computeLayout(filtered, filteredEdges));
-  }, [graphData, effectiveSearch]);
+    const newNodes = computeLayout(filtered, filteredEdges);
+    setNodes(newNodes);
+
+    // Zoom to matching nodes when searching
+    if (effectiveSearch && newNodes.length > 0 && svgRef.current) {
+      const rect = svgRef.current.getBoundingClientRect();
+      const xs = newNodes.map((n) => n.x);
+      const ys = newNodes.map((n) => n.y);
+      const minX = Math.min(...xs) - 20;
+      const minY = Math.min(...ys) - 20;
+      const maxXN = Math.max(...xs) + NODE_W + 20;
+      const maxYN = Math.max(...ys) + NODE_H + 20;
+      const contentW = maxXN - minX;
+      const contentH = maxYN - minY;
+      const fitZ = Math.min(rect.width / contentW, rect.height / contentH, 2) * 0.9;
+      const centerX = rect.width / 2 - (minX + contentW / 2) * fitZ;
+      const centerY = rect.height / 2 - (minY + contentH / 2) * fitZ;
+      panRef.current = { x: centerX, y: centerY };
+      setPan({ x: centerX, y: centerY });
+      setZoom(fitZ);
+    }
+  }, [graphData, effectiveSearch, hideDone]);
 
   const nodeMap = new Map(nodes.map((n) => [n.id, n]));
 
@@ -186,6 +210,19 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery }: Gra
   function svgPoint(e: React.MouseEvent | MouseEvent): { x: number; y: number } {
     const svg = svgRef.current;
     if (!svg) return { x: 0, y: 0 };
+    // Use SVG's built-in coordinate transform to get accurate position
+    const pt = svg.createSVGPoint();
+    pt.x = e.clientX;
+    pt.y = e.clientY;
+    const g = svg.querySelector("g") as SVGGElement | null;
+    if (g) {
+      const ctm = g.getScreenCTM();
+      if (ctm) {
+        const inv = ctm.inverse();
+        const transformed = pt.matrixTransform(inv);
+        return { x: transformed.x, y: transformed.y };
+      }
+    }
     const rect = svg.getBoundingClientRect();
     const p = panRef.current;
     return {
@@ -276,7 +313,7 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery }: Gra
   return (
     <div className="relative h-full w-full overflow-hidden bg-gray-50 select-none">
       {/* Search toolbar */}
-      <div className="absolute top-3 left-3 z-10">
+      <div className="absolute top-3 left-3 z-10 flex items-center gap-2">
         <input
           type="text"
           value={localSearch}
@@ -284,6 +321,13 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery }: Gra
           placeholder="Search nodes..."
           className="px-2.5 py-1.5 text-xs border border-gray-300 rounded-md bg-white shadow-sm focus:outline-none focus:ring-1 focus:ring-blue-500 w-44"
         />
+        <button
+          onClick={() => setHideDone((v) => !v)}
+          className={`px-2.5 py-1.5 text-xs rounded-md border shadow-sm whitespace-nowrap ${hideDone ? "bg-gray-700 text-white border-gray-700" : "bg-white text-gray-600 border-gray-300 hover:bg-gray-100"}`}
+          title={hideDone ? "Show Done/Cancelled" : "Hide Done/Cancelled"}
+        >
+          {hideDone ? "Hide Done" : "Show Done"}
+        </button>
       </div>
       {/* Controls */}
       <div className="absolute top-3 right-3 z-10 flex flex-col gap-1">
