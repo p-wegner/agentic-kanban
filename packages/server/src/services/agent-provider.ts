@@ -355,9 +355,11 @@ function getMcpConfigPath(): string {
 }
 
 // Env vars that profile settings files can set to redirect API traffic.
-// When switching profiles, strip these from the inherited process env so a
-// profile without an env block doesn't inherit vars set by a different profile.
+// When a profile is active, strip ALL of these from the inherited process env
+// so a profile without an env block gets a clean baseline and Claude Code
+// falls back to its own stored OAuth credentials.
 const PROFILE_OWNED_ENV_VARS = [
+  "ANTHROPIC_API_KEY",
   "ANTHROPIC_AUTH_TOKEN",
   "ANTHROPIC_BASE_URL",
   "ANTHROPIC_MODEL",
@@ -382,11 +384,8 @@ function buildSpawnEnv(claudeProfile?: string): Record<string, string> {
     const profileSettings = JSON.parse(readFileSync(settingsPath, "utf-8"));
     if (profileSettings.env && typeof profileSettings.env === "object") {
       const profileEnv = profileSettings.env as Record<string, string>;
-      // If the profile authenticates via ANTHROPIC_AUTH_TOKEN (bearer token),
-      // remove ANTHROPIC_API_KEY so Claude Code doesn't prefer the key over the token.
-      if (profileEnv.ANTHROPIC_AUTH_TOKEN && !profileEnv.ANTHROPIC_API_KEY) {
-        delete spawnEnv.ANTHROPIC_API_KEY;
-      }
+      // ANTHROPIC_API_KEY was already stripped above; the profile re-adds it
+      // only if it explicitly sets one (e.g. a direct-Anthropic API key profile).
       Object.assign(spawnEnv, profileEnv);
     }
   } catch (err) {
