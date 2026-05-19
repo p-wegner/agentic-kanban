@@ -408,6 +408,29 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
               {/* Workflow tab */}
               {tab === "workflow" && (
                 <>
+                  {/* Process pipeline visualization */}
+                  <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 mb-2">
+                    <div className="text-xs font-medium text-gray-600 mb-2">Process pipeline</div>
+                    <div className="flex items-center gap-1 flex-wrap">
+                      {[
+                        { label: "Agent runs", always: true },
+                        { label: "Manual approval", key: "require_manual_approval", enabled: settings.require_manual_approval === "true" },
+                        { label: "Learning step", key: "learning_step_before_merge", enabled: settings.learning_step_before_merge === "true" },
+                        { label: "AI Review", key: "auto_review", enabled: settings.auto_review !== "false" },
+                        { label: "Auto-fix", key: "review_auto_fix", enabled: settings.auto_review !== "false" && settings.review_auto_fix !== "false", indent: true },
+                        { label: "Auto-merge", key: "auto_merge", enabled: settings.auto_review !== "false" && settings.auto_merge !== "false", indent: true },
+                        { label: "Merge", always: true },
+                      ].filter(s => s.always || s.enabled).map((step, i, arr) => (
+                        <div key={step.label} className="flex items-center gap-1">
+                          {i > 0 && <span className="text-gray-400 text-xs">→</span>}
+                          <span className={`px-2 py-0.5 rounded text-xs font-medium ${step.always ? "bg-blue-100 text-blue-700" : "bg-green-100 text-green-700"}`}>
+                            {step.label}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="text-xs text-gray-400 mt-1.5">Green steps are optional — toggle them below to add/remove from pipeline.</div>
+                  </div>
                   <Toggle
                     checked={autoReviewOn}
                     onChange={setBool("auto_review")}
