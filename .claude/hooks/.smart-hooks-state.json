@@ -8,7 +8,10 @@
     "packages/client/src/components/SettingsPanel.tsx",
     "packages/server/src/services/git.service.ts",
     "packages/server/src/server-start.ts",
-    "packages/server/src/routes/workspace-actions.ts",
-    "packages/server/src/routes/index.ts"
+    "packages/client/src/components/GraphView.tsx",
+    "packages/server/src/routes/projects.ts",
+    "packages/client/src/routes/BoardPage.tsx",
+    "packages/server/src/routes/preferences.ts",
+    "packages/server/src/routes/workspace-actions.ts"
   ]
 }

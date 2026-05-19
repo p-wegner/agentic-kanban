@@ -799,6 +799,69 @@ ${contextParts.join("\n")}`;
     return c.json(result);
   });
 
+  // GET /api/projects/:id/graph — all issues + all dependencies for graph view
+  router.get("/:id/graph", async (c) => {
+    const projectId = c.req.param("id");
+
+    const projectRows = await database
+      .select({ id: projects.id })
+      .from(projects)
+      .where(eq(projects.id, projectId));
+    if (projectRows.length === 0) return c.json({ error: "Project not found" }, 404);
+
+    const projectIssues = await database
+      .select({
+        id: issues.id,
+        issueNumber: issues.issueNumber,
+        title: issues.title,
+        description: issues.description,
+        priority: issues.priority,
+        sortOrder: issues.sortOrder,
+        statusId: issues.statusId,
+        projectId: issues.projectId,
+        createdAt: issues.createdAt,
+        updatedAt: issues.updatedAt,
+        statusChangedAt: issues.statusChangedAt,
+        statusName: projectStatuses.name,
+        skipAutoReview: issues.skipAutoReview,
+      })
+      .from(issues)
+      .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
+      .where(eq(issues.projectId, projectId))
+      .orderBy(issues.sortOrder);
+
+    const issueIds = projectIssues.map((i) => i.id);
+    let edges: Array<{ id: string; issueId: string; dependsOnId: string; type: string; issueTitle: string; issueStatusName: string; issueNumber: number | null }> = [];
+
+    if (issueIds.length > 0) {
+      edges = await database
+        .select({
+          id: issueDependencies.id,
+          issueId: issueDependencies.issueId,
+          dependsOnId: issueDependencies.dependsOnId,
+          type: issueDependencies.type,
+          issueTitle: issues.title,
+          issueStatusName: projectStatuses.name,
+          issueNumber: issues.issueNumber,
+        })
+        .from(issueDependencies)
+        .innerJoin(issues, eq(issueDependencies.issueId, issues.id))
+        .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
+        .where(inArray(issueDependencies.issueId, issueIds));
+    }
+
+    // Compute isBlocked
+    const blockedIds = new Set(
+      edges
+        .filter((e) => e.type === "depends_on" || e.type === "blocked_by")
+        .map((e) => e.issueId)
+    );
+
+    const nodes = projectIssues.map((i) => ({ ...i, isBlocked: blockedIds.has(i.id) }));
+
+    return c.json({ nodes, edges });
+  });
+
   return router;
 }
 
