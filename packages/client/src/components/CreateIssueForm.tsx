@@ -15,7 +15,7 @@ export interface CreateIssueFormState {
 interface CreateIssueFormProps {
   projectId: string;
   statusId: string;
-  onSubmit: (data: CreateIssueRequest & { startWorkspace?: boolean; planMode?: boolean; skipAutoReview?: boolean }) => Promise<void>;
+  onSubmit: (data: CreateIssueRequest & { startWorkspace?: boolean; planMode?: boolean; skipAutoReview?: boolean; isDirect?: boolean }) => Promise<void>;
   onCancel: () => void;
   canStartWorkspace?: boolean;
   onExpand?: (state: CreateIssueFormState) => void;
@@ -37,6 +37,7 @@ export function CreateIssueForm({
   const [startWorkspace, setStartWorkspace] = useState(initialState?.startWorkspace ?? false);
   const [planMode, setPlanMode] = useState(initialState?.planMode ?? false);
   const [skipAutoReview, setSkipAutoReview] = useState(initialState?.skipAutoReview ?? false);
+  const [isDirect, setIsDirect] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [enhancing, setEnhancing] = useState(false);
   const [preEnhanceSnapshot, setPreEnhanceSnapshot] = useState<{ title: string; description: string } | null>(null);
@@ -81,6 +82,7 @@ export function CreateIssueForm({
         startWorkspace: startWorkspace || undefined,
         planMode: (startWorkspace && planMode) || undefined,
         skipAutoReview: (startWorkspace && skipAutoReview) || undefined,
+        isDirect: (startWorkspace && isDirect) || undefined,
       });
     } finally {
       setSubmitting(false);
@@ -162,6 +164,15 @@ export function CreateIssueForm({
               className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
             />
             Skip auto AI code review
+          </label>
+          <label className="flex items-center gap-2 text-xs text-gray-600 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={isDirect}
+              onChange={(e) => setIsDirect(e.target.checked)}
+              className="rounded border-gray-300 text-purple-600 focus:ring-purple-500"
+            />
+            Work directly on master (no worktree)
           </label>
         </div>
       )}
