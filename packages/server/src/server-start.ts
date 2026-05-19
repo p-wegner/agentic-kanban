@@ -422,8 +422,10 @@ export async function startServer(port?: number) {
 
   // Board monitoring loop — periodically checks for stuck/idle workspaces
   let monitorTimer: ReturnType<typeof setTimeout> | null = null;
+  let monitorLastRun: { at: string; relaunched: number; merged: number; nudged: number } | null = null;
 
   async function runMonitorCycle() {
+    const cycleStats = { relaunched: 0, merged: 0, nudged: 0 };
     try {
       const prefRows = await db.select().from(preferences);
       const prefMap = new Map(prefRows.map(r => [r.key, r.value]));
@@ -464,12 +466,14 @@ export async function startServer(port?: number) {
             // Relaunch idle workspaces
             const baseUrl = `http://localhost:${serverPort}`;
             await fetch(`${baseUrl}/api/workspaces/${ws.wsId}/launch`, { method: "POST" }).catch(() => {});
+            cycleStats.relaunched++;
             console.log(`[monitor] Relaunched idle workspace ${ws.wsId}`);
             boardEvents.broadcast(ws.projectId, "board_changed");
           } else if (ws.wsStatus === "reviewing" && sess && sess.status === "stopped") {
             // Trigger merge for reviewing workspaces with stopped sessions
             const baseUrl = `http://localhost:${serverPort}`;
             await fetch(`${baseUrl}/api/workspaces/${ws.wsId}/merge`, { method: "POST" }).catch(() => {});
+            cycleStats.merged++;
             console.log(`[monitor] Triggered merge for reviewing workspace ${ws.wsId}`);
             boardEvents.broadcast(ws.projectId, "board_changed");
           } else if (ws.wsStatus === "active" && sess && sess.status === "running") {
@@ -482,6 +486,7 @@ export async function startServer(port?: number) {
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ message: "Please continue with the task. If you are waiting for input, proceed with your best judgment." }),
               }).catch(() => {});
+              cycleStats.nudged++;
               console.log(`[monitor] Nudged long-running agent in workspace ${ws.wsId}`);
             }
           }
@@ -492,6 +497,7 @@ export async function startServer(port?: number) {
     } catch (err) {
       console.warn("[monitor] Cycle error:", err);
     } finally {
+      monitorLastRun = { at: new Date().toISOString(), ...cycleStats };
       // Reschedule based on current preference
       const prefRows = await db.select().from(preferences).catch(() => []);
       const prefMap = new Map(prefRows.map((r: { key: string; value: string }) => [r.key, r.value]));
@@ -531,6 +537,7 @@ export async function startServer(port?: number) {
       enabled: prefMap.get("auto_monitor") === "true",
       intervalMin: parseInt(prefMap.get("auto_monitor_interval") || "4", 10),
       active: monitorTimer !== null,
+      lastRun: monitorLastRun,
     });
   });
 
