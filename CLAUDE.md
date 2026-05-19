@@ -167,9 +167,7 @@ When performing kanban board operations (creating issues, moving issues, managin
 - `pnpm cli -- workspace list` — list workspaces for active project
 - `pnpm cli -- workspace create <issueId>` — create a git worktree workspace
 
-**Only fall back to REST API** when an operation has no MCP tool or CLI equivalent. Known gaps where REST is the only option:
-- `POST /api/workspaces/:id/launch` — relaunch an idle workspace (no CLI/MCP equivalent)
-- `POST /api/workspaces/:id/review` — trigger AI review on a workspace The REST API is fragile from the Claude Code shell — endpoints return 404 or 500 for reasons unrelated to the operation (missing projectId resolution, preference routes not mounted, etc.). The CLI handles all of that internally and is the reliable fallback.
+**Only fall back to REST API** when an operation has no MCP tool or CLI equivalent. The REST API is fragile from the Claude Code shell — endpoints return 404 or 500 for reasons unrelated to the operation (missing projectId resolution, preference routes not mounted, etc.). The CLI handles all of that internally and is the reliable fallback.
 
 ## Monorepo Commands
 - `pnpm dev` — start server + client concurrently (auto-detects worktree ports; default: server 3001, client 5173)
