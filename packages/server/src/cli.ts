@@ -707,12 +707,17 @@ Setup:
       }
 
       const { mkdir, access, rm } = await import("node:fs/promises");
+<<<<<<< HEAD
       const { join, resolve: resolvePath } = await import("node:path");
 >>>>>>> 4ff54fb (feat: add cli create subcommand and preferences set/get)
+=======
+      const { join, resolve: resolvePath, sep } = await import("node:path");
+>>>>>>> 76d53ab (fix: guard against path traversal in cli create command)
       const { execFile } = await import("node:child_process");
       const { promisify } = await import("node:util");
       const execFileAsync = promisify(execFile);
 
+<<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
       const repoPath = resolvePath(join(baseFolder, folderName));
@@ -720,6 +725,10 @@ Setup:
 =======
 =======
 >>>>>>> b794815 (feat: add cli create subcommand and preferences set/get)
+=======
+=======
+>>>>>>> 76d53ab (fix: guard against path traversal in cli create command)
+>>>>>>> 09277d7 (fix: guard against path traversal in cli create command)
       const resolvedBase = resolvePath(baseFolder);
       const repoPath = resolvePath(join(resolvedBase, folderName));
 
@@ -729,12 +738,20 @@ Setup:
         process.exit(1);
       }
 <<<<<<< HEAD
+<<<<<<< HEAD
 >>>>>>> a1f5d7d (fix: guard against path traversal in cli create command)
 =======
 =======
       const repoPath = resolvePath(join(baseFolder, folderName));
 >>>>>>> 4ff54fb (feat: add cli create subcommand and preferences set/get)
 >>>>>>> b794815 (feat: add cli create subcommand and preferences set/get)
+=======
+=======
+      const repoPath = resolvePath(join(baseFolder, folderName));
+>>>>>>> 4ff54fb (feat: add cli create subcommand and preferences set/get)
+=======
+>>>>>>> 76d53ab (fix: guard against path traversal in cli create command)
+>>>>>>> 09277d7 (fix: guard against path traversal in cli create command)
 
       // Check if directory already exists
       try {
