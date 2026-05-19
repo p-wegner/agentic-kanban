@@ -638,7 +638,7 @@ Setup:
         process.exit(1);
       }
 
-      const { mkdir, access } = await import("node:fs/promises");
+      const { mkdir, access, rm } = await import("node:fs/promises");
       const { join, resolve: resolvePath } = await import("node:path");
       const { execFile } = await import("node:child_process");
       const { promisify } = await import("node:util");
@@ -656,6 +656,7 @@ Setup:
         // Expected: directory doesn't exist yet
       }
 
+<<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
@@ -751,7 +752,17 @@ Setup:
 >>>>>>> 856937b (fix: add missing rmSync/writeFileSync imports in projects.ts; fix cleanupDir scope in cli create command)
 =======
       // Create directory
+=======
+      // Create directory — track so we can clean up on failure
+>>>>>>> 5643a0f (fix: clean up created directory if git init/commit fails in cli create command)
       await mkdir(repoPath, { recursive: true });
+      let dirCreated = true;
+
+      const cleanupDir = async () => {
+        if (dirCreated) {
+          try { await rm(repoPath, { recursive: true, force: true }); } catch { /* best-effort */ }
+        }
+      };
 
 >>>>>>> dd3f860 (feat: add cli create subcommand and preferences set/get)
       // Run git init
@@ -775,12 +786,15 @@ Setup:
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 >>>>>>> 907d84b (fix: clean up created directory if git init/commit fails in cli create command)
 =======
 >>>>>>> 7d3e5ad (fix: clean up created directory if git init/commit fails in cli create command)
 =======
 >>>>>>> c6268ea (fix: clean up created directory if git init/commit fails in cli create command)
+=======
+>>>>>>> 5643a0f (fix: clean up created directory if git init/commit fails in cli create command)
       // Create an initial empty commit so the repo has a HEAD.
       // git commit requires user.name/email to be configured; give a clear error if not.
       try {
@@ -797,6 +811,7 @@ Setup:
         }
         process.exit(1);
       }
+<<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
@@ -836,6 +851,9 @@ Setup:
 =======
       // Create an initial empty commit so the repo has a HEAD
       await execFileAsync("git", ["-C", repoPath, "commit", "--allow-empty", "-m", "Initial commit"]);
+=======
+      dirCreated = false; // repo is now fully initialized; don't clean up on later errors
+>>>>>>> 5643a0f (fix: clean up created directory if git init/commit fails in cli create command)
 
 >>>>>>> dd3f860 (feat: add cli create subcommand and preferences set/get)
       // Register the new repo
