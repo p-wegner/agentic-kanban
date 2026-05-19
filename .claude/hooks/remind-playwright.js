@@ -5,8 +5,9 @@
  * Blocks agent termination when client source files were edited,
  * reminding the agent to visually verify changes via playwright-cli.
  *
- * Reads edited file state from .smart-hooks-state.json (shared with
- * smart-hooks-runner.js).
+ * Receives edited file list via SMART_HOOKS_EDITED_FILES env var (set by
+ * smart-hooks-runner.js). Falls back to reading .smart-hooks-state.json for
+ * standalone invocation.
  *
  * Outputs a JSON block decision on stdout if client files need verification.
  * Exit code 2 = block, 0 = pass.
@@ -32,10 +33,16 @@ function hasClientEdits(files) {
 }
 
 function main() {
-  let state = { editedFiles: [] };
-  try {
-    state = JSON.parse(fs.readFileSync(getStatePath(), "utf8"));
-  } catch {}
+  let editedFiles = [];
+  if (process.env.SMART_HOOKS_EDITED_FILES) {
+    try { editedFiles = JSON.parse(process.env.SMART_HOOKS_EDITED_FILES); } catch {}
+  } else {
+    try {
+      const state = JSON.parse(fs.readFileSync(getStatePath(), "utf8"));
+      editedFiles = state.editedFiles || [];
+    } catch {}
+  }
+  const state = { editedFiles };
 
   if (!hasClientEdits(state.editedFiles)) process.exit(0);
 
