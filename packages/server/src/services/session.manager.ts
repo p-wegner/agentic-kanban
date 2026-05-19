@@ -88,9 +88,9 @@ function createSessionManager(
         // Provider session ID (e.g. Claude's system/init session_id)
         if (evt.providerSessionId) {
           db.update(sessions)
-            .set({ claudeSessionId: evt.providerSessionId })
+            .set({ providerSessionId: evt.providerSessionId })
             .where(eq(sessions.id, sessionId))
-            .catch((err) => console.error("Failed to update claudeSessionId:", err));
+            .catch((err) => console.error("Failed to update providerSessionId:", err));
         }
 
         // Turn completion in multi-turn mode
