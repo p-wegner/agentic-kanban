@@ -850,12 +850,18 @@ ${contextParts.join("\n")}`;
         .where(inArray(issueDependencies.issueId, issueIds));
     }
 
-    // Compute isBlocked
-    const blockedIds = new Set(
-      edges
-        .filter((e) => e.type === "depends_on" || e.type === "blocked_by")
-        .map((e) => e.issueId)
-    );
+    // Compute isBlocked: an issue is blocked only when it has at least one
+    // depends_on/blocked_by dependency whose target is not yet Done/Cancelled.
+    const TERMINAL_STATUSES = new Set(["Done", "Cancelled"]);
+    const issueStatusMap = new Map(projectIssues.map((i) => [i.id, i.statusName]));
+    const blockedIds = new Set<string>();
+    for (const e of edges) {
+      if (e.type !== "depends_on" && e.type !== "blocked_by") continue;
+      const depStatus = issueStatusMap.get(e.dependsOnId);
+      if (!depStatus || !TERMINAL_STATUSES.has(depStatus)) {
+        blockedIds.add(e.issueId);
+      }
+    }
 
     const nodes = projectIssues.map((i) => ({ ...i, isBlocked: blockedIds.has(i.id) }));
 
