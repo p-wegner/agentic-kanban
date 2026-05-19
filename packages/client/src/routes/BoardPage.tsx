@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Layout } from "../components/Layout.js";
 import { BoardColumn } from "../components/BoardColumn.js";
 import { CompletedGrid } from "../components/CompletedGrid.js";
+import { BoardStats } from "../components/BoardStats.js";
 import { CreateIssueForm } from "../components/CreateIssueForm.js";
 import { CreateIssuePanel } from "../components/CreateIssuePanel.js";
 import type { CreateIssueFormState } from "../components/CreateIssueForm.js";
@@ -619,7 +620,13 @@ export function BoardPage() {
         </div>
       )}
       <div className="flex flex-col gap-3 p-4 h-full overflow-hidden">
-        <div className="flex flex-col gap-4 sm:flex-row flex-1 min-h-0">
+        <BoardStats
+          activeColumns={activeColumns}
+          archiveColumns={archiveColumns}
+          searchQuery={searchQuery}
+          priorityFilter={priorityFilter}
+        />
+        <div className="flex flex-col gap-4 sm:flex-row flex-1 min-h-0 overflow-x-auto board-columns-scroll">
           {activeColumns.map((col) => (
             <BoardColumn
               key={col.id}
