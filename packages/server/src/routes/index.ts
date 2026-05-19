@@ -13,6 +13,7 @@ import type { BoardEvents } from "../services/board-events.js";
 
 interface RouteOptions {
   boardEvents?: BoardEvents;
+  fixAndMergeSessionIds?: Set<string>;
 }
 
 export function createRoutes(database: Database, getSessionManager: () => SessionManager, options?: RouteOptions) {

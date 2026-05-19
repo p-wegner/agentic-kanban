@@ -132,6 +132,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
   const [error, setError] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
   const [conflictState, setConflictState] = useState<{ hasConflicts: boolean; conflictingFiles: string[] } | null>(null);
+  const [mergeError, setMergeError] = useState<{ wsId: string; message: string } | null>(null);
 
   // Session history state
   const [workspaceSessions, setWorkspaceSessions] = useState<Record<string, SessionInfo[]>>({});
@@ -614,6 +615,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
     if (isRunning && !window.confirm("Agent is still running. Stop and merge?")) return;
     setActionLoading(true);
     setError(null);
+    setMergeError(null);
     try {
       if (isRunning) {
         await apiFetch(`/api/workspaces/${wsId}/stop`, { method: "POST" });
@@ -627,7 +629,27 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
       await fetchWorkspaces();
       onWorkspaceChange?.();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Merge failed");
+      const message = err instanceof Error ? err.message : "Merge failed";
+      setError(message);
+      setMergeError({ wsId, message });
+    } finally {
+      setActionLoading(false);
+    }
+  }
+
+  async function handleFixAndMerge(wsId: string, errorMessage: string) {
+    setActionLoading(true);
+    setError(null);
+    setMergeError(null);
+    try {
+      const result = await apiFetch<{ sessionId: string }>(`/api/workspaces/${wsId}/fix-and-merge`, {
+        method: "POST",
+        body: JSON.stringify({ mergeError: errorMessage }),
+      });
+      setActiveSession(result.sessionId);
+      await fetchWorkspaces();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Fix-and-merge launch failed");
     } finally {
       setActionLoading(false);
     }
@@ -856,7 +878,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
           {error && (
             <div className="p-2 bg-red-50 border border-red-200 rounded text-sm text-red-700">
               {error}
-              <button onClick={() => setError(null)} className="ml-2 text-red-400 hover:text-red-600">
+              <button onClick={() => { setError(null); setMergeError(null); }} className="ml-2 text-red-400 hover:text-red-600">
                 Dismiss
               </button>
             </div>
@@ -1514,6 +1536,22 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                           Delete
                         </button>
                       </div>
+                      {/* Fix & merge with AI after merge error */}
+                      {mergeError && mergeError.wsId === ws.id && (
+                        <div className="mt-2 p-2 bg-orange-50 border border-orange-200 rounded">
+                          <div className="flex items-center justify-between">
+                            <span className="text-sm font-medium text-orange-700">Merge failed — AI can fix and retry</span>
+                            <button
+                              onClick={() => handleFixAndMerge(ws.id, mergeError.message)}
+                              disabled={actionLoading}
+                              className="text-xs bg-orange-600 text-white px-2 py-1 rounded hover:bg-orange-700 disabled:opacity-50"
+                            >
+                              Fix &amp; Merge with AI
+                            </button>
+                          </div>
+                          <p className="mt-1 text-xs text-orange-600 font-mono break-all">{mergeError.message}</p>
+                        </div>
+                      )}
                       {/* Conflict display */}
                       {conflictState && conflictState.hasConflicts && (
                         <div className="mt-2 p-2 bg-red-50 border border-red-200 rounded">
