@@ -569,6 +569,7 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
 
               {/* UI tab */}
               {tab === "ui" && (
+                <>
                 <Field label="Output Parsing" hint={`When enabled, the terminal view parses structured agent output and displays it with syntax highlighting. "Minimal" shows a compact activity timeline.`}>
                   <select
                     value={settings.output_parser || "true"}
@@ -594,6 +595,7 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                     hint="Keep a warm agent process alive between sessions to reduce startup latency. Experimental."
                   />
                 </div>
+                </>
               )}
 
               {/* Project tab */}
