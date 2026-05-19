@@ -1,0 +1,10 @@
+{
+  "editedFiles": [
+    "packages/client/src/lib/agent-output-parser.ts",
+    "packages/client/src/components/TerminalView.tsx",
+    "packages/client/src/components/WorkspacePanel.tsx",
+    "packages/shared/src/types/api.ts",
+    "packages/client/src/lib/agent-output-parser.test.ts",
+    "packages/client/src/components/SettingsPanel.tsx"
+  ]
+}
