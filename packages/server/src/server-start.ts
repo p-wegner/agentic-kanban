@@ -86,8 +86,7 @@ Conflicting files:
 ${conflictingFiles.map(f => `- ${f}`).join("\n")}
 
 Steps to resolve:
-1. Start a fresh rebase: git rebase origin/${baseBranch ?? "master"}
-   (or use the local branch if no remote: git rebase ${baseBranch ?? "master"})
+1. Start a fresh rebase: git rebase ${baseBranch ?? "master"}
 2. For each conflicting file, open it and resolve the conflict markers (<<<<<<<, =======, >>>>>>>)
 3. After resolving each file: git add <resolved-file>
 4. Continue: git rebase --continue (repeat for each conflicting commit)
