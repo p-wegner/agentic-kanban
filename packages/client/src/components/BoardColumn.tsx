@@ -109,7 +109,7 @@ export function BoardColumn({
   return (
     <div
       id={`column-${column.id}`}
-      className={`w-full sm:flex-shrink-0 sm:min-w-[220px] sm:flex-1 bg-gray-100 rounded-xl p-3 flex flex-col transition-all relative ${
+      className={`w-72 shrink-0 bg-gray-100 rounded-xl p-3 flex flex-col transition-all relative ${
         dragOver ? "ring-2 ring-blue-400 ring-offset-1" : ""
       }`}
       onDragEnter={handleDragEnter}
