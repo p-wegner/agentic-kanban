@@ -122,9 +122,27 @@ Every feature that has a UI component must be visually verified using the `playw
 
 When the user references `#N` (e.g., "review #70", "merge #65", "what's the status of #72"), this **always refers to a kanban board issue number**, never a GitHub pull request. This project does not use PRs — merges are done directly from worktree branches.
 
-- **"review #N"** → invoke the `/kanban-workflow` skill, then use MCP tools to find issue #N, get its workspace diff, review the changes, and merge if acceptable
-- **"merge #N"** → same as "review #N and merge"
+- **"review #N"** → trigger the AI review feature via `POST /api/workspaces/:id/review` (use the board's built-in AI review, don't manually read and critique the diff)
+- **"merge #N"** → use `mcp__agentic-kanban__merge_workspace` or `POST /api/workspaces/:id/merge` after review passes
 - **"status of #N"** → use `get_board_status` or `get_issue` to look up issue #N by `issueNumber`
+
+### Use the board's built-in features, don't replicate them manually
+
+This board is used to implement features in the app itself. When asked to perform an action the board supports natively, **delegate to the board feature** rather than doing it manually:
+
+| Task | Use the board | Don't do manually |
+|---|---|---|
+| Review code on a branch | `POST /api/workspaces/:id/review` | Read diff and critique it yourself |
+| Merge a branch | `POST /api/workspaces/:id/merge` (or MCP `merge_workspace`) | Run `git merge` directly |
+| Fix merge conflicts and retry | `POST /api/workspaces/:id/fix-and-merge` | Manually resolve conflicts in git |
+| Start agent work on an issue | `POST /api/workspaces` (creates worktree + launches agent) | Run `claude` directly in a shell |
+| Improve a ticket's title/description | `POST /api/issues/enhance` (AI-powered) | Rewrite it yourself |
+| Analyze issue dependencies | `POST /api/issues/analyze-dependencies` | Manually read issues and infer deps |
+| Rebase a workspace onto latest base | `POST /api/workspaces/:id/update-base` | Run `git rebase` directly |
+| Move an issue to a new status | MCP `move_issue` or CLI `issue move` | PATCH via REST unless no tool exists |
+| Send a follow-up message to a running agent | `POST /api/workspaces/:id/turn` | Spawn a new claude process |
+
+The goal is to test and exercise the board's own workflows, not bypass them. These features exist — using them surfaces real bugs and validates the product.
 
 ### MCP Tools are the primary interface
 
@@ -149,7 +167,7 @@ When performing kanban board operations (creating issues, moving issues, managin
 - `pnpm cli -- workspace list` — list workspaces for active project
 - `pnpm cli -- workspace create <issueId>` — create a git worktree workspace
 
-**Only fall back to REST API curl** when an operation has no MCP tool or CLI equivalent.
+**Only fall back to REST API** when an operation has no MCP tool or CLI equivalent. The REST API is fragile from the Claude Code shell — endpoints return 404 or 500 for reasons unrelated to the operation (missing projectId resolution, preference routes not mounted, etc.). The CLI handles all of that internally and is the reliable fallback.
 
 ## Monorepo Commands
 - `pnpm dev` — start server + client concurrently (auto-detects worktree ports; default: server 3001, client 5173)
