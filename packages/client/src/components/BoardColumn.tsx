@@ -19,6 +19,7 @@ interface BoardColumnProps {
   liveStats?: Record<string, LiveSessionStats>;
   sessionTodos?: Record<string, TodoItem[]>;
   children?: React.ReactNode;
+  style?: React.CSSProperties;
 }
 
 export function BoardColumn({
@@ -37,6 +38,7 @@ export function BoardColumn({
   liveStats,
   sessionTodos,
   children,
+  style,
 }: BoardColumnProps) {
   const [dragOver, setDragOver] = useState(false);
   const dragCounterRef = useRef(0);
@@ -112,6 +114,7 @@ export function BoardColumn({
       className={`w-72 shrink-0 bg-gray-100 rounded-xl p-2 flex flex-col transition-all relative ${
         dragOver ? "ring-2 ring-blue-400 ring-offset-1" : ""
       }`}
+      style={style}
       onDragEnter={handleDragEnter}
       onDragLeave={handleDragLeave}
       onDragOver={handleDragOver}
