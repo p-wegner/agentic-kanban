@@ -50,7 +50,7 @@ function buildReviewArgs(prefMap: Map<string, string>): string | undefined {
   return baseArgs || undefined;
 }
 
-async function buildReviewPrompt(branch: string, baseBranch: string | null, issueId: string, autoFix: boolean, projectId?: string): Promise<string> {
+async function buildReviewPrompt(branch: string, baseBranch: string | null, issueId: string, autoFix: boolean, projectId?: string, conflictingFiles?: string[]): Promise<string> {
   let template: string | null = null;
   if (projectId) {
     const projectSkill = await db.select({ prompt: agentSkills.prompt }).from(agentSkills)
@@ -78,7 +78,27 @@ If only MINOR issues or no issues: just exit normally (the system will auto-merg
 
 If only MINOR issues or no issues: just exit normally (the system will auto-merge).`;
 
-  return template
+  let conflictPreamble = "";
+  if (conflictingFiles && conflictingFiles.length > 0) {
+    conflictPreamble = `IMPORTANT: Auto-rebase onto the base branch failed due to conflicts. The rebase has been aborted, so the worktree is clean. You must resolve the conflicts and rebase manually before reviewing.
+
+Conflicting files:
+${conflictingFiles.map(f => `- ${f}`).join("\n")}
+
+Steps to resolve:
+1. Start a fresh rebase: git rebase origin/${baseBranch ?? "master"}
+   (or use the local branch if no remote: git rebase ${baseBranch ?? "master"})
+2. For each conflicting file, open it and resolve the conflict markers (<<<<<<<, =======, >>>>>>>)
+3. After resolving each file: git add <resolved-file>
+4. Continue: git rebase --continue (repeat for each conflicting commit)
+5. Once the rebase completes, proceed with the code review below.
+
+---
+
+`;
+  }
+
+  return conflictPreamble + template
     .replace(/\{\{branch}}/g, branch)
     .replace(/\{\{baseBranch}}/g, baseBranch ?? "HEAD")
     .replace(/\{\{issueId}}/g, issueId)
@@ -190,15 +210,17 @@ export async function startServer(port?: number) {
           const autoFix = prefMap.get("review_auto_fix") !== "false";
 
           let diffRef = workspace.baseBranch || defaultBranch;
+          let conflictingFiles: string[] | undefined;
           if (!workspace.isDirect && workspace.workingDir) {
             const baseBranch = workspace.baseBranch || defaultBranch;
             const prep = await gitService.prepareForReview(workspace.workingDir, baseBranch);
-            if (!prep.success) {
-              console.warn(`[workflow] merge-base failed for workspace ${workspaceId}: ${prep.error} — launching review with stale base`);
-            }
             diffRef = prep.diffRef;
+            if (!prep.success) {
+              conflictingFiles = prep.conflictingFiles;
+              console.warn(`[workflow] rebase failed for workspace ${workspaceId}: ${prep.error} — reviewer will resolve conflicts`);
+            }
           }
-          const reviewPrompt = await buildReviewPrompt(workspace.branch, diffRef, issueId, autoFix, projectId);
+          const reviewPrompt = await buildReviewPrompt(workspace.branch, diffRef, issueId, autoFix, projectId, conflictingFiles);
 
           try {
             await db.update(workspaces).set({ status: "reviewing", updatedAt: now }).where(eq(workspaces.id, workspaceId));
