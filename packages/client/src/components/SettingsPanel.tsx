@@ -37,6 +37,7 @@ interface Settings {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
   nudge_auto_start?: string;
   nudge_wip_limit?: string;
@@ -60,6 +61,9 @@ interface Settings {
 =======
   projects_base_path?: string;
 >>>>>>> 9196ac9 (fix: align projects_base_dir -> projects_base_path across cli.ts and SettingsPanel.tsx)
+=======
+  projects_base_dir?: string;
+>>>>>>> e6a6ccb (feat: implement create project flow (WIP - UI + backend route))
 }
 
 const DEFAULT_SETTINGS: Settings = {
@@ -91,6 +95,7 @@ const DEFAULT_SETTINGS: Settings = {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
   nudge_auto_start: "false",
   nudge_wip_limit: "5",
@@ -114,6 +119,9 @@ const DEFAULT_SETTINGS: Settings = {
 =======
   projects_base_path: "",
 >>>>>>> 9196ac9 (fix: align projects_base_dir -> projects_base_path across cli.ts and SettingsPanel.tsx)
+=======
+  projects_base_dir: "",
+>>>>>>> e6a6ccb (feat: implement create project flow (WIP - UI + backend route))
 };
 
 type Tab = "agent" | "workflow" | "skills" | "mcp" | "ui" | "project" | "tags" | "advanced";
@@ -893,6 +901,7 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
                       value={settings.projects_base_path ?? ""}
                       onChange={(e) => setSettings((s) => ({ ...s, projects_base_path: e.target.value }))}
 =======
@@ -919,6 +928,10 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                       value={settings.projects_base_path ?? ""}
                       onChange={(e) => setSettings((s) => ({ ...s, projects_base_path: e.target.value }))}
 >>>>>>> 9196ac9 (fix: align projects_base_dir -> projects_base_path across cli.ts and SettingsPanel.tsx)
+=======
+                      value={settings.projects_base_dir ?? ""}
+                      onChange={(e) => setSettings((s) => ({ ...s, projects_base_dir: e.target.value }))}
+>>>>>>> e6a6ccb (feat: implement create project flow (WIP - UI + backend route))
                       placeholder="C:/projects"
                       className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 font-mono"
                     />
