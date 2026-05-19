@@ -121,14 +121,17 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery }: Gra
   const [loading, setLoading] = useState(true);
   const [localSearch, setLocalSearch] = useState("");
   const [nodes, setNodes] = useState<Node[]>([]);
-  const [dragNode, setDragNode] = useState<string | null>(null);
-  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
+  const dragNodeRef = useRef<string | null>(null);
+  const dragOffsetRef = useRef({ x: 0, y: 0 });
+  const didDragRef = useRef(false);
   const [pan, setPan] = useState({ x: 0, y: 0 });
+  const panRef = useRef({ x: 0, y: 0 });
   const [zoom, setZoom] = useState(1);
-  const [isPanning, setIsPanning] = useState(false);
+  const isPanningRef = useRef(false);
   const panStart = useRef({ x: 0, y: 0 });
   const panOrigin = useRef({ x: 0, y: 0 });
   const svgRef = useRef<SVGSVGElement>(null);
+  const rafRef = useRef<number | null>(null);
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
 
   const allIssues = columns.flatMap((c) => c.issues);
@@ -180,13 +183,14 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery }: Gra
     );
   }
 
-  function svgPoint(e: React.MouseEvent): { x: number; y: number } {
+  function svgPoint(e: React.MouseEvent | MouseEvent): { x: number; y: number } {
     const svg = svgRef.current;
     if (!svg) return { x: 0, y: 0 };
     const rect = svg.getBoundingClientRect();
+    const p = panRef.current;
     return {
-      x: (e.clientX - rect.left - pan.x) / zoom,
-      y: (e.clientY - rect.top - pan.y) / zoom,
+      x: (e.clientX - rect.left - p.x) / zoom,
+      y: (e.clientY - rect.top - p.y) / zoom,
     };
   }
 
@@ -194,39 +198,46 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery }: Gra
     e.stopPropagation();
     const pt = svgPoint(e);
     const node = nodeMap.get(nodeId)!;
-    setDragNode(nodeId);
-    setDragOffset({ x: pt.x - node.x, y: pt.y - node.y });
+    didDragRef.current = false;
+    dragNodeRef.current = nodeId;
+    dragOffsetRef.current = { x: pt.x - node.x, y: pt.y - node.y };
     setSelectedNode(nodeId);
   }
 
   function handleMouseMoveSvg(e: React.MouseEvent) {
-    if (dragNode) {
+    if (dragNodeRef.current) {
+      didDragRef.current = true;
       const pt = svgPoint(e);
-      setNodes((prev) =>
-        prev.map((n) =>
-          n.id === dragNode
-            ? { ...n, x: pt.x - dragOffset.x, y: pt.y - dragOffset.y }
-            : n
-        )
-      );
-    } else if (isPanning) {
-      setPan({
-        x: panOrigin.current.x + (e.clientX - panStart.current.x),
-        y: panOrigin.current.y + (e.clientY - panStart.current.y),
+      const dx = dragOffsetRef.current;
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      rafRef.current = requestAnimationFrame(() => {
+        setNodes((prev) =>
+          prev.map((n) =>
+            n.id === dragNodeRef.current
+              ? { ...n, x: pt.x - dx.x, y: pt.y - dx.y }
+              : n
+          )
+        );
       });
+    } else if (isPanningRef.current) {
+      const nx = panOrigin.current.x + (e.clientX - panStart.current.x);
+      const ny = panOrigin.current.y + (e.clientY - panStart.current.y);
+      panRef.current = { x: nx, y: ny };
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      rafRef.current = requestAnimationFrame(() => setPan({ x: nx, y: ny }));
     }
   }
 
   function handleMouseUpSvg() {
-    setDragNode(null);
-    setIsPanning(false);
+    dragNodeRef.current = null;
+    isPanningRef.current = false;
   }
 
   function handleMouseDownSvg(e: React.MouseEvent) {
     if ((e.target as SVGElement).closest("[data-node]")) return;
-    setIsPanning(true);
+    isPanningRef.current = true;
     panStart.current = { x: e.clientX, y: e.clientY };
-    panOrigin.current = { x: pan.x, y: pan.y };
+    panOrigin.current = { x: panRef.current.x, y: panRef.current.y };
   }
 
   const handleWheel = useCallback((e: WheelEvent) => {
@@ -285,7 +296,7 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery }: Gra
           className="w-7 h-7 bg-white border border-gray-300 rounded text-gray-600 hover:bg-gray-100 flex items-center justify-center text-sm font-bold shadow-sm"
         >−</button>
         <button
-          onClick={() => { setZoom(1); setPan({ x: 0, y: 0 }); }}
+          onClick={() => { setZoom(1); panRef.current = { x: 0, y: 0 }; setPan({ x: 0, y: 0 }); }}
           className="w-7 h-7 bg-white border border-gray-300 rounded text-gray-600 hover:bg-gray-100 flex items-center justify-center shadow-sm"
           title="Reset view"
         >
@@ -326,7 +337,7 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery }: Gra
         ref={svgRef}
         className="w-full h-full cursor-grab active:cursor-grabbing"
         viewBox={`0 0 ${Math.max(maxX, 400)} ${Math.max(maxY, 300)}`}
-        style={{ cursor: isPanning ? "grabbing" : dragNode ? "grabbing" : "grab" }}
+        style={{ cursor: isPanningRef.current || dragNodeRef.current ? "grabbing" : "grab" }}
         onMouseMove={handleMouseMoveSvg}
         onMouseUp={handleMouseUpSvg}
         onMouseLeave={handleMouseUpSvg}
@@ -394,7 +405,7 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery }: Gra
                 onMouseDown={(e) => handleMouseDownNode(e, node.id)}
                 onClick={(e) => {
                   e.stopPropagation();
-                  if (!dragNode) onIssueClick(node.issue);
+                  if (!didDragRef.current) onIssueClick(node.issue);
                 }}
               >
                 <rect
