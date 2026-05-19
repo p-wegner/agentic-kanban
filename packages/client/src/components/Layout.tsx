@@ -11,6 +11,7 @@ interface LayoutProps {
   activeProjectId?: string | null;
   onProjectChange?: (id: string) => void;
   onRegisterProject?: (repoPath: string) => Promise<void>;
+  onCreateProject?: (name: string, path: string) => Promise<void>;
   searchQuery?: string;
   onSearchChange?: (query: string) => void;
   priorityFilter?: string;
@@ -25,6 +26,7 @@ export function Layout({
   activeProjectId,
   onProjectChange,
   onRegisterProject,
+  onCreateProject,
   searchQuery = "",
   onSearchChange,
   priorityFilter = "",
@@ -33,9 +35,14 @@ export function Layout({
   onSettingsClick,
 }: LayoutProps) {
   const [showRegister, setShowRegister] = useState(false);
+  const [modalTab, setModalTab] = useState<"import" | "create">("import");
   const [repoPath, setRepoPath] = useState("");
   const [registering, setRegistering] = useState(false);
   const [registerError, setRegisterError] = useState<string | null>(null);
+  const [createName, setCreateName] = useState("");
+  const [createPath, setCreatePath] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   async function handleRegisterSubmit(e: React.FormEvent) {
@@ -54,9 +61,30 @@ export function Layout({
     }
   }
 
+  async function handleCreateSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!createName.trim()) return;
+    setCreating(true);
+    setCreateError(null);
+    try {
+      await onCreateProject?.(createName.trim(), createPath.trim());
+      setShowRegister(false);
+      setCreateName("");
+      setCreatePath("");
+    } catch (err) {
+      setCreateError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setCreating(false);
+    }
+  }
+
   function openRegister() {
     setRegisterError(null);
+    setCreateError(null);
     setRepoPath("");
+    setCreateName("");
+    setCreatePath("");
+    setModalTab("import");
     setShowRegister(true);
     setTimeout(() => inputRef.current?.focus(), 50);
   }
@@ -168,44 +196,115 @@ export function Layout({
           onClick={(e) => { if (e.target === e.currentTarget) setShowRegister(false); }}
         >
           <div className="bg-white rounded-lg shadow-xl w-full max-w-md mx-4 p-6">
-            <h2 className="text-lg font-semibold text-gray-900 mb-4">Register Project</h2>
-            <form onSubmit={handleRegisterSubmit} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Repository path
-                </label>
-                <input
-                  ref={inputRef}
-                  type="text"
-                  value={repoPath}
-                  onChange={(e) => setRepoPath(e.target.value)}
-                  placeholder="C:/path/to/repo"
-                  className="w-full text-sm border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
-                />
-                <p className="mt-1 text-xs text-gray-500">
-                  Absolute path to a git repository. Branch and remote URL are auto-detected.
-                </p>
-              </div>
-              {registerError && (
-                <p className="text-sm text-red-600">{registerError}</p>
-              )}
-              <div className="flex justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => setShowRegister(false)}
-                  className="px-3 py-1.5 text-sm text-gray-700 border border-gray-300 rounded-md hover:bg-gray-50"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={registering || !repoPath.trim()}
-                  className="px-3 py-1.5 text-sm text-white bg-blue-600 rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {registering ? "Registering…" : "Register"}
-                </button>
-              </div>
-            </form>
+            <h2 className="text-lg font-semibold text-gray-900 mb-4">Add Project</h2>
+            <div className="flex border-b border-gray-200 mb-4">
+              <button
+                type="button"
+                onClick={() => setModalTab("import")}
+                className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px ${modalTab === "import" ? "border-blue-600 text-blue-600" : "border-transparent text-gray-500 hover:text-gray-700"}`}
+              >
+                Import existing
+              </button>
+              <button
+                type="button"
+                onClick={() => setModalTab("create")}
+                className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px ${modalTab === "create" ? "border-blue-600 text-blue-600" : "border-transparent text-gray-500 hover:text-gray-700"}`}
+              >
+                Create new
+              </button>
+            </div>
+
+            {modalTab === "import" && (
+              <form onSubmit={handleRegisterSubmit} className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Repository path
+                  </label>
+                  <input
+                    ref={inputRef}
+                    type="text"
+                    value={repoPath}
+                    onChange={(e) => setRepoPath(e.target.value)}
+                    placeholder="C:/path/to/repo"
+                    className="w-full text-sm border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                  />
+                  <p className="mt-1 text-xs text-gray-500">
+                    Absolute path to a git repository. Branch and remote URL are auto-detected.
+                  </p>
+                </div>
+                {registerError && (
+                  <p className="text-sm text-red-600">{registerError}</p>
+                )}
+                <div className="flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowRegister(false)}
+                    className="px-3 py-1.5 text-sm text-gray-700 border border-gray-300 rounded-md hover:bg-gray-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={registering || !repoPath.trim()}
+                    className="px-3 py-1.5 text-sm text-white bg-blue-600 rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {registering ? "Registering…" : "Register"}
+                  </button>
+                </div>
+              </form>
+            )}
+
+            {modalTab === "create" && (
+              <form onSubmit={handleCreateSubmit} className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Project name <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={createName}
+                    onChange={(e) => setCreateName(e.target.value)}
+                    placeholder="my-project"
+                    className="w-full text-sm border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                    autoFocus
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Path <span className="text-gray-400 font-normal">(optional)</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={createPath}
+                    onChange={(e) => setCreatePath(e.target.value)}
+                    placeholder="Defaults to projects base directory / name"
+                    className="w-full text-sm border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                  />
+                  <p className="mt-1 text-xs text-gray-500">
+                    Leave blank to use the base directory from Settings › Project. A new folder and git repo will be created.
+                  </p>
+                </div>
+                {createError && (
+                  <p className="text-sm text-red-600">{createError}</p>
+                )}
+                <div className="flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowRegister(false)}
+                    className="px-3 py-1.5 text-sm text-gray-700 border border-gray-300 rounded-md hover:bg-gray-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={creating || !createName.trim()}
+                    className="px-3 py-1.5 text-sm text-white bg-blue-600 rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {creating ? "Creating…" : "Create project"}
+                  </button>
+                </div>
+              </form>
+            )}
           </div>
         </div>
       )}
