@@ -80,18 +80,18 @@ If only MINOR issues or no issues: just exit normally (the system will auto-merg
 
   let conflictPreamble = "";
   if (conflictingFiles && conflictingFiles.length > 0) {
-    conflictPreamble = `IMPORTANT: There are rebase conflicts that must be resolved before reviewing.
+    conflictPreamble = `IMPORTANT: Auto-rebase onto the base branch failed due to conflicts. The rebase has been aborted, so the worktree is clean. You must resolve the conflicts and rebase manually before reviewing.
 
 Conflicting files:
 ${conflictingFiles.map(f => `- ${f}`).join("\n")}
 
 Steps to resolve:
-1. For each conflicting file, open it and resolve the conflict markers (<<<<<<<, =======, >>>>>>>)
-2. After resolving all files, run: git add <resolved-files>
-3. Continue the rebase: git rebase --continue
-4. Commit any remaining changes if needed
-
-Only after resolving all conflicts and completing the rebase, proceed with the code review below.
+1. Start a fresh rebase: git rebase origin/${baseBranch ?? "master"}
+   (or use the local branch if no remote: git rebase ${baseBranch ?? "master"})
+2. For each conflicting file, open it and resolve the conflict markers (<<<<<<<, =======, >>>>>>>)
+3. After resolving each file: git add <resolved-file>
+4. Continue: git rebase --continue (repeat for each conflicting commit)
+5. Once the rebase completes, proceed with the code review below.
 
 ---
 
