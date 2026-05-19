@@ -196,13 +196,20 @@ Setup:
       }
 
       const { mkdir, access, rm } = await import("node:fs/promises");
+<<<<<<< HEAD
       const { join, resolve: resolvePath } = await import("node:path");
 >>>>>>> 4ff54fb (feat: add cli create subcommand and preferences set/get)
+=======
+      const { join, resolve: resolvePath, sep } = await import("node:path");
+>>>>>>> 76d53ab (fix: guard against path traversal in cli create command)
       const { execFile } = await import("node:child_process");
       const { promisify } = await import("node:util");
       const execFileAsync = promisify(execFile);
 
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> 76d53ab (fix: guard against path traversal in cli create command)
       const resolvedBase = resolvePath(baseFolder);
       const repoPath = resolvePath(join(resolvedBase, folderName));
 
@@ -211,9 +218,12 @@ Setup:
         console.error(`Invalid folder name: "${folderName}" escapes the base directory.`);
         process.exit(1);
       }
+<<<<<<< HEAD
 =======
       const repoPath = resolvePath(join(baseFolder, folderName));
 >>>>>>> 4ff54fb (feat: add cli create subcommand and preferences set/get)
+=======
+>>>>>>> 76d53ab (fix: guard against path traversal in cli create command)
 
       // Check if directory already exists
       try {
