@@ -554,7 +554,13 @@ Tip: Use 'issue list' to find the issue ID and see available status names.
     try {
       await runMigrations();
 
-      const issueRows = await db.select().from(issues).where(eq(issues.id, issueId)).limit(1);
+      const isNumeric = /^\d+$/.test(issueId);
+      const projectId = isNumeric ? await getActiveProjectId() : undefined;
+      const whereClause = isNumeric
+        ? and(eq(issues.issueNumber, Number(issueId)), eq(issues.projectId, projectId!))
+        : eq(issues.id, issueId);
+
+      const issueRows = await db.select().from(issues).where(whereClause).limit(1);
       if (issueRows.length === 0) {
         console.error(`Issue '${issueId}' not found.`);
         process.exit(1);
