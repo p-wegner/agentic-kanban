@@ -432,7 +432,7 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                     checked={settings.auto_start_followup === "true"}
                     onChange={setBool("auto_start_followup")}
                     label="Auto-start follow-up tasks after merge"
-                    hint="When a workspace is merged and the issue has outgoing 'depends_on' or 'child_of' dependencies, automatically create workspaces for unblocked follow-up issues."
+                    hint="When a workspace is merged and the issue has outgoing 'depends_on' or 'blocked_by' dependencies, automatically create workspaces for unblocked follow-up issues."
                   />
                 </>
               )}
