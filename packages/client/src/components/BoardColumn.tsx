@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
 import type { LiveSessionStats, TodoItem } from "../lib/useBoardEvents.js";
 import { IssueCard } from "./IssueCard.js";
@@ -40,6 +40,25 @@ export function BoardColumn({
 }: BoardColumnProps) {
   const [dragOver, setDragOver] = useState(false);
   const dragCounterRef = useRef(0);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [scrollState, setScrollState] = useState<"top" | "middle" | "bottom" | "none">("none");
+
+  const updateScrollState = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const { scrollTop, scrollHeight, clientHeight } = el;
+    const atTop = scrollTop <= 2;
+    const atBottom = scrollTop + clientHeight >= scrollHeight - 2;
+    if (scrollHeight <= clientHeight + 4) {
+      setScrollState("none");
+    } else if (atTop && !atBottom) {
+      setScrollState("top");
+    } else if (atBottom && !atTop) {
+      setScrollState("bottom");
+    } else {
+      setScrollState("middle");
+    }
+  }, []);
 
   function handleDragEnter(e: React.DragEvent) {
     e.preventDefault();
@@ -89,7 +108,8 @@ export function BoardColumn({
 
   return (
     <div
-      className={`w-full sm:flex-shrink-0 sm:min-w-[200px] sm:flex-1 bg-gray-100 rounded-lg p-3 flex flex-col transition-all ${
+      id={`column-${column.id}`}
+      className={`w-full sm:flex-shrink-0 sm:min-w-[220px] sm:flex-1 bg-gray-100 rounded-xl p-3 flex flex-col transition-all relative ${
         dragOver ? "ring-2 ring-blue-400 ring-offset-1" : ""
       }`}
       onDragEnter={handleDragEnter}
@@ -97,15 +117,17 @@ export function BoardColumn({
       onDragOver={handleDragOver}
       onDrop={handleDrop}
     >
-      <div className="flex items-center justify-between mb-3 px-1">
-        <h2 className="font-medium text-sm text-gray-700">
+      <div className="flex items-center justify-between mb-2 px-1 shrink-0">
+        <h2 className="font-semibold text-sm text-gray-700 flex items-center gap-2">
           {column.name}
-          <span className="ml-2 text-xs text-gray-400 bg-gray-200 rounded-full px-1.5 py-0.5">{column.issues.length}</span>
+          <span className="text-[11px] text-gray-400 bg-white/80 rounded-full px-2 py-0.5 font-medium shadow-sm">
+            {column.issues.length}
+          </span>
         </h2>
         {!isCreating && (
           <button
             onClick={() => onCreateClick(column.id)}
-            className="text-gray-400 hover:text-gray-600 text-lg leading-none"
+            className="text-gray-400 hover:text-gray-600 hover:bg-white/60 rounded-md w-6 h-6 flex items-center justify-center text-lg leading-none transition-colors"
             title="Add issue"
           >
             +
@@ -113,38 +135,50 @@ export function BoardColumn({
         )}
       </div>
 
-      <div className="space-y-2 flex-1 min-h-0 overflow-y-auto">
-        {column.issues.map((issue: IssueWithStatus, idx: number) => (
-          <div key={issue.id}>
-            <DropGap
-              visible={dragOver}
-              onDrop={(e) => handleDropGap(e, computeGapSortOrder(idx))}
-            />
-            <IssueCard
-              issue={issue}
-              onClick={onIssueClick}
-              onWorkspaceClick={onWorkspaceClick}
-              onStartWorkspace={onStartWorkspace}
-              onDragStart={onDragStart}
-              searchQuery={searchQuery}
-              liveActivity={sessionActivity?.[issue.id]}
-              liveStats={liveStats?.[issue.id]}
-              todos={sessionTodos?.[issue.id]}
-            />
-          </div>
-        ))}
-        {dragOver && column.issues.length > 0 && (
-          <DropGap
-            visible={true}
-            onDrop={(e) => {
-              const lastSort = column.issues[column.issues.length - 1].sortOrder;
-              handleDropGap(e, lastSort + 100);
-            }}
-          />
+      <div className="relative flex-1 min-h-0">
+        {(scrollState === "top" || scrollState === "middle") && (
+          <div className="absolute top-0 left-0 right-0 h-6 bg-gradient-to-b from-gray-100 to-transparent z-10 pointer-events-none rounded-t-lg" />
         )}
-        {isCreating && children}
-        {column.issues.length === 0 && !isCreating && !dragOver && (
-          <p className="text-xs text-gray-400 text-center py-4">No issues</p>
+        <div
+          ref={scrollRef}
+          onScroll={updateScrollState}
+          className="space-y-2 h-full overflow-y-auto column-scroll-container"
+        >
+          {column.issues.map((issue: IssueWithStatus, idx: number) => (
+            <div key={issue.id}>
+              <DropGap
+                visible={dragOver}
+                onDrop={(e) => handleDropGap(e, computeGapSortOrder(idx))}
+              />
+              <IssueCard
+                issue={issue}
+                onClick={onIssueClick}
+                onWorkspaceClick={onWorkspaceClick}
+                onStartWorkspace={onStartWorkspace}
+                onDragStart={onDragStart}
+                searchQuery={searchQuery}
+                liveActivity={sessionActivity?.[issue.id]}
+                liveStats={liveStats?.[issue.id]}
+                todos={sessionTodos?.[issue.id]}
+              />
+            </div>
+          ))}
+          {dragOver && column.issues.length > 0 && (
+            <DropGap
+              visible={true}
+              onDrop={(e) => {
+                const lastSort = column.issues[column.issues.length - 1].sortOrder;
+                handleDropGap(e, lastSort + 100);
+              }}
+            />
+          )}
+          {isCreating && children}
+          {column.issues.length === 0 && !isCreating && !dragOver && (
+            <p className="text-xs text-gray-400 text-center py-4">No issues</p>
+          )}
+        </div>
+        {(scrollState === "bottom" || scrollState === "middle") && (
+          <div className="absolute bottom-0 left-0 right-0 h-6 bg-gradient-to-t from-gray-100 to-transparent z-10 pointer-events-none rounded-b-lg" />
         )}
       </div>
     </div>
