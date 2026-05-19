@@ -635,10 +635,10 @@ export function BoardPage() {
         </div>
       )}
       {mutating && (
-        <div className="fixed top-2 right-2 z-50">
-          <div className="bg-blue-50 border border-blue-200 rounded-md px-3 py-1.5 flex items-center gap-2">
+        <div className="fixed bottom-4 right-4 z-50">
+          <div className="bg-blue-600 text-white rounded-lg px-4 py-2 flex items-center gap-2 shadow-lg">
             <svg
-              className="animate-spin h-3 w-3 text-blue-500"
+              className="animate-spin h-4 w-4 text-white"
               viewBox="0 0 24 24"
             >
               <circle
@@ -656,7 +656,7 @@ export function BoardPage() {
                 d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
               />
             </svg>
-            <span className="text-xs text-blue-700">Saving...</span>
+            <span className="text-sm font-medium">Saving...</span>
           </div>
         </div>
       )}
