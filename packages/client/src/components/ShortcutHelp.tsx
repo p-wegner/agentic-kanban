@@ -8,6 +8,8 @@ const SHORTCUTS = [
   { keys: ["Escape"], description: "Close panel / clear search" },
   { keys: ["?"], description: "Show keyboard shortcuts" },
   { keys: ["c"], description: "Create new issue" },
+  { keys: ["w"], description: "New issue + start workspace" },
+  { keys: ["g", "s"], description: "Open settings" },
 ];
 
 export function ShortcutHelp({ onClose }: ShortcutHelpProps) {
