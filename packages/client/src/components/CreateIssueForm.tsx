@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useEffect, useState } from "react";
 import type { CreateIssueRequest } from "@agentic-kanban/shared";
 import { apiFetch } from "../lib/api.js";
 import { showToast } from "./Toast.js";
@@ -38,9 +38,20 @@ export function CreateIssueForm({
   const [planMode, setPlanMode] = useState(initialState?.planMode ?? false);
   const [skipAutoReview, setSkipAutoReview] = useState(initialState?.skipAutoReview ?? false);
   const [isDirect, setIsDirect] = useState(false);
+  const titleRef = useRef<HTMLTextAreaElement>(null);
+  const descRef = useRef<HTMLTextAreaElement>(null);
   const [submitting, setSubmitting] = useState(false);
   const [enhancing, setEnhancing] = useState(false);
   const [preEnhanceSnapshot, setPreEnhanceSnapshot] = useState<{ title: string; description: string } | null>(null);
+
+  function autoResize(el: HTMLTextAreaElement | null) {
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight}px`;
+  }
+
+  useEffect(() => { autoResize(titleRef.current); }, [title]);
+  useEffect(() => { autoResize(descRef.current); }, [description]);
 
   async function handleEnhance() {
     if (!title.trim() || enhancing) return;
@@ -95,6 +106,20 @@ export function CreateIssueForm({
     }
   }
 
+  function handleTitleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (e.key === "Escape") {
+      onCancel();
+      return;
+    }
+    // Submit on Enter (prevent newline in title)
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      if (title.trim() && !submitting) {
+        e.currentTarget.closest("form")?.requestSubmit();
+      }
+    }
+  }
+
   function handleBlur(e: React.FocusEvent) {
     // If focus moves outside the form and title is empty, cancel
     if (!e.currentTarget.contains(e.relatedTarget as Node) && !title.trim() && !submitting) {
@@ -109,20 +134,23 @@ export function CreateIssueForm({
       onBlur={handleBlur}
       className="bg-white rounded-md shadow-sm p-3 border border-blue-200 space-y-2"
     >
-      <input
-        type="text"
+      <textarea
+        ref={titleRef}
         placeholder="Issue title"
         value={title}
         onChange={(e) => setTitle(e.target.value)}
+        onKeyDown={handleTitleKeyDown}
         autoFocus
-        className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
+        rows={1}
+        className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none overflow-hidden"
       />
       <textarea
+        ref={descRef}
         placeholder="Description (optional)"
         value={description}
         onChange={(e) => setDescription(e.target.value)}
         rows={2}
-        className="w-full text-xs border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none"
+        className="w-full text-xs border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none overflow-hidden"
       />
       <select
         value={priority}
