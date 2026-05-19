@@ -183,6 +183,13 @@
       "when": 1779438400000,
       "tag": "0025_ready_for_merge",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "6",
+      "when": 1779524800000,
+      "tag": "0026_ready_for_merge",
+      "breakpoints": true
     }
   ]
 }
