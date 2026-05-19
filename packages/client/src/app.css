@@ -56,6 +56,15 @@ html, body {
   background: rgba(0, 0, 0, 0.25);
 }
 
+/* Scrollbar hide utility */
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
 /* Stats pill animated count */
 @keyframes count-pop {
   0% { transform: scale(1); }

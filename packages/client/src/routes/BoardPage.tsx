@@ -626,7 +626,7 @@ export function BoardPage() {
           searchQuery={searchQuery}
           priorityFilter={priorityFilter}
         />
-        <div className="flex flex-col gap-4 sm:flex-row flex-1 min-h-0 overflow-x-auto board-columns-scroll">
+        <div className="flex gap-4 flex-1 min-h-0 overflow-x-auto board-columns-scroll">
           {activeColumns.map((col) => (
             <BoardColumn
               key={col.id}
