@@ -93,10 +93,18 @@ export function CreateIssueForm({
     }
   }
 
+  function handleBlur(e: React.FocusEvent) {
+    // If focus moves outside the form and title is empty, cancel
+    if (!e.currentTarget.contains(e.relatedTarget as Node) && !title.trim() && !submitting) {
+      onCancel();
+    }
+  }
+
   return (
     <form
       onSubmit={handleSubmit}
       onKeyDown={handleKeyDown}
+      onBlur={handleBlur}
       className="bg-white rounded-md shadow-sm p-3 border border-blue-200 space-y-2"
     >
       <input
