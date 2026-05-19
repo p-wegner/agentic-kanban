@@ -13,6 +13,7 @@
       {
         "name": "TypeScript build check",
         "command": "pnpm build",
+        "filePatterns": ["packages/**/*.ts", "packages/**/*.tsx"],
         "enabled": true,
         "blocking": true,
         "timeout": 60

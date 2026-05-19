@@ -43,22 +43,26 @@ function main() {
   const ports = [serverPort, clientPort].filter(Boolean);
   const runningPorts = [];
 
-  for (const port of ports) {
-    try {
-      execSync(
-        `powershell.exe -NoProfile -Command "Get-NetTCPConnection -LocalPort ${port} -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1"`,
-        {
-          encoding: "utf8",
-          timeout: 5000,
-          windowsHide: true,
-          stdio: ["pipe", "pipe", "pipe"],
-        }
-      );
-      // If we get here without throwing, a process is listening
-      runningPorts.push(port);
-    } catch {
-      // No process on this port — good
+  // Check all ports in a single PowerShell call to avoid per-port spawn overhead
+  try {
+    const portList = ports.join(",");
+    const output = execSync(
+      `powershell.exe -NoProfile -Command "Get-NetTCPConnection -LocalPort ${portList} -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty LocalPort | Sort-Object -Unique"`,
+      {
+        encoding: "utf8",
+        timeout: 5000,
+        windowsHide: true,
+        stdio: ["pipe", "pipe", "pipe"],
+      }
+    );
+    const listeningPorts = new Set(
+      output.split(/\r?\n/).map((l) => l.trim()).filter(Boolean)
+    );
+    for (const p of ports) {
+      if (listeningPorts.has(String(p))) runningPorts.push(p);
     }
+  } catch {
+    // PowerShell returned non-zero (no matches) — no ports listening
   }
 
   if (runningPorts.length === 0) process.exit(0);
