@@ -143,7 +143,7 @@ export function CreateIssueForm({
         onKeyDown={handleTitleKeyDown}
         autoFocus
         rows={1}
-        className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none overflow-hidden"
+        className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none overflow-y-hidden"
       />
       <textarea
         ref={descRef}
@@ -151,7 +151,7 @@ export function CreateIssueForm({
         value={description}
         onChange={(e) => setDescription(e.target.value)}
         rows={2}
-        className="w-full text-xs border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none overflow-hidden"
+        className="w-full text-xs border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none overflow-y-hidden"
       />
       <select
         value={priority}
