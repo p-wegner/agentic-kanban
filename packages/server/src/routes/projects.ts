@@ -4,11 +4,11 @@ import { projects, projectStatuses, issues, workspaces, sessions, sessionMessage
 import { eq, inArray, sql, and } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { execFile, execSync } from "node:child_process";
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync } from "node:fs";
 import { detectRepoInfo } from "../services/git-info.service.js";
 import { listBranches, listWorktrees, getDiffShortstat, removeWorktree, detectConflicts } from "../services/git.service.js";
 import type { Database } from "../db/index.js";
-import { sep, join } from "node:path";
+import { resolve, sep, join } from "node:path";
 import { homedir } from "node:os";
 
 const DEFAULT_STATUSES = [
@@ -86,6 +86,97 @@ export function createProjectsRoute(database: Database = db) {
     }
 
     return c.json({ id, name, repoPath: repoInfo.repoPath }, 201);
+  });
+
+  // POST /api/projects/create — create a new directory as a git repo and register it
+  router.post("/create", async (c) => {
+    const body = await c.req.json();
+    if (!body.name || !body.name.trim()) {
+      return c.json({ error: "name is required" }, 400);
+    }
+
+    const name = body.name.trim();
+
+    // Resolve target path: explicit path override or baseDir/name
+    let targetPath: string;
+    if (body.path && body.path.trim()) {
+      targetPath = resolve(body.path.trim());
+    } else {
+      // Read projects_base_dir from preferences
+      const baseDirRows = await database
+        .select({ value: preferences.value })
+        .from(preferences)
+        .where(eq(preferences.key, "projects_base_dir"))
+        .limit(1);
+      const baseDir = baseDirRows[0]?.value?.trim();
+      if (!baseDir) {
+        return c.json({ error: "No base directory configured. Set 'Projects base directory' in Settings > Project, or provide an explicit path." }, 400);
+      }
+      targetPath = resolve(join(baseDir, name));
+    }
+
+    // Create directory if it doesn't exist
+    if (!existsSync(targetPath)) {
+      try {
+        mkdirSync(targetPath, { recursive: true });
+      } catch (err) {
+        return c.json({ error: `Failed to create directory: ${err instanceof Error ? err.message : String(err)}` }, 400);
+      }
+    }
+
+    // Run git init
+    try {
+      execSync("git init", { cwd: targetPath, stdio: "pipe" });
+    } catch (err: any) {
+      return c.json({ error: `git init failed: ${err.stderr ? String(err.stderr).trim() : String(err)}` }, 400);
+    }
+
+    // Check for duplicate registration
+    const existing = await database
+      .select({ id: projects.id, name: projects.name })
+      .from(projects)
+      .where(eq(projects.repoPath, targetPath))
+      .limit(1);
+    if (existing.length > 0) {
+      return c.json({ error: `Project "${existing[0].name}" is already registered at this path` }, 409);
+    }
+
+    let repoInfo;
+    try {
+      repoInfo = await detectRepoInfo(targetPath);
+    } catch (err) {
+      return c.json({ error: `Failed to read repo info: ${err instanceof Error ? err.message : String(err)}` }, 400);
+    }
+
+    const now = new Date().toISOString();
+    const id = randomUUID();
+    const projectName = body.name?.trim() || repoInfo.repoName;
+
+    await database.insert(projects).values({
+      id,
+      name: projectName,
+      description: body.description ?? null,
+      color: body.color ?? null,
+      repoPath: repoInfo.repoPath,
+      repoName: repoInfo.repoName,
+      defaultBranch: repoInfo.defaultBranch,
+      remoteUrl: repoInfo.remoteUrl,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    for (const status of DEFAULT_STATUSES) {
+      await database.insert(projectStatuses).values({
+        id: randomUUID(),
+        projectId: id,
+        name: status.name,
+        sortOrder: status.sortOrder,
+        isDefault: status.isDefault,
+        createdAt: now,
+      });
+    }
+
+    return c.json({ id, name: projectName, repoPath: repoInfo.repoPath }, 201);
   });
 
   // PATCH /api/projects/:id — update project fields
