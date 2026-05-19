@@ -639,13 +639,24 @@ Setup:
       }
 
       const { mkdir, access, rm } = await import("node:fs/promises");
-      const { join, resolve: resolvePath } = await import("node:path");
+      const { join, resolve: resolvePath, sep } = await import("node:path");
       const { execFile } = await import("node:child_process");
       const { promisify } = await import("node:util");
       const execFileAsync = promisify(execFile);
 
+<<<<<<< HEAD
       const repoPath = resolvePath(join(baseFolder, folderName));
 >>>>>>> dd3f860 (feat: add cli create subcommand and preferences set/get)
+=======
+      const resolvedBase = resolvePath(baseFolder);
+      const repoPath = resolvePath(join(resolvedBase, folderName));
+
+      // Guard against path traversal (e.g. folderName = "../../etc")
+      if (!repoPath.startsWith(resolvedBase + sep) && repoPath !== resolvedBase) {
+        console.error(`Invalid folder name: "${folderName}" escapes the base directory.`);
+        process.exit(1);
+      }
+>>>>>>> a1f5d7d (fix: guard against path traversal in cli create command)
 
       // Check if directory already exists
       try {
