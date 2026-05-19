@@ -76,7 +76,7 @@ async function resolveProjectId(
 export function createWorkspaceActionsRoute(
   getSessionManager: () => SessionManager,
   database: Database = db,
-  options?: { boardEvents?: BoardEvents },
+  options?: { boardEvents?: BoardEvents; fixAndMergeSessionIds?: Set<string> },
 ) {
   const router = new Hono();
 
@@ -691,6 +691,74 @@ Base branch: ${baseBranch}`;
       return c.json({ sessionId });
     } catch (err) {
       return c.json({ error: `Resolve conflicts failed: ${err instanceof Error ? err.message : String(err)}` }, 500);
+    }
+  });
+
+  // POST /api/workspaces/:id/fix-and-merge — launch AI agent to fix merge errors, then auto-merge on exit
+  router.post("/:id/fix-and-merge", async (c) => {
+    const id = c.req.param("id");
+    const body = await c.req.json<{ mergeError?: string }>().catch(() => ({ mergeError: undefined }));
+    const mergeError = body.mergeError || "Unknown merge error";
+
+    const rows = await database.select().from(workspaces).where(eq(workspaces.id, id)).limit(1);
+    if (rows.length === 0) {
+      return c.json({ error: "Workspace not found" }, 404);
+    }
+    const workspace = rows[0];
+    if (!workspace.workingDir) {
+      return c.json({ error: "Workspace not set up" }, 400);
+    }
+
+    try {
+      const { defaultBranch } = await resolveProjectRepo(id, database);
+      const baseBranch = workspace.baseBranch || defaultBranch;
+
+      const prompt = `A merge into '${baseBranch}' failed with the following error:
+
+${mergeError}
+
+Please investigate and fix the issue so the branch can be merged cleanly.
+
+Branch: ${workspace.branch}
+Working directory: ${workspace.workingDir}
+Base branch: ${baseBranch}
+
+Steps to take:
+1. Understand the error above
+2. Run 'git status' and 'git log --oneline -10' to see the current state
+3. Fix whatever is causing the merge failure (e.g. resolve conflicts, fix build errors, clean up the branch)
+4. Verify the fix by running 'git diff ${baseBranch} --stat' to confirm the branch is in a clean state
+5. Commit any changes you make
+6. Exit — the system will automatically retry the merge after you finish
+
+Do NOT run git merge yourself. Just fix the underlying issue and exit.`;
+
+      const prefRows = await database.select().from(preferences);
+      const prefMap = new Map(prefRows.map(r => [r.key, r.value]));
+      const useMock = prefMap.get("mock_agent") === "true" || process.env.MOCK_AGENT === "1";
+      const agentCommand = useMock ? MOCK_AGENT_COMMAND : (prefMap.get("agent_command") || undefined);
+      const skipPerms = prefMap.get("skip_permissions") === "true";
+      const baseArgs = prefMap.get("agent_args") || "";
+      const agentArgs = skipPerms
+        ? (baseArgs ? baseArgs + " --dangerously-skip-permissions" : "--dangerously-skip-permissions")
+        : (baseArgs || undefined);
+      const claudeProfile = prefMap.get("claude_profile") || undefined;
+
+      const sessionId = await getSessionManager().startSession(id, prompt, agentCommand, agentArgs, undefined, claudeProfile, true);
+
+      if (options?.fixAndMergeSessionIds) {
+        options.fixAndMergeSessionIds.add(sessionId);
+      }
+
+      const now = new Date().toISOString();
+      await database.update(workspaces).set({ status: "active", updatedAt: now }).where(eq(workspaces.id, id));
+
+      const projectId = await resolveProjectId(id, database);
+      if (projectId) options?.boardEvents?.broadcast(projectId, "session_launched");
+
+      return c.json({ sessionId });
+    } catch (err) {
+      return c.json({ error: `Fix-and-merge launch failed: ${err instanceof Error ? err.message : String(err)}` }, 500);
     }
   });
 
