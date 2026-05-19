@@ -6,7 +6,19 @@
       "Bash(git add *)",
       "Bash(pnpm dev *)",
       "Skill(playwright-cli)",
-      "WebSearch"
+      "WebSearch",
+      "Bash(node -e \"JSON.parse\\(require\\('fs'\\).readFileSync\\('.claude/hooks/smart-hooks-config.json','utf8'\\)\\); console.log\\('config OK'\\)\")",
+      "Bash(node --check .claude/hooks/smart-hooks-runner.js)",
+      "Bash(node --check .claude/hooks/remind-playwright.js)",
+      "Bash(node --check .claude/hooks/remind-cleanup.js)",
+      "Bash(node --check .claude/hooks/check-uncommitted.js)",
+      "Bash(pnpm cli *)",
+      "PowerShell($env:KANBAN_SERVER_PORT; $env:KANBAN_CLIENT_PORT; $env:ANTHROPIC_API_KEY; $env:CLAUDE_PROFILE)",
+      "PowerShell($env:KANBAN_SERVER_PORT)",
+      "PowerShell($env:KANBAN_CLIENT_PORT)",
+      "PowerShell($env:ANTHROPIC_API_KEY)",
+      "PowerShell($env:CLAUDE_PROFILE)",
+      "PowerShell(Get-NetTCPConnection -ErrorAction SilentlyContinue | Where-Object { $_.LocalPort -in @\\(3001,3002,3003,3004,3005\\) -and $_.State -eq \"Listen\" } | Select-Object LocalPort, State, OwningProcess)"
     ]
   }
 }
