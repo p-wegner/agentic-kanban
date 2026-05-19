@@ -706,7 +706,7 @@ Setup:
         process.exit(1);
       }
 
-      const { mkdir, access } = await import("node:fs/promises");
+      const { mkdir, access, rm } = await import("node:fs/promises");
       const { join, resolve: resolvePath } = await import("node:path");
 >>>>>>> 4ff54fb (feat: add cli create subcommand and preferences set/get)
       const { execFile } = await import("node:child_process");
@@ -762,8 +762,11 @@ Setup:
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 >>>>>>> b794815 (feat: add cli create subcommand and preferences set/get)
+=======
+>>>>>>> 09fa7b4 (fix: clean up created directory if git init/commit fails in cli create command)
       // Create directory â€” track so we can clean up on failure
 =======
       // Create directory — track so we can clean up on failure
@@ -863,6 +866,17 @@ Setup:
       // Create directory
       await mkdir(repoPath, { recursive: true });
 >>>>>>> 4ff54fb (feat: add cli create subcommand and preferences set/get)
+=======
+      // Create directory — track so we can clean up on failure
+      await mkdir(repoPath, { recursive: true });
+      let dirCreated = true;
+
+      const cleanupDir = async () => {
+        if (dirCreated) {
+          try { await rm(repoPath, { recursive: true, force: true }); } catch { /* best-effort */ }
+        }
+      };
+>>>>>>> 907d84b (fix: clean up created directory if git init/commit fails in cli create command)
 
 >>>>>>> dd3f860 (feat: add cli create subcommand and preferences set/get)
       // Run git init
@@ -888,6 +902,7 @@ Setup:
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 >>>>>>> 907d84b (fix: clean up created directory if git init/commit fails in cli create command)
 =======
@@ -898,6 +913,10 @@ Setup:
 >>>>>>> 5643a0f (fix: clean up created directory if git init/commit fails in cli create command)
 =======
 >>>>>>> b794815 (feat: add cli create subcommand and preferences set/get)
+=======
+=======
+>>>>>>> 907d84b (fix: clean up created directory if git init/commit fails in cli create command)
+>>>>>>> 09fa7b4 (fix: clean up created directory if git init/commit fails in cli create command)
       // Create an initial empty commit so the repo has a HEAD.
       // git commit requires user.name/email to be configured; give a clear error if not.
       try {
@@ -914,6 +933,7 @@ Setup:
         }
         process.exit(1);
       }
+<<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
@@ -965,8 +985,13 @@ Setup:
 >>>>>>> f716420 (fix: resolve preference key mismatch, path traversal in skill names, and cleanup bugs)
 =======
 =======
+>>>>>>> 09fa7b4 (fix: clean up created directory if git init/commit fails in cli create command)
+=======
       // Create an initial empty commit so the repo has a HEAD
       await execFileAsync("git", ["-C", repoPath, "commit", "--allow-empty", "-m", "Initial commit"]);
+=======
+      dirCreated = false; // repo is now fully initialized; don't clean up on later errors
+>>>>>>> 907d84b (fix: clean up created directory if git init/commit fails in cli create command)
 
 >>>>>>> 4ff54fb (feat: add cli create subcommand and preferences set/get)
 >>>>>>> b794815 (feat: add cli create subcommand and preferences set/get)
