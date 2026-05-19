@@ -8,17 +8,21 @@ export function registerGetContext(server: McpServer) {
     "get_context",
     "Get current project context including project info, issues count by status, and active workspaces",
     {
-      projectId: z.string().optional().describe("Project ID (defaults to first project)"),
+      projectId: z.string().optional().describe("Project ID (defaults to active project)"),
     },
     async ({ projectId }) => {
       let pid = projectId;
 
       if (!pid) {
-        const projects = await db.select().from(schema.projects).limit(1);
-        if (projects.length === 0) {
-          return { content: [{ type: "text" as const, text: "No projects found. Run db:seed first." }] };
+        const pref = await db
+          .select({ value: schema.preferences.value })
+          .from(schema.preferences)
+          .where(eq(schema.preferences.key, "activeProjectId"))
+          .limit(1);
+        if (pref.length === 0 || !pref[0].value) {
+          return { content: [{ type: "text" as const, text: "No active project. Run `pnpm cli -- register <path>` first." }] };
         }
-        pid = projects[0].id;
+        pid = pref[0].value;
       }
 
       const project = await db.select().from(schema.projects).where(eq(schema.projects.id, pid)).limit(1);
