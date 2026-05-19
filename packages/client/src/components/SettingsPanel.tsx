@@ -28,6 +28,7 @@ interface Settings {
   learning_step_before_merge?: string;
   auto_monitor?: string;
   auto_monitor_interval?: string;
+  projects_base_dir?: string;
 }
 
 const DEFAULT_SETTINGS: Settings = {
@@ -50,6 +51,7 @@ const DEFAULT_SETTINGS: Settings = {
   learning_step_before_merge: "false",
   auto_monitor: "false",
   auto_monitor_interval: "4",
+  projects_base_dir: "",
 };
 
 type Tab = "agent" | "workflow" | "skills" | "mcp" | "ui" | "project" | "advanced";
@@ -660,6 +662,21 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
               {/* Project tab */}
               {tab === "project" && (
                 <>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Projects base directory
+                    </label>
+                    <input
+                      type="text"
+                      value={settings.projects_base_dir ?? ""}
+                      onChange={(e) => setSettings((s) => ({ ...s, projects_base_dir: e.target.value }))}
+                      placeholder="C:/projects"
+                      className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 font-mono"
+                    />
+                    <p className="mt-1 text-xs text-gray-500">
+                      Default parent folder for new projects created via "Create new project". New projects are created as subdirectories here.
+                    </p>
+                  </div>
                   {!activeProjectId ? (
                     <p className="text-sm text-gray-500">No active project selected.</p>
                   ) : (
