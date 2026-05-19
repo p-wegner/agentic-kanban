@@ -165,12 +165,19 @@ Setup:
       }
 
       const { mkdir, access, rm } = await import("node:fs/promises");
-      const { join, resolve: resolvePath } = await import("node:path");
+      const { join, resolve: resolvePath, sep } = await import("node:path");
       const { execFile } = await import("node:child_process");
       const { promisify } = await import("node:util");
       const execFileAsync = promisify(execFile);
 
-      const repoPath = resolvePath(join(baseFolder, folderName));
+      const resolvedBase = resolvePath(baseFolder);
+      const repoPath = resolvePath(join(resolvedBase, folderName));
+
+      // Guard against path traversal (e.g. folderName = "../../etc")
+      if (!repoPath.startsWith(resolvedBase + sep) && repoPath !== resolvedBase) {
+        console.error(`Invalid folder name: "${folderName}" escapes the base directory.`);
+        process.exit(1);
+      }
 
       // Check if directory already exists
       try {
