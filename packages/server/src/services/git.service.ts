@@ -298,14 +298,22 @@ export async function getWorkingTreeDiff(workdirPath: string): Promise<string> {
 }
 
 /**
- * Fetch the latest base branch and merge it into the current workspace branch.
+ * Fetch the latest base branch and rebase the current workspace branch onto it.
  * Returns the diff ref to use for review (e.g., "origin/main" or "main").
- * If the merge fails (conflicts), returns success=false and the merge is aborted.
+ * On conflict, aborts the rebase and returns success=false with conflicting file names.
  */
 export async function prepareForReview(
   worktreePath: string,
   baseBranch: string,
 ): Promise<{ diffRef: string; success: boolean; conflictingFiles?: string[]; error?: string }> {
+  // Abort any in-progress rebase from a prior failed attempt (idempotent retry safety)
+  try {
+    await execGit(["rebase", "--abort"], worktreePath);
+    console.log(`[git] aborted stale in-progress rebase in ${worktreePath}`);
+  } catch {
+    // No rebase in progress — expected
+  }
+
   // Try to fetch from origin (best effort — no remote is fine)
   try {
     await execGit(["fetch", "origin", baseBranch], worktreePath);
@@ -326,14 +334,16 @@ export async function prepareForReview(
   try {
     await execGit(["rebase", rebaseSource], worktreePath);
   } catch (err) {
-    // Rebase conflict — leave rebase in-progress so reviewer can resolve conflicts
+    // Rebase conflict — collect conflicting files, then abort to leave worktree clean
+    let conflictingFiles: string[] | undefined;
     try {
       const unmerged = await execGit(["diff", "--name-only", "--diff-filter=U"], worktreePath);
-      const conflictingFiles = unmerged.trim().split("\n").filter(Boolean);
-      return { diffRef: rebaseSource, success: false, conflictingFiles, error: err instanceof Error ? err.message : String(err) };
-    } catch {
-      return { diffRef: rebaseSource, success: false, error: err instanceof Error ? err.message : String(err) };
-    }
+      conflictingFiles = unmerged.trim().split("\n").filter(Boolean);
+    } catch { /* best effort */ }
+    try {
+      await execGit(["rebase", "--abort"], worktreePath);
+    } catch { /* best effort */ }
+    return { diffRef: rebaseSource, success: false, conflictingFiles, error: err instanceof Error ? err.message : String(err) };
   }
 
   return { diffRef: rebaseSource, success: true };
