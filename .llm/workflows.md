@@ -280,6 +280,7 @@ $parsed | Select-Object -Last 10 | ForEach-Object {
 | `exitCode: null`, very short duration, no file writes | User-stopped before agent started working |
 | Agent produced a plan in `keyExcerpts` but wrote nothing | Session was stopped during the planning phase |
 | `errors` array non-empty | Check error message — usually a tool call failure |
+| `exitCode: 1`, "Invalid API key" in session output, 0 tokens | `ANTHROPIC_API_KEY` set in shell env leaked into agent spawn (fixed in 816fe20). Restart the dev server to pick up the fix — the old server process still passes the leaked key. |
 
 ### 5. Deciding what to do with the worktree
 
