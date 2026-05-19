@@ -119,6 +119,7 @@ interface GraphViewProps {
 export function GraphView({ columns, projectId, onIssueClick, searchQuery }: GraphViewProps) {
   const [graphData, setGraphData] = useState<GraphData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [localSearch, setLocalSearch] = useState("");
   const [nodes, setNodes] = useState<Node[]>([]);
   const [dragNode, setDragNode] = useState<string | null>(null);
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
@@ -153,13 +154,15 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery }: Gra
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, columns]);
 
+  const effectiveSearch = localSearch || searchQuery || "";
+
   useLayoutEffect(() => {
     if (!graphData) return;
-    const filtered = searchQuery
+    const filtered = effectiveSearch
       ? graphData.nodes.filter(
           (n) =>
-            n.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-            n.description?.toLowerCase().includes(searchQuery.toLowerCase())
+            n.title.toLowerCase().includes(effectiveSearch.toLowerCase()) ||
+            n.description?.toLowerCase().includes(effectiveSearch.toLowerCase())
         )
       : graphData.nodes;
     const filteredIds = new Set(filtered.map((n) => n.id));
@@ -167,7 +170,7 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery }: Gra
       (e) => filteredIds.has(e.issueId) && filteredIds.has(e.dependsOnId)
     );
     setNodes(computeLayout(filtered, filteredEdges));
-  }, [graphData, searchQuery]);
+  }, [graphData, effectiveSearch]);
 
   const nodeMap = new Map(nodes.map((n) => [n.id, n]));
 
@@ -264,6 +267,16 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery }: Gra
 
   return (
     <div className="relative h-full w-full overflow-hidden bg-gray-50 select-none">
+      {/* Search toolbar */}
+      <div className="absolute top-3 left-3 z-10">
+        <input
+          type="text"
+          value={localSearch}
+          onChange={(e) => setLocalSearch(e.target.value)}
+          placeholder="Search nodes..."
+          className="px-2.5 py-1.5 text-xs border border-gray-300 rounded-md bg-white shadow-sm focus:outline-none focus:ring-1 focus:ring-blue-500 w-44"
+        />
+      </div>
       {/* Controls */}
       <div className="absolute top-3 right-3 z-10 flex flex-col gap-1">
         <button
@@ -282,6 +295,22 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery }: Gra
           <svg viewBox="0 0 24 24" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2}>
             <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
             <path d="M3 3v5h5" />
+          </svg>
+        </button>
+        <button
+          onClick={() => {
+            const svg = svgRef.current;
+            if (!svg || nodes.length === 0) return;
+            const rect = svg.getBoundingClientRect();
+            const fitZoom = Math.min(rect.width / maxX, rect.height / maxY, 1) * 0.9;
+            setZoom(fitZoom);
+            setPan({ x: 0, y: 0 });
+          }}
+          className="w-7 h-7 bg-white border border-gray-300 rounded text-gray-600 hover:bg-gray-100 flex items-center justify-center shadow-sm"
+          title="Fit to screen"
+        >
+          <svg viewBox="0 0 24 24" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2}>
+            <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3" />
           </svg>
         </button>
       </div>
@@ -355,9 +384,9 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery }: Gra
           {nodes.map((node) => {
             const color = STATUS_COLORS[node.issue.statusName] ?? "#6b7280";
             const isSelected = selectedNode === node.id;
-            const isHighlighted = searchQuery
-              ? node.issue.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                (node.issue.description?.toLowerCase().includes(searchQuery.toLowerCase()) ?? false)
+            const isHighlighted = effectiveSearch
+              ? node.issue.title.toLowerCase().includes(effectiveSearch.toLowerCase()) ||
+                (node.issue.description?.toLowerCase().includes(effectiveSearch.toLowerCase()) ?? false)
               : true;
             return (
               <g
