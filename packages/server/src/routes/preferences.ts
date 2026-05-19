@@ -1,4 +1,4 @@
-import { Hono } from "hono";
+﻿import { Hono } from "hono";
 import { db } from "../db/index.js";
 import { preferences } from "@agentic-kanban/shared/schema";
 import { eq } from "drizzle-orm";
@@ -45,7 +45,7 @@ export function createPreferencesRoute(database: Database = db) {
     return c.json({ projectId: body.projectId });
   });
 
-  // GET /api/preferences/settings — get all agent settings
+  // GET /api/preferences/settings â€” get all agent settings
   router.get("/settings", async (c) => {
     const keys = ["agent_command", "agent_args", "output_parser", "mock_agent", "skip_permissions", "claude_profile", "permission_prompt_tool", "auto_review", "auto_merge", "resume_with_new_model", "review_auto_fix", "disabled_mcp_tools", "auto_start_followup", "require_manual_approval", "dynamic_column_scaling", "persistent_agent", "learning_step_before_merge", "auto_monitor", "auto_monitor_interval", "projects_base_path"];
     const rows = await database
@@ -62,7 +62,7 @@ export function createPreferencesRoute(database: Database = db) {
     return c.json(settings);
   });
 
-  // PUT /api/preferences/settings — update agent settings
+  // PUT /api/preferences/settings â€” update agent settings
   router.put("/settings", async (c) => {
     const body = await c.req.json() as Record<string, string>;
     const now = new Date().toISOString();
@@ -82,7 +82,7 @@ export function createPreferencesRoute(database: Database = db) {
     return c.json({ ok: true });
   });
 
-  // GET /api/preferences/claude-profiles — list available claude profiles
+  // GET /api/preferences/claude-profiles â€” list available claude profiles
   router.get("/claude-profiles", async (c) => {
     const claudeDir = join(homedir(), ".claude");
     const profiles: string[] = [];
@@ -100,3 +100,4 @@ export function createPreferencesRoute(database: Database = db) {
 }
 
 export const preferencesRoute = createPreferencesRoute();
+
