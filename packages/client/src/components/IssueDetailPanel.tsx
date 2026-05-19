@@ -40,6 +40,8 @@ export function IssueDetailPanel({
   onNavigateToIssue,
 }: IssueDetailPanelProps) {
   const [editing, setEditing] = useState(false);
+  const [dragPos, setDragPos] = useState<{ x: number; y: number } | null>(null);
+  const dragStartRef = useRef<{ mouseX: number; mouseY: number; panelX: number; panelY: number } | null>(null);
   const [title, setTitle] = useState(issue.title);
   const [description, setDescription] = useState(issue.description ?? "");
   const [priority, setPriority] = useState(issue.priority);
@@ -205,6 +207,27 @@ export function IssueDetailPanel({
     }
   }
 
+  function handleHeaderMouseDown(e: React.MouseEvent) {
+    if ((e.target as HTMLElement).closest("button")) return;
+    const panel = (e.currentTarget as HTMLElement).closest("[data-panel]") as HTMLElement;
+    if (!panel) return;
+    const rect = panel.getBoundingClientRect();
+    dragStartRef.current = { mouseX: e.clientX, mouseY: e.clientY, panelX: rect.left, panelY: rect.top };
+    const onMove = (ev: MouseEvent) => {
+      if (!dragStartRef.current) return;
+      const dx = ev.clientX - dragStartRef.current.mouseX;
+      const dy = ev.clientY - dragStartRef.current.mouseY;
+      setDragPos({ x: dragStartRef.current.panelX + dx, y: dragStartRef.current.panelY + dy });
+    };
+    const onUp = () => {
+      dragStartRef.current = null;
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  }
+
   function handleBackdropClick() {
     if (editing && hasChanges) {
       if (!window.confirm("You have unsaved changes. Discard?")) return;
@@ -222,8 +245,12 @@ export function IssueDetailPanel({
         onClick={handleBackdropClick}
       />
       {/* Panel */}
-      <div className="fixed right-0 top-0 h-full w-[min(384px,100vw)] bg-white shadow-xl z-50 flex flex-col border-l border-gray-200 animate-slide-in-right">
-        <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200">
+      <div
+        data-panel
+        className="fixed right-0 top-0 h-full w-[min(384px,100vw)] bg-white shadow-xl z-50 flex flex-col border-l border-gray-200 animate-slide-in-right"
+        style={dragPos ? { right: "auto", left: dragPos.x, top: dragPos.y, height: "min(90vh, 100vh)" } : undefined}
+      >
+        <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 cursor-grab active:cursor-grabbing" onMouseDown={handleHeaderMouseDown}>
           <h2 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
             {issue.issueNumber != null && (
               <span className="text-gray-400 font-mono">#{issue.issueNumber}</span>
