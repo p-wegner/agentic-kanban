@@ -305,41 +305,38 @@ export async function getWorkingTreeDiff(workdirPath: string): Promise<string> {
 export async function prepareForReview(
   worktreePath: string,
   baseBranch: string,
-): Promise<{ diffRef: string; success: boolean; error?: string }> {
+): Promise<{ diffRef: string; success: boolean; conflictingFiles?: string[]; error?: string }> {
   // Try to fetch from origin (best effort — no remote is fine)
-  let hasRemote = false;
   try {
     await execGit(["fetch", "origin", baseBranch], worktreePath);
-    hasRemote = true;
   } catch {
     // No remote configured — use local branches only
   }
 
-  // Determine merge source: prefer remote ref, fall back to local
-  let mergeSource: string;
-  if (hasRemote) {
-    try {
-      await execGit(["rev-parse", "--verify", `remotes/origin/${baseBranch}`], worktreePath);
-      mergeSource = `origin/${baseBranch}`;
-    } catch {
-      mergeSource = baseBranch;
-    }
-  } else {
-    mergeSource = baseBranch;
-  }
-
-  // Merge the base branch into the current workspace branch
+  // Determine rebase source: prefer remote ref, fall back to local
+  let rebaseSource: string;
   try {
-    await execGit(["merge", mergeSource, "--no-edit"], worktreePath);
-  } catch (err) {
-    // Merge conflict or failure — abort and report
-    try {
-      await execGit(["merge", "--abort"], worktreePath);
-    } catch { /* best effort */ }
-    return { diffRef: mergeSource, success: false, error: err instanceof Error ? err.message : String(err) };
+    await execGit(["rev-parse", "--verify", `remotes/origin/${baseBranch}`], worktreePath);
+    rebaseSource = `origin/${baseBranch}`;
+  } catch {
+    rebaseSource = baseBranch;
   }
 
-  return { diffRef: mergeSource, success: true };
+  // Rebase the workspace branch onto the base branch
+  try {
+    await execGit(["rebase", rebaseSource], worktreePath);
+  } catch (err) {
+    // Rebase conflict — leave rebase in-progress so reviewer can resolve conflicts
+    try {
+      const unmerged = await execGit(["diff", "--name-only", "--diff-filter=U"], worktreePath);
+      const conflictingFiles = unmerged.trim().split("\n").filter(Boolean);
+      return { diffRef: rebaseSource, success: false, conflictingFiles, error: err instanceof Error ? err.message : String(err) };
+    } catch {
+      return { diffRef: rebaseSource, success: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
+  return { diffRef: rebaseSource, success: true };
 }
 
 /** Get lightweight diff stats using --shortstat (no full diff transfer). Includes untracked files. */
