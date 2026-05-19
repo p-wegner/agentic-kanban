@@ -485,17 +485,18 @@ const PROFILE_OWNED_ENV_VARS = [
 
 function buildSpawnEnv(claudeProfile?: string): Record<string, string> {
   const spawnEnv: Record<string, string> = { ...process.env as Record<string, string> };
+
+  // Always strip these so Claude Code falls back to its stored OAuth credentials.
+  // Without this, an ANTHROPIC_API_KEY in the server's env leaks into every spawned
+  // agent and causes 401s when the key is wrong/expired.
+  for (const key of PROFILE_OWNED_ENV_VARS) {
+    delete spawnEnv[key];
+  }
+
   if (!claudeProfile) return spawnEnv;
 
   const settingsPath = join(homedir(), ".claude", `settings_${claudeProfile}.json`);
   if (!existsSync(settingsPath)) return spawnEnv;
-
-  // Strip profile-owned vars so the new profile starts from a clean baseline.
-  // This prevents a prior profile's env vars (e.g. ANTHROPIC_BASE_URL from zai)
-  // from leaking into a session that uses a different profile.
-  for (const key of PROFILE_OWNED_ENV_VARS) {
-    delete spawnEnv[key];
-  }
 
   try {
     const profileSettings = JSON.parse(readFileSync(settingsPath, "utf-8"));
