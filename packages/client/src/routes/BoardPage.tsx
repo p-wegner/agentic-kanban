@@ -239,6 +239,19 @@ export function BoardPage() {
     showToast(`Registered "${result.name}"`, "success");
   }
 
+  async function handleCreateProject(name: string, path: string) {
+    const body: Record<string, string> = { name };
+    if (path) body.path = path;
+    const result = await apiFetch<{ id: string; name: string; error?: string }>(
+      "/api/projects/create",
+      { method: "POST", body: JSON.stringify(body) },
+    );
+    if (result.error) throw new Error(result.error);
+    await loadProjects();
+    await handleProjectChange(result.id);
+    showToast(`Created "${result.name}"`, "success");
+  }
+
   async function handleCreateIssue(data: CreateIssueRequest & { startWorkspace?: boolean; planMode?: boolean; claudeProfile?: string; isDirect?: boolean }) {
     setMutating(true);
     setError(null);
@@ -630,7 +643,7 @@ export function BoardPage() {
 
   if (loading) {
     return (
-      <Layout onRegisterProject={handleRegisterProject}>
+      <Layout onRegisterProject={handleRegisterProject} onCreateProject={handleCreateProject}>
         <SkeletonBoard />
       </Layout>
     );
@@ -639,7 +652,7 @@ export function BoardPage() {
   // No projects registered
   if (projects.length === 0 || !activeProjectId) {
     return (
-      <Layout onRegisterProject={handleRegisterProject}>
+      <Layout onRegisterProject={handleRegisterProject} onCreateProject={handleCreateProject}>
         <div className="flex items-center justify-center h-96 text-gray-500">
           <div className="text-center">
             <p className="text-lg font-medium text-gray-700 mb-2">
@@ -667,6 +680,7 @@ export function BoardPage() {
       priorityFilter={priorityFilter}
       onPriorityFilterChange={setPriorityFilter}
       onRegisterProject={handleRegisterProject}
+      onCreateProject={handleCreateProject}
       onSettingsClick={() => setShowSettings(true)}
       onWorktreeOverviewClick={() => setShowWorktreeOverview(true)}
     >
