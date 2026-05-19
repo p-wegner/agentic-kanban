@@ -298,7 +298,29 @@ export function IssueDetailPanel({
                 onChange={(e) => setDescription(e.target.value)}
                 rows={4}
                 className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none"
-                placeholder="Add a description..."
+                placeholder="Add a description... (paste screenshots with Ctrl+V)"
+                onPaste={(e) => {
+                  const items = e.clipboardData?.items;
+                  if (!items) return;
+                  for (const item of Array.from(items)) {
+                    if (item.type.startsWith("image/")) {
+                      e.preventDefault();
+                      const file = item.getAsFile();
+                      if (!file) return;
+                      const reader = new FileReader();
+                      reader.onload = (ev) => {
+                        const dataUrl = ev.target?.result as string;
+                        const imgMarkdown = `\n![screenshot](${dataUrl})\n`;
+                        const ta = e.target as HTMLTextAreaElement;
+                        const start = ta.selectionStart ?? description.length;
+                        const end = ta.selectionEnd ?? description.length;
+                        setDescription(description.slice(0, start) + imgMarkdown + description.slice(end));
+                      };
+                      reader.readAsDataURL(file);
+                      return;
+                    }
+                  }
+                }}
               />
             ) : issue.description ? (
               <p className="text-sm text-gray-700 whitespace-pre-wrap">
