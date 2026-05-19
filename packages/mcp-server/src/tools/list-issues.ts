@@ -1,20 +1,21 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { db, schema } from "../db.js";
-import { eq, inArray } from "drizzle-orm";
+import { eq, inArray, and } from "drizzle-orm";
 
 export function registerListIssues(server: McpServer) {
   server.tool(
     "list_issues",
-    "List all issues for a project, optionally filtered by status name, priority, tag, or blocked status",
+    "List all issues for a project, optionally filtered by status name, priority, tag, blocked status, or issue number",
     {
       projectId: z.string().describe("The project ID"),
       status: z.string().optional().describe("Filter by status name (e.g., 'Todo', 'In Progress')"),
       priority: z.string().optional().describe("Filter by priority (low, medium, high, critical)"),
       tag: z.string().optional().describe("Filter by tag name (e.g., 'bug', 'feature')"),
       blocked: z.boolean().optional().describe("Filter by blocked status (true = only blocked, false = only unblocked)"),
+      issueNumber: z.number().optional().describe("Filter by issue number (e.g., 42)"),
     },
-    async ({ projectId, status, priority, tag, blocked }) => {
+    async ({ projectId, status, priority, tag, blocked, issueNumber }) => {
       let query = db.select({
         id: schema.issues.id,
         issueNumber: schema.issues.issueNumber,
@@ -30,7 +31,9 @@ export function registerListIssues(server: McpServer) {
       })
         .from(schema.issues)
         .innerJoin(schema.projectStatuses, eq(schema.issues.statusId, schema.projectStatuses.id))
-        .where(eq(schema.issues.projectId, projectId));
+        .where(issueNumber !== undefined
+          ? and(eq(schema.issues.projectId, projectId), eq(schema.issues.issueNumber, issueNumber))
+          : eq(schema.issues.projectId, projectId));
 
       let results = await query;
 

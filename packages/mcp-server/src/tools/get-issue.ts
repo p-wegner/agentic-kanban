@@ -6,11 +6,16 @@ import { eq } from "drizzle-orm";
 export function registerGetIssue(server: McpServer) {
   server.tool(
     "get_issue",
-    "Get detailed information about a specific issue, including workspaces and dependencies",
+    "Get detailed information about a specific issue, including workspaces and dependencies. Accepts either a UUID issue ID or a numeric issue number (e.g. 42).",
     {
-      issueId: z.string().describe("The issue ID"),
+      issueId: z.string().describe("The issue ID (UUID) or issue number (e.g. '42')"),
     },
     async ({ issueId }) => {
+      const isNumeric = /^\d+$/.test(issueId);
+      const whereClause = isNumeric
+        ? eq(schema.issues.issueNumber, Number(issueId))
+        : eq(schema.issues.id, issueId);
+
       const issues = await db.select({
         id: schema.issues.id,
         issueNumber: schema.issues.issueNumber,
@@ -26,15 +31,17 @@ export function registerGetIssue(server: McpServer) {
       })
         .from(schema.issues)
         .innerJoin(schema.projectStatuses, eq(schema.issues.statusId, schema.projectStatuses.id))
-        .where(eq(schema.issues.id, issueId))
+        .where(whereClause)
         .limit(1);
 
       if (issues.length === 0) {
         return { content: [{ type: "text" as const, text: `Issue ${issueId} not found` }] };
       }
 
+      const resolvedId = issues[0].id;
+
       const [workspaces, outgoing, incoming] = await Promise.all([
-        db.select().from(schema.workspaces).where(eq(schema.workspaces.issueId, issueId)),
+        db.select().from(schema.workspaces).where(eq(schema.workspaces.issueId, resolvedId)),
         db.select({
           id: schema.issueDependencies.id,
           dependsOnId: schema.issueDependencies.dependsOnId,
@@ -47,7 +54,7 @@ export function registerGetIssue(server: McpServer) {
           .from(schema.issueDependencies)
           .innerJoin(schema.issues, eq(schema.issueDependencies.dependsOnId, schema.issues.id))
           .innerJoin(schema.projectStatuses, eq(schema.issues.statusId, schema.projectStatuses.id))
-          .where(eq(schema.issueDependencies.issueId, issueId)),
+          .where(eq(schema.issueDependencies.issueId, resolvedId)),
         db.select({
           id: schema.issueDependencies.id,
           issueId: schema.issueDependencies.issueId,
@@ -60,7 +67,7 @@ export function registerGetIssue(server: McpServer) {
           .from(schema.issueDependencies)
           .innerJoin(schema.issues, eq(schema.issueDependencies.issueId, schema.issues.id))
           .innerJoin(schema.projectStatuses, eq(schema.issues.statusId, schema.projectStatuses.id))
-          .where(eq(schema.issueDependencies.dependsOnId, issueId)),
+          .where(eq(schema.issueDependencies.dependsOnId, resolvedId)),
       ]);
 
       // An issue is blocked if it has unmet outgoing "depends_on" or "blocked_by" dependencies
