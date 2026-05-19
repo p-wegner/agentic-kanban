@@ -123,6 +123,12 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
             blocked
           </span>
         )}
+        {!issue.isBlocked && (issue as IssueWithStatus & { dependencyCount?: number }).dependencyCount ? (
+          <span className="inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded bg-purple-50 text-purple-600" title={`${(issue as IssueWithStatus & { dependencyCount?: number }).dependencyCount} dependencies`}>
+            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+            {(issue as IssueWithStatus & { dependencyCount?: number }).dependencyCount}
+          </span>
+        ) : null}
         <span
           className={`inline-block text-xs font-medium px-1.5 py-0.5 rounded ${badgeColor}`}
         >
