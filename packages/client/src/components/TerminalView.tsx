@@ -38,10 +38,26 @@ function basename(path: string): string {
   return parts[parts.length - 1] || path;
 }
 
+function isSkillRead(name: string, input: Record<string, unknown>): string | null {
+  if (name !== "Read") return null;
+  const path = (input.file_path as string) || "";
+  const normalized = path.replace(/\\/g, "/");
+  const skillMatch = normalized.match(/\.claude\/skills\/([^/]+)\/SKILL\.md$/i);
+  if (skillMatch) return skillMatch[1];
+  if (normalized.toUpperCase().endsWith("/SKILL.MD") || normalized.toUpperCase() === "SKILL.MD") {
+    const parts = normalized.split("/");
+    return parts[parts.length - 2] || "skill";
+  }
+  return null;
+}
+
 function summarizeToolCall(name: string, input: Record<string, unknown>): string {
   switch (name) {
-    case "Read":
+    case "Read": {
+      const skillName = isSkillRead(name, input);
+      if (skillName) return `Loading skill: ${skillName}`;
       return `Reading ${basename((input.file_path as string) || "file")}`;
+    }
     case "Edit":
       return `Editing ${basename((input.file_path as string) || "file")}`;
     case "Write":
@@ -631,6 +647,15 @@ function renderParsedEvent(event: DisplayEvent, key: number, ctx: RenderContext)
     }
 
     if (isMinimal) {
+      const skillName = isSkillRead(event.name, event.inputParsed || {});
+      if (skillName) {
+        return (
+          <div key={key} data-event-idx={key} className={`mb-1 text-[11px] ${inSubagent ? "ml-6" : "ml-1"} flex items-center gap-1.5`}>
+            <span className="text-purple-400">⚡</span>
+            <span className="text-purple-300 font-medium">Skill: {skillName}</span>
+          </div>
+        );
+      }
       const summary = summarizeToolCall(event.name, event.inputParsed || {});
       return (
         <div key={key} data-event-idx={key} className={`mb-0.5 text-[11px] ${inSubagent ? "ml-6" : "ml-1"}`}>

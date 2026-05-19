@@ -166,6 +166,8 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
   const [branches, setBranches] = useState<{ local: string[]; remote: string[] } | null>(null);
   const [availableSkills, setAvailableSkills] = useState<{ id: string; name: string; description: string }[]>([]);
   const [selectedSkillId, setSelectedSkillId] = useState<string>("");
+  const [availableProfiles, setAvailableProfiles] = useState<string[]>([]);
+  const [selectedProfile, setSelectedProfile] = useState<string>("");
   const suggestion = suggestBranchName(issue);
 
   const { state: wsState, messages, disconnect, isWaitingForInput } = useWebSocket(activeSession);
@@ -266,13 +268,22 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
       .catch(() => {});
   }, [issue.id]);
 
-  // Fetch branches & pre-fill branch name when create form opens
+  // Fetch branches & profiles & pre-fill branch name when create form opens
   useEffect(() => {
     if (!showCreate || !project) return;
     setBranchName(suggestion);
     apiFetch<{ local: string[]; remote: string[] }>(`/api/projects/${project.id}/branches`)
       .then((data) => setBranches(data))
       .catch(() => setBranches(null));
+    apiFetch<{ profiles: string[] }>("/api/preferences/claude-profiles")
+      .then((data) => {
+        setAvailableProfiles(data.profiles);
+        // Pre-select the currently configured profile
+        apiFetch<Record<string, string>>("/api/preferences/settings")
+          .then((s) => setSelectedProfile(s.claude_profile || ""))
+          .catch(() => {});
+      })
+      .catch(() => {});
   }, [showCreate]);
 
   useEffect(() => {
@@ -413,6 +424,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
     try {
       const body: Record<string, unknown> = { issueId: issue.id, isDirect, requiresReview, planMode, skipSetup };
       if (selectedSkillId) body.skillId = selectedSkillId;
+      if (selectedProfile) body.claudeProfile = selectedProfile;
       if (!isDirect) {
         body.branch = branchName.trim();
         if (baseBranch.trim()) {
@@ -1054,6 +1066,21 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                     <option value="">None (default)</option>
                     {availableSkills.map((s) => (
                       <option key={s.id} value={s.id}>{s.name} — {s.description}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              {availableProfiles.length > 0 && (
+                <div>
+                  <label className="text-xs font-medium text-gray-600 mb-1 block">Profile</label>
+                  <select
+                    value={selectedProfile}
+                    onChange={(e) => setSelectedProfile(e.target.value)}
+                    className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  >
+                    <option value="">Default ({prefs.claude_profile || "none"})</option>
+                    {availableProfiles.map((p) => (
+                      <option key={p} value={p}>{p}</option>
                     ))}
                   </select>
                 </div>
