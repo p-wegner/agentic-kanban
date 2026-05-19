@@ -13,18 +13,22 @@ export function registerCreateIssue(server: McpServer) {
       title: z.string().describe("Issue title"),
       description: z.string().optional().describe("Issue description"),
       priority: z.enum(["low", "medium", "high", "critical"]).optional().describe("Priority (default: medium)"),
-      projectId: z.string().optional().describe("Project ID (defaults to first project)"),
+      projectId: z.string().optional().describe("Project ID (defaults to active project)"),
       statusName: z.string().optional().describe("Status column name (default: 'Todo')"),
     },
     async ({ title, description, priority, projectId, statusName }) => {
       let pid = projectId;
 
       if (!pid) {
-        const projects = await db.select().from(schema.projects).limit(1);
-        if (projects.length === 0) {
-          return { content: [{ type: "text" as const, text: "No projects found. Run db:seed first." }] };
+        const pref = await db
+          .select({ value: schema.preferences.value })
+          .from(schema.preferences)
+          .where(eq(schema.preferences.key, "activeProjectId"))
+          .limit(1);
+        if (pref.length === 0 || !pref[0].value) {
+          return { content: [{ type: "text" as const, text: "No active project. Run `pnpm cli -- register <path>` first." }] };
         }
-        pid = projects[0].id;
+        pid = pref[0].value;
       }
 
       // Find status ID by name or default to first
