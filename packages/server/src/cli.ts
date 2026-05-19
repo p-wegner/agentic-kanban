@@ -1306,4 +1306,202 @@ program
     }
   });
 
+// ── sessions debug command ────────────────────────────────────────────────────
+
+const sessionDebugCmd = program
+  .command("session-history [issue-number]")
+  .alias("sh")
+  .description(
+    "Inspect Claude Code session transcript files from ~/.claude/projects/.\n\nParses JSONL session files for worktrees linked to this project's issues, showing what the agent did and why it stopped — without loading entire large files."
+  )
+  .option("-t, --tail <lines>", "Number of tail lines to parse per session file (default: 60)", "60")
+  .option("-a, --all", "Show all sessions for the issue, not just the latest", false)
+  .option("--json", "Output raw JSON")
+  .addHelpText(
+    "after",
+    `
+Examples:
+  $ agentic-kanban session-history           # all issues with session dirs
+  $ agentic-kanban sh 17                     # inspect issue #17 sessions
+  $ agentic-kanban sh 23 --all               # all session files for #23
+  $ agentic-kanban sh 17 --tail 100          # parse more lines for detail
+  $ agentic-kanban sh --json                 # machine-readable output
+
+Via pnpm (use -- to pass args):
+  $ pnpm sh -- 17
+  $ pnpm sh -- 17 --all
+`
+  )
+  .action(
+    async (issueArg: string | undefined, options: { tail?: string; all?: boolean; json?: boolean }) => {
+      const issueNumber = issueArg;
+      const { homedir } = await import("node:os");
+      const { readdirSync, statSync, readFileSync } = await import("node:fs");
+      const { join } = await import("node:path");
+
+      const claudeProjects = join(homedir(), ".claude", "projects");
+      const tailLines = parseInt(options.tail ?? "60", 10);
+
+      // Find all worktree session dirs for this project
+      let allDirs: { name: string; path: string; issueNum: number | null }[] = [];
+      try {
+        const entries = readdirSync(claudeProjects);
+        for (const entry of entries) {
+          // Match C--andrena--worktrees-feature-ak-N-* and C--andrena-agentic-kanban-packages--worktrees-*
+          const m =
+            entry.match(/--worktrees-feature-ak-(\d+)-/i) ||
+            entry.match(/agentic-kanban-packages--worktrees-feature-ak-(\d+)-/i);
+          const issueNum = m ? parseInt(m[1], 10) : null;
+          if (m || entry.includes("worktrees")) {
+            allDirs.push({ name: entry, path: join(claudeProjects, entry), issueNum });
+          }
+        }
+      } catch {
+        console.error(`Cannot read ${claudeProjects}`);
+        process.exit(1);
+      }
+
+      if (issueNumber) {
+        const n = parseInt(issueNumber, 10);
+        allDirs = allDirs.filter((d) => d.issueNum === n);
+        if (allDirs.length === 0) {
+          console.error(`No session directory found for issue #${n}`);
+          process.exit(1);
+        }
+      }
+
+      // Sort by issue number
+      allDirs.sort((a, b) => (a.issueNum ?? 999) - (b.issueNum ?? 999));
+
+      interface SessionResult {
+        issueNum: number | null;
+        dir: string;
+        file: string;
+        fileSizeBytes: number;
+        lastModified: string;
+        linesParsed: number;
+        turns: number;
+        lastAssistantText: string | null;
+        lastToolCall: string | null;
+        stopReason: string | null;
+        sessionStarted: boolean;
+        agentResponded: boolean;
+        sessionId: string | null;
+      }
+
+      const results: SessionResult[] = [];
+
+      for (const dir of allDirs) {
+        // List .jsonl files in this dir, sort by mtime desc
+        let jsonlFiles: { name: string; path: string; mtime: Date; size: number }[] = [];
+        try {
+          const files = readdirSync(dir.path).filter((f) => f.endsWith(".jsonl"));
+          for (const f of files) {
+            const fp = join(dir.path, f);
+            const st = statSync(fp);
+            jsonlFiles.push({ name: f, path: fp, mtime: st.mtime, size: st.size });
+          }
+          jsonlFiles.sort((a, b) => b.mtime.getTime() - a.mtime.getTime());
+        } catch {
+          continue;
+        }
+
+        if (!options.all) jsonlFiles = jsonlFiles.slice(0, 1);
+
+        for (const jf of jsonlFiles) {
+          // Read only the tail — avoid loading huge files
+          const raw = readFileSync(jf.path, "utf8");
+          const allLines = raw.split("\n").filter(Boolean);
+          const tailStart = Math.max(0, allLines.length - tailLines);
+          const linesToParse = allLines.slice(tailStart);
+
+          let turns = 0;
+          let lastAssistantText: string | null = null;
+          let lastToolCall: string | null = null;
+          let stopReason: string | null = null;
+          let sessionStarted = false;
+          let agentResponded = false;
+          let sessionId: string | null = null;
+
+          for (const line of linesToParse) {
+            let obj: Record<string, unknown>;
+            try {
+              obj = JSON.parse(line);
+            } catch {
+              continue;
+            }
+
+            if (!sessionId && (obj.sessionId as string)) sessionId = obj.sessionId as string;
+
+            const type = obj.type as string;
+            if (type === "user") sessionStarted = true;
+
+            if (type === "assistant") {
+              agentResponded = true;
+              const msg = obj.message as { role: string; stop_reason?: string; content?: unknown[] };
+              if (msg.stop_reason) stopReason = msg.stop_reason;
+              const content = msg.content ?? [];
+              for (const block of content as { type: string; text?: string; name?: string; input?: unknown }[]) {
+                if (block.type === "text" && block.text) {
+                  lastAssistantText = block.text.replace(/\s+/g, " ").slice(0, 300);
+                  turns++;
+                }
+                if (block.type === "tool_use" && block.name) {
+                  const inputStr = block.input ? JSON.stringify(block.input).slice(0, 80) : "";
+                  lastToolCall = `${block.name}  ${inputStr}`;
+                }
+              }
+            }
+          }
+
+          results.push({
+            issueNum: dir.issueNum,
+            dir: dir.name,
+            file: jf.name.replace(".jsonl", "").slice(0, 8) + "…",
+            fileSizeBytes: jf.size,
+            lastModified: jf.mtime.toISOString(),
+            linesParsed: linesToParse.length,
+            turns,
+            lastAssistantText,
+            lastToolCall,
+            stopReason,
+            sessionStarted,
+            agentResponded,
+            sessionId: sessionId ? (sessionId as string).slice(0, 8) + "…" : null,
+          });
+        }
+      }
+
+      if (options.json) {
+        console.log(JSON.stringify(results, null, 2));
+        process.exit(0);
+      }
+
+      // Formatted output
+      console.log(`\n  Claude Session History  (tail: ${tailLines} lines/file)\n`);
+
+      let currentIssue: number | null = -1;
+      for (const r of results) {
+        if (r.issueNum !== currentIssue) {
+          currentIssue = r.issueNum;
+          console.log(`  ── #${r.issueNum ?? "?"} ──────────────────────────────────`);
+        }
+        const size = r.fileSizeBytes < 1024 ? `${r.fileSizeBytes}B` : `${(r.fileSizeBytes / 1024).toFixed(0)}KB`;
+        const age = timeSince(new Date(r.lastModified));
+        const started = r.sessionStarted ? (r.agentResponded ? "✓ responded" : "✗ no response") : "✗ no prompt";
+        console.log(`  ${r.file}  ${size}  ${age} ago  [${started}]  turns:${r.turns}`);
+        if (r.stopReason) console.log(`    stop_reason: ${r.stopReason}`);
+        if (r.lastToolCall) console.log(`    last tool:   ${r.lastToolCall}`);
+        if (r.lastAssistantText) console.log(`    last text:   ${r.lastAssistantText.slice(0, 200)}`);
+        console.log("");
+      }
+
+      if (results.length === 0) console.log("  No session files found.\n");
+
+      process.exit(0);
+    }
+  );
+
+void sessionDebugCmd;
+
 program.parse();
