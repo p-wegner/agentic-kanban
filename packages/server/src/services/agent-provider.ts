@@ -269,24 +269,6 @@ export class ClaudeProvider implements AgentProvider {
       }
     }
 
-    // TaskCreate/TaskUpdate (only used when no TodoWrite has been seen — caller decides)
-    if (obj.type === "assistant" && obj.message?.content) {
-      const content = obj.message.content;
-      if (Array.isArray(content)) {
-        for (const block of content) {
-          if (block.type === "tool_use" && block.name === "TaskCreate" && block.input?.subject) {
-            // Signal a single task creation — caller accumulates
-            if (!result.todos) result.todos = [];
-            result.todos.push({ subject: block.input.subject as string, status: "pending" });
-          }
-          if (block.type === "tool_use" && block.name === "TaskUpdate" && block.input?.taskId && block.input?.status) {
-            // TaskUpdate doesn't map cleanly to ParsedStreamEvent.todos
-            // The session manager handles this directly
-          }
-        }
-      }
-    }
-
     // Return undefined if nothing was extracted
     if (
       result.providerSessionId === undefined &&

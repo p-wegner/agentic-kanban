@@ -149,13 +149,14 @@ function createSessionManager(
             }
           }
 
-          // TaskCreate/TaskUpdate (only when no TodoWrite has taken precedence)
-          if (!sessionHasTodoWrite.has(sessionId) && evt.toolActivity.name === "TaskCreate" && evt.todos) {
-            for (const todo of evt.todos) {
+          // TaskCreate (only when no TodoWrite has taken precedence)
+          if (!sessionHasTodoWrite.has(sessionId) && evt.toolActivity.name === "TaskCreate") {
+            const subject = evt.toolActivity.input.subject as string | undefined;
+            if (subject) {
               if (!sessionTasks.has(sessionId)) sessionTasks.set(sessionId, new Map());
               const tasks = sessionTasks.get(sessionId)!;
               const taskIdx = String(tasks.size + 1);
-              tasks.set(taskIdx, { subject: todo.subject, status: todo.status });
+              tasks.set(taskIdx, { subject, status: "pending" });
               if (ctx) {
                 options?.onTodos?.(ctx.projectId, ctx.issueId, tasksToTodoItems(tasks));
               }
