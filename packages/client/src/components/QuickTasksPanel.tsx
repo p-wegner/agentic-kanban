@@ -60,13 +60,13 @@ export function QuickTasksPanel({ projectId, onClose, onLaunched }: QuickTasksPa
   return (
     <>
       <div className="fixed inset-0 bg-black/30 z-50" onClick={onClose} />
-      <div className="fixed top-[15%] left-1/2 -translate-x-1/2 w-full max-w-md bg-white rounded-xl shadow-2xl z-50 border border-gray-200 overflow-hidden animate-slide-in-right">
+      <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-md bg-white rounded-xl shadow-2xl z-50 border border-gray-200 overflow-hidden flex flex-col max-h-[85vh] animate-slide-in-right">
         <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between">
           <h3 className="text-sm font-semibold text-gray-900">Quick Tasks</h3>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-lg leading-none">&times;</button>
         </div>
 
-        <div className="p-3 space-y-1.5 max-h-96 overflow-y-auto">
+        <div className="p-3 space-y-1.5 overflow-y-auto flex-1 min-h-0">
           {loading && <p className="text-xs text-gray-400 text-center py-4">Loading skills...</p>}
 
           {!loading && skills.map((skill) => (
