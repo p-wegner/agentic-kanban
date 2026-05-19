@@ -420,6 +420,120 @@ export async function startServer(port?: number) {
 
   injectWebSocket(server);
 
+  // Board monitoring loop — periodically checks for stuck/idle workspaces
+  let monitorTimer: ReturnType<typeof setTimeout> | null = null;
+
+  async function runMonitorCycle() {
+    try {
+      const prefRows = await db.select().from(preferences);
+      const prefMap = new Map(prefRows.map(r => [r.key, r.value]));
+      if (prefMap.get("auto_monitor") !== "true") return;
+
+      const intervalMin = parseInt(prefMap.get("auto_monitor_interval") || "4", 10);
+
+      // Find active workspaces on non-Done/Cancelled issues
+      const activeStatuses = await db
+        .select({ id: projectStatuses.id })
+        .from(projectStatuses)
+        .where(sql`${projectStatuses.name} NOT IN ('Done', 'Cancelled')`);
+      const activeStatusIds = activeStatuses.map(s => s.id);
+      if (activeStatusIds.length === 0) return;
+
+      const candidates = await db
+        .select({
+          wsId: workspaces.id,
+          wsStatus: workspaces.status,
+          projectId: issues.projectId,
+        })
+        .from(workspaces)
+        .innerJoin(issues, eq(workspaces.issueId, issues.id))
+        .where(sql`${workspaces.status} != 'closed' AND ${issues.statusId} IN (${sql.join(activeStatusIds.map(id => sql`${id}`), sql`, `)})`);
+
+      for (const ws of candidates) {
+        try {
+          const lastSess = await db
+            .select({ id: sessions.id, status: sessions.status, startedAt: sessions.startedAt, endedAt: sessions.endedAt, exitCode: sessions.exitCode })
+            .from(sessions)
+            .where(eq(sessions.workspaceId, ws.wsId))
+            .orderBy(desc(sessions.startedAt))
+            .limit(1);
+
+          const sess = lastSess[0];
+
+          if (ws.wsStatus === "idle") {
+            // Relaunch idle workspaces
+            const baseUrl = `http://localhost:${serverPort}`;
+            await fetch(`${baseUrl}/api/workspaces/${ws.wsId}/launch`, { method: "POST" }).catch(() => {});
+            console.log(`[monitor] Relaunched idle workspace ${ws.wsId}`);
+            boardEvents.broadcast(ws.projectId, "board_changed");
+          } else if (ws.wsStatus === "reviewing" && sess && sess.status === "stopped") {
+            // Trigger merge for reviewing workspaces with stopped sessions
+            const baseUrl = `http://localhost:${serverPort}`;
+            await fetch(`${baseUrl}/api/workspaces/${ws.wsId}/merge`, { method: "POST" }).catch(() => {});
+            console.log(`[monitor] Triggered merge for reviewing workspace ${ws.wsId}`);
+            boardEvents.broadcast(ws.projectId, "board_changed");
+          } else if (ws.wsStatus === "active" && sess && sess.status === "running") {
+            // Check if agent is waiting for input (running > 5min without activity)
+            const runningMs = Date.now() - new Date(sess.startedAt).getTime();
+            if (runningMs > 5 * 60 * 1000) {
+              const baseUrl = `http://localhost:${serverPort}`;
+              await fetch(`${baseUrl}/api/workspaces/${ws.wsId}/turn`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ message: "Please continue with the task. If you are waiting for input, proceed with your best judgment." }),
+              }).catch(() => {});
+              console.log(`[monitor] Nudged long-running agent in workspace ${ws.wsId}`);
+            }
+          }
+        } catch (err) {
+          console.warn(`[monitor] Error processing workspace ${ws.wsId}:`, err);
+        }
+      }
+    } catch (err) {
+      console.warn("[monitor] Cycle error:", err);
+    } finally {
+      // Reschedule based on current preference
+      const prefRows = await db.select().from(preferences).catch(() => []);
+      const prefMap = new Map(prefRows.map((r: { key: string; value: string }) => [r.key, r.value]));
+      if (prefMap.get("auto_monitor") === "true") {
+        const intervalMin = parseInt(prefMap.get("auto_monitor_interval") || "4", 10);
+        monitorTimer = setTimeout(runMonitorCycle, intervalMin * 60 * 1000);
+      }
+    }
+  }
+
+  // Watch for preference changes to start/stop monitoring
+  async function syncMonitorState() {
+    const prefRows = await db.select().from(preferences).catch(() => []);
+    const prefMap = new Map(prefRows.map((r: { key: string; value: string }) => [r.key, r.value]));
+    const enabled = prefMap.get("auto_monitor") === "true";
+    if (enabled && !monitorTimer) {
+      const intervalMin = parseInt(prefMap.get("auto_monitor_interval") || "4", 10);
+      console.log(`[monitor] Starting board monitoring loop (every ${intervalMin}m)`);
+      monitorTimer = setTimeout(runMonitorCycle, intervalMin * 60 * 1000);
+    } else if (!enabled && monitorTimer) {
+      console.log("[monitor] Stopping board monitoring loop");
+      clearTimeout(monitorTimer);
+      monitorTimer = null;
+    }
+  }
+
+  // Poll for preference changes every 30s to pick up toggle changes from UI
+  setInterval(syncMonitorState, 30_000);
+  // Also run once at startup
+  syncMonitorState().catch(() => {});
+
+  // Expose monitor state via internal endpoint so UI can show it
+  app.get("/api/internal/monitor-status", async (c) => {
+    const prefRows = await db.select().from(preferences);
+    const prefMap = new Map(prefRows.map(r => [r.key, r.value]));
+    return c.json({
+      enabled: prefMap.get("auto_monitor") === "true",
+      intervalMin: parseInt(prefMap.get("auto_monitor_interval") || "4", 10),
+      active: monitorTimer !== null,
+    });
+  });
+
   process.on("uncaughtException", (err: NodeJS.ErrnoException) => {
     if (err.code === "EADDRINUSE") {
       console.error("[fatal] Port already in use — exiting:", err.message);
