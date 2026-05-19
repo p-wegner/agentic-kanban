@@ -145,7 +145,7 @@ export function BoardColumn({
         <div
           ref={scrollRef}
           onScroll={updateScrollState}
-          className="space-y-1.5 h-full overflow-y-auto column-scroll-container"
+          className="space-y-1.5 h-full overflow-y-auto column-scroll-container pb-6"
         >
           {column.issues.map((issue: IssueWithStatus, idx: number) => (
             <div key={issue.id}>
