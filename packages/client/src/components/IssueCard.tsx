@@ -1,6 +1,8 @@
 import { useState } from "react";
 import type { IssueWithStatus } from "@agentic-kanban/shared";
 import type { LiveSessionStats, TodoItem } from "../lib/useBoardEvents.js";
+import { apiFetch } from "../lib/api.js";
+import { showToast } from "./Toast.js";
 
 function relativeTime(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();
@@ -63,13 +65,43 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
   const badgeColor = priorityColors[issue.priority] ?? "bg-gray-200 text-gray-700";
   const ws = issue.workspaceSummary;
   const hasActiveWorkspace = ws?.main && ws.main.status !== "closed";
+  const [depDragOver, setDepDragOver] = useState(false);
+
+  function handleDragOver(e: React.DragEvent) {
+    const dragData = (window as unknown as Record<string, unknown>).__dragData as { issueId?: string; sourceStatusId?: string } | undefined;
+    if (dragData?.issueId && dragData.issueId !== issue.id && e.shiftKey) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "link";
+      setDepDragOver(true);
+    }
+  }
+
+  async function handleDrop(e: React.DragEvent) {
+    setDepDragOver(false);
+    if (!e.shiftKey) return;
+    const dragData = (window as unknown as Record<string, unknown>).__dragData as { issueId?: string } | undefined;
+    if (!dragData?.issueId || dragData.issueId === issue.id) return;
+    e.stopPropagation();
+    try {
+      await apiFetch(`/api/issues/${dragData.issueId}/dependencies`, {
+        method: "POST",
+        body: JSON.stringify({ dependsOnId: issue.id, type: "depends_on" }),
+      });
+      showToast("Dependency added", "success");
+    } catch {
+      showToast("Failed to add dependency", "error");
+    }
+  }
 
   return (
     <div
       draggable
       onDragStart={(e) => onDragStart(e, issue)}
+      onDragOver={handleDragOver}
+      onDragLeave={() => setDepDragOver(false)}
+      onDrop={handleDrop}
       onClick={() => onClick(issue)}
-      className="group bg-white rounded-md shadow-sm p-2 border border-gray-200 cursor-pointer hover:shadow-md hover:border-gray-300 transition-shadow relative"
+      className={`group bg-white rounded-md shadow-sm p-2 border cursor-pointer hover:shadow-md transition-shadow relative ${depDragOver ? "border-purple-400 bg-purple-50 shadow-purple-200" : "border-gray-200 hover:border-gray-300"}`}
     >
       <div className="flex items-start justify-between gap-2">
         <p className="text-sm text-gray-900">
