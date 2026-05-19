@@ -136,8 +136,6 @@ export async function startServer(port?: number) {
       await db.update(workspaces).set({ status: "idle", updatedAt: now }).where(eq(workspaces.id, workspaceId));
       boardEvents.broadcast(projectId, "workspace_idle");
 
-      if (exitCode !== 0) return;
-
       const statuses = await db.select().from(projectStatuses).where(eq(projectStatuses.projectId, projectId));
       const findStatus = (name: string) => statuses.find(s => s.name === name);
 
@@ -159,6 +157,8 @@ export async function startServer(port?: number) {
         }
         return;
       }
+
+      if (exitCode !== 0) return;
 
       if (reviewSessionIds.has(sessionId)) {
         reviewSessionIds.delete(sessionId);
