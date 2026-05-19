@@ -12,36 +12,91 @@ const CATEGORY_LABELS: Record<ActionCategory, string> = {
   settings: "Settings",
 };
 
-const CATEGORY_ORDER: ActionCategory[] = ["board", "navigation", "issue", "settings"];
+const CATEGORY_ORDER: ActionCategory[] = ["issue", "board", "navigation", "settings"];
+
+const CATEGORY_ICONS: Record<ActionCategory, string> = {
+  issue: "◈",
+  board: "⊞",
+  navigation: "⇢",
+  settings: "⚙",
+};
+
+const RECENT_KEY = "command-palette-recent";
+const MAX_RECENT = 5;
+
+function getRecentIds(): string[] {
+  try {
+    return JSON.parse(localStorage.getItem(RECENT_KEY) || "[]");
+  } catch {
+    return [];
+  }
+}
+
+function recordRecent(id: string) {
+  const recent = getRecentIds().filter((r) => r !== id);
+  recent.unshift(id);
+  localStorage.setItem(RECENT_KEY, JSON.stringify(recent.slice(0, MAX_RECENT)));
+}
 
 export function CommandPalette({ onClose }: CommandPaletteProps) {
   const [query, setQuery] = useState("");
   const [selectedIndex, setSelectedIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+
+  const allActions = useMemo(() => getActions(), []);
 
   const filteredActions = useMemo(() => {
-    const all = getActions();
-    if (!query) return all;
+    if (!query) return allActions;
     const q = query.toLowerCase();
-    return all.filter((a) => a.label.toLowerCase().includes(q));
-  }, [query]);
+    return allActions.filter(
+      (a) =>
+        a.label.toLowerCase().includes(q) ||
+        a.description?.toLowerCase().includes(q) ||
+        CATEGORY_LABELS[a.category].toLowerCase().includes(q),
+    );
+  }, [query, allActions]);
 
-  // Group by category
-  const grouped = useMemo(() => {
-    const groups: { category: ActionCategory; actions: Action[] }[] = [];
+  // When no query, show recent actions first, then rest grouped by category
+  const displayGroups = useMemo(() => {
+    if (query) {
+      const groups: { category: ActionCategory; label: string; actions: Action[] }[] = [];
+      for (const cat of CATEGORY_ORDER) {
+        const catActions = filteredActions.filter((a) => a.category === cat);
+        if (catActions.length > 0) {
+          groups.push({ category: cat, label: CATEGORY_LABELS[cat], actions: catActions });
+        }
+      }
+      return groups;
+    }
+
+    const recentIds = getRecentIds();
+    const recentActions = recentIds
+      .map((id) => allActions.find((a) => a.id === id))
+      .filter(Boolean) as Action[];
+
+    const groups: { category: ActionCategory | "recent"; label: string; actions: Action[] }[] = [];
+
+    if (recentActions.length > 0) {
+      groups.push({ category: "recent", label: "Recent", actions: recentActions });
+    }
+
     for (const cat of CATEGORY_ORDER) {
-      const catActions = filteredActions.filter((a) => a.category === cat);
+      const catActions = allActions.filter(
+        (a) => a.category === cat && !recentIds.includes(a.id),
+      );
       if (catActions.length > 0) {
-        groups.push({ category: cat, actions: catActions });
+        groups.push({ category: cat, label: CATEGORY_LABELS[cat], actions: catActions });
       }
     }
-    return groups;
-  }, [filteredActions]);
 
-  // Flat list for index tracking
-  const flatActions = useMemo(() => {
-    return grouped.flatMap((g) => g.actions);
-  }, [grouped]);
+    return groups;
+  }, [query, filteredActions, allActions]);
+
+  const flatActions = useMemo(
+    () => displayGroups.flatMap((g) => g.actions),
+    [displayGroups],
+  );
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -50,6 +105,14 @@ export function CommandPalette({ onClose }: CommandPaletteProps) {
   useEffect(() => {
     setSelectedIndex(0);
   }, [query]);
+
+  // Scroll selected item into view
+  useEffect(() => {
+    const container = listRef.current;
+    if (!container) return;
+    const selected = container.querySelector("[data-selected='true']") as HTMLElement;
+    selected?.scrollIntoView({ block: "nearest" });
+  }, [selectedIndex]);
 
   function handleKeyDown(e: React.KeyboardEvent) {
     if (e.key === "Escape") {
@@ -71,6 +134,7 @@ export function CommandPalette({ onClose }: CommandPaletteProps) {
       e.preventDefault();
       const action = flatActions[selectedIndex];
       if (action) {
+        recordRecent(action.id);
         onClose();
         action.handler();
       }
@@ -78,31 +142,59 @@ export function CommandPalette({ onClose }: CommandPaletteProps) {
     }
   }
 
+  function handleActionClick(action: Action) {
+    recordRecent(action.id);
+    onClose();
+    action.handler();
+  }
+
   return (
     <>
-      <div className="fixed inset-0 bg-black/30 z-50" onClick={onClose} />
-      <div className="fixed top-[20%] left-1/2 -translate-x-1/2 w-full max-w-md bg-white rounded-lg shadow-2xl z-50 border border-gray-200 overflow-hidden">
-        <div className="px-3 py-2 border-b border-gray-200">
+      <div className="fixed inset-0 bg-black/40 z-50" onClick={onClose} />
+      <div className="fixed top-[15%] left-1/2 -translate-x-1/2 w-full max-w-lg bg-white rounded-xl shadow-2xl z-50 border border-gray-200 overflow-hidden">
+        {/* Header */}
+        <div className="flex items-center gap-2 px-4 py-3 border-b border-gray-100">
+          <svg className="w-4 h-4 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+          </svg>
           <input
             ref={inputRef}
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Type a command..."
-            className="w-full text-sm outline-none placeholder:text-gray-400"
+            placeholder="Search actions..."
+            className="flex-1 text-sm outline-none placeholder:text-gray-400 text-gray-900"
           />
+          {query && (
+            <button
+              onClick={() => setQuery("")}
+              className="text-gray-400 hover:text-gray-600 text-xs px-1"
+            >
+              ✕
+            </button>
+          )}
+          <kbd className="hidden sm:inline-flex text-[10px] text-gray-400 px-1.5 py-0.5 bg-gray-100 rounded border border-gray-200 shrink-0">
+            Esc
+          </kbd>
         </div>
-        <div className="max-h-72 overflow-y-auto py-1">
+
+        {/* Results */}
+        <div ref={listRef} className="max-h-80 overflow-y-auto py-1.5">
           {flatActions.length === 0 && (
-            <div className="px-3 py-4 text-sm text-gray-400 text-center">
-              No matching commands
+            <div className="px-4 py-8 text-sm text-gray-400 text-center">
+              No matching actions for &ldquo;{query}&rdquo;
             </div>
           )}
-          {grouped.map((group) => (
+          {displayGroups.map((group) => (
             <div key={group.category}>
-              <div className="px-3 py-1 text-[10px] font-medium text-gray-400 uppercase tracking-wide">
-                {CATEGORY_LABELS[group.category]}
+              <div className="flex items-center gap-1.5 px-4 py-1 mt-0.5">
+                <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">
+                  {group.category !== "recent" && (
+                    <span className="mr-1">{CATEGORY_ICONS[group.category as ActionCategory]}</span>
+                  )}
+                  {group.label}
+                </span>
               </div>
               {group.actions.map((action) => {
                 const flatIndex = flatActions.indexOf(action);
@@ -110,22 +202,34 @@ export function CommandPalette({ onClose }: CommandPaletteProps) {
                 return (
                   <div
                     key={action.id}
-                    className={`flex items-center justify-between px-3 py-1.5 cursor-pointer ${
-                      isSelected ? "bg-blue-50" : "hover:bg-gray-50"
+                    data-selected={isSelected}
+                    className={`flex items-center gap-3 px-4 py-2 cursor-pointer transition-colors ${
+                      isSelected
+                        ? "bg-blue-50 border-l-2 border-blue-500"
+                        : "hover:bg-gray-50 border-l-2 border-transparent"
                     }`}
-                    onClick={() => {
-                      onClose();
-                      action.handler();
-                    }}
+                    onClick={() => handleActionClick(action)}
                     onMouseEnter={() => setSelectedIndex(flatIndex)}
                   >
-                    <span className="text-sm text-gray-900">{action.label}</span>
-                    <div className="flex items-center gap-2">
-                      <span className="text-[10px] text-gray-400 px-1 py-0.5 bg-gray-100 rounded">
-                        {CATEGORY_LABELS[action.category]}
-                      </span>
+                    {/* Icon placeholder / category dot */}
+                    <span className={`w-6 h-6 rounded flex items-center justify-center text-xs shrink-0 ${
+                      isSelected ? "bg-blue-100 text-blue-600" : "bg-gray-100 text-gray-500"
+                    }`}>
+                      {action.icon ?? CATEGORY_ICONS[action.category]}
+                    </span>
+
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-medium text-gray-900 truncate">
+                        {action.label}
+                      </div>
+                      {action.description && (
+                        <div className="text-xs text-gray-500 truncate">{action.description}</div>
+                      )}
+                    </div>
+
+                    <div className="flex items-center gap-1.5 shrink-0">
                       {action.shortcut && (
-                        <kbd className="text-[10px] text-gray-400 px-1 py-0.5 bg-gray-100 rounded border border-gray-200">
+                        <kbd className="text-[10px] text-gray-400 px-1.5 py-0.5 bg-gray-100 rounded border border-gray-200 font-mono">
                           {action.shortcut}
                         </kbd>
                       )}
@@ -135,6 +239,18 @@ export function CommandPalette({ onClose }: CommandPaletteProps) {
               })}
             </div>
           ))}
+        </div>
+
+        {/* Footer hint */}
+        <div className="flex items-center justify-between px-4 py-2 border-t border-gray-100 bg-gray-50">
+          <div className="flex items-center gap-3 text-[10px] text-gray-400">
+            <span><kbd className="font-mono">↑↓</kbd> navigate</span>
+            <span><kbd className="font-mono">↵</kbd> select</span>
+            <span><kbd className="font-mono">Esc</kbd> close</span>
+          </div>
+          <span className="text-[10px] text-gray-300">
+            {flatActions.length} action{flatActions.length !== 1 ? "s" : ""}
+          </span>
         </div>
       </div>
     </>
