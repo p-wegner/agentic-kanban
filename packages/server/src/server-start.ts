@@ -40,7 +40,8 @@ Classify each issue as CRITICAL (must fix — bugs, security, data loss), MAJOR 
 
 Do NOT move the issue to 'AI Reviewed' yourself — the system handles that on merge.
 
-Issue ID: {{issueId}}`;
+Issue ID: {{issueId}}
+Workspace ID: {{workspaceId}}`;
 
 function buildReviewArgs(prefMap: Map<string, string>): string | undefined {
   const skipPerms = prefMap.get("skip_permissions") === "true";
@@ -71,13 +72,17 @@ async function buildReviewPrompt(branch: string, baseBranch: string | null, issu
 3. Commit the fixes with a descriptive message
 4. Exit normally (the system will handle merging)
 
-If only MINOR issues or no issues: just exit normally (the system will auto-merge).`
+If only MINOR issues or no issues:
+1. Use the mark_ready_for_merge MCP tool with workspaceId={{workspaceId}} to signal the workspace is approved
+2. Exit normally (the system will auto-merge)`
     : `If you find CRITICAL or MAJOR issues:
 1. Use the move_issue MCP tool to move issue ${issueId} to 'In Progress'
 2. Describe each issue clearly so the developer knows what to fix
 3. Do NOT edit any files — report only
 
-If only MINOR issues or no issues: just exit normally (the system will auto-merge).`;
+If only MINOR issues or no issues:
+1. Use the mark_ready_for_merge MCP tool with workspaceId={{workspaceId}} to signal the workspace is approved
+2. Exit normally (the system will auto-merge)`;
 
   // Strip "origin/" prefix so rebase instructions use the bare branch name (e.g. "master" not "origin/master")
   const localBaseBranch = (baseBranch ?? "master").replace(/^origin\//, "");
@@ -121,6 +126,7 @@ Steps to resolve:
     .replace(/\{\{branch}}/g, branch)
     .replace(/\{\{baseBranch}}/g, baseBranch ?? "HEAD")
     .replace(/\{\{issueId}}/g, issueId)
+    .replace(/\{\{workspaceId}}/g, workspaceId)
     .replace(/\{\{autoFixInstructions}}/g, autoFixInstructions);
 }
 
