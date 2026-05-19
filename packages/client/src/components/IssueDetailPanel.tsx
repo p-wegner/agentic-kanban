@@ -56,6 +56,9 @@ export function IssueDetailPanel({
   const [dependencies, setDependencies] = useState<DependencyInfo>({ dependencies: [] });
   const [analyzingDeps, setAnalyzingDeps] = useState(false);
   const [availableIssues, setAvailableIssues] = useState<IssueWithStatus[]>([]);
+  const [showFollowUp, setShowFollowUp] = useState(false);
+  const [followUpTitle, setFollowUpTitle] = useState("");
+  const [followUpCreating, setFollowUpCreating] = useState(false);
 
   // Track unsaved changes for warning
   const hasChanges = editing && (
@@ -166,6 +169,28 @@ export function IssueDetailPanel({
       showToast(err instanceof Error ? err.message : "Dependency analysis failed", "error");
     } finally {
       setAnalyzingDeps(false);
+    }
+  }
+
+  async function handleCreateFollowUp() {
+    if (!followUpTitle.trim() || followUpCreating) return;
+    setFollowUpCreating(true);
+    try {
+      const newIssue = await apiFetch<{ id: string }>("/api/issues", {
+        method: "POST",
+        body: JSON.stringify({ title: followUpTitle.trim(), description: "", priority: "medium", projectId: issue.projectId }),
+      });
+      await apiFetch(`/api/issues/${newIssue.id}/dependencies`, {
+        method: "POST",
+        body: JSON.stringify({ dependsOnId: issue.id, type: "depends_on" }),
+      }).catch(() => {});
+      setFollowUpTitle("");
+      setShowFollowUp(false);
+      showToast("Follow-up task created", "success");
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Failed to create follow-up", "error");
+    } finally {
+      setFollowUpCreating(false);
     }
   }
 
@@ -698,6 +723,36 @@ export function IssueDetailPanel({
               })()}
             </div>
           )}
+
+          {/* Follow-up task creation */}
+          <div className="pt-2">
+            {!showFollowUp ? (
+              <button
+                onClick={() => setShowFollowUp(true)}
+                className="text-xs text-blue-600 hover:text-blue-800 flex items-center gap-1"
+              >
+                <span className="font-bold text-sm leading-none">+</span> Create follow-up task
+              </button>
+            ) : (
+              <div className="flex gap-1.5 items-center">
+                <input
+                  autoFocus
+                  type="text"
+                  value={followUpTitle}
+                  onChange={(e) => setFollowUpTitle(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") handleCreateFollowUp(); if (e.key === "Escape") { setShowFollowUp(false); setFollowUpTitle(""); } }}
+                  placeholder="Follow-up task title..."
+                  className="flex-1 text-xs border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                />
+                <button
+                  onClick={handleCreateFollowUp}
+                  disabled={!followUpTitle.trim() || followUpCreating}
+                  className="text-xs bg-blue-600 text-white px-2 py-1 rounded hover:bg-blue-700 disabled:opacity-50 whitespace-nowrap"
+                >{followUpCreating ? "…" : "Create"}</button>
+                <button onClick={() => { setShowFollowUp(false); setFollowUpTitle(""); }} className="text-xs text-gray-400 hover:text-gray-600">✕</button>
+              </div>
+            )}
+          </div>
 
           {/* Timestamps */}
           <div className="pt-2 border-t border-gray-100">
