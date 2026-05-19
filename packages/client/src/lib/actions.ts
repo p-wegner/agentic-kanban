@@ -3,6 +3,8 @@ export type ActionCategory = "board" | "navigation" | "issue" | "settings";
 export interface Action {
   id: string;
   label: string;
+  description?: string;
+  icon?: string;
   shortcut?: string;
   category: ActionCategory;
   handler: () => void;
