@@ -217,6 +217,79 @@ if ($proc) { $proc | ForEach-Object { Stop-Process -Id $_ -Force } }
 
 ---
 
+## Diagnosing a Stopped Agent Session
+
+When an agent session stops unexpectedly (workspace shows `idle`, no commits), use this workflow to find out why.
+
+### 1. Check session status and exit code
+
+```powershell
+# Find the workspace ID from the CLI
+pnpm cli -- workspace list
+
+# Get sessions for that workspace
+Invoke-RestMethod "http://localhost:3001/api/workspaces/<workspaceId>/sessions" | ConvertTo-Json -Depth 3
+```
+
+Key fields to look at:
+- `status: "stopped"` + `exitCode: null` → user-stopped (not a crash)
+- `status: "stopped"` + `exitCode: 1` → crash or error
+- Very short duration (< 60s) → likely stopped before doing real work
+
+### 2. Get a quick summary of what the agent did
+
+```powershell
+Invoke-RestMethod "http://localhost:3001/api/sessions/<sessionId>/summary" | ConvertTo-Json -Depth 5
+```
+
+Check `keyExcerpts` for the last thing the agent said, `filesEdited`/`filesWritten` to see if it produced output, and `errors` for any failures.
+
+### 3. Read the raw Claude Code session transcript
+
+Claude Code stores full JSONL transcripts under `~/.claude/projects/`, keyed by the worktree path. The directory name is the path with `/` and `\` replaced by `--`:
+
+```powershell
+# Find the session dir for a worktree
+Get-ChildItem "$env:USERPROFILE\.claude\projects\" -Directory | Where-Object { $_.Name -like "*ak-<N>*" }
+
+# List files inside (the .jsonl is the transcript)
+Get-ChildItem "$env:USERPROFILE\.claude\projects\<dir>\"
+```
+
+Parse the last entries to find the final tool call and result:
+
+```powershell
+$lines = Get-Content "$env:USERPROFILE\.claude\projects\<dir>\<session-id>.jsonl"
+$parsed = $lines | ForEach-Object { try { $_ | ConvertFrom-Json } catch {} }
+$parsed | Select-Object -Last 10 | ForEach-Object {
+    $toolUse = $_.message.content | Where-Object { $_.type -eq "tool_use" }
+    [PSCustomObject]@{
+        type       = $_.type
+        stop_reason = $_.message.stop_reason
+        tool_name  = $toolUse.name
+        tool_input = ($toolUse.input | ConvertTo-Json -Compress -Depth 2)
+    }
+} | ConvertTo-Json -Depth 3
+```
+
+### 4. Common failure patterns
+
+| Symptom | Likely cause |
+|---|---|
+| Last tool call was `get_context` returning wrong project | MCP active-project bug (fixed in 21dff41) — agent saw wrong board |
+| `exitCode: null`, very short duration, no file writes | User-stopped before agent started working |
+| Agent produced a plan in `keyExcerpts` but wrote nothing | Session was stopped during the planning phase |
+| `errors` array non-empty | Check error message — usually a tool call failure |
+
+### 5. Deciding what to do with the worktree
+
+After diagnosing, for worktrees with **no commits ahead of master**:
+- Check `git status` for uncommitted changes
+- If the changes are superseded by a fix already on master → discard and clean up (see "Cleaning Up Git Worktrees")
+- If the changes are valuable and not on master → commit them or cherry-pick
+
+---
+
 ## Cleaning Up Git Worktrees
 
 When worktrees accumulate from completed or abandoned agent sessions, use this workflow to audit and clean them up.
