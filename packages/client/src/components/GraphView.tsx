@@ -383,9 +383,18 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery }: Gra
             const svg = svgRef.current;
             if (!svg || nodes.length === 0) return;
             const rect = svg.getBoundingClientRect();
-            const fitZoom = Math.min(rect.width / maxX, rect.height / maxY, 1) * 0.9;
-            setZoom(fitZoom);
-            setPan({ x: 0, y: 0 });
+            const xs = nodes.map((n) => n.x);
+            const ys = nodes.map((n) => n.y);
+            const minX = Math.min(...xs) - 20;
+            const minY = Math.min(...ys) - 20;
+            const contentW = Math.max(...xs) + NODE_W + 20 - minX;
+            const contentH = Math.max(...ys) + NODE_H + 20 - minY;
+            const fitZ = Math.min(rect.width / contentW, rect.height / contentH, 2) * 0.9;
+            const cx = rect.width / 2 - (minX + contentW / 2) * fitZ;
+            const cy = rect.height / 2 - (minY + contentH / 2) * fitZ;
+            panRef.current = { x: cx, y: cy };
+            setPan({ x: cx, y: cy });
+            setZoom(fitZ);
           }}
           className="w-7 h-7 bg-white border border-gray-300 rounded text-gray-600 hover:bg-gray-100 flex items-center justify-center shadow-sm"
           title="Fit to screen"
