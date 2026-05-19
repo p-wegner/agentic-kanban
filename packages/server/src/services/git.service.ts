@@ -305,7 +305,7 @@ export async function getWorkingTreeDiff(workdirPath: string): Promise<string> {
 export async function prepareForReview(
   worktreePath: string,
   baseBranch: string,
-): Promise<{ diffRef: string; success: boolean; conflictingFiles?: string[]; error?: string }> {
+): Promise<{ diffRef: string; success: boolean; conflictingFiles?: string[]; error?: string; uncommittedChanges?: string[] }> {
   // Abort any in-progress rebase from a prior failed attempt (idempotent retry safety)
   try {
     await execGit(["rebase", "--abort"], worktreePath);
@@ -313,6 +313,19 @@ export async function prepareForReview(
   } catch {
     // No rebase in progress — expected
   }
+
+  // Check for uncommitted changes (staged or unstaged) — rebase requires a clean tree
+  let uncommittedChanges: string[] | undefined;
+  try {
+    const statusOutput = await execGit(["status", "--porcelain"], worktreePath);
+    const changedFiles = statusOutput.trim().split("\n").filter(Boolean);
+    if (changedFiles.length > 0) {
+      uncommittedChanges = changedFiles;
+      console.log(`[git] worktree has ${changedFiles.length} uncommitted change(s) — skipping rebase`);
+      // Return early: rebase would fail on a dirty tree. Let the reviewer handle it.
+      return { diffRef: baseBranch, success: false, uncommittedChanges, error: "Worktree has uncommitted changes" };
+    }
+  } catch { /* best effort */ }
 
   // Try to fetch from origin (best effort — no remote is fine)
   try {

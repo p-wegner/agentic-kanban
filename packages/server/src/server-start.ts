@@ -50,7 +50,7 @@ function buildReviewArgs(prefMap: Map<string, string>): string | undefined {
   return baseArgs || undefined;
 }
 
-async function buildReviewPrompt(branch: string, baseBranch: string | null, issueId: string, autoFix: boolean, projectId?: string, conflictingFiles?: string[]): Promise<string> {
+async function buildReviewPrompt(branch: string, baseBranch: string | null, issueId: string, autoFix: boolean, projectId?: string, conflictingFiles?: string[], uncommittedChanges?: string[]): Promise<string> {
   let template: string | null = null;
   if (projectId) {
     const projectSkill = await db.select({ prompt: agentSkills.prompt }).from(agentSkills)
@@ -78,15 +78,34 @@ If only MINOR issues or no issues: just exit normally (the system will auto-merg
 
 If only MINOR issues or no issues: just exit normally (the system will auto-merge).`;
 
+  // Strip "origin/" prefix so rebase instructions use the bare branch name (e.g. "master" not "origin/master")
+  const localBaseBranch = (baseBranch ?? "master").replace(/^origin\//, "");
+
   let conflictPreamble = "";
-  if (conflictingFiles && conflictingFiles.length > 0) {
+  if (uncommittedChanges && uncommittedChanges.length > 0) {
+    conflictPreamble = `IMPORTANT: The worktree has uncommitted changes. You must commit or stash them before rebasing and reviewing.
+
+Uncommitted files (git status --porcelain):
+${uncommittedChanges.map(f => `  ${f}`).join("\n")}
+
+Steps to resolve:
+1. Review the changes: git diff (for unstaged), git diff --cached (for staged)
+2. If the changes belong to this branch: git add -A && git commit -m "WIP: uncommitted changes"
+3. Then rebase: git rebase origin/${localBaseBranch} (or git rebase ${localBaseBranch} if no remote)
+4. Once the working tree is clean and rebased, proceed with the code review below.
+
+---
+
+`;
+  } else if (conflictingFiles && conflictingFiles.length > 0) {
     conflictPreamble = `IMPORTANT: Auto-rebase onto the base branch failed due to conflicts. The rebase has been aborted, so the worktree is clean. You must resolve the conflicts and rebase manually before reviewing.
 
 Conflicting files:
 ${conflictingFiles.map(f => `- ${f}`).join("\n")}
 
 Steps to resolve:
-1. Start a fresh rebase: git rebase ${baseBranch ?? "master"}
+1. Start a fresh rebase: git rebase origin/${localBaseBranch}
+   (or use the local branch if no remote: git rebase ${localBaseBranch})
 2. For each conflicting file, open it and resolve the conflict markers (<<<<<<<, =======, >>>>>>>)
 3. After resolving each file: git add <resolved-file>
 4. Continue: git rebase --continue (repeat for each conflicting commit)
@@ -223,16 +242,18 @@ export async function startServer(port?: number) {
 
           let diffRef = workspace.baseBranch || defaultBranch;
           let conflictingFiles: string[] | undefined;
+          let uncommittedChanges: string[] | undefined;
           if (!workspace.isDirect && workspace.workingDir) {
             const baseBranch = workspace.baseBranch || defaultBranch;
             const prep = await gitService.prepareForReview(workspace.workingDir, baseBranch);
             diffRef = prep.diffRef;
             if (!prep.success) {
               conflictingFiles = prep.conflictingFiles;
+              uncommittedChanges = prep.uncommittedChanges;
               console.warn(`[workflow] rebase failed for workspace ${workspaceId}: ${prep.error} — reviewer will resolve conflicts`);
             }
           }
-          const reviewPrompt = await buildReviewPrompt(workspace.branch, diffRef, issueId, autoFix, projectId, conflictingFiles);
+          const reviewPrompt = await buildReviewPrompt(workspace.branch, diffRef, issueId, autoFix, projectId, conflictingFiles, uncommittedChanges);
 
           try {
             await db.update(workspaces).set({ status: "reviewing", updatedAt: now }).where(eq(workspaces.id, workspaceId));
@@ -335,15 +356,19 @@ export async function startServer(port?: number) {
       const projectRows = await db.select({ defaultBranch: projects.defaultBranch }).from(projects).where(eq(projects.id, projectId)).limit(1);
       const defaultBranch = projectRows.length > 0 ? projectRows[0].defaultBranch : "main";
       let diffRef = workspace.baseBranch || defaultBranch;
+      let manualConflictingFiles: string[] | undefined;
+      let manualUncommittedChanges: string[] | undefined;
       if (!workspace.isDirect && workspace.workingDir) {
         const baseBranch = workspace.baseBranch || defaultBranch;
         const prep = await gitService.prepareForReview(workspace.workingDir, baseBranch);
         if (!prep.success) {
-          console.warn(`[workflow] merge-base failed for manual review ${workspaceId}: ${prep.error}`);
+          manualConflictingFiles = prep.conflictingFiles;
+          manualUncommittedChanges = prep.uncommittedChanges;
+          console.warn(`[workflow] rebase failed for manual review ${workspaceId}: ${prep.error}`);
         }
         diffRef = prep.diffRef;
       }
-      const reviewPrompt = await buildReviewPrompt(workspace.branch, diffRef, issueId, autoFix, projectId);
+      const reviewPrompt = await buildReviewPrompt(workspace.branch, diffRef, issueId, autoFix, projectId, manualConflictingFiles, manualUncommittedChanges);
 
       const now = new Date().toISOString();
       await db.update(workspaces).set({ status: "reviewing", updatedAt: now }).where(eq(workspaces.id, workspaceId));
