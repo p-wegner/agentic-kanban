@@ -20,3 +20,4 @@ packages/desktop/src-tauri/gen/
 .playwright-cli/
 docs/temp/
 bash.exe.stackdump
+.claude/settings.local.json
