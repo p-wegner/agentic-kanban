@@ -4,7 +4,11 @@ import { projects, projectStatuses, issues, workspaces, sessions, sessionMessage
 import { eq, inArray, sql, and } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { execFile, execSync } from "node:child_process";
+<<<<<<< HEAD
 import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+=======
+import { existsSync, mkdirSync, readdirSync } from "node:fs";
+>>>>>>> 41a314b (feat: implement create project flow (WIP - UI + backend route))
 import { detectRepoInfo } from "../services/git-info.service.js";
 import { listBranches, listWorktrees, getDiffShortstat, removeWorktree, detectConflicts } from "../services/git.service.js";
 import type { Database } from "../db/index.js";
@@ -193,6 +197,7 @@ export function createProjectsRoute(database: Database = db) {
     if (body.path && body.path.trim()) {
       targetPath = resolve(body.path.trim());
     } else {
+<<<<<<< HEAD
       // Validate folder name when deriving path from name
       if (/[/\\<>:"|?*\x00]/.test(name)) {
         return c.json({ error: 'Project name contains invalid characters. Avoid: / \\ < > : " | ? *' }, 400);
@@ -228,11 +233,38 @@ export function createProjectsRoute(database: Database = db) {
       return c.json({ error: `Failed to create directory: ${err instanceof Error ? err.message : String(err)}` }, 400);
     }
 
+=======
+      // Read projects_base_dir from preferences
+      const baseDirRows = await database
+        .select({ value: preferences.value })
+        .from(preferences)
+        .where(eq(preferences.key, "projects_base_dir"))
+        .limit(1);
+      const baseDir = baseDirRows[0]?.value?.trim();
+      if (!baseDir) {
+        return c.json({ error: "No base directory configured. Set 'Projects base directory' in Settings > Project, or provide an explicit path." }, 400);
+      }
+      targetPath = resolve(join(baseDir, name));
+    }
+
+    // Create directory if it doesn't exist
+    if (!existsSync(targetPath)) {
+      try {
+        mkdirSync(targetPath, { recursive: true });
+      } catch (err) {
+        return c.json({ error: `Failed to create directory: ${err instanceof Error ? err.message : String(err)}` }, 400);
+      }
+    }
+
+>>>>>>> 41a314b (feat: implement create project flow (WIP - UI + backend route))
     // Run git init
     try {
       execSync("git init", { cwd: targetPath, stdio: "pipe" });
     } catch (err: any) {
+<<<<<<< HEAD
       try { rmSync(targetPath, { recursive: true, force: true }); } catch {}
+=======
+>>>>>>> 41a314b (feat: implement create project flow (WIP - UI + backend route))
       return c.json({ error: `git init failed: ${err.stderr ? String(err.stderr).trim() : String(err)}` }, 400);
     }
 
