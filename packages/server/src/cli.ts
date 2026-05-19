@@ -880,6 +880,101 @@ Tip: Use 'issue list' to find the issue ID.
     }
   });
 
+wsCmd
+  .command("launch <workspace-id>")
+  .description("Relaunch an idle workspace by starting a new agent session.\n\nRequires the kanban server to be running (pnpm dev). The workspace must be in 'idle' status.")
+  .option("--prompt <text>", "Prompt to send to the agent (default: issue title + description)")
+  .option("-p, --port <port>", "Server port (default: $KANBAN_SERVER_PORT or 3001)")
+  .addHelpText("after", `
+Examples:
+  $ agentic-kanban workspace launch <workspace-id>
+  $ agentic-kanban workspace launch <workspace-id> --prompt "Fix the failing tests"
+`)
+  .action(async (workspaceId: string, options: { prompt?: string; port?: string }) => {
+    try {
+      await runMigrations();
+
+      const wsRows = await db.select().from(workspaces).where(eq(workspaces.id, workspaceId)).limit(1);
+      if (wsRows.length === 0) {
+        console.error(`Workspace '${workspaceId}' not found.`);
+        process.exit(1);
+      }
+
+      const ws = wsRows[0];
+      let prompt = options.prompt;
+      if (!prompt) {
+        const issueRows = await db.select({ title: issues.title, description: issues.description }).from(issues).where(eq(issues.id, ws.issueId)).limit(1);
+        if (issueRows.length > 0) {
+          prompt = issueRows[0].description
+            ? `${issueRows[0].title}\n\n${issueRows[0].description}`
+            : issueRows[0].title;
+        } else {
+          prompt = "Continue working on this issue.";
+        }
+      }
+
+      const port = options.port ?? process.env.KANBAN_SERVER_PORT ?? "3001";
+      const res = await fetch(`http://localhost:${port}/api/workspaces/${workspaceId}/launch`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt }),
+      });
+      const data = await res.json() as Record<string, unknown>;
+
+      if (!res.ok) {
+        console.error(`Launch failed: ${data.error ?? res.statusText}`);
+        process.exit(1);
+      }
+
+      console.log(`Launched workspace '${workspaceId}'`);
+      console.log(`  sessionId: ${data.sessionId}`);
+      process.exit(0);
+    } catch (err) {
+      console.error("Error:", err instanceof Error ? err.message : String(err));
+      process.exit(1);
+    }
+  });
+
+wsCmd
+  .command("review <workspace-id>")
+  .description("Trigger an AI code review for an idle workspace.\n\nRequires the kanban server to be running (pnpm dev). The workspace must be in 'idle' status.")
+  .option("-p, --port <port>", "Server port (default: $KANBAN_SERVER_PORT or 3001)")
+  .addHelpText("after", `
+Example:
+  $ agentic-kanban workspace review <workspace-id>
+`)
+  .action(async (workspaceId: string, options: { port?: string }) => {
+    try {
+      await runMigrations();
+
+      const wsRows = await db.select().from(workspaces).where(eq(workspaces.id, workspaceId)).limit(1);
+      if (wsRows.length === 0) {
+        console.error(`Workspace '${workspaceId}' not found.`);
+        process.exit(1);
+      }
+
+      const port = options.port ?? process.env.KANBAN_SERVER_PORT ?? "3001";
+      const res = await fetch(`http://localhost:${port}/api/workspaces/${workspaceId}/review`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const data = await res.json() as Record<string, unknown>;
+
+      if (!res.ok) {
+        console.error(`Review failed: ${data.error ?? res.statusText}`);
+        process.exit(1);
+      }
+
+      console.log(`Review started for workspace '${workspaceId}'`);
+      console.log(`  sessionId: ${data.sessionId}`);
+      process.exit(0);
+    } catch (err) {
+      console.error("Error:", err instanceof Error ? err.message : String(err));
+      process.exit(1);
+    }
+  });
+
 // ── skill commands ────────────────────────────────────────────────────────────
 
 program
