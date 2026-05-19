@@ -22,7 +22,13 @@ async function main() {
   const DB_PATH = resolve(__dirname, "../../packages/server/kanban.db");
   if (!existsSync(DB_PATH)) process.exit(0);
 
-  const db = new DatabaseSync(DB_PATH);
+  let db;
+  try {
+    db = new DatabaseSync(DB_PATH);
+  } catch {
+    // DB locked or corrupt — skip check
+    process.exit(0);
+  }
   try {
     const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='workspaces'").all();
     if (tables.length === 0) process.exit(0);
@@ -53,7 +59,7 @@ async function main() {
       process.exit(1);
     }
   } finally {
-    db.close();
+    if (db) db.close();
   }
 }
 
