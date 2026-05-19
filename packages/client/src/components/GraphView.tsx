@@ -33,6 +33,9 @@ const STATUS_COLORS: Record<string, string> = {
   "Cancelled": "#ef4444",
 };
 
+// Ordered workflow columns for status-based layout
+const STATUS_ORDER = ["Todo", "In Progress", "In Review", "AI Reviewed", "Done", "Cancelled"];
+
 const DEPENDENCY_COLORS: Record<string, string> = {
   depends_on: "#6b7280",
   blocked_by: "#ef4444",
@@ -42,72 +45,120 @@ const DEPENDENCY_COLORS: Record<string, string> = {
   duplicates: "#ec4899",
 };
 
-const NODE_W = 160;
-const NODE_H = 60;
-const H_GAP = 40;
-const V_GAP = 24;
+const NODE_W = 220;
+const NODE_H = 64;
+const H_GAP = 48;
+const V_GAP = 16;
+const COL_HEADER_H = 28;
 
 function computeLayout(nodes: IssueWithStatus[], edges: Dependency[]): Node[] {
   if (nodes.length === 0) return [];
 
-  // Build adjacency for topological sort
-  const outEdges = new Map<string, string[]>();
-  const inDegree = new Map<string, number>();
-  for (const n of nodes) {
-    outEdges.set(n.id, []);
-    inDegree.set(n.id, 0);
-  }
-  for (const e of edges) {
-    // depends_on: issueId -> dependsOnId (source depends on target = edge from source to target in execution order)
-    // For layout: dependsOnId should appear before issueId
-    if (outEdges.has(e.dependsOnId) && outEdges.has(e.issueId)) {
-      outEdges.get(e.dependsOnId)!.push(e.issueId);
-      inDegree.set(e.issueId, (inDegree.get(e.issueId) ?? 0) + 1);
+  const hasEdges = edges.length > 0;
+
+  if (hasEdges) {
+    // Dependency-based topological layout
+    const outEdges = new Map<string, string[]>();
+    const inDegree = new Map<string, number>();
+    for (const n of nodes) {
+      outEdges.set(n.id, []);
+      inDegree.set(n.id, 0);
     }
+    for (const e of edges) {
+      if (outEdges.has(e.dependsOnId) && outEdges.has(e.issueId)) {
+        outEdges.get(e.dependsOnId)!.push(e.issueId);
+        inDegree.set(e.issueId, (inDegree.get(e.issueId) ?? 0) + 1);
+      }
+    }
+
+    const levels = new Map<string, number>();
+    const queue: string[] = [];
+    for (const [id, deg] of inDegree) {
+      if (deg === 0) queue.push(id);
+    }
+    while (queue.length > 0) {
+      const id = queue.shift()!;
+      const level = levels.get(id) ?? 0;
+      for (const next of outEdges.get(id) ?? []) {
+        const nextLevel = Math.max(levels.get(next) ?? 0, level + 1);
+        levels.set(next, nextLevel);
+        const deg = (inDegree.get(next) ?? 1) - 1;
+        inDegree.set(next, deg);
+        if (deg === 0) queue.push(next);
+      }
+    }
+    for (const n of nodes) {
+      if (!levels.has(n.id)) levels.set(n.id, 0);
+    }
+
+    const byLevel = new Map<number, IssueWithStatus[]>();
+    for (const n of nodes) {
+      const lv = levels.get(n.id) ?? 0;
+      if (!byLevel.has(lv)) byLevel.set(lv, []);
+      byLevel.get(lv)!.push(n);
+    }
+
+    const result: Node[] = [];
+    const sortedLevels = Array.from(byLevel.keys()).sort((a, b) => a - b);
+    for (const lv of sortedLevels) {
+      const group = byLevel.get(lv)!;
+      const x = lv * (NODE_W + H_GAP) + 40;
+      for (let i = 0; i < group.length; i++) {
+        const y = i * (NODE_H + V_GAP) + 40;
+        result.push({ id: group[i].id, x, y, issue: group[i] });
+      }
+    }
+    return result;
   }
 
-  // Kahn's algorithm for level assignment
-  const levels = new Map<string, number>();
-  const queue: string[] = [];
-  for (const [id, deg] of inDegree) {
-    if (deg === 0) queue.push(id);
-  }
-  while (queue.length > 0) {
-    const id = queue.shift()!;
-    const level = levels.get(id) ?? 0;
-    for (const next of outEdges.get(id) ?? []) {
-      const nextLevel = Math.max(levels.get(next) ?? 0, level + 1);
-      levels.set(next, nextLevel);
-      const deg = (inDegree.get(next) ?? 1) - 1;
-      inDegree.set(next, deg);
-      if (deg === 0) queue.push(next);
-    }
-  }
-  // Any unreached nodes (cycles) get level 0
+  // Status-based swimlane layout (no dependency edges)
+  const byStatus = new Map<string, IssueWithStatus[]>();
   for (const n of nodes) {
-    if (!levels.has(n.id)) levels.set(n.id, 0);
+    const s = n.statusName;
+    if (!byStatus.has(s)) byStatus.set(s, []);
+    byStatus.get(s)!.push(n);
   }
 
-  // Group by level
-  const byLevel = new Map<number, IssueWithStatus[]>();
-  for (const n of nodes) {
-    const lv = levels.get(n.id) ?? 0;
-    if (!byLevel.has(lv)) byLevel.set(lv, []);
-    byLevel.get(lv)!.push(n);
-  }
+  // Order columns by STATUS_ORDER, then any remaining statuses alphabetically
+  const knownOrder = STATUS_ORDER.filter((s) => byStatus.has(s));
+  const extraStatuses = [...byStatus.keys()]
+    .filter((s) => !STATUS_ORDER.includes(s))
+    .sort();
+  const orderedStatuses = [...knownOrder, ...extraStatuses];
 
   const result: Node[] = [];
-  const sortedLevels = Array.from(byLevel.keys()).sort((a, b) => a - b);
-  for (const lv of sortedLevels) {
-    const group = byLevel.get(lv)!;
-    const x = lv * (NODE_W + H_GAP) + 40;
+  for (let col = 0; col < orderedStatuses.length; col++) {
+    const status = orderedStatuses[col];
+    const group = byStatus.get(status)!;
+    const x = col * (NODE_W + H_GAP) + 40;
     for (let i = 0; i < group.length; i++) {
-      const y = i * (NODE_H + V_GAP) + 40;
+      const y = i * (NODE_H + V_GAP) + COL_HEADER_H + 48;
       result.push({ id: group[i].id, x, y, issue: group[i] });
     }
   }
   return result;
 }
+
+/** Column headers for the status-based layout (no edges mode) */
+function computeColumns(nodes: IssueWithStatus[], edges: Dependency[]) {
+  if (edges.length > 0 || nodes.length === 0) return [];
+  const byStatus = new Map<string, number>();
+  for (const n of nodes) {
+    byStatus.set(n.statusName, (byStatus.get(n.statusName) ?? 0) + 1);
+  }
+  const knownOrder = STATUS_ORDER.filter((s) => byStatus.has(s));
+  const extraStatuses = [...byStatus.keys()]
+    .filter((s) => !STATUS_ORDER.includes(s))
+    .sort();
+  const orderedStatuses = [...knownOrder, ...extraStatuses];
+  return orderedStatuses.map((status, col) => ({
+    status,
+    count: byStatus.get(status) ?? 0,
+    x: col * (NODE_W + H_GAP) + 40,
+  }));
+}
+
+const ARCHIVE_STATUS_NAMES = new Set(["Done", "Cancelled"]);
 
 interface GraphViewProps {
   columns: StatusWithIssues[];
@@ -119,25 +170,20 @@ interface GraphViewProps {
 export function GraphView({ columns, projectId, onIssueClick, searchQuery }: GraphViewProps) {
   const [graphData, setGraphData] = useState<GraphData | null>(null);
   const [loading, setLoading] = useState(true);
-  const [localSearch, setLocalSearch] = useState("");
-  const [hideDone, setHideDone] = useState(true);
+  const [showArchived, setShowArchived] = useState(false);
   const [nodes, setNodes] = useState<Node[]>([]);
-  const dragNodeRef = useRef<string | null>(null);
-  const dragOffsetRef = useRef({ x: 0, y: 0 });
+  const [colHeaders, setColHeaders] = useState<{ status: string; count: number; x: number }[]>([]);
+  const [dragNode, setDragNode] = useState<string | null>(null);
+  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
   const didDragRef = useRef(false);
   const [pan, setPan] = useState({ x: 0, y: 0 });
-  const panRef = useRef({ x: 0, y: 0 });
   const [zoom, setZoom] = useState(1);
-  const isPanningRef = useRef(false);
+  const [isPanning, setIsPanning] = useState(false);
   const panStart = useRef({ x: 0, y: 0 });
   const panOrigin = useRef({ x: 0, y: 0 });
   const svgRef = useRef<SVGSVGElement>(null);
-  const rafRef = useRef<number | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
-  const [followUpNode, setFollowUpNode] = useState<Node | null>(null);
-  const [followUpTitle, setFollowUpTitle] = useState("");
-  const [followUpCreating, setFollowUpCreating] = useState(false);
-  const [hoveredNode, setHoveredNode] = useState<string | null>(null);
 
   const allIssues = columns.flatMap((c) => c.issues);
 
@@ -145,13 +191,11 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery }: Gra
     async function load() {
       try {
         setLoading(true);
-        // Fetch all dependencies for the project
         const result = await apiFetch<{ nodes: IssueWithStatus[]; edges: Dependency[] }>(
           `/api/projects/${projectId}/graph`
         );
         setGraphData(result);
       } catch {
-        // Fallback: build from columns data with no edges
         setGraphData({ nodes: allIssues, edges: [] });
       } finally {
         setLoading(false);
@@ -161,46 +205,62 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery }: Gra
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, columns]);
 
-  const effectiveSearch = localSearch || searchQuery || "";
-
   useLayoutEffect(() => {
     if (!graphData) return;
-    let baseNodes = hideDone
-      ? graphData.nodes.filter((n) => n.statusName !== "Done" && n.statusName !== "Cancelled")
-      : graphData.nodes;
-    const filtered = effectiveSearch
-      ? baseNodes.filter(
+    const visibleNodes = showArchived
+      ? graphData.nodes
+      : graphData.nodes.filter((n) => !ARCHIVE_STATUS_NAMES.has(n.statusName));
+    const filtered = searchQuery
+      ? visibleNodes.filter(
           (n) =>
-            n.title.toLowerCase().includes(effectiveSearch.toLowerCase()) ||
-            n.description?.toLowerCase().includes(effectiveSearch.toLowerCase())
+            n.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+            n.description?.toLowerCase().includes(searchQuery.toLowerCase())
         )
-      : baseNodes;
+      : visibleNodes;
     const filteredIds = new Set(filtered.map((n) => n.id));
     const filteredEdges = graphData.edges.filter(
       (e) => filteredIds.has(e.issueId) && filteredIds.has(e.dependsOnId)
     );
-    const newNodes = computeLayout(filtered, filteredEdges);
-    setNodes(newNodes);
+    const laid = computeLayout(filtered, filteredEdges);
+    setNodes(laid);
+    setColHeaders(computeColumns(filtered, filteredEdges));
 
-    // Zoom to matching nodes when searching
-    if (effectiveSearch && newNodes.length > 0 && svgRef.current) {
-      const rect = svgRef.current.getBoundingClientRect();
-      const xs = newNodes.map((n) => n.x);
-      const ys = newNodes.map((n) => n.y);
-      const minX = Math.min(...xs) - 20;
-      const minY = Math.min(...ys) - 20;
-      const maxXN = Math.max(...xs) + NODE_W + 20;
-      const maxYN = Math.max(...ys) + NODE_H + 20;
-      const contentW = maxXN - minX;
-      const contentH = maxYN - minY;
-      const fitZ = Math.min(rect.width / contentW, rect.height / contentH, 2) * 0.9;
-      const centerX = rect.width / 2 - (minX + contentW / 2) * fitZ;
-      const centerY = rect.height / 2 - (minY + contentH / 2) * fitZ;
-      panRef.current = { x: centerX, y: centerY };
-      setPan({ x: centerX, y: centerY });
-      setZoom(fitZ);
-    }
-  }, [graphData, effectiveSearch, hideDone]);
+    // Auto-fit after layout is set — defer so the container has rendered
+    requestAnimationFrame(() => {
+      if (laid.length === 0 || !containerRef.current) return;
+      const cw = containerRef.current.clientWidth;
+      const ch = containerRef.current.clientHeight;
+      if (cw === 0 || ch === 0) return;
+      const minX = Math.min(...laid.map((n) => n.x));
+      const minY = Math.min(...laid.map((n) => n.y));
+      const maxX = Math.max(...laid.map((n) => n.x + NODE_W));
+      const maxY = Math.max(...laid.map((n) => n.y + NODE_H));
+      const contentW = maxX - minX + 80;
+      const contentH = maxY - minY + 80;
+      const z = Math.min(1, Math.min(cw / contentW, ch / contentH));
+      const px = (cw - contentW * z) / 2 - minX * z + 40 * z;
+      const py = (ch - contentH * z) / 2 - minY * z + 40 * z;
+      setZoom(z);
+      setPan({ x: px, y: py });
+    });
+  }, [graphData, searchQuery, showArchived]);
+
+  const fitView = useCallback(() => {
+    if (nodes.length === 0 || !containerRef.current) return;
+    const cw = containerRef.current.clientWidth;
+    const ch = containerRef.current.clientHeight;
+    const minX = Math.min(...nodes.map((n) => n.x));
+    const minY = Math.min(...nodes.map((n) => n.y));
+    const maxX = Math.max(...nodes.map((n) => n.x + NODE_W));
+    const maxY = Math.max(...nodes.map((n) => n.y + NODE_H));
+    const contentW = maxX - minX + 80;
+    const contentH = maxY - minY + 80;
+    const z = Math.min(1, Math.min(cw / contentW, ch / contentH));
+    const px = (cw - contentW * z) / 2 - minX * z + 40 * z;
+    const py = (ch - contentH * z) / 2 - minY * z + 40 * z;
+    setZoom(z);
+    setPan({ x: px, y: py });
+  }, [nodes]);
 
   const nodeMap = new Map(nodes.map((n) => [n.id, n]));
 
@@ -211,27 +271,13 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery }: Gra
     );
   }
 
-  function svgPoint(e: React.MouseEvent | MouseEvent): { x: number; y: number } {
+  function svgPoint(e: React.MouseEvent): { x: number; y: number } {
     const svg = svgRef.current;
     if (!svg) return { x: 0, y: 0 };
-    // Use SVG's built-in coordinate transform to get accurate position
-    const pt = svg.createSVGPoint();
-    pt.x = e.clientX;
-    pt.y = e.clientY;
-    const g = svg.querySelector("g") as SVGGElement | null;
-    if (g) {
-      const ctm = g.getScreenCTM();
-      if (ctm) {
-        const inv = ctm.inverse();
-        const transformed = pt.matrixTransform(inv);
-        return { x: transformed.x, y: transformed.y };
-      }
-    }
     const rect = svg.getBoundingClientRect();
-    const p = panRef.current;
     return {
-      x: (e.clientX - rect.left - p.x) / zoom,
-      y: (e.clientY - rect.top - p.y) / zoom,
+      x: (e.clientX - rect.left - pan.x) / zoom,
+      y: (e.clientY - rect.top - pan.y) / zoom,
     };
   }
 
@@ -240,45 +286,40 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery }: Gra
     const pt = svgPoint(e);
     const node = nodeMap.get(nodeId)!;
     didDragRef.current = false;
-    dragNodeRef.current = nodeId;
-    dragOffsetRef.current = { x: pt.x - node.x, y: pt.y - node.y };
+    setDragNode(nodeId);
+    setDragOffset({ x: pt.x - node.x, y: pt.y - node.y });
     setSelectedNode(nodeId);
   }
 
   function handleMouseMoveSvg(e: React.MouseEvent) {
-    if (dragNodeRef.current) {
+    if (dragNode) {
       didDragRef.current = true;
       const pt = svgPoint(e);
-      const dx = dragOffsetRef.current;
-      if (rafRef.current) cancelAnimationFrame(rafRef.current);
-      rafRef.current = requestAnimationFrame(() => {
-        setNodes((prev) =>
-          prev.map((n) =>
-            n.id === dragNodeRef.current
-              ? { ...n, x: pt.x - dx.x, y: pt.y - dx.y }
-              : n
-          )
-        );
+      setNodes((prev) =>
+        prev.map((n) =>
+          n.id === dragNode
+            ? { ...n, x: pt.x - dragOffset.x, y: pt.y - dragOffset.y }
+            : n
+        )
+      );
+    } else if (isPanning) {
+      setPan({
+        x: panOrigin.current.x + (e.clientX - panStart.current.x),
+        y: panOrigin.current.y + (e.clientY - panStart.current.y),
       });
-    } else if (isPanningRef.current) {
-      const nx = panOrigin.current.x + (e.clientX - panStart.current.x);
-      const ny = panOrigin.current.y + (e.clientY - panStart.current.y);
-      panRef.current = { x: nx, y: ny };
-      if (rafRef.current) cancelAnimationFrame(rafRef.current);
-      rafRef.current = requestAnimationFrame(() => setPan({ x: nx, y: ny }));
     }
   }
 
   function handleMouseUpSvg() {
-    dragNodeRef.current = null;
-    isPanningRef.current = false;
+    setDragNode(null);
+    setIsPanning(false);
   }
 
   function handleMouseDownSvg(e: React.MouseEvent) {
     if ((e.target as SVGElement).closest("[data-node]")) return;
-    isPanningRef.current = true;
+    setIsPanning(true);
     panStart.current = { x: e.clientX, y: e.clientY };
-    panOrigin.current = { x: panRef.current.x, y: panRef.current.y };
+    panOrigin.current = { x: pan.x, y: pan.y };
   }
 
   const handleWheel = useCallback((e: WheelEvent) => {
@@ -293,31 +334,6 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery }: Gra
     svg.addEventListener("wheel", handleWheel, { passive: false });
     return () => svg.removeEventListener("wheel", handleWheel);
   }, [handleWheel]);
-
-  async function handleCreateFollowUp() {
-    if (!followUpNode || !followUpTitle.trim()) return;
-    setFollowUpCreating(true);
-    try {
-      const newIssue = await apiFetch<{ id: string }>(`/api/issues`, {
-        method: "POST",
-        body: JSON.stringify({ title: followUpTitle.trim(), description: "", priority: "medium", projectId }),
-      });
-      // Link as depends_on: new issue depends on the source node
-      await apiFetch(`/api/issues/${newIssue.id}/dependencies`, {
-        method: "POST",
-        body: JSON.stringify({ dependsOnId: followUpNode.issue.id, type: "depends_on" }),
-      }).catch(() => {});
-      setFollowUpNode(null);
-      setFollowUpTitle("");
-      // Reload graph
-      const result = await apiFetch<{ nodes: IssueWithStatus[]; edges: Dependency[] }>(`/api/projects/${projectId}/graph`);
-      setGraphData(result);
-    } catch {
-      // ignore
-    } finally {
-      setFollowUpCreating(false);
-    }
-  }
 
   if (loading) {
     return (
@@ -336,26 +352,20 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery }: Gra
   }
 
   const edges = getEdges();
-  const maxX = Math.max(...nodes.map((n) => n.x + NODE_W)) + 40;
-  const maxY = Math.max(...nodes.map((n) => n.y + NODE_H)) + 40;
 
   return (
-    <div className="relative h-full w-full overflow-hidden bg-gray-50 select-none">
-      {/* Search toolbar */}
-      <div className="absolute top-3 left-3 z-10 flex items-center gap-2">
-        <input
-          type="text"
-          value={localSearch}
-          onChange={(e) => setLocalSearch(e.target.value)}
-          placeholder="Search nodes..."
-          className="px-2.5 py-1.5 text-xs border border-gray-300 rounded-md bg-white shadow-sm focus:outline-none focus:ring-1 focus:ring-blue-500 w-44"
-        />
+    <div ref={containerRef} className="relative h-full w-full overflow-hidden bg-gray-50 select-none">
+      {/* Archive toggle */}
+      <div className="absolute top-3 left-3 z-10">
         <button
-          onClick={() => setHideDone((v) => !v)}
-          className={`px-2.5 py-1.5 text-xs rounded-md border shadow-sm whitespace-nowrap ${hideDone ? "bg-gray-700 text-white border-gray-700" : "bg-white text-gray-600 border-gray-300 hover:bg-gray-100"}`}
-          title={hideDone ? "Show Done/Cancelled" : "Hide Done/Cancelled"}
+          onClick={() => setShowArchived((v) => !v)}
+          className={`px-2.5 py-1 text-xs rounded border shadow-sm font-medium transition-colors ${
+            showArchived
+              ? "bg-blue-50 border-blue-300 text-blue-700"
+              : "bg-white border-gray-300 text-gray-600 hover:bg-gray-50"
+          }`}
         >
-          {hideDone ? "Hide Done" : "Show Done"}
+          {showArchived ? "Hide completed" : "Show completed"}
         </button>
       </div>
       {/* Controls */}
@@ -369,38 +379,13 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery }: Gra
           className="w-7 h-7 bg-white border border-gray-300 rounded text-gray-600 hover:bg-gray-100 flex items-center justify-center text-sm font-bold shadow-sm"
         >−</button>
         <button
-          onClick={() => { setZoom(1); panRef.current = { x: 0, y: 0 }; setPan({ x: 0, y: 0 }); }}
+          onClick={fitView}
           className="w-7 h-7 bg-white border border-gray-300 rounded text-gray-600 hover:bg-gray-100 flex items-center justify-center shadow-sm"
-          title="Reset view"
+          title="Fit to view"
         >
           <svg viewBox="0 0 24 24" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2}>
             <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
             <path d="M3 3v5h5" />
-          </svg>
-        </button>
-        <button
-          onClick={() => {
-            const svg = svgRef.current;
-            if (!svg || nodes.length === 0) return;
-            const rect = svg.getBoundingClientRect();
-            const xs = nodes.map((n) => n.x);
-            const ys = nodes.map((n) => n.y);
-            const minX = Math.min(...xs) - 20;
-            const minY = Math.min(...ys) - 20;
-            const contentW = Math.max(...xs) + NODE_W + 20 - minX;
-            const contentH = Math.max(...ys) + NODE_H + 20 - minY;
-            const fitZ = Math.min(rect.width / contentW, rect.height / contentH, 2) * 0.9;
-            const cx = rect.width / 2 - (minX + contentW / 2) * fitZ;
-            const cy = rect.height / 2 - (minY + contentH / 2) * fitZ;
-            panRef.current = { x: cx, y: cy };
-            setPan({ x: cx, y: cy });
-            setZoom(fitZ);
-          }}
-          className="w-7 h-7 bg-white border border-gray-300 rounded text-gray-600 hover:bg-gray-100 flex items-center justify-center shadow-sm"
-          title="Fit to screen"
-        >
-          <svg viewBox="0 0 24 24" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2}>
-            <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3" />
           </svg>
         </button>
       </div>
@@ -417,9 +402,8 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery }: Gra
 
       <svg
         ref={svgRef}
-        className="w-full h-full cursor-grab active:cursor-grabbing"
-        viewBox={`0 0 ${Math.max(maxX, 400)} ${Math.max(maxY, 300)}`}
-        style={{ cursor: isPanningRef.current || dragNodeRef.current ? "grabbing" : "grab" }}
+        className="w-full h-full"
+        style={{ cursor: isPanning ? "grabbing" : dragNode ? "grabbing" : "grab" }}
         onMouseMove={handleMouseMoveSvg}
         onMouseUp={handleMouseUpSvg}
         onMouseLeave={handleMouseUpSvg}
@@ -436,6 +420,30 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery }: Gra
           ))}
         </defs>
         <g transform={`translate(${pan.x},${pan.y}) scale(${zoom})`}>
+          {/* Column headers (status swimlane mode) */}
+          {colHeaders.map(({ status, count, x }) => {
+            const color = STATUS_COLORS[status] ?? "#6b7280";
+            return (
+              <g key={status}>
+                <rect
+                  x={x}
+                  y={8}
+                  width={NODE_W}
+                  height={COL_HEADER_H}
+                  rx={5}
+                  fill={color}
+                  opacity={0.12}
+                />
+                <rect x={x} y={8} width={4} height={COL_HEADER_H} rx={2} fill={color} />
+                <text x={x + 12} y={8 + COL_HEADER_H / 2 + 4} fontSize={11} fontWeight={600} fill={color}>
+                  {status}
+                </text>
+                <text x={x + NODE_W - 8} y={8 + COL_HEADER_H / 2 + 4} fontSize={10} fill={color} textAnchor="end" opacity={0.7}>
+                  {count}
+                </text>
+              </g>
+            );
+          })}
           {/* Edges */}
           {edges.map((edge) => {
             const src = nodeMap.get(edge.dependsOnId);
@@ -474,32 +482,24 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery }: Gra
           {nodes.map((node) => {
             const color = STATUS_COLORS[node.issue.statusName] ?? "#6b7280";
             const isSelected = selectedNode === node.id;
-            const isHovered = hoveredNode === node.id;
-            const isHighlighted = effectiveSearch
-              ? node.issue.title.toLowerCase().includes(effectiveSearch.toLowerCase()) ||
-                (node.issue.description?.toLowerCase().includes(effectiveSearch.toLowerCase()) ?? false)
+            const isHighlighted = searchQuery
+              ? node.issue.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                (node.issue.description?.toLowerCase().includes(searchQuery.toLowerCase()) ?? false)
               : true;
+            const title = node.issue.title;
+            const displayTitle = title.length > 28 ? title.slice(0, 28) + "…" : title;
             return (
               <g
                 key={node.id}
                 data-node
                 transform={`translate(${node.x},${node.y})`}
                 style={{ cursor: "pointer", opacity: isHighlighted ? 1 : 0.3 }}
-                onMouseEnter={() => setHoveredNode(node.id)}
-                onMouseLeave={() => setHoveredNode(null)}
                 onMouseDown={(e) => handleMouseDownNode(e, node.id)}
                 onClick={(e) => {
                   e.stopPropagation();
                   if (!didDragRef.current) onIssueClick(node.issue);
                 }}
               >
-                {/* Invisible hit area covering node + button zone to prevent hover flicker */}
-                <rect
-                  width={NODE_W + 32}
-                  height={NODE_H}
-                  fill="transparent"
-                  style={{ pointerEvents: "all" }}
-                />
                 <rect
                   width={NODE_W}
                   height={NODE_H}
@@ -508,14 +508,14 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery }: Gra
                   fill="white"
                   stroke={isSelected ? "#3b82f6" : color}
                   strokeWidth={isSelected ? 2 : 1.5}
-                  filter="drop-shadow(0 1px 2px rgba(0,0,0,0.1))"
+                  filter="drop-shadow(0 1px 3px rgba(0,0,0,0.12))"
                 />
                 {/* Status indicator bar */}
                 <rect width={4} height={NODE_H} rx={3} fill={color} />
                 {/* Priority dot */}
                 <circle
-                  cx={NODE_W - 10}
-                  cy={10}
+                  cx={NODE_W - 12}
+                  cy={12}
                   r={4}
                   fill={
                     node.issue.priority === "critical" ? "#ef4444" :
@@ -525,84 +525,27 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery }: Gra
                 />
                 {/* Issue number */}
                 {node.issue.issueNumber != null && (
-                  <text x={10} y={16} fontSize={9} fill="#9ca3af" fontFamily="monospace">
+                  <text x={12} y={18} fontSize={9} fill="#9ca3af" fontFamily="monospace">
                     #{node.issue.issueNumber}
                   </text>
                 )}
                 {/* Title */}
-                <text
-                  x={10}
-                  y={32}
-                  fontSize={11}
-                  fill="#111827"
-                  fontWeight={500}
-                >
-                  <tspan>
-                    {node.issue.title.length > 18
-                      ? node.issue.title.slice(0, 18) + "…"
-                      : node.issue.title}
-                  </tspan>
+                <text x={12} y={36} fontSize={11} fill="#111827" fontWeight={500}>
+                  {displayTitle}
                 </text>
                 {/* Status label */}
-                <text x={10} y={50} fontSize={9} fill={color}>
+                <text x={12} y={54} fontSize={9} fill={color}>
                   {node.issue.statusName}
                 </text>
                 {/* Blocked indicator */}
                 {node.issue.isBlocked && (
-                  <text x={NODE_W - 20} y={NODE_H - 6} fontSize={9} fill="#f59e0b">⚠</text>
-                )}
-                {/* Follow-up button — shown on hover */}
-                {isHovered && (
-                  <g
-                    transform={`translate(${NODE_W + 6}, ${NODE_H / 2 - 10})`}
-                    style={{ cursor: "pointer" }}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setFollowUpNode(node);
-                      setFollowUpTitle("");
-                    }}
-                  >
-                    <rect width={20} height={20} rx={4} fill="#3b82f6" />
-                    <text x={10} y={14} fontSize={14} fill="white" textAnchor="middle" fontWeight={700}>+</text>
-                  </g>
+                  <text x={NODE_W - 22} y={NODE_H - 6} fontSize={9} fill="#f59e0b">⚠</text>
                 )}
               </g>
             );
           })}
         </g>
       </svg>
-
-      {/* Follow-up task creation overlay */}
-      {followUpNode && (
-        <div className="absolute inset-0 bg-black/20 flex items-center justify-center z-20" onClick={() => setFollowUpNode(null)}>
-          <div className="bg-white rounded-lg shadow-xl p-4 w-80" onClick={(e) => e.stopPropagation()}>
-            <div className="text-sm font-medium text-gray-800 mb-1">New follow-up task</div>
-            <div className="text-xs text-gray-500 mb-3">
-              Depends on: <span className="font-medium text-gray-700">#{followUpNode.issue.issueNumber} {followUpNode.issue.title}</span>
-            </div>
-            <input
-              autoFocus
-              type="text"
-              value={followUpTitle}
-              onChange={(e) => setFollowUpTitle(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter") handleCreateFollowUp(); if (e.key === "Escape") setFollowUpNode(null); }}
-              placeholder="Task title..."
-              className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 mb-3"
-            />
-            <div className="flex gap-2 justify-end">
-              <button
-                onClick={() => setFollowUpNode(null)}
-                className="px-3 py-1.5 text-sm text-gray-500 hover:text-gray-700"
-              >Cancel</button>
-              <button
-                onClick={handleCreateFollowUp}
-                disabled={!followUpTitle.trim() || followUpCreating}
-                className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50"
-              >{followUpCreating ? "Creating…" : "Create"}</button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
