@@ -152,7 +152,7 @@ export function createWorkspacesRoute(
       const agentArgs = skipPerms
         ? (baseArgs ? baseArgs + " --dangerously-skip-permissions" : "--dangerously-skip-permissions")
         : (baseArgs || undefined);
-      claudeProfile = prefMap.get("claude_profile") || undefined;
+      claudeProfile = (body.claudeProfile as string | undefined) || prefMap.get("claude_profile") || undefined;
       const permissionPromptToolPref = prefMap.get("permission_prompt_tool");
       const permissionPromptTool = permissionPromptToolPref === "true"
         ? "mcp__agentic-kanban__approve_tool_use"
