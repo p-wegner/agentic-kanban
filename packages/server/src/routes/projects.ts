@@ -818,7 +818,7 @@ ${contextParts.join("\n")}`;
             const s = depStatusMap.get(dep.dependsOnId);
             return s !== "Done" && s !== "AI Reviewed";
           });
-          issuesWithBlocked[i] = { ...issue, isBlocked };
+          issuesWithBlocked[i] = { ...issue, isBlocked, dependencyCount: deps.length };
         }
       }
     }
