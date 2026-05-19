@@ -98,7 +98,7 @@ async function freePort(port, label) {
           .filter(p => /^\d+$/.test(p) && p !== "0")
       )];
       for (const pid of pids) {
-        try { execSync(`taskkill /PID ${pid} /F`, { stdio: "pipe" }); } catch {}
+        try { execSync(`taskkill /PID ${pid} /T /F`, { stdio: "pipe" }); } catch {}
       }
     } else {
       execSync(`lsof -ti :${port} | xargs kill -9`, { stdio: "pipe" });
@@ -124,6 +124,10 @@ function spawnProcess(label, cmd, args, opts) {
     proc.on("exit", (code, signal) => {
       if (signal === "SIGINT" || signal === "SIGTERM") return; // clean shutdown
       if (code === 0) return; // intentional exit
+      if (code === 1) {
+        console.error(`[dev] ${label} exited with fatal error (code=1) — not retrying`);
+        return;
+      }
       if (restarts >= MAX_RESTARTS) {
         console.error(`[dev] ${label} exited (code=${code}), max restarts reached — giving up`);
         return;
