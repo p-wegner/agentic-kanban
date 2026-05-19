@@ -138,6 +138,9 @@ export class ClaudeProvider implements AgentProvider {
         const settingsPath = join(homedir(), ".claude", `settings_${claudeProfile}.json`);
         if (existsSync(settingsPath)) {
           args.push("--settings", settingsPath);
+          console.log(`[agent] using profile "${claudeProfile}" → --settings ${settingsPath}`);
+        } else {
+          console.warn(`[agent] profile "${claudeProfile}" not found at ${settingsPath}`);
         }
       }
       if (providerSessionId) {
@@ -351,6 +354,16 @@ function getMcpConfigPath(): string {
   return path;
 }
 
+// Env vars that profile settings files can set to redirect API traffic.
+// When switching profiles, strip these from the inherited process env so a
+// profile without an env block doesn't inherit vars set by a different profile.
+const PROFILE_OWNED_ENV_VARS = [
+  "ANTHROPIC_AUTH_TOKEN",
+  "ANTHROPIC_BASE_URL",
+  "ANTHROPIC_MODEL",
+  "API_TIMEOUT_MS",
+];
+
 function buildSpawnEnv(claudeProfile?: string): Record<string, string> {
   const spawnEnv: Record<string, string> = { ...process.env as Record<string, string> };
   if (!claudeProfile) return spawnEnv;
@@ -358,10 +371,19 @@ function buildSpawnEnv(claudeProfile?: string): Record<string, string> {
   const settingsPath = join(homedir(), ".claude", `settings_${claudeProfile}.json`);
   if (!existsSync(settingsPath)) return spawnEnv;
 
+  // Strip profile-owned vars so the new profile starts from a clean baseline.
+  // This prevents a prior profile's env vars (e.g. ANTHROPIC_BASE_URL from zai)
+  // from leaking into a session that uses a different profile.
+  for (const key of PROFILE_OWNED_ENV_VARS) {
+    delete spawnEnv[key];
+  }
+
   try {
     const profileSettings = JSON.parse(readFileSync(settingsPath, "utf-8"));
     if (profileSettings.env && typeof profileSettings.env === "object") {
       const profileEnv = profileSettings.env as Record<string, string>;
+      // If the profile authenticates via ANTHROPIC_AUTH_TOKEN (bearer token),
+      // remove ANTHROPIC_API_KEY so Claude Code doesn't prefer the key over the token.
       if (profileEnv.ANTHROPIC_AUTH_TOKEN && !profileEnv.ANTHROPIC_API_KEY) {
         delete spawnEnv.ANTHROPIC_API_KEY;
       }
