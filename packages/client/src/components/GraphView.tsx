@@ -134,6 +134,10 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery }: Gra
   const svgRef = useRef<SVGSVGElement>(null);
   const rafRef = useRef<number | null>(null);
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
+  const [followUpNode, setFollowUpNode] = useState<Node | null>(null);
+  const [followUpTitle, setFollowUpTitle] = useState("");
+  const [followUpCreating, setFollowUpCreating] = useState(false);
+  const [hoveredNode, setHoveredNode] = useState<string | null>(null);
 
   const allIssues = columns.flatMap((c) => c.issues);
 
@@ -290,6 +294,31 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery }: Gra
     return () => svg.removeEventListener("wheel", handleWheel);
   }, [handleWheel]);
 
+  async function handleCreateFollowUp() {
+    if (!followUpNode || !followUpTitle.trim()) return;
+    setFollowUpCreating(true);
+    try {
+      const newIssue = await apiFetch<{ id: string }>(`/api/issues`, {
+        method: "POST",
+        body: JSON.stringify({ title: followUpTitle.trim(), description: "", priority: "medium", projectId }),
+      });
+      // Link as depends_on: new issue depends on the source node
+      await apiFetch(`/api/issues/${newIssue.id}/dependencies`, {
+        method: "POST",
+        body: JSON.stringify({ dependsOnId: followUpNode.issue.id, type: "depends_on" }),
+      }).catch(() => {});
+      setFollowUpNode(null);
+      setFollowUpTitle("");
+      // Reload graph
+      const result = await apiFetch<{ nodes: IssueWithStatus[]; edges: Dependency[] }>(`/api/projects/${projectId}/graph`);
+      setGraphData(result);
+    } catch {
+      // ignore
+    } finally {
+      setFollowUpCreating(false);
+    }
+  }
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-full text-gray-500 text-sm">
@@ -436,6 +465,7 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery }: Gra
           {nodes.map((node) => {
             const color = STATUS_COLORS[node.issue.statusName] ?? "#6b7280";
             const isSelected = selectedNode === node.id;
+            const isHovered = hoveredNode === node.id;
             const isHighlighted = effectiveSearch
               ? node.issue.title.toLowerCase().includes(effectiveSearch.toLowerCase()) ||
                 (node.issue.description?.toLowerCase().includes(effectiveSearch.toLowerCase()) ?? false)
@@ -446,6 +476,8 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery }: Gra
                 data-node
                 transform={`translate(${node.x},${node.y})`}
                 style={{ cursor: "pointer", opacity: isHighlighted ? 1 : 0.3 }}
+                onMouseEnter={() => setHoveredNode(node.id)}
+                onMouseLeave={() => setHoveredNode(null)}
                 onMouseDown={(e) => handleMouseDownNode(e, node.id)}
                 onClick={(e) => {
                   e.stopPropagation();
@@ -503,11 +535,58 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery }: Gra
                 {node.issue.isBlocked && (
                   <text x={NODE_W - 20} y={NODE_H - 6} fontSize={9} fill="#f59e0b">⚠</text>
                 )}
+                {/* Follow-up button — shown on hover */}
+                {isHovered && (
+                  <g
+                    transform={`translate(${NODE_W + 6}, ${NODE_H / 2 - 10})`}
+                    style={{ cursor: "pointer" }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setFollowUpNode(node);
+                      setFollowUpTitle("");
+                    }}
+                  >
+                    <rect width={20} height={20} rx={4} fill="#3b82f6" />
+                    <text x={10} y={14} fontSize={14} fill="white" textAnchor="middle" fontWeight={700}>+</text>
+                  </g>
+                )}
               </g>
             );
           })}
         </g>
       </svg>
+
+      {/* Follow-up task creation overlay */}
+      {followUpNode && (
+        <div className="absolute inset-0 bg-black/20 flex items-center justify-center z-20" onClick={() => setFollowUpNode(null)}>
+          <div className="bg-white rounded-lg shadow-xl p-4 w-80" onClick={(e) => e.stopPropagation()}>
+            <div className="text-sm font-medium text-gray-800 mb-1">New follow-up task</div>
+            <div className="text-xs text-gray-500 mb-3">
+              Depends on: <span className="font-medium text-gray-700">#{followUpNode.issue.issueNumber} {followUpNode.issue.title}</span>
+            </div>
+            <input
+              autoFocus
+              type="text"
+              value={followUpTitle}
+              onChange={(e) => setFollowUpTitle(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") handleCreateFollowUp(); if (e.key === "Escape") setFollowUpNode(null); }}
+              placeholder="Task title..."
+              className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 mb-3"
+            />
+            <div className="flex gap-2 justify-end">
+              <button
+                onClick={() => setFollowUpNode(null)}
+                className="px-3 py-1.5 text-sm text-gray-500 hover:text-gray-700"
+              >Cancel</button>
+              <button
+                onClick={handleCreateFollowUp}
+                disabled={!followUpTitle.trim() || followUpCreating}
+                className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50"
+              >{followUpCreating ? "Creating…" : "Create"}</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
