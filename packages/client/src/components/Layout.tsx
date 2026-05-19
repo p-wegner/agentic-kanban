@@ -22,11 +22,14 @@ interface LayoutProps {
   onRegisterProject?: (repoPath: string) => Promise<void>;
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 >>>>>>> 41a314b (feat: implement create project flow (WIP - UI + backend route))
 =======
 >>>>>>> 73b13d2 (feat: implement create project flow (WIP - UI + backend route))
 =======
 >>>>>>> e6a6ccb (feat: implement create project flow (WIP - UI + backend route))
+=======
+>>>>>>> ec12683 (feat: implement create project flow (WIP - UI + backend route))
   onCreateProject?: (name: string, path: string) => Promise<void>;
   searchQuery?: string;
   onSearchChange?: (query: string) => void;
@@ -126,6 +129,7 @@ export function Layout({
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
   const createNameInvalid = /[/\\<>:"|?*\x00]/.test(createName);
 =======
 >>>>>>> 41a314b (feat: implement create project flow (WIP - UI + backend route))
@@ -151,6 +155,8 @@ export function Layout({
 =======
   const createNameInvalid = /[/\\<>:"|?*\x00]/.test(createName);
 >>>>>>> 5ffc0d0 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
+=======
+>>>>>>> ec12683 (feat: implement create project flow (WIP - UI + backend route))
   const inputRef = useRef<HTMLInputElement>(null);
 
   async function handleRegisterSubmit(e: React.FormEvent) {
@@ -198,6 +204,7 @@ export function Layout({
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
     setGitignoreTemplate("");
     setGenerateReadme(false);
 =======
@@ -206,6 +213,8 @@ export function Layout({
 >>>>>>> 73b13d2 (feat: implement create project flow (WIP - UI + backend route))
 =======
 >>>>>>> e6a6ccb (feat: implement create project flow (WIP - UI + backend route))
+=======
+>>>>>>> ec12683 (feat: implement create project flow (WIP - UI + backend route))
     setShowRegister(true);
     setTimeout(() => inputRef.current?.focus(), 50);
   }
@@ -486,6 +495,7 @@ export function Layout({
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
                     className={`w-full text-sm border rounded-md px-3 py-2 focus:outline-none focus:ring-1 ${createNameInvalid ? "border-red-400 focus:ring-red-400 focus:border-red-400" : "border-gray-300 focus:ring-blue-500 focus:border-blue-500"}`}
                     autoFocus
                   />
@@ -531,6 +541,11 @@ export function Layout({
                     <p className="mt-1 text-xs text-red-600">Name cannot contain: / \ &lt; &gt; : " | ? *</p>
                   )}
 >>>>>>> 132b17a (feat: validate create-project edge cases (WIP))
+=======
+                    className="w-full text-sm border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                    autoFocus
+                  />
+>>>>>>> ec12683 (feat: implement create project flow (WIP - UI + backend route))
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -566,6 +581,7 @@ export function Layout({
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
                     disabled={creating || !createName.trim() || createNameInvalid}
 =======
                     disabled={creating || !createName.trim()}
@@ -585,6 +601,9 @@ export function Layout({
 =======
                     disabled={creating || !createName.trim() || createNameInvalid}
 >>>>>>> 132b17a (feat: validate create-project edge cases (WIP))
+=======
+                    disabled={creating || !createName.trim()}
+>>>>>>> ec12683 (feat: implement create project flow (WIP - UI + backend route))
                     className="px-3 py-1.5 text-sm text-white bg-blue-600 rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     {creating ? "Creating…" : "Create project"}
