@@ -180,6 +180,16 @@ export class ClaudeOutputParser {
           priority: (obj.priority as string) || "",
         }];
       }
+      if (subtype === "status") {
+        const text = (obj.status as string) || (obj.message as string) || "";
+        if (text) return [{ kind: "raw", text: `[status] ${text}` }];
+        return [];
+      }
+      if (subtype === "task_progress") {
+        const msg = (obj.message as string) || (obj.progress as string) || "";
+        if (msg) return [{ kind: "raw", text: `[progress] ${msg}` }];
+        return [];
+      }
       return [];
     }
 
