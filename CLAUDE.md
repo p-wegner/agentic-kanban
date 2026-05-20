@@ -5,32 +5,38 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Project Status
 This project is **Stage 13 complete + Tauri desktop** (Stages 0-13 done). Tech stack: TypeScript monorepo — Hono + Drizzle + React + MCP SDK + Tauri v2. Progress tracked in `docs/state.md`.
 
-All documented features have been visually verified (2026-05-16):
+All documented features have been visually verified (2026-05-21):
 - Board renders 3 active columns (Todo, In Progress, In Review) with collapsible "Completed" group for Done/Cancelled
+- Board stats bar: ticket counts per status, "N commits on main branch" counter, Blocked filter toggle (shows only blocked issues), Tasks button (opens Quick Tasks panel)
+- Three view modes: Board (kanban), Graph (dependency DAG with status colors + zoom controls), Table (sortable flat list with status filter)
+- Table view: sortable columns (#, Title, Status, Priority, Estimate, Created), "All statuses" filter dropdown, row click opens detail panel
+- Graph view: nodes colored by status, dependency arrows, "Show completed" toggle, +/−/reset zoom controls, status legend
+- Quick Tasks panel: lists installed skills with descriptions, custom task prompt input, context button
 - Create issue: inline form with title, description, priority, plan mode, skip review, Add/Cancel; expandable full-screen panel via Expand button
-- Issue detail panel: slide-in with view/edit/delete, status dropdown, description placeholder, priority badge, status, workspaces, tags, timestamps, issue number
-- Edit issue: title/description/priority editable, Save/Cancel; all sections visible in edit mode; unsaved changes warning
+- Issue detail panel: slide-in with view/edit/delete, status dropdown, description placeholder, priority badge, estimate field, workspaces, tags, dependencies (with Analyze Deps button), timestamps, issue number, follow-up task button
+- Edit issue: title/description/priority/estimate/status editable, Enhance with AI button, Save/Cancel; unsaved changes warning
 - Tags: CRUD via dropdown in detail panel, removable badges with colors, 4 seed tags (bug, feature, improvement, docs)
-- Search/filter: real-time text search with highlighted matches, priority dropdown filter, keyboard shortcut `/` to focus, Escape to clear
+- Search/filter: real-time text search with highlighted matches, priority dropdown filter, keyboard shortcut `/` to focus, Escape to clear, Blocked filter toggle
 - Drag-and-drop: HTML5 DnD between columns (mouse-based, use `run-code` for `/` key on Windows/MSYS)
-- Workspace panel: slide-in with read-only repo info, "New Workspace" button (one-step: creates worktree + auto-launches agent with issue title/description as prompt), delete button with confirmation for active and closed workspaces
+- Workspace panel: slide-in with read-only repo info, branch/worktree path, session status, Output/Summary toggle, terminal view, chat input, action buttons (Resume, Update Base, Terminal, Review, View Diff, Merge, Delete), inline diff viewer at bottom
+- All Workspaces panel: slide-in listing all workspaces (85 total / 14 active), grouped by issue, diff stats, timestamps
 - Worktree overview: branch icon in header, slide-in panel listing all git worktrees with issue linking, diff stats, and status badges
 - Project switcher: dropdown in header when multiple projects registered
-- API routes: health, projects (with git info + worktrees), preferences (active-project + settings), board aggregation, issues (CRUD), workspaces (CRUD + one-step create with worktree+launch + actions), tags (CRUD), sessions (WebSocket + output history)
-- Settings panel: tabbed modal (gear icon in header), agent command/args, output parsing, mock agent toggle, auto_merge, review_auto_fix, claude_profile
+- Settings panel: 8-tab modal (gear icon in header) — Agent (command/args/profile), Workflow (pipeline visualization + auto-review/fix/merge toggles), Skills (install status per skill), MCP Tools, UI (output parsing, dynamic column scaling, persistent agent warm pool), Project (base dir + setup script), Tags (CRUD), Advanced (skip permissions, permission prompt tool)
 - Session history: inline session selector in workspace panel, click between past sessions without leaving workspace context
 - Chat-like agent interaction: persistent chat input with Send/Stop toggle, --resume support, auto-clear on exit, Ctrl+Enter to send, multi-turn follow-up messages via stdin JSONL, turn state tracking (processing/waiting), "Turn complete — waiting for input" display
 - AI code review: auto-review on agent session exit (configurable per-issue), manual review button, reviewing indicator badge, review sessions inherit claude_profile, auto_fix setting
 - Live session stats: real-time model name and context token count on issue cards via WebSocket
+- Agent task progress: TodoProgress bar on issue cards showing "N/M tasks" + "K active" with colored progress bar
 - Real-time board updates: board auto-refreshes via WebSocket when mutations happen
-- Command palette: Ctrl+K searchable action list, keyboard navigation
-- Keyboard shortcut help: `?` overlay showing all shortcuts
+- Command palette: Ctrl+K searchable action list (14 actions: Create Issue, New Issue + Start Workspace, Search Issues, Switch Project, All Workspaces, View Worktrees, Open Settings, view-switching), keyboard navigation
+- Keyboard shortcuts: `/` search, `Escape` close/clear, `?` help overlay, `Ctrl+K` command palette, `Ctrl+Enter` send chat, `c` create issue, `w` new issue + workspace, `t` open Tasks panel, `g+s` open Settings
 - Issue numbers: auto-incrementing #1, #2, #3 per project on cards and detail panel
 - Panel animations: slide-in transitions on detail/workspace/settings/worktree panels
 - Favicon: inline SVG kanban-board icon
 - MCP server: 27 tools via stdio JSON-RPC (includes agent skills: list/get/create/export, get_board_status)
 - CLI: `pnpm cli -- register <path>` to register a git repo as a project; also `issue list/create/move`, `workspace list/create`, `skill list/get/create`, and `status` for board overview
-- Agent skills: 4 built-in skills (board-navigator, code-review, dependency-analyzer, ticket-enhancer) + custom skills via DB. Skills are prompt templates injected into agent context at workspace creation time. Skills can be global or project-scoped.
+- Agent skills: 4 built-in skills (board-navigator, code-review, dependency-analyzer, ticket-enhancer) + custom skills via DB; Skills tab in Settings shows install status; ui-explorer installed as .claude/skills/
 - Desktop app: Tauri v2 native window with system tray (Show/Quit), minimize-to-tray on close, OS notifications on session_completed/workspace_merged events
 - Workspace setup scripts: project-specific shell commands (e.g., `pnpm install`) that run automatically after worktree creation. Configurable in Settings > Project tab with AI-generate button. Supports blocking (wait for setup before agent) and parallel modes.
 
