@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+﻿import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { spawnSync } from "node:child_process";
 import { drizzle } from "drizzle-orm/libsql";
 import { createClient } from "@libsql/client";
@@ -47,6 +47,8 @@ const MIGRATION_FILES = [
   "../../../shared/drizzle/0022_teardown_script.sql",
   "../../../shared/drizzle/0024_setup_enabled.sql",
   "../../../shared/drizzle/0025_provider_session_id.sql",
+  "../../../shared/drizzle/0026_ready_for_merge.sql",
+  "../../../shared/drizzle/0027_estimate_field.sql",
 ];
 
 const DEFAULT_STATUSES = [
