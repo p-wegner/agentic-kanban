@@ -3,6 +3,7 @@
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 import { useState } from "react";
 =======
 >>>>>>> 7c9ead0 (feat: add table view as third board view alongside board and graph)
@@ -16,6 +17,9 @@ import { useState } from "react";
 >>>>>>> 9878a53 (feat: add table view as third board view alongside kanban and graph)
 =======
 >>>>>>> b06ea29 (feat: add table view as third board view alongside board and graph)
+=======
+import { useState } from "react";
+>>>>>>> ab93bc6 (feat: add table view as third board view alongside kanban and graph)
 import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
 
 interface TableViewProps {
@@ -26,10 +30,13 @@ interface TableViewProps {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 >>>>>>> e318eb3 (feat: add table view as third board view alongside kanban and graph)
 =======
 >>>>>>> 9878a53 (feat: add table view as third board view alongside kanban and graph)
+=======
+>>>>>>> ab93bc6 (feat: add table view as third board view alongside kanban and graph)
   searchQuery?: string;
 }
 
@@ -56,14 +63,19 @@ const STATUS_CLASS: Record<string, string> = {
   "Cancelled": "text-gray-500 bg-gray-100",
 };
 
+<<<<<<< HEAD
 const ARCHIVE_STATUSES = new Set(["Done", "Cancelled"]);
 
 type SortKey = "number" | "title" | "status" | "priority" | "estimate" | "updated";
+=======
+type SortKey = "number" | "title" | "status" | "priority" | "estimate" | "created";
+>>>>>>> ab93bc6 (feat: add table view as third board view alongside kanban and graph)
 type SortDir = "asc" | "desc";
 
 const PRIORITY_ORDER: Record<string, number> = { urgent: 0, high: 1, medium: 2, low: 3 };
 const ESTIMATE_ORDER: Record<string, number> = { XS: 0, S: 1, M: 2, L: 3, XL: 4 };
 
+<<<<<<< HEAD
 const TAG_COLORS: Record<string, string> = {
   blue: "bg-blue-100 text-blue-700",
   green: "bg-green-100 text-green-700",
@@ -80,13 +92,19 @@ function tagClass(color: string | null | undefined) {
   return TAG_COLORS[color ?? ""] ?? "bg-gray-100 text-gray-600";
 }
 
+=======
+>>>>>>> ab93bc6 (feat: add table view as third board view alongside kanban and graph)
 function formatDate(iso: string) {
   return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
 }
 
 export function TableView({ columns, onIssueClick, searchQuery }: TableViewProps) {
   const [sort, setSort] = useState<{ key: SortKey; dir: SortDir }>({ key: "number", dir: "asc" });
+<<<<<<< HEAD
   const [statusFilter, setStatusFilter] = useState<string>("active");
+=======
+  const [statusFilter, setStatusFilter] = useState<string>("all");
+>>>>>>> ab93bc6 (feat: add table view as third board view alongside kanban and graph)
 
   const allIssues = columns.flatMap((col) =>
     col.issues.map((issue) => ({ ...issue, statusName: col.name }))
@@ -94,8 +112,12 @@ export function TableView({ columns, onIssueClick, searchQuery }: TableViewProps
 
   const q = searchQuery?.toLowerCase() ?? "";
   const filtered = allIssues.filter((issue) => {
+<<<<<<< HEAD
     if (statusFilter === "active" && ARCHIVE_STATUSES.has(issue.statusName)) return false;
     if (statusFilter !== "active" && statusFilter !== "all" && issue.statusName !== statusFilter) return false;
+=======
+    if (statusFilter !== "all" && issue.statusName !== statusFilter) return false;
+>>>>>>> ab93bc6 (feat: add table view as third board view alongside kanban and graph)
     if (q) return issue.title.toLowerCase().includes(q) || (issue.description ?? "").toLowerCase().includes(q);
     return true;
   });
@@ -108,7 +130,11 @@ export function TableView({ columns, onIssueClick, searchQuery }: TableViewProps
       case "status": cmp = a.statusName.localeCompare(b.statusName); break;
       case "priority": cmp = (PRIORITY_ORDER[a.priority ?? "low"] ?? 3) - (PRIORITY_ORDER[b.priority ?? "low"] ?? 3); break;
       case "estimate": cmp = (ESTIMATE_ORDER[a.estimate ?? ""] ?? 99) - (ESTIMATE_ORDER[b.estimate ?? ""] ?? 99); break;
+<<<<<<< HEAD
       case "updated": cmp = new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime(); break;
+=======
+      case "created": cmp = new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(); break;
+>>>>>>> ab93bc6 (feat: add table view as third board view alongside kanban and graph)
     }
     return sort.dir === "asc" ? cmp : -cmp;
   });
@@ -133,7 +159,10 @@ export function TableView({ columns, onIssueClick, searchQuery }: TableViewProps
           onChange={(e) => setStatusFilter(e.target.value)}
           className="text-xs border border-gray-200 rounded px-2 py-1 bg-white text-gray-700"
         >
+<<<<<<< HEAD
           <option value="active">Active only</option>
+=======
+>>>>>>> ab93bc6 (feat: add table view as third board view alongside kanban and graph)
           <option value="all">All statuses</option>
           {statusNames.map((s) => <option key={s} value={s}>{s}</option>)}
         </select>
@@ -149,7 +178,11 @@ export function TableView({ columns, onIssueClick, searchQuery }: TableViewProps
                   ["status", "Status"],
                   ["priority", "Priority"],
                   ["estimate", "Estimate"],
+<<<<<<< HEAD
                   ["updated", "Updated"],
+=======
+                  ["created", "Created"],
+>>>>>>> ab93bc6 (feat: add table view as third board view alongside kanban and graph)
                 ] as [SortKey, string][]
               ).map(([key, label]) => (
                 <th
@@ -160,15 +193,22 @@ export function TableView({ columns, onIssueClick, searchQuery }: TableViewProps
                   {label}<SortIcon col={key} />
                 </th>
               ))}
+<<<<<<< HEAD
               <th className="text-left text-xs font-medium text-gray-500 px-3 py-2 border-b border-gray-200 whitespace-nowrap">
                 Tags
               </th>
+=======
+>>>>>>> ab93bc6 (feat: add table view as third board view alongside kanban and graph)
             </tr>
           </thead>
           <tbody>
             {sorted.length === 0 && (
               <tr>
+<<<<<<< HEAD
                 <td colSpan={7} className="text-center text-gray-400 text-sm py-12">No issues found</td>
+=======
+                <td colSpan={6} className="text-center text-gray-400 text-sm py-12">No issues found</td>
+>>>>>>> ab93bc6 (feat: add table view as third board view alongside kanban and graph)
               </tr>
             )}
             {sorted.map((issue) => (
@@ -177,6 +217,7 @@ export function TableView({ columns, onIssueClick, searchQuery }: TableViewProps
                 onClick={() => onIssueClick(issue)}
                 className="border-b border-gray-100 hover:bg-blue-50 cursor-pointer transition-colors"
               >
+<<<<<<< HEAD
                 <td className="px-3 py-1.5 text-gray-400 text-xs whitespace-nowrap">
                   #{issue.issueNumber ?? "—"}
                 </td>
@@ -184,17 +225,34 @@ export function TableView({ columns, onIssueClick, searchQuery }: TableViewProps
                   <span className="font-medium text-gray-900 truncate block">{issue.title}</span>
                 </td>
                 <td className="px-3 py-1.5 whitespace-nowrap">
+=======
+                <td className="px-3 py-2 text-gray-400 text-xs whitespace-nowrap">
+                  #{issue.issueNumber ?? "—"}
+                </td>
+                <td className="px-3 py-2 max-w-xs">
+                  <span className="font-medium text-gray-900 line-clamp-1">{issue.title}</span>
+                  {issue.description && (
+                    <span className="block text-xs text-gray-400 line-clamp-1">{issue.description}</span>
+                  )}
+                </td>
+                <td className="px-3 py-2 whitespace-nowrap">
+>>>>>>> ab93bc6 (feat: add table view as third board view alongside kanban and graph)
                   <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_CLASS[issue.statusName] ?? "text-gray-600 bg-gray-100"}`}>
                     {issue.statusName}
                   </span>
                 </td>
+<<<<<<< HEAD
                 <td className="px-3 py-1.5 whitespace-nowrap">
+=======
+                <td className="px-3 py-2 whitespace-nowrap">
+>>>>>>> ab93bc6 (feat: add table view as third board view alongside kanban and graph)
                   {issue.priority ? (
                     <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${PRIORITY_CLASS[issue.priority] ?? ""}`}>
                       {PRIORITY_LABEL[issue.priority] ?? issue.priority}
                     </span>
                   ) : <span className="text-gray-300">—</span>}
                 </td>
+<<<<<<< HEAD
                 <td className="px-3 py-1.5 whitespace-nowrap text-xs text-gray-600">
                   {issue.estimate ?? <span className="text-gray-300">—</span>}
                 </td>
@@ -209,12 +267,20 @@ export function TableView({ columns, onIssueClick, searchQuery }: TableViewProps
                       </span>
                     ))}
                   </div>
+=======
+                <td className="px-3 py-2 whitespace-nowrap text-xs text-gray-600">
+                  {issue.estimate ?? <span className="text-gray-300">—</span>}
+                </td>
+                <td className="px-3 py-2 whitespace-nowrap text-xs text-gray-500">
+                  {formatDate(issue.createdAt)}
+>>>>>>> ab93bc6 (feat: add table view as third board view alongside kanban and graph)
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
+<<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
 =======
@@ -331,6 +397,8 @@ export function TableView({ columns, onIssueClick, searchQuery }: TableViewProps
 >>>>>>> 9878a53 (feat: add table view as third board view alongside kanban and graph)
 =======
 >>>>>>> b06ea29 (feat: add table view as third board view alongside board and graph)
+=======
+>>>>>>> ab93bc6 (feat: add table view as third board view alongside kanban and graph)
     </div>
   );
 }
