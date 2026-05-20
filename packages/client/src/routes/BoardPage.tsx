@@ -278,6 +278,7 @@ export function BoardPage() {
   const [searchQuery, setSearchQuery] = useState("");
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
   const [blockedFilter, setBlockedFilter] = useState(false);
 =======
   const [priorityFilter, setPriorityFilter] = useState("");
@@ -285,6 +286,12 @@ export function BoardPage() {
 =======
   const [priorityFilter, setPriorityFilter] = useState("");
 >>>>>>> 029ede6 (feat: remove blocked filter from board main page)
+=======
+  const [priorityFilter, setPriorityFilter] = useState("");
+=======
+  const [blockedFilter, setBlockedFilter] = useState(false);
+>>>>>>> 5651f2d (feat: remove priority filter from frontend UI)
+>>>>>>> 46e7ac8 (feat: remove priority filter from frontend UI)
   const [showSettings, setShowSettings] = useState(false);
   const [showQuickTasks, setShowQuickTasks] = useState(false);
   const [showWorktreeOverview, setShowWorktreeOverview] = useState(false);
@@ -679,6 +686,7 @@ export function BoardPage() {
         issues: col.issues.filter((issue) => {
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
           if (blockedFilter && !(issue as IssueWithStatus & { isBlocked?: boolean }).isBlocked) return false;
 =======
           if (priorityFilter && issue.priority !== priorityFilter) return false;
@@ -686,6 +694,12 @@ export function BoardPage() {
 =======
           if (priorityFilter && issue.priority !== priorityFilter) return false;
 >>>>>>> 029ede6 (feat: remove blocked filter from board main page)
+=======
+          if (priorityFilter && issue.priority !== priorityFilter) return false;
+=======
+          if (blockedFilter && !(issue as IssueWithStatus & { isBlocked?: boolean }).isBlocked) return false;
+>>>>>>> 5651f2d (feat: remove priority filter from frontend UI)
+>>>>>>> 46e7ac8 (feat: remove priority filter from frontend UI)
           if (searchQuery) {
             const q = searchQuery.toLowerCase();
             return (
@@ -697,6 +711,7 @@ export function BoardPage() {
         }),
       })),
     [columns, searchQuery],
+<<<<<<< HEAD
   );
 
   // "AI Reviewed" = tickets needing human attention (manual merge).
@@ -707,6 +722,8 @@ export function BoardPage() {
       columns.some((col) => col.name === "AI Reviewed" && col.issues.length > 0) ||
       (autoReview && !autoMerge),
     [columns, autoReview, autoMerge],
+=======
+>>>>>>> 46e7ac8 (feat: remove priority filter from frontend UI)
   );
 
   const activeColumns = useMemo(
