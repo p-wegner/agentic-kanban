@@ -5,13 +5,23 @@ interface Project {
   name: string;
 }
 
+interface RegisterOptions {
+  repoPath: string;
+  gitignoreTemplate: string;
+  generateReadme: boolean;
+}
+
 interface LayoutProps {
   children: ReactNode;
   projects?: Project[];
   activeProjectId?: string | null;
   onProjectChange?: (id: string) => void;
+<<<<<<< HEAD
   onRegisterProject?: (repoPath: string) => Promise<void>;
   onCreateProject?: (name: string, path: string) => Promise<void>;
+=======
+  onRegisterProject?: (opts: RegisterOptions) => Promise<void>;
+>>>>>>> f36a871 (feat: add optional README and .gitignore template to project creation dialog)
   searchQuery?: string;
   onSearchChange?: (query: string) => void;
   priorityFilter?: string;
@@ -37,6 +47,8 @@ export function Layout({
   const [showRegister, setShowRegister] = useState(false);
   const [modalTab, setModalTab] = useState<"import" | "create">("import");
   const [repoPath, setRepoPath] = useState("");
+  const [gitignoreTemplate, setGitignoreTemplate] = useState("");
+  const [generateReadme, setGenerateReadme] = useState(false);
   const [registering, setRegistering] = useState(false);
   const [registerError, setRegisterError] = useState<string | null>(null);
   const [createName, setCreateName] = useState("");
@@ -51,9 +63,11 @@ export function Layout({
     setRegistering(true);
     setRegisterError(null);
     try {
-      await onRegisterProject?.(repoPath.trim());
+      await onRegisterProject?.({ repoPath: repoPath.trim(), gitignoreTemplate, generateReadme });
       setShowRegister(false);
       setRepoPath("");
+      setGitignoreTemplate("");
+      setGenerateReadme(false);
     } catch (err) {
       setRegisterError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -82,9 +96,14 @@ export function Layout({
     setRegisterError(null);
     setCreateError(null);
     setRepoPath("");
+<<<<<<< HEAD
     setCreateName("");
     setCreatePath("");
     setModalTab("import");
+=======
+    setGitignoreTemplate("");
+    setGenerateReadme(false);
+>>>>>>> f36a871 (feat: add optional README and .gitignore template to project creation dialog)
     setShowRegister(true);
     setTimeout(() => inputRef.current?.focus(), 50);
   }
@@ -196,6 +215,7 @@ export function Layout({
           onClick={(e) => { if (e.target === e.currentTarget) setShowRegister(false); }}
         >
           <div className="bg-white rounded-lg shadow-xl w-full max-w-md mx-4 p-6">
+<<<<<<< HEAD
             <h2 className="text-lg font-semibold text-gray-900 mb-4">Add Project</h2>
             <div className="flex border-b border-gray-200 mb-4">
               <button
@@ -305,6 +325,74 @@ export function Layout({
                 </div>
               </form>
             )}
+=======
+            <h2 className="text-lg font-semibold text-gray-900 mb-4">Register Project</h2>
+            <form onSubmit={handleRegisterSubmit} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Repository path
+                </label>
+                <input
+                  ref={inputRef}
+                  type="text"
+                  value={repoPath}
+                  onChange={(e) => setRepoPath(e.target.value)}
+                  placeholder="C:/path/to/repo"
+                  className="w-full text-sm border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                />
+                <p className="mt-1 text-xs text-gray-500">
+                  Absolute path to a git repository. Branch and remote URL are auto-detected.
+                </p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  .gitignore template
+                </label>
+                <select
+                  value={gitignoreTemplate}
+                  onChange={(e) => setGitignoreTemplate(e.target.value)}
+                  className="w-full text-sm border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                >
+                  <option value="">None</option>
+                  <option value="node">Node</option>
+                  <option value="python">Python</option>
+                  <option value="java">Java</option>
+                  <option value="go">Go</option>
+                  <option value="rust">Rust</option>
+                  <option value="ruby">Ruby</option>
+                  <option value="dotnet">.NET / C#</option>
+                </select>
+              </div>
+              <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={generateReadme}
+                  onChange={(e) => setGenerateReadme(e.target.checked)}
+                  className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                />
+                Generate README.md
+              </label>
+              {registerError && (
+                <p className="text-sm text-red-600">{registerError}</p>
+              )}
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowRegister(false)}
+                  className="px-3 py-1.5 text-sm text-gray-700 border border-gray-300 rounded-md hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={registering || !repoPath.trim()}
+                  className="px-3 py-1.5 text-sm text-white bg-blue-600 rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {registering ? "Registering…" : "Register"}
+                </button>
+              </div>
+            </form>
+>>>>>>> f36a871 (feat: add optional README and .gitignore template to project creation dialog)
           </div>
         </div>
       )}
