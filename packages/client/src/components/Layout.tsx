@@ -16,12 +16,13 @@ interface LayoutProps {
   projects?: Project[];
   activeProjectId?: string | null;
   onProjectChange?: (id: string) => void;
-  onRegisterProject?: (repoPath: string) => Promise<void>;
+  onRegisterProject?: (options: { repoPath: string; gitignoreTemplate: string; generateReadme: boolean }) => Promise<void>;
   onCreateProject?: (name: string, path: string, gitignoreTemplate: string, generateReadme: boolean) => Promise<void>;
   searchQuery?: string;
   onSearchChange?: (query: string) => void;
   priorityFilter?: string;
   onPriorityFilterChange?: (priority: string) => void;
+  onAllWorkspacesClick?: () => void;
   onWorktreeOverviewClick?: () => void;
   onSettingsClick?: () => void;
 }
@@ -37,6 +38,7 @@ export function Layout({
   onSearchChange,
   priorityFilter = "",
   onPriorityFilterChange,
+  onAllWorkspacesClick,
   onWorktreeOverviewClick,
   onSettingsClick,
 }: LayoutProps) {
@@ -176,6 +178,18 @@ export function Layout({
               <option value="medium">Medium</option>
               <option value="low">Low</option>
             </select>
+            <button
+              onClick={onAllWorkspacesClick}
+              className="p-1.5 text-gray-400 hover:text-gray-600 rounded-md hover:bg-gray-100"
+              title="All Workspaces"
+            >
+              <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <rect x="3" y="3" width="7" height="7" rx="1" />
+                <rect x="14" y="3" width="7" height="7" rx="1" />
+                <rect x="3" y="14" width="7" height="7" rx="1" />
+                <rect x="14" y="14" width="7" height="7" rx="1" />
+              </svg>
+            </button>
             <button
               onClick={onWorktreeOverviewClick}
               className="p-1.5 text-gray-400 hover:text-gray-600 rounded-md hover:bg-gray-100"

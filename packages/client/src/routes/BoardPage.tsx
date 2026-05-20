@@ -10,6 +10,7 @@ import type { CreateIssueFormState } from "../components/CreateIssueForm.js";
 import { IssueDetailPanel } from "../components/IssueDetailPanel.js";
 import { WorkspacePanel } from "../components/WorkspacePanel.js";
 import { WorktreeOverview } from "../components/WorktreeOverview.js";
+import { AllWorkspacesPanel } from "../components/AllWorkspacesPanel.js";
 import { SettingsPanel } from "../components/SettingsPanel.js";
 import { SkeletonBoard } from "../components/SkeletonBoard.js";
 import { ToastContainer, showToast } from "../components/Toast.js";
@@ -56,6 +57,7 @@ export function BoardPage() {
   const [showSettings, setShowSettings] = useState(false);
   const [showQuickTasks, setShowQuickTasks] = useState(false);
   const [showWorktreeOverview, setShowWorktreeOverview] = useState(false);
+  const [showAllWorkspaces, setShowAllWorkspaces] = useState(false);
   const [showCommandPalette, setShowCommandPalette] = useState(false);
   const [showShortcutHelp, setShowShortcutHelp] = useState(false);
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(
@@ -497,6 +499,10 @@ export function BoardPage() {
           setShowCommandPalette(false);
           return;
         }
+        if (showAllWorkspaces) {
+          setShowAllWorkspaces(false);
+          return;
+        }
         if (showWorktreeOverview) {
           setShowWorktreeOverview(false);
           return;
@@ -540,7 +546,7 @@ export function BoardPage() {
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [searchQuery, showCommandPalette, showWorktreeOverview, showShortcutHelp, filteredColumns, columns]);
+  }, [searchQuery, showCommandPalette, showAllWorkspaces, showWorktreeOverview, showShortcutHelp, filteredColumns, columns]);
 
   // Register command palette actions
   useEffect(() => {
@@ -591,6 +597,15 @@ export function BoardPage() {
       icon: "⚙",
       category: "settings",
       handler: () => setShowSettings(true),
+    }));
+
+    unregisters.push(registerAction({
+      id: "view-all-workspaces",
+      label: "All Workspaces",
+      description: "View all workspaces with status, diff stats, and session activity",
+      icon: "⊞",
+      category: "navigation",
+      handler: () => setShowAllWorkspaces(true),
     }));
 
     unregisters.push(registerAction({
@@ -680,6 +695,7 @@ export function BoardPage() {
       onRegisterProject={handleRegisterProject}
       onCreateProject={handleCreateProject}
       onSettingsClick={() => setShowSettings(true)}
+      onAllWorkspacesClick={() => setShowAllWorkspaces(true)}
       onWorktreeOverviewClick={() => setShowWorktreeOverview(true)}
     >
       {error && (
@@ -884,6 +900,16 @@ export function BoardPage() {
           projectId={activeProjectId}
           onClose={() => setShowQuickTasks(false)}
           onLaunched={() => refetchBoard()}
+        />
+      )}
+      {showAllWorkspaces && (
+        <AllWorkspacesPanel
+          columns={columns}
+          onClose={() => setShowAllWorkspaces(false)}
+          onIssueClick={(issue) => {
+            setSelectedIssue(issue);
+            setShowAllWorkspaces(false);
+          }}
         />
       )}
       {showWorktreeOverview && activeProjectId && (
