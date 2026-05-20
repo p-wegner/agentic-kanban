@@ -44,6 +44,7 @@ export function WorktreeOverview({ projectId, onClose, onIssueClick, onWorkspace
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
+  const [opening, setOpening] = useState<string | null>(null);
 
   const loadWorktrees = useCallback(async () => {
     try {
@@ -61,6 +62,20 @@ export function WorktreeOverview({ projectId, onClose, onIssueClick, onWorkspace
     }
     load();
   }, [loadWorktrees]);
+
+  async function handleOpenFolder(wt: WorktreeInfo) {
+    setOpening(wt.path);
+    try {
+      await apiFetch(`/api/projects/${projectId}/worktrees/open`, {
+        method: "POST",
+        body: JSON.stringify({ path: wt.path }),
+      });
+    } catch {
+      showToast("Failed to open folder", "error");
+    } finally {
+      setOpening(null);
+    }
+  }
 
   async function handleDelete(wt: WorktreeInfo) {
     const label = wt.workspace
@@ -139,6 +154,16 @@ export function WorktreeOverview({ projectId, onClose, onIssueClick, onWorkspace
                         {mainWorktree.workspace.status}
                       </span>
                     )}
+                    <button
+                      onClick={() => handleOpenFolder(mainWorktree)}
+                      disabled={opening === mainWorktree.path}
+                      className="ml-auto p-1 text-gray-300 hover:text-blue-500 rounded hover:bg-blue-50 disabled:opacity-50"
+                      title="Open folder in explorer"
+                    >
+                      <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+                      </svg>
+                    </button>
                   </div>
                   <div className="text-xs text-gray-400 font-mono">
                     {truncatePath(mainWorktree.path, 60)}
@@ -183,9 +208,19 @@ export function WorktreeOverview({ projectId, onClose, onIssueClick, onWorkspace
                         </span>
                       )}
                       <button
+                        onClick={() => handleOpenFolder(wt)}
+                        disabled={opening === wt.path}
+                        className="ml-auto p-1 text-gray-300 hover:text-blue-500 rounded hover:bg-blue-50 disabled:opacity-50"
+                        title="Open folder in explorer"
+                      >
+                        <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+                        </svg>
+                      </button>
+                      <button
                         onClick={() => handleDelete(wt)}
                         disabled={deleting === wt.path}
-                        className="ml-auto p-1 text-gray-300 hover:text-red-500 rounded hover:bg-red-50 disabled:opacity-50"
+                        className="p-1 text-gray-300 hover:text-red-500 rounded hover:bg-red-50 disabled:opacity-50"
                         title="Delete worktree"
                       >
                         <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
