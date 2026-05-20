@@ -14,8 +14,9 @@ export function registerUpdateIssue(server: McpServer) {
       description: z.string().optional().describe("New description"),
       statusName: z.string().optional().describe("Move to status column by name (e.g., 'In Progress', 'Done')"),
       priority: z.enum(["low", "medium", "high", "critical"]).optional().describe("New priority"),
+      estimate: z.enum(["XS", "S", "M", "L", "XL"]).nullable().optional().describe("Size estimate (XS/S/M/L/XL), or null to clear"),
     },
-    async ({ issueId, title, description, statusName, priority }) => {
+    async ({ issueId, title, description, statusName, priority, estimate }) => {
       const existing = await db.select().from(schema.issues).where(eq(schema.issues.id, issueId)).limit(1);
       if (existing.length === 0) {
         return { content: [{ type: "text" as const, text: `Issue ${issueId} not found` }] };
@@ -27,6 +28,7 @@ export function registerUpdateIssue(server: McpServer) {
       if (title !== undefined) updates.title = title;
       if (description !== undefined) updates.description = description;
       if (priority !== undefined) updates.priority = priority;
+      if (estimate !== undefined) updates.estimate = estimate;
 
       if (statusName) {
         const statuses = await db.select().from(schema.projectStatuses)
