@@ -59,12 +59,16 @@ export function Layout({
   const [createError, setCreateError] = useState<string | null>(null);
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
   const createNameInvalid = /[/\\<>:"|?*\x00]/.test(createName);
 =======
 >>>>>>> 41a314b (feat: implement create project flow (WIP - UI + backend route))
 =======
   const createNameInvalid = !createPath.trim() && /[/\\<>:"|?*\x00]/.test(createName);
 >>>>>>> 7695053 (feat: validate create-project edge cases (WIP))
+=======
+  const createNameInvalid = /[/\\<>:"|?*\x00]/.test(createName);
+>>>>>>> f6d1a48 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
   const inputRef = useRef<HTMLInputElement>(null);
 
   async function handleRegisterSubmit(e: React.FormEvent) {
