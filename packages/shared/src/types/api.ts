@@ -34,6 +34,8 @@ export interface ProjectResponse {
   updatedAt: string;
 }
 
+export type IssueEstimate = "XS" | "S" | "M" | "L" | "XL";
+
 export interface CreateIssueRequest {
   title: string;
   description?: string;
@@ -41,6 +43,7 @@ export interface CreateIssueRequest {
   statusId: string;
   projectId: string;
   skipAutoReview?: boolean;
+  estimate?: IssueEstimate;
 }
 
 export interface UpdateIssueRequest {
@@ -49,6 +52,7 @@ export interface UpdateIssueRequest {
   priority?: "low" | "medium" | "high" | "critical";
   statusId?: string;
   sortOrder?: number;
+  estimate?: IssueEstimate | null;
 }
 
 export interface MainWorkspaceInfo {
@@ -88,6 +92,7 @@ export interface IssueWithStatus {
   workspaceSummary?: WorkspaceSummary;
   isBlocked?: boolean;
   skipAutoReview?: boolean;
+  estimate?: string | null;
 }
 
 export interface StatusWithIssues {

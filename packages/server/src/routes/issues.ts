@@ -37,6 +37,7 @@ export function createIssuesRoute(database: Database = db, options?: { boardEven
         updatedAt: issues.updatedAt,
         statusChangedAt: issues.statusChangedAt,
         skipAutoReview: issues.skipAutoReview,
+        estimate: issues.estimate,
         statusName: projectStatuses.name,
       })
       .from(issues)
@@ -349,6 +350,7 @@ Only include genuinely useful dependencies, not just topical similarity.`;
       description: body.description ?? null,
       priority: body.priority ?? "medium",
       skipAutoReview: body.skipAutoReview ?? false,
+      estimate: body.estimate ?? null,
       sortOrder: body.sortOrder ?? 0,
       statusId,
       projectId: body.projectId,
@@ -495,6 +497,7 @@ Only include genuinely useful dependencies, not just topical similarity.`;
     if (body.priority !== undefined) updates.priority = body.priority;
     if (body.statusId !== undefined) { updates.statusId = body.statusId; updates.statusChangedAt = now; }
     if (body.sortOrder !== undefined) updates.sortOrder = body.sortOrder;
+    if (body.estimate !== undefined) updates.estimate = body.estimate;
 
     await database.update(issues).set(updates).where(eq(issues.id, id));
 
