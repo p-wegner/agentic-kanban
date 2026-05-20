@@ -82,6 +82,7 @@ export function Layout({
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
   const createNameInvalid = /[/\\<>:"|?*\x00]/.test(createName);
 =======
 >>>>>>> 41a314b (feat: implement create project flow (WIP - UI + backend route))
@@ -93,6 +94,9 @@ export function Layout({
 >>>>>>> f6d1a48 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
 =======
 >>>>>>> 73b13d2 (feat: implement create project flow (WIP - UI + backend route))
+=======
+  const createNameInvalid = !createPath.trim() && /[/\\<>:"|?*\x00]/.test(createName);
+>>>>>>> bef4ff5 (feat: validate create-project edge cases (WIP))
   const inputRef = useRef<HTMLInputElement>(null);
 
   async function handleRegisterSubmit(e: React.FormEvent) {
@@ -368,6 +372,7 @@ export function Layout({
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
                     className={`w-full text-sm border rounded-md px-3 py-2 focus:outline-none focus:ring-1 ${createNameInvalid ? "border-red-400 focus:ring-red-400 focus:border-red-400" : "border-gray-300 focus:ring-blue-500 focus:border-blue-500"}`}
                     autoFocus
                   />
@@ -392,6 +397,14 @@ export function Layout({
                     autoFocus
                   />
 >>>>>>> 73b13d2 (feat: implement create project flow (WIP - UI + backend route))
+=======
+                    className={`w-full text-sm border rounded-md px-3 py-2 focus:outline-none focus:ring-1 ${createNameInvalid ? "border-red-400 focus:ring-red-400 focus:border-red-400" : "border-gray-300 focus:ring-blue-500 focus:border-blue-500"}`}
+                    autoFocus
+                  />
+                  {createNameInvalid && (
+                    <p className="mt-1 text-xs text-red-600">Name cannot contain: / \ &lt; &gt; : " | ? *</p>
+                  )}
+>>>>>>> bef4ff5 (feat: validate create-project edge cases (WIP))
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -424,6 +437,7 @@ export function Layout({
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
                     disabled={creating || !createName.trim() || createNameInvalid}
 =======
                     disabled={creating || !createName.trim()}
@@ -434,6 +448,9 @@ export function Layout({
 =======
                     disabled={creating || !createName.trim()}
 >>>>>>> 73b13d2 (feat: implement create project flow (WIP - UI + backend route))
+=======
+                    disabled={creating || !createName.trim() || createNameInvalid}
+>>>>>>> bef4ff5 (feat: validate create-project edge cases (WIP))
                     className="px-3 py-1.5 text-sm text-white bg-blue-600 rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     {creating ? "Creating…" : "Create project"}
