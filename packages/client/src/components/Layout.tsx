@@ -155,8 +155,8 @@ export function Layout({
                 type="text"
                 value={searchQuery}
                 onChange={(e) => onSearchChange?.(e.target.value)}
-                placeholder='Search issues... (press "/")'
-                className="pl-8 pr-3 py-1.5 text-sm border border-gray-300 rounded-md w-48 sm:w-64 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                placeholder='Search issues... ("/")'
+                className="pl-8 pr-3 py-1.5 text-sm border border-gray-300 rounded-md w-32 sm:w-48 md:w-64 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
               />
               {searchQuery && (
                 <button
