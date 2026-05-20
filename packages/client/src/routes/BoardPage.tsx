@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Layout } from "../components/Layout.js";
 import { GraphView } from "../components/GraphView.js";
+import { TableView } from "../components/TableView.js";
 import { BoardColumn } from "../components/BoardColumn.js";
 import { CompletedGrid } from "../components/CompletedGrid.js";
 import { BoardStats } from "../components/BoardStats.js";
@@ -252,7 +253,7 @@ export function BoardPage() {
   const [approvalRequests, setApprovalRequests] = useState<ApprovalRequest[]>([]);
   const pendingBoardRefreshRef = useRef(false);
   const [expandedCreatePanel, setExpandedCreatePanel] = useState<{ statusId: string; statusName: string; state: Partial<CreateIssueFormState> } | null>(null);
-  const [viewMode, setViewMode] = useState<"kanban" | "graph">("kanban");
+  const [viewMode, setViewMode] = useState<"kanban" | "graph" | "table">("kanban");
   const [dynamicColumnScaling, setDynamicColumnScaling] = useState(false);
   const [autoMonitor, setAutoMonitor] = useState(false);
   const [monitorStatus, setMonitorStatus] = useState<MonitorStatus | null>(null);
@@ -954,8 +955,12 @@ export function BoardPage() {
 >>>>>>> e0c9cf4 (feat: make kanban board truly responsive for mobile)
 =======
       <div className="flex flex-col gap-3 p-4 h-full overflow-hidden">
+<<<<<<< HEAD
         <div className="flex items-center gap-3">
 >>>>>>> 8f2f90d (revert: remove table view and revert mobile-responsive board styling)
+=======
+        <div className="flex items-center gap-2 flex-wrap">
+>>>>>>> 9878a53 (feat: add table view as third board view alongside kanban and graph)
           <BoardStats
             activeColumns={activeColumns}
             archiveColumns={archiveColumns}
@@ -1033,16 +1038,20 @@ export function BoardPage() {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 >>>>>>> e318eb3 (feat: add table view as third board view alongside kanban and graph)
 =======
 >>>>>>> 770082f (feat: add table view as third board view alongside board and graph)
+=======
+>>>>>>> 9878a53 (feat: add table view as third board view alongside kanban and graph)
             <button
               onClick={() => setViewMode("table")}
               className={`px-2.5 py-1 text-xs rounded flex items-center gap-1.5 transition-colors ${viewMode === "table" ? "bg-blue-600 text-white" : "text-gray-600 hover:bg-gray-100"}`}
               title="Table view"
             >
               <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+<<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
@@ -1057,10 +1066,13 @@ export function BoardPage() {
 =======
 >>>>>>> 5d43535 (revert: remove table view and revert mobile-responsive board styling)
 =======
+=======
+>>>>>>> 9878a53 (feat: add table view as third board view alongside kanban and graph)
                 <path d="M3 6h18M3 12h18M3 18h18M8 6v12" />
               </svg>
               Table
             </button>
+<<<<<<< HEAD
 >>>>>>> e318eb3 (feat: add table view as third board view alongside kanban and graph)
 =======
                 <rect x="3" y="3" width="18" height="18" rx="2" />
@@ -1071,6 +1083,8 @@ export function BoardPage() {
 >>>>>>> 770082f (feat: add table view as third board view alongside board and graph)
 =======
 >>>>>>> 8f2f90d (revert: remove table view and revert mobile-responsive board styling)
+=======
+>>>>>>> 9878a53 (feat: add table view as third board view alongside kanban and graph)
           </div>
         </div>
         {viewMode === "graph" && activeProjectId ? (
@@ -1087,10 +1101,13 @@ export function BoardPage() {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 >>>>>>> e318eb3 (feat: add table view as third board view alongside kanban and graph)
 =======
 >>>>>>> 770082f (feat: add table view as third board view alongside board and graph)
+=======
+>>>>>>> 9878a53 (feat: add table view as third board view alongside kanban and graph)
         {viewMode === "table" && (
           <TableView
             columns={columns}
@@ -1103,8 +1120,11 @@ export function BoardPage() {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 >>>>>>> e318eb3 (feat: add table view as third board view alongside kanban and graph)
+=======
+>>>>>>> 9878a53 (feat: add table view as third board view alongside kanban and graph)
         {viewMode === "kanban" && activeColumns.length > 1 && (
           <div className="flex sm:hidden gap-1 overflow-x-auto scrollbar-hide shrink-0">
             {activeColumns.map((col) => (
@@ -1122,12 +1142,15 @@ export function BoardPage() {
           </div>
         )}
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 >>>>>>> 7c9ead0 (feat: add table view as third board view alongside board and graph)
 =======
 >>>>>>> e318eb3 (feat: add table view as third board view alongside kanban and graph)
 =======
 >>>>>>> 770082f (feat: add table view as third board view alongside board and graph)
+=======
+>>>>>>> 9878a53 (feat: add table view as third board view alongside kanban and graph)
         {viewMode === "kanban" && <div className="flex gap-4 flex-1 min-h-0 overflow-x-auto board-columns-scroll">
 =======
         {viewMode === "kanban" && <div className="flex gap-2 sm:gap-4 flex-1 min-h-0 overflow-x-auto board-columns-scroll">
