@@ -546,9 +546,8 @@ export function IssueDetailPanel({
             </div>
           )}
 
-          {/* Tags section - always visible */}
-          {!editing && (
-            <div>
+          {/* Tags section - visible in both view and edit mode */}
+          <div>
               <label className="text-xs font-medium text-gray-600 block mb-1">
                 Tags
               </label>
@@ -604,11 +603,9 @@ export function IssueDetailPanel({
                 )}
               </div>
             </div>
-          )}
 
           {/* Dependencies section */}
-          {!editing && (
-            <div>
+          <div>
               <div className="flex items-center justify-between mb-1">
                 <label className="text-xs font-medium text-gray-600">
                   Dependencies
@@ -853,7 +850,6 @@ export function IssueDetailPanel({
                 ) : null;
               })()}
             </div>
-          )}
 
           {/* Follow-up task creation */}
           <div className="pt-2">
