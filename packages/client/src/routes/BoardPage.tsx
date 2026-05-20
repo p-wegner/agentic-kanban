@@ -228,10 +228,10 @@ export function BoardPage() {
     }
   }
 
-  async function handleRegisterProject(repoPath: string) {
+  async function handleRegisterProject({ repoPath, gitignoreTemplate, generateReadme }: { repoPath: string; gitignoreTemplate: string; generateReadme: boolean }) {
     const result = await apiFetch<{ id: string; name: string; error?: string }>(
       "/api/projects",
-      { method: "POST", body: JSON.stringify({ repoPath }) },
+      { method: "POST", body: JSON.stringify({ repoPath, gitignoreTemplate: gitignoreTemplate || undefined, generateReadme: generateReadme || undefined }) },
     );
     if (result.error) throw new Error(result.error);
     await loadProjects();
