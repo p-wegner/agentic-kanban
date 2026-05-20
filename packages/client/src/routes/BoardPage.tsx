@@ -42,7 +42,11 @@ interface Project {
 
 const ARCHIVE_STATUS_NAMES = new Set(["Done", "Cancelled"]);
 
+<<<<<<< HEAD
 type MonitorAction = { at: string; action: "relaunch" | "merge" | "nudge" | "mark_idle" | "mark_dead"; workspaceId: string; issueId: string };
+=======
+type MonitorAction = { at: string; action: "relaunch" | "merge" | "nudge" | "mark_idle" | "mark_dead"; workspaceId: string };
+>>>>>>> 01516bd (feat: add board monitor visualization panel)
 type MonitorStatus = { enabled: boolean; intervalMin: number; active: boolean; lastRun: { at: string; relaunched: number; merged: number; nudged: number } | null; nextRunAt: string | null; recentActions: MonitorAction[] };
 
 const ACTION_LABELS: Record<MonitorAction["action"], { label: string; color: string }> = {
@@ -53,6 +57,7 @@ const ACTION_LABELS: Record<MonitorAction["action"], { label: string; color: str
   mark_dead:{ label: "Marked dead",      color: "text-red-500" },
 };
 
+<<<<<<< HEAD
 function MonitorPopover({ status, onClose, onOpenWorkspace, columns }: { status: MonitorStatus | null; onClose: () => void; onOpenWorkspace: (workspaceId: string, issueId: string) => void; columns: StatusWithIssues[] }) {
   const [now, setNow] = useState(Date.now());
   const issueMap = useMemo(() => {
@@ -60,6 +65,10 @@ function MonitorPopover({ status, onClose, onOpenWorkspace, columns }: { status:
     for (const col of columns) for (const issue of col.issues) m.set(issue.id, issue);
     return m;
   }, [columns]);
+=======
+function MonitorPopover({ status, onClose }: { status: MonitorStatus | null; onClose: () => void }) {
+  const [now, setNow] = useState(Date.now());
+>>>>>>> 01516bd (feat: add board monitor visualization panel)
 
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 1000);
@@ -144,6 +153,7 @@ function MonitorPopover({ status, onClose, onOpenWorkspace, columns }: { status:
           <div className="space-y-1 max-h-48 overflow-y-auto">
             {status.recentActions.map((a, i) => {
               const meta = ACTION_LABELS[a.action];
+<<<<<<< HEAD
               const issue = issueMap.get(a.issueId);
               const label = issue ? `#${issue.issueNumber} ${issue.title}` : a.workspaceId.slice(0, 8);
               return (
@@ -155,6 +165,12 @@ function MonitorPopover({ status, onClose, onOpenWorkspace, columns }: { status:
                     onClick={() => { onOpenWorkspace(a.workspaceId, a.issueId); onClose(); }}
                     title={issue ? issue.title : a.workspaceId}
                   >{label}</button>
+=======
+              return (
+                <div key={i} className="flex items-center justify-between gap-2">
+                  <span className={`${meta.color} font-medium`}>{meta.label}</span>
+                  <span className="text-gray-400 shrink-0 font-mono" style={{ fontSize: "10px" }}>{a.workspaceId.slice(0, 8)}</span>
+>>>>>>> 01516bd (feat: add board monitor visualization panel)
                   <span className="text-gray-400 shrink-0">{formatAge(a.at)}</span>
                 </div>
               );
@@ -916,6 +932,7 @@ export function BoardPage() {
                 <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
                 Monitor
               </button>
+<<<<<<< HEAD
               {showMonitorPopover && <MonitorPopover
                 status={monitorStatus}
                 onClose={() => setShowMonitorPopover(false)}
@@ -925,6 +942,9 @@ export function BoardPage() {
                   if (issue) handleManageWorkspaces(issue, workspaceId);
                 }}
               />}
+=======
+              {showMonitorPopover && <MonitorPopover status={monitorStatus} onClose={() => setShowMonitorPopover(false)} />}
+>>>>>>> 01516bd (feat: add board monitor visualization panel)
             </div>
           )}
           <div className="flex items-center gap-1 border border-gray-200 rounded-md p-0.5 bg-white shrink-0">
