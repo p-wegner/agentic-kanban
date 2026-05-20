@@ -1,9 +1,10 @@
 import { Hono } from "hono";
 import { db } from "../db/index.js";
-import { agentSkills } from "@agentic-kanban/shared/schema";
+import { agentSkills, preferences, projects } from "@agentic-kanban/shared/schema";
 import { eq, and, isNull, sql } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import type { Database } from "../db/index.js";
+import { writeAgentSkillFile, isSkillInstalledLocally } from "@agentic-kanban/shared/lib/agent-skill-files";
 
 export function createAgentSkillsRoute(database: Database = db) {
   const router = new Hono();
@@ -122,6 +123,32 @@ export function createAgentSkillsRoute(database: Database = db) {
     return c.json(updated[0]);
   });
 
+  // GET /api/agent-skills/:id/install-status — check if skill is installed locally in the active project
+  router.get("/:id/install-status", async (c) => {
+    const id = c.req.param("id");
+    const rows = await database.select().from(agentSkills).where(eq(agentSkills.id, id)).limit(1);
+    if (rows.length === 0) return c.json({ error: "Skill not found" }, 404);
+
+    const repoPath = await getActiveProjectRepoPath(database);
+    if (!repoPath) return c.json({ installed: false, repoPath: null });
+
+    const installed = await isSkillInstalledLocally(repoPath, rows[0].name);
+    return c.json({ installed, repoPath });
+  });
+
+  // POST /api/agent-skills/:id/install — write skill as SKILL.md into active project's .claude/skills/
+  router.post("/:id/install", async (c) => {
+    const id = c.req.param("id");
+    const rows = await database.select().from(agentSkills).where(eq(agentSkills.id, id)).limit(1);
+    if (rows.length === 0) return c.json({ error: "Skill not found" }, 404);
+
+    const repoPath = await getActiveProjectRepoPath(database);
+    if (!repoPath) return c.json({ error: "No active project found" }, 400);
+
+    await writeAgentSkillFile(repoPath, rows[0]);
+    return c.json({ installed: true, repoPath });
+  });
+
   // DELETE /api/agent-skills/:id — delete a skill
   router.delete("/:id", async (c) => {
     const id = c.req.param("id");
@@ -143,3 +170,11 @@ export function createAgentSkillsRoute(database: Database = db) {
 }
 
 export const agentSkillsRoute = createAgentSkillsRoute();
+
+async function getActiveProjectRepoPath(database: Database): Promise<string | null> {
+  const prefRows = await database.select().from(preferences).where(eq(preferences.key, "activeProjectId"));
+  const activeProjectId = prefRows[0]?.value;
+  if (!activeProjectId) return null;
+  const projectRows = await database.select({ repoPath: projects.repoPath }).from(projects).where(eq(projects.id, activeProjectId)).limit(1);
+  return projectRows[0]?.repoPath ?? null;
+}
