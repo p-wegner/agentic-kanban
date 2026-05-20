@@ -93,7 +93,10 @@ export interface IssueWithStatus {
   isBlocked?: boolean;
   skipAutoReview?: boolean;
   estimate?: string | null;
+<<<<<<< HEAD
   tags?: { id: string; name: string; color: string | null }[];
+=======
+>>>>>>> 43685f8 (feat: add estimate/sizing field to issues (XS/S/M/L/XL))
 }
 
 export interface StatusWithIssues {
