@@ -52,7 +52,7 @@ export function BoardPage() {
   const [workspaceIssue, setWorkspaceIssue] = useState<IssueWithStatus | null>(null);
   const [workspaceInitial, setWorkspaceInitial] = useState<{ workspaceId: string; sessionId: string } | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
-  const [priorityFilter, setPriorityFilter] = useState("");
+  const [blockedFilter, setBlockedFilter] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showQuickTasks, setShowQuickTasks] = useState(false);
   const [showWorktreeOverview, setShowWorktreeOverview] = useState(false);
@@ -429,7 +429,7 @@ export function BoardPage() {
       columns.map((col) => ({
         ...col,
         issues: col.issues.filter((issue) => {
-          if (priorityFilter && issue.priority !== priorityFilter) return false;
+          if (blockedFilter && !(issue as IssueWithStatus & { isBlocked?: boolean }).isBlocked) return false;
           if (searchQuery) {
             const q = searchQuery.toLowerCase();
             return (
@@ -440,7 +440,7 @@ export function BoardPage() {
           return true;
         }),
       })),
-    [columns, priorityFilter, searchQuery],
+    [columns, searchQuery],
   );
 
   const activeColumns = useMemo(
@@ -675,8 +675,6 @@ export function BoardPage() {
       onProjectChange={handleProjectChange}
       searchQuery={searchQuery}
       onSearchChange={setSearchQuery}
-      priorityFilter={priorityFilter}
-      onPriorityFilterChange={setPriorityFilter}
       onRegisterProject={handleRegisterProject}
       onCreateProject={handleCreateProject}
       onSettingsClick={() => setShowSettings(true)}
@@ -725,7 +723,6 @@ export function BoardPage() {
             activeColumns={activeColumns}
             archiveColumns={archiveColumns}
             searchQuery={searchQuery}
-            priorityFilter={priorityFilter}
             projectId={activeProjectId}
           />
           <button
