@@ -206,11 +206,36 @@ export async function startServer(port?: number) {
           return;
         }
 
+        // Optional learning step after review (runs in parallel with merge)
+        let learningAfterReviewPromise: Promise<void> = Promise.resolve();
+        if (prefMap.get("learning_step_after_review") === "true" && workspace.workingDir) {
+          try {
+            const useMockLearn = prefMap.get("mock_agent") === "true" || process.env.MOCK_AGENT === "1";
+            const agentCmdLearn = useMockLearn ? MOCK_AGENT_COMMAND : (prefMap.get("agent_command") || undefined);
+            const agentArgsLearn = prefMap.get("agent_args") || undefined;
+            const claudeProfileLearn = useMockLearn ? undefined : (prefMap.get("claude_profile") || undefined);
+            const learningPrompt = `/learning-step\n\nRun the learning step skill to extract insights from recent session transcripts and update docs/hooks.`;
+            const learnSessId = await sessionManager.startSession(workspace.id, learningPrompt, agentCmdLearn, agentArgsLearn ? agentArgsLearn.split(" ") : undefined, undefined, claudeProfileLearn);
+            learningSessionIds.add(learnSessId);
+            console.log(`[workflow] learning step (after review) started: session=${learnSessId}`);
+            learningAfterReviewPromise = new Promise<void>((resolve) => {
+              const timeout = setTimeout(() => { console.log("[workflow] learning step (after review) timed out after 3m"); resolve(); }, 3 * 60 * 1000);
+              const poll = setInterval(async () => {
+                const sessRows = await db.select({ status: sessions.status }).from(sessions).where(eq(sessions.id, learnSessId)).limit(1);
+                if (sessRows.length > 0 && sessRows[0].status !== "running") { clearInterval(poll); clearTimeout(timeout); console.log(`[workflow] learning step (after review) finished`); resolve(); }
+              }, 5000);
+            });
+          } catch (err) {
+            console.warn("[workflow] learning step (after review) failed (non-fatal):", err);
+          }
+        }
+
         if (autoMergeEnabled) {
-          console.log(`[workflow] review session ${sessionId} completed — auto-merging`);
-          await autoMerge(workspace, projectId, issueId, findStatus("Done")?.id ?? null, now);
+          console.log(`[workflow] review session ${sessionId} completed — auto-merging (learning step runs in parallel)`);
+          await Promise.all([autoMerge(workspace, projectId, issueId, findStatus("Done")?.id ?? null, now), learningAfterReviewPromise]);
         } else {
           console.log(`[workflow] review session ${sessionId} completed — auto-merge disabled, leaving in In Review`);
+          await learningAfterReviewPromise;
         }
         return;
       }
@@ -246,6 +271,22 @@ export async function startServer(port?: number) {
         boardEvents.broadcast(projectId, "issue_updated");
 
         const autoReview = !skipAutoReview && (workspace.requiresReview || prefMap.get("auto_review") !== "false");
+
+        // Optional learning step after agent (runs in parallel with review)
+        if (prefMap.get("learning_step_after_agent") === "true" && workspace.workingDir) {
+          try {
+            const useMockLearn = prefMap.get("mock_agent") === "true" || process.env.MOCK_AGENT === "1";
+            const agentCmdLearn = useMockLearn ? MOCK_AGENT_COMMAND : (prefMap.get("agent_command") || undefined);
+            const agentArgsLearn = prefMap.get("agent_args") || undefined;
+            const claudeProfileLearn = useMockLearn ? undefined : (prefMap.get("claude_profile") || undefined);
+            const learningPrompt = `/learning-step\n\nRun the learning step skill to extract insights from recent session transcripts and update docs/hooks.`;
+            const learnSessId = await sessionManager.startSession(workspace.id, learningPrompt, agentCmdLearn, agentArgsLearn ? agentArgsLearn.split(" ") : undefined, undefined, claudeProfileLearn);
+            learningSessionIds.add(learnSessId);
+            console.log(`[workflow] learning step (after agent) started: session=${learnSessId}`);
+          } catch (err) {
+            console.warn("[workflow] learning step (after agent) failed (non-fatal):", err);
+          }
+        }
 
         if (autoReview) {
           const useMock = prefMap.get("mock_agent") === "true" || process.env.MOCK_AGENT === "1";
@@ -310,12 +351,13 @@ export async function startServer(port?: number) {
           learningSessionIds.add(learningSessId);
           console.log(`[workflow] learning step started: session=${learningSessId}`);
           await new Promise<void>((resolve) => {
+            let poll: NodeJS.Timeout;
             const timeout = setTimeout(() => {
               clearInterval(poll);
               console.log("[workflow] learning step timed out after 3m, proceeding with merge");
               resolve();
             }, 3 * 60 * 1000);
-            const poll = setInterval(async () => {
+            poll = setInterval(async () => {
               const sessRows = await db.select({ status: sessions.status }).from(sessions).where(eq(sessions.id, learningSessId)).limit(1);
               if (sessRows.length > 0 && sessRows[0].status !== "running") {
                 clearInterval(poll);
