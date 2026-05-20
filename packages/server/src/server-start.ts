@@ -368,6 +368,7 @@ export async function startServer(port?: number) {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
             let poll: NodeJS.Timeout;
             const timeout = setTimeout(() => {
               clearInterval(poll);
@@ -391,13 +392,20 @@ export async function startServer(port?: number) {
             poll = setInterval(async () => {
 >>>>>>> cc239db (fix: correct projects_base_path key name and learning step poll TDZ)
 =======
+=======
+            let poll: NodeJS.Timeout;
+>>>>>>> c8742c0 (fix: correct projects_base_path key name and learning step poll TDZ)
             const timeout = setTimeout(() => {
               clearInterval(poll);
               console.log("[workflow] learning step timed out after 3m, proceeding with merge");
               resolve();
             }, 3 * 60 * 1000);
+<<<<<<< HEAD
             const poll = setInterval(async () => {
 >>>>>>> 3e19310 (feat: wire learning step into auto-merge workflow)
+=======
+            poll = setInterval(async () => {
+>>>>>>> c8742c0 (fix: correct projects_base_path key name and learning step poll TDZ)
               const sessRows = await db.select({ status: sessions.status }).from(sessions).where(eq(sessions.id, learningSessId)).limit(1);
               if (sessRows.length > 0 && sessRows[0].status !== "running") {
                 clearInterval(poll);
