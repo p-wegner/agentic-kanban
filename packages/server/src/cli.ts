@@ -301,6 +301,7 @@ Setup:
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let rmFn: any;
 
@@ -342,10 +343,14 @@ Setup:
 >>>>>>> c3f1926 (feat: add cli create subcommand and preferences set/get)
 =======
     let rm: ((path: string, opts: { recursive: boolean; force: boolean }) => Promise<void>) | undefined;
+=======
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let rmFn: any;
+>>>>>>> 856937b (fix: add missing rmSync/writeFileSync imports in projects.ts; fix cleanupDir scope in cli create command)
 
     const cleanupDir = async () => {
-      if (dirCreated && repoPath && rm) {
-        try { await rm(repoPath, { recursive: true, force: true }); } catch { /* best-effort */ }
+      if (dirCreated && repoPath && rmFn) {
+        try { await rmFn(repoPath, { recursive: true, force: true }); } catch { /* best-effort */ }
       }
     };
 
@@ -556,7 +561,7 @@ Setup:
       }
 
       const { mkdir, access, rm: rmFs } = await import(“node:fs/promises”);
-      rm = rmFs;
+      rmFn = rmFs;
       const { join, resolve: resolvePath, sep } = await import(“node:path”);
       const { execFile } = await import(“node:child_process”);
       const { promisify } = await import(“node:util”);
@@ -669,11 +674,14 @@ Setup:
       await mkdir(repoPath, { recursive: true });
       dirCreated = true;
 
+<<<<<<< HEAD
       if (false) { // placeholder to keep block structure identical
         }
       };
 
 >>>>>>> c3f1926 (feat: add cli create subcommand and preferences set/get)
+=======
+>>>>>>> 856937b (fix: add missing rmSync/writeFileSync imports in projects.ts; fix cleanupDir scope in cli create command)
       // Run git init
       const branch = options.branch ?? "main";
       try {
