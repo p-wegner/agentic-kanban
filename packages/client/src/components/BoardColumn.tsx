@@ -116,6 +116,7 @@ export function BoardColumn({
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
       className={`w-[calc(100vw-2rem)] sm:w-72 shrink-0 bg-gray-100 rounded-xl p-2 flex flex-col transition-all relative ${
 =======
       className={`w-[88vw] sm:w-64 lg:w-72 shrink-0 bg-gray-100 rounded-xl p-2 flex flex-col transition-all relative ${
@@ -132,6 +133,9 @@ export function BoardColumn({
 =======
       className={`w-72 shrink-0 bg-gray-100 rounded-xl p-2 flex flex-col transition-all relative ${
 >>>>>>> 8f2f90d (revert: remove table view and revert mobile-responsive board styling)
+=======
+      className={`w-[calc(100vw-2rem)] sm:w-72 shrink-0 bg-gray-100 rounded-xl p-2 flex flex-col transition-all relative ${
+>>>>>>> c6d8504 (feat: make kanban board truly responsive)
         dragOver ? "ring-2 ring-blue-400 ring-offset-1" : ""
       }`}
       style={style}
