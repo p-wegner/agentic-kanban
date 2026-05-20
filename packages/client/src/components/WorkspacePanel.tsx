@@ -159,6 +159,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
   const [baseBranch, setBaseBranch] = useState("");
   const [isDirect, setIsDirect] = useState(false);
   const [requiresReview, setRequiresReview] = useState(false);
+  const [thoroughReview, setThoroughReview] = useState(false);
   const [planMode, setPlanMode] = useState(false);
   const [skipSetup, setSkipSetup] = useState(false);
   const [prompt, setPrompt] = useState("");
@@ -422,7 +423,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
     setError(null);
     setCompletedMessages([]);
     try {
-      const body: Record<string, unknown> = { issueId: issue.id, isDirect, requiresReview, planMode, skipSetup };
+      const body: Record<string, unknown> = { issueId: issue.id, isDirect, requiresReview, thoroughReview, planMode, skipSetup };
       if (selectedSkillId) body.skillId = selectedSkillId;
       if (selectedProfile) body.claudeProfile = selectedProfile;
       if (!isDirect) {
@@ -834,11 +835,14 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
     }
   }
 
-  async function handleReview(wsId: string) {
+  async function handleReview(wsId: string, thorough = false) {
     setActionLoading(true);
     setError(null);
     try {
-      const result = await apiFetch<{ sessionId: string }>(`/api/workspaces/${wsId}/review`, { method: "POST" });
+      const result = await apiFetch<{ sessionId: string }>(`/api/workspaces/${wsId}/review`, {
+        method: "POST",
+        body: thorough ? JSON.stringify({ thoroughReview: true }) : undefined,
+      });
       setActiveSession(result.sessionId);
       setCompletedMessages([]);
       await fetchWorkspaces();
@@ -1036,6 +1040,15 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
               <label className="flex items-center gap-2 text-xs text-gray-600">
                 <input
                   type="checkbox"
+                  checked={thoroughReview}
+                  onChange={(e) => setThoroughReview(e.target.checked)}
+                  className="rounded border-gray-300"
+                />
+                <span>Use thorough review (more capable model — slower &amp; costlier)</span>
+              </label>
+              <label className="flex items-center gap-2 text-xs text-gray-600">
+                <input
+                  type="checkbox"
                   checked={planMode}
                   onChange={(e) => setPlanMode(e.target.checked)}
                   className="rounded border-gray-300"
@@ -1094,7 +1107,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                   {actionLoading ? "Creating..." : isDirect ? "Create Direct & Launch" : "Create & Launch"}
                 </button>
                 <button
-                  onClick={() => { setShowCreate(false); setBaseBranch(""); setBranchName(""); setIsDirect(false); setRequiresReview(false); setPlanMode(false); setSkipSetup(false); }}
+                  onClick={() => { setShowCreate(false); setBaseBranch(""); setBranchName(""); setIsDirect(false); setRequiresReview(false); setThoroughReview(false); setPlanMode(false); setSkipSetup(false); }}
                   className="text-sm text-gray-500 px-3 py-1.5 hover:text-gray-700"
                 >
                   Cancel
@@ -1556,12 +1569,22 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                         )}
                         {ws.workingDir && (
                         <button
-                          onClick={() => handleReview(ws.id)}
+                          onClick={() => handleReview(ws.id, false)}
                           disabled={actionLoading || isRunning}
                           className="text-sm bg-violet-600 text-white px-3 py-1.5 rounded hover:bg-violet-700 disabled:opacity-50"
                           title="Trigger AI code review"
                         >
                           Review
+                        </button>
+                        )}
+                        {ws.workingDir && (
+                        <button
+                          onClick={() => handleReview(ws.id, true)}
+                          disabled={actionLoading || isRunning}
+                          className="text-sm bg-violet-800 text-white px-3 py-1.5 rounded hover:bg-violet-900 disabled:opacity-50"
+                          title="Trigger thorough AI code review using a more capable model"
+                        >
+                          Thorough Review
                         </button>
                         )}
                         {ws.workingDir && (

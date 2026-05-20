@@ -52,17 +52,24 @@ function buildReviewArgs(prefMap: Map<string, string>): string | undefined {
   return baseArgs || undefined;
 }
 
-async function buildReviewPrompt(branch: string, baseBranch: string | null, issueId: string, autoFix: boolean, projectId?: string, conflictingFiles?: string[], uncommittedChanges?: string[], workspaceId?: string): Promise<string> {
+async function buildReviewPrompt(branch: string, baseBranch: string | null, issueId: string, autoFix: boolean, projectId?: string, conflictingFiles?: string[], uncommittedChanges?: string[], workspaceId?: string, skillName = "code-review"): Promise<{ prompt: string; model: string | null }> {
   let template: string | null = null;
+  let skillModel: string | null = null;
   if (projectId) {
-    const projectSkill = await db.select({ prompt: agentSkills.prompt }).from(agentSkills)
-      .where(sql`${agentSkills.name} = 'code-review' AND (${agentSkills.projectId} = ${projectId} OR ${agentSkills.projectId} IS NULL)`)
+    const projectSkill = await db.select({ prompt: agentSkills.prompt, model: agentSkills.model }).from(agentSkills)
+      .where(sql`${agentSkills.name} = ${skillName} AND (${agentSkills.projectId} = ${projectId} OR ${agentSkills.projectId} IS NULL)`)
       .orderBy(desc(agentSkills.projectId))
       .limit(1);
     template = projectSkill[0]?.prompt ?? null;
+    skillModel = projectSkill[0]?.model ?? null;
   }
   if (!template) {
-    template = DEFAULT_REVIEW_PROMPT;
+    // Fall back to global skill by name, then DEFAULT_REVIEW_PROMPT
+    const globalSkill = await db.select({ prompt: agentSkills.prompt, model: agentSkills.model }).from(agentSkills)
+      .where(sql`${agentSkills.name} = ${skillName} AND ${agentSkills.projectId} IS NULL`)
+      .limit(1);
+    template = globalSkill[0]?.prompt ?? DEFAULT_REVIEW_PROMPT;
+    skillModel = globalSkill[0]?.model ?? null;
   }
 
   const autoFixInstructions = autoFix
@@ -122,12 +129,13 @@ Steps to resolve:
 `;
   }
 
-  return conflictPreamble + template
+  const prompt = conflictPreamble + template
     .replace(/\{\{branch}}/g, branch)
     .replace(/\{\{baseBranch}}/g, baseBranch ?? "HEAD")
     .replace(/\{\{issueId}}/g, issueId)
     .replace(/\{\{workspaceId}}/g, workspaceId ?? "")
     .replace(/\{\{autoFixInstructions}}/g, autoFixInstructions);
+  return { prompt, model: skillModel };
 }
 
 export async function startServer(port?: number) {
@@ -309,15 +317,17 @@ export async function startServer(port?: number) {
               console.warn(`[workflow] rebase failed for workspace ${workspaceId}: ${prep.error} — reviewer will resolve conflicts`);
             }
           }
-          const reviewPrompt = await buildReviewPrompt(workspace.branch, diffRef, issueId, autoFix, projectId, conflictingFiles, uncommittedChanges, workspaceId);
+          const reviewSkillName = workspace.thoroughReview ? "code-review-thorough" : "code-review";
+          const { prompt: reviewPromptText, model: reviewModel } = await buildReviewPrompt(workspace.branch, diffRef, issueId, autoFix, projectId, conflictingFiles, uncommittedChanges, workspaceId, reviewSkillName);
+          const reviewArgsWithModel = reviewModel ? `${reviewArgs ?? ""} --model ${reviewModel}`.trim() : reviewArgs;
 
           try {
             await db.update(workspaces).set({ status: "reviewing", updatedAt: now }).where(eq(workspaces.id, workspaceId));
             boardEvents.broadcast(projectId, "issue_updated");
 
-            const reviewSessionId = await sessionManager.startSession(workspaceId, reviewPrompt, agentCommand, reviewArgs, undefined, claudeProfile, undefined, undefined, undefined, undefined, provider);
+            const reviewSessionId = await sessionManager.startSession(workspaceId, reviewPromptText, agentCommand, reviewArgsWithModel, undefined, claudeProfile, undefined, undefined, undefined, undefined, provider);
             reviewSessionIds.add(reviewSessionId);
-            console.log(`[workflow] launched review session ${reviewSessionId} for workspace ${workspaceId}`);
+            console.log(`[workflow] launched ${reviewSkillName} session ${reviewSessionId} for workspace ${workspaceId}`);
           } catch (err) {
             console.error("[workflow] Failed to launch review session:", err);
           }
@@ -422,6 +432,8 @@ export async function startServer(port?: number) {
   app.post("/api/workspaces/:id/review", async (c) => {
     const workspaceId = c.req.param("id");
     try {
+      const body = await c.req.json().catch(() => ({}));
+      const thoroughReview = body.thoroughReview === true;
       const wsRows = await db.select().from(workspaces).where(eq(workspaces.id, workspaceId)).limit(1);
       if (wsRows.length === 0) return c.json({ error: "Workspace not found" }, 404);
       const workspace = wsRows[0];
@@ -459,13 +471,15 @@ export async function startServer(port?: number) {
         }
         diffRef = prep.diffRef;
       }
-      const reviewPrompt = await buildReviewPrompt(workspace.branch, diffRef, issueId, autoFix, projectId, manualConflictingFiles, manualUncommittedChanges, workspaceId);
+      const manualSkillName = thoroughReview ? "code-review-thorough" : "code-review";
+      const { prompt: reviewPromptText, model: reviewModel } = await buildReviewPrompt(workspace.branch, diffRef, issueId, autoFix, projectId, manualConflictingFiles, manualUncommittedChanges, workspaceId, manualSkillName);
+      const reviewArgsWithModel = reviewModel ? `${reviewArgs ?? ""} --model ${reviewModel}`.trim() : reviewArgs;
 
       const now = new Date().toISOString();
       await db.update(workspaces).set({ status: "reviewing", updatedAt: now }).where(eq(workspaces.id, workspaceId));
       boardEvents.broadcast(projectId, "issue_updated");
 
-      const reviewSessionId = await sessionManager.startSession(workspaceId, reviewPrompt, agentCommand, reviewArgs, undefined, claudeProfile, undefined, undefined, undefined, undefined, provider);
+      const reviewSessionId = await sessionManager.startSession(workspaceId, reviewPromptText, agentCommand, reviewArgsWithModel, undefined, claudeProfile, undefined, undefined, undefined, undefined, provider);
       reviewSessionIds.add(reviewSessionId);
       console.log(`[workflow] manual review session ${reviewSessionId} for workspace ${workspaceId}`);
 
