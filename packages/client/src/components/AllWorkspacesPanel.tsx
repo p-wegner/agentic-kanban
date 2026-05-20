@@ -1,10 +1,14 @@
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 import { useState } from "react";
 =======
 >>>>>>> b4a5c74 (feat: add All Workspaces aggregate panel (#101))
 =======
 >>>>>>> ed04713 (feat: add All Workspaces aggregate panel (#101))
+=======
+import { useState } from "react";
+>>>>>>> 1bb4b1b (feat: add status filter and text search to All Workspaces panel)
 import { formatRelativeTime } from "../lib/formatRelativeTime.js";
 import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
 
@@ -16,6 +20,9 @@ interface AllWorkspacesPanelProps {
 
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> 1bb4b1b (feat: add status filter and text search to All Workspaces panel)
 type WsStatusFilter = "all" | "active" | "running" | "idle" | "reviewing" | "closed";
 
 const FILTER_CHIPS: { label: string; value: WsStatusFilter }[] = [
@@ -27,10 +34,13 @@ const FILTER_CHIPS: { label: string; value: WsStatusFilter }[] = [
   { label: "Closed", value: "closed" },
 ];
 
+<<<<<<< HEAD
 =======
 >>>>>>> b4a5c74 (feat: add All Workspaces aggregate panel (#101))
 =======
 >>>>>>> ed04713 (feat: add All Workspaces aggregate panel (#101))
+=======
+>>>>>>> 1bb4b1b (feat: add status filter and text search to All Workspaces panel)
 const WS_STATUS_COLORS: Record<string, string> = {
   active: "bg-green-100 text-green-700",
   reviewing: "bg-purple-100 text-purple-700",
@@ -50,6 +60,7 @@ const ISSUE_STATUS_COLORS: Record<string, string> = {
 export function AllWorkspacesPanel({ columns, onClose, onIssueClick }: AllWorkspacesPanelProps) {
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
   const [statusFilter, setStatusFilter] = useState<WsStatusFilter>("all");
   const [searchQuery, setSearchQuery] = useState("");
 
@@ -57,6 +68,11 @@ export function AllWorkspacesPanel({ columns, onClose, onIssueClick }: AllWorksp
 >>>>>>> b4a5c74 (feat: add All Workspaces aggregate panel (#101))
 =======
 >>>>>>> ed04713 (feat: add All Workspaces aggregate panel (#101))
+=======
+  const [statusFilter, setStatusFilter] = useState<WsStatusFilter>("all");
+  const [searchQuery, setSearchQuery] = useState("");
+
+>>>>>>> 1bb4b1b (feat: add status filter and text search to All Workspaces panel)
   const issuesWithWorkspaces: IssueWithStatus[] = columns
     .flatMap((col) => col.issues)
     .filter((issue) => issue.workspaceSummary && issue.workspaceSummary.total > 0);
@@ -67,6 +83,9 @@ export function AllWorkspacesPanel({ columns, onClose, onIssueClick }: AllWorksp
 
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> 1bb4b1b (feat: add status filter and text search to All Workspaces panel)
   const filtered = issuesWithWorkspaces.filter((issue) => {
     const ws = issue.workspaceSummary!;
     const mainStatus = ws.main?.status ?? "";
@@ -89,10 +108,13 @@ export function AllWorkspacesPanel({ columns, onClose, onIssueClick }: AllWorksp
     return true;
   });
 
+<<<<<<< HEAD
 =======
 >>>>>>> b4a5c74 (feat: add All Workspaces aggregate panel (#101))
 =======
 >>>>>>> ed04713 (feat: add All Workspaces aggregate panel (#101))
+=======
+>>>>>>> 1bb4b1b (feat: add status filter and text search to All Workspaces panel)
   return (
     <div className="fixed inset-0 z-50 flex justify-end">
       <div className="absolute inset-0 bg-black/20" onClick={onClose} />
@@ -109,17 +131,23 @@ export function AllWorkspacesPanel({ columns, onClose, onIssueClick }: AllWorksp
             <h2 className="text-lg font-semibold text-gray-900">All Workspaces</h2>
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> 1bb4b1b (feat: add status filter and text search to All Workspaces panel)
             <span className="text-sm text-gray-500">
               {filtered.length === issuesWithWorkspaces.length
                 ? `(${issuesWithWorkspaces.length})`
                 : `${filtered.length} of ${issuesWithWorkspaces.length}`}
             </span>
+<<<<<<< HEAD
 =======
             <span className="text-sm text-gray-500">({issuesWithWorkspaces.length})</span>
 >>>>>>> b4a5c74 (feat: add All Workspaces aggregate panel (#101))
 =======
             <span className="text-sm text-gray-500">({issuesWithWorkspaces.length})</span>
 >>>>>>> ed04713 (feat: add All Workspaces aggregate panel (#101))
+=======
+>>>>>>> 1bb4b1b (feat: add status filter and text search to All Workspaces panel)
             {activeCount > 0 && (
               <span className="text-xs bg-green-100 text-green-700 px-1.5 py-0.5 rounded-full font-medium">
                 {activeCount} active
@@ -136,6 +164,9 @@ export function AllWorkspacesPanel({ columns, onClose, onIssueClick }: AllWorksp
 
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> 1bb4b1b (feat: add status filter and text search to All Workspaces panel)
         {/* Filters */}
         <div className="px-4 py-2 border-b border-gray-100 space-y-2">
           {/* Text search */}
@@ -164,6 +195,7 @@ export function AllWorkspacesPanel({ columns, onClose, onIssueClick }: AllWorksp
           </div>
         </div>
 
+<<<<<<< HEAD
         {/* Content */}
         <div className="flex-1 overflow-y-auto">
           {filtered.length === 0 ? (
@@ -178,19 +210,27 @@ export function AllWorkspacesPanel({ columns, onClose, onIssueClick }: AllWorksp
 =======
 =======
 >>>>>>> ed04713 (feat: add All Workspaces aggregate panel (#101))
+=======
+>>>>>>> 1bb4b1b (feat: add status filter and text search to All Workspaces panel)
         {/* Content */}
         <div className="flex-1 overflow-y-auto">
-          {issuesWithWorkspaces.length === 0 ? (
+          {filtered.length === 0 ? (
             <div className="px-4 py-12 text-center text-sm text-gray-500">
-              No workspaces yet. Create a workspace from an issue to get started.
+              {issuesWithWorkspaces.length === 0
+                ? "No workspaces yet. Create a workspace from an issue to get started."
+                : "No workspaces match the current filter."}
             </div>
           ) : (
             <div className="divide-y divide-gray-100">
+<<<<<<< HEAD
               {issuesWithWorkspaces.map((issue) => {
 <<<<<<< HEAD
 >>>>>>> b4a5c74 (feat: add All Workspaces aggregate panel (#101))
 =======
 >>>>>>> ed04713 (feat: add All Workspaces aggregate panel (#101))
+=======
+              {filtered.map((issue) => {
+>>>>>>> 1bb4b1b (feat: add status filter and text search to All Workspaces panel)
                 const ws = issue.workspaceSummary!;
                 const main = ws.main;
 
