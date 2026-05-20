@@ -46,6 +46,7 @@ export function IssueDetailPanel({
   const [description, setDescription] = useState(issue.description ?? "");
   const [pastedImages, setPastedImages] = useState<string[]>([]);
   const [priority, setPriority] = useState(issue.priority);
+  const [estimate, setEstimate] = useState<string>(issue.estimate ?? "");
   const [saving, setSaving] = useState(false);
   const depTypeRef = useRef<HTMLSelectElement>(null);
   const [enhancing, setEnhancing] = useState(false);
@@ -65,7 +66,8 @@ export function IssueDetailPanel({
   const hasChanges = editing && (
     title !== issue.title ||
     description !== (issue.description ?? "") ||
-    priority !== issue.priority
+    priority !== issue.priority ||
+    estimate !== (issue.estimate ?? "")
   );
 
   useEffect(() => {
@@ -96,6 +98,7 @@ export function IssueDetailPanel({
       setTitle(issue.title);
       setDescription(issue.description ?? "");
       setPriority(issue.priority);
+      setEstimate(issue.estimate ?? "");
     }
   }, [issue, editing]);
 
@@ -122,6 +125,7 @@ export function IssueDetailPanel({
     setTitle(issue.title);
     setDescription(issue.description ?? "");
     setPriority(issue.priority);
+    setEstimate(issue.estimate ?? "");
   }
 
   async function handleEnhance() {
@@ -205,6 +209,7 @@ export function IssueDetailPanel({
         title: title.trim(),
         description: fullDescription || undefined,
         priority: priority as UpdateIssueRequest["priority"],
+        estimate: (estimate || null) as UpdateIssueRequest["estimate"],
       });
       setPastedImages([]);
       setEditing(false);
@@ -411,6 +416,33 @@ export function IssueDetailPanel({
               <span className={`inline-block text-xs font-medium px-1.5 py-0.5 rounded capitalize ${badgeColor}`}>
                 {issue.priority}
               </span>
+            )}
+          </div>
+
+          {/* Estimate */}
+          <div>
+            <label className="text-xs font-medium text-gray-600 block mb-1">
+              Estimate
+            </label>
+            {editing ? (
+              <select
+                value={estimate}
+                onChange={(e) => setEstimate(e.target.value)}
+                className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              >
+                <option value="">None</option>
+                <option value="XS">XS</option>
+                <option value="S">S</option>
+                <option value="M">M</option>
+                <option value="L">L</option>
+                <option value="XL">XL</option>
+              </select>
+            ) : issue.estimate ? (
+              <span className="inline-block text-xs font-medium px-1.5 py-0.5 rounded bg-teal-100 text-teal-700">
+                {issue.estimate}
+              </span>
+            ) : (
+              <span className="text-xs text-gray-400">—</span>
             )}
           </div>
 
