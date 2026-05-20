@@ -45,6 +45,7 @@ const ARCHIVE_STATUS_NAMES = new Set(["Done", "Cancelled"]);
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 type MonitorAction = { at: string; action: "relaunch" | "merge" | "nudge" | "mark_idle" | "mark_dead"; workspaceId: string; issueId: string };
 =======
 type MonitorAction = { at: string; action: "relaunch" | "merge" | "nudge" | "mark_idle" | "mark_dead"; workspaceId: string };
@@ -88,6 +89,21 @@ function MonitorPopover({ status, onClose, onOpenWorkspace, columns }: { status:
     return m;
   }, [columns]);
 >>>>>>> 47c4344 (feat: make monitor action log entries clickable workspace links)
+=======
+type MonitorAction = { at: string; action: "relaunch" | "merge" | "nudge" | "mark_idle" | "mark_dead"; workspaceId: string };
+type MonitorStatus = { enabled: boolean; intervalMin: number; active: boolean; lastRun: { at: string; relaunched: number; merged: number; nudged: number } | null; nextRunAt: string | null; recentActions: MonitorAction[] };
+
+const ACTION_LABELS: Record<MonitorAction["action"], { label: string; color: string }> = {
+  relaunch: { label: "Relaunched agent", color: "text-blue-600" },
+  merge:    { label: "Triggered merge",  color: "text-purple-600" },
+  nudge:    { label: "Nudged agent",     color: "text-amber-600" },
+  mark_idle:{ label: "Marked idle",      color: "text-gray-500" },
+  mark_dead:{ label: "Marked dead",      color: "text-red-500" },
+};
+
+function MonitorPopover({ status, onClose }: { status: MonitorStatus | null; onClose: () => void }) {
+  const [now, setNow] = useState(Date.now());
+>>>>>>> 1407a7f (feat: add board monitor visualization panel)
 
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 1000);
@@ -174,6 +190,7 @@ function MonitorPopover({ status, onClose, onOpenWorkspace, columns }: { status:
               const meta = ACTION_LABELS[a.action];
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
               const issue = issueMap.get(a.issueId);
               const label = issue ? `#${issue.issueNumber} ${issue.title}` : a.workspaceId.slice(0, 8);
               return (
@@ -186,10 +203,13 @@ function MonitorPopover({ status, onClose, onOpenWorkspace, columns }: { status:
                     title={issue ? issue.title : a.workspaceId}
                   >{label}</button>
 =======
+=======
+>>>>>>> 1407a7f (feat: add board monitor visualization panel)
               return (
                 <div key={i} className="flex items-center justify-between gap-2">
                   <span className={`${meta.color} font-medium`}>{meta.label}</span>
                   <span className="text-gray-400 shrink-0 font-mono" style={{ fontSize: "10px" }}>{a.workspaceId.slice(0, 8)}</span>
+<<<<<<< HEAD
 >>>>>>> 01516bd (feat: add board monitor visualization panel)
 =======
               const issue = issueMap.get(a.issueId);
@@ -204,6 +224,8 @@ function MonitorPopover({ status, onClose, onOpenWorkspace, columns }: { status:
                     title={issue ? issue.title : a.workspaceId}
                   >{label}</button>
 >>>>>>> 47c4344 (feat: make monitor action log entries clickable workspace links)
+=======
+>>>>>>> 1407a7f (feat: add board monitor visualization panel)
                   <span className="text-gray-400 shrink-0">{formatAge(a.at)}</span>
                 </div>
               );
@@ -989,6 +1011,7 @@ export function BoardPage() {
               </button>
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 >>>>>>> 47c4344 (feat: make monitor action log entries clickable workspace links)
               {showMonitorPopover && <MonitorPopover
@@ -1006,6 +1029,9 @@ export function BoardPage() {
 >>>>>>> 01516bd (feat: add board monitor visualization panel)
 =======
 >>>>>>> 47c4344 (feat: make monitor action log entries clickable workspace links)
+=======
+              {showMonitorPopover && <MonitorPopover status={monitorStatus} onClose={() => setShowMonitorPopover(false)} />}
+>>>>>>> 1407a7f (feat: add board monitor visualization panel)
             </div>
           )}
           <div className="flex items-center gap-1 border border-gray-200 rounded-md p-0.5 bg-white shrink-0">
