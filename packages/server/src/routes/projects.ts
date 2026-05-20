@@ -4,12 +4,87 @@ import { projects, projectStatuses, issues, workspaces, sessions, sessionMessage
 import { eq, inArray, sql, and } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { execFile, execSync } from "node:child_process";
+<<<<<<< HEAD
 import { existsSync, mkdirSync, readdirSync } from "node:fs";
+=======
+import { existsSync, readdirSync, writeFileSync } from "node:fs";
+>>>>>>> f36a871 (feat: add optional README and .gitignore template to project creation dialog)
 import { detectRepoInfo } from "../services/git-info.service.js";
 import { listBranches, listWorktrees, getDiffShortstat, removeWorktree, detectConflicts } from "../services/git.service.js";
 import type { Database } from "../db/index.js";
 import { resolve, sep, join } from "node:path";
 import { homedir } from "node:os";
+
+const GITIGNORE_TEMPLATES: Record<string, string> = {
+  node: `node_modules/
+dist/
+build/
+.env
+.env.local
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.DS_Store
+`,
+  python: `__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+.env
+*.log
+.DS_Store
+`,
+  java: `target/
+*.class
+*.jar
+*.war
+*.ear
+.gradle/
+build/
+.env
+*.log
+.DS_Store
+`,
+  go: `*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+vendor/
+.env
+.DS_Store
+`,
+  rust: `target/
+Cargo.lock
+*.pdb
+.env
+.DS_Store
+`,
+  ruby: `.bundle/
+vendor/bundle/
+*.gem
+*.rbc
+.env
+log/
+tmp/
+.DS_Store
+`,
+  dotnet: `bin/
+obj/
+*.user
+*.suo
+.vs/
+*.nupkg
+.env
+.DS_Store
+`,
+};
 
 const DEFAULT_STATUSES = [
   { name: "Todo", sortOrder: 0, isDefault: true },
@@ -83,6 +158,26 @@ export function createProjectsRoute(database: Database = db) {
         isDefault: status.isDefault,
         createdAt: now,
       });
+    }
+
+    // Write optional .gitignore
+    if (body.gitignoreTemplate && GITIGNORE_TEMPLATES[body.gitignoreTemplate]) {
+      const gitignorePath = join(repoInfo.repoPath, ".gitignore");
+      if (!existsSync(gitignorePath)) {
+        try {
+          writeFileSync(gitignorePath, GITIGNORE_TEMPLATES[body.gitignoreTemplate], "utf8");
+        } catch { /* non-fatal */ }
+      }
+    }
+
+    // Write optional README.md
+    if (body.generateReadme) {
+      const readmePath = join(repoInfo.repoPath, "README.md");
+      if (!existsSync(readmePath)) {
+        try {
+          writeFileSync(readmePath, `# ${name}\n`, "utf8");
+        } catch { /* non-fatal */ }
+      }
     }
 
     return c.json({ id, name, repoPath: repoInfo.repoPath }, 201);
