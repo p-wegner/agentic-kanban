@@ -50,6 +50,7 @@ Examples:
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
   $ agentic-kanban preferences set projects_base_dir /path/to/projects
 =======
   $ agentic-kanban preferences set projects_base_folder /path/to/projects
@@ -78,6 +79,9 @@ Examples:
 =======
   $ agentic-kanban preferences set projects_base_dir /path/to/projects
 >>>>>>> 5ffc0d0 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
+=======
+  $ agentic-kanban preferences set projects_base_path /path/to/projects
+>>>>>>> d7a5078 (fix: align projects_base_dir -> projects_base_path across cli.ts and SettingsPanel.tsx)
 `);
 
 program
@@ -174,6 +178,7 @@ program
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
   .description("Create a new git repo and register it as a project.\n\nCreates a directory under the configured projects_base_dir preference (or --path), runs 'git init', and registers the repo.\n\nUse 'pnpm cli -- register <path>' to register an existing repo instead.")
   .argument("<folder-name>", "Name of the new project folder to create")
   .option("--path <base-path>", "Base directory to create the folder in (overrides projects_base_dir preference)")
@@ -222,6 +227,11 @@ program
   .argument("<folder-name>", "Name of the new project folder to create")
   .option("--path <base-path>", "Base directory to create the folder in (overrides projects_base_dir preference)")
 >>>>>>> 5ffc0d0 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
+=======
+  .description("Create a new git repo and register it as a project.\n\nCreates a directory under the configured projects_base_path preference (or --path), runs 'git init', and registers the repo.\n\nUse 'pnpm cli -- register <path>' to register an existing repo instead.")
+  .argument("<folder-name>", "Name of the new project folder to create")
+  .option("--path <base-path>", "Base directory to create the folder in (overrides projects_base_path preference)")
+>>>>>>> d7a5078 (fix: align projects_base_dir -> projects_base_path across cli.ts and SettingsPanel.tsx)
   .option("-n, --name <name>", "Custom project name (defaults to folder name)")
   .option("-b, --branch <branch>", "Initial branch name (default: main)")
   .addHelpText("after", `
@@ -235,6 +245,7 @@ Examples:
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
   $ agentic-kanban create my-app                        # uses projects_base_dir preference
 =======
   $ agentic-kanban create my-app                        # uses projects_base_folder preference
@@ -263,12 +274,16 @@ Examples:
 =======
   $ agentic-kanban create my-app                        # uses projects_base_dir preference
 >>>>>>> 5ffc0d0 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
+=======
+  $ agentic-kanban create my-app                        # uses projects_base_path preference
+>>>>>>> d7a5078 (fix: align projects_base_dir -> projects_base_path across cli.ts and SettingsPanel.tsx)
   $ agentic-kanban create my-app --path /projects       # create in /projects/my-app
   $ agentic-kanban create my-app -n "My Application"   # custom project name
   $ agentic-kanban create my-app -b master              # use 'master' as initial branch
 
 Setup:
   Set the base folder preference first:
+<<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
@@ -294,6 +309,9 @@ Setup:
 =======
   $ agentic-kanban preferences set projects_base_path /path/to/projects
 >>>>>>> 9196ac9 (fix: align projects_base_dir -> projects_base_path across cli.ts and SettingsPanel.tsx)
+=======
+  $ agentic-kanban preferences set projects_base_path /path/to/projects
+>>>>>>> d7a5078 (fix: align projects_base_dir -> projects_base_path across cli.ts and SettingsPanel.tsx)
 `)
   .action(async (folderName: string, options: { path?: string; name?: string; branch?: string }) => {
     let dirCreated = false;
@@ -374,6 +392,7 @@ Setup:
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
         const pref = await db.select().from(preferences).where(eq(preferences.key, "projects_base_dir")).limit(1);
 =======
         const pref = await db.select().from(preferences).where(eq(preferences.key, "projects_base_folder")).limit(1);
@@ -414,12 +433,16 @@ Setup:
 =======
         const pref = await db.select().from(preferences).where(eq(preferences.key, “projects_base_dir”)).limit(1);
 >>>>>>> 59386e6 (WIP: add rmSync and writeFileSync imports to projects.ts)
+=======
+        const pref = await db.select().from(preferences).where(eq(preferences.key, “projects_base_path”)).limit(1);
+>>>>>>> d7a5078 (fix: align projects_base_dir -> projects_base_path across cli.ts and SettingsPanel.tsx)
         if (pref.length > 0 && pref[0].value) {
           baseFolder = pref[0].value;
         }
       }
 
       if (!baseFolder) {
+<<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
@@ -523,6 +546,10 @@ Setup:
         console.error(“No base folder configured. Use --path <base-path> or set the projects_base_path preference:”);
         console.error(“  pnpm cli -- preferences set projects_base_path /path/to/projects”);
 >>>>>>> 9196ac9 (fix: align projects_base_dir -> projects_base_path across cli.ts and SettingsPanel.tsx)
+=======
+        console.error(“No base folder configured. Use --path <base-path> or set the projects_base_path preference:”);
+        console.error(“  pnpm cli -- preferences set projects_base_path /path/to/projects”);
+>>>>>>> d7a5078 (fix: align projects_base_dir -> projects_base_path across cli.ts and SettingsPanel.tsx)
         process.exit(1);
       }
 
@@ -872,6 +899,7 @@ Examples:
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
   $ agentic-kanban preferences get projects_base_dir
   $ agentic-kanban preferences set projects_base_dir /path/to/projects
 =======
@@ -910,6 +938,10 @@ Examples:
   $ agentic-kanban preferences get projects_base_dir
   $ agentic-kanban preferences set projects_base_dir /path/to/projects
 >>>>>>> 5ffc0d0 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
+=======
+  $ agentic-kanban preferences get projects_base_path
+  $ agentic-kanban preferences set projects_base_path /path/to/projects
+>>>>>>> d7a5078 (fix: align projects_base_dir -> projects_base_path across cli.ts and SettingsPanel.tsx)
 `);
 
 prefCmd
