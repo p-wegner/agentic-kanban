@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+﻿#!/usr/bin/env node
 import { Command } from "commander";
 import { readFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
@@ -46,6 +46,7 @@ Examples:
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
   $ agentic-kanban preferences set projects_base_dir /path/to/projects
 =======
   $ agentic-kanban preferences set projects_base_folder /path/to/projects
@@ -62,6 +63,9 @@ Examples:
 =======
   $ agentic-kanban preferences set projects_base_folder /path/to/projects
 >>>>>>> a9ef19b (feat: add cli create subcommand and preferences set/get)
+=======
+  $ agentic-kanban preferences set projects_base_dir /path/to/projects
+>>>>>>> c6fd8a4 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
 `);
 
 program
@@ -154,6 +158,7 @@ program
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
   .description("Create a new git repo and register it as a project.\n\nCreates a directory under the configured projects_base_dir preference (or --path), runs 'git init', and registers the repo.\n\nUse 'pnpm cli -- register <path>' to register an existing repo instead.")
   .argument("<folder-name>", "Name of the new project folder to create")
   .option("--path <base-path>", "Base directory to create the folder in (overrides projects_base_dir preference)")
@@ -182,6 +187,11 @@ program
   .argument("<folder-name>", "Name of the new project folder to create")
   .option("--path <base-path>", "Base directory to create the folder in (overrides projects_base_folder preference)")
 >>>>>>> a9ef19b (feat: add cli create subcommand and preferences set/get)
+=======
+  .description("Create a new git repo and register it as a project.\n\nCreates a directory under the configured projects_base_dir preference (or --path), runs 'git init', and registers the repo.\n\nUse 'pnpm cli -- register <path>' to register an existing repo instead.")
+  .argument("<folder-name>", "Name of the new project folder to create")
+  .option("--path <base-path>", "Base directory to create the folder in (overrides projects_base_dir preference)")
+>>>>>>> c6fd8a4 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
   .option("-n, --name <name>", "Custom project name (defaults to folder name)")
   .option("-b, --branch <branch>", "Initial branch name (default: main)")
   .addHelpText("after", `
@@ -191,6 +201,7 @@ Examples:
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
   $ agentic-kanban create my-app                        # uses projects_base_dir preference
 =======
   $ agentic-kanban create my-app                        # uses projects_base_folder preference
@@ -207,12 +218,16 @@ Examples:
 =======
   $ agentic-kanban create my-app                        # uses projects_base_folder preference
 >>>>>>> a9ef19b (feat: add cli create subcommand and preferences set/get)
+=======
+  $ agentic-kanban create my-app                        # uses projects_base_dir preference
+>>>>>>> c6fd8a4 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
   $ agentic-kanban create my-app --path /projects       # create in /projects/my-app
   $ agentic-kanban create my-app -n "My Application"   # custom project name
   $ agentic-kanban create my-app -b master              # use 'master' as initial branch
 
 Setup:
   Set the base folder preference first:
+<<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
@@ -246,6 +261,9 @@ Setup:
 
 =======
   $ agentic-kanban preferences set projects_base_folder /path/to/projects
+=======
+  $ agentic-kanban preferences set projects_base_dir /path/to/projects
+>>>>>>> c6fd8a4 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
 `)
   .action(async (folderName: string, options: { path?: string; name?: string; branch?: string }) => {
 >>>>>>> a9ef19b (feat: add cli create subcommand and preferences set/get)
@@ -255,6 +273,7 @@ Setup:
       // Resolve base folder: --path flag takes precedence over preference
       let baseFolder = options.path;
       if (!baseFolder) {
+<<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
@@ -280,12 +299,16 @@ Setup:
 =======
         const pref = await db.select().from(preferences).where(eq(preferences.key, "projects_base_folder")).limit(1);
 >>>>>>> a9ef19b (feat: add cli create subcommand and preferences set/get)
+=======
+        const pref = await db.select().from(preferences).where(eq(preferences.key, "projects_base_dir")).limit(1);
+>>>>>>> c6fd8a4 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
         if (pref.length > 0 && pref[0].value) {
           baseFolder = pref[0].value;
         }
       }
 
       if (!baseFolder) {
+<<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
@@ -361,6 +384,10 @@ Setup:
 =======
         console.error("No base folder configured. Use --path <base-path> or set the projects_base_folder preference:");
         console.error("  pnpm cli -- preferences set projects_base_folder /path/to/projects");
+=======
+        console.error("No base folder configured. Use --path <base-path> or set the projects_base_dir preference:");
+        console.error("  pnpm cli -- preferences set projects_base_dir /path/to/projects");
+>>>>>>> c6fd8a4 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
         process.exit(1);
       }
 
@@ -393,6 +420,7 @@ Setup:
         // Expected: directory doesn't exist yet
       }
 
+<<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
@@ -436,6 +464,9 @@ Setup:
 =======
       // Create directory — track so we can clean up on failure
 >>>>>>> 7d3e5ad (fix: clean up created directory if git init/commit fails in cli create command)
+=======
+      // Create directory â€” track so we can clean up on failure
+>>>>>>> c6fd8a4 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
       await mkdir(repoPath, { recursive: true });
       let dirCreated = true;
 
@@ -591,6 +622,7 @@ Examples:
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
   $ agentic-kanban preferences get projects_base_dir
   $ agentic-kanban preferences set projects_base_dir /path/to/projects
 =======
@@ -613,6 +645,10 @@ Examples:
   $ agentic-kanban preferences get projects_base_folder
   $ agentic-kanban preferences set projects_base_folder /path/to/projects
 >>>>>>> a9ef19b (feat: add cli create subcommand and preferences set/get)
+=======
+  $ agentic-kanban preferences get projects_base_dir
+  $ agentic-kanban preferences set projects_base_dir /path/to/projects
+>>>>>>> c6fd8a4 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
 `);
 
 prefCmd
