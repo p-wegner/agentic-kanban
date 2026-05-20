@@ -29,6 +29,7 @@ interface LayoutProps {
   onSearchChange?: (query: string) => void;
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
   priorityFilter?: string;
   onPriorityFilterChange?: (priority: string) => void;
   onAllWorkspacesClick?: () => void;
@@ -39,6 +40,8 @@ interface LayoutProps {
   onPriorityFilterChange?: (priority: string) => void;
   onAllWorkspacesClick?: () => void;
 >>>>>>> b4a5c74 (feat: add All Workspaces aggregate panel (#101))
+=======
+>>>>>>> 46934f1 (feat: remove priority filter from frontend UI)
   onWorktreeOverviewClick?: () => void;
   onSettingsClick?: () => void;
 }
@@ -54,6 +57,7 @@ export function Layout({
   onSearchChange,
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
   priorityFilter = "",
   onPriorityFilterChange,
   onAllWorkspacesClick,
@@ -64,6 +68,8 @@ export function Layout({
   onPriorityFilterChange,
   onAllWorkspacesClick,
 >>>>>>> b4a5c74 (feat: add All Workspaces aggregate panel (#101))
+=======
+>>>>>>> 46934f1 (feat: remove priority filter from frontend UI)
   onWorktreeOverviewClick,
   onSettingsClick,
 }: LayoutProps) {
@@ -221,6 +227,7 @@ export function Layout({
               )}
             </div>
 <<<<<<< HEAD
+<<<<<<< HEAD
             <button
               onClick={onAllWorkspacesClick}
               className="p-1.5 text-gray-400 hover:text-gray-600 rounded-md hover:bg-gray-100"
@@ -271,6 +278,8 @@ export function Layout({
                 <rect x="14" y="14" width="7" height="7" rx="1" />
               </svg>
             </button>
+=======
+>>>>>>> 46934f1 (feat: remove priority filter from frontend UI)
             <button
               onClick={onWorktreeOverviewClick}
               className="p-1.5 text-gray-400 hover:text-gray-600 rounded-md hover:bg-gray-100"
