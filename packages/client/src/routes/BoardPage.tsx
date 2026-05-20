@@ -197,6 +197,8 @@ export function BoardPage() {
   const [expandedCreatePanel, setExpandedCreatePanel] = useState<{ statusId: string; statusName: string; state: Partial<CreateIssueFormState> } | null>(null);
   const [viewMode, setViewMode] = useState<"kanban" | "graph" | "table">("kanban");
   const [dynamicColumnScaling, setDynamicColumnScaling] = useState(false);
+  const [autoReview, setAutoReview] = useState(true);
+  const [autoMerge, setAutoMerge] = useState(true);
   const [autoMonitor, setAutoMonitor] = useState(false);
   const [monitorStatus, setMonitorStatus] = useState<MonitorStatus | null>(null);
   const [showMonitorPopover, setShowMonitorPopover] = useState(false);
@@ -316,6 +318,8 @@ export function BoardPage() {
       try {
         const s = await apiFetch<Record<string, string>>("/api/preferences/settings");
         setDynamicColumnScaling(s.dynamic_column_scaling === "true");
+        setAutoReview(s.auto_review !== "false");
+        setAutoMerge(s.auto_merge !== "false");
         setAutoMonitor(s.auto_monitor === "true");
         apiFetch<MonitorStatus>("/api/internal/monitor-status")
           .then((r) => setMonitorStatus(r))
@@ -589,9 +593,24 @@ export function BoardPage() {
     [columns, searchQuery],
   );
 
+  // "AI Reviewed" = tickets needing human attention (manual merge).
+  // Hide the column when no tickets are there AND the workflow won't produce them
+  // (auto_review off, or auto_merge on means review goes straight to Done).
+  const showAiReviewedColumn = useMemo(
+    () =>
+      columns.some((col) => col.name === "AI Reviewed" && col.issues.length > 0) ||
+      (autoReview && !autoMerge),
+    [columns, autoReview, autoMerge],
+  );
+
   const activeColumns = useMemo(
-    () => filteredColumns.filter((col) => !ARCHIVE_STATUS_NAMES.has(col.name)),
-    [filteredColumns],
+    () =>
+      filteredColumns.filter(
+        (col) =>
+          !ARCHIVE_STATUS_NAMES.has(col.name) &&
+          (col.name !== "AI Reviewed" || showAiReviewedColumn),
+      ),
+    [filteredColumns, showAiReviewedColumn],
   );
   const archiveColumns = useMemo(
     () => filteredColumns.filter((col) => ARCHIVE_STATUS_NAMES.has(col.name)),
@@ -1076,6 +1095,8 @@ export function BoardPage() {
           setShowSettings(false);
           apiFetch<Record<string, string>>("/api/preferences/settings")
             .then(s => {
+              setAutoReview(s.auto_review !== "false");
+              setAutoMerge(s.auto_merge !== "false");
               setAutoMonitor(s.auto_monitor === "true");
               return apiFetch<MonitorStatus>("/api/internal/monitor-status");
             })
