@@ -546,11 +546,11 @@ export async function startServer(port?: number) {
   let monitorTimer: ReturnType<typeof setTimeout> | null = null;
   let monitorNextRunAt: string | null = null;
   let monitorLastRun: { at: string; relaunched: number; merged: number; nudged: number } | null = null;
-  type MonitorAction = { at: string; action: "relaunch" | "merge" | "nudge" | "mark_idle" | "mark_dead"; workspaceId: string };
+  type MonitorAction = { at: string; action: "relaunch" | "merge" | "nudge" | "mark_idle" | "mark_dead"; workspaceId: string; issueId: string };
   const monitorRecentActions: MonitorAction[] = [];
 
-  function logMonitorAction(action: MonitorAction["action"], workspaceId: string) {
-    monitorRecentActions.unshift({ at: new Date().toISOString(), action, workspaceId });
+  function logMonitorAction(action: MonitorAction["action"], workspaceId: string, issueId: string) {
+    monitorRecentActions.unshift({ at: new Date().toISOString(), action, workspaceId, issueId });
     if (monitorRecentActions.length > 30) monitorRecentActions.splice(30);
   }
 
@@ -576,6 +576,7 @@ export async function startServer(port?: number) {
           wsId: workspaces.id,
           wsStatus: workspaces.status,
           projectId: issues.projectId,
+          issueId: issues.id,
         })
         .from(workspaces)
         .innerJoin(issues, eq(workspaces.issueId, issues.id))
@@ -597,7 +598,7 @@ export async function startServer(port?: number) {
             const baseUrl = `http://localhost:${serverPort}`;
             await fetch(`${baseUrl}/api/workspaces/${ws.wsId}/launch`, { method: "POST" }).catch(() => {});
             cycleStats.relaunched++;
-            logMonitorAction("relaunch", ws.wsId);
+            logMonitorAction("relaunch", ws.wsId, ws.issueId);
             console.log(`[monitor] Relaunched idle workspace ${ws.wsId}`);
             boardEvents.broadcast(ws.projectId, "board_changed");
           } else if (ws.wsStatus === "reviewing" && sess && sess.status === "stopped") {
@@ -605,14 +606,14 @@ export async function startServer(port?: number) {
             const baseUrl = `http://localhost:${serverPort}`;
             await fetch(`${baseUrl}/api/workspaces/${ws.wsId}/merge`, { method: "POST" }).catch(() => {});
             cycleStats.merged++;
-            logMonitorAction("merge", ws.wsId);
+            logMonitorAction("merge", ws.wsId, ws.issueId);
             console.log(`[monitor] Triggered merge for reviewing workspace ${ws.wsId}`);
             boardEvents.broadcast(ws.projectId, "board_changed");
           } else if (ws.wsStatus === "active" && sess && sess.status === "stopped") {
             // Active workspace but session has stopped — agent exited without transitioning workspace.
             // Mark workspace as idle so the next cycle will relaunch it.
             await db.update(workspaces).set({ status: "idle" }).where(eq(workspaces.id, ws.wsId)).catch(() => {});
-            logMonitorAction("mark_idle", ws.wsId);
+            logMonitorAction("mark_idle", ws.wsId, ws.issueId);
             console.log(`[monitor] Active workspace ${ws.wsId} has stopped session — marking idle for relaunch`);
             boardEvents.broadcast(ws.projectId, "board_changed");
           } else if (ws.wsStatus === "active" && sess && sess.status === "running") {
@@ -622,7 +623,7 @@ export async function startServer(port?: number) {
               // Process died without updating DB — treat as stopped
               await db.update(workspaces).set({ status: "idle" }).where(eq(workspaces.id, ws.wsId)).catch(() => {});
               await db.update(sessions).set({ status: "stopped", endedAt: new Date().toISOString() }).where(eq(sessions.id, sess.id)).catch(() => {});
-              logMonitorAction("mark_dead", ws.wsId);
+              logMonitorAction("mark_dead", ws.wsId, ws.issueId);
               console.log(`[monitor] Workspace ${ws.wsId} process dead — marking idle`);
               boardEvents.broadcast(ws.projectId, "board_changed");
             } else {
@@ -640,7 +641,7 @@ export async function startServer(port?: number) {
                   body: JSON.stringify({ message: nudgeMessage }),
                 }).catch(() => {});
                 cycleStats.nudged++;
-                logMonitorAction("nudge", ws.wsId);
+                logMonitorAction("nudge", ws.wsId, ws.issueId);
                 console.log(`[monitor] Nudged long-running agent in workspace ${ws.wsId}`);
               }
             }
