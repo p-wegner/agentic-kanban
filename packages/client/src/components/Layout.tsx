@@ -19,12 +19,15 @@ interface LayoutProps {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
   onRegisterProject?: (opts: RegisterOptions) => Promise<void>;
 =======
 =======
 >>>>>>> 27323e9 (feat: add optional README and .gitignore template to project creation dialog)
 =======
 >>>>>>> 2f40776 (fix: correct onRegisterProject prop type to accept object in Layout.tsx)
+=======
+>>>>>>> ff986c7 (fix: correct LayoutProps onRegisterProject type signature)
   onRegisterProject?: (repoPath: string) => Promise<void>;
 <<<<<<< HEAD
 <<<<<<< HEAD
@@ -42,6 +45,9 @@ interface LayoutProps {
 >>>>>>> f36a871 (feat: add optional README and .gitignore template to project creation dialog)
 =======
   onRegisterProject?: (args: { repoPath: string; gitignoreTemplate: string; generateReadme: boolean }) => Promise<void>;
+=======
+  onRegisterProject?: (opts: { repoPath: string; gitignoreTemplate: string; generateReadme: boolean }) => Promise<void>;
+>>>>>>> 76091bc (fix: correct LayoutProps onRegisterProject type signature)
   onCreateProject?: (name: string, path: string, gitignoreTemplate: string, generateReadme: boolean) => Promise<void>;
 >>>>>>> 7dd2d0e (fix: correct onRegisterProject prop type to accept object in Layout.tsx)
   searchQuery?: string;
