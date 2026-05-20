@@ -56,12 +56,15 @@ Examples:
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 >>>>>>> b794815 (feat: add cli create subcommand and preferences set/get)
 =======
 >>>>>>> 89f4fdb (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
 =======
 >>>>>>> 7effda9 (fix: align projects_base_dir -> projects_base_path across cli.ts and SettingsPanel.tsx)
+=======
+>>>>>>> dbea783 (fix: add missing fs imports and unify projects_base_path key name)
   $ agentic-kanban preferences set projects_base_dir /path/to/projects
 =======
   $ agentic-kanban preferences set projects_base_folder /path/to/projects
@@ -74,6 +77,7 @@ Examples:
 =======
   $ agentic-kanban preferences set projects_base_path /path/to/projects
 >>>>>>> a5e9504 (fix: align projects_base_dir -> projects_base_path across cli.ts and SettingsPanel.tsx)
+<<<<<<< HEAD
 <<<<<<< HEAD
 =======
   $ agentic-kanban preferences set projects_base_path /path/to/projects
@@ -111,6 +115,11 @@ Examples:
 >>>>>>> 89f4fdb (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
 =======
 >>>>>>> 7effda9 (fix: align projects_base_dir -> projects_base_path across cli.ts and SettingsPanel.tsx)
+=======
+=======
+  $ agentic-kanban preferences set projects_base_path /path/to/projects
+>>>>>>> 9e9ee57 (fix: add missing fs imports and unify projects_base_path key name)
+>>>>>>> dbea783 (fix: add missing fs imports and unify projects_base_path key name)
 `);
 
 program
@@ -213,12 +222,15 @@ program
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 >>>>>>> b794815 (feat: add cli create subcommand and preferences set/get)
 =======
 >>>>>>> 89f4fdb (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
 =======
 >>>>>>> 7effda9 (fix: align projects_base_dir -> projects_base_path across cli.ts and SettingsPanel.tsx)
+=======
+>>>>>>> dbea783 (fix: add missing fs imports and unify projects_base_path key name)
   .description("Create a new git repo and register it as a project.\n\nCreates a directory under the configured projects_base_dir preference (or --path), runs 'git init', and registers the repo.\n\nUse 'pnpm cli -- register <path>' to register an existing repo instead.")
   .argument("<folder-name>", "Name of the new project folder to create")
   .option("--path <base-path>", "Base directory to create the folder in (overrides projects_base_dir preference)")
@@ -246,11 +258,15 @@ program
   .option("--path <base-path>", "Base directory to create the folder in (overrides projects_base_path preference)")
 >>>>>>> a5e9504 (fix: align projects_base_dir -> projects_base_path across cli.ts and SettingsPanel.tsx)
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> dbea783 (fix: add missing fs imports and unify projects_base_path key name)
 =======
   .description("Create a new git repo and register it as a project.\n\nCreates a directory under the configured projects_base_path preference (or --path), runs 'git init', and registers the repo.\n\nUse 'pnpm cli -- register <path>' to register an existing repo instead.")
   .argument("<folder-name>", "Name of the new project folder to create")
   .option("--path <base-path>", "Base directory to create the folder in (overrides projects_base_path preference)")
 >>>>>>> 9e9ee57 (fix: add missing fs imports and unify projects_base_path key name)
+<<<<<<< HEAD
 =======
   .description("Create a new git repo and register it as a project.\n\nCreates a directory under the configured projects_base_folder preference (or --path), runs 'git init', and registers the repo.\n\nUse 'pnpm cli -- register <path>' to register an existing repo instead.")
   .argument("<folder-name>", "Name of the new project folder to create")
@@ -297,6 +313,8 @@ program
 >>>>>>> 89f4fdb (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
 =======
 >>>>>>> 7effda9 (fix: align projects_base_dir -> projects_base_path across cli.ts and SettingsPanel.tsx)
+=======
+>>>>>>> dbea783 (fix: add missing fs imports and unify projects_base_path key name)
   .option("-n, --name <name>", "Custom project name (defaults to folder name)")
   .option("-b, --branch <branch>", "Initial branch name (default: main)")
   .addHelpText("after", `
@@ -316,12 +334,15 @@ Examples:
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 >>>>>>> b794815 (feat: add cli create subcommand and preferences set/get)
 =======
 >>>>>>> 89f4fdb (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
 =======
 >>>>>>> 7effda9 (fix: align projects_base_dir -> projects_base_path across cli.ts and SettingsPanel.tsx)
+=======
+>>>>>>> dbea783 (fix: add missing fs imports and unify projects_base_path key name)
   $ agentic-kanban create my-app                        # uses projects_base_dir preference
 =======
   $ agentic-kanban create my-app                        # uses projects_base_folder preference
@@ -334,6 +355,7 @@ Examples:
 =======
   $ agentic-kanban create my-app                        # uses projects_base_path preference
 >>>>>>> a5e9504 (fix: align projects_base_dir -> projects_base_path across cli.ts and SettingsPanel.tsx)
+<<<<<<< HEAD
 <<<<<<< HEAD
 =======
   $ agentic-kanban create my-app                        # uses projects_base_path preference
@@ -371,6 +393,11 @@ Examples:
 >>>>>>> 89f4fdb (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
 =======
 >>>>>>> 7effda9 (fix: align projects_base_dir -> projects_base_path across cli.ts and SettingsPanel.tsx)
+=======
+=======
+  $ agentic-kanban create my-app                        # uses projects_base_path preference
+>>>>>>> 9e9ee57 (fix: add missing fs imports and unify projects_base_path key name)
+>>>>>>> dbea783 (fix: add missing fs imports and unify projects_base_path key name)
   $ agentic-kanban create my-app --path /projects       # create in /projects/my-app
   $ agentic-kanban create my-app -n "My Application"   # custom project name
   $ agentic-kanban create my-app -b master              # use 'master' as initial branch
@@ -392,12 +419,15 @@ Setup:
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 >>>>>>> b794815 (feat: add cli create subcommand and preferences set/get)
 =======
 >>>>>>> 89f4fdb (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
 =======
 >>>>>>> 7effda9 (fix: align projects_base_dir -> projects_base_path across cli.ts and SettingsPanel.tsx)
+=======
+>>>>>>> dbea783 (fix: add missing fs imports and unify projects_base_path key name)
   $ agentic-kanban preferences set projects_base_dir /path/to/projects
 =======
   $ agentic-kanban preferences set projects_base_folder /path/to/projects
@@ -410,6 +440,7 @@ Setup:
 =======
   $ agentic-kanban preferences set projects_base_path /path/to/projects
 >>>>>>> a5e9504 (fix: align projects_base_dir -> projects_base_path across cli.ts and SettingsPanel.tsx)
+<<<<<<< HEAD
 <<<<<<< HEAD
 =======
   $ agentic-kanban preferences set projects_base_path /path/to/projects
@@ -429,6 +460,11 @@ Setup:
 >>>>>>> 89f4fdb (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
 =======
 >>>>>>> 7effda9 (fix: align projects_base_dir -> projects_base_path across cli.ts and SettingsPanel.tsx)
+=======
+=======
+  $ agentic-kanban preferences set projects_base_path /path/to/projects
+>>>>>>> 9e9ee57 (fix: add missing fs imports and unify projects_base_path key name)
+>>>>>>> dbea783 (fix: add missing fs imports and unify projects_base_path key name)
 `)
   .action(async (folderName: string, options: { path?: string; name?: string; branch?: string }) => {
     let dirCreated = false;
@@ -540,6 +576,7 @@ Setup:
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 >>>>>>> b794815 (feat: add cli create subcommand and preferences set/get)
 =======
@@ -548,6 +585,8 @@ Setup:
 >>>>>>> 088856d (WIP: add rmSync and writeFileSync imports to projects.ts)
 =======
 >>>>>>> 7effda9 (fix: align projects_base_dir -> projects_base_path across cli.ts and SettingsPanel.tsx)
+=======
+>>>>>>> dbea783 (fix: add missing fs imports and unify projects_base_path key name)
         const pref = await db.select().from(preferences).where(eq(preferences.key, "projects_base_dir")).limit(1);
 =======
         const pref = await db.select().from(preferences).where(eq(preferences.key, "projects_base_folder")).limit(1);
@@ -568,6 +607,7 @@ Setup:
 =======
         const pref = await db.select().from(preferences).where(eq(preferences.key, "projects_base_path")).limit(1);
 >>>>>>> 9e9ee57 (fix: add missing fs imports and unify projects_base_path key name)
+<<<<<<< HEAD
 =======
         const pref = await db.select().from(preferences).where(eq(preferences.key, "projects_base_folder")).limit(1);
 >>>>>>> a9ef19b (feat: add cli create subcommand and preferences set/get)
@@ -615,12 +655,15 @@ Setup:
         const pref = await db.select().from(preferences).where(eq(preferences.key, “projects_base_path”)).limit(1);
 >>>>>>> a5e9504 (fix: align projects_base_dir -> projects_base_path across cli.ts and SettingsPanel.tsx)
 >>>>>>> 7effda9 (fix: align projects_base_dir -> projects_base_path across cli.ts and SettingsPanel.tsx)
+=======
+>>>>>>> dbea783 (fix: add missing fs imports and unify projects_base_path key name)
         if (pref.length > 0 && pref[0].value) {
           baseFolder = pref[0].value;
         }
       }
 
       if (!baseFolder) {
+<<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
@@ -649,12 +692,15 @@ Setup:
 >>>>>>> 088856d (WIP: add rmSync and writeFileSync imports to projects.ts)
 =======
 >>>>>>> 7effda9 (fix: align projects_base_dir -> projects_base_path across cli.ts and SettingsPanel.tsx)
+=======
+>>>>>>> dbea783 (fix: add missing fs imports and unify projects_base_path key name)
         console.error("No base folder configured. Use --path <base-path> or set the projects_base_dir preference:");
         console.error("  pnpm cli -- preferences set projects_base_dir /path/to/projects");
 =======
         console.error("No base folder configured. Use --path <base-path> or set the projects_base_path preference:");
         console.error("  pnpm cli -- preferences set projects_base_path /path/to/projects");
 >>>>>>> 9e9ee57 (fix: add missing fs imports and unify projects_base_path key name)
+<<<<<<< HEAD
 =======
         console.error("No base folder configured. Use --path <base-path> or set the projects_base_path preference:");
         console.error("  pnpm cli -- preferences set projects_base_path /path/to/projects");
@@ -807,6 +853,8 @@ Setup:
         console.error("No base folder configured. Use --path <base-path> or set the projects_base_dir preference:");
         console.error("  pnpm cli -- preferences set projects_base_dir /path/to/projects");
 >>>>>>> 63066d9 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
+=======
+>>>>>>> dbea783 (fix: add missing fs imports and unify projects_base_path key name)
         process.exit(1);
       }
 
@@ -1322,12 +1370,15 @@ Examples:
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 >>>>>>> b794815 (feat: add cli create subcommand and preferences set/get)
 =======
 >>>>>>> 89f4fdb (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
 =======
 >>>>>>> 7effda9 (fix: align projects_base_dir -> projects_base_path across cli.ts and SettingsPanel.tsx)
+=======
+>>>>>>> dbea783 (fix: add missing fs imports and unify projects_base_path key name)
   $ agentic-kanban preferences get projects_base_dir
   $ agentic-kanban preferences set projects_base_dir /path/to/projects
 =======
@@ -1351,10 +1402,14 @@ Examples:
   $ agentic-kanban preferences set projects_base_path /path/to/projects
 >>>>>>> a5e9504 (fix: align projects_base_dir -> projects_base_path across cli.ts and SettingsPanel.tsx)
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> dbea783 (fix: add missing fs imports and unify projects_base_path key name)
 =======
   $ agentic-kanban preferences get projects_base_path
   $ agentic-kanban preferences set projects_base_path /path/to/projects
 >>>>>>> 9e9ee57 (fix: add missing fs imports and unify projects_base_path key name)
+<<<<<<< HEAD
 =======
   $ agentic-kanban preferences get projects_base_folder
   $ agentic-kanban preferences set projects_base_folder /path/to/projects
@@ -1393,6 +1448,8 @@ Examples:
 >>>>>>> 89f4fdb (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
 =======
 >>>>>>> 7effda9 (fix: align projects_base_dir -> projects_base_path across cli.ts and SettingsPanel.tsx)
+=======
+>>>>>>> dbea783 (fix: add missing fs imports and unify projects_base_path key name)
 `);
 
 prefCmd

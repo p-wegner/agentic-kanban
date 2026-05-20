@@ -19,6 +19,14 @@ import { execFile, execSync } from "node:child_process";
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+import { existsSync, mkdirSync, readdirSync } from "node:fs";
+=======
+import { existsSync, readdirSync, writeFileSync } from "node:fs";
+>>>>>>> f36a871 (feat: add optional README and .gitignore template to project creation dialog)
+=======
+>>>>>>> dbea783 (fix: add missing fs imports and unify projects_base_path key name)
 import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 =======
 import { existsSync, mkdirSync, readdirSync } from "node:fs";
@@ -29,6 +37,7 @@ import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:
 =======
 import { existsSync, mkdirSync, readdirSync, writeFileSync, rmSync } from "node:fs";
 >>>>>>> 9e9ee57 (fix: add missing fs imports and unify projects_base_path key name)
+<<<<<<< HEAD
 =======
 import { existsSync, mkdirSync, readdirSync } from "node:fs";
 >>>>>>> 73b13d2 (feat: implement create project flow (WIP - UI + backend route))
@@ -88,6 +97,8 @@ import { existsSync, mkdirSync, readdirSync } from "node:fs";
 import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 >>>>>>> 088aead (WIP: add rmSync and writeFileSync imports to projects.ts)
 >>>>>>> 088856d (WIP: add rmSync and writeFileSync imports to projects.ts)
+=======
+>>>>>>> dbea783 (fix: add missing fs imports and unify projects_base_path key name)
 import { detectRepoInfo } from "../services/git-info.service.js";
 import { listBranches, listWorktrees, getDiffShortstat, removeWorktree, detectConflicts } from "../services/git.service.js";
 import type { Database } from "../db/index.js";
@@ -318,14 +329,18 @@ export function createProjectsRoute(database: Database = db) {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 >>>>>>> 62b2c9d (feat: validate create-project edge cases (WIP))
 =======
 >>>>>>> ea9ffef (fix: resolve preference key mismatch, path traversal in skill names, and cleanup bugs)
+=======
+>>>>>>> dbea783 (fix: add missing fs imports and unify projects_base_path key name)
       // Read projects_base_folder from preferences
 =======
       // Read projects_base_path from preferences
 >>>>>>> 9e9ee57 (fix: add missing fs imports and unify projects_base_path key name)
+<<<<<<< HEAD
       const baseDirRows = await database
         .select({ value: preferences.value })
         .from(preferences)
@@ -442,10 +457,12 @@ export function createProjectsRoute(database: Database = db) {
 =======
       // Read projects_base_folder from preferences
 >>>>>>> 89b6a74 (fix: resolve preference key mismatch, path traversal in skill names, and cleanup bugs)
+=======
+>>>>>>> dbea783 (fix: add missing fs imports and unify projects_base_path key name)
       const baseDirRows = await database
         .select({ value: preferences.value })
         .from(preferences)
-        .where(eq(preferences.key, "projects_base_folder"))
+        .where(eq(preferences.key, "projects_base_path"))
         .limit(1);
       const baseDir = baseDirRows[0]?.value?.trim();
       if (!baseDir) {
