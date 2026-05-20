@@ -55,7 +55,7 @@ export function Layout({
   const [createPath, setCreatePath] = useState("");
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
-  const createNameInvalid = !createPath.trim() && /[/\\<>:"|?*\x00]/.test(createName);
+  const createNameInvalid = /[/\\<>:"|?*\x00]/.test(createName);
   const inputRef = useRef<HTMLInputElement>(null);
 
   async function handleRegisterSubmit(e: React.FormEvent) {
