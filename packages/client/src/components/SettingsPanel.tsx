@@ -393,6 +393,17 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
   const [mergeTargetId, setMergeTargetId] = useState<string>("");
   const [mergingTags, setMergingTags] = useState(false);
 
+  // Tags state
+  const [tagsList, setTagsList] = useState<{ id: string; name: string; color: string | null }[]>([]);
+  const [editingTag, setEditingTag] = useState<string | null>(null);
+  const [editTagName, setEditTagName] = useState("");
+  const [editTagColor, setEditTagColor] = useState("");
+  const [newTagName, setNewTagName] = useState("");
+  const [newTagColor, setNewTagColor] = useState("#6B7280");
+  const [selectedTagIds, setSelectedTagIds] = useState<Set<string>>(new Set());
+  const [mergeTargetId, setMergeTargetId] = useState<string>("");
+  const [mergingTags, setMergingTags] = useState(false);
+
   const disabledTools = new Set((settings.disabled_mcp_tools || "").split(",").filter(Boolean));
   function isToolDisabled(name: string) {
     return disabledTools.has(name);
