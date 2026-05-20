@@ -6,8 +6,11 @@ description: Analyze a ticket and its relationships to other open tickets, sugge
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 >>>>>>> 741e4c0 (chore: add exported agent skills to .claude/skills/)
+=======
+>>>>>>> abd2196 (chore: add exported agent skills to .claude/skills/)
 Analyze the given issue and its relationship to other open (non-Done, non-Cancelled) issues on the board.
 
 Steps:
@@ -20,6 +23,7 @@ Steps:
 4. Use add_dependency to create any discovered "depends on" relationships
 5. Use update_issue to add a "## Dependencies" section to the issue description listing discovered relationships
 
+<<<<<<< HEAD
 <<<<<<< HEAD
 Focus on actionable dependencies, not just topical similarity. Only add a dependency if there is a clear technical reason the issues are coupled.
 =======
@@ -66,3 +70,6 @@ Analyze the given issue and its relationships to other open (non-Done, non-Cance
 =======
 Focus on actionable dependencies, not just topical similarity. Only add a dependency if there is a clear technical reason the issues are coupled.
 >>>>>>> 741e4c0 (chore: add exported agent skills to .claude/skills/)
+=======
+Focus on actionable dependencies, not just topical similarity. Only add a dependency if there is a clear technical reason the issues are coupled.
+>>>>>>> abd2196 (chore: add exported agent skills to .claude/skills/)
