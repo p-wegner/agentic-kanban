@@ -31,10 +31,14 @@ interface Settings {
   auto_monitor?: string;
   auto_monitor_interval?: string;
 <<<<<<< HEAD
+<<<<<<< HEAD
   projects_base_path?: string;
 =======
   projects_base_dir?: string;
 >>>>>>> 73b13d2 (feat: implement create project flow (WIP - UI + backend route))
+=======
+  projects_base_folder?: string;
+>>>>>>> 9a513e9 (WIP: uncommitted changes in SettingsPanel and register-project test)
 }
 
 const DEFAULT_SETTINGS: Settings = {
@@ -60,10 +64,14 @@ const DEFAULT_SETTINGS: Settings = {
   auto_monitor: "false",
   auto_monitor_interval: "4",
 <<<<<<< HEAD
+<<<<<<< HEAD
   projects_base_path: "",
 =======
   projects_base_dir: "",
 >>>>>>> 73b13d2 (feat: implement create project flow (WIP - UI + backend route))
+=======
+  projects_base_folder: "",
+>>>>>>> 9a513e9 (WIP: uncommitted changes in SettingsPanel and register-project test)
 };
 
 type Tab = "agent" | "workflow" | "skills" | "mcp" | "ui" | "project" | "tags" | "advanced";
@@ -787,12 +795,17 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                     <input
                       type="text"
 <<<<<<< HEAD
+<<<<<<< HEAD
                       value={settings.projects_base_path ?? ""}
                       onChange={(e) => setSettings((s) => ({ ...s, projects_base_path: e.target.value }))}
 =======
                       value={settings.projects_base_dir ?? ""}
                       onChange={(e) => setSettings((s) => ({ ...s, projects_base_dir: e.target.value }))}
 >>>>>>> 73b13d2 (feat: implement create project flow (WIP - UI + backend route))
+=======
+                      value={settings.projects_base_folder ?? ""}
+                      onChange={(e) => setSettings((s) => ({ ...s, projects_base_folder: e.target.value }))}
+>>>>>>> 9a513e9 (WIP: uncommitted changes in SettingsPanel and register-project test)
                       placeholder="C:/projects"
                       className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 font-mono"
                     />
