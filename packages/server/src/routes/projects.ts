@@ -276,6 +276,7 @@ export function createProjectsRoute(database: Database = db) {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 >>>>>>> 7695053 (feat: validate create-project edge cases (WIP))
 =======
@@ -286,6 +287,10 @@ export function createProjectsRoute(database: Database = db) {
 >>>>>>> 405a005 (feat: validate create-project edge cases (WIP))
 =======
 >>>>>>> 19a00ff (feat: implement create project flow (WIP - UI + backend route))
+=======
+=======
+>>>>>>> 7695053 (feat: validate create-project edge cases (WIP))
+>>>>>>> 62b2c9d (feat: validate create-project edge cases (WIP))
       // Validate folder name when deriving path from name
       if (/[/\\<>:"|?*\x00]/.test(name)) {
         return c.json({ error: 'Project name contains invalid characters. Avoid: / \\ < > : " | ? *' }, 400);
@@ -302,6 +307,9 @@ export function createProjectsRoute(database: Database = db) {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> 62b2c9d (feat: validate create-project edge cases (WIP))
       // Read projects_base_folder from preferences
 =======
       // Read projects_base_path from preferences
@@ -492,6 +500,8 @@ export function createProjectsRoute(database: Database = db) {
 >>>>>>> ec12683 (feat: implement create project flow (WIP - UI + backend route))
 =======
 =======
+=======
+>>>>>>> 7695053 (feat: validate create-project edge cases (WIP))
       // Read projects_base_dir from preferences
       const baseDirRows = await database
         .select({ value: preferences.value })
@@ -500,18 +510,26 @@ export function createProjectsRoute(database: Database = db) {
         .limit(1);
       const baseDir = baseDirRows[0]?.value?.trim();
       if (!baseDir) {
-        return c.json({ error: "No base directory configured. Set 'Projects base directory' in Settings > Project, or provide an explicit path." }, 400);
+        return c.json({ error: "No base directory configured. Set 'Projects base directory' in Settings › Project, or provide an explicit path." }, 400);
       }
       targetPath = resolve(join(baseDir, name));
+
+      // Guard against path traversal (e.g. name = "../other")
+      const resolvedBase = resolve(baseDir);
+      if (!targetPath.startsWith(resolvedBase + sep) && targetPath !== resolvedBase) {
+        return c.json({ error: `Invalid project name: "${name}" would escape the base directory.` }, 400);
+      }
     }
 
-    // Create directory if it doesn't exist
-    if (!existsSync(targetPath)) {
-      try {
-        mkdirSync(targetPath, { recursive: true });
-      } catch (err) {
-        return c.json({ error: `Failed to create directory: ${err instanceof Error ? err.message : String(err)}` }, 400);
-      }
+    // Error if the directory already exists — use the Import tab for existing repos
+    if (existsSync(targetPath)) {
+      return c.json({ error: `Directory already exists: ${targetPath}. To use an existing directory, use "Import existing" instead.` }, 409);
+    }
+
+    try {
+      mkdirSync(targetPath, { recursive: true });
+    } catch (err) {
+      return c.json({ error: `Failed to create directory: ${err instanceof Error ? err.message : String(err)}` }, 400);
     }
 
 >>>>>>> 41a314b (feat: implement create project flow (WIP - UI + backend route))
