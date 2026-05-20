@@ -4,6 +4,7 @@ description: Analyze a ticket and its relationships to other open tickets, sugge
 ---
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 Analyze the given issue and its relationship to other open (non-Done, non-Cancelled) issues on the board.
 
 Steps:
@@ -18,6 +19,8 @@ Steps:
 
 Focus on actionable dependencies, not just topical similarity. Only add a dependency if there is a clear technical reason the issues are coupled.
 =======
+=======
+>>>>>>> b63e4a8 (feat: implement dependency-analyzer skill with improved prompt)
 Analyze the given issue and its relationships to other open (non-Done, non-Cancelled) issues on the board.
 
 ## Steps
@@ -52,4 +55,7 @@ Analyze the given issue and its relationships to other open (non-Done, non-Cance
 - Prefer `depends_on` when one issue must land in production before the other can be implemented
 - Skip issues that are already linked (check existing dependencies in `get_issue` output)
 - Do not link an issue to itself
+<<<<<<< HEAD
 >>>>>>> 66f1d46 (feat: implement dependency-analyzer skill with improved prompt)
+=======
+>>>>>>> b63e4a8 (feat: implement dependency-analyzer skill with improved prompt)
