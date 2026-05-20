@@ -5,12 +5,18 @@ interface Project {
   name: string;
 }
 
+interface RegisterOptions {
+  repoPath: string;
+  gitignoreTemplate: string;
+  generateReadme: boolean;
+}
+
 interface LayoutProps {
   children: ReactNode;
   projects?: Project[];
   activeProjectId?: string | null;
   onProjectChange?: (id: string) => void;
-  onRegisterProject?: (repoPath: string) => Promise<void>;
+  onRegisterProject?: (opts: RegisterOptions) => Promise<void>;
   onCreateProject?: (name: string, path: string) => Promise<void>;
   searchQuery?: string;
   onSearchChange?: (query: string) => void;
@@ -37,6 +43,8 @@ export function Layout({
   const [showRegister, setShowRegister] = useState(false);
   const [modalTab, setModalTab] = useState<"import" | "create">("import");
   const [repoPath, setRepoPath] = useState("");
+  const [gitignoreTemplate, setGitignoreTemplate] = useState("");
+  const [generateReadme, setGenerateReadme] = useState(false);
   const [registering, setRegistering] = useState(false);
   const [registerError, setRegisterError] = useState<string | null>(null);
   const [createName, setCreateName] = useState("");
@@ -51,9 +59,11 @@ export function Layout({
     setRegistering(true);
     setRegisterError(null);
     try {
-      await onRegisterProject?.(repoPath.trim());
+      await onRegisterProject?.({ repoPath: repoPath.trim(), gitignoreTemplate, generateReadme });
       setShowRegister(false);
       setRepoPath("");
+      setGitignoreTemplate("");
+      setGenerateReadme(false);
     } catch (err) {
       setRegisterError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -85,6 +95,8 @@ export function Layout({
     setCreateName("");
     setCreatePath("");
     setModalTab("import");
+    setGitignoreTemplate("");
+    setGenerateReadme(false);
     setShowRegister(true);
     setTimeout(() => inputRef.current?.focus(), 50);
   }
