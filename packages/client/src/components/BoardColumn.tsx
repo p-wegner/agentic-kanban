@@ -111,7 +111,7 @@ export function BoardColumn({
   return (
     <div
       id={`column-${column.id}`}
-      className={`w-72 shrink-0 bg-gray-100 rounded-xl p-2 flex flex-col transition-all relative ${
+      className={`w-[calc(100vw-2rem)] sm:w-72 shrink-0 bg-gray-100 rounded-xl p-2 flex flex-col transition-all relative ${
         dragOver ? "ring-2 ring-blue-400 ring-offset-1" : ""
       }`}
       style={style}
