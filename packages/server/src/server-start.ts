@@ -502,7 +502,15 @@ export async function startServer(port?: number) {
 
   // Board monitoring loop — periodically checks for stuck/idle workspaces
   let monitorTimer: ReturnType<typeof setTimeout> | null = null;
+  let monitorNextRunAt: string | null = null;
   let monitorLastRun: { at: string; relaunched: number; merged: number; nudged: number } | null = null;
+  type MonitorAction = { at: string; action: "relaunch" | "merge" | "nudge" | "mark_idle" | "mark_dead"; workspaceId: string };
+  const monitorRecentActions: MonitorAction[] = [];
+
+  function logMonitorAction(action: MonitorAction["action"], workspaceId: string) {
+    monitorRecentActions.unshift({ at: new Date().toISOString(), action, workspaceId });
+    if (monitorRecentActions.length > 30) monitorRecentActions.splice(30);
+  }
 
   async function runMonitorCycle() {
     const cycleStats = { relaunched: 0, merged: 0, nudged: 0 };
@@ -547,6 +555,7 @@ export async function startServer(port?: number) {
             const baseUrl = `http://localhost:${serverPort}`;
             await fetch(`${baseUrl}/api/workspaces/${ws.wsId}/launch`, { method: "POST" }).catch(() => {});
             cycleStats.relaunched++;
+            logMonitorAction("relaunch", ws.wsId);
             console.log(`[monitor] Relaunched idle workspace ${ws.wsId}`);
             boardEvents.broadcast(ws.projectId, "board_changed");
           } else if (ws.wsStatus === "reviewing" && sess && sess.status === "stopped") {
@@ -554,12 +563,14 @@ export async function startServer(port?: number) {
             const baseUrl = `http://localhost:${serverPort}`;
             await fetch(`${baseUrl}/api/workspaces/${ws.wsId}/merge`, { method: "POST" }).catch(() => {});
             cycleStats.merged++;
+            logMonitorAction("merge", ws.wsId);
             console.log(`[monitor] Triggered merge for reviewing workspace ${ws.wsId}`);
             boardEvents.broadcast(ws.projectId, "board_changed");
           } else if (ws.wsStatus === "active" && sess && sess.status === "stopped") {
             // Active workspace but session has stopped — agent exited without transitioning workspace.
             // Mark workspace as idle so the next cycle will relaunch it.
             await db.update(workspaces).set({ status: "idle" }).where(eq(workspaces.id, ws.wsId)).catch(() => {});
+            logMonitorAction("mark_idle", ws.wsId);
             console.log(`[monitor] Active workspace ${ws.wsId} has stopped session — marking idle for relaunch`);
             boardEvents.broadcast(ws.projectId, "board_changed");
           } else if (ws.wsStatus === "active" && sess && sess.status === "running") {
@@ -569,6 +580,7 @@ export async function startServer(port?: number) {
               // Process died without updating DB — treat as stopped
               await db.update(workspaces).set({ status: "idle" }).where(eq(workspaces.id, ws.wsId)).catch(() => {});
               await db.update(sessions).set({ status: "stopped", endedAt: new Date().toISOString() }).where(eq(sessions.id, sess.id)).catch(() => {});
+              logMonitorAction("mark_dead", ws.wsId);
               console.log(`[monitor] Workspace ${ws.wsId} process dead — marking idle`);
               boardEvents.broadcast(ws.projectId, "board_changed");
             } else {
@@ -582,6 +594,7 @@ export async function startServer(port?: number) {
                   body: JSON.stringify({ message: "Please continue with the task. If you are waiting for input, proceed with your best judgment." }),
                 }).catch(() => {});
                 cycleStats.nudged++;
+                logMonitorAction("nudge", ws.wsId);
                 console.log(`[monitor] Nudged long-running agent in workspace ${ws.wsId}`);
               }
             }
@@ -599,7 +612,10 @@ export async function startServer(port?: number) {
       const prefMap = new Map(prefRows.map((r: { key: string; value: string }) => [r.key, r.value]));
       if (prefMap.get("auto_monitor") === "true") {
         const intervalMin = parseInt(prefMap.get("auto_monitor_interval") || "4", 10);
+        monitorNextRunAt = new Date(Date.now() + intervalMin * 60 * 1000).toISOString();
         monitorTimer = setTimeout(runMonitorCycle, intervalMin * 60 * 1000);
+      } else {
+        monitorNextRunAt = null;
       }
     }
   }
@@ -612,11 +628,13 @@ export async function startServer(port?: number) {
     if (enabled && !monitorTimer) {
       const intervalMin = parseInt(prefMap.get("auto_monitor_interval") || "4", 10);
       console.log(`[monitor] Starting board monitoring loop (every ${intervalMin}m)`);
+      monitorNextRunAt = new Date(Date.now() + intervalMin * 60 * 1000).toISOString();
       monitorTimer = setTimeout(runMonitorCycle, intervalMin * 60 * 1000);
     } else if (!enabled && monitorTimer) {
       console.log("[monitor] Stopping board monitoring loop");
       clearTimeout(monitorTimer);
       monitorTimer = null;
+      monitorNextRunAt = null;
     }
   }
 
@@ -634,6 +652,8 @@ export async function startServer(port?: number) {
       intervalMin: parseInt(prefMap.get("auto_monitor_interval") || "4", 10),
       active: monitorTimer !== null,
       lastRun: monitorLastRun,
+      nextRunAt: monitorNextRunAt,
+      recentActions: monitorRecentActions,
     });
   });
 
