@@ -151,6 +151,7 @@ export function createAgentSkillsRoute(database: Database = db) {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 >>>>>>> a19889f (fix: resolve preference key mismatch, path traversal in skill names, and cleanup bugs)
 =======
@@ -180,6 +181,9 @@ export function createAgentSkillsRoute(database: Database = db) {
 >>>>>>> ad9bf6a (feat: install kanban skills to project .claude/skills/ from Settings UI)
 =======
 >>>>>>> 89b6a74 (fix: resolve preference key mismatch, path traversal in skill names, and cleanup bugs)
+=======
+    await writeAgentSkillFile(repoPath, rows[0]);
+>>>>>>> 74c8daf (feat: install kanban skills to project .claude/skills/ from Settings UI)
     return c.json({ installed: true, repoPath });
   });
 
