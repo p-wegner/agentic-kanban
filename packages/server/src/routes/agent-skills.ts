@@ -145,7 +145,11 @@ export function createAgentSkillsRoute(database: Database = db) {
     const repoPath = await getActiveProjectRepoPath(database);
     if (!repoPath) return c.json({ error: "No active project found" }, 400);
 
-    await writeAgentSkillFile(repoPath, rows[0]);
+    try {
+      await writeAgentSkillFile(repoPath, rows[0]);
+    } catch (err) {
+      return c.json({ error: `Failed to install skill: ${err instanceof Error ? err.message : String(err)}` }, 500);
+    }
     return c.json({ installed: true, repoPath });
   });
 
