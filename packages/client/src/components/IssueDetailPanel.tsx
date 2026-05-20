@@ -50,6 +50,11 @@ export function IssueDetailPanel({
   const [estimate, setEstimate] = useState<string>(issue.estimate ?? "");
   const [saving, setSaving] = useState(false);
   const depTypeRef = useRef<HTMLSelectElement>(null);
+  const [depSearch, setDepSearch] = useState("");
+  const [depDropdownOpen, setDepDropdownOpen] = useState(false);
+  const [depHighlightIdx, setDepHighlightIdx] = useState(0);
+  const depComboRef = useRef<HTMLDivElement>(null);
+  const depInputRef = useRef<HTMLInputElement>(null);
   const [enhancing, setEnhancing] = useState(false);
   const [preEnhanceSnapshot, setPreEnhanceSnapshot] = useState<{ title: string; description: string } | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -745,36 +750,93 @@ export function IssueDetailPanel({
                     .map((d) => d.dependsOnId)
                 );
                 const candidates = availableIssues.filter((i) => !existingTargetIds.has(i.id));
+                const filteredCandidates = candidates.filter((i) => {
+                  const q = depSearch.toLowerCase();
+                  return (
+                    (i.issueNumber != null && String(i.issueNumber).includes(q)) ||
+                    i.title.toLowerCase().includes(q)
+                  );
+                });
+                const addDep = async (depId: string) => {
+                  const depType = depTypeRef.current?.value || "depends_on";
+                  try {
+                    await apiFetch(`/api/issues/${issue.id}/dependencies`, {
+                      method: "POST",
+                      body: JSON.stringify({ dependsOnId: depId, type: depType }),
+                    });
+                    const deps = await apiFetch<DependencyInfo>(`/api/issues/${issue.id}/dependencies`);
+                    setDependencies(deps);
+                    onIssueUpdate(issue);
+                    setDepSearch("");
+                    setDepDropdownOpen(false);
+                    setDepHighlightIdx(0);
+                  } catch (err: any) {
+                    const msg = err?.message ?? "Failed to add dependency";
+                    showToast(msg, "error");
+                  }
+                };
                 return candidates.length > 0 ? (
                   <div className="flex gap-1 mt-1.5">
-                    <select
-                      className="text-xs border border-gray-300 rounded px-1 py-0.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                      value=""
-                      onChange={async (e) => {
-                        const depId = e.target.value;
-                        if (!depId) return;
-                        const depType = depTypeRef.current?.value || "depends_on";
-                        try {
-                          await apiFetch(`/api/issues/${issue.id}/dependencies`, {
-                            method: "POST",
-                            body: JSON.stringify({ dependsOnId: depId, type: depType }),
-                          });
-                          const deps = await apiFetch<DependencyInfo>(`/api/issues/${issue.id}/dependencies`);
-                          setDependencies(deps);
-                          onIssueUpdate(issue);
-                        } catch (err: any) {
-                          const msg = err?.message ?? "Failed to add dependency";
-                          showToast(msg, "error");
-                        }
-                      }}
-                    >
-                      <option value="">+ Add</option>
-                      {candidates.map((i) => (
-                        <option key={i.id} value={i.id}>
-                          {i.issueNumber != null ? `#${i.issueNumber} ` : ""}{i.title}
-                        </option>
-                      ))}
-                    </select>
+                    <div ref={depComboRef} className="relative">
+                      <input
+                        ref={depInputRef}
+                        type="text"
+                        className="text-xs border border-gray-300 rounded px-1.5 py-0.5 w-44 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                        placeholder="+ Add dependency…"
+                        value={depSearch}
+                        onChange={(e) => {
+                          setDepSearch(e.target.value);
+                          setDepDropdownOpen(true);
+                          setDepHighlightIdx(0);
+                        }}
+                        onFocus={() => setDepDropdownOpen(true)}
+                        onBlur={(e) => {
+                          if (!depComboRef.current?.contains(e.relatedTarget as Node)) {
+                            setDepDropdownOpen(false);
+                          }
+                        }}
+                        onKeyDown={(e) => {
+                          if (!depDropdownOpen) {
+                            if (e.key === "ArrowDown" || e.key === "Enter") setDepDropdownOpen(true);
+                            return;
+                          }
+                          if (e.key === "ArrowDown") {
+                            e.preventDefault();
+                            setDepHighlightIdx((p) => Math.min(p + 1, filteredCandidates.length - 1));
+                          } else if (e.key === "ArrowUp") {
+                            e.preventDefault();
+                            setDepHighlightIdx((p) => Math.max(p - 1, 0));
+                          } else if (e.key === "Enter") {
+                            e.preventDefault();
+                            const item = filteredCandidates[depHighlightIdx];
+                            if (item) addDep(item.id);
+                          } else if (e.key === "Escape") {
+                            setDepDropdownOpen(false);
+                            setDepSearch("");
+                          }
+                        }}
+                      />
+                      {depDropdownOpen && (
+                        <div className="absolute z-50 top-full left-0 mt-0.5 w-64 bg-white border border-gray-200 rounded shadow-lg max-h-48 overflow-y-auto">
+                          {filteredCandidates.length === 0 ? (
+                            <div className="text-xs text-gray-400 px-2 py-1.5">No matches</div>
+                          ) : (
+                            filteredCandidates.map((i, idx) => (
+                              <button
+                                key={i.id}
+                                tabIndex={-1}
+                                className={`w-full text-left text-xs px-2 py-1 truncate ${idx === depHighlightIdx ? "bg-blue-100 text-blue-800" : "hover:bg-gray-100"}`}
+                                onMouseDown={(e) => { e.preventDefault(); addDep(i.id); }}
+                                onMouseEnter={() => setDepHighlightIdx(idx)}
+                              >
+                                {i.issueNumber != null ? <span className="font-mono text-gray-500">#{i.issueNumber} </span> : null}
+                                {i.title}
+                              </button>
+                            ))
+                          )}
+                        </div>
+                      )}
+                    </div>
                     <select
                       ref={depTypeRef}
                       className="text-xs border border-gray-300 rounded px-1 py-0.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
