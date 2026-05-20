@@ -13,6 +13,7 @@ const COLUMN_COLORS: Record<string, string> = {
   "Todo": "bg-slate-400",
   "In Progress": "bg-amber-400",
   "In Review": "bg-blue-400",
+  "AI Reviewed": "bg-purple-400",
   "Done": "bg-emerald-400",
   "Cancelled": "bg-gray-400",
 };
@@ -21,6 +22,7 @@ const COLUMN_DOT_COLORS: Record<string, string> = {
   "Todo": "bg-slate-300",
   "In Progress": "bg-amber-300",
   "In Review": "bg-blue-300",
+  "AI Reviewed": "bg-purple-300",
   "Done": "bg-emerald-300",
   "Cancelled": "bg-gray-300",
 };
