@@ -790,6 +790,30 @@ ${contextParts.join("\n")}`;
     return c.json({ success: true });
   });
 
+  // POST /api/projects/:id/worktrees/open — open a worktree folder in the OS file explorer
+  router.post("/:id/worktrees/open", async (c) => {
+    const body = await c.req.json<{ path: string }>();
+    if (!body.path) return c.json({ error: "path is required" }, 400);
+
+    const { spawn } = await import("node:child_process");
+    const platform = process.platform;
+    let cmd: string;
+    let args: string[];
+    if (platform === "win32") {
+      cmd = "explorer";
+      args = [body.path.replace(/\//g, "\\")];
+    } else if (platform === "darwin") {
+      cmd = "open";
+      args = [body.path];
+    } else {
+      cmd = "xdg-open";
+      args = [body.path];
+    }
+
+    spawn(cmd, args, { detached: true, stdio: "ignore" }).unref();
+    return c.json({ success: true });
+  });
+
   // GET /api/projects/:id/board
   router.get("/:id/board", async (c) => {
     const projectId = c.req.param("id");
