@@ -240,6 +240,8 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
   const [skills, setSkills] = useState<{ id: string; name: string; description: string; prompt: string; model: string | null; projectId: string | null; isBuiltin: boolean }[]>([]);
   const [editingSkill, setEditingSkill] = useState<string | null>(null);
   const [newSkill, setNewSkill] = useState<{ name: string; description: string; prompt: string; model: string } | null>(null);
+  const [installedSkills, setInstalledSkills] = useState<Record<string, boolean>>({});
+  const [installingSkill, setInstallingSkill] = useState<string | null>(null);
 
   // Tags state
   const [tagsList, setTagsList] = useState<{ id: string; name: string; color: string | null }[]>([]);
@@ -276,6 +278,19 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
         setProfiles(profileData.profiles);
         setSkills(skillsData);
         setTagsList(tagsData);
+
+        // Check install status for each skill
+        const statusEntries = await Promise.all(
+          skillsData.map(async (skill) => {
+            try {
+              const s = await apiFetch<{ installed: boolean }>(`/api/agent-skills/${skill.id}/install-status`);
+              return [skill.id, s.installed] as const;
+            } catch {
+              return [skill.id, false] as const;
+            }
+          })
+        );
+        setInstalledSkills(Object.fromEntries(statusEntries));
 
         // Load project-specific settings
         if (activeProjectId) {
@@ -570,6 +585,25 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                               className="text-xs text-gray-400 hover:text-blue-600 px-1"
                             >
                               Edit
+                            </button>
+                            <button
+                              title={installedSkills[skill.id] ? "Re-install to project (.claude/skills/)" : "Install to project (.claude/skills/)"}
+                              disabled={installingSkill === skill.id}
+                              onClick={async () => {
+                                setInstallingSkill(skill.id);
+                                try {
+                                  await apiFetch(`/api/agent-skills/${skill.id}/install`, { method: "POST" });
+                                  setInstalledSkills((s) => ({ ...s, [skill.id]: true }));
+                                  showToast(`Installed "${skill.name}" to .claude/skills/`, "success");
+                                } catch {
+                                  showToast("Install failed", "error");
+                                } finally {
+                                  setInstallingSkill(null);
+                                }
+                              }}
+                              className={`text-xs px-1 ${installedSkills[skill.id] ? "text-green-600 hover:text-green-700" : "text-gray-400 hover:text-green-600"}`}
+                            >
+                              {installingSkill === skill.id ? "…" : installedSkills[skill.id] ? "✓ installed" : "Install"}
                             </button>
                             {!skill.isBuiltin && (
                               <button
