@@ -140,6 +140,7 @@ export async function startServer(port?: number) {
   const boardEvents = createBoardEvents(upgradeWebSocket);
   const reviewSessionIds = new Set<string>();
   const fixAndMergeSessionIds = new Set<string>();
+  const learningSessionIds = new Set<string>();
 
   async function runWorkflowOnExit(workspaceId: string, sessionId: string, exitCode: number | null) {
     try {
@@ -180,6 +181,12 @@ export async function startServer(port?: number) {
           console.log(`[workflow] fix-and-merge session ${sessionId} exited with code ${exitCode} — not retrying merge`);
           boardEvents.broadcast(projectId, "workflow_error");
         }
+        return;
+      }
+
+      if (learningSessionIds.has(sessionId)) {
+        learningSessionIds.delete(sessionId);
+        console.log(`[workflow] learning step session ${sessionId} completed — no further workflow action`);
         return;
       }
 
@@ -290,6 +297,38 @@ export async function startServer(port?: number) {
     now: string,
   ) {
     try {
+      // Optional learning step before merge
+      const prefRowsLearning = await db.select().from(preferences);
+      const prefMapLearning = new Map(prefRowsLearning.map(r => [r.key, r.value]));
+      if (prefMapLearning.get("learning_step_before_merge") === "true" && workspace.workingDir) {
+        try {
+          const learningPrompt = `/learning-step\n\nRun the learning step skill to extract insights from recent session transcripts and update docs/hooks before this workspace is merged.`;
+          const agentCmd = prefMapLearning.get("agent_command") || undefined;
+          const agentArgs = prefMapLearning.get("agent_args") || undefined;
+          const claudeProfile = prefMapLearning.get("claude_profile") || undefined;
+          const learningSessId = await sessionManager.startSession(workspace.id, learningPrompt, agentCmd, agentArgs ? agentArgs.split(" ") : undefined, undefined, claudeProfile);
+          learningSessionIds.add(learningSessId);
+          console.log(`[workflow] learning step started: session=${learningSessId}`);
+          await new Promise<void>((resolve) => {
+            const timeout = setTimeout(() => {
+              console.log("[workflow] learning step timed out after 3m, proceeding with merge");
+              resolve();
+            }, 3 * 60 * 1000);
+            const poll = setInterval(async () => {
+              const sessRows = await db.select({ status: sessions.status }).from(sessions).where(eq(sessions.id, learningSessId)).limit(1);
+              if (sessRows.length > 0 && sessRows[0].status !== "running") {
+                clearInterval(poll);
+                clearTimeout(timeout);
+                console.log(`[workflow] learning step finished: status=${sessRows[0].status}`);
+                resolve();
+              }
+            }, 5000);
+          });
+        } catch (err) {
+          console.warn("[workflow] learning step failed (non-fatal):", err);
+        }
+      }
+
       if (!workspace.isDirect) {
         const projectRows = await db.select({ repoPath: projects.repoPath, teardownScript: projects.teardownScript }).from(projects).where(eq(projects.id, projectId)).limit(1);
         if (projectRows.length > 0) {
