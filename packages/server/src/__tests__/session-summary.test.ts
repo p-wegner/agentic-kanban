@@ -42,6 +42,7 @@ const MIGRATION_FILES = [
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
   "../../../shared/drizzle/0028_perf_indexes_conflict_cache.sql",
 =======
 >>>>>>> b6a4ecf (feat: add estimate/sizing field to issues (XS/S/M/L/XL))
@@ -50,6 +51,9 @@ const MIGRATION_FILES = [
 >>>>>>> d778ce3 (perf: add DB indexes and stale-while-revalidate conflict cache for board load)
 =======
 >>>>>>> 26ff491 (feat: add estimate/sizing field to issues (XS/S/M/L/XL))
+=======
+  "../../../shared/drizzle/0028_perf_indexes_conflict_cache.sql",
+>>>>>>> d318021 (perf: add DB indexes and stale-while-revalidate conflict cache for board load)
 ];
 
 function createTestApp() {
