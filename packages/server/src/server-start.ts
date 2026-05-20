@@ -392,6 +392,7 @@ export async function startServer(port?: number) {
 >>>>>>> cc239db (fix: correct projects_base_path key name and learning step poll TDZ)
 =======
             const timeout = setTimeout(() => {
+              clearInterval(poll);
               console.log("[workflow] learning step timed out after 3m, proceeding with merge");
               resolve();
             }, 3 * 60 * 1000);
