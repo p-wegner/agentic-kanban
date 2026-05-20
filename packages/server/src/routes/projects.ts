@@ -232,6 +232,7 @@ export function createProjectsRoute(database: Database = db) {
     try {
       execSync("git init", { cwd: targetPath, stdio: "pipe" });
     } catch (err: any) {
+      try { rmSync(targetPath, { recursive: true, force: true }); } catch {}
       return c.json({ error: `git init failed: ${err.stderr ? String(err.stderr).trim() : String(err)}` }, 400);
     }
 
