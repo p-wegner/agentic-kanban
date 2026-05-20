@@ -210,6 +210,86 @@ describe("Issues API", () => {
     const body = await res.json() as any;
     expect(body.success).toBe(true);
   });
+
+  it("POST /api/issues creates issue with estimate", async () => {
+    const res = await app.request("/api/issues", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "Estimated issue", statusId, projectId, estimate: "M" }),
+    });
+    expect(res.status).toBe(201);
+    const { id } = await res.json() as any;
+
+    const list = await (await app.request(`/api/issues?projectId=${projectId}`)).json() as any[];
+    const created = list.find((i: any) => i.id === id);
+    expect(created.estimate).toBe("M");
+  });
+
+  it("POST /api/issues defaults estimate to null", async () => {
+    const res = await app.request("/api/issues", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "No estimate", statusId, projectId }),
+    });
+    const { id } = await res.json() as any;
+
+    const list = await (await app.request(`/api/issues?projectId=${projectId}`)).json() as any[];
+    const created = list.find((i: any) => i.id === id);
+    expect(created.estimate).toBeNull();
+  });
+
+  it("PATCH /api/issues/:id sets estimate", async () => {
+    const createRes = await app.request("/api/issues", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "Patch estimate", statusId, projectId }),
+    });
+    const { id } = await createRes.json() as any;
+
+    const patchRes = await app.request(`/api/issues/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ estimate: "XL" }),
+    });
+    expect(patchRes.status).toBe(200);
+
+    const list = await (await app.request(`/api/issues?projectId=${projectId}`)).json() as any[];
+    const updated = list.find((i: any) => i.id === id);
+    expect(updated.estimate).toBe("XL");
+  });
+
+  it("PATCH /api/issues/:id clears estimate", async () => {
+    const createRes = await app.request("/api/issues", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "Clear estimate", statusId, projectId, estimate: "S" }),
+    });
+    const { id } = await createRes.json() as any;
+
+    await app.request(`/api/issues/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ estimate: null }),
+    });
+
+    const list = await (await app.request(`/api/issues?projectId=${projectId}`)).json() as any[];
+    const updated = list.find((i: any) => i.id === id);
+    expect(updated.estimate).toBeNull();
+  });
+
+  it("GET /api/issues returns estimate field", async () => {
+    const createRes = await app.request("/api/issues", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "With estimate", statusId, projectId, estimate: "XS" }),
+    });
+    const { id } = await createRes.json() as any;
+
+    const list = await (await app.request(`/api/issues?projectId=${projectId}`)).json() as any[];
+    const issue = list.find((i: any) => i.id === id);
+    expect(issue).toHaveProperty("estimate");
+    expect(issue.estimate).toBe("XS");
+  });
 });
 
 describe("Board API", () => {
