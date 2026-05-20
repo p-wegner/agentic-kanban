@@ -28,11 +28,8 @@ async function seed() {
     console.log(`Seeded ${DEFAULT_TAGS.length} default tags.`);
   }
 
-  // Seed default agent skills
-  const existingSkills = await db.select().from(agentSkills).limit(1);
-  if (existingSkills.length > 0) {
-    console.log("Agent skills already seeded, skipping.");
-  } else {
+  // Seed default agent skills — upsert by name so new builtins are added to existing DBs
+  {
     const DEFAULT_SKILLS = [
       {
         name: "board-navigator",
@@ -149,9 +146,22 @@ Format the description with clear sections:
 - Relevant files or areas (if inferable from the title/context)`,
         model: "haiku",
       },
+      {
+        name: "monitor-nudge",
+        description: "Message sent to agents that have been running for more than 5 minutes without exiting — customize to change nudge behavior",
+        prompt: `Please continue with the task. If you are waiting for input or unsure how to proceed, use your best judgment and keep moving forward. Check the issue description and any open questions, then take the next logical step.`,
+        model: null,
+      },
     ];
 
+    const existingByName = new Map(
+      (await db.select({ name: agentSkills.name }).from(agentSkills).where(eq(agentSkills.isBuiltin, true)))
+        .map(r => [r.name, true])
+    );
+
+    let added = 0;
     for (const skill of DEFAULT_SKILLS) {
+      if (existingByName.has(skill.name)) continue;
       await db.insert(agentSkills).values({
         id: randomUUID(),
         name: skill.name,
@@ -162,8 +172,13 @@ Format the description with clear sections:
         createdAt: now,
         updatedAt: now,
       });
+      added++;
     }
-    console.log(`Seeded ${DEFAULT_SKILLS.length} default agent skills.`);
+    if (added > 0) {
+      console.log(`Seeded ${added} new default agent skill(s).`);
+    } else {
+      console.log("Agent skills already up to date.");
+    }
   }
 
   console.log('Run `pnpm cli -- register <path>` to register a git repo as a project.');
