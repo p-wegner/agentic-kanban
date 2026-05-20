@@ -276,9 +276,13 @@ export function createProjectsRoute(database: Database = db) {
       execSync("git init", { cwd: targetPath, stdio: "pipe" });
     } catch (err: any) {
 <<<<<<< HEAD
+<<<<<<< HEAD
       try { rmSync(targetPath, { recursive: true, force: true }); } catch {}
 =======
 >>>>>>> 41a314b (feat: implement create project flow (WIP - UI + backend route))
+=======
+      try { rmSync(targetPath, { recursive: true, force: true }); } catch {}
+>>>>>>> f6d1a48 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
       return c.json({ error: `git init failed: ${err.stderr ? String(err.stderr).trim() : String(err)}` }, 400);
     }
 
