@@ -1334,7 +1334,11 @@ ${contextParts.join("\n")}`;
                 if (mainWs.conflictCacheHasConflicts !== null) {
                   mainRef.conflicts = {
                     hasConflicts: mainWs.conflictCacheHasConflicts ?? false,
+<<<<<<< HEAD
                     conflictFiles: mainWs.conflictCacheFiles ? (() => { try { return JSON.parse(mainWs.conflictCacheFiles!); } catch { return []; } })() : [],
+=======
+                    conflictFiles: mainWs.conflictCacheFiles ? JSON.parse(mainWs.conflictCacheFiles) : [],
+>>>>>>> 59675e9 (perf: add DB indexes and stale-while-revalidate conflict cache for board load)
                   };
                 }
               } else {
@@ -1342,7 +1346,11 @@ ${contextParts.join("\n")}`;
                 if (mainWs.conflictCacheCheckedAt && mainWs.conflictCacheHasConflicts !== null) {
                   mainRef.conflicts = {
                     hasConflicts: mainWs.conflictCacheHasConflicts ?? false,
+<<<<<<< HEAD
                     conflictFiles: mainWs.conflictCacheFiles ? (() => { try { return JSON.parse(mainWs.conflictCacheFiles!); } catch { return []; } })() : [],
+=======
+                    conflictFiles: mainWs.conflictCacheFiles ? JSON.parse(mainWs.conflictCacheFiles) : [],
+>>>>>>> 59675e9 (perf: add DB indexes and stale-while-revalidate conflict cache for board load)
                   };
                 }
                 const wsId = mainWs.id;

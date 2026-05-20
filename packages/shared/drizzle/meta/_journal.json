@@ -202,10 +202,13 @@
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 >>>>>>> d778ce3 (perf: add DB indexes and stale-while-revalidate conflict cache for board load)
 =======
 >>>>>>> d318021 (perf: add DB indexes and stale-while-revalidate conflict cache for board load)
+=======
+>>>>>>> 59675e9 (perf: add DB indexes and stale-while-revalidate conflict cache for board load)
     },
     {
       "idx": 28,
@@ -213,6 +216,7 @@
       "when": 1779697600000,
       "tag": "0028_perf_indexes_conflict_cache",
       "breakpoints": true
+<<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
@@ -245,6 +249,8 @@
 >>>>>>> d318021 (perf: add DB indexes and stale-while-revalidate conflict cache for board load)
 =======
 >>>>>>> 43685f8 (feat: add estimate/sizing field to issues (XS/S/M/L/XL))
+=======
+>>>>>>> 59675e9 (perf: add DB indexes and stale-while-revalidate conflict cache for board load)
     }
   ]
 }
