@@ -452,10 +452,15 @@ export function BoardPage() {
         const s = await apiFetch<Record<string, string>>("/api/preferences/settings");
         setDynamicColumnScaling(s.dynamic_column_scaling === "true");
 <<<<<<< HEAD
+<<<<<<< HEAD
         setAutoReview(s.auto_review !== "false");
         setAutoMerge(s.auto_merge !== "false");
 =======
 >>>>>>> bf9db15 (feat: add board monitor visualization panel)
+=======
+        setAutoReview(s.auto_review !== "false");
+        setAutoMerge(s.auto_merge !== "false");
+>>>>>>> f974211 (feat: conditionally show AI Reviewed column and fix stats colors)
         setAutoMonitor(s.auto_monitor === "true");
         apiFetch<MonitorStatus>("/api/internal/monitor-status")
           .then((r) => setMonitorStatus(r))
@@ -754,6 +759,16 @@ export function BoardPage() {
     [columns, autoReview, autoMerge],
 =======
 >>>>>>> 46e7ac8 (feat: remove priority filter from frontend UI)
+  );
+
+  // "AI Reviewed" = tickets needing human attention (manual merge).
+  // Hide the column when no tickets are there AND the workflow won't produce them
+  // (auto_review off, or auto_merge on means review goes straight to Done).
+  const showAiReviewedColumn = useMemo(
+    () =>
+      columns.some((col) => col.name === "AI Reviewed" && col.issues.length > 0) ||
+      (autoReview && !autoMerge),
+    [columns, autoReview, autoMerge],
   );
 
   const activeColumns = useMemo(
@@ -1450,10 +1465,15 @@ export function BoardPage() {
           apiFetch<Record<string, string>>("/api/preferences/settings")
             .then(s => {
 <<<<<<< HEAD
+<<<<<<< HEAD
               setAutoReview(s.auto_review !== "false");
               setAutoMerge(s.auto_merge !== "false");
 =======
 >>>>>>> bf9db15 (feat: add board monitor visualization panel)
+=======
+              setAutoReview(s.auto_review !== "false");
+              setAutoMerge(s.auto_merge !== "false");
+>>>>>>> f974211 (feat: conditionally show AI Reviewed column and fix stats colors)
               setAutoMonitor(s.auto_monitor === "true");
               return apiFetch<MonitorStatus>("/api/internal/monitor-status");
             })
