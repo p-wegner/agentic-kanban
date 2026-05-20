@@ -17,11 +17,16 @@ interface LayoutProps {
   activeProjectId?: string | null;
   onProjectChange?: (id: string) => void;
 <<<<<<< HEAD
+<<<<<<< HEAD
   onRegisterProject?: (repoPath: string) => Promise<void>;
   onCreateProject?: (name: string, path: string) => Promise<void>;
 =======
   onRegisterProject?: (opts: RegisterOptions) => Promise<void>;
 >>>>>>> f36a871 (feat: add optional README and .gitignore template to project creation dialog)
+=======
+  onRegisterProject?: (args: { repoPath: string; gitignoreTemplate: string; generateReadme: boolean }) => Promise<void>;
+  onCreateProject?: (name: string, path: string, gitignoreTemplate: string, generateReadme: boolean) => Promise<void>;
+>>>>>>> 7dd2d0e (fix: correct onRegisterProject prop type to accept object in Layout.tsx)
   searchQuery?: string;
   onSearchChange?: (query: string) => void;
   onWorktreeOverviewClick?: () => void;
