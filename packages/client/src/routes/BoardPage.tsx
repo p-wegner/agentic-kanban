@@ -288,10 +288,16 @@ export function BoardPage() {
 >>>>>>> 029ede6 (feat: remove blocked filter from board main page)
 =======
   const [priorityFilter, setPriorityFilter] = useState("");
+<<<<<<< HEAD
 =======
   const [blockedFilter, setBlockedFilter] = useState(false);
 >>>>>>> 5651f2d (feat: remove priority filter from frontend UI)
+<<<<<<< HEAD
 >>>>>>> 46e7ac8 (feat: remove priority filter from frontend UI)
+=======
+=======
+>>>>>>> 4f0c0a0 (feat: remove blocked filter from board main page)
+>>>>>>> 4a222f1 (feat: remove blocked filter from board main page)
   const [showSettings, setShowSettings] = useState(false);
   const [showQuickTasks, setShowQuickTasks] = useState(false);
   const [showWorktreeOverview, setShowWorktreeOverview] = useState(false);
@@ -696,10 +702,16 @@ export function BoardPage() {
 >>>>>>> 029ede6 (feat: remove blocked filter from board main page)
 =======
           if (priorityFilter && issue.priority !== priorityFilter) return false;
+<<<<<<< HEAD
 =======
           if (blockedFilter && !(issue as IssueWithStatus & { isBlocked?: boolean }).isBlocked) return false;
 >>>>>>> 5651f2d (feat: remove priority filter from frontend UI)
+<<<<<<< HEAD
 >>>>>>> 46e7ac8 (feat: remove priority filter from frontend UI)
+=======
+=======
+>>>>>>> 4f0c0a0 (feat: remove blocked filter from board main page)
+>>>>>>> 4a222f1 (feat: remove blocked filter from board main page)
           if (searchQuery) {
             const q = searchQuery.toLowerCase();
             return (
