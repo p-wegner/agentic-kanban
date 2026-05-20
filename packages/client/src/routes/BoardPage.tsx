@@ -1023,6 +1023,7 @@ export function BoardPage() {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
       <div className="flex flex-col gap-3 p-4 h-full overflow-hidden">
 =======
       <div className="flex flex-col gap-2 sm:gap-3 p-2 sm:p-4 h-full overflow-hidden">
@@ -1048,6 +1049,10 @@ export function BoardPage() {
 =======
         <div className="flex items-center gap-2 flex-wrap">
 >>>>>>> 9878a53 (feat: add table view as third board view alongside kanban and graph)
+=======
+      <div className="flex flex-col gap-2 sm:gap-3 p-2 sm:p-4 h-full overflow-hidden">
+        <div className="flex items-center gap-2 flex-wrap">
+>>>>>>> f0547d3 (feat: make kanban board truly responsive for mobile)
           <BoardStats
             activeColumns={activeColumns}
             archiveColumns={archiveColumns}
@@ -1231,6 +1236,7 @@ export function BoardPage() {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 >>>>>>> e318eb3 (feat: add table view as third board view alongside kanban and graph)
 =======
@@ -1276,6 +1282,9 @@ export function BoardPage() {
 =======
         {viewMode === "kanban" && <div className="flex gap-4 flex-1 min-h-0 overflow-x-auto board-columns-scroll">
 >>>>>>> 8f2f90d (revert: remove table view and revert mobile-responsive board styling)
+=======
+        {viewMode === "kanban" && <div className="flex gap-2 sm:gap-4 flex-1 min-h-0 overflow-x-auto board-columns-scroll">
+>>>>>>> f0547d3 (feat: make kanban board truly responsive for mobile)
           {activeColumns.map((col) => (
             <BoardColumn
               key={col.id}
