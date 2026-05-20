@@ -734,8 +734,8 @@ export function BoardPage() {
           </div>
         </div>
       )}
-      <div className="flex flex-col gap-3 p-4 h-full overflow-hidden">
-        <div className="flex items-center gap-3">
+      <div className="flex flex-col gap-2 sm:gap-3 p-2 sm:p-4 h-full overflow-hidden">
+        <div className="flex items-center gap-2 flex-wrap">
           <BoardStats
             activeColumns={activeColumns}
             archiveColumns={archiveColumns}
@@ -824,7 +824,7 @@ export function BoardPage() {
             searchQuery={searchQuery}
           />
         )}
-        {viewMode === "kanban" && <div className="flex gap-4 flex-1 min-h-0 overflow-x-auto board-columns-scroll">
+        {viewMode === "kanban" && <div className="flex gap-2 sm:gap-4 flex-1 min-h-0 overflow-x-auto board-columns-scroll">
           {activeColumns.map((col) => (
             <BoardColumn
               key={col.id}
