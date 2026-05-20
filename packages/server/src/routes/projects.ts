@@ -8,6 +8,7 @@ import { execFile, execSync } from "node:child_process";
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 import { existsSync, mkdirSync, readdirSync } from "node:fs";
 =======
 import { existsSync, readdirSync, writeFileSync } from "node:fs";
@@ -21,6 +22,9 @@ import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:
 =======
 import { existsSync, mkdirSync, readdirSync } from "node:fs";
 >>>>>>> 41a314b (feat: implement create project flow (WIP - UI + backend route))
+=======
+import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+>>>>>>> 088aead (WIP: add rmSync and writeFileSync imports to projects.ts)
 import { detectRepoInfo } from "../services/git-info.service.js";
 import { listBranches, listWorktrees, getDiffShortstat, removeWorktree, detectConflicts } from "../services/git.service.js";
 import type { Database } from "../db/index.js";
