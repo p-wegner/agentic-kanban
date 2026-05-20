@@ -878,11 +878,15 @@ ${contextParts.join("\n")}`;
           workingDir: workspaces.workingDir,
           baseBranch: workspaces.baseBranch,
           isDirect: workspaces.isDirect,
+          conflictCacheCheckedAt: workspaces.conflictCacheCheckedAt,
+          conflictCacheHasConflicts: workspaces.conflictCacheHasConflicts,
+          conflictCacheFiles: workspaces.conflictCacheFiles,
         })
         .from(workspaces)
         .where(inArray(workspaces.issueId, issueIds));
 
-      const mainWorkspaceMap = new Map<string, { id: string; branch: string; status: string; updatedAt: string; claudeProfile: string | null; agentCommand: string | null; workingDir: string | null; baseBranch: string | null; isDirect: boolean }>();
+      const CONFLICT_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+      const mainWorkspaceMap = new Map<string, { id: string; branch: string; status: string; updatedAt: string; claudeProfile: string | null; agentCommand: string | null; workingDir: string | null; baseBranch: string | null; isDirect: boolean; conflictCacheCheckedAt: string | null; conflictCacheHasConflicts: boolean | null; conflictCacheFiles: string | null }>();
       const statusPriority = (s: string) => s === "active" || s === "reviewing" ? 0 : s === "idle" ? 1 : 2;
       for (const row of wsDetailRows) {
         const existing = mainWorkspaceMap.get(row.issueId);
@@ -918,13 +922,45 @@ ${contextParts.join("\n")}`;
                 })
                 .catch(() => {})
             );
-            // Conflict detection for non-direct idle workspaces
+            // Conflict detection for non-direct idle workspaces — stale-while-revalidate
             if (!mainWs.isDirect && mainWs.status === "idle") {
-              diffStatsPromises.push(
-                detectConflicts(mainWs.workingDir, mainWs.baseBranch || defaultBranch)
-                  .then(result => { mainRef.conflicts = result; })
-                  .catch(() => {})
-              );
+              const cacheAge = mainWs.conflictCacheCheckedAt
+                ? Date.now() - new Date(mainWs.conflictCacheCheckedAt).getTime()
+                : Infinity;
+              if (mainWs.conflictCacheCheckedAt && cacheAge < CONFLICT_CACHE_TTL_MS) {
+                // Cache is fresh — use it immediately
+                if (mainWs.conflictCacheHasConflicts !== null) {
+                  mainRef.conflicts = {
+                    hasConflicts: mainWs.conflictCacheHasConflicts ?? false,
+                    conflictFiles: mainWs.conflictCacheFiles ? JSON.parse(mainWs.conflictCacheFiles) : [],
+                  };
+                }
+              } else {
+                // Cache is stale — recompute and persist in background, serve stale value now
+                if (mainWs.conflictCacheCheckedAt && mainWs.conflictCacheHasConflicts !== null) {
+                  mainRef.conflicts = {
+                    hasConflicts: mainWs.conflictCacheHasConflicts ?? false,
+                    conflictFiles: mainWs.conflictCacheFiles ? JSON.parse(mainWs.conflictCacheFiles) : [],
+                  };
+                }
+                const wsId = mainWs.id;
+                const baseBranch = mainWs.baseBranch || defaultBranch;
+                const workingDir = mainWs.workingDir;
+                // Fire-and-forget background refresh
+                detectConflicts(workingDir, baseBranch)
+                  .then(result => {
+                    database
+                      .update(workspaces)
+                      .set({
+                        conflictCacheCheckedAt: new Date().toISOString(),
+                        conflictCacheHasConflicts: result.hasConflicts,
+                        conflictCacheFiles: JSON.stringify(result.conflictFiles),
+                      })
+                      .where(eq(workspaces.id, wsId))
+                      .catch(() => {});
+                  })
+                  .catch(() => {});
+              }
             }
           }
         }
