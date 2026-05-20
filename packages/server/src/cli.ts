@@ -518,6 +518,7 @@ Setup:
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
       // Create an initial empty commit so the repo has a HEAD
       await execFileAsync("git", ["-C", repoPath, "commit", "--allow-empty", "-m", "Initial commit"]);
@@ -536,6 +537,8 @@ Setup:
 >>>>>>> 7d3e5ad (fix: clean up created directory if git init/commit fails in cli create command)
 
 >>>>>>> a9ef19b (feat: add cli create subcommand and preferences set/get)
+=======
+>>>>>>> 9bd4ac7 (fix: resolve preference key mismatch, path traversal in skill names, and cleanup bugs)
       // Register the new repo
       const { detectRepoInfo: detectInfo } = await import("./services/git-info.service.js");
       const repoInfo = await detectInfo(repoPath);
@@ -581,6 +584,7 @@ Setup:
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
       dirCreated = false; // DB registration succeeded; keep the directory
 =======
 >>>>>>> 4ff54fb (feat: add cli create subcommand and preferences set/get)
@@ -589,6 +593,9 @@ Setup:
 >>>>>>> a19889f (fix: resolve preference key mismatch, path traversal in skill names, and cleanup bugs)
 =======
 >>>>>>> a9ef19b (feat: add cli create subcommand and preferences set/get)
+=======
+      dirCreated = false; // DB registration succeeded; keep the directory
+>>>>>>> 9bd4ac7 (fix: resolve preference key mismatch, path traversal in skill names, and cleanup bugs)
       console.log(`Created and registered project "${projectName}"`);
       console.log(`  Path: ${repoInfo.repoPath}`);
       console.log(`  Branch: ${repoInfo.defaultBranch}`);
@@ -599,6 +606,7 @@ Setup:
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
       await cleanupDir();
 =======
 >>>>>>> 4ff54fb (feat: add cli create subcommand and preferences set/get)
@@ -607,6 +615,9 @@ Setup:
 >>>>>>> a19889f (fix: resolve preference key mismatch, path traversal in skill names, and cleanup bugs)
 =======
 >>>>>>> a9ef19b (feat: add cli create subcommand and preferences set/get)
+=======
+      await cleanupDir();
+>>>>>>> 9bd4ac7 (fix: resolve preference key mismatch, path traversal in skill names, and cleanup bugs)
       console.error("Error:", err instanceof Error ? err.message : String(err));
       process.exit(1);
     }
