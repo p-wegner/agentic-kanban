@@ -15,6 +15,7 @@ import { execFile, execSync } from "node:child_process";
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 =======
 import { existsSync, mkdirSync, readdirSync } from "node:fs";
@@ -47,11 +48,19 @@ import { existsSync, mkdirSync, readdirSync, writeFileSync, rmSync } from "node:
 import { existsSync, mkdirSync, readdirSync } from "node:fs";
 >>>>>>> ec12683 (feat: implement create project flow (WIP - UI + backend route))
 =======
+=======
+>>>>>>> 63066d9 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
 import { existsSync, mkdirSync, readdirSync } from "node:fs";
 =======
 import { existsSync, readdirSync, writeFileSync } from "node:fs";
 >>>>>>> f36a871 (feat: add optional README and .gitignore template to project creation dialog)
+<<<<<<< HEAD
 >>>>>>> 27323e9 (feat: add optional README and .gitignore template to project creation dialog)
+=======
+=======
+import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+>>>>>>> 8c8ad15 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
+>>>>>>> 63066d9 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
 import { detectRepoInfo } from "../services/git-info.service.js";
 import { listBranches, listWorktrees, getDiffShortstat, removeWorktree, detectConflicts } from "../services/git.service.js";
 import type { Database } from "../db/index.js";
@@ -466,6 +475,7 @@ export function createProjectsRoute(database: Database = db) {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
       try { rmSync(targetPath, { recursive: true, force: true }); } catch {}
 =======
 >>>>>>> 41a314b (feat: implement create project flow (WIP - UI + backend route))
@@ -484,6 +494,9 @@ export function createProjectsRoute(database: Database = db) {
 >>>>>>> 5ffc0d0 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
 =======
 >>>>>>> ec12683 (feat: implement create project flow (WIP - UI + backend route))
+=======
+      try { rmSync(targetPath, { recursive: true, force: true }); } catch {}
+>>>>>>> 63066d9 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
       return c.json({ error: `git init failed: ${err.stderr ? String(err.stderr).trim() : String(err)}` }, 400);
     }
 
