@@ -11,7 +11,7 @@ import type { Database } from "../db/index.js";
 import type { ProviderId } from "../services/agent-provider.js";
 import { resolve, dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { writeAgentSkillFile } from "@agentic-kanban/shared/lib/agent-skill-files";
+import { writeAgentSkillFile, readLocalSkillPrompt } from "@agentic-kanban/shared/lib/agent-skill-files";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const MOCK_AGENT_PATH = resolve(__dirname, "../scripts/mock-agent.ts");
@@ -127,13 +127,17 @@ export function createWorkspacesRoute(
         agentPrompt += `\n\n${issue.description}`;
       }
 
-      // Write skill as a SKILL.md file for progressive disclosure (agent invokes on demand)
+      // Write skill as a SKILL.md file for progressive disclosure (agent invokes on demand).
+      // If the project has a locally installed version (.claude/skills/<name>/SKILL.md in repoPath),
+      // use that prompt so users can customise it; otherwise fall back to the DB prompt.
       const skillId: string | null = body.skillId || null;
       if (skillId && worktreePath) {
         const skillRows = await database.select().from(agentSkills).where(eq(agentSkills.id, skillId)).limit(1);
         if (skillRows.length > 0) {
           const skill = skillRows[0];
-          await writeAgentSkillFile(worktreePath, skill);
+          const localPrompt = await readLocalSkillPrompt(project.repoPath, skill.name);
+          const effectiveSkill = localPrompt ? { ...skill, prompt: localPrompt } : skill;
+          await writeAgentSkillFile(worktreePath, effectiveSkill);
         }
       }
 
