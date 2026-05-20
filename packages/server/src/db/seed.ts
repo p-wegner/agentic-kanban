@@ -173,6 +173,7 @@ Format the description with clear sections:
         updatedAt: now,
       });
       added++;
+<<<<<<< HEAD
     }
     if (added > 0) {
       console.log(`Seeded ${added} new default agent skill(s).`);
@@ -220,6 +221,14 @@ Workspace ID: {{workspaceId}}`,
       updatedAt: now,
     });
     console.log("Seeded code-review-thorough skill.");
+=======
+    }
+    if (added > 0) {
+      console.log(`Seeded ${added} new default agent skill(s).`);
+    } else {
+      console.log("Agent skills already up to date.");
+    }
+>>>>>>> 83a0a31 (feat: make nudge message a proper agent skill (monitor-nudge))
   }
 
   console.log('Run `pnpm cli -- register <path>` to register a git repo as a project.');
