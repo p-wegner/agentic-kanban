@@ -199,6 +199,7 @@ The subagent should:
    - Replace the `<!-- last-synced: ... | commit: ... -->` line at the top with the current timestamp and short SHA (`git rev-parse --short HEAD`)
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
    - Fix stale F-entry descriptions (e.g. wrong tab names, missing fields)
    - Add new F-entries for undocumented features with status DONE
    - Keep the existing structure: `### F-CAT-NN: Feature Name` with bullet list + `**Status: DONE**`
@@ -556,10 +557,13 @@ Spawn a documentation subagent using the Agent tool. Hand it the full doc-gap li
 
 The subagent should:
 1. Update `docs/prd/01-features-catalog.md`:
+=======
+>>>>>>> 42aa28a (docs: add last-synced timestamp+SHA header to feature catalog)
    - Fix stale F-entry descriptions (e.g. wrong tab names, missing fields)
    - Add new F-entries for undocumented features with status DONE
    - Keep the existing structure: `### F-CAT-NN: Feature Name` with bullet list + `**Status: DONE**`
 2. Update the `CLAUDE.md` "Project Status" bullet list:
+   - Update the "visually verified (DATE)" line to today's date
    - Add bullets for verified features missing from the list
    - Correct any bullet that describes the UI wrongly
    - Keep bullets concise — one line per feature with key sub-bullets
@@ -578,6 +582,9 @@ Rules:
 - Do not change features marked SKIP or NOT PLANNED
 - Do not invent details you weren't given — use only what was observed
 - Keep the existing structure and formatting in each file
+- In docs/prd/01-features-catalog.md, update the <!-- last-synced --> comment at
+  the top to today's ISO 8601 date+time and the short commit SHA from `git rev-parse --short HEAD`
+- In CLAUDE.md, update the "visually verified (DATE)" line to today's date
 - After editing both files, commit the changes with message "docs: sync feature catalog and CLAUDE.md from UI exploration"
 ```
 
