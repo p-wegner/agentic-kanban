@@ -1018,6 +1018,9 @@ Setup:
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> ea9ffef (fix: resolve preference key mismatch, path traversal in skill names, and cleanup bugs)
 =======
       // Create an initial empty commit so the repo has a HEAD
       await execFileAsync("git", ["-C", repoPath, "commit", "--allow-empty", "-m", "Initial commit"]);
@@ -1028,6 +1031,7 @@ Setup:
 >>>>>>> 4ff54fb (feat: add cli create subcommand and preferences set/get)
 =======
 >>>>>>> a19889f (fix: resolve preference key mismatch, path traversal in skill names, and cleanup bugs)
+<<<<<<< HEAD
 =======
       // Create an initial empty commit so the repo has a HEAD
       await execFileAsync("git", ["-C", repoPath, "commit", "--allow-empty", "-m", "Initial commit"]);
@@ -1070,6 +1074,8 @@ Setup:
 
 >>>>>>> 4ff54fb (feat: add cli create subcommand and preferences set/get)
 >>>>>>> b794815 (feat: add cli create subcommand and preferences set/get)
+=======
+>>>>>>> ea9ffef (fix: resolve preference key mismatch, path traversal in skill names, and cleanup bugs)
       // Register the new repo
       const { detectRepoInfo: detectInfo } = await import("./services/git-info.service.js");
       const repoInfo = await detectInfo(repoPath);
@@ -1121,12 +1127,16 @@ Setup:
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> ea9ffef (fix: resolve preference key mismatch, path traversal in skill names, and cleanup bugs)
       dirCreated = false; // DB registration succeeded; keep the directory
 =======
 >>>>>>> 4ff54fb (feat: add cli create subcommand and preferences set/get)
 =======
       dirCreated = false; // DB registration succeeded; keep the directory
 >>>>>>> a19889f (fix: resolve preference key mismatch, path traversal in skill names, and cleanup bugs)
+<<<<<<< HEAD
 =======
 >>>>>>> a9ef19b (feat: add cli create subcommand and preferences set/get)
 =======
@@ -1147,6 +1157,8 @@ Setup:
 =======
 >>>>>>> 4ff54fb (feat: add cli create subcommand and preferences set/get)
 >>>>>>> b794815 (feat: add cli create subcommand and preferences set/get)
+=======
+>>>>>>> ea9ffef (fix: resolve preference key mismatch, path traversal in skill names, and cleanup bugs)
       console.log(`Created and registered project "${projectName}"`);
       console.log(`  Path: ${repoInfo.repoPath}`);
       console.log(`  Branch: ${repoInfo.defaultBranch}`);
@@ -1163,12 +1175,16 @@ Setup:
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> ea9ffef (fix: resolve preference key mismatch, path traversal in skill names, and cleanup bugs)
       await cleanupDir();
 =======
 >>>>>>> 4ff54fb (feat: add cli create subcommand and preferences set/get)
 =======
       await cleanupDir();
 >>>>>>> a19889f (fix: resolve preference key mismatch, path traversal in skill names, and cleanup bugs)
+<<<<<<< HEAD
 =======
 >>>>>>> a9ef19b (feat: add cli create subcommand and preferences set/get)
 =======
@@ -1189,6 +1205,8 @@ Setup:
 =======
 >>>>>>> 4ff54fb (feat: add cli create subcommand and preferences set/get)
 >>>>>>> b794815 (feat: add cli create subcommand and preferences set/get)
+=======
+>>>>>>> ea9ffef (fix: resolve preference key mismatch, path traversal in skill names, and cleanup bugs)
       console.error("Error:", err instanceof Error ? err.message : String(err));
       process.exit(1);
     }
