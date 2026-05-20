@@ -43,10 +43,14 @@ interface Project {
 const ARCHIVE_STATUS_NAMES = new Set(["Done", "Cancelled"]);
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 type MonitorAction = { at: string; action: "relaunch" | "merge" | "nudge" | "mark_idle" | "mark_dead"; workspaceId: string; issueId: string };
 =======
 type MonitorAction = { at: string; action: "relaunch" | "merge" | "nudge" | "mark_idle" | "mark_dead"; workspaceId: string };
 >>>>>>> 01516bd (feat: add board monitor visualization panel)
+=======
+type MonitorAction = { at: string; action: "relaunch" | "merge" | "nudge" | "mark_idle" | "mark_dead"; workspaceId: string; issueId: string };
+>>>>>>> 47c4344 (feat: make monitor action log entries clickable workspace links)
 type MonitorStatus = { enabled: boolean; intervalMin: number; active: boolean; lastRun: { at: string; relaunched: number; merged: number; nudged: number } | null; nextRunAt: string | null; recentActions: MonitorAction[] };
 
 const ACTION_LABELS: Record<MonitorAction["action"], { label: string; color: string }> = {
@@ -57,6 +61,7 @@ const ACTION_LABELS: Record<MonitorAction["action"], { label: string; color: str
   mark_dead:{ label: "Marked dead",      color: "text-red-500" },
 };
 
+<<<<<<< HEAD
 <<<<<<< HEAD
 function MonitorPopover({ status, onClose, onOpenWorkspace, columns }: { status: MonitorStatus | null; onClose: () => void; onOpenWorkspace: (workspaceId: string, issueId: string) => void; columns: StatusWithIssues[] }) {
   const [now, setNow] = useState(Date.now());
@@ -69,6 +74,15 @@ function MonitorPopover({ status, onClose, onOpenWorkspace, columns }: { status:
 function MonitorPopover({ status, onClose }: { status: MonitorStatus | null; onClose: () => void }) {
   const [now, setNow] = useState(Date.now());
 >>>>>>> 01516bd (feat: add board monitor visualization panel)
+=======
+function MonitorPopover({ status, onClose, onOpenWorkspace, columns }: { status: MonitorStatus | null; onClose: () => void; onOpenWorkspace: (workspaceId: string, issueId: string) => void; columns: StatusWithIssues[] }) {
+  const [now, setNow] = useState(Date.now());
+  const issueMap = useMemo(() => {
+    const m = new Map<string, IssueWithStatus>();
+    for (const col of columns) for (const issue of col.issues) m.set(issue.id, issue);
+    return m;
+  }, [columns]);
+>>>>>>> 47c4344 (feat: make monitor action log entries clickable workspace links)
 
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 1000);
@@ -154,6 +168,7 @@ function MonitorPopover({ status, onClose }: { status: MonitorStatus | null; onC
             {status.recentActions.map((a, i) => {
               const meta = ACTION_LABELS[a.action];
 <<<<<<< HEAD
+<<<<<<< HEAD
               const issue = issueMap.get(a.issueId);
               const label = issue ? `#${issue.issueNumber} ${issue.title}` : a.workspaceId.slice(0, 8);
               return (
@@ -171,6 +186,19 @@ function MonitorPopover({ status, onClose }: { status: MonitorStatus | null; onC
                   <span className={`${meta.color} font-medium`}>{meta.label}</span>
                   <span className="text-gray-400 shrink-0 font-mono" style={{ fontSize: "10px" }}>{a.workspaceId.slice(0, 8)}</span>
 >>>>>>> 01516bd (feat: add board monitor visualization panel)
+=======
+              const issue = issueMap.get(a.issueId);
+              const label = issue ? `#${issue.issueNumber} ${issue.title}` : a.workspaceId.slice(0, 8);
+              return (
+                <div key={i} className="flex items-center justify-between gap-2 min-w-0">
+                  <span className={`${meta.color} font-medium shrink-0`}>{meta.label}</span>
+                  <button
+                    className="text-blue-500 hover:text-blue-700 hover:underline truncate text-left min-w-0 flex-1"
+                    style={{ fontSize: "11px" }}
+                    onClick={() => { onOpenWorkspace(a.workspaceId, a.issueId); onClose(); }}
+                    title={issue ? issue.title : a.workspaceId}
+                  >{label}</button>
+>>>>>>> 47c4344 (feat: make monitor action log entries clickable workspace links)
                   <span className="text-gray-400 shrink-0">{formatAge(a.at)}</span>
                 </div>
               );
@@ -933,6 +961,9 @@ export function BoardPage() {
                 Monitor
               </button>
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> 47c4344 (feat: make monitor action log entries clickable workspace links)
               {showMonitorPopover && <MonitorPopover
                 status={monitorStatus}
                 onClose={() => setShowMonitorPopover(false)}
@@ -942,9 +973,12 @@ export function BoardPage() {
                   if (issue) handleManageWorkspaces(issue, workspaceId);
                 }}
               />}
+<<<<<<< HEAD
 =======
               {showMonitorPopover && <MonitorPopover status={monitorStatus} onClose={() => setShowMonitorPopover(false)} />}
 >>>>>>> 01516bd (feat: add board monitor visualization panel)
+=======
+>>>>>>> 47c4344 (feat: make monitor action log entries clickable workspace links)
             </div>
           )}
           <div className="flex items-center gap-1 border border-gray-200 rounded-md p-0.5 bg-white shrink-0">
