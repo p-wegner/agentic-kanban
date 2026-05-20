@@ -146,36 +146,47 @@ Setup:
   $ agentic-kanban preferences set projects_base_dir /path/to/projects
 `)
   .action(async (folderName: string, options: { path?: string; name?: string; branch?: string }) => {
+    let dirCreated = false;
+    let repoPath = “”;
+    let rm: ((path: string, opts: { recursive: boolean; force: boolean }) => Promise<void>) | undefined;
+
+    const cleanupDir = async () => {
+      if (dirCreated && repoPath && rm) {
+        try { await rm(repoPath, { recursive: true, force: true }); } catch { /* best-effort */ }
+      }
+    };
+
     try {
       await runMigrations();
 
       // Resolve base folder: --path flag takes precedence over preference
       let baseFolder = options.path;
       if (!baseFolder) {
-        const pref = await db.select().from(preferences).where(eq(preferences.key, "projects_base_dir")).limit(1);
+        const pref = await db.select().from(preferences).where(eq(preferences.key, “projects_base_dir”)).limit(1);
         if (pref.length > 0 && pref[0].value) {
           baseFolder = pref[0].value;
         }
       }
 
       if (!baseFolder) {
-        console.error("No base folder configured. Use --path <base-path> or set the projects_base_dir preference:");
-        console.error("  pnpm cli -- preferences set projects_base_dir /path/to/projects");
+        console.error(“No base folder configured. Use --path <base-path> or set the projects_base_dir preference:”);
+        console.error(“  pnpm cli -- preferences set projects_base_dir /path/to/projects”);
         process.exit(1);
       }
 
-      const { mkdir, access, rm } = await import("node:fs/promises");
-      const { join, resolve: resolvePath, sep } = await import("node:path");
-      const { execFile } = await import("node:child_process");
-      const { promisify } = await import("node:util");
+      const { mkdir, access, rm: rmFs } = await import(“node:fs/promises”);
+      rm = rmFs;
+      const { join, resolve: resolvePath, sep } = await import(“node:path”);
+      const { execFile } = await import(“node:child_process”);
+      const { promisify } = await import(“node:util”);
       const execFileAsync = promisify(execFile);
 
       const resolvedBase = resolvePath(baseFolder);
-      const repoPath = resolvePath(join(resolvedBase, folderName));
+      repoPath = resolvePath(join(resolvedBase, folderName));
 
-      // Guard against path traversal (e.g. folderName = "../../etc")
+      // Guard against path traversal (e.g. folderName = “../../etc”)
       if (!repoPath.startsWith(resolvedBase + sep) && repoPath !== resolvedBase) {
-        console.error(`Invalid folder name: "${folderName}" escapes the base directory.`);
+        console.error(`Invalid folder name: “${folderName}” escapes the base directory.`);
         process.exit(1);
       }
 
@@ -188,13 +199,11 @@ Setup:
         // Expected: directory doesn't exist yet
       }
 
-      // Create directory â€” track so we can clean up on failure
+      // Create directory — track so we can clean up on failure
       await mkdir(repoPath, { recursive: true });
-      let dirCreated = true;
+      dirCreated = true;
 
-      const cleanupDir = async () => {
-        if (dirCreated) {
-          try { await rm(repoPath, { recursive: true, force: true }); } catch { /* best-effort */ }
+      if (false) { // placeholder to keep block structure identical
         }
       };
 
