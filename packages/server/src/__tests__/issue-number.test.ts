@@ -37,6 +37,8 @@ const MIGRATION_FILES = [
   "../../../shared/drizzle/0022_teardown_script.sql",
   "../../../shared/drizzle/0024_setup_enabled.sql",
   "../../../shared/drizzle/0025_provider_session_id.sql",
+  "../../../shared/drizzle/0026_ready_for_merge.sql",
+  "../../../shared/drizzle/0027_estimate_field.sql",
 ];
 
 function createTestApp() {
