@@ -6,6 +6,7 @@ import { randomUUID } from "node:crypto";
 import { execFile, execSync } from "node:child_process";
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 import { existsSync, mkdirSync, readdirSync } from "node:fs";
 =======
 import { existsSync, readdirSync, writeFileSync } from "node:fs";
@@ -13,6 +14,9 @@ import { existsSync, readdirSync, writeFileSync } from "node:fs";
 =======
 import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 >>>>>>> 8c8ad15 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
+=======
+import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+>>>>>>> 7c81e83 (fix: restore name validation and dir cleanup on git init failure)
 import { detectRepoInfo } from "../services/git-info.service.js";
 import { listBranches, listWorktrees, getDiffShortstat, removeWorktree, detectConflicts } from "../services/git.service.js";
 import type { Database } from "../db/index.js";
