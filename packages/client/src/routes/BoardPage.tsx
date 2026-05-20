@@ -42,15 +42,16 @@ interface Project {
 
 const ARCHIVE_STATUS_NAMES = new Set(["Done", "Cancelled"]);
 
-type MonitorAction = { at: string; action: "relaunch" | "merge" | "nudge" | "mark_idle" | "mark_dead"; workspaceId: string; issueId: string };
+type MonitorAction = { at: string; action: "relaunch" | "merge" | "nudge" | "mark_idle" | "mark_dead" | "auto_start"; workspaceId: string; issueId: string };
 type MonitorStatus = { enabled: boolean; intervalMin: number; active: boolean; lastRun: { at: string; relaunched: number; merged: number; nudged: number } | null; nextRunAt: string | null; recentActions: MonitorAction[] };
 
 const ACTION_LABELS: Record<MonitorAction["action"], { label: string; color: string }> = {
-  relaunch: { label: "Relaunched agent", color: "text-blue-600" },
-  merge:    { label: "Triggered merge",  color: "text-purple-600" },
-  nudge:    { label: "Nudged agent",     color: "text-amber-600" },
-  mark_idle:{ label: "Marked idle",      color: "text-gray-500" },
-  mark_dead:{ label: "Marked dead",      color: "text-red-500" },
+  relaunch:   { label: "Relaunched agent",  color: "text-blue-600" },
+  merge:      { label: "Triggered merge",   color: "text-purple-600" },
+  nudge:      { label: "Nudged agent",      color: "text-amber-600" },
+  mark_idle:  { label: "Marked idle",       color: "text-gray-500" },
+  mark_dead:  { label: "Marked dead",       color: "text-red-500" },
+  auto_start: { label: "Auto-started issue", color: "text-green-600" },
 };
 
 function MonitorPopover({ status, onClose, onOpenWorkspace, columns }: { status: MonitorStatus | null; onClose: () => void; onOpenWorkspace: (workspaceId: string, issueId: string) => void; columns: StatusWithIssues[] }) {
