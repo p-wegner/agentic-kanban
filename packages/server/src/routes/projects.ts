@@ -4,7 +4,7 @@ import { projects, projectStatuses, issues, workspaces, sessions, sessionMessage
 import { eq, inArray, sql, and } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { execFile, execSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, writeFileSync, rmSync } from "node:fs";
 import { detectRepoInfo } from "../services/git-info.service.js";
 import { listBranches, listWorktrees, getDiffShortstat, removeWorktree, detectConflicts } from "../services/git.service.js";
 import type { Database } from "../db/index.js";
@@ -198,11 +198,11 @@ export function createProjectsRoute(database: Database = db) {
         return c.json({ error: 'Project name contains invalid characters. Avoid: / \\ < > : " | ? *' }, 400);
       }
 
-      // Read projects_base_folder from preferences
+      // Read projects_base_path from preferences
       const baseDirRows = await database
         .select({ value: preferences.value })
         .from(preferences)
-        .where(eq(preferences.key, "projects_base_folder"))
+        .where(eq(preferences.key, "projects_base_path"))
         .limit(1);
       const baseDir = baseDirRows[0]?.value?.trim();
       if (!baseDir) {
