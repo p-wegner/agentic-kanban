@@ -25,6 +25,8 @@ interface Settings {
   require_manual_approval?: string;
   dynamic_column_scaling?: string;
   persistent_agent?: string;
+  learning_step_after_agent?: string;
+  learning_step_after_review?: string;
   learning_step_before_merge?: string;
   auto_monitor?: string;
   auto_monitor_interval?: string;
@@ -48,6 +50,8 @@ const DEFAULT_SETTINGS: Settings = {
   require_manual_approval: "false",
   dynamic_column_scaling: "false",
   persistent_agent: "false",
+  learning_step_after_agent: "false",
+  learning_step_after_review: "false",
   learning_step_before_merge: "false",
   auto_monitor: "false",
   auto_monitor_interval: "4",
@@ -450,10 +454,12 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                       {[
                         { label: "Agent runs", always: true },
                         { label: "Manual approval", key: "require_manual_approval", enabled: settings.require_manual_approval === "true" },
-                        { label: "Learning step", key: "learning_step_before_merge", enabled: settings.learning_step_before_merge === "true" },
+                        { label: "Learn (after agent)", key: "learning_step_after_agent", enabled: settings.learning_step_after_agent === "true" },
                         { label: "AI Review", key: "auto_review", enabled: settings.auto_review !== "false" },
                         { label: "Auto-fix", key: "review_auto_fix", enabled: settings.auto_review !== "false" && settings.review_auto_fix !== "false", indent: true },
+                        { label: "Learn (after review)", key: "learning_step_after_review", enabled: settings.learning_step_after_review === "true" },
                         { label: "Auto-merge", key: "auto_merge", enabled: settings.auto_review !== "false" && settings.auto_merge !== "false", indent: true },
+                        { label: "Learn (before merge)", key: "learning_step_before_merge", enabled: settings.learning_step_before_merge === "true" },
                         { label: "Merge", always: true },
                       ].filter(s => s.always || s.enabled).map((step, i, arr) => (
                         <div key={step.label} className="flex items-center gap-1">
@@ -507,10 +513,22 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                     hint="When enabled, issues must be manually approved before the AI review step is triggered. Useful for gating expensive review sessions on deliberate human sign-off."
                   />
                   <Toggle
+                    checked={settings.learning_step_after_agent === "true"}
+                    onChange={setBool("learning_step_after_agent")}
+                    label="Learning step after agent (parallel)"
+                    hint="When an agent session completes with committed changes, runs a learning session in parallel with code review. Extracts insights from session transcripts and updates docs and hooks without blocking the review."
+                  />
+                  <Toggle
+                    checked={settings.learning_step_after_review === "true"}
+                    onChange={setBool("learning_step_after_review")}
+                    label="Learning step after review (parallel)"
+                    hint="When a review session completes, runs a learning session in parallel with the auto-merge step. Extracts insights without delaying the merge."
+                  />
+                  <Toggle
                     checked={settings.learning_step_before_merge === "true"}
                     onChange={setBool("learning_step_before_merge")}
-                    label="Learning step before merge"
-                    hint="When enabled, runs an agent session before merging that reads the worktree's session transcripts and updates docs and Claude hooks with extracted insights. Improves future agent sessions."
+                    label="Learning step before merge (blocking)"
+                    hint="When enabled, runs an agent session before merging that reads the worktree's session transcripts and updates docs and Claude hooks with extracted insights. Blocks merge until complete (up to 3 minutes)."
                   />
 
                   <div className="pt-2 border-t border-gray-100">
