@@ -24,9 +24,12 @@ interface LayoutProps {
   onCreateProject?: (name: string, path: string) => Promise<void>;
   searchQuery?: string;
   onSearchChange?: (query: string) => void;
+<<<<<<< HEAD
   priorityFilter?: string;
   onPriorityFilterChange?: (priority: string) => void;
   onAllWorkspacesClick?: () => void;
+=======
+>>>>>>> 1040497 (feat: remove priority filter from frontend UI)
   onWorktreeOverviewClick?: () => void;
   onSettingsClick?: () => void;
 }
@@ -40,9 +43,12 @@ export function Layout({
   onCreateProject,
   searchQuery = "",
   onSearchChange,
+<<<<<<< HEAD
   priorityFilter = "",
   onPriorityFilterChange,
   onAllWorkspacesClick,
+=======
+>>>>>>> 1040497 (feat: remove priority filter from frontend UI)
   onWorktreeOverviewClick,
   onSettingsClick,
 }: LayoutProps) {
@@ -185,6 +191,7 @@ export function Layout({
                 </button>
               )}
             </div>
+<<<<<<< HEAD
             <button
               onClick={onAllWorkspacesClick}
               className="p-1.5 text-gray-400 hover:text-gray-600 rounded-md hover:bg-gray-100"
@@ -209,6 +216,8 @@ export function Layout({
                 <rect x="14" y="14" width="7" height="7" rx="1" />
               </svg>
             </button>
+=======
+>>>>>>> 1040497 (feat: remove priority filter from frontend UI)
             <button
               onClick={onWorktreeOverviewClick}
               className="p-1.5 text-gray-400 hover:text-gray-600 rounded-md hover:bg-gray-100"
