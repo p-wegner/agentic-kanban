@@ -47,6 +47,7 @@ const ARCHIVE_STATUS_NAMES = new Set(["Done", "Cancelled"]);
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 type MonitorAction = { at: string; action: "relaunch" | "merge" | "nudge" | "mark_idle" | "mark_dead"; workspaceId: string; issueId: string };
 =======
 type MonitorAction = { at: string; action: "relaunch" | "merge" | "nudge" | "mark_idle" | "mark_dead"; workspaceId: string };
@@ -95,6 +96,9 @@ type MonitorAction = { at: string; action: "relaunch" | "merge" | "nudge" | "mar
 =======
 type MonitorAction = { at: string; action: "relaunch" | "merge" | "nudge" | "mark_idle" | "mark_dead"; workspaceId: string; issueId: string };
 >>>>>>> f7a87fc (feat: make monitor action log entries clickable workspace links)
+=======
+type MonitorAction = { at: string; action: "relaunch" | "merge" | "nudge" | "mark_idle" | "mark_dead"; workspaceId: string };
+>>>>>>> bf9db15 (feat: add board monitor visualization panel)
 type MonitorStatus = { enabled: boolean; intervalMin: number; active: boolean; lastRun: { at: string; relaunched: number; merged: number; nudged: number } | null; nextRunAt: string | null; recentActions: MonitorAction[] };
 
 const ACTION_LABELS: Record<MonitorAction["action"], { label: string; color: string }> = {
@@ -105,6 +109,7 @@ const ACTION_LABELS: Record<MonitorAction["action"], { label: string; color: str
   mark_dead:{ label: "Marked dead",      color: "text-red-500" },
 };
 
+<<<<<<< HEAD
 function MonitorPopover({ status, onClose, onOpenWorkspace, columns }: { status: MonitorStatus | null; onClose: () => void; onOpenWorkspace: (workspaceId: string, issueId: string) => void; columns: StatusWithIssues[] }) {
   const [now, setNow] = useState(Date.now());
 <<<<<<< HEAD
@@ -116,6 +121,10 @@ function MonitorPopover({ status, onClose, onOpenWorkspace, columns }: { status:
     return m;
   }, [columns]);
 >>>>>>> f7a87fc (feat: make monitor action log entries clickable workspace links)
+=======
+function MonitorPopover({ status, onClose }: { status: MonitorStatus | null; onClose: () => void }) {
+  const [now, setNow] = useState(Date.now());
+>>>>>>> bf9db15 (feat: add board monitor visualization panel)
 
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 1000);
@@ -204,6 +213,7 @@ function MonitorPopover({ status, onClose, onOpenWorkspace, columns }: { status:
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
               const issue = issueMap.get(a.issueId);
               const label = issue ? `#${issue.issueNumber} ${issue.title}` : a.workspaceId.slice(0, 8);
               return (
@@ -218,10 +228,13 @@ function MonitorPopover({ status, onClose, onOpenWorkspace, columns }: { status:
 =======
 =======
 >>>>>>> 1407a7f (feat: add board monitor visualization panel)
+=======
+>>>>>>> bf9db15 (feat: add board monitor visualization panel)
               return (
                 <div key={i} className="flex items-center justify-between gap-2">
                   <span className={`${meta.color} font-medium`}>{meta.label}</span>
                   <span className="text-gray-400 shrink-0 font-mono" style={{ fontSize: "10px" }}>{a.workspaceId.slice(0, 8)}</span>
+<<<<<<< HEAD
 <<<<<<< HEAD
 >>>>>>> 01516bd (feat: add board monitor visualization panel)
 =======
@@ -247,6 +260,8 @@ function MonitorPopover({ status, onClose, onOpenWorkspace, columns }: { status:
 >>>>>>> 1407a7f (feat: add board monitor visualization panel)
 =======
 >>>>>>> f7a87fc (feat: make monitor action log entries clickable workspace links)
+=======
+>>>>>>> bf9db15 (feat: add board monitor visualization panel)
                   <span className="text-gray-400 shrink-0">{formatAge(a.at)}</span>
                 </div>
               );
@@ -436,8 +451,11 @@ export function BoardPage() {
       try {
         const s = await apiFetch<Record<string, string>>("/api/preferences/settings");
         setDynamicColumnScaling(s.dynamic_column_scaling === "true");
+<<<<<<< HEAD
         setAutoReview(s.auto_review !== "false");
         setAutoMerge(s.auto_merge !== "false");
+=======
+>>>>>>> bf9db15 (feat: add board monitor visualization panel)
         setAutoMonitor(s.auto_monitor === "true");
         apiFetch<MonitorStatus>("/api/internal/monitor-status")
           .then((r) => setMonitorStatus(r))
@@ -1104,6 +1122,7 @@ export function BoardPage() {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 >>>>>>> 47c4344 (feat: make monitor action log entries clickable workspace links)
 =======
@@ -1129,6 +1148,9 @@ export function BoardPage() {
 >>>>>>> 1407a7f (feat: add board monitor visualization panel)
 =======
 >>>>>>> f7a87fc (feat: make monitor action log entries clickable workspace links)
+=======
+              {showMonitorPopover && <MonitorPopover status={monitorStatus} onClose={() => setShowMonitorPopover(false)} />}
+>>>>>>> bf9db15 (feat: add board monitor visualization panel)
             </div>
           )}
           <div className="flex items-center gap-1 border border-gray-200 rounded-md p-0.5 bg-white shrink-0">
@@ -1427,8 +1449,11 @@ export function BoardPage() {
           setShowSettings(false);
           apiFetch<Record<string, string>>("/api/preferences/settings")
             .then(s => {
+<<<<<<< HEAD
               setAutoReview(s.auto_review !== "false");
               setAutoMerge(s.auto_merge !== "false");
+=======
+>>>>>>> bf9db15 (feat: add board monitor visualization panel)
               setAutoMonitor(s.auto_monitor === "true");
               return apiFetch<MonitorStatus>("/api/internal/monitor-status");
             })
