@@ -69,11 +69,15 @@ interface LayoutProps {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> 50a304b (feat: remove priority filter from frontend UI)
   priorityFilter?: string;
   onPriorityFilterChange?: (priority: string) => void;
   onAllWorkspacesClick?: () => void;
 =======
 >>>>>>> 1040497 (feat: remove priority filter from frontend UI)
+<<<<<<< HEAD
 =======
   priorityFilter?: string;
   onPriorityFilterChange?: (priority: string) => void;
@@ -100,6 +104,8 @@ interface LayoutProps {
   onPriorityFilterChange?: (priority: string) => void;
   onAllWorkspacesClick?: () => void;
 >>>>>>> e633a5a (feat: add All Workspaces aggregate panel (#101))
+=======
+>>>>>>> 50a304b (feat: remove priority filter from frontend UI)
   onWorktreeOverviewClick?: () => void;
   onSettingsClick?: () => void;
 }
@@ -121,11 +127,15 @@ export function Layout({
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> 50a304b (feat: remove priority filter from frontend UI)
   priorityFilter = "",
   onPriorityFilterChange,
   onAllWorkspacesClick,
 =======
 >>>>>>> 1040497 (feat: remove priority filter from frontend UI)
+<<<<<<< HEAD
 =======
   priorityFilter = "",
   onPriorityFilterChange,
@@ -152,6 +162,8 @@ export function Layout({
   onPriorityFilterChange,
   onAllWorkspacesClick,
 >>>>>>> e633a5a (feat: add All Workspaces aggregate panel (#101))
+=======
+>>>>>>> 50a304b (feat: remove priority filter from frontend UI)
   onWorktreeOverviewClick,
   onSettingsClick,
 }: LayoutProps) {
@@ -378,6 +390,7 @@ export function Layout({
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
             <button
               onClick={onAllWorkspacesClick}
               className="p-1.5 text-gray-400 hover:text-gray-600 rounded-md hover:bg-gray-100"
@@ -482,6 +495,8 @@ export function Layout({
             </button>
 =======
 >>>>>>> 46e7ac8 (feat: remove priority filter from frontend UI)
+=======
+>>>>>>> 50a304b (feat: remove priority filter from frontend UI)
             <button
               onClick={onAllWorkspacesClick}
               className="p-1.5 text-gray-400 hover:text-gray-600 rounded-md hover:bg-gray-100"
@@ -506,6 +521,8 @@ export function Layout({
                 <rect x="14" y="14" width="7" height="7" rx="1" />
               </svg>
             </button>
+=======
+>>>>>>> 1040497 (feat: remove priority filter from frontend UI)
             <button
               onClick={onWorktreeOverviewClick}
               className="p-1.5 text-gray-400 hover:text-gray-600 rounded-md hover:bg-gray-100"
