@@ -611,6 +611,7 @@ export async function startServer(port?: number) {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
   type MonitorAction = { at: string; action: "relaunch" | "merge" | "nudge" | "mark_idle" | "mark_dead"; workspaceId: string; issueId: string };
 =======
   type MonitorAction = { at: string; action: "relaunch" | "merge" | "nudge" | "mark_idle" | "mark_dead" | "auto_start"; workspaceId: string; issueId: string };
@@ -622,11 +623,14 @@ export async function startServer(port?: number) {
 =======
 =======
 >>>>>>> 1407a7f (feat: add board monitor visualization panel)
+=======
+>>>>>>> bf9db15 (feat: add board monitor visualization panel)
   type MonitorAction = { at: string; action: "relaunch" | "merge" | "nudge" | "mark_idle" | "mark_dead"; workspaceId: string };
   const monitorRecentActions: MonitorAction[] = [];
 
   function logMonitorAction(action: MonitorAction["action"], workspaceId: string) {
     monitorRecentActions.unshift({ at: new Date().toISOString(), action, workspaceId });
+<<<<<<< HEAD
 <<<<<<< HEAD
 >>>>>>> 01516bd (feat: add board monitor visualization panel)
 =======
@@ -691,6 +695,10 @@ export async function startServer(port?: number) {
     if (monitorRecentActions.length > 30) monitorRecentActions.splice(30);
   }
 >>>>>>> 1407a7f (feat: add board monitor visualization panel)
+=======
+    if (monitorRecentActions.length > 30) monitorRecentActions.splice(30);
+  }
+>>>>>>> bf9db15 (feat: add board monitor visualization panel)
 
   async function runMonitorCycle() {
     const cycleStats = { relaunched: 0, merged: 0, nudged: 0 };
@@ -739,6 +747,7 @@ export async function startServer(port?: number) {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
             logMonitorAction("relaunch", ws.wsId, ws.issueId);
 =======
             logMonitorAction("relaunch", ws.wsId);
@@ -749,6 +758,9 @@ export async function startServer(port?: number) {
 =======
             logMonitorAction("relaunch", ws.wsId);
 >>>>>>> 1407a7f (feat: add board monitor visualization panel)
+=======
+            logMonitorAction("relaunch", ws.wsId);
+>>>>>>> bf9db15 (feat: add board monitor visualization panel)
             console.log(`[monitor] Relaunched idle workspace ${ws.wsId}`);
             boardEvents.broadcast(ws.projectId, "board_changed");
           } else if (ws.wsStatus === "reviewing" && sess && sess.status === "stopped") {
@@ -759,6 +771,7 @@ export async function startServer(port?: number) {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
             logMonitorAction("merge", ws.wsId, ws.issueId);
 =======
             logMonitorAction("merge", ws.wsId);
@@ -769,6 +782,9 @@ export async function startServer(port?: number) {
 =======
             logMonitorAction("merge", ws.wsId);
 >>>>>>> 1407a7f (feat: add board monitor visualization panel)
+=======
+            logMonitorAction("merge", ws.wsId);
+>>>>>>> bf9db15 (feat: add board monitor visualization panel)
             console.log(`[monitor] Triggered merge for reviewing workspace ${ws.wsId}`);
             boardEvents.broadcast(ws.projectId, "board_changed");
           } else if (ws.wsStatus === "active" && sess && sess.status === "stopped") {
@@ -778,6 +794,7 @@ export async function startServer(port?: number) {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
             logMonitorAction("mark_idle", ws.wsId, ws.issueId);
 =======
             logMonitorAction("mark_idle", ws.wsId);
@@ -788,6 +805,9 @@ export async function startServer(port?: number) {
 =======
             logMonitorAction("mark_idle", ws.wsId);
 >>>>>>> 1407a7f (feat: add board monitor visualization panel)
+=======
+            logMonitorAction("mark_idle", ws.wsId);
+>>>>>>> bf9db15 (feat: add board monitor visualization panel)
             console.log(`[monitor] Active workspace ${ws.wsId} has stopped session — marking idle for relaunch`);
             boardEvents.broadcast(ws.projectId, "board_changed");
           } else if (ws.wsStatus === "active" && sess && sess.status === "running") {
@@ -800,6 +820,7 @@ export async function startServer(port?: number) {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
               logMonitorAction("mark_dead", ws.wsId, ws.issueId);
 =======
               logMonitorAction("mark_dead", ws.wsId);
@@ -810,6 +831,9 @@ export async function startServer(port?: number) {
 =======
               logMonitorAction("mark_dead", ws.wsId);
 >>>>>>> 1407a7f (feat: add board monitor visualization panel)
+=======
+              logMonitorAction("mark_dead", ws.wsId);
+>>>>>>> bf9db15 (feat: add board monitor visualization panel)
               console.log(`[monitor] Workspace ${ws.wsId} process dead — marking idle`);
               boardEvents.broadcast(ws.projectId, "board_changed");
             } else {
@@ -851,6 +875,7 @@ export async function startServer(port?: number) {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
                 logMonitorAction("nudge", ws.wsId, ws.issueId);
 =======
                 logMonitorAction("nudge", ws.wsId);
@@ -864,6 +889,9 @@ export async function startServer(port?: number) {
 =======
 
 >>>>>>> f7a87fc (feat: make monitor action log entries clickable workspace links)
+=======
+                logMonitorAction("nudge", ws.wsId);
+>>>>>>> bf9db15 (feat: add board monitor visualization panel)
                 console.log(`[monitor] Nudged long-running agent in workspace ${ws.wsId}`);
               }
             }
