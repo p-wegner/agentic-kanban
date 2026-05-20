@@ -146,14 +146,20 @@ export function createAgentSkillsRoute(database: Database = db) {
     if (!repoPath) return c.json({ error: "No active project found" }, 400);
 
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> a19889f (fix: resolve preference key mismatch, path traversal in skill names, and cleanup bugs)
     try {
       await writeAgentSkillFile(repoPath, rows[0]);
     } catch (err) {
       return c.json({ error: `Failed to install skill: ${err instanceof Error ? err.message : String(err)}` }, 500);
     }
+<<<<<<< HEAD
 =======
     await writeAgentSkillFile(repoPath, rows[0]);
 >>>>>>> 9e48722 (feat: install kanban skills to project .claude/skills/ from Settings UI)
+=======
+>>>>>>> a19889f (fix: resolve preference key mismatch, path traversal in skill names, and cleanup bugs)
     return c.json({ installed: true, repoPath });
   });
 
