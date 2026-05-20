@@ -849,6 +849,7 @@ export async function startServer(port?: number) {
               const runningMs = Date.now() - new Date(sess.startedAt).getTime();
               if (runningMs > 5 * 60 * 1000) {
 <<<<<<< HEAD
+<<<<<<< HEAD
                 // Check if we've already nudged this workspace before (repeat nudge scenario)
                 const previousNudge = monitorRecentActions.find(
                   a => a.action === "nudge" && a.workspaceId === ws.wsId
@@ -869,6 +870,8 @@ export async function startServer(port?: number) {
 <<<<<<< HEAD
 =======
 >>>>>>> 83a0a31 (feat: make nudge message a proper agent skill (monitor-nudge))
+=======
+>>>>>>> a071876 (feat: make nudge message a proper agent skill (monitor-nudge))
                 const nudgeSkill = await db.select({ prompt: agentSkills.prompt }).from(agentSkills)
                   .where(sql`${agentSkills.name} = 'monitor-nudge'`)
                   .limit(1);
