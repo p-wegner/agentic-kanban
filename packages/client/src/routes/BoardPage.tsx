@@ -53,7 +53,6 @@ export function BoardPage() {
   const [workspaceInitial, setWorkspaceInitial] = useState<{ workspaceId: string; sessionId: string } | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [priorityFilter, setPriorityFilter] = useState("");
-  const [blockedFilter, setBlockedFilter] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showQuickTasks, setShowQuickTasks] = useState(false);
   const [showWorktreeOverview, setShowWorktreeOverview] = useState(false);
@@ -431,7 +430,6 @@ export function BoardPage() {
         ...col,
         issues: col.issues.filter((issue) => {
           if (priorityFilter && issue.priority !== priorityFilter) return false;
-          if (blockedFilter && !(issue as IssueWithStatus & { isBlocked?: boolean }).isBlocked) return false;
           if (searchQuery) {
             const q = searchQuery.toLowerCase();
             return (
@@ -730,14 +728,6 @@ export function BoardPage() {
             priorityFilter={priorityFilter}
             projectId={activeProjectId}
           />
-          <button
-            onClick={() => setBlockedFilter(!blockedFilter)}
-            title="Filter to show only blocked issues"
-            className={`shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium border transition-colors ${blockedFilter ? "bg-amber-50 border-amber-300 text-amber-700" : "bg-white border-gray-200 text-gray-600 hover:bg-gray-50"}`}
-          >
-            <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 16 16"><path d="M8 1a2 2 0 0 1 2 2v4H6V3a2 2 0 0 1 2-2zm3 6V3a3 3 0 0 0-6 0v4a2 2 0 0 0 2 2v2.5a.5.5 0 0 0 1 0V9a2 2 0 0 0 2-2z"/></svg>
-            Blocked
-          </button>
           <button
             onClick={() => setShowQuickTasks(true)}
             title="Quick Tasks — run a skill directly on the main branch (t)"
