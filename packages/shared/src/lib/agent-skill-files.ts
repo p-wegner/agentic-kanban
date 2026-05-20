@@ -8,6 +8,9 @@ export type AgentSkillFile = {
 };
 
 export async function writeAgentSkillFile(targetPath: string, skill: AgentSkillFile) {
+  if (/[/\\]/.test(skill.name) || skill.name === ".." || skill.name === ".") {
+    throw new Error(`Invalid skill name for filesystem use: "${skill.name}"`);
+  }
   const skillsDir = join(targetPath, ".claude", "skills");
   const skillDir = join(skillsDir, skill.name);
 
