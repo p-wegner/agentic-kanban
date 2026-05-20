@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+﻿#!/usr/bin/env node
 import { Command } from "commander";
 import { readFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
@@ -41,7 +41,7 @@ Examples:
   $ agentic-kanban workspace create <issue-id>       # create a worktree for an issue
   $ agentic-kanban status                            # show board overview
   $ agentic-kanban skill list                        # list agent skills
-  $ agentic-kanban preferences set projects_base_folder /path/to/projects
+  $ agentic-kanban preferences set projects_base_dir /path/to/projects
 `);
 
 program
@@ -129,21 +129,21 @@ Examples:
 
 program
   .command("create")
-  .description("Create a new git repo and register it as a project.\n\nCreates a directory under the configured projects_base_folder preference (or --path), runs 'git init', and registers the repo.\n\nUse 'pnpm cli -- register <path>' to register an existing repo instead.")
+  .description("Create a new git repo and register it as a project.\n\nCreates a directory under the configured projects_base_dir preference (or --path), runs 'git init', and registers the repo.\n\nUse 'pnpm cli -- register <path>' to register an existing repo instead.")
   .argument("<folder-name>", "Name of the new project folder to create")
-  .option("--path <base-path>", "Base directory to create the folder in (overrides projects_base_folder preference)")
+  .option("--path <base-path>", "Base directory to create the folder in (overrides projects_base_dir preference)")
   .option("-n, --name <name>", "Custom project name (defaults to folder name)")
   .option("-b, --branch <branch>", "Initial branch name (default: main)")
   .addHelpText("after", `
 Examples:
-  $ agentic-kanban create my-app                        # uses projects_base_folder preference
+  $ agentic-kanban create my-app                        # uses projects_base_dir preference
   $ agentic-kanban create my-app --path /projects       # create in /projects/my-app
   $ agentic-kanban create my-app -n "My Application"   # custom project name
   $ agentic-kanban create my-app -b master              # use 'master' as initial branch
 
 Setup:
   Set the base folder preference first:
-  $ agentic-kanban preferences set projects_base_folder /path/to/projects
+  $ agentic-kanban preferences set projects_base_dir /path/to/projects
 `)
   .action(async (folderName: string, options: { path?: string; name?: string; branch?: string }) => {
     try {
@@ -152,15 +152,15 @@ Setup:
       // Resolve base folder: --path flag takes precedence over preference
       let baseFolder = options.path;
       if (!baseFolder) {
-        const pref = await db.select().from(preferences).where(eq(preferences.key, "projects_base_folder")).limit(1);
+        const pref = await db.select().from(preferences).where(eq(preferences.key, "projects_base_dir")).limit(1);
         if (pref.length > 0 && pref[0].value) {
           baseFolder = pref[0].value;
         }
       }
 
       if (!baseFolder) {
-        console.error("No base folder configured. Use --path <base-path> or set the projects_base_folder preference:");
-        console.error("  pnpm cli -- preferences set projects_base_folder /path/to/projects");
+        console.error("No base folder configured. Use --path <base-path> or set the projects_base_dir preference:");
+        console.error("  pnpm cli -- preferences set projects_base_dir /path/to/projects");
         process.exit(1);
       }
 
@@ -188,7 +188,7 @@ Setup:
         // Expected: directory doesn't exist yet
       }
 
-      // Create directory — track so we can clean up on failure
+      // Create directory â€” track so we can clean up on failure
       await mkdir(repoPath, { recursive: true });
       let dirCreated = true;
 
@@ -289,8 +289,8 @@ const prefCmd = program
   .description("Manage CLI preferences.\n\nSubcommands: get, set")
   .addHelpText("after", `
 Examples:
-  $ agentic-kanban preferences get projects_base_folder
-  $ agentic-kanban preferences set projects_base_folder /path/to/projects
+  $ agentic-kanban preferences get projects_base_dir
+  $ agentic-kanban preferences set projects_base_dir /path/to/projects
 `);
 
 prefCmd
@@ -456,7 +456,7 @@ Example:
 
 program
   .command("cleanup")
-  .description("Show stale worktrees for closed workspaces.\n\nLists git worktrees belonging to closed/merged workspaces. These worktrees are no longer needed and can be removed manually with 'git worktree remove --force <path>'.\n\nThis command does NOT auto-remove worktrees — it only reports them.")
+  .description("Show stale worktrees for closed workspaces.\n\nLists git worktrees belonging to closed/merged workspaces. These worktrees are no longer needed and can be removed manually with 'git worktree remove --force <path>'.\n\nThis command does NOT auto-remove worktrees â€” it only reports them.")
   .addHelpText("after", `
 Example:
   $ agentic-kanban cleanup
@@ -481,7 +481,7 @@ Example:
 
       console.log(`Found ${withWorktrees.length} closed workspace(s) with worktrees:`);
       for (const ws of withWorktrees) {
-        console.log(`  ${ws.branch} → ${ws.workingDir}`);
+        console.log(`  ${ws.branch} â†’ ${ws.workingDir}`);
       }
       console.log("\nThese worktrees can be removed manually with:");
       console.log("  git worktree remove --force <path>");
@@ -519,7 +519,7 @@ Examples:
   $ agentic-kanban status -w -i 10              # auto-refresh every 10s
 
 Status indicators:
-  ● = active workspace   ○ = idle workspace   ◎ = reviewing   · = no workspace
+  â— = active workspace   â—‹ = idle workspace   â—Ž = reviewing   Â· = no workspace
 `)
   .action(async (options: { project?: string; all?: boolean; json?: boolean; watch?: boolean; interval?: string }) => {
     try {
@@ -550,7 +550,7 @@ Status indicators:
         for (const issue of status.issues) {
           const num = issue.issueNumber != null ? `#${issue.issueNumber}` : "???";
           const wsStatus = issue.workspace?.status ?? "no workspace";
-          const marker = wsStatus === "active" ? "●" : wsStatus === "idle" ? "○" : wsStatus === "reviewing" ? "◎" : "·";
+          const marker = wsStatus === "active" ? "â—" : wsStatus === "idle" ? "â—‹" : wsStatus === "reviewing" ? "â—Ž" : "Â·";
 
           console.log(`  ${marker} ${num.padEnd(4)} ${issue.title}`);
           console.log(`         [${issue.statusName}]  priority: ${issue.priority}  workspace: ${wsStatus}`);
@@ -626,7 +626,7 @@ async function getActiveProjectId(): Promise<string> {
   return pref[0].value;
 }
 
-// ── issue commands ────────────────────────────────────────────────────────────
+// â”€â”€ issue commands â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 const issueCmd = program.command("issue").description("Manage issues on the board.\n\nSubcommands: list, create, move, summary, dependency");
 
@@ -975,7 +975,7 @@ Examples:
     }
   });
 
-// ── workspace commands ────────────────────────────────────────────────────────
+// â”€â”€ workspace commands â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 const wsCmd = program.command("workspace").description("Manage workspaces (git worktrees linked to issues).\n\nWorkspaces create isolated git worktrees where agents can work on issues. Each workspace is tied to a single issue.\n\nSubcommands: list, create");
 
@@ -1187,7 +1187,7 @@ Example:
     }
   });
 
-// ── skill commands ────────────────────────────────────────────────────────────
+// â”€â”€ skill commands â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 program
   .command("delete-status <status-id>")
@@ -1202,7 +1202,7 @@ program
       }
       const linked = await db.select({ id: issues.id }).from(issues).where(eq(issues.statusId, statusId)).limit(1);
       if (linked.length > 0) {
-        console.error(`Cannot delete status "${rows[0].name}" — it has linked issues. Move or delete those issues first.`);
+        console.error(`Cannot delete status "${rows[0].name}" â€” it has linked issues. Move or delete those issues first.`);
         process.exit(1);
       }
       await db.delete(projectStatuses).where(eq(projectStatuses.id, statusId));
@@ -1414,7 +1414,7 @@ Examples:
     }
   });
 
-// ── dependency commands ─────────────────────────────────────────────────────────
+// â”€â”€ dependency commands â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 const depCmd = issueCmd.command("dependency").description("Manage issue dependencies.\n\nDependencies link issues together with typed relationships. Available types: depends_on, blocked_by, related_to, duplicates, parent_of, child_of.\n\nSubcommands: list, add, remove");
 
@@ -1613,13 +1613,13 @@ program
     }
   });
 
-// ── sessions debug command ────────────────────────────────────────────────────
+// â”€â”€ sessions debug command â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 const sessionDebugCmd = program
   .command("session-history [issue-number]")
   .alias("sh")
   .description(
-    "Inspect Claude Code session transcript files from ~/.claude/projects/.\n\nParses JSONL session files for worktrees linked to this project's issues, showing what the agent did and why it stopped — without loading entire large files."
+    "Inspect Claude Code session transcript files from ~/.claude/projects/.\n\nParses JSONL session files for worktrees linked to this project's issues, showing what the agent did and why it stopped â€” without loading entire large files."
   )
   .option("-t, --tail <lines>", "Number of tail lines to parse per session file (default: 60)", "60")
   .option("-a, --all", "Show all sessions for the issue, not just the latest", false)
@@ -1716,7 +1716,7 @@ Via pnpm (use -- to pass args):
         if (!options.all) jsonlFiles = jsonlFiles.slice(0, 1);
 
         for (const jf of jsonlFiles) {
-          // Read only the tail — avoid loading huge files
+          // Read only the tail â€” avoid loading huge files
           const raw = readFileSync(jf.path, "utf8");
           const allLines = raw.split("\n").filter(Boolean);
           const tailStart = Math.max(0, allLines.length - tailLines);
@@ -1764,7 +1764,7 @@ Via pnpm (use -- to pass args):
           results.push({
             issueNum: dir.issueNum,
             dir: dir.name,
-            file: jf.name.replace(".jsonl", "").slice(0, 8) + "…",
+            file: jf.name.replace(".jsonl", "").slice(0, 8) + "â€¦",
             fileSizeBytes: jf.size,
             lastModified: jf.mtime.toISOString(),
             linesParsed: linesToParse.length,
@@ -1774,7 +1774,7 @@ Via pnpm (use -- to pass args):
             stopReason,
             sessionStarted,
             agentResponded,
-            sessionId: sessionId ? (sessionId as string).slice(0, 8) + "…" : null,
+            sessionId: sessionId ? (sessionId as string).slice(0, 8) + "â€¦" : null,
           });
         }
       }
@@ -1791,11 +1791,11 @@ Via pnpm (use -- to pass args):
       for (const r of results) {
         if (r.issueNum !== currentIssue) {
           currentIssue = r.issueNum;
-          console.log(`  ── #${r.issueNum ?? "?"} ──────────────────────────────────`);
+          console.log(`  â”€â”€ #${r.issueNum ?? "?"} â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€`);
         }
         const size = r.fileSizeBytes < 1024 ? `${r.fileSizeBytes}B` : `${(r.fileSizeBytes / 1024).toFixed(0)}KB`;
         const age = timeSince(new Date(r.lastModified));
-        const started = r.sessionStarted ? (r.agentResponded ? "✓ responded" : "✗ no response") : "✗ no prompt";
+        const started = r.sessionStarted ? (r.agentResponded ? "âœ“ responded" : "âœ— no response") : "âœ— no prompt";
         console.log(`  ${r.file}  ${size}  ${age} ago  [${started}]  turns:${r.turns}`);
         if (r.stopReason) console.log(`    stop_reason: ${r.stopReason}`);
         if (r.lastToolCall) console.log(`    last tool:   ${r.lastToolCall}`);
@@ -1812,3 +1812,4 @@ Via pnpm (use -- to pass args):
 void sessionDebugCmd;
 
 program.parse();
+
