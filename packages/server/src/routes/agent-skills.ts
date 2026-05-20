@@ -154,6 +154,7 @@ export function createAgentSkillsRoute(database: Database = db) {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 >>>>>>> a19889f (fix: resolve preference key mismatch, path traversal in skill names, and cleanup bugs)
 =======
@@ -164,6 +165,10 @@ export function createAgentSkillsRoute(database: Database = db) {
 >>>>>>> f716420 (fix: resolve preference key mismatch, path traversal in skill names, and cleanup bugs)
 =======
 >>>>>>> f6b75e2 (feat: install kanban skills to project .claude/skills/ from Settings UI)
+=======
+=======
+>>>>>>> a19889f (fix: resolve preference key mismatch, path traversal in skill names, and cleanup bugs)
+>>>>>>> ea9ffef (fix: resolve preference key mismatch, path traversal in skill names, and cleanup bugs)
     try {
       await writeAgentSkillFile(repoPath, rows[0]);
     } catch (err) {
@@ -174,11 +179,15 @@ export function createAgentSkillsRoute(database: Database = db) {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> ea9ffef (fix: resolve preference key mismatch, path traversal in skill names, and cleanup bugs)
 =======
     await writeAgentSkillFile(repoPath, rows[0]);
 >>>>>>> 9e48722 (feat: install kanban skills to project .claude/skills/ from Settings UI)
 =======
 >>>>>>> a19889f (fix: resolve preference key mismatch, path traversal in skill names, and cleanup bugs)
+<<<<<<< HEAD
 =======
     await writeAgentSkillFile(repoPath, rows[0]);
 >>>>>>> e23b7a0 (feat: install kanban skills to project .claude/skills/ from Settings UI)
@@ -199,6 +208,8 @@ export function createAgentSkillsRoute(database: Database = db) {
     await writeAgentSkillFile(repoPath, rows[0]);
 >>>>>>> 9e48722 (feat: install kanban skills to project .claude/skills/ from Settings UI)
 >>>>>>> f6b75e2 (feat: install kanban skills to project .claude/skills/ from Settings UI)
+=======
+>>>>>>> ea9ffef (fix: resolve preference key mismatch, path traversal in skill names, and cleanup bugs)
     return c.json({ installed: true, repoPath });
   });
 
