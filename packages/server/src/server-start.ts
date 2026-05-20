@@ -825,6 +825,7 @@ export async function startServer(port?: number) {
                   }
                 }
 
+<<<<<<< HEAD
 =======
 >>>>>>> 83a0a31 (feat: make nudge message a proper agent skill (monitor-nudge))
                 const nudgeSkill = await db.select({ prompt: agentSkills.prompt }).from(agentSkills)
@@ -851,6 +852,9 @@ export async function startServer(port?: number) {
 =======
                 logMonitorAction("nudge", ws.wsId);
 >>>>>>> 1407a7f (feat: add board monitor visualization panel)
+=======
+
+>>>>>>> f7a87fc (feat: make monitor action log entries clickable workspace links)
                 console.log(`[monitor] Nudged long-running agent in workspace ${ws.wsId}`);
               }
             }
