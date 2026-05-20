@@ -16,7 +16,7 @@ interface LayoutProps {
   projects?: Project[];
   activeProjectId?: string | null;
   onProjectChange?: (id: string) => void;
-  onRegisterProject?: (repoPath: string) => Promise<void>;
+  onRegisterProject?: (args: { repoPath: string; gitignoreTemplate: string; generateReadme: boolean }) => Promise<void>;
   onCreateProject?: (name: string, path: string, gitignoreTemplate: string, generateReadme: boolean) => Promise<void>;
   searchQuery?: string;
   onSearchChange?: (query: string) => void;
