@@ -35,6 +35,7 @@ interface LayoutProps {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
   priorityFilter?: string;
   onPriorityFilterChange?: (priority: string) => void;
   onAllWorkspacesClick?: () => void;
@@ -54,6 +55,11 @@ interface LayoutProps {
 >>>>>>> ed04713 (feat: add All Workspaces aggregate panel (#101))
 =======
 >>>>>>> b21ee88 (feat: remove priority filter from frontend UI)
+=======
+  priorityFilter?: string;
+  onPriorityFilterChange?: (priority: string) => void;
+  onAllWorkspacesClick?: () => void;
+>>>>>>> f4516a3 (feat: add All Workspaces aggregate panel (#101))
   onWorktreeOverviewClick?: () => void;
   onSettingsClick?: () => void;
 }
@@ -72,6 +78,7 @@ export function Layout({
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
   priorityFilter = "",
   onPriorityFilterChange,
   onAllWorkspacesClick,
@@ -91,6 +98,11 @@ export function Layout({
 >>>>>>> ed04713 (feat: add All Workspaces aggregate panel (#101))
 =======
 >>>>>>> b21ee88 (feat: remove priority filter from frontend UI)
+=======
+  priorityFilter = "",
+  onPriorityFilterChange,
+  onAllWorkspacesClick,
+>>>>>>> f4516a3 (feat: add All Workspaces aggregate panel (#101))
   onWorktreeOverviewClick,
   onSettingsClick,
 }: LayoutProps) {
@@ -342,6 +354,18 @@ export function Layout({
             </button>
 =======
 >>>>>>> b21ee88 (feat: remove priority filter from frontend UI)
+            <button
+              onClick={onAllWorkspacesClick}
+              className="p-1.5 text-gray-400 hover:text-gray-600 rounded-md hover:bg-gray-100"
+              title="All Workspaces"
+            >
+              <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <rect x="3" y="3" width="7" height="7" rx="1" />
+                <rect x="14" y="3" width="7" height="7" rx="1" />
+                <rect x="3" y="14" width="7" height="7" rx="1" />
+                <rect x="14" y="14" width="7" height="7" rx="1" />
+              </svg>
+            </button>
             <button
               onClick={onWorktreeOverviewClick}
               className="p-1.5 text-gray-400 hover:text-gray-600 rounded-md hover:bg-gray-100"
