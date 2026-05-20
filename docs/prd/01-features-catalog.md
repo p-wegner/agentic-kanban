@@ -1,5 +1,7 @@
 # PRD-01: Features Catalog
 
+<!-- last-synced: 2026-05-21T00:33:05+02:00 | commit: 2b1e622 -->
+
 Complete inventory of features, organized by category. Status reflects the current implementation (Stages 0–14 complete).
 
 ## Category: Task Management (CORE)
