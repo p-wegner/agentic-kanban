@@ -42,6 +42,124 @@ interface Project {
 
 const ARCHIVE_STATUS_NAMES = new Set(["Done", "Cancelled"]);
 
+type MonitorAction = { at: string; action: "relaunch" | "merge" | "nudge" | "mark_idle" | "mark_dead"; workspaceId: string };
+type MonitorStatus = { enabled: boolean; intervalMin: number; active: boolean; lastRun: { at: string; relaunched: number; merged: number; nudged: number } | null; nextRunAt: string | null; recentActions: MonitorAction[] };
+
+const ACTION_LABELS: Record<MonitorAction["action"], { label: string; color: string }> = {
+  relaunch: { label: "Relaunched agent", color: "text-blue-600" },
+  merge:    { label: "Triggered merge",  color: "text-purple-600" },
+  nudge:    { label: "Nudged agent",     color: "text-amber-600" },
+  mark_idle:{ label: "Marked idle",      color: "text-gray-500" },
+  mark_dead:{ label: "Marked dead",      color: "text-red-500" },
+};
+
+function MonitorPopover({ status, onClose }: { status: MonitorStatus | null; onClose: () => void }) {
+  const [now, setNow] = useState(Date.now());
+
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
+
+  useEffect(() => {
+    function handler(e: MouseEvent) {
+      const el = document.getElementById("monitor-popover");
+      if (el && !el.contains(e.target as Node)) onClose();
+    }
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [onClose]);
+
+  function formatCountdown(isoStr: string) {
+    const ms = new Date(isoStr).getTime() - now;
+    if (ms <= 0) return "now";
+    const s = Math.floor(ms / 1000);
+    const m = Math.floor(s / 60);
+    const rem = s % 60;
+    return m > 0 ? `${m}m ${rem}s` : `${rem}s`;
+  }
+
+  function formatAge(isoStr: string) {
+    const s = Math.floor((now - new Date(isoStr).getTime()) / 1000);
+    if (s < 60) return `${s}s ago`;
+    const m = Math.floor(s / 60);
+    if (m < 60) return `${m}m ago`;
+    return `${Math.floor(m / 60)}h ago`;
+  }
+
+  return (
+    <div
+      id="monitor-popover"
+      className="absolute right-0 top-full mt-1.5 z-50 w-80 bg-white border border-gray-200 rounded-lg shadow-lg text-xs"
+    >
+      <div className="px-3 py-2.5 border-b border-gray-100 flex items-center justify-between">
+        <span className="font-semibold text-gray-700">Board Monitor</span>
+        <span className="flex items-center gap-1.5 text-green-600">
+          <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
+          Active
+        </span>
+      </div>
+
+      <div className="px-3 py-2 border-b border-gray-100 space-y-1.5">
+        {status?.lastRun ? (
+          <div className="flex justify-between text-gray-500">
+            <span>Last run</span>
+            <span className="text-gray-700">{formatAge(status.lastRun.at)} — {new Date(status.lastRun.at).toLocaleTimeString()}</span>
+          </div>
+        ) : (
+          <div className="text-gray-400">No runs yet this session</div>
+        )}
+        {status?.nextRunAt && (
+          <div className="flex justify-between text-gray-500">
+            <span>Next run</span>
+            <span className="font-medium text-gray-700">{formatCountdown(status.nextRunAt)}</span>
+          </div>
+        )}
+        {status?.intervalMin && (
+          <div className="flex justify-between text-gray-500">
+            <span>Interval</span>
+            <span>{status.intervalMin}m</span>
+          </div>
+        )}
+        {status?.lastRun && (
+          <div className="flex gap-3 pt-0.5">
+            {status.lastRun.relaunched > 0 && <span className="text-blue-600">{status.lastRun.relaunched} relaunched</span>}
+            {status.lastRun.merged > 0 && <span className="text-purple-600">{status.lastRun.merged} merged</span>}
+            {status.lastRun.nudged > 0 && <span className="text-amber-600">{status.lastRun.nudged} nudged</span>}
+            {status.lastRun.relaunched === 0 && status.lastRun.merged === 0 && status.lastRun.nudged === 0 && (
+              <span className="text-gray-400">No actions needed</span>
+            )}
+          </div>
+        )}
+      </div>
+
+      {status?.recentActions && status.recentActions.length > 0 ? (
+        <div className="px-3 py-2">
+          <div className="text-gray-400 font-medium uppercase tracking-wide mb-1.5" style={{ fontSize: "10px" }}>Recent actions</div>
+          <div className="space-y-1 max-h-48 overflow-y-auto">
+            {status.recentActions.map((a, i) => {
+              const meta = ACTION_LABELS[a.action];
+              return (
+                <div key={i} className="flex items-center justify-between gap-2">
+                  <span className={`${meta.color} font-medium`}>{meta.label}</span>
+                  <span className="text-gray-400 shrink-0 font-mono" style={{ fontSize: "10px" }}>{a.workspaceId.slice(0, 8)}</span>
+                  <span className="text-gray-400 shrink-0">{formatAge(a.at)}</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ) : (
+        <div className="px-3 py-2 text-gray-400">No actions recorded yet</div>
+      )}
+
+      <div className="px-3 py-2 border-t border-gray-100 text-gray-400">
+        Configure in Settings → Workflow
+      </div>
+    </div>
+  );
+}
+
 export function BoardPage() {
   const [columns, setColumns] = useState<StatusWithIssues[]>([]);
   const [loading, setLoading] = useState(true);
@@ -80,7 +198,8 @@ export function BoardPage() {
   const [viewMode, setViewMode] = useState<"kanban" | "graph" | "table">("kanban");
   const [dynamicColumnScaling, setDynamicColumnScaling] = useState(false);
   const [autoMonitor, setAutoMonitor] = useState(false);
-  const [monitorLastRun, setMonitorLastRun] = useState<{ at: string; relaunched: number; merged: number; nudged: number } | null>(null);
+  const [monitorStatus, setMonitorStatus] = useState<MonitorStatus | null>(null);
+  const [showMonitorPopover, setShowMonitorPopover] = useState(false);
 
   const refetchBoard = useCallback(async (projectId?: string) => {
     const pid = projectId || activeProjectId;
@@ -190,24 +309,34 @@ export function BoardPage() {
           );
           setColumns(board);
         }
-        try {
-          const s = await apiFetch<Record<string, string>>("/api/preferences/settings");
-          setDynamicColumnScaling(s.dynamic_column_scaling === "true");
-          setAutoMonitor(s.auto_monitor === "true");
-          apiFetch<{ lastRun: typeof monitorLastRun }>("/api/internal/monitor-status")
-            .then((r) => setMonitorLastRun(r.lastRun))
-            .catch(() => {});
-        } catch {
-          // ignore
-        }
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to load board");
-      } finally {
-        setLoading(false);
       }
+      // Load preferences independently so they work even if board fails
+      try {
+        const s = await apiFetch<Record<string, string>>("/api/preferences/settings");
+        setDynamicColumnScaling(s.dynamic_column_scaling === "true");
+        setAutoMonitor(s.auto_monitor === "true");
+        apiFetch<MonitorStatus>("/api/internal/monitor-status")
+          .then((r) => setMonitorStatus(r))
+          .catch(() => {});
+      } catch {
+        // ignore
+      }
+      setLoading(false);
     }
     load();
   }, [loadProjects]);
+
+  useEffect(() => {
+    if (!autoMonitor) return;
+    const t = setInterval(() => {
+      apiFetch<MonitorStatus>("/api/internal/monitor-status")
+        .then((r) => setMonitorStatus(r))
+        .catch(() => {});
+    }, 30_000);
+    return () => clearInterval(t);
+  }, [autoMonitor]);
 
   async function toggleAutoMonitor() {
     const next = !autoMonitor;
@@ -217,8 +346,8 @@ export function BoardPage() {
         method: "PUT",
         body: JSON.stringify({ auto_monitor: String(next) }),
       });
-      const status = await apiFetch<{ lastRun: typeof monitorLastRun }>("/api/internal/monitor-status");
-      setMonitorLastRun(status.lastRun);
+      const status = await apiFetch<MonitorStatus>("/api/internal/monitor-status");
+      setMonitorStatus(status);
     } catch {
       setAutoMonitor(!next);
     }
@@ -767,11 +896,16 @@ export function BoardPage() {
             Tasks
           </button>
           {autoMonitor && (
-            <div
-              title={`Auto-monitor active${monitorLastRun ? ` · Last run: ${new Date(monitorLastRun.at).toLocaleTimeString()} · ${monitorLastRun.relaunched} relaunched, ${monitorLastRun.merged} merged, ${monitorLastRun.nudged} nudged` : ""} · Configure in Settings → Agent`}
-              className="shrink-0 flex items-center gap-1.5 px-2 py-1 rounded text-xs text-green-700"
-            >
-              <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+            <div className="relative shrink-0">
+              <button
+                onClick={() => setShowMonitorPopover(v => !v)}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium border transition-colors bg-green-50 border-green-200 text-green-700 hover:bg-green-100"
+                title="Board monitor active — click for details"
+              >
+                <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+                Monitor
+              </button>
+              {showMonitorPopover && <MonitorPopover status={monitorStatus} onClose={() => setShowMonitorPopover(false)} />}
             </div>
           )}
           <div className="flex items-center gap-1 border border-gray-200 rounded-md p-0.5 bg-white shrink-0">
@@ -938,7 +1072,16 @@ export function BoardPage() {
       />
       <ToastContainer />
       {showSettings && (
-        <SettingsPanel onClose={() => setShowSettings(false)} activeProjectId={activeProjectId} />
+        <SettingsPanel onClose={() => {
+          setShowSettings(false);
+          apiFetch<Record<string, string>>("/api/preferences/settings")
+            .then(s => {
+              setAutoMonitor(s.auto_monitor === "true");
+              return apiFetch<MonitorStatus>("/api/internal/monitor-status");
+            })
+            .then(r => setMonitorStatus(r))
+            .catch(() => {});
+        }} activeProjectId={activeProjectId} />
       )}
       {showQuickTasks && activeProjectId && (
         <QuickTasksPanel
