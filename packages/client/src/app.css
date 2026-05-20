@@ -95,6 +95,7 @@ html, body {
     scroll-snap-align: none;
   }
 }
+<<<<<<< HEAD
 
 .markdown-body {
   font-size: 0.875rem;
@@ -154,3 +155,5 @@ html, body {
 }
 .markdown-body strong { font-weight: 600; }
 .markdown-body em { font-style: italic; }
+=======
+>>>>>>> 2713ec4 (feat: make kanban board truly responsive)
