@@ -9,6 +9,7 @@ description: Analyze a ticket and its relationships to other open tickets, sugge
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 >>>>>>> 741e4c0 (chore: add exported agent skills to .claude/skills/)
 =======
@@ -17,6 +18,8 @@ description: Analyze a ticket and its relationships to other open tickets, sugge
 >>>>>>> a38c748 (chore: add exported agent skills to .claude/skills/)
 =======
 >>>>>>> c24a7ee (feat: implement dependency-analyzer skill with improved prompt)
+=======
+>>>>>>> 0dd037e (feat: implement dependency-analyzer skill with improved prompt)
 Analyze the given issue and its relationship to other open (non-Done, non-Cancelled) issues on the board.
 
 Steps:
@@ -37,10 +40,13 @@ Focus on actionable dependencies, not just topical similarity. Only add a depend
 =======
 =======
 >>>>>>> b63e4a8 (feat: implement dependency-analyzer skill with improved prompt)
+<<<<<<< HEAD
 =======
 Focus on actionable dependencies, not just topical similarity. Only add a dependency if there is a clear technical reason the issues are coupled.
 =======
 >>>>>>> c24a7ee (feat: implement dependency-analyzer skill with improved prompt)
+=======
+>>>>>>> 0dd037e (feat: implement dependency-analyzer skill with improved prompt)
 Analyze the given issue and its relationships to other open (non-Done, non-Cancelled) issues on the board.
 
 ## Steps
@@ -77,6 +83,7 @@ Analyze the given issue and its relationships to other open (non-Done, non-Cance
 - Do not link an issue to itself
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 >>>>>>> 66f1d46 (feat: implement dependency-analyzer skill with improved prompt)
 =======
 >>>>>>> b63e4a8 (feat: implement dependency-analyzer skill with improved prompt)
@@ -92,3 +99,8 @@ Focus on actionable dependencies, not just topical similarity. Only add a depend
 =======
 >>>>>>> 66f1d46 (feat: implement dependency-analyzer skill with improved prompt)
 >>>>>>> c24a7ee (feat: implement dependency-analyzer skill with improved prompt)
+=======
+>>>>>>> 66f1d46 (feat: implement dependency-analyzer skill with improved prompt)
+=======
+>>>>>>> b63e4a8 (feat: implement dependency-analyzer skill with improved prompt)
+>>>>>>> 0dd037e (feat: implement dependency-analyzer skill with improved prompt)
