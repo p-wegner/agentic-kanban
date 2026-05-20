@@ -40,6 +40,7 @@ export function IssueDetailPanel({
   onNavigateToIssue,
 }: IssueDetailPanelProps) {
   const [editing, setEditing] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   const [dragPos, setDragPos] = useState<{ x: number; y: number } | null>(null);
   const dragStartRef = useRef<{ mouseX: number; mouseY: number; panelX: number; panelY: number } | null>(null);
   const [title, setTitle] = useState(issue.title);
@@ -276,22 +277,42 @@ export function IssueDetailPanel({
       {/* Panel */}
       <div
         data-panel
-        className="fixed right-0 top-0 h-full w-[min(384px,100vw)] bg-white shadow-xl z-50 flex flex-col border-l border-gray-200 animate-slide-in-right"
-        style={dragPos ? { right: "auto", left: dragPos.x, top: dragPos.y, height: "min(90vh, 100vh)" } : undefined}
+        className={`fixed right-0 top-0 h-full bg-white shadow-xl z-50 flex flex-col border-l border-gray-200 animate-slide-in-right ${expanded ? "w-full" : "w-[min(384px,100vw)]"}`}
+        style={!expanded && dragPos ? { right: "auto", left: dragPos.x, top: dragPos.y, height: "min(90vh, 100vh)" } : undefined}
       >
-        <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 cursor-grab active:cursor-grabbing" onMouseDown={handleHeaderMouseDown}>
+        <div
+          className={`flex items-center justify-between px-4 py-3 border-b border-gray-200 ${!expanded ? "cursor-grab active:cursor-grabbing" : ""}`}
+          onMouseDown={!expanded ? handleHeaderMouseDown : undefined}
+        >
           <h2 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
             {issue.issueNumber != null && (
               <span className="text-gray-400 font-mono">#{issue.issueNumber}</span>
             )}
             {editing ? "Edit Issue" : "Issue Details"}
           </h2>
-          <button
-            onClick={handleBackdropClick}
-            className="text-gray-400 hover:text-gray-600 text-lg leading-none"
-          >
-            &times;
-          </button>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => { setExpanded((v) => !v); setDragPos(null); }}
+              title={expanded ? "Collapse panel" : "Expand panel"}
+              className="text-gray-400 hover:text-gray-600 p-0.5 rounded"
+            >
+              {expanded ? (
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 9L4 4m0 0h5m-5 0v5M15 9l5-5m0 0h-5m5 0v5M9 15l-5 5m0 0h5m-5 0v-5M15 15l5 5m0 0h-5m5 0v-5" />
+                </svg>
+              ) : (
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 8V4m0 0h4M4 4l5 5M20 8V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5M20 16v4m0 0h-4m4 0l-5-5" />
+                </svg>
+              )}
+            </button>
+            <button
+              onClick={handleBackdropClick}
+              className="text-gray-400 hover:text-gray-600 text-lg leading-none"
+            >
+              &times;
+            </button>
+          </div>
         </div>
 
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
@@ -326,7 +347,7 @@ export function IssueDetailPanel({
               <textarea
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
-                rows={4}
+                rows={expanded ? 16 : 4}
                 className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none"
                 placeholder="Add a description... (paste screenshots with Ctrl+V)"
                 onPaste={(e) => {
