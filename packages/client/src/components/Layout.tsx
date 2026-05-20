@@ -20,6 +20,7 @@ interface LayoutProps {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
   onRegisterProject?: (opts: RegisterOptions) => Promise<void>;
 =======
 =======
@@ -28,6 +29,8 @@ interface LayoutProps {
 >>>>>>> 2f40776 (fix: correct onRegisterProject prop type to accept object in Layout.tsx)
 =======
 >>>>>>> ff986c7 (fix: correct LayoutProps onRegisterProject type signature)
+=======
+>>>>>>> d715380 (feat: add All Workspaces aggregate panel (#101))
   onRegisterProject?: (repoPath: string) => Promise<void>;
 <<<<<<< HEAD
 <<<<<<< HEAD
@@ -48,6 +51,9 @@ interface LayoutProps {
 =======
   onRegisterProject?: (opts: { repoPath: string; gitignoreTemplate: string; generateReadme: boolean }) => Promise<void>;
 >>>>>>> 76091bc (fix: correct LayoutProps onRegisterProject type signature)
+=======
+  onRegisterProject?: (options: { repoPath: string; gitignoreTemplate: string; generateReadme: boolean }) => Promise<void>;
+>>>>>>> 3ce95e1 (feat: add All Workspaces aggregate panel (#101))
   onCreateProject?: (name: string, path: string, gitignoreTemplate: string, generateReadme: boolean) => Promise<void>;
 >>>>>>> 7dd2d0e (fix: correct onRegisterProject prop type to accept object in Layout.tsx)
   searchQuery?: string;
@@ -443,6 +449,18 @@ export function Layout({
             </button>
 =======
 >>>>>>> 46e7ac8 (feat: remove priority filter from frontend UI)
+            <button
+              onClick={onAllWorkspacesClick}
+              className="p-1.5 text-gray-400 hover:text-gray-600 rounded-md hover:bg-gray-100"
+              title="All Workspaces"
+            >
+              <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <rect x="3" y="3" width="7" height="7" rx="1" />
+                <rect x="14" y="3" width="7" height="7" rx="1" />
+                <rect x="3" y="14" width="7" height="7" rx="1" />
+                <rect x="14" y="14" width="7" height="7" rx="1" />
+              </svg>
+            </button>
             <button
               onClick={onAllWorkspacesClick}
               className="p-1.5 text-gray-400 hover:text-gray-600 rounded-md hover:bg-gray-100"
