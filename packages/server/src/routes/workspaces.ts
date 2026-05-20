@@ -36,6 +36,7 @@ export function createWorkspacesRoute(
     }
 
     const requiresReview = body.requiresReview === true;
+    const thoroughReview = body.thoroughReview === true;
     const planMode = body.planMode === true;
     const includeVisualProof = body.includeVisualProof === true;
     const now = new Date().toISOString();
@@ -177,6 +178,7 @@ export function createWorkspacesRoute(
         baseBranch,
         isDirect,
         requiresReview,
+        thoroughReview,
         planMode,
         includeVisualProof,
         skillId,
@@ -247,6 +249,7 @@ export function createWorkspacesRoute(
           baseBranch,
           isDirect,
           requiresReview,
+          thoroughReview,
           planMode,
           includeVisualProof,
           status: "active",
