@@ -593,6 +593,7 @@ export async function startServer(port?: number) {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
   type MonitorAction = { at: string; action: "relaunch" | "merge" | "nudge" | "mark_idle" | "mark_dead"; workspaceId: string; issueId: string };
 =======
   type MonitorAction = { at: string; action: "relaunch" | "merge" | "nudge" | "mark_idle" | "mark_dead" | "auto_start"; workspaceId: string; issueId: string };
@@ -602,11 +603,14 @@ export async function startServer(port?: number) {
   function logMonitorAction(action: MonitorAction["action"], workspaceId: string, issueId: string) {
     monitorRecentActions.unshift({ at: new Date().toISOString(), action, workspaceId, issueId });
 =======
+=======
+>>>>>>> 1407a7f (feat: add board monitor visualization panel)
   type MonitorAction = { at: string; action: "relaunch" | "merge" | "nudge" | "mark_idle" | "mark_dead"; workspaceId: string };
   const monitorRecentActions: MonitorAction[] = [];
 
   function logMonitorAction(action: MonitorAction["action"], workspaceId: string) {
     monitorRecentActions.unshift({ at: new Date().toISOString(), action, workspaceId });
+<<<<<<< HEAD
 >>>>>>> 01516bd (feat: add board monitor visualization panel)
 =======
   type MonitorAction = { at: string; action: "relaunch" | "merge" | "nudge" | "mark_idle" | "mark_dead"; workspaceId: string; issueId: string };
@@ -666,6 +670,10 @@ export async function startServer(port?: number) {
     const hasActive = activeSignals.some(s => combined.includes(s));
     return hasActive; // skip if clearly active
   }
+=======
+    if (monitorRecentActions.length > 30) monitorRecentActions.splice(30);
+  }
+>>>>>>> 1407a7f (feat: add board monitor visualization panel)
 
   async function runMonitorCycle() {
     const cycleStats = { relaunched: 0, merged: 0, nudged: 0 };
@@ -713,6 +721,7 @@ export async function startServer(port?: number) {
             cycleStats.relaunched++;
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
             logMonitorAction("relaunch", ws.wsId, ws.issueId);
 =======
             logMonitorAction("relaunch", ws.wsId);
@@ -720,6 +729,9 @@ export async function startServer(port?: number) {
 =======
             logMonitorAction("relaunch", ws.wsId, ws.issueId);
 >>>>>>> 47c4344 (feat: make monitor action log entries clickable workspace links)
+=======
+            logMonitorAction("relaunch", ws.wsId);
+>>>>>>> 1407a7f (feat: add board monitor visualization panel)
             console.log(`[monitor] Relaunched idle workspace ${ws.wsId}`);
             boardEvents.broadcast(ws.projectId, "board_changed");
           } else if (ws.wsStatus === "reviewing" && sess && sess.status === "stopped") {
@@ -729,6 +741,7 @@ export async function startServer(port?: number) {
             cycleStats.merged++;
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
             logMonitorAction("merge", ws.wsId, ws.issueId);
 =======
             logMonitorAction("merge", ws.wsId);
@@ -736,12 +749,16 @@ export async function startServer(port?: number) {
 =======
             logMonitorAction("merge", ws.wsId, ws.issueId);
 >>>>>>> 47c4344 (feat: make monitor action log entries clickable workspace links)
+=======
+            logMonitorAction("merge", ws.wsId);
+>>>>>>> 1407a7f (feat: add board monitor visualization panel)
             console.log(`[monitor] Triggered merge for reviewing workspace ${ws.wsId}`);
             boardEvents.broadcast(ws.projectId, "board_changed");
           } else if (ws.wsStatus === "active" && sess && sess.status === "stopped") {
             // Active workspace but session has stopped — agent exited without transitioning workspace.
             // Mark workspace as idle so the next cycle will relaunch it.
             await db.update(workspaces).set({ status: "idle" }).where(eq(workspaces.id, ws.wsId)).catch(() => {});
+<<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
             logMonitorAction("mark_idle", ws.wsId, ws.issueId);
@@ -751,6 +768,9 @@ export async function startServer(port?: number) {
 =======
             logMonitorAction("mark_idle", ws.wsId, ws.issueId);
 >>>>>>> 47c4344 (feat: make monitor action log entries clickable workspace links)
+=======
+            logMonitorAction("mark_idle", ws.wsId);
+>>>>>>> 1407a7f (feat: add board monitor visualization panel)
             console.log(`[monitor] Active workspace ${ws.wsId} has stopped session — marking idle for relaunch`);
             boardEvents.broadcast(ws.projectId, "board_changed");
           } else if (ws.wsStatus === "active" && sess && sess.status === "running") {
@@ -762,6 +782,7 @@ export async function startServer(port?: number) {
               await db.update(sessions).set({ status: "stopped", endedAt: new Date().toISOString() }).where(eq(sessions.id, sess.id)).catch(() => {});
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
               logMonitorAction("mark_dead", ws.wsId, ws.issueId);
 =======
               logMonitorAction("mark_dead", ws.wsId);
@@ -769,6 +790,9 @@ export async function startServer(port?: number) {
 =======
               logMonitorAction("mark_dead", ws.wsId, ws.issueId);
 >>>>>>> 47c4344 (feat: make monitor action log entries clickable workspace links)
+=======
+              logMonitorAction("mark_dead", ws.wsId);
+>>>>>>> 1407a7f (feat: add board monitor visualization panel)
               console.log(`[monitor] Workspace ${ws.wsId} process dead — marking idle`);
               boardEvents.broadcast(ws.projectId, "board_changed");
             } else {
@@ -805,6 +829,7 @@ export async function startServer(port?: number) {
                 cycleStats.nudged++;
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
                 logMonitorAction("nudge", ws.wsId, ws.issueId);
 =======
                 logMonitorAction("nudge", ws.wsId);
@@ -812,6 +837,9 @@ export async function startServer(port?: number) {
 =======
                 logMonitorAction("nudge", ws.wsId, ws.issueId);
 >>>>>>> 47c4344 (feat: make monitor action log entries clickable workspace links)
+=======
+                logMonitorAction("nudge", ws.wsId);
+>>>>>>> 1407a7f (feat: add board monitor visualization panel)
                 console.log(`[monitor] Nudged long-running agent in workspace ${ws.wsId}`);
               }
             }
