@@ -6,7 +6,7 @@ Synthesis of where Agentic Kanban differentiates and gaps to consider filling.
 
 These are things no competitor currently does (or does as well):
 
-1. **Testability-first architecture** — 176 automated tests (100+ E2E, 76 unit) with mock agent. No competitor has a visible testing story.
+1. **Testability-first architecture** — 135+ E2E Playwright tests + Vitest unit tests + mock agent. No competitor has a visible testing story.
 2. **Parsed agent output** — Deep understanding of Claude's stream-json format (thinking blocks, tool use, subagents). Others show raw terminals.
 3. **Inline diff comments** — CRUD per file+line. Cline has multi-line comments; others don't.
 4. **Chat-like agent interaction** — Persistent input, Send/Stop toggle, multi-turn via --resume. Others use terminal-style input.
@@ -14,8 +14,12 @@ These are things no competitor currently does (or does as well):
 6. **Session summary (no LLM)** — Pure server-side JSONL parsing for structured summaries. No API cost.
 7. **Worktree port strategy** — Deterministic ports per branch for parallel agent execution.
 8. **Command palette** — Ctrl+K quick actions. No competitor has this.
-9. **Agent skills system** — Built-in + custom skills, SKILL.md injection, export to Claude Code format.
+9. **Agent skills system** — Built-in + custom skills, SKILL.md injection, export to Claude Code format, install from Settings UI.
 10. **Windows support** — Only Cline Kanban also runs on Windows; Lanes is macOS-only.
+11. **Estimate field** — XS/S/M/L/XL sizing on issues. No competitor has this.
+12. **All Workspaces panel** — Aggregate view of every active workspace across all issues. Unique to us.
+13. **Quick tasks panel** — Launch an agent directly from a skill without creating an issue first.
+14. **Create project from UI** — New project dialog (git init or local path) without requiring CLI. Lanes also has this; others don't.
 
 ## Where Competitors Lead
 
@@ -59,4 +63,4 @@ Ranked by effort vs. impact:
 
 ## Positioning Statement
 
-> Agentic Kanban is the **developer-first** kanban for AI coding tasks — testable, scriptable, and transparent. Where competitors optimize for autonomous workflows (Cline) or polished UX (Lanes), we optimize for **observability and control**: every agent action is parsed, persisted, and reviewable. The 176-test suite and mock agent make it the only option where you can confidently iterate on agent behavior with automated feedback loops.
+> Agentic Kanban is the **developer-first** kanban for AI coding tasks — testable, scriptable, and transparent. Where competitors optimize for autonomous workflows (Cline) or polished UX (Lanes), we optimize for **observability and control**: every agent action is parsed, persisted, and reviewable. The 135+ E2E test suite and mock agent make it the only option where you can confidently iterate on agent behavior with automated feedback loops.
