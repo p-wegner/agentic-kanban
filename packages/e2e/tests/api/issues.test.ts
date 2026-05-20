@@ -92,6 +92,44 @@ test.describe("Issues API", () => {
     expect(updateRes.ok()).toBeTruthy();
   });
 
+  test("POST /api/issues creates issue with estimate", async ({ request }) => {
+    const suffix = Date.now().toString(36);
+    const res = await request.post(`${SERVER_URL}/api/issues`, {
+      data: { title: `Estimated ${suffix}`, statusId, projectId, estimate: "L" },
+    });
+    expect(res.status()).toBe(201);
+    const { id } = await res.json();
+    createdIssueIds.push(id);
+
+    const listRes = await request.get(`${SERVER_URL}/api/issues?projectId=${projectId}`);
+    const list = await listRes.json();
+    const issue = list.find((i: { id: string }) => i.id === id);
+    expect(issue.estimate).toBe("L");
+  });
+
+  test("PATCH /api/issues/:id sets and clears estimate", async ({ request }) => {
+    const suffix = Date.now().toString(36);
+    const createRes = await request.post(`${SERVER_URL}/api/issues`, {
+      data: { title: `Estimate patch ${suffix}`, statusId, projectId },
+    });
+    const { id } = await createRes.json();
+    createdIssueIds.push(id);
+
+    // set estimate
+    const setRes = await request.patch(`${SERVER_URL}/api/issues/${id}`, {
+      data: { estimate: "XS" },
+    });
+    expect(setRes.ok()).toBeTruthy();
+
+    const listAfterSet = await (await request.get(`${SERVER_URL}/api/issues?projectId=${projectId}`)).json();
+    expect(listAfterSet.find((i: { id: string }) => i.id === id).estimate).toBe("XS");
+
+    // clear estimate
+    await request.patch(`${SERVER_URL}/api/issues/${id}`, { data: { estimate: null } });
+    const listAfterClear = await (await request.get(`${SERVER_URL}/api/issues?projectId=${projectId}`)).json();
+    expect(listAfterClear.find((i: { id: string }) => i.id === id).estimate).toBeNull();
+  });
+
   test("DELETE /api/issues/:id deletes an issue", async ({ request }) => {
     const suffix = Date.now().toString(36);
     const createRes = await request.post(`${SERVER_URL}/api/issues`, {
