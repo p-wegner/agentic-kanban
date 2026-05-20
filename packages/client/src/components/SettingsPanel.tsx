@@ -263,6 +263,7 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
   const [installedSkills, setInstalledSkills] = useState<Record<string, boolean>>({});
   const [installingSkill, setInstallingSkill] = useState<string | null>(null);
 <<<<<<< HEAD
+<<<<<<< HEAD
 
   // Tags state
   const [tagsList, setTagsList] = useState<{ id: string; name: string; color: string | null }[]>([]);
@@ -287,6 +288,8 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
   const [selectedTagIds, setSelectedTagIds] = useState<Set<string>>(new Set());
   const [mergeTargetId, setMergeTargetId] = useState<string>("");
   const [mergingTags, setMergingTags] = useState(false);
+=======
+>>>>>>> e23b7a0 (feat: install kanban skills to project .claude/skills/ from Settings UI)
 
   // Tags state
   const [tagsList, setTagsList] = useState<{ id: string; name: string; color: string | null }[]>([]);
@@ -355,6 +358,19 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
         setInstalledSkills(Object.fromEntries(statusEntries));
 =======
 >>>>>>> 1e9a6e9 (feat: add Tags management tab to Settings panel)
+
+        // Check install status for each skill
+        const statusEntries = await Promise.all(
+          skillsData.map(async (skill) => {
+            try {
+              const s = await apiFetch<{ installed: boolean }>(`/api/agent-skills/${skill.id}/install-status`);
+              return [skill.id, s.installed] as const;
+            } catch {
+              return [skill.id, false] as const;
+            }
+          })
+        );
+        setInstalledSkills(Object.fromEntries(statusEntries));
 
         // Load project-specific settings
         if (activeProjectId) {
