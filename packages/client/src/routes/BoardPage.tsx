@@ -440,7 +440,7 @@ export function BoardPage() {
           return true;
         }),
       })),
-    [columns, priorityFilter, searchQuery],
+    [columns, searchQuery],
   );
 
   const activeColumns = useMemo(
@@ -675,8 +675,6 @@ export function BoardPage() {
       onProjectChange={handleProjectChange}
       searchQuery={searchQuery}
       onSearchChange={setSearchQuery}
-      priorityFilter={priorityFilter}
-      onPriorityFilterChange={setPriorityFilter}
       onRegisterProject={handleRegisterProject}
       onCreateProject={handleCreateProject}
       onSettingsClick={() => setShowSettings(true)}
@@ -725,7 +723,6 @@ export function BoardPage() {
             activeColumns={activeColumns}
             archiveColumns={archiveColumns}
             searchQuery={searchQuery}
-            priorityFilter={priorityFilter}
             projectId={activeProjectId}
           />
           <button
