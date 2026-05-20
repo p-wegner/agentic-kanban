@@ -201,6 +201,7 @@
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 >>>>>>> d778ce3 (perf: add DB indexes and stale-while-revalidate conflict cache for board load)
 =======
@@ -242,6 +243,8 @@
 >>>>>>> 26ff491 (feat: add estimate/sizing field to issues (XS/S/M/L/XL))
 =======
 >>>>>>> d318021 (perf: add DB indexes and stale-while-revalidate conflict cache for board load)
+=======
+>>>>>>> 43685f8 (feat: add estimate/sizing field to issues (XS/S/M/L/XL))
     }
   ]
 }
