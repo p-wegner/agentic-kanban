@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Layout } from "../components/Layout.js";
 import { GraphView } from "../components/GraphView.js";
-import { TableView } from "../components/TableView.js";
 import { BoardColumn } from "../components/BoardColumn.js";
 import { CompletedGrid } from "../components/CompletedGrid.js";
 import { BoardStats } from "../components/BoardStats.js";
@@ -200,7 +199,7 @@ export function BoardPage() {
   const [approvalRequests, setApprovalRequests] = useState<ApprovalRequest[]>([]);
   const pendingBoardRefreshRef = useRef(false);
   const [expandedCreatePanel, setExpandedCreatePanel] = useState<{ statusId: string; statusName: string; state: Partial<CreateIssueFormState> } | null>(null);
-  const [viewMode, setViewMode] = useState<"kanban" | "graph" | "table">("kanban");
+  const [viewMode, setViewMode] = useState<"kanban" | "graph">("kanban");
   const [dynamicColumnScaling, setDynamicColumnScaling] = useState(false);
   const [autoMonitor, setAutoMonitor] = useState(false);
   const [monitorStatus, setMonitorStatus] = useState<MonitorStatus | null>(null);
@@ -876,11 +875,16 @@ export function BoardPage() {
         </div>
       )}
 <<<<<<< HEAD
+<<<<<<< HEAD
       <div className="flex flex-col gap-3 p-4 h-full overflow-hidden">
 =======
       <div className="flex flex-col gap-2 sm:gap-3 p-2 sm:p-4 h-full overflow-hidden">
 >>>>>>> 65f7a08 (feat: make kanban board truly responsive for mobile)
         <div className="flex items-center gap-2 flex-wrap">
+=======
+      <div className="flex flex-col gap-3 p-4 h-full overflow-hidden">
+        <div className="flex items-center gap-3">
+>>>>>>> 5d43535 (revert: remove table view and revert mobile-responsive board styling)
           <BoardStats
             activeColumns={activeColumns}
             archiveColumns={archiveColumns}
@@ -944,6 +948,7 @@ export function BoardPage() {
               </svg>
               Graph
             </button>
+<<<<<<< HEAD
             <button
               onClick={() => setViewMode("table")}
               className={`px-2.5 py-1 text-xs rounded flex items-center gap-1.5 transition-colors ${viewMode === "table" ? "bg-blue-600 text-white" : "text-gray-600 hover:bg-gray-100"}`}
@@ -959,6 +964,8 @@ export function BoardPage() {
               </svg>
               Table
             </button>
+=======
+>>>>>>> 5d43535 (revert: remove table view and revert mobile-responsive board styling)
           </div>
         </div>
         {viewMode === "graph" && activeProjectId ? (
@@ -971,6 +978,7 @@ export function BoardPage() {
             />
           </div>
         ) : null}
+<<<<<<< HEAD
         {viewMode === "table" && (
           <TableView
             columns={columns}
@@ -1002,6 +1010,9 @@ export function BoardPage() {
 =======
         {viewMode === "kanban" && <div className="flex gap-2 sm:gap-4 flex-1 min-h-0 overflow-x-auto board-columns-scroll">
 >>>>>>> 65f7a08 (feat: make kanban board truly responsive for mobile)
+=======
+        {viewMode === "kanban" && <div className="flex gap-4 flex-1 min-h-0 overflow-x-auto board-columns-scroll">
+>>>>>>> 5d43535 (revert: remove table view and revert mobile-responsive board styling)
           {activeColumns.map((col) => (
             <BoardColumn
               key={col.id}
