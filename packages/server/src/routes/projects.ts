@@ -198,11 +198,11 @@ export function createProjectsRoute(database: Database = db) {
         return c.json({ error: 'Project name contains invalid characters. Avoid: / \\ < > : " | ? *' }, 400);
       }
 
-      // Read projects_base_dir from preferences
+      // Read projects_base_folder from preferences
       const baseDirRows = await database
         .select({ value: preferences.value })
         .from(preferences)
-        .where(eq(preferences.key, "projects_base_dir"))
+        .where(eq(preferences.key, "projects_base_folder"))
         .limit(1);
       const baseDir = baseDirRows[0]?.value?.trim();
       if (!baseDir) {
