@@ -233,7 +233,11 @@ export function BoardPage() {
   const [workspaceIssue, setWorkspaceIssue] = useState<IssueWithStatus | null>(null);
   const [workspaceInitial, setWorkspaceInitial] = useState<{ workspaceId: string; sessionId: string } | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
+<<<<<<< HEAD
   const [blockedFilter, setBlockedFilter] = useState(false);
+=======
+  const [priorityFilter, setPriorityFilter] = useState("");
+>>>>>>> 53a9dc5 (feat: remove blocked filter from board main page)
   const [showSettings, setShowSettings] = useState(false);
   const [showQuickTasks, setShowQuickTasks] = useState(false);
   const [showWorktreeOverview, setShowWorktreeOverview] = useState(false);
@@ -622,7 +626,11 @@ export function BoardPage() {
       columns.map((col) => ({
         ...col,
         issues: col.issues.filter((issue) => {
+<<<<<<< HEAD
           if (blockedFilter && !(issue as IssueWithStatus & { isBlocked?: boolean }).isBlocked) return false;
+=======
+          if (priorityFilter && issue.priority !== priorityFilter) return false;
+>>>>>>> 53a9dc5 (feat: remove blocked filter from board main page)
           if (searchQuery) {
             const q = searchQuery.toLowerCase();
             return (
