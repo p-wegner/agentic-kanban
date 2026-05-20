@@ -822,6 +822,7 @@ ${contextParts.join("\n")}`;
         statusChangedAt: issues.statusChangedAt,
         statusName: projectStatuses.name,
         skipAutoReview: issues.skipAutoReview,
+        estimate: issues.estimate,
       })
       .from(issues)
       .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
@@ -1054,6 +1055,7 @@ ${contextParts.join("\n")}`;
         statusChangedAt: issues.statusChangedAt,
         statusName: projectStatuses.name,
         skipAutoReview: issues.skipAutoReview,
+        estimate: issues.estimate,
       })
       .from(issues)
       .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
