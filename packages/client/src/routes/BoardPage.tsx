@@ -42,7 +42,7 @@ interface Project {
 
 const ARCHIVE_STATUS_NAMES = new Set(["Done", "Cancelled"]);
 
-type MonitorAction = { at: string; action: "relaunch" | "merge" | "nudge" | "mark_idle" | "mark_dead"; workspaceId: string };
+type MonitorAction = { at: string; action: "relaunch" | "merge" | "nudge" | "mark_idle" | "mark_dead"; workspaceId: string; issueId: string };
 type MonitorStatus = { enabled: boolean; intervalMin: number; active: boolean; lastRun: { at: string; relaunched: number; merged: number; nudged: number } | null; nextRunAt: string | null; recentActions: MonitorAction[] };
 
 const ACTION_LABELS: Record<MonitorAction["action"], { label: string; color: string }> = {
@@ -53,8 +53,13 @@ const ACTION_LABELS: Record<MonitorAction["action"], { label: string; color: str
   mark_dead:{ label: "Marked dead",      color: "text-red-500" },
 };
 
-function MonitorPopover({ status, onClose }: { status: MonitorStatus | null; onClose: () => void }) {
+function MonitorPopover({ status, onClose, onOpenWorkspace, columns }: { status: MonitorStatus | null; onClose: () => void; onOpenWorkspace: (workspaceId: string, issueId: string) => void; columns: StatusWithIssues[] }) {
   const [now, setNow] = useState(Date.now());
+  const issueMap = useMemo(() => {
+    const m = new Map<string, IssueWithStatus>();
+    for (const col of columns) for (const issue of col.issues) m.set(issue.id, issue);
+    return m;
+  }, [columns]);
 
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 1000);
@@ -139,10 +144,17 @@ function MonitorPopover({ status, onClose }: { status: MonitorStatus | null; onC
           <div className="space-y-1 max-h-48 overflow-y-auto">
             {status.recentActions.map((a, i) => {
               const meta = ACTION_LABELS[a.action];
+              const issue = issueMap.get(a.issueId);
+              const label = issue ? `#${issue.issueNumber} ${issue.title}` : a.workspaceId.slice(0, 8);
               return (
-                <div key={i} className="flex items-center justify-between gap-2">
-                  <span className={`${meta.color} font-medium`}>{meta.label}</span>
-                  <span className="text-gray-400 shrink-0 font-mono" style={{ fontSize: "10px" }}>{a.workspaceId.slice(0, 8)}</span>
+                <div key={i} className="flex items-center justify-between gap-2 min-w-0">
+                  <span className={`${meta.color} font-medium shrink-0`}>{meta.label}</span>
+                  <button
+                    className="text-blue-500 hover:text-blue-700 hover:underline truncate text-left min-w-0 flex-1"
+                    style={{ fontSize: "11px" }}
+                    onClick={() => { onOpenWorkspace(a.workspaceId, a.issueId); onClose(); }}
+                    title={issue ? issue.title : a.workspaceId}
+                  >{label}</button>
                   <span className="text-gray-400 shrink-0">{formatAge(a.at)}</span>
                 </div>
               );
@@ -891,7 +903,15 @@ export function BoardPage() {
                 <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
                 Monitor
               </button>
-              {showMonitorPopover && <MonitorPopover status={monitorStatus} onClose={() => setShowMonitorPopover(false)} />}
+              {showMonitorPopover && <MonitorPopover
+                status={monitorStatus}
+                onClose={() => setShowMonitorPopover(false)}
+                columns={columns}
+                onOpenWorkspace={(workspaceId, issueId) => {
+                  const issue = columns.flatMap(c => c.issues).find(i => i.id === issueId);
+                  if (issue) handleManageWorkspaces(issue, workspaceId);
+                }}
+              />}
             </div>
           )}
           <div className="flex items-center gap-1 border border-gray-200 rounded-md p-0.5 bg-white shrink-0">
