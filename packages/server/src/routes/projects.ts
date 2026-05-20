@@ -308,8 +308,11 @@ export function createProjectsRoute(database: Database = db) {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 >>>>>>> 62b2c9d (feat: validate create-project edge cases (WIP))
+=======
+>>>>>>> ea9ffef (fix: resolve preference key mismatch, path traversal in skill names, and cleanup bugs)
       // Read projects_base_folder from preferences
 =======
       // Read projects_base_path from preferences
@@ -503,10 +506,13 @@ export function createProjectsRoute(database: Database = db) {
 =======
 >>>>>>> 7695053 (feat: validate create-project edge cases (WIP))
       // Read projects_base_dir from preferences
+=======
+      // Read projects_base_folder from preferences
+>>>>>>> a19889f (fix: resolve preference key mismatch, path traversal in skill names, and cleanup bugs)
       const baseDirRows = await database
         .select({ value: preferences.value })
         .from(preferences)
-        .where(eq(preferences.key, "projects_base_dir"))
+        .where(eq(preferences.key, "projects_base_folder"))
         .limit(1);
       const baseDir = baseDirRows[0]?.value?.trim();
       if (!baseDir) {
