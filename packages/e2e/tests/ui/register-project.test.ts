@@ -9,6 +9,7 @@ const VALID_REPO_PATH = "C:/andrena/agentic-kanban";
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 >>>>>>> 3240b24 (feat: expand E2E tests for create-project and import flows)
 =======
@@ -35,6 +36,8 @@ async function openModal(page: import("@playwright/test").Page) {
 >>>>>>> ae3c965 (feat: add E2E tests for create-project flow (WIP))
 =======
 >>>>>>> 00f487d (feat: expand E2E tests for create-project and import flows)
+=======
+>>>>>>> a7e30c7 (feat: add E2E tests for create-project flow (WIP))
 test.describe("Register Project UI", () => {
   test.beforeEach(async ({ page }) => {
     await page.goto("/");
@@ -46,6 +49,7 @@ test.describe("Register Project UI", () => {
     await expect(registerBtn).toBeVisible();
   });
 
+<<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
@@ -90,6 +94,11 @@ test.describe("Register Project UI", () => {
 >>>>>>> ae3c965 (feat: add E2E tests for create-project flow (WIP))
 =======
 >>>>>>> 00f487d (feat: expand E2E tests for create-project and import flows)
+=======
+  test("clicking register button opens modal", async ({ page }) => {
+    await page.locator('button[title="Register project"]').click();
+    await expect(page.locator("h2", { hasText: "Register Project" })).toBeVisible();
+>>>>>>> a7e30c7 (feat: add E2E tests for create-project flow (WIP))
     await expect(page.locator('input[placeholder="C:/path/to/repo"]')).toBeVisible();
     await expect(page.locator("text=Absolute path to a git repository")).toBeVisible();
   });
@@ -101,6 +110,7 @@ test.describe("Register Project UI", () => {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
     await openModal(page);
 =======
     await page.locator('button[title="Register project"]').click();
@@ -126,6 +136,11 @@ test.describe("Register Project UI", () => {
 =======
     await openModal(page);
 >>>>>>> 00f487d (feat: expand E2E tests for create-project and import flows)
+=======
+    await page.locator('button[title="Register project"]').click();
+    await expect(page.locator("h2", { hasText: "Register Project" })).toBeVisible();
+
+>>>>>>> a7e30c7 (feat: add E2E tests for create-project flow (WIP))
     const submitBtn = page.locator('button[type="submit"]', { hasText: /Register/ });
     await expect(submitBtn).toBeDisabled();
   });
@@ -137,6 +152,7 @@ test.describe("Register Project UI", () => {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
     await openModal(page);
     await page.locator('input[placeholder="C:/path/to/repo"]').fill("/some/path");
 =======
@@ -144,11 +160,14 @@ test.describe("Register Project UI", () => {
 >>>>>>> 0c8a99f (feat: add E2E tests for create-project flow (WIP))
 =======
 >>>>>>> ae3c965 (feat: add E2E tests for create-project flow (WIP))
+=======
+>>>>>>> a7e30c7 (feat: add E2E tests for create-project flow (WIP))
     await page.locator('button[title="Register project"]').click();
 
     const input = page.locator('input[placeholder="C:/path/to/repo"]');
     await input.fill("/some/path");
 
+<<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
 >>>>>>> 7776b38 (feat: add E2E tests for create-project flow (WIP))
@@ -168,6 +187,8 @@ test.describe("Register Project UI", () => {
     await openModal(page);
     await page.locator('input[placeholder="C:/path/to/repo"]').fill("/some/path");
 >>>>>>> 00f487d (feat: expand E2E tests for create-project and import flows)
+=======
+>>>>>>> a7e30c7 (feat: add E2E tests for create-project flow (WIP))
     const submitBtn = page.locator('button[type="submit"]', { hasText: /Register/ });
     await expect(submitBtn).toBeEnabled();
   });
@@ -179,6 +200,7 @@ test.describe("Register Project UI", () => {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
     await openModal(page);
     await page.locator("button", { hasText: /^Cancel$/ }).click();
     await expect(page.locator("h2", { hasText: "Add Project" })).not.toBeVisible();
@@ -280,6 +302,30 @@ test.describe("Register Project UI", () => {
 =======
     await openModal(page);
 >>>>>>> 00f487d (feat: expand E2E tests for create-project and import flows)
+=======
+    await page.locator('button[title="Register project"]').click();
+    await expect(page.locator("h2", { hasText: "Register Project" })).toBeVisible();
+
+    await page.locator("button", { hasText: /^Cancel$/ }).click();
+    await expect(page.locator("h2", { hasText: "Register Project" })).not.toBeVisible();
+  });
+
+  test("clicking backdrop closes the modal", async ({ page }) => {
+    await page.locator('button[title="Register project"]').click();
+    await expect(page.locator("h2", { hasText: "Register Project" })).toBeVisible();
+
+    // Click the backdrop (outside the modal card)
+    await page.locator(".fixed.inset-0.bg-black\\/40").click({ position: { x: 10, y: 10 } });
+    await expect(page.locator("h2", { hasText: "Register Project" })).not.toBeVisible();
+  });
+
+  test("modal clears input when reopened", async ({ page }) => {
+    await page.locator('button[title="Register project"]').click();
+    await page.locator('input[placeholder="C:/path/to/repo"]').fill("/some/path");
+    await page.locator("button", { hasText: /^Cancel$/ }).click();
+
+    await page.locator('button[title="Register project"]').click();
+>>>>>>> a7e30c7 (feat: add E2E tests for create-project flow (WIP))
     await expect(page.locator('input[placeholder="C:/path/to/repo"]')).toHaveValue("");
   });
 
@@ -290,6 +336,7 @@ test.describe("Register Project UI", () => {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
     await openModal(page);
 =======
     await page.locator('button[title="Register project"]').click();
@@ -312,6 +359,10 @@ test.describe("Register Project UI", () => {
 =======
     await openModal(page);
 >>>>>>> 00f487d (feat: expand E2E tests for create-project and import flows)
+=======
+    await page.locator('button[title="Register project"]').click();
+
+>>>>>>> a7e30c7 (feat: add E2E tests for create-project flow (WIP))
     await page.locator('input[placeholder="C:/path/to/repo"]').fill("C:/nonexistent/path/xyz");
     await page.locator('button[type="submit"]', { hasText: /Register/ }).click();
 
@@ -323,6 +374,7 @@ test.describe("Register Project UI", () => {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
     await expect(page.locator("h2", { hasText: "Add Project" })).toBeVisible();
   });
 
@@ -332,11 +384,14 @@ test.describe("Register Project UI", () => {
 >>>>>>> 0c8a99f (feat: add E2E tests for create-project flow (WIP))
 =======
 >>>>>>> ae3c965 (feat: add E2E tests for create-project flow (WIP))
+=======
+>>>>>>> a7e30c7 (feat: add E2E tests for create-project flow (WIP))
     await expect(page.locator("h2", { hasText: "Register Project" })).toBeVisible();
   });
 
   test("duplicate path shows error message", async ({ page }) => {
     // Route the register API to return a 409 conflict
+<<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
 >>>>>>> 7776b38 (feat: add E2E tests for create-project flow (WIP))
@@ -362,6 +417,8 @@ test.describe("Register Project UI", () => {
 
   test("duplicate path shows error message", async ({ page }) => {
 >>>>>>> 00f487d (feat: expand E2E tests for create-project and import flows)
+=======
+>>>>>>> a7e30c7 (feat: add E2E tests for create-project flow (WIP))
     await page.route("**/api/projects", async (route) => {
       if (route.request().method() === "POST") {
         await route.fulfill({
@@ -380,6 +437,7 @@ test.describe("Register Project UI", () => {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
     await openModal(page);
 =======
     await page.locator('button[title="Register project"]').click();
@@ -399,6 +457,9 @@ test.describe("Register Project UI", () => {
 =======
     await openModal(page);
 >>>>>>> 00f487d (feat: expand E2E tests for create-project and import flows)
+=======
+    await page.locator('button[title="Register project"]').click();
+>>>>>>> a7e30c7 (feat: add E2E tests for create-project flow (WIP))
     await page.locator('input[placeholder="C:/path/to/repo"]').fill(VALID_REPO_PATH);
     await page.locator('button[type="submit"]', { hasText: /Register/ }).click();
 
@@ -410,6 +471,7 @@ test.describe("Register Project UI", () => {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
     await expect(page.locator("h2", { hasText: "Add Project" })).toBeVisible();
 =======
     // Modal stays open
@@ -432,6 +494,10 @@ test.describe("Register Project UI", () => {
 =======
     await expect(page.locator("h2", { hasText: "Add Project" })).toBeVisible();
 >>>>>>> 00f487d (feat: expand E2E tests for create-project and import flows)
+=======
+    // Modal stays open
+    await expect(page.locator("h2", { hasText: "Register Project" })).toBeVisible();
+>>>>>>> a7e30c7 (feat: add E2E tests for create-project flow (WIP))
   });
 
   test("server error is displayed", async ({ page }) => {
@@ -453,6 +519,7 @@ test.describe("Register Project UI", () => {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
     await openModal(page);
 =======
     await page.locator('button[title="Register project"]').click();
@@ -472,6 +539,9 @@ test.describe("Register Project UI", () => {
 =======
     await openModal(page);
 >>>>>>> 00f487d (feat: expand E2E tests for create-project and import flows)
+=======
+    await page.locator('button[title="Register project"]').click();
+>>>>>>> a7e30c7 (feat: add E2E tests for create-project flow (WIP))
     await page.locator('input[placeholder="C:/path/to/repo"]').fill("/not/a/git/repo");
     await page.locator('button[type="submit"]', { hasText: /Register/ }).click();
 
@@ -485,18 +555,22 @@ test.describe("Register Project UI", () => {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
   test("successful registration closes modal and sends correct path", async ({ page }) => {
 =======
 =======
 >>>>>>> 0c8a99f (feat: add E2E tests for create-project flow (WIP))
 =======
 >>>>>>> ae3c965 (feat: add E2E tests for create-project flow (WIP))
+=======
+>>>>>>> a7e30c7 (feat: add E2E tests for create-project flow (WIP))
   test("successful registration closes modal and adds project", async ({ page }) => {
     // Get current projects count
     const initialProjects = await (await fetch(`${SERVER_URL}/api/projects`)).json();
     const initialCount = initialProjects.length;
 
     // Mock successful registration to avoid actually registering a new project
+<<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
 >>>>>>> 7776b38 (feat: add E2E tests for create-project flow (WIP))
@@ -513,6 +587,8 @@ test.describe("Register Project UI", () => {
 =======
   test("successful registration closes modal and sends correct path", async ({ page }) => {
 >>>>>>> 00f487d (feat: expand E2E tests for create-project and import flows)
+=======
+>>>>>>> a7e30c7 (feat: add E2E tests for create-project flow (WIP))
     let capturedBody: { repoPath?: string } = {};
     await page.route("**/api/projects", async (route) => {
       if (route.request().method() === "POST") {
@@ -533,6 +609,7 @@ test.describe("Register Project UI", () => {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
     await openModal(page);
     await page.locator('input[placeholder="C:/path/to/repo"]').fill("/some/repo/path");
     await page.locator('button[type="submit"]', { hasText: /Register/ }).click();
@@ -543,6 +620,8 @@ test.describe("Register Project UI", () => {
 >>>>>>> 0c8a99f (feat: add E2E tests for create-project flow (WIP))
 =======
 >>>>>>> ae3c965 (feat: add E2E tests for create-project flow (WIP))
+=======
+>>>>>>> a7e30c7 (feat: add E2E tests for create-project flow (WIP))
     await page.locator('button[title="Register project"]').click();
     await page.locator('input[placeholder="C:/path/to/repo"]').fill("/some/repo/path");
     await page.locator('button[type="submit"]', { hasText: /Register/ }).click();
@@ -553,6 +632,7 @@ test.describe("Register Project UI", () => {
     // Verify the path was sent to the API
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 >>>>>>> 7776b38 (feat: add E2E tests for create-project flow (WIP))
 =======
     await openModal(page);
@@ -579,6 +659,8 @@ test.describe("Register Project UI", () => {
 
     await expect(page.locator("h2", { hasText: "Add Project" })).not.toBeVisible();
 >>>>>>> 00f487d (feat: expand E2E tests for create-project and import flows)
+=======
+>>>>>>> a7e30c7 (feat: add E2E tests for create-project flow (WIP))
     expect(capturedBody.repoPath).toBe("/some/repo/path");
   });
 
@@ -589,6 +671,7 @@ test.describe("Register Project UI", () => {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
     // Delay the response to catch the loading state
 >>>>>>> 7776b38 (feat: add E2E tests for create-project flow (WIP))
@@ -604,6 +687,9 @@ test.describe("Register Project UI", () => {
 >>>>>>> ae3c965 (feat: add E2E tests for create-project flow (WIP))
 =======
 >>>>>>> 00f487d (feat: expand E2E tests for create-project and import flows)
+=======
+    // Delay the response to catch the loading state
+>>>>>>> a7e30c7 (feat: add E2E tests for create-project flow (WIP))
     await page.route("**/api/projects", async (route) => {
       if (route.request().method() === "POST") {
         await new Promise((r) => setTimeout(r, 300));
@@ -623,6 +709,7 @@ test.describe("Register Project UI", () => {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
     await openModal(page);
     await page.locator('input[placeholder="C:/path/to/repo"]').fill("/some/repo");
     await page.locator('button[type="submit"]', { hasText: /Register/ }).click();
@@ -1375,3 +1462,13 @@ test.describe("Create Project UI", () => {
   });
 });
 >>>>>>> 00f487d (feat: expand E2E tests for create-project and import flows)
+=======
+    await page.locator('button[title="Register project"]').click();
+    await page.locator('input[placeholder="C:/path/to/repo"]').fill("/some/repo");
+    await page.locator('button[type="submit"]', { hasText: /Register/ }).click();
+
+    // Button should show loading state
+    await expect(page.locator('button[type="submit"]', { hasText: "Registering…" })).toBeVisible();
+  });
+});
+>>>>>>> a7e30c7 (feat: add E2E tests for create-project flow (WIP))
