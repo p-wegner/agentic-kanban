@@ -14,6 +14,7 @@ import { execFile, execSync } from "node:child_process";
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 =======
 import { existsSync, mkdirSync, readdirSync } from "node:fs";
@@ -45,6 +46,12 @@ import { existsSync, mkdirSync, readdirSync, writeFileSync, rmSync } from "node:
 =======
 import { existsSync, mkdirSync, readdirSync } from "node:fs";
 >>>>>>> ec12683 (feat: implement create project flow (WIP - UI + backend route))
+=======
+import { existsSync, mkdirSync, readdirSync } from "node:fs";
+=======
+import { existsSync, readdirSync, writeFileSync } from "node:fs";
+>>>>>>> f36a871 (feat: add optional README and .gitignore template to project creation dialog)
+>>>>>>> 27323e9 (feat: add optional README and .gitignore template to project creation dialog)
 import { detectRepoInfo } from "../services/git-info.service.js";
 import { listBranches, listWorktrees, getDiffShortstat, removeWorktree, detectConflicts } from "../services/git.service.js";
 import type { Database } from "../db/index.js";
