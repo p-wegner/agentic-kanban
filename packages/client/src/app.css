@@ -96,6 +96,9 @@ html, body {
   }
 }
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> 8a7c9f8 (feat: render ticket descriptions as markdown)
 
 .markdown-body {
   font-size: 0.875rem;
@@ -155,5 +158,8 @@ html, body {
 }
 .markdown-body strong { font-weight: 600; }
 .markdown-body em { font-style: italic; }
+<<<<<<< HEAD
 =======
 >>>>>>> 2713ec4 (feat: make kanban board truly responsive)
+=======
+>>>>>>> 8a7c9f8 (feat: render ticket descriptions as markdown)
