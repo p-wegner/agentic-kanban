@@ -180,14 +180,18 @@ export function Layout({
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 >>>>>>> 62b2c9d (feat: validate create-project edge cases (WIP))
+=======
+>>>>>>> 89f4fdb (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
   const createNameInvalid = /[/\\<>:"|?*\x00]/.test(createName);
 =======
 >>>>>>> 41a314b (feat: implement create project flow (WIP - UI + backend route))
 =======
   const createNameInvalid = !createPath.trim() && /[/\\<>:"|?*\x00]/.test(createName);
 >>>>>>> 7695053 (feat: validate create-project edge cases (WIP))
+<<<<<<< HEAD
 <<<<<<< HEAD
 =======
   const createNameInvalid = /[/\\<>:"|?*\x00]/.test(createName);
@@ -223,6 +227,11 @@ export function Layout({
 >>>>>>> 19a00ff (feat: implement create project flow (WIP - UI + backend route))
 =======
 >>>>>>> 62b2c9d (feat: validate create-project edge cases (WIP))
+=======
+=======
+  const createNameInvalid = /[/\\<>:"|?*\x00]/.test(createName);
+>>>>>>> f6d1a48 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
+>>>>>>> 89f4fdb (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
   const inputRef = useRef<HTMLInputElement>(null);
 
   async function handleRegisterSubmit(e: React.FormEvent) {
