@@ -228,8 +228,6 @@ Setup:
         }
         process.exit(1);
       }
-      dirCreated = false; // repo is now fully initialized; don't clean up on later errors
-
       // Register the new repo
       const { detectRepoInfo: detectInfo } = await import("./services/git-info.service.js");
       const repoInfo = await detectInfo(repoPath);
@@ -272,6 +270,7 @@ Setup:
         .values({ key: "activeProjectId", value: projectId, updatedAt: now })
         .onConflictDoUpdate({ target: preferences.key, set: { value: projectId, updatedAt: now } });
 
+      dirCreated = false; // DB registration succeeded; keep the directory
       console.log(`Created and registered project "${projectName}"`);
       console.log(`  Path: ${repoInfo.repoPath}`);
       console.log(`  Branch: ${repoInfo.defaultBranch}`);
@@ -279,6 +278,7 @@ Setup:
       console.log(`  Set as active project.`);
       process.exit(0);
     } catch (err) {
+      await cleanupDir();
       console.error("Error:", err instanceof Error ? err.message : String(err));
       process.exit(1);
     }
