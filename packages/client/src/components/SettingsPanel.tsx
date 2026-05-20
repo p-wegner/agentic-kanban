@@ -34,6 +34,7 @@ interface Settings {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
   projects_base_path?: string;
 =======
   projects_base_dir?: string;
@@ -47,6 +48,9 @@ interface Settings {
 =======
   projects_base_folder?: string;
 >>>>>>> 6f16985 (WIP: uncommitted changes in SettingsPanel and register-project test)
+=======
+  projects_base_dir?: string;
+>>>>>>> d4d0a21 (fix: unify projects_base_dir preference key across preferences route, projects route, and SettingsPanel)
 }
 
 const DEFAULT_SETTINGS: Settings = {
@@ -75,6 +79,7 @@ const DEFAULT_SETTINGS: Settings = {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
   projects_base_path: "",
 =======
   projects_base_dir: "",
@@ -88,6 +93,9 @@ const DEFAULT_SETTINGS: Settings = {
 =======
   projects_base_folder: "",
 >>>>>>> 6f16985 (WIP: uncommitted changes in SettingsPanel and register-project test)
+=======
+  projects_base_dir: "",
+>>>>>>> d4d0a21 (fix: unify projects_base_dir preference key across preferences route, projects route, and SettingsPanel)
 };
 
 type Tab = "agent" | "workflow" | "skills" | "mcp" | "ui" | "project" | "tags" | "advanced";
@@ -841,6 +849,7 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
                       value={settings.projects_base_path ?? ""}
                       onChange={(e) => setSettings((s) => ({ ...s, projects_base_path: e.target.value }))}
 =======
@@ -859,6 +868,10 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                       value={settings.projects_base_folder ?? ""}
                       onChange={(e) => setSettings((s) => ({ ...s, projects_base_folder: e.target.value }))}
 >>>>>>> 6f16985 (WIP: uncommitted changes in SettingsPanel and register-project test)
+=======
+                      value={settings.projects_base_dir ?? ""}
+                      onChange={(e) => setSettings((s) => ({ ...s, projects_base_dir: e.target.value }))}
+>>>>>>> d4d0a21 (fix: unify projects_base_dir preference key across preferences route, projects route, and SettingsPanel)
                       placeholder="C:/projects"
                       className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 font-mono"
                     />
