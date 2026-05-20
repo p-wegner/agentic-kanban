@@ -199,6 +199,7 @@
       "breakpoints": true
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 >>>>>>> d778ce3 (perf: add DB indexes and stale-while-revalidate conflict cache for board load)
     },
@@ -233,6 +234,8 @@
       "tag": "0030_thorough_review",
       "breakpoints": true
 >>>>>>> 39e2791 (feat: add optional thorough code review using more capable model)
+=======
+>>>>>>> 26ff491 (feat: add estimate/sizing field to issues (XS/S/M/L/XL))
     }
   ]
 }
