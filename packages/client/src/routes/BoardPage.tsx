@@ -44,6 +44,7 @@ const ARCHIVE_STATUS_NAMES = new Set(["Done", "Cancelled"]);
 
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 type MonitorAction = { at: string; action: "relaunch" | "merge" | "nudge" | "mark_idle" | "mark_dead"; workspaceId: string; issueId: string };
 =======
 type MonitorAction = { at: string; action: "relaunch" | "merge" | "nudge" | "mark_idle" | "mark_dead"; workspaceId: string };
@@ -51,14 +52,18 @@ type MonitorAction = { at: string; action: "relaunch" | "merge" | "nudge" | "mar
 =======
 type MonitorAction = { at: string; action: "relaunch" | "merge" | "nudge" | "mark_idle" | "mark_dead"; workspaceId: string; issueId: string };
 >>>>>>> 47c4344 (feat: make monitor action log entries clickable workspace links)
+=======
+type MonitorAction = { at: string; action: "relaunch" | "merge" | "nudge" | "mark_idle" | "mark_dead" | "auto_start"; workspaceId: string; issueId: string };
+>>>>>>> badbfcc (feat: add nudge auto-start setting to monitor for unblocked Todo items)
 type MonitorStatus = { enabled: boolean; intervalMin: number; active: boolean; lastRun: { at: string; relaunched: number; merged: number; nudged: number } | null; nextRunAt: string | null; recentActions: MonitorAction[] };
 
 const ACTION_LABELS: Record<MonitorAction["action"], { label: string; color: string }> = {
-  relaunch: { label: "Relaunched agent", color: "text-blue-600" },
-  merge:    { label: "Triggered merge",  color: "text-purple-600" },
-  nudge:    { label: "Nudged agent",     color: "text-amber-600" },
-  mark_idle:{ label: "Marked idle",      color: "text-gray-500" },
-  mark_dead:{ label: "Marked dead",      color: "text-red-500" },
+  relaunch:   { label: "Relaunched agent",  color: "text-blue-600" },
+  merge:      { label: "Triggered merge",   color: "text-purple-600" },
+  nudge:      { label: "Nudged agent",      color: "text-amber-600" },
+  mark_idle:  { label: "Marked idle",       color: "text-gray-500" },
+  mark_dead:  { label: "Marked dead",       color: "text-red-500" },
+  auto_start: { label: "Auto-started issue", color: "text-green-600" },
 };
 
 <<<<<<< HEAD
