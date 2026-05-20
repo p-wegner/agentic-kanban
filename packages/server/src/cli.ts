@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+﻿#!/usr/bin/env node
 import { Command } from "commander";
 import { readFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
@@ -49,6 +49,7 @@ Examples:
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
   $ agentic-kanban preferences set projects_base_dir /path/to/projects
 =======
   $ agentic-kanban preferences set projects_base_folder /path/to/projects
@@ -74,6 +75,9 @@ Examples:
 =======
   $ agentic-kanban preferences set projects_base_folder /path/to/projects
 >>>>>>> c3f1926 (feat: add cli create subcommand and preferences set/get)
+=======
+  $ agentic-kanban preferences set projects_base_dir /path/to/projects
+>>>>>>> 5ffc0d0 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
 `);
 
 program
@@ -169,6 +173,7 @@ program
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
   .description("Create a new git repo and register it as a project.\n\nCreates a directory under the configured projects_base_dir preference (or --path), runs 'git init', and registers the repo.\n\nUse 'pnpm cli -- register <path>' to register an existing repo instead.")
   .argument("<folder-name>", "Name of the new project folder to create")
   .option("--path <base-path>", "Base directory to create the folder in (overrides projects_base_dir preference)")
@@ -212,6 +217,11 @@ program
   .argument("<folder-name>", "Name of the new project folder to create")
   .option("--path <base-path>", "Base directory to create the folder in (overrides projects_base_folder preference)")
 >>>>>>> c3f1926 (feat: add cli create subcommand and preferences set/get)
+=======
+  .description("Create a new git repo and register it as a project.\n\nCreates a directory under the configured projects_base_dir preference (or --path), runs 'git init', and registers the repo.\n\nUse 'pnpm cli -- register <path>' to register an existing repo instead.")
+  .argument("<folder-name>", "Name of the new project folder to create")
+  .option("--path <base-path>", "Base directory to create the folder in (overrides projects_base_dir preference)")
+>>>>>>> 5ffc0d0 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
   .option("-n, --name <name>", "Custom project name (defaults to folder name)")
   .option("-b, --branch <branch>", "Initial branch name (default: main)")
   .addHelpText("after", `
@@ -224,6 +234,7 @@ Examples:
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
   $ agentic-kanban create my-app                        # uses projects_base_dir preference
 =======
   $ agentic-kanban create my-app                        # uses projects_base_folder preference
@@ -249,12 +260,16 @@ Examples:
 =======
   $ agentic-kanban create my-app                        # uses projects_base_folder preference
 >>>>>>> c3f1926 (feat: add cli create subcommand and preferences set/get)
+=======
+  $ agentic-kanban create my-app                        # uses projects_base_dir preference
+>>>>>>> 5ffc0d0 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
   $ agentic-kanban create my-app --path /projects       # create in /projects/my-app
   $ agentic-kanban create my-app -n "My Application"   # custom project name
   $ agentic-kanban create my-app -b master              # use 'master' as initial branch
 
 Setup:
   Set the base folder preference first:
+<<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
@@ -318,6 +333,9 @@ Setup:
 >>>>>>> 14dd44c (WIP: add rmSync and writeFileSync imports to projects.ts)
 =======
   $ agentic-kanban preferences set projects_base_folder /path/to/projects
+=======
+  $ agentic-kanban preferences set projects_base_dir /path/to/projects
+>>>>>>> 5ffc0d0 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
 `)
   .action(async (folderName: string, options: { path?: string; name?: string; branch?: string }) => {
 >>>>>>> c3f1926 (feat: add cli create subcommand and preferences set/get)
@@ -327,6 +345,7 @@ Setup:
       // Resolve base folder: --path flag takes precedence over preference
       let baseFolder = options.path;
       if (!baseFolder) {
+<<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
@@ -372,12 +391,16 @@ Setup:
 =======
         const pref = await db.select().from(preferences).where(eq(preferences.key, "projects_base_folder")).limit(1);
 >>>>>>> c3f1926 (feat: add cli create subcommand and preferences set/get)
+=======
+        const pref = await db.select().from(preferences).where(eq(preferences.key, "projects_base_dir")).limit(1);
+>>>>>>> 5ffc0d0 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
         if (pref.length > 0 && pref[0].value) {
           baseFolder = pref[0].value;
         }
       }
 
       if (!baseFolder) {
+<<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
@@ -505,6 +528,10 @@ Setup:
 =======
         console.error("No base folder configured. Use --path <base-path> or set the projects_base_folder preference:");
         console.error("  pnpm cli -- preferences set projects_base_folder /path/to/projects");
+=======
+        console.error("No base folder configured. Use --path <base-path> or set the projects_base_dir preference:");
+        console.error("  pnpm cli -- preferences set projects_base_dir /path/to/projects");
+>>>>>>> 5ffc0d0 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
         process.exit(1);
       }
 
@@ -537,6 +564,7 @@ Setup:
         // Expected: directory doesn't exist yet
       }
 
+<<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
@@ -610,6 +638,9 @@ Setup:
 =======
       // Create directory — track so we can clean up on failure
 >>>>>>> c6268ea (fix: clean up created directory if git init/commit fails in cli create command)
+=======
+      // Create directory â€” track so we can clean up on failure
+>>>>>>> 5ffc0d0 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
       await mkdir(repoPath, { recursive: true });
       let dirCreated = true;
 
@@ -798,6 +829,7 @@ Examples:
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
   $ agentic-kanban preferences get projects_base_dir
   $ agentic-kanban preferences set projects_base_dir /path/to/projects
 =======
@@ -832,6 +864,10 @@ Examples:
   $ agentic-kanban preferences get projects_base_folder
   $ agentic-kanban preferences set projects_base_folder /path/to/projects
 >>>>>>> c3f1926 (feat: add cli create subcommand and preferences set/get)
+=======
+  $ agentic-kanban preferences get projects_base_dir
+  $ agentic-kanban preferences set projects_base_dir /path/to/projects
+>>>>>>> 5ffc0d0 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
 `);
 
 prefCmd
@@ -997,7 +1033,11 @@ Example:
 
 program
   .command("cleanup")
+<<<<<<< HEAD
   .description("Show stale worktrees for closed workspaces.\n\nLists git worktrees belonging to closed/merged workspaces. These worktrees are no longer needed and can be removed manually with 'git worktree remove --force <path>'.\n\nThis command does NOT auto-remove worktrees -- it only reports them.")
+=======
+  .description("Show stale worktrees for closed workspaces.\n\nLists git worktrees belonging to closed/merged workspaces. These worktrees are no longer needed and can be removed manually with 'git worktree remove --force <path>'.\n\nThis command does NOT auto-remove worktrees â€” it only reports them.")
+>>>>>>> 5ffc0d0 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
   .addHelpText("after", `
 Example:
   $ agentic-kanban cleanup
@@ -1022,7 +1062,11 @@ Example:
 
       console.log(`Found ${withWorktrees.length} closed workspace(s) with worktrees:`);
       for (const ws of withWorktrees) {
+<<<<<<< HEAD
         console.log(`  ${ws.branch} ->' ${ws.workingDir}`);
+=======
+        console.log(`  ${ws.branch} â†’ ${ws.workingDir}`);
+>>>>>>> 5ffc0d0 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
       }
       console.log("\nThese worktrees can be removed manually with:");
       console.log("  git worktree remove --force <path>");
@@ -1060,7 +1104,11 @@ Examples:
   $ agentic-kanban status -w -i 10              # auto-refresh every 10s
 
 Status indicators:
+<<<<<<< HEAD
   * = active workspace   o = idle workspace   o = reviewing   . = no workspace
+=======
+  â— = active workspace   â—‹ = idle workspace   â—Ž = reviewing   Â· = no workspace
+>>>>>>> 5ffc0d0 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
 `)
   .action(async (options: { project?: string; all?: boolean; json?: boolean; watch?: boolean; interval?: string }) => {
     try {
@@ -1091,7 +1139,12 @@ Status indicators:
         for (const issue of status.issues) {
           const num = issue.issueNumber != null ? `#${issue.issueNumber}` : "???";
           const wsStatus = issue.workspace?.status ?? "no workspace";
+<<<<<<< HEAD
           const marker = wsStatus === "active" ? "*" : wsStatus === "idle" ? "o" : wsStatus === "reviewing" ? "o" : ".";
+=======
+          const marker = wsStatus === "active" ? "â—" : wsStatus === "idle" ? "â—‹" : wsStatus === "reviewing" ? "â—Ž" : "Â·";
+
+>>>>>>> 5ffc0d0 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
           console.log(`  ${marker} ${num.padEnd(4)} ${issue.title}`);
           console.log(`         [${issue.statusName}]  priority: ${issue.priority}  workspace: ${wsStatus}`);
 
@@ -1166,7 +1219,12 @@ async function getActiveProjectId(): Promise<string> {
   return pref[0].value;
 }
 
+<<<<<<< HEAD
 // ?? issue commands ??
+=======
+// â”€â”€ issue commands â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+>>>>>>> 5ffc0d0 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
 const issueCmd = program.command("issue").description("Manage issues on the board.\n\nSubcommands: list, create, move, summary, dependency");
 
 issueCmd
@@ -1514,7 +1572,12 @@ Examples:
     }
   });
 
+<<<<<<< HEAD
 // ?? workspace commands ??
+=======
+// â”€â”€ workspace commands â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+>>>>>>> 5ffc0d0 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
 const wsCmd = program.command("workspace").description("Manage workspaces (git worktrees linked to issues).\n\nWorkspaces create isolated git worktrees where agents can work on issues. Each workspace is tied to a single issue.\n\nSubcommands: list, create");
 
 wsCmd
@@ -1725,7 +1788,12 @@ Example:
     }
   });
 
+<<<<<<< HEAD
 // ?? skill commands ??
+=======
+// â”€â”€ skill commands â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+>>>>>>> 5ffc0d0 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
 program
   .command("delete-status <status-id>")
   .description("Delete a project status (fails if issues are linked to it)")
@@ -1739,7 +1807,11 @@ program
       }
       const linked = await db.select({ id: issues.id }).from(issues).where(eq(issues.statusId, statusId)).limit(1);
       if (linked.length > 0) {
+<<<<<<< HEAD
         console.error(`Cannot delete status "${rows[0].name}" -- it has linked issues. Move or delete those issues first.`);
+=======
+        console.error(`Cannot delete status "${rows[0].name}" â€” it has linked issues. Move or delete those issues first.`);
+>>>>>>> 5ffc0d0 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
         process.exit(1);
       }
       await db.delete(projectStatuses).where(eq(projectStatuses.id, statusId));
@@ -1951,7 +2023,12 @@ Examples:
     }
   });
 
+<<<<<<< HEAD
 // ?? dependency commands ??
+=======
+// â”€â”€ dependency commands â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+>>>>>>> 5ffc0d0 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
 const depCmd = issueCmd.command("dependency").description("Manage issue dependencies.\n\nDependencies link issues together with typed relationships. Available types: depends_on, blocked_by, related_to, duplicates, parent_of, child_of.\n\nSubcommands: list, add, remove");
 
 depCmd
@@ -2149,12 +2226,21 @@ program
     }
   });
 
+<<<<<<< HEAD
 // ?? sessions debug command ??
+=======
+// â”€â”€ sessions debug command â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+>>>>>>> 5ffc0d0 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
 const sessionDebugCmd = program
   .command("session-history [issue-number]")
   .alias("sh")
   .description(
+<<<<<<< HEAD
     "Inspect Claude Code session transcript files from ~/.claude/projects/.\n\nParses JSONL session files for worktrees linked to this project's issues, showing what the agent did and why it stopped -- without loading entire large files."
+=======
+    "Inspect Claude Code session transcript files from ~/.claude/projects/.\n\nParses JSONL session files for worktrees linked to this project's issues, showing what the agent did and why it stopped â€” without loading entire large files."
+>>>>>>> 5ffc0d0 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
   )
   .option("-t, --tail <lines>", "Number of tail lines to parse per session file (default: 60)", "60")
   .option("-a, --all", "Show all sessions for the issue, not just the latest", false)
@@ -2251,7 +2337,11 @@ Via pnpm (use -- to pass args):
         if (!options.all) jsonlFiles = jsonlFiles.slice(0, 1);
 
         for (const jf of jsonlFiles) {
+<<<<<<< HEAD
           // Read only the tail -- avoid loading huge files
+=======
+          // Read only the tail â€” avoid loading huge files
+>>>>>>> 5ffc0d0 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
           const raw = readFileSync(jf.path, "utf8");
           const allLines = raw.split("\n").filter(Boolean);
           const tailStart = Math.max(0, allLines.length - tailLines);
@@ -2299,7 +2389,11 @@ Via pnpm (use -- to pass args):
           results.push({
             issueNum: dir.issueNum,
             dir: dir.name,
+<<<<<<< HEAD
             file: jf.name.replace(".jsonl", "").slice(0, 8) + "--",
+=======
+            file: jf.name.replace(".jsonl", "").slice(0, 8) + "â€¦",
+>>>>>>> 5ffc0d0 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
             fileSizeBytes: jf.size,
             lastModified: jf.mtime.toISOString(),
             linesParsed: linesToParse.length,
@@ -2309,7 +2403,11 @@ Via pnpm (use -- to pass args):
             stopReason,
             sessionStarted,
             agentResponded,
+<<<<<<< HEAD
             sessionId: sessionId ? (sessionId as string).slice(0, 8) + "--" : null,
+=======
+            sessionId: sessionId ? (sessionId as string).slice(0, 8) + "â€¦" : null,
+>>>>>>> 5ffc0d0 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
           });
         }
       }
@@ -2326,11 +2424,19 @@ Via pnpm (use -- to pass args):
       for (const r of results) {
         if (r.issueNum !== currentIssue) {
           currentIssue = r.issueNum;
+<<<<<<< HEAD
           console.log(`  -- #${r.issueNum ?? "?"} ----------------------------------`);
         }
         const size = r.fileSizeBytes < 1024 ? `${r.fileSizeBytes}B` : `${(r.fileSizeBytes / 1024).toFixed(0)}KB`;
         const age = timeSince(new Date(r.lastModified));
         const started = r.sessionStarted ? (r.agentResponded ? "OK responded" : "FAIL no response") : "FAIL no prompt";
+=======
+          console.log(`  â”€â”€ #${r.issueNum ?? "?"} â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€`);
+        }
+        const size = r.fileSizeBytes < 1024 ? `${r.fileSizeBytes}B` : `${(r.fileSizeBytes / 1024).toFixed(0)}KB`;
+        const age = timeSince(new Date(r.lastModified));
+        const started = r.sessionStarted ? (r.agentResponded ? "âœ“ responded" : "âœ— no response") : "âœ— no prompt";
+>>>>>>> 5ffc0d0 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
         console.log(`  ${r.file}  ${size}  ${age} ago  [${started}]  turns:${r.turns}`);
         if (r.stopReason) console.log(`    stop_reason: ${r.stopReason}`);
         if (r.lastToolCall) console.log(`    last tool:   ${r.lastToolCall}`);
