@@ -6,7 +6,6 @@ interface BoardStatsProps {
   activeColumns: StatusWithIssues[];
   archiveColumns: StatusWithIssues[];
   searchQuery: string;
-  priorityFilter: string;
   projectId?: string;
 }
 
@@ -30,10 +29,9 @@ export function BoardStats({
   activeColumns,
   archiveColumns,
   searchQuery,
-  priorityFilter,
   projectId,
 }: BoardStatsProps) {
-  const isFiltered = !!searchQuery || !!priorityFilter;
+  const isFiltered = !!searchQuery;
   const totalActive = activeColumns.reduce((sum, col) => sum + col.issues.length, 0);
   const totalArchive = archiveColumns.reduce((sum, col) => sum + col.issues.length, 0);
   const total = totalActive + totalArchive;
