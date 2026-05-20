@@ -85,3 +85,13 @@ html, body {
 .board-columns-scroll > * {
   scroll-snap-align: start;
 }
+
+/* On sm+ (640px), disable forced snap so multiple columns can be seen */
+@media (min-width: 640px) {
+  .board-columns-scroll {
+    scroll-snap-type: none;
+  }
+  .board-columns-scroll > * {
+    scroll-snap-align: none;
+  }
+}
