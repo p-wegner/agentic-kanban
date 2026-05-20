@@ -466,6 +466,17 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
   const [mergeTargetId, setMergeTargetId] = useState<string>("");
   const [mergingTags, setMergingTags] = useState(false);
 
+  // Tags state
+  const [tagsList, setTagsList] = useState<{ id: string; name: string; color: string | null }[]>([]);
+  const [editingTag, setEditingTag] = useState<string | null>(null);
+  const [editTagName, setEditTagName] = useState("");
+  const [editTagColor, setEditTagColor] = useState("");
+  const [newTagName, setNewTagName] = useState("");
+  const [newTagColor, setNewTagColor] = useState("#6B7280");
+  const [selectedTagIds, setSelectedTagIds] = useState<Set<string>>(new Set());
+  const [mergeTargetId, setMergeTargetId] = useState<string>("");
+  const [mergingTags, setMergingTags] = useState(false);
+
   const disabledTools = new Set((settings.disabled_mcp_tools || "").split(",").filter(Boolean));
   function isToolDisabled(name: string) {
     return disabledTools.has(name);
@@ -490,6 +501,7 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
         setProfiles(profileData.profiles);
         setSkills(skillsData);
         setTagsList(tagsData);
+<<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
@@ -554,6 +566,8 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
         setInstalledSkills(Object.fromEntries(statusEntries));
 =======
 >>>>>>> 0234410 (feat: add Tags management tab to Settings panel)
+=======
+>>>>>>> 3d619ec (feat: add Tags management tab to Settings panel)
 
         // Check install status for each skill
         const statusEntries = await Promise.all(
@@ -567,6 +581,8 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
           })
         );
         setInstalledSkills(Object.fromEntries(statusEntries));
+=======
+>>>>>>> 0ab88a1 (feat: add Tags management tab to Settings panel)
 
         // Load project-specific settings
         if (activeProjectId) {
