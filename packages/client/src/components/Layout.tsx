@@ -20,8 +20,6 @@ interface LayoutProps {
   onCreateProject?: (name: string, path: string, gitignoreTemplate: string, generateReadme: boolean) => Promise<void>;
   searchQuery?: string;
   onSearchChange?: (query: string) => void;
-  priorityFilter?: string;
-  onPriorityFilterChange?: (priority: string) => void;
   onWorktreeOverviewClick?: () => void;
   onSettingsClick?: () => void;
 }
@@ -35,8 +33,6 @@ export function Layout({
   onCreateProject,
   searchQuery = "",
   onSearchChange,
-  priorityFilter = "",
-  onPriorityFilterChange,
   onWorktreeOverviewClick,
   onSettingsClick,
 }: LayoutProps) {
@@ -165,17 +161,6 @@ export function Layout({
                 </button>
               )}
             </div>
-            <select
-              value={priorityFilter}
-              onChange={(e) => onPriorityFilterChange?.(e.target.value)}
-              className="text-sm border border-gray-300 rounded-md px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
-            >
-              <option value="">All priorities</option>
-              <option value="critical">Critical</option>
-              <option value="high">High</option>
-              <option value="medium">Medium</option>
-              <option value="low">Low</option>
-            </select>
             <button
               onClick={onWorktreeOverviewClick}
               className="p-1.5 text-gray-400 hover:text-gray-600 rounded-md hover:bg-gray-100"
