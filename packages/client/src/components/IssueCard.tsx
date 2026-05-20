@@ -134,6 +134,11 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
         >
           {issue.priority}
         </span>
+        {issue.estimate && (
+          <span className="inline-block text-xs font-medium px-1.5 py-0.5 rounded bg-teal-100 text-teal-700">
+            {issue.estimate}
+          </span>
+        )}
         {tags?.map((tag) => (
           <span
             key={tag.id}
