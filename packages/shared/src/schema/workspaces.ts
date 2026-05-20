@@ -20,6 +20,9 @@ export const workspaces = sqliteTable("workspaces", {
   createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
   updatedAt: text("updated_at").notNull().$defaultFn(() => new Date().toISOString()),
   closedAt: text("closed_at"),
+  conflictCacheCheckedAt: text("conflict_cache_checked_at"),
+  conflictCacheHasConflicts: integer("conflict_cache_has_conflicts", { mode: "boolean" }),
+  conflictCacheFiles: text("conflict_cache_files"),
 });
 
 export const workspacesRelations = relations(workspaces, ({ one, many }) => ({
