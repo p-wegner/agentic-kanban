@@ -327,6 +327,7 @@ Setup:
         process.exit(1);
       }
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
       // Create an initial empty commit so the repo has a HEAD
       await execFileAsync("git", ["-C", repoPath, "commit", "--allow-empty", "-m", "Initial commit"]);
@@ -335,6 +336,8 @@ Setup:
 >>>>>>> 907d84b (fix: clean up created directory if git init/commit fails in cli create command)
 
 >>>>>>> 4ff54fb (feat: add cli create subcommand and preferences set/get)
+=======
+>>>>>>> a19889f (fix: resolve preference key mismatch, path traversal in skill names, and cleanup bugs)
       // Register the new repo
       const { detectRepoInfo: detectInfo } = await import("./services/git-info.service.js");
       const repoInfo = await detectInfo(repoPath);
@@ -378,9 +381,13 @@ Setup:
         .onConflictDoUpdate({ target: preferences.key, set: { value: projectId, updatedAt: now } });
 
 <<<<<<< HEAD
+<<<<<<< HEAD
       dirCreated = false; // DB registration succeeded; keep the directory
 =======
 >>>>>>> 4ff54fb (feat: add cli create subcommand and preferences set/get)
+=======
+      dirCreated = false; // DB registration succeeded; keep the directory
+>>>>>>> a19889f (fix: resolve preference key mismatch, path traversal in skill names, and cleanup bugs)
       console.log(`Created and registered project "${projectName}"`);
       console.log(`  Path: ${repoInfo.repoPath}`);
       console.log(`  Branch: ${repoInfo.defaultBranch}`);
@@ -389,9 +396,13 @@ Setup:
       process.exit(0);
     } catch (err) {
 <<<<<<< HEAD
+<<<<<<< HEAD
       await cleanupDir();
 =======
 >>>>>>> 4ff54fb (feat: add cli create subcommand and preferences set/get)
+=======
+      await cleanupDir();
+>>>>>>> a19889f (fix: resolve preference key mismatch, path traversal in skill names, and cleanup bugs)
       console.error("Error:", err instanceof Error ? err.message : String(err));
       process.exit(1);
     }
