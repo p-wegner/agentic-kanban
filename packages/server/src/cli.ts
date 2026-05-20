@@ -410,6 +410,7 @@ Setup:
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let rmFn: any;
 
@@ -471,6 +472,16 @@ Setup:
 `)
   .action(async (folderName: string, options: { path?: string; name?: string; branch?: string }) => {
 >>>>>>> dd3f860 (feat: add cli create subcommand and preferences set/get)
+=======
+    let rm: ((path: string, opts: { recursive: boolean; force: boolean }) => Promise<void>) | undefined;
+
+    const cleanupDir = async () => {
+      if (dirCreated && repoPath && rm) {
+        try { await rm(repoPath, { recursive: true, force: true }); } catch { /* best-effort */ }
+      }
+    };
+
+>>>>>>> 088856d (WIP: add rmSync and writeFileSync imports to projects.ts)
     try {
       await runMigrations();
 
@@ -495,10 +506,13 @@ Setup:
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 >>>>>>> b794815 (feat: add cli create subcommand and preferences set/get)
 =======
 >>>>>>> 89f4fdb (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
+=======
+>>>>>>> 088856d (WIP: add rmSync and writeFileSync imports to projects.ts)
         const pref = await db.select().from(preferences).where(eq(preferences.key, "projects_base_dir")).limit(1);
 =======
         const pref = await db.select().from(preferences).where(eq(preferences.key, "projects_base_folder")).limit(1);
@@ -511,6 +525,7 @@ Setup:
 =======
         const pref = await db.select().from(preferences).where(eq(preferences.key, “projects_base_dir”)).limit(1);
 >>>>>>> 088aead (WIP: add rmSync and writeFileSync imports to projects.ts)
+<<<<<<< HEAD
 =======
         const pref = await db.select().from(preferences).where(eq(preferences.key, “projects_base_path”)).limit(1);
 >>>>>>> a5e9504 (fix: align projects_base_dir -> projects_base_path across cli.ts and SettingsPanel.tsx)
@@ -557,6 +572,8 @@ Setup:
         const pref = await db.select().from(preferences).where(eq(preferences.key, "projects_base_dir")).limit(1);
 >>>>>>> f6d1a48 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
 >>>>>>> 89f4fdb (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
+=======
+>>>>>>> 088856d (WIP: add rmSync and writeFileSync imports to projects.ts)
         if (pref.length > 0 && pref[0].value) {
           baseFolder = pref[0].value;
         }
@@ -581,10 +598,13 @@ Setup:
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 >>>>>>> b794815 (feat: add cli create subcommand and preferences set/get)
 =======
 >>>>>>> 89f4fdb (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
+=======
+>>>>>>> 088856d (WIP: add rmSync and writeFileSync imports to projects.ts)
         console.error("No base folder configured. Use --path <base-path> or set the projects_base_dir preference:");
         console.error("  pnpm cli -- preferences set projects_base_dir /path/to/projects");
 =======
@@ -767,6 +787,18 @@ Setup:
 >>>>>>> 76d53ab (fix: guard against path traversal in cli create command)
       const { execFile } = await import("node:child_process");
       const { promisify } = await import("node:util");
+=======
+        console.error(“No base folder configured. Use --path <base-path> or set the projects_base_dir preference:”);
+        console.error(“  pnpm cli -- preferences set projects_base_dir /path/to/projects”);
+        process.exit(1);
+      }
+
+      const { mkdir, access, rm: rmFs } = await import(“node:fs/promises”);
+      rm = rmFs;
+      const { join, resolve: resolvePath, sep } = await import(“node:path”);
+      const { execFile } = await import(“node:child_process”);
+      const { promisify } = await import(“node:util”);
+>>>>>>> 088aead (WIP: add rmSync and writeFileSync imports to projects.ts)
       const execFileAsync = promisify(execFile);
 
 <<<<<<< HEAD
@@ -782,11 +814,11 @@ Setup:
 >>>>>>> 76d53ab (fix: guard against path traversal in cli create command)
 >>>>>>> 09277d7 (fix: guard against path traversal in cli create command)
       const resolvedBase = resolvePath(baseFolder);
-      const repoPath = resolvePath(join(resolvedBase, folderName));
+      repoPath = resolvePath(join(resolvedBase, folderName));
 
-      // Guard against path traversal (e.g. folderName = "../../etc")
+      // Guard against path traversal (e.g. folderName = “../../etc”)
       if (!repoPath.startsWith(resolvedBase + sep) && repoPath !== resolvedBase) {
-        console.error(`Invalid folder name: "${folderName}" escapes the base directory.`);
+        console.error(`Invalid folder name: “${folderName}” escapes the base directory.`);
         process.exit(1);
       }
 <<<<<<< HEAD
@@ -833,16 +865,20 @@ Setup:
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 >>>>>>> b794815 (feat: add cli create subcommand and preferences set/get)
 =======
 >>>>>>> 09fa7b4 (fix: clean up created directory if git init/commit fails in cli create command)
 =======
 >>>>>>> 89f4fdb (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
+=======
+>>>>>>> 088856d (WIP: add rmSync and writeFileSync imports to projects.ts)
       // Create directory â€” track so we can clean up on failure
 =======
       // Create directory — track so we can clean up on failure
 >>>>>>> 088aead (WIP: add rmSync and writeFileSync imports to projects.ts)
+<<<<<<< HEAD
       await mkdir(repoPath, { recursive: true });
       dirCreated = true;
 
@@ -926,12 +962,12 @@ Setup:
 =======
       // Create directory â€” track so we can clean up on failure
 >>>>>>> 63066d9 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
+=======
+>>>>>>> 088856d (WIP: add rmSync and writeFileSync imports to projects.ts)
       await mkdir(repoPath, { recursive: true });
-      let dirCreated = true;
+      dirCreated = true;
 
-      const cleanupDir = async () => {
-        if (dirCreated) {
-          try { await rm(repoPath, { recursive: true, force: true }); } catch { /* best-effort */ }
+      if (false) { // placeholder to keep block structure identical
         }
       };
 =======
