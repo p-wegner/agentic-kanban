@@ -5,13 +5,19 @@ interface Project {
   name: string;
 }
 
+interface RegisterOptions {
+  repoPath: string;
+  gitignoreTemplate: string;
+  generateReadme: boolean;
+}
+
 interface LayoutProps {
   children: ReactNode;
   projects?: Project[];
   activeProjectId?: string | null;
   onProjectChange?: (id: string) => void;
   onRegisterProject?: (repoPath: string) => Promise<void>;
-  onCreateProject?: (name: string, path: string) => Promise<void>;
+  onCreateProject?: (name: string, path: string, gitignoreTemplate: string, generateReadme: boolean) => Promise<void>;
   searchQuery?: string;
   onSearchChange?: (query: string) => void;
   priorityFilter?: string;
@@ -37,6 +43,8 @@ export function Layout({
   const [showRegister, setShowRegister] = useState(false);
   const [modalTab, setModalTab] = useState<"import" | "create">("import");
   const [repoPath, setRepoPath] = useState("");
+  const [gitignoreTemplate, setGitignoreTemplate] = useState("");
+  const [generateReadme, setGenerateReadme] = useState(false);
   const [registering, setRegistering] = useState(false);
   const [registerError, setRegisterError] = useState<string | null>(null);
   const [createName, setCreateName] = useState("");
@@ -51,9 +59,11 @@ export function Layout({
     setRegistering(true);
     setRegisterError(null);
     try {
-      await onRegisterProject?.(repoPath.trim());
+      await onRegisterProject?.({ repoPath: repoPath.trim(), gitignoreTemplate, generateReadme });
       setShowRegister(false);
       setRepoPath("");
+      setGitignoreTemplate("");
+      setGenerateReadme(false);
     } catch (err) {
       setRegisterError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -67,7 +77,7 @@ export function Layout({
     setCreating(true);
     setCreateError(null);
     try {
-      await onCreateProject?.(createName.trim(), createPath.trim());
+      await onCreateProject?.(createName.trim(), createPath.trim(), gitignoreTemplate, generateReadme);
       setShowRegister(false);
       setCreateName("");
       setCreatePath("");
@@ -84,6 +94,8 @@ export function Layout({
     setRepoPath("");
     setCreateName("");
     setCreatePath("");
+    setGitignoreTemplate("");
+    setGenerateReadme(false);
     setModalTab("import");
     setShowRegister(true);
     setTimeout(() => inputRef.current?.focus(), 50);
@@ -284,6 +296,34 @@ export function Layout({
                     Leave blank to use the base directory from Settings › Project. A new folder and git repo will be created.
                   </p>
                 </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    .gitignore template
+                  </label>
+                  <select
+                    value={gitignoreTemplate}
+                    onChange={(e) => setGitignoreTemplate(e.target.value)}
+                    className="w-full text-sm border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                  >
+                    <option value="">None</option>
+                    <option value="node">Node</option>
+                    <option value="python">Python</option>
+                    <option value="java">Java</option>
+                    <option value="go">Go</option>
+                    <option value="rust">Rust</option>
+                    <option value="ruby">Ruby</option>
+                    <option value="dotnet">.NET / C#</option>
+                  </select>
+                </div>
+                <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={generateReadme}
+                    onChange={(e) => setGenerateReadme(e.target.checked)}
+                    className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                  />
+                  Generate README.md
+                </label>
                 {createError && (
                   <p className="text-sm text-red-600">{createError}</p>
                 )}
