@@ -361,6 +361,7 @@ export async function startServer(port?: number) {
             poll = setInterval(async () => {
 =======
             const timeout = setTimeout(() => {
+              clearInterval(poll);
               console.log("[workflow] learning step timed out after 3m, proceeding with merge");
               resolve();
             }, 3 * 60 * 1000);
