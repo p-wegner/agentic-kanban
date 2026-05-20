@@ -547,12 +547,16 @@ export function createProjectsRoute(database: Database = db) {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> 89f4fdb (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
       try { rmSync(targetPath, { recursive: true, force: true }); } catch {}
 =======
 >>>>>>> 41a314b (feat: implement create project flow (WIP - UI + backend route))
 =======
       try { rmSync(targetPath, { recursive: true, force: true }); } catch {}
 >>>>>>> f6d1a48 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
+<<<<<<< HEAD
 =======
 >>>>>>> 73b13d2 (feat: implement create project flow (WIP - UI + backend route))
 =======
@@ -573,6 +577,8 @@ export function createProjectsRoute(database: Database = db) {
 =======
 >>>>>>> 41a314b (feat: implement create project flow (WIP - UI + backend route))
 >>>>>>> 19a00ff (feat: implement create project flow (WIP - UI + backend route))
+=======
+>>>>>>> 89f4fdb (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
       return c.json({ error: `git init failed: ${err.stderr ? String(err.stderr).trim() : String(err)}` }, 400);
     }
 
