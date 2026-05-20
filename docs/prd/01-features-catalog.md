@@ -21,10 +21,10 @@ Complete inventory of features, organized by category. Status reflects the curre
 - **Status: DONE**
 
 ### F-TASK-03: Issue Filtering & Search
-- Filter by status, priority, tags
-- Real-time text search with highlighted matches
-- Priority dropdown filter
+- Real-time text search with highlighted matches on cards
+- Priority dropdown filter in search bar
 - Keyboard shortcut `/` to focus search, Escape to clear
+- **Blocked filter** toggle in board stats bar — shows only issues that have a blocked_by or depends_on dependency and are not yet resolved
 - **Status: DONE**
 
 ### F-TASK-04: Tags & Categories
@@ -212,9 +212,10 @@ Complete inventory of features, organized by category. Status reflects the curre
 
 ### F-UI-04: Keyboard Shortcuts
 - `/` to search, `Escape` to close/clear, `?` for help overlay
-- `Ctrl+K` for command palette, `Ctrl+Enter` to send chat
-- `c` to create issue
-- Help overlay showing all shortcuts
+- `Ctrl+K` for command palette, `Ctrl+Enter` to send chat message to agent
+- `c` to create issue, `w` to create issue + start workspace, `t` to open Tasks panel
+- `g + s` to open Settings
+- Help overlay (`?`) lists all shortcuts
 - **Status: DONE**
 
 ### F-UI-05: Dark/Light Theme
@@ -238,8 +239,36 @@ Complete inventory of features, organized by category. Status reflects the curre
 - **Status: DONE**
 
 ### F-UI-09: Settings Panel
-- Tabbed modal (gear icon in header)
-- Tabs: Agent (command/args, output parsing, mock agent), Merge (auto_merge, review_auto_fix), Profile (claude_profile), Project (setup scripts)
+- Tabbed modal (gear icon in header), 8 tabs:
+  - **Agent**: agent command/binary, Claude profile (--settings flag), additional CLI args
+  - **Workflow**: pipeline visualization (Agent runs → Learning step → AI Review → Auto-fix → Auto-merge → Merge); auto code review, auto-fix, auto-merge toggles
+  - **Skills**: list of global + project-scoped skills with install status; Edit buttons
+  - **MCP Tools**: MCP server configuration and tool list
+  - **UI**: output parsing mode (Minimal/Full), Dynamic column scaling toggle, Persistent agent (warm pool) toggle
+  - **Project**: projects base directory, setup script (textarea + AI-generate button)
+  - **Tags**: manage tags (rename, delete, merge); Add new tag
+  - **Advanced**: Skip Permissions (--dangerously-skip-permissions), Permission Prompt Tool
+- **Status: DONE**
+
+### F-UI-10: Board Views
+- Three view modes: Board (kanban columns), Graph (dependency DAG), Table (flat sortable list)
+- Table view: sortable columns (#, Title, Status, Priority, Estimate, Created), status filter dropdown, row click opens detail panel
+- Graph view: nodes colored by status, dependency arrows, "Show completed" toggle, zoom controls (+/−/reset), status legend
+- View toggle buttons in board header
+- **Status: DONE**
+
+### F-UI-11: Board Stats Bar
+- Ticket counts per status (Todo N, In Progress N, In Review N, AI Reviewed N, N done)
+- Commits on main branch counter (e.g. "640 commits")
+- Blocked filter toggle — hides all non-blocked issues
+- Tasks button — opens Quick Tasks panel (skill launcher)
+- **Status: DONE**
+
+### F-UI-12: Quick Tasks Panel
+- Slide-in panel listing all installed skills (board-navigator, code-review, dependency-analyzer, ticket-enhancer, ui-explorer, + custom)
+- Each skill shows name, description, and model badge (if haiku/non-default)
+- Custom task prompt input (free-form agent prompt)
+- Context button to attach board context
 - **Status: DONE**
 
 ## Category: Infrastructure
