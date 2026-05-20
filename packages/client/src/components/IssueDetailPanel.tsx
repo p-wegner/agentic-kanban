@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import ReactMarkdown from "react-markdown";
 import type { IssueWithStatus, UpdateIssueRequest, DependencyInfo } from "@agentic-kanban/shared";
 import { apiFetch } from "../lib/api.js";
 import { formatRelativeTime } from "../lib/formatRelativeTime.js";
@@ -395,9 +396,9 @@ export function IssueDetailPanel({
               )}
               </>
             ) : issue.description ? (
-              <p className="text-sm text-gray-700 whitespace-pre-wrap">
-                {issue.description}
-              </p>
+              <div className="markdown-body">
+                <ReactMarkdown>{issue.description}</ReactMarkdown>
+              </div>
             ) : (
               <p className="text-sm text-gray-400 italic">
                 No description. Click edit to add one.
