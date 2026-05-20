@@ -629,11 +629,15 @@ export async function startServer(port?: number) {
               // Check if agent is waiting for input (running > 5min without activity)
               const runningMs = Date.now() - new Date(sess.startedAt).getTime();
               if (runningMs > 5 * 60 * 1000) {
+                const nudgeSkill = await db.select({ prompt: agentSkills.prompt }).from(agentSkills)
+                  .where(sql`${agentSkills.name} = 'monitor-nudge'`)
+                  .limit(1);
+                const nudgeMessage = nudgeSkill[0]?.prompt ?? "Please continue with the task. If you are waiting for input, proceed with your best judgment.";
                 const baseUrl = `http://localhost:${serverPort}`;
                 await fetch(`${baseUrl}/api/workspaces/${ws.wsId}/turn`, {
                   method: "POST",
                   headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ message: "Please continue with the task. If you are waiting for input, proceed with your best judgment." }),
+                  body: JSON.stringify({ message: nudgeMessage }),
                 }).catch(() => {});
                 cycleStats.nudged++;
                 logMonitorAction("nudge", ws.wsId);
