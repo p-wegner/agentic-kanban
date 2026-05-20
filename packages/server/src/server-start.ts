@@ -311,6 +311,7 @@ export async function startServer(port?: number) {
           console.log(`[workflow] learning step started: session=${learningSessId}`);
           await new Promise<void>((resolve) => {
             const timeout = setTimeout(() => {
+              clearInterval(poll);
               console.log("[workflow] learning step timed out after 3m, proceeding with merge");
               resolve();
             }, 3 * 60 * 1000);
