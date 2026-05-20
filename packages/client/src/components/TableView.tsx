@@ -1,6 +1,7 @@
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 import { useState } from "react";
 =======
 >>>>>>> 7c9ead0 (feat: add table view as third board view alongside board and graph)
@@ -9,6 +10,9 @@ import { useState } from "react";
 >>>>>>> e318eb3 (feat: add table view as third board view alongside kanban and graph)
 =======
 >>>>>>> 770082f (feat: add table view as third board view alongside board and graph)
+=======
+import { useState } from "react";
+>>>>>>> 9878a53 (feat: add table view as third board view alongside kanban and graph)
 import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
 
 interface TableViewProps {
@@ -17,8 +21,11 @@ interface TableViewProps {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 >>>>>>> e318eb3 (feat: add table view as third board view alongside kanban and graph)
+=======
+>>>>>>> 9878a53 (feat: add table view as third board view alongside kanban and graph)
   searchQuery?: string;
 }
 
@@ -176,6 +183,7 @@ export function TableView({ columns, onIssueClick, searchQuery }: TableViewProps
         </table>
       </div>
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 =======
 >>>>>>> 770082f (feat: add table view as third board view alongside board and graph)
@@ -283,6 +291,8 @@ export function TableView({ columns, onIssueClick, searchQuery }: TableViewProps
 >>>>>>> e318eb3 (feat: add table view as third board view alongside kanban and graph)
 =======
 >>>>>>> 770082f (feat: add table view as third board view alongside board and graph)
+=======
+>>>>>>> 9878a53 (feat: add table view as third board view alongside kanban and graph)
     </div>
   );
 }
