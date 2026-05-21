@@ -185,6 +185,8 @@ export function BoardPage() {
   const [workspaceInitial, setWorkspaceInitial] = useState<{ workspaceId: string; sessionId: string } | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [priorityFilter, setPriorityFilter] = useState("");
+  const [autoReview, setAutoReview] = useState(true);
+  const [autoMerge, setAutoMerge] = useState(true);
 
   const filteredColumns = useMemo(
     () =>
