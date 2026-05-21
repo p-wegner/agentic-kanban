@@ -45,6 +45,7 @@ function createMockProc(overrides: Partial<ChildProcess> = {}): ChildProcess {
     }),
     kill: vi.fn(),
     killed: false,
+    unref: vi.fn(),
     ...overrides,
   } as any;
 }
