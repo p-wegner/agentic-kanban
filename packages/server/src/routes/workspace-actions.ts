@@ -181,15 +181,27 @@ export function createWorkspaceActionsRoute(
   // POST /api/workspaces/:id/launch — start agent session
   router.post("/:id/launch", async (c) => {
     const id = c.req.param("id");
-    const body = await c.req.json();
-
-    if (!body.prompt) {
-      return c.json({ error: "prompt is required" }, 400);
-    }
+    let body: Record<string, unknown> = {};
+    try { body = await c.req.json(); } catch { /* empty body is fine */ }
 
     const rows = await database.select().from(workspaces).where(eq(workspaces.id, id)).limit(1);
     if (rows.length === 0) {
       return c.json({ error: "Workspace not found" }, 404);
+    }
+
+    // Auto-build prompt from issue when not provided
+    if (!body.prompt) {
+      const ws = rows[0];
+      const issueRows = await database
+        .select({ title: issues.title, description: issues.description })
+        .from(issues)
+        .where(eq(issues.id, ws.issueId))
+        .limit(1);
+      if (issueRows.length === 0) {
+        return c.json({ error: "prompt is required" }, 400);
+      }
+      const iss = issueRows[0];
+      body = { ...body, prompt: iss.description ? `${iss.title}\n\n${iss.description}` : iss.title };
     }
 
     try {
@@ -219,14 +231,16 @@ export function createWorkspaceActionsRoute(
         ? "mcp__agentic-kanban__approve_tool_use"
         : (permissionPromptToolPref && permissionPromptToolPref !== "false" ? permissionPromptToolPref : undefined);
 
-      const truncatedPrompt = body.prompt.length > 80 ? body.prompt.slice(0, 80) + "..." : body.prompt;
+      const promptStr = body.prompt as string;
+      const truncatedPrompt = promptStr.length > 80 ? promptStr.slice(0, 80) + "..." : promptStr;
       console.log(`[workspace-actions] launch: workspaceId=${id} prompt="${truncatedPrompt}" agentCommand=${agentCommand ?? "default"} agentArgs=${agentArgs ?? "none"} profile=${claudeProfile ?? "none"} resumeFromId=${body.resumeFromId ?? "none"} multiTurn=${body.multiTurn !== false} resumeWithNewModel=${resumeWithNewModel}`);
 
       // Read planMode from workspace record
       const wsRows = await database.select({ planMode: workspaces.planMode }).from(workspaces).where(eq(workspaces.id, id)).limit(1);
       const planMode = wsRows.length > 0 ? wsRows[0].planMode : false;
 
-      const sessionId = await getSessionManager().startSession(id, body.prompt, agentCommand, agentArgs, body.resumeFromId, claudeProfile, body.multiTurn !== false, permissionPromptTool, planMode, resumeWithNewModel);
+      const resumeFromId = typeof body.resumeFromId === "string" ? body.resumeFromId : undefined;
+      const sessionId = await getSessionManager().startSession(id, promptStr, agentCommand, agentArgs, resumeFromId, claudeProfile, body.multiTurn !== false, permissionPromptTool, planMode, resumeWithNewModel);
 
       const now = new Date().toISOString();
       await database.update(workspaces).set({ status: "active", claudeProfile: claudeProfile ?? null, agentCommand: agentCommand ?? null, updatedAt: now }).where(eq(workspaces.id, id));
