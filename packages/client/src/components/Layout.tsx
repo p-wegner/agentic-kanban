@@ -21,6 +21,7 @@ interface LayoutProps {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
   onRegisterProject?: (opts: RegisterOptions) => Promise<void>;
 =======
 =======
@@ -48,19 +49,13 @@ interface LayoutProps {
   onRegisterProject?: (opts: RegisterOptions) => Promise<void>;
 >>>>>>> f36a871 (feat: add optional README and .gitignore template to project creation dialog)
 =======
+=======
+>>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
   onRegisterProject?: (args: { repoPath: string; gitignoreTemplate: string; generateReadme: boolean }) => Promise<void>;
-=======
-  onRegisterProject?: (opts: { repoPath: string; gitignoreTemplate: string; generateReadme: boolean }) => Promise<void>;
->>>>>>> 76091bc (fix: correct LayoutProps onRegisterProject type signature)
-=======
-  onRegisterProject?: (options: { repoPath: string; gitignoreTemplate: string; generateReadme: boolean }) => Promise<void>;
->>>>>>> 3ce95e1 (feat: add All Workspaces aggregate panel (#101))
   onCreateProject?: (name: string, path: string, gitignoreTemplate: string, generateReadme: boolean) => Promise<void>;
->>>>>>> 7dd2d0e (fix: correct onRegisterProject prop type to accept object in Layout.tsx)
-=======
->>>>>>> 41a314b (feat: implement create project flow (WIP - UI + backend route))
   searchQuery?: string;
   onSearchChange?: (query: string) => void;
+<<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
@@ -115,6 +110,11 @@ interface LayoutProps {
 >>>>>>> 50a304b (feat: remove priority filter from frontend UI)
 =======
 >>>>>>> 862c38b (feat: add All Workspaces aggregate panel (#101))
+=======
+  priorityFilter?: string;
+  onPriorityFilterChange?: (priority: string) => void;
+  onAllWorkspacesClick?: () => void;
+>>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
   onWorktreeOverviewClick?: () => void;
   onSettingsClick?: () => void;
 }
@@ -138,6 +138,7 @@ export function Layout({
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 >>>>>>> 50a304b (feat: remove priority filter from frontend UI)
 =======
@@ -182,6 +183,11 @@ export function Layout({
 >>>>>>> 50a304b (feat: remove priority filter from frontend UI)
 =======
 >>>>>>> 862c38b (feat: add All Workspaces aggregate panel (#101))
+=======
+  priorityFilter = "",
+  onPriorityFilterChange,
+  onAllWorkspacesClick,
+>>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
   onWorktreeOverviewClick,
   onSettingsClick,
 }: LayoutProps) {
@@ -196,6 +202,7 @@ export function Layout({
   const [createPath, setCreatePath] = useState("");
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
+<<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
@@ -262,6 +269,9 @@ export function Layout({
   const createNameInvalid = /[/\\<>:"|?*\x00]/.test(createName);
 >>>>>>> f6d1a48 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
 >>>>>>> 89f4fdb (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
+=======
+  const createNameInvalid = /[/\\<>:"|?*\x00]/.test(createName);
+>>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
   const inputRef = useRef<HTMLInputElement>(null);
 
   async function handleRegisterSubmit(e: React.FormEvent) {
@@ -288,7 +298,7 @@ export function Layout({
     setCreating(true);
     setCreateError(null);
     try {
-      await onCreateProject?.(createName.trim(), createPath.trim());
+      await onCreateProject?.(createName.trim(), createPath.trim(), gitignoreTemplate, generateReadme);
       setShowRegister(false);
       setCreateName("");
       setCreatePath("");
@@ -303,10 +313,9 @@ export function Layout({
     setRegisterError(null);
     setCreateError(null);
     setRepoPath("");
-<<<<<<< HEAD
-<<<<<<< HEAD
     setCreateName("");
     setCreatePath("");
+<<<<<<< HEAD
     setModalTab("import");
 <<<<<<< HEAD
 <<<<<<< HEAD
@@ -565,6 +574,10 @@ export function Layout({
                 <rect x="14" y="14" width="7" height="7" rx="1" />
               </svg>
             </button>
+=======
+    setGitignoreTemplate("");
+    setGenerateReadme(false);
+>>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
             <button
               onClick={onWorktreeOverviewClick}
               className="p-1.5 text-gray-400 hover:text-gray-600 rounded-md hover:bg-gray-100"
@@ -598,10 +611,6 @@ export function Layout({
           onClick={(e) => { if (e.target === e.currentTarget) setShowRegister(false); }}
         >
           <div className="bg-white rounded-lg shadow-xl w-full max-w-md mx-4 p-6">
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> 41a314b (feat: implement create project flow (WIP - UI + backend route))
             <h2 className="text-lg font-semibold text-gray-900 mb-4">Add Project</h2>
             <div className="flex border-b border-gray-200 mb-4">
               <button
@@ -681,16 +690,20 @@ export function Layout({
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 >>>>>>> 19a00ff (feat: implement create project flow (WIP - UI + backend route))
 =======
 >>>>>>> 62b2c9d (feat: validate create-project edge cases (WIP))
+=======
+>>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
                     className={`w-full text-sm border rounded-md px-3 py-2 focus:outline-none focus:ring-1 ${createNameInvalid ? "border-red-400 focus:ring-red-400 focus:border-red-400" : "border-gray-300 focus:ring-blue-500 focus:border-blue-500"}`}
                     autoFocus
                   />
                   {createNameInvalid && (
                     <p className="mt-1 text-xs text-red-600">Name cannot contain: / \ &lt; &gt; : " | ? *</p>
                   )}
+<<<<<<< HEAD
 =======
                     className="w-full text-sm border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
                     autoFocus
@@ -752,6 +765,8 @@ export function Layout({
 >>>>>>> 19a00ff (feat: implement create project flow (WIP - UI + backend route))
 =======
 >>>>>>> 62b2c9d (feat: validate create-project edge cases (WIP))
+=======
+>>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -768,6 +783,34 @@ export function Layout({
                     Leave blank to use the base directory from Settings › Project. A new folder and git repo will be created.
                   </p>
                 </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    .gitignore template
+                  </label>
+                  <select
+                    value={gitignoreTemplate}
+                    onChange={(e) => setGitignoreTemplate(e.target.value)}
+                    className="w-full text-sm border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                  >
+                    <option value="">None</option>
+                    <option value="node">Node</option>
+                    <option value="python">Python</option>
+                    <option value="java">Java</option>
+                    <option value="go">Go</option>
+                    <option value="rust">Rust</option>
+                    <option value="ruby">Ruby</option>
+                    <option value="dotnet">.NET / C#</option>
+                  </select>
+                </div>
+                <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={generateReadme}
+                    onChange={(e) => setGenerateReadme(e.target.checked)}
+                    className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                  />
+                  Generate README.md
+                </label>
                 {createError && (
                   <p className="text-sm text-red-600">{createError}</p>
                 )}
@@ -791,6 +834,7 @@ export function Layout({
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 >>>>>>> 19a00ff (feat: implement create project flow (WIP - UI + backend route))
 =======
@@ -829,6 +873,9 @@ export function Layout({
                     disabled={creating || !createName.trim() || createNameInvalid}
 >>>>>>> 7695053 (feat: validate create-project edge cases (WIP))
 >>>>>>> 62b2c9d (feat: validate create-project edge cases (WIP))
+=======
+                    disabled={creating || !createName.trim() || createNameInvalid}
+>>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
                     className="px-3 py-1.5 text-sm text-white bg-blue-600 rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     {creating ? "Creating…" : "Create project"}
@@ -836,77 +883,6 @@ export function Layout({
                 </div>
               </form>
             )}
-<<<<<<< HEAD
-=======
-            <h2 className="text-lg font-semibold text-gray-900 mb-4">Register Project</h2>
-            <form onSubmit={handleRegisterSubmit} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Repository path
-                </label>
-                <input
-                  ref={inputRef}
-                  type="text"
-                  value={repoPath}
-                  onChange={(e) => setRepoPath(e.target.value)}
-                  placeholder="C:/path/to/repo"
-                  className="w-full text-sm border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
-                />
-                <p className="mt-1 text-xs text-gray-500">
-                  Absolute path to a git repository. Branch and remote URL are auto-detected.
-                </p>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  .gitignore template
-                </label>
-                <select
-                  value={gitignoreTemplate}
-                  onChange={(e) => setGitignoreTemplate(e.target.value)}
-                  className="w-full text-sm border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
-                >
-                  <option value="">None</option>
-                  <option value="node">Node</option>
-                  <option value="python">Python</option>
-                  <option value="java">Java</option>
-                  <option value="go">Go</option>
-                  <option value="rust">Rust</option>
-                  <option value="ruby">Ruby</option>
-                  <option value="dotnet">.NET / C#</option>
-                </select>
-              </div>
-              <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer select-none">
-                <input
-                  type="checkbox"
-                  checked={generateReadme}
-                  onChange={(e) => setGenerateReadme(e.target.checked)}
-                  className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                />
-                Generate README.md
-              </label>
-              {registerError && (
-                <p className="text-sm text-red-600">{registerError}</p>
-              )}
-              <div className="flex justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => setShowRegister(false)}
-                  className="px-3 py-1.5 text-sm text-gray-700 border border-gray-300 rounded-md hover:bg-gray-50"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={registering || !repoPath.trim()}
-                  className="px-3 py-1.5 text-sm text-white bg-blue-600 rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {registering ? "Registering…" : "Register"}
-                </button>
-              </div>
-            </form>
->>>>>>> f36a871 (feat: add optional README and .gitignore template to project creation dialog)
-=======
->>>>>>> 41a314b (feat: implement create project flow (WIP - UI + backend route))
           </div>
         </div>
       )}

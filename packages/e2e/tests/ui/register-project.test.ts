@@ -13,6 +13,7 @@ const VALID_REPO_PATH = "C:/andrena/agentic-kanban";
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 >>>>>>> 3240b24 (feat: expand E2E tests for create-project and import flows)
 =======
@@ -27,11 +28,14 @@ const VALID_REPO_PATH = "C:/andrena/agentic-kanban";
 =======
 >>>>>>> 3240b24 (feat: expand E2E tests for create-project and import flows)
 >>>>>>> d0f3bf1 (feat: expand E2E tests for create-project and import flows)
+=======
+>>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
 async function openModal(page: import("@playwright/test").Page) {
   await page.locator('button[title="Register project"]').click();
   await expect(page.locator("h2", { hasText: "Add Project" })).toBeVisible();
 }
 
+<<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
@@ -63,6 +67,8 @@ async function openModal(page: import("@playwright/test").Page) {
 >>>>>>> 91e1b62 (feat: add E2E tests for create-project flow (WIP))
 =======
 >>>>>>> d0f3bf1 (feat: expand E2E tests for create-project and import flows)
+=======
+>>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
 test.describe("Register Project UI", () => {
   test.beforeEach(async ({ page }) => {
     await page.goto("/");
@@ -84,6 +90,7 @@ test.describe("Register Project UI", () => {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 >>>>>>> 3240b24 (feat: expand E2E tests for create-project and import flows)
 =======
@@ -98,6 +105,8 @@ test.describe("Register Project UI", () => {
 =======
 >>>>>>> 3240b24 (feat: expand E2E tests for create-project and import flows)
 >>>>>>> d0f3bf1 (feat: expand E2E tests for create-project and import flows)
+=======
+>>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
   test("clicking register button opens modal with two tabs", async ({ page }) => {
     await openModal(page);
     await expect(page.locator("button", { hasText: "Import existing" })).toBeVisible();
@@ -106,6 +115,7 @@ test.describe("Register Project UI", () => {
 
   test("Import existing tab shows repo path input by default", async ({ page }) => {
     await openModal(page);
+<<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
@@ -152,6 +162,8 @@ test.describe("Register Project UI", () => {
 =======
 >>>>>>> 3240b24 (feat: expand E2E tests for create-project and import flows)
 >>>>>>> d0f3bf1 (feat: expand E2E tests for create-project and import flows)
+=======
+>>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
     await expect(page.locator('input[placeholder="C:/path/to/repo"]')).toBeVisible();
     await expect(page.locator("text=Absolute path to a git repository")).toBeVisible();
   });
@@ -167,6 +179,7 @@ test.describe("Register Project UI", () => {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 >>>>>>> 91e1b62 (feat: add E2E tests for create-project flow (WIP))
 =======
@@ -213,11 +226,15 @@ test.describe("Register Project UI", () => {
     await openModal(page);
 >>>>>>> 3240b24 (feat: expand E2E tests for create-project and import flows)
 >>>>>>> d0f3bf1 (feat: expand E2E tests for create-project and import flows)
+=======
+    await openModal(page);
+>>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
     const submitBtn = page.locator('button[type="submit"]', { hasText: /Register/ });
     await expect(submitBtn).toBeDisabled();
   });
 
   test("Register button enables when path is entered", async ({ page }) => {
+<<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
@@ -282,6 +299,10 @@ test.describe("Register Project UI", () => {
 >>>>>>> 91e1b62 (feat: add E2E tests for create-project flow (WIP))
 =======
 >>>>>>> d0f3bf1 (feat: expand E2E tests for create-project and import flows)
+=======
+    await openModal(page);
+    await page.locator('input[placeholder="C:/path/to/repo"]').fill("/some/path");
+>>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
     const submitBtn = page.locator('button[type="submit"]', { hasText: /Register/ });
     await expect(submitBtn).toBeEnabled();
   });
@@ -297,10 +318,13 @@ test.describe("Register Project UI", () => {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 >>>>>>> 91e1b62 (feat: add E2E tests for create-project flow (WIP))
 =======
 >>>>>>> d0f3bf1 (feat: expand E2E tests for create-project and import flows)
+=======
+>>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
     await openModal(page);
     await page.locator("button", { hasText: /^Cancel$/ }).click();
     await expect(page.locator("h2", { hasText: "Add Project" })).not.toBeVisible();
@@ -318,6 +342,7 @@ test.describe("Register Project UI", () => {
     await page.locator("button", { hasText: /^Cancel$/ }).click();
 
     await openModal(page);
+<<<<<<< HEAD
 =======
     await page.locator('button[title="Register project"]').click();
     await expect(page.locator("h2", { hasText: "Register Project" })).toBeVisible();
@@ -463,6 +488,8 @@ test.describe("Register Project UI", () => {
     await openModal(page);
 >>>>>>> 3240b24 (feat: expand E2E tests for create-project and import flows)
 >>>>>>> d0f3bf1 (feat: expand E2E tests for create-project and import flows)
+=======
+>>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
     await expect(page.locator('input[placeholder="C:/path/to/repo"]')).toHaveValue("");
   });
 
@@ -477,6 +504,7 @@ test.describe("Register Project UI", () => {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 >>>>>>> 91e1b62 (feat: add E2E tests for create-project flow (WIP))
 =======
@@ -519,6 +547,9 @@ test.describe("Register Project UI", () => {
     await openModal(page);
 >>>>>>> 3240b24 (feat: expand E2E tests for create-project and import flows)
 >>>>>>> d0f3bf1 (feat: expand E2E tests for create-project and import flows)
+=======
+    await openModal(page);
+>>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
     await page.locator('input[placeholder="C:/path/to/repo"]').fill("C:/nonexistent/path/xyz");
     await page.locator('button[type="submit"]', { hasText: /Register/ }).click();
 
@@ -534,14 +565,18 @@ test.describe("Register Project UI", () => {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 >>>>>>> 91e1b62 (feat: add E2E tests for create-project flow (WIP))
 =======
 >>>>>>> d0f3bf1 (feat: expand E2E tests for create-project and import flows)
+=======
+>>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
     await expect(page.locator("h2", { hasText: "Add Project" })).toBeVisible();
   });
 
   test("duplicate path shows error message", async ({ page }) => {
+<<<<<<< HEAD
 =======
 <<<<<<< HEAD
 =======
@@ -598,6 +633,8 @@ test.describe("Register Project UI", () => {
 >>>>>>> 91e1b62 (feat: add E2E tests for create-project flow (WIP))
 =======
 >>>>>>> d0f3bf1 (feat: expand E2E tests for create-project and import flows)
+=======
+>>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
     await page.route("**/api/projects", async (route) => {
       if (route.request().method() === "POST") {
         await route.fulfill({
@@ -620,6 +657,7 @@ test.describe("Register Project UI", () => {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 >>>>>>> 91e1b62 (feat: add E2E tests for create-project flow (WIP))
 =======
@@ -658,6 +696,9 @@ test.describe("Register Project UI", () => {
     await openModal(page);
 >>>>>>> 3240b24 (feat: expand E2E tests for create-project and import flows)
 >>>>>>> d0f3bf1 (feat: expand E2E tests for create-project and import flows)
+=======
+    await openModal(page);
+>>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
     await page.locator('input[placeholder="C:/path/to/repo"]').fill(VALID_REPO_PATH);
     await page.locator('button[type="submit"]', { hasText: /Register/ }).click();
 
@@ -673,6 +714,7 @@ test.describe("Register Project UI", () => {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 >>>>>>> 91e1b62 (feat: add E2E tests for create-project flow (WIP))
 =======
@@ -715,6 +757,9 @@ test.describe("Register Project UI", () => {
     await expect(page.locator("h2", { hasText: "Add Project" })).toBeVisible();
 >>>>>>> 3240b24 (feat: expand E2E tests for create-project and import flows)
 >>>>>>> d0f3bf1 (feat: expand E2E tests for create-project and import flows)
+=======
+    await expect(page.locator("h2", { hasText: "Add Project" })).toBeVisible();
+>>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
   });
 
   test("server error is displayed", async ({ page }) => {
@@ -740,6 +785,7 @@ test.describe("Register Project UI", () => {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 >>>>>>> 91e1b62 (feat: add E2E tests for create-project flow (WIP))
 =======
@@ -778,6 +824,9 @@ test.describe("Register Project UI", () => {
     await openModal(page);
 >>>>>>> 3240b24 (feat: expand E2E tests for create-project and import flows)
 >>>>>>> d0f3bf1 (feat: expand E2E tests for create-project and import flows)
+=======
+    await openModal(page);
+>>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
     await page.locator('input[placeholder="C:/path/to/repo"]').fill("/not/a/git/repo");
     await page.locator('button[type="submit"]', { hasText: /Register/ }).click();
 
@@ -785,6 +834,7 @@ test.describe("Register Project UI", () => {
     await expect(page.locator("p.text-red-600")).toContainText("not a git repository");
   });
 
+<<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
@@ -844,6 +894,9 @@ test.describe("Register Project UI", () => {
 >>>>>>> 91e1b62 (feat: add E2E tests for create-project flow (WIP))
 =======
 >>>>>>> d0f3bf1 (feat: expand E2E tests for create-project and import flows)
+=======
+  test("successful registration closes modal and sends correct path", async ({ page }) => {
+>>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
     let capturedBody: { repoPath?: string } = {};
     await page.route("**/api/projects", async (route) => {
       if (route.request().method() === "POST") {
@@ -868,15 +921,19 @@ test.describe("Register Project UI", () => {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 >>>>>>> 91e1b62 (feat: add E2E tests for create-project flow (WIP))
 =======
 >>>>>>> d0f3bf1 (feat: expand E2E tests for create-project and import flows)
+=======
+>>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
     await openModal(page);
     await page.locator('input[placeholder="C:/path/to/repo"]').fill("/some/repo/path");
     await page.locator('button[type="submit"]', { hasText: /Register/ }).click();
 
     await expect(page.locator("h2", { hasText: "Add Project" })).not.toBeVisible();
+<<<<<<< HEAD
 =======
 <<<<<<< HEAD
 =======
@@ -940,10 +997,13 @@ test.describe("Register Project UI", () => {
 >>>>>>> 91e1b62 (feat: add E2E tests for create-project flow (WIP))
 =======
 >>>>>>> d0f3bf1 (feat: expand E2E tests for create-project and import flows)
+=======
+>>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
     expect(capturedBody.repoPath).toBe("/some/repo/path");
   });
 
   test("shows Registering… label while submitting", async ({ page }) => {
+<<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
@@ -984,6 +1044,8 @@ test.describe("Register Project UI", () => {
 >>>>>>> 91e1b62 (feat: add E2E tests for create-project flow (WIP))
 =======
 >>>>>>> d0f3bf1 (feat: expand E2E tests for create-project and import flows)
+=======
+>>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
     await page.route("**/api/projects", async (route) => {
       if (route.request().method() === "POST") {
         await new Promise((r) => setTimeout(r, 300));
@@ -1007,10 +1069,13 @@ test.describe("Register Project UI", () => {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 >>>>>>> 91e1b62 (feat: add E2E tests for create-project flow (WIP))
 =======
 >>>>>>> d0f3bf1 (feat: expand E2E tests for create-project and import flows)
+=======
+>>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
     await openModal(page);
     await page.locator('input[placeholder="C:/path/to/repo"]').fill("/some/repo");
     await page.locator('button[type="submit"]', { hasText: /Register/ }).click();
@@ -1193,6 +1258,7 @@ test.describe("Create Project UI", () => {
     await expect(page.locator('input[placeholder="C:/path/to/repo"]')).toHaveValue("");
   });
 });
+<<<<<<< HEAD
 =======
     await page.locator('button[title="Register project"]').click();
 <<<<<<< HEAD
@@ -2150,3 +2216,5 @@ test.describe("Create Project UI", () => {
 });
 >>>>>>> 3240b24 (feat: expand E2E tests for create-project and import flows)
 >>>>>>> d0f3bf1 (feat: expand E2E tests for create-project and import flows)
+=======
+>>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)

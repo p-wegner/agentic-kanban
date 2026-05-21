@@ -155,6 +155,7 @@ export function createAgentSkillsRoute(database: Database = db) {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 >>>>>>> a19889f (fix: resolve preference key mismatch, path traversal in skill names, and cleanup bugs)
 =======
@@ -169,11 +170,14 @@ export function createAgentSkillsRoute(database: Database = db) {
 =======
 >>>>>>> a19889f (fix: resolve preference key mismatch, path traversal in skill names, and cleanup bugs)
 >>>>>>> ea9ffef (fix: resolve preference key mismatch, path traversal in skill names, and cleanup bugs)
+=======
+>>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
     try {
       await writeAgentSkillFile(repoPath, rows[0]);
     } catch (err) {
       return c.json({ error: `Failed to install skill: ${err instanceof Error ? err.message : String(err)}` }, 500);
     }
+<<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
@@ -210,6 +214,8 @@ export function createAgentSkillsRoute(database: Database = db) {
 >>>>>>> f6b75e2 (feat: install kanban skills to project .claude/skills/ from Settings UI)
 =======
 >>>>>>> ea9ffef (fix: resolve preference key mismatch, path traversal in skill names, and cleanup bugs)
+=======
+>>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
     return c.json({ installed: true, repoPath });
   });
 
