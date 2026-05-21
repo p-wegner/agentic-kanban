@@ -185,6 +185,13 @@ export function BoardPage() {
   const [workspaceInitial, setWorkspaceInitial] = useState<{ workspaceId: string; sessionId: string } | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [priorityFilter, setPriorityFilter] = useState("");
+
+  const filteredColumns = useMemo(
+    () =>
+      columns.map((col) => ({
+        ...col,
+        issues: col.issues.filter((issue) => {
+          if (priorityFilter && issue.priority !== priorityFilter) return false;
           if (searchQuery) {
             const q = searchQuery.toLowerCase();
             return (
@@ -195,7 +202,7 @@ export function BoardPage() {
           return true;
         }),
       })),
-    [columns, searchQuery],
+    [columns, searchQuery, priorityFilter],
   );
 
   // "AI Reviewed" = tickets needing human attention (manual merge).
