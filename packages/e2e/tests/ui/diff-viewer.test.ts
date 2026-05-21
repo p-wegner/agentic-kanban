@@ -339,6 +339,51 @@ test.describe("Diff Viewer UI", () => {
       }
     });
 
+    test("comment shows timestamp", async ({ page, request }) => {
+      const commentRes = await request.post(
+        `${SERVER_URL}/api/workspaces/${workspaceId}/comments`,
+        {
+          data: {
+            filePath: "src/example.ts",
+            lineNumNew: 2,
+            side: "new",
+            body: "Timestamp display test comment",
+          },
+        },
+      );
+      expect(commentRes.status()).toBe(201);
+      const comment = await commentRes.json();
+
+      try {
+        await page.goto("/");
+        await page.waitForSelector("h2");
+
+        await openWorkspacePanel(page, issueTitle, branchName);
+        await page.locator('button:has-text("View Diff")').click();
+
+        const diffViewer = page
+          .locator(".border.border-gray-300.rounded")
+          .or(page.locator("text=No changes to show"))
+          .first();
+        await expect(diffViewer).toBeVisible({ timeout: 5000 });
+
+        // Comment block should be visible with the body text
+        await expect(page.locator("text=Timestamp display test comment")).toBeVisible({ timeout: 3000 });
+
+        // Timestamp should be shown in the comment block (formatted date/time)
+        const commentBlock = page.locator(".bg-yellow-50").filter({ hasText: "Timestamp display test comment" }).first();
+        // The timestamp span renders a short date-time string (non-empty)
+        const timestampEl = commentBlock.locator("span.text-gray-400").first();
+        await expect(timestampEl).toBeVisible({ timeout: 2000 });
+        const timestampText = await timestampEl.textContent();
+        expect(timestampText?.trim().length).toBeGreaterThan(0);
+      } finally {
+        await request.delete(
+          `${SERVER_URL}/api/workspaces/${workspaceId}/comments/${comment.id}`,
+        );
+      }
+    });
+
     test("comment create via UI: click diff line, type comment, submit", async ({
       page,
       request,
