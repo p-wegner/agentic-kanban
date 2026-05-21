@@ -142,6 +142,15 @@ When the user references `#N` (e.g., "review #70", "merge #65", "what's the stat
 Get-NetTCPConnection -LocalPort <port> | Select-Object -ExpandProperty OwningProcess | ForEach-Object { Stop-Process -Id $_ -Force }
 ```
 
+**Stopping the dev server:** Stop the `Start-Job` first, then sweep ports — otherwise the job restarts Vite after the port kill:
+```powershell
+Get-Job | Stop-Job; Get-Job | Remove-Job
+Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue |
+  Where-Object { ($_.LocalPort -ge 3001 -and $_.LocalPort -le 3020) -or ($_.LocalPort -ge 5173 -and $_.LocalPort -le 5190) } |
+  Select-Object -ExpandProperty OwningProcess | Sort-Object -Unique |
+  ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }
+```
+
 **Starting the dev server headlessly:** Use `Start-Job` — it persists after the tool call returns, unlike background Bash (`&`) which exits immediately:
 ```powershell
 Start-Job -ScriptBlock { Set-Location C:\andrena\agentic-kanban; pnpm dev 2>&1 } | Out-Null
