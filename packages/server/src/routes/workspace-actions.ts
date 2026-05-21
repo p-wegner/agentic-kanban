@@ -420,7 +420,8 @@ export function createWorkspaceActionsRoute(
       const project = projectRows[0] ?? null;
 
       // Pre-merge cleanup: kill processes and run teardown script (best effort)
-      if (workspace.workingDir) {
+      // Skip process cleanup for direct workspaces — their workingDir is the main repo, killing would take down the dev server
+      if (workspace.workingDir && !workspace.isDirect) {
         try {
           const killed = await killProcessesInDir(workspace.workingDir);
           if (killed > 0) console.log(`[workspace-actions] killed ${killed} process(es) in ${workspace.workingDir}`);
