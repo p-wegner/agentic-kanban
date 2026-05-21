@@ -13,7 +13,7 @@ import { resolve, dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { tmpdir } from "node:os";
 import { writeFileSync } from "node:fs";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const MOCK_AGENT_PATH = resolve(__dirname, "../scripts/mock-agent.ts");
@@ -844,6 +844,27 @@ Base branch: ${baseBranch}`;
       .where(eq(sessions.workspaceId, id));
 
     return c.json(result);
+  });
+
+  // POST /api/workspaces/:id/open-editor — open the workspace directory in VS Code
+  router.post("/:id/open-editor", async (c) => {
+    const id = c.req.param("id");
+
+    const rows = await database.select().from(workspaces).where(eq(workspaces.id, id)).limit(1);
+    if (rows.length === 0) return c.json({ error: "Workspace not found" }, 404);
+
+    const { workingDir } = rows[0];
+    if (!workingDir) return c.json({ error: "Workspace has no working directory" }, 422);
+
+    // Verify VS Code is available
+    const which = spawnSync("code", ["--version"], { shell: true, windowsHide: true });
+    if (which.status !== 0) {
+      return c.json({ error: "VS Code (code) is not installed or not in PATH" }, 422);
+    }
+
+    spawn("code", [workingDir], { shell: true, windowsHide: true, detached: true }).unref();
+
+    return c.json({ ok: true });
   });
 
   return router;
