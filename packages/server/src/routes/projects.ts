@@ -932,7 +932,7 @@ ${contextParts.join("\n")}`;
                 if (mainWs.conflictCacheHasConflicts !== null) {
                   mainRef.conflicts = {
                     hasConflicts: mainWs.conflictCacheHasConflicts ?? false,
-                    conflictFiles: mainWs.conflictCacheFiles ? JSON.parse(mainWs.conflictCacheFiles) : [],
+                    conflictFiles: mainWs.conflictCacheFiles ? (() => { try { return JSON.parse(mainWs.conflictCacheFiles!); } catch { return []; } })() : [],
                   };
                 }
               } else {
@@ -940,7 +940,7 @@ ${contextParts.join("\n")}`;
                 if (mainWs.conflictCacheCheckedAt && mainWs.conflictCacheHasConflicts !== null) {
                   mainRef.conflicts = {
                     hasConflicts: mainWs.conflictCacheHasConflicts ?? false,
-                    conflictFiles: mainWs.conflictCacheFiles ? JSON.parse(mainWs.conflictCacheFiles) : [],
+                    conflictFiles: mainWs.conflictCacheFiles ? (() => { try { return JSON.parse(mainWs.conflictCacheFiles!); } catch { return []; } })() : [],
                   };
                 }
                 const wsId = mainWs.id;
