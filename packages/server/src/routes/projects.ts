@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { db } from "../db/index.js";
-import { projects, projectStatuses, issues, workspaces, sessions, sessionMessages, diffComments, issueDependencies, preferences } from "@agentic-kanban/shared/schema";
+import { projects, projectStatuses, issues, workspaces, sessions, sessionMessages, diffComments, issueDependencies, preferences, tags, issueTags } from "@agentic-kanban/shared/schema";
 import { eq, inArray, sql, and } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { execFile, execSync } from "node:child_process";
@@ -1056,12 +1056,30 @@ ${contextParts.join("\n")}`;
       }
     }
 
+    // Fetch tags for all issues in one query
+    const issueTagMap = new Map<string, { id: string; name: string; color: string | null }[]>();
+    if (issueIds.length > 0) {
+      const tagRows = await database
+        .select({ issueId: issueTags.issueId, id: tags.id, name: tags.name, color: tags.color })
+        .from(issueTags)
+        .innerJoin(tags, eq(issueTags.tagId, tags.id))
+        .where(inArray(issueTags.issueId, issueIds));
+      for (const row of tagRows) {
+        let arr = issueTagMap.get(row.issueId);
+        if (!arr) { arr = []; issueTagMap.set(row.issueId, arr); }
+        arr.push({ id: row.id, name: row.name, color: row.color });
+      }
+    }
+
     const result = statuses.map((s) => ({
       id: s.id,
       name: s.name,
       projectId: s.projectId,
       sortOrder: s.sortOrder,
-      issues: issuesWithBlocked.filter((i) => i.statusId === s.id),
+      issues: issuesWithBlocked.filter((i) => i.statusId === s.id).map((i) => ({
+        ...i,
+        tags: issueTagMap.get(i.id) ?? [],
+      })),
     }));
 
     return c.json(result);

@@ -93,6 +93,7 @@ export interface IssueWithStatus {
   isBlocked?: boolean;
   skipAutoReview?: boolean;
   estimate?: string | null;
+  tags?: { id: string; name: string; color: string | null }[];
 }
 
 export interface StatusWithIssues {
