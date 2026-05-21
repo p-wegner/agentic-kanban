@@ -56,6 +56,19 @@ Every feature with UI must be visually verified using the `playwright-cli` skill
 - `docs/decisions/` — numbered decision records
 - `docs/state.md` — current progress tracking
 
+## Getting a Ticket Description
+
+When you need to read the full title and description of a ticket by its number, use one of:
+
+| Method | Command |
+|---|---|
+| CLI (recommended) | `pnpm cli -- issue get <N>` |
+| CLI (JSON) | `pnpm cli -- issue get <N> --json` |
+| REST API | `GET /api/issues?projectId=<id>&issueNumber=<N>` (returns array) |
+| MCP tool | `mcp__agentic-kanban__get_issue` with `issueNumber` |
+
+The CLI `issue get` command works without knowing the project ID — it uses the active project automatically.
+
 ## Board Operations: Prefer MCP Tools or CLI over REST
 
 ### `#N` means kanban issue, not GitHub PR
