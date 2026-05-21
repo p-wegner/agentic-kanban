@@ -212,6 +212,7 @@ pnpm test:e2e                                  # E2E tests (101 tests)
 | F-MCP-03: Agent command configuration via settings | `packages/e2e/tests/api/settings.test.ts` |
 | F-MCP-04: Agent Skills UI in Settings (built-in protection, custom skill CRUD, edit/delete) | `packages/e2e/tests/ui/agent-skills.test.ts` |
 | F-MCP-04: Skill selector in inline issue create form (Start Workspace checkbox) | `packages/e2e/tests/ui/agent-skills.test.ts` |
+| F-UI-09: "Enhance with AI" button for skill creation/editing in Settings > Skills tab (#192) | `packages/e2e/tests/ui/agent-skills.test.ts` |
 | F-UI-10: Graph view (dependency DAG, nodes, zoom, Show completed toggle) | `packages/e2e/tests/ui/graph-table-views.test.ts` |
 | F-UI-10: Table view (sortable columns, status filter, row click to detail) | `packages/e2e/tests/ui/graph-table-views.test.ts` |
 | F-DATA-02: Board WebSocket events (create/update/delete) | `packages/e2e/tests/api/board-events.test.ts`, `packages/e2e/tests/ui/board-realtime.test.ts` |
@@ -253,7 +254,6 @@ pnpm test:e2e                                  # E2E tests (101 tests)
 | F-UI-09: Board monitor visualization panel and workflow toggles (Settings > Workflow) | #189 |
 | F-UI-02: Expand button for issue detail panel (full-width mode) | #190 |
 | F-UI-02: AI Reviewed column conditional display and "Awaiting manual merge" hint | #191 |
-| F-UI-09: "Enhance with AI" button for skill creation/editing in Settings > Skills tab | #192 |
 | F-WS-02: Live session stats on issue cards (real-time model name + context token count via WebSocket) | #193 |
 | F-WS-02: Agent task progress bar on issue cards (TodoProgress N/M tasks + K active) | #194 |
 | F-WS-04: Direct workspace UI (purple badge, "Close"/"View Changes" vs "Merge"/"View Diff") | #195 |
