@@ -1263,7 +1263,7 @@ ${contextParts.join("\n")}`;
 
     // Fetch workspace summaries grouped by issueId
     const issueIds = projectIssues.map((i) => i.id);
-    const workspaceSummaryMap = new Map<string, { total: number; active: number; idle: number; closed: number; branches: string[]; main?: { id: string; branch: string; status: "active" | "reviewing" | "idle" | "closed"; claudeProfile: string | null; agentCommand: string | null; readyForMerge?: boolean; diffStats?: { filesChanged: number; insertions: number; deletions: number } | null; conflicts?: { hasConflicts: boolean; conflictingFiles: string[] } | null; lastSessionAt?: string | null; contextTokens?: number | null; lastTool?: string | null } }>();
+    const workspaceSummaryMap = new Map<string, { total: number; active: number; idle: number; closed: number; branches: string[]; main?: { id: string; branch: string; status: "active" | "reviewing" | "idle" | "closed"; claudeProfile: string | null; agentCommand: string | null; readyForMerge?: boolean; diffStats?: { filesChanged: number; insertions: number; deletions: number } | null; conflicts?: { hasConflicts: boolean; conflictingFiles: string[] } | null; lastSessionAt?: string | null; contextTokens?: number | null; lastTool?: string | null; lastAssistantMessage?: string | null } }>();
 
     if (issueIds.length > 0) {
       const wsRows = await database
@@ -1474,8 +1474,9 @@ ${contextParts.join("\n")}`;
         // Collect session IDs for message lookup
         const latestSessionIds = [...latestByWs.values()].map(s => s.id);
 
-        // Fetch recent messages to extract last tool call
+        // Fetch recent messages to extract last tool call and last assistant text
         const lastToolBySession = new Map<string, string>();
+        const lastAssistantMsgBySession = new Map<string, string>();
         if (latestSessionIds.length > 0) {
           const msgRows = await database
             .select({ sessionId: sessionMessages.sessionId, data: sessionMessages.data })
@@ -1484,16 +1485,20 @@ ${contextParts.join("\n")}`;
             .orderBy(desc(sessionMessages.id));
 
           for (const msg of msgRows) {
-            if (lastToolBySession.has(msg.sessionId)) continue;
+            const hasTool = lastToolBySession.has(msg.sessionId);
+            const hasMsg = lastAssistantMsgBySession.has(msg.sessionId);
+            if (hasTool && hasMsg) continue;
             if (!msg.data) continue;
             try {
               const obj = JSON.parse(msg.data) as Record<string, unknown>;
               if (obj.type === "assistant") {
                 const content = (obj.message as { content?: unknown[] })?.content ?? [];
-                for (const block of content as { type: string; name?: string; input?: unknown }[]) {
-                  if (block.type === "tool_use" && block.name) {
+                for (const block of content as { type: string; name?: string; text?: string; input?: unknown }[]) {
+                  if (!hasTool && block.type === "tool_use" && block.name) {
                     lastToolBySession.set(msg.sessionId, block.name);
-                    break;
+                  }
+                  if (!hasMsg && block.type === "text" && block.text?.trim()) {
+                    lastAssistantMsgBySession.set(msg.sessionId, block.text.trim());
                   }
                 }
               }
@@ -1515,6 +1520,7 @@ ${contextParts.join("\n")}`;
                 } catch { /* ignore */ }
               }
               summary.main.lastTool = lastToolBySession.get(sess.id) ?? null;
+              summary.main.lastAssistantMessage = lastAssistantMsgBySession.get(sess.id) ?? null;
             }
           }
         }
