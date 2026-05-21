@@ -212,6 +212,12 @@ The script prints a banner showing detected ports, e.g.: `[dev] Worktree detecte
 - Set by `agent.service.ts` (passed to spawned agents): `KANBAN_SERVER_PORT`, `KANBAN_CLIENT_PORT`, `SERVER_PORT`, `PORT`
 - Agents should read `KANBAN_SERVER_PORT` / `KANBAN_CLIENT_PORT` to determine their ports
 
+**CRITICAL: Run all commands headlessly — never flash terminal windows.** This is a shared desktop. Agents run in the background and must not open visible windows:
+- **Never use `Start-Process`** (opens a new window by default). Use `Invoke-Expression`, `&`, or `Bash` tool instead.
+- **Never use `cmd /c start <something>`** — this opens a new console window.
+- When spawning processes in Node.js code, always add `windowsHide: true` to the spawn/exec options.
+- PowerShell commands via the Bash tool run headlessly already — prefer those over `Start-Process`.
+
 **CRITICAL: Never kill ALL node processes.** Other agents may be running in separate worktrees with their own dev servers. Instead:
 - Kill by specific port: `Get-NetTCPConnection -LocalPort <port> | Select-Object -ExpandProperty OwningProcess | ForEach-Object { Stop-Process -Id $_ -Force }`
 - Or kill by PID: `Stop-Process -Id <pid> -Force`
