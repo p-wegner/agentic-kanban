@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import type { IssueWithStatus, UpdateIssueRequest, DependencyInfo } from "@agentic-kanban/shared";
 import { apiFetch } from "../lib/api.js";
@@ -129,7 +129,7 @@ export function IssueDetailPanel({
         setDependencies(deps);
         setAvailableIssues(issues.filter(i => i.id !== issue.id));
       } catch {
-        // Ignore â€” non-critical
+        // Ignore — non-critical
       }
     }
     loadData();
@@ -261,7 +261,7 @@ export function IssueDetailPanel({
       setPastedImages([]);
       setEditing(false);
       setDescriptionMode("edit");
-      // Don't close panel â€” F1 fix. Parent will re-render with updated data.
+      // Don't close panel — F1 fix. Parent will re-render with updated data.
     } finally {
       setSaving(false);
     }
@@ -371,7 +371,7 @@ export function IssueDetailPanel({
         </div>
 
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
-          {/* Blocked banner â€” shown when issue has unresolved blocking dependencies */}
+          {/* Blocked banner — shown when issue has unresolved blocking dependencies */}
           {(() => {
             const RESOLVED = ["done", "cancelled", "ai reviewed"];
             const blockingDeps = dependencies.dependencies.filter((dep) => {
@@ -394,7 +394,7 @@ export function IssueDetailPanel({
                 <ul className="space-y-0.5 pl-5.5">
                   {blockingDeps.map((dep) => (
                     <li key={dep.id} className="text-amber-700 flex items-center gap-1">
-                      <span className="text-amber-500 shrink-0">â€¢</span>
+                      <span className="text-amber-500 shrink-0">•</span>
                       {dep.issueNumber != null && (
                         <span className="font-mono text-xs shrink-0">#{dep.issueNumber}</span>
                       )}
@@ -498,7 +498,7 @@ export function IssueDetailPanel({
                         type="button"
                         onClick={() => setPastedImages((prev) => prev.filter((_, j) => j !== i))}
                         className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-red-500 text-white rounded-full text-xs leading-none flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-                      >Ã—</button>
+                      >×</button>
                     </div>
                   ))}
                 </div>
@@ -580,7 +580,7 @@ export function IssueDetailPanel({
                 {issue.estimate}
               </span>
             ) : (
-              <span className="text-xs text-gray-400">â€”</span>
+              <span className="text-xs text-gray-400">—</span>
             )}
           </div>
 
@@ -918,7 +918,7 @@ export function IssueDetailPanel({
                         ref={depInputRef}
                         type="text"
                         className="text-xs border border-gray-300 rounded px-1.5 py-0.5 w-44 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                        placeholder="+ Add dependencyâ€¦"
+                        placeholder="+ Add dependency…"
                         value={depSearch}
                         onChange={(e) => {
                           setDepSearch(e.target.value);
@@ -1014,8 +1014,8 @@ export function IssueDetailPanel({
                   onClick={handleCreateFollowUp}
                   disabled={!followUpTitle.trim() || followUpCreating}
                   className="text-xs bg-blue-600 text-white px-2 py-1 rounded hover:bg-blue-700 disabled:opacity-50 whitespace-nowrap"
-                >{followUpCreating ? "â€¦" : "Create"}</button>
-                <button onClick={() => { setShowFollowUp(false); setFollowUpTitle(""); }} className="text-xs text-gray-400 hover:text-gray-600">âœ•</button>
+                >{followUpCreating ? "…" : "Create"}</button>
+                <button onClick={() => { setShowFollowUp(false); setFollowUpTitle(""); }} className="text-xs text-gray-400 hover:text-gray-600">✕</button>
               </div>
             )}
           </div>
