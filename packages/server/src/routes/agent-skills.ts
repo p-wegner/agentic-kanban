@@ -1,10 +1,15 @@
 import { Hono } from "hono";
 import { db } from "../db/index.js";
 import { agentSkills, preferences, projects } from "@agentic-kanban/shared/schema";
-import { eq, and, isNull, sql } from "drizzle-orm";
+import { eq, and, isNull, sql, inArray } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
+import { execFile, execSync } from "node:child_process";
+import { homedir } from "node:os";
+import { join } from "node:path";
+import { existsSync } from "node:fs";
 import type { Database } from "../db/index.js";
 import { writeAgentSkillFile, isSkillInstalledLocally } from "@agentic-kanban/shared/lib/agent-skill-files";
+import { buildSpawnEnv } from "../services/agent-provider.js";
 
 export function createAgentSkillsRoute(database: Database = db) {
   const router = new Hono();
@@ -29,6 +34,94 @@ export function createAgentSkillsRoute(database: Database = db) {
       rows = await database.select().from(agentSkills).orderBy(agentSkills.name);
     }
     return c.json(rows);
+  });
+
+  // POST /api/agent-skills/enhance — AI-enhance a skill name, description, and prompt
+  router.post("/enhance", async (c) => {
+    let body: { name: string; description?: string; prompt?: string };
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ error: "invalid JSON body" }, 400);
+    }
+    if (!body.name?.trim()) {
+      return c.json({ error: "name is required" }, 400);
+    }
+
+    let agentCommand = "claude";
+    let claudeProfile: string | undefined;
+    const prefs = await database
+      .select({ key: preferences.key, value: preferences.value })
+      .from(preferences)
+      .where(inArray(preferences.key, ["agent_command", "claude_profile"]));
+    for (const p of prefs) {
+      if (p.key === "agent_command" && p.value) agentCommand = p.value;
+      if (p.key === "claude_profile" && p.value) claudeProfile = p.value;
+    }
+
+    if (process.platform === "win32" && agentCommand === "claude") {
+      try {
+        const resolved = execSync("where claude.exe 2>nul", { encoding: "utf8" }).trim().split("\n")[0]?.trim();
+        if (resolved) agentCommand = resolved;
+      } catch {}
+    }
+
+    const prompt = `You are helping create an agent skill definition for a kanban board AI coding system.
+Given a skill name and optional description/prompt, return an improved version that is clear, actionable, and well-structured.
+The description should be one concise sentence explaining what the skill does.
+The prompt should be a detailed SKILL.md-style guide that an AI agent can follow.
+Respond ONLY with valid JSON — no markdown, no explanation:
+{"name": "...", "description": "...", "prompt": "..."}
+
+Current name: ${body.name}
+Current description: ${body.description?.trim() || "(none)"}
+Current prompt: ${body.prompt?.trim() || "(none)"}`;
+
+    const args: string[] = ["--output-format", "text", "-p"];
+    if (claudeProfile) {
+      const settingsPath = join(homedir(), ".claude", `settings_${claudeProfile}.json`);
+      if (existsSync(settingsPath)) {
+        args.push("--settings", settingsPath);
+      }
+    }
+
+    let stdout: string;
+    try {
+      ({ stdout } = await new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
+        const child = execFile(agentCommand, args, {
+          encoding: "utf8",
+          timeout: 60000,
+          shell: false,
+          maxBuffer: 1024 * 1024,
+          env: buildSpawnEnv(claudeProfile),
+        }, (err, out, se) => {
+          if (err) reject(err);
+          else resolve({ stdout: out ?? "", stderr: se ?? "" });
+        });
+        child.stdin?.end(prompt);
+      }));
+    } catch (err: any) {
+      const parts: string[] = [];
+      if (err.message) parts.push(err.message);
+      if (err.stderr) parts.push(String(err.stderr).trim());
+      const msg = parts.length > 0 ? parts.join(" | ") : "claude CLI failed";
+      console.error("[skill-enhance] claude error:", msg);
+      return c.json({ error: "AI enhancement failed", detail: msg }, 500);
+    }
+
+    const output = stdout.trim();
+    const cleaned = output.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
+    try {
+      const enhanced = JSON.parse(cleaned) as { name?: string; description?: string; prompt?: string };
+      return c.json({
+        name: enhanced.name?.trim() || body.name,
+        description: enhanced.description?.trim() ?? body.description ?? "",
+        prompt: enhanced.prompt?.trim() ?? body.prompt ?? "",
+      });
+    } catch {
+      console.error("[skill-enhance] failed to parse claude output:", output);
+      return c.json({ error: "Failed to parse AI response", raw: output }, 500);
+    }
   });
 
   // GET /api/agent-skills/:id — get a single skill
