@@ -140,8 +140,18 @@ function CommentBlock({
     );
   }
 
+  const timestamp = new Date(comment.createdAt).toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+
   return (
     <div className="bg-yellow-50 border-l-2 border-yellow-400 px-3 py-1.5 group/comment">
+      <div className="flex items-center gap-2 mb-0.5">
+        <span className="text-[10px] text-gray-400">{timestamp}</span>
+      </div>
       <div className="text-xs text-gray-700 whitespace-pre-wrap">{comment.body}</div>
       <div className="flex items-center gap-2 mt-0.5 opacity-0 group-hover/comment:opacity-100 transition-opacity">
         <button
