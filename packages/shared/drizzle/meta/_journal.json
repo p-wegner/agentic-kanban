@@ -286,7 +286,17 @@
       "when": 1780129200000,
       "tag": "0033_backlog_status",
       "breakpoints": true
+<<<<<<< HEAD
 >>>>>>> bc89428 (feat: add Backlog status as default project status with migration)
+=======
+    },
+    {
+      "idx": 34,
+      "version": "6",
+      "when": 1780215600000,
+      "tag": "0034_session_pid",
+      "breakpoints": true
+>>>>>>> 1ea0691 (feat: prevent server hot-reload from killing agent processes (#222))
     }
   ]
 }
