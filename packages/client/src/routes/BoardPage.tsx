@@ -199,6 +199,8 @@ export function BoardPage() {
   const [sessionTodos, setSessionTodos] = useState<Record<string, TodoItem[]>>({});
   const [approvalRequests, setApprovalRequests] = useState<ApprovalRequest[]>([]);
   const pendingBoardRefreshRef = useRef(false);
+  const pendingGRef = useRef(false);
+  const pendingGTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [expandedCreatePanel, setExpandedCreatePanel] = useState<{ statusId: string; statusName: string; state: Partial<CreateIssueFormState> } | null>(null);
   const [viewMode, setViewMode] = useState<"kanban" | "graph" | "table">("kanban");
   const [dynamicColumnScaling, setDynamicColumnScaling] = useState(false);
@@ -665,13 +667,34 @@ export function BoardPage() {
         e.preventDefault();
         setShowShortcutHelp((prev) => !prev);
       }
-      // "b", "g", "t" to switch views
-      if ((e.key === "b" || e.key === "g" || e.key === "t") && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      // "g+s" chord to open settings; "g" alone switches to graph view
+      if (e.key === "g" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        const target = e.target as HTMLElement;
+        if (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT") return;
+        e.preventDefault();
+        pendingGRef.current = true;
+        if (pendingGTimerRef.current) clearTimeout(pendingGTimerRef.current);
+        pendingGTimerRef.current = setTimeout(() => {
+          if (pendingGRef.current) {
+            pendingGRef.current = false;
+            setViewMode("graph");
+          }
+        }, 400);
+        return;
+      }
+      // complete "g+s" chord or handle standalone "b"/"t" view switches
+      if (e.key === "s" && pendingGRef.current && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        pendingGRef.current = false;
+        if (pendingGTimerRef.current) { clearTimeout(pendingGTimerRef.current); pendingGTimerRef.current = null; }
+        e.preventDefault();
+        setShowSettings(true);
+        return;
+      }
+      if ((e.key === "b" || e.key === "t") && !e.ctrlKey && !e.metaKey && !e.altKey) {
         const target = e.target as HTMLElement;
         if (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT") return;
         e.preventDefault();
         if (e.key === "b") setViewMode("kanban");
-        else if (e.key === "g") setViewMode("graph");
         else if (e.key === "t") setViewMode("table");
         return;
       }
@@ -699,7 +722,7 @@ export function BoardPage() {
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [searchQuery, showCommandPalette, showAllWorkspaces, showWorktreeOverview, showShortcutHelp, filteredColumns, columns, setViewMode, setShowQuickTasks]);
+  }, [searchQuery, showCommandPalette, showAllWorkspaces, showWorktreeOverview, showShortcutHelp, filteredColumns, columns, setViewMode, setShowQuickTasks, setShowSettings]);
 
   // Register command palette actions
   useEffect(() => {
