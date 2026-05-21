@@ -93,16 +93,20 @@ function tagClass(color: string | null | undefined) {
 }
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 >>>>>>> ab93bc6 (feat: add table view as third board view alongside kanban and graph)
 =======
 >>>>>>> ab01232 (fix: restore TableView.tsx mangled by conflict resolution — use clean version from 4fb96d3)
+=======
+>>>>>>> 52ef66c (fix: repair pre-existing build errors (smart quotes in cli.ts, truncated TableView/BoardPage from bad merge))
 function formatDate(iso: string) {
   return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
 }
 
 export function TableView({ columns, onIssueClick, searchQuery }: TableViewProps) {
   const [sort, setSort] = useState<{ key: SortKey; dir: SortDir }>({ key: "number", dir: "asc" });
+<<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
   const [statusFilter, setStatusFilter] = useState<string>("active");
@@ -112,6 +116,9 @@ export function TableView({ columns, onIssueClick, searchQuery }: TableViewProps
 =======
   const [statusFilter, setStatusFilter] = useState<string>("active");
 >>>>>>> ab01232 (fix: restore TableView.tsx mangled by conflict resolution — use clean version from 4fb96d3)
+=======
+  const [statusFilter, setStatusFilter] = useState<string>("active");
+>>>>>>> 52ef66c (fix: repair pre-existing build errors (smart quotes in cli.ts, truncated TableView/BoardPage from bad merge))
 
   const allIssues = columns.flatMap((col) =>
     col.issues.map((issue) => ({ ...issue, statusName: col.name }))
@@ -169,10 +176,13 @@ export function TableView({ columns, onIssueClick, searchQuery }: TableViewProps
 <<<<<<< HEAD
           <option value="active">Active only</option>
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 >>>>>>> ab93bc6 (feat: add table view as third board view alongside kanban and graph)
 =======
 >>>>>>> ab01232 (fix: restore TableView.tsx mangled by conflict resolution — use clean version from 4fb96d3)
+=======
+>>>>>>> 52ef66c (fix: repair pre-existing build errors (smart quotes in cli.ts, truncated TableView/BoardPage from bad merge))
           <option value="all">All statuses</option>
           {statusNames.map((s) => <option key={s} value={s}>{s}</option>)}
         </select>
@@ -190,6 +200,7 @@ export function TableView({ columns, onIssueClick, searchQuery }: TableViewProps
                   ["estimate", "Estimate"],
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
                   ["updated", "Updated"],
 =======
                   ["created", "Created"],
@@ -197,6 +208,9 @@ export function TableView({ columns, onIssueClick, searchQuery }: TableViewProps
 =======
                   ["updated", "Updated"],
 >>>>>>> ab01232 (fix: restore TableView.tsx mangled by conflict resolution — use clean version from 4fb96d3)
+=======
+                  ["updated", "Updated"],
+>>>>>>> 52ef66c (fix: repair pre-existing build errors (smart quotes in cli.ts, truncated TableView/BoardPage from bad merge))
                 ] as [SortKey, string][]
               ).map(([key, label]) => (
                 <th
@@ -212,15 +226,19 @@ export function TableView({ columns, onIssueClick, searchQuery }: TableViewProps
                 Tags
               </th>
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 >>>>>>> ab93bc6 (feat: add table view as third board view alongside kanban and graph)
 =======
 >>>>>>> ab01232 (fix: restore TableView.tsx mangled by conflict resolution — use clean version from 4fb96d3)
+=======
+>>>>>>> 52ef66c (fix: repair pre-existing build errors (smart quotes in cli.ts, truncated TableView/BoardPage from bad merge))
             </tr>
           </thead>
           <tbody>
             {sorted.length === 0 && (
               <tr>
+<<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
                 <td colSpan={7} className="text-center text-gray-400 text-sm py-12">No issues found</td>
@@ -230,6 +248,9 @@ export function TableView({ columns, onIssueClick, searchQuery }: TableViewProps
 =======
                 <td colSpan={7} className="text-center text-gray-400 text-sm py-12">No issues found</td>
 >>>>>>> ab01232 (fix: restore TableView.tsx mangled by conflict resolution — use clean version from 4fb96d3)
+=======
+                <td colSpan={7} className="text-center text-gray-400 text-sm py-12">No issues found</td>
+>>>>>>> 52ef66c (fix: repair pre-existing build errors (smart quotes in cli.ts, truncated TableView/BoardPage from bad merge))
               </tr>
             )}
             {sorted.map((issue) => (
