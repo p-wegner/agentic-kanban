@@ -299,6 +299,7 @@ export function BoardPage() {
 =======
   const [priorityFilter, setPriorityFilter] = useState("");
 <<<<<<< HEAD
+<<<<<<< HEAD
 >>>>>>> 53a9dc5 (feat: remove blocked filter from board main page)
 =======
   const [priorityFilter, setPriorityFilter] = useState("");
@@ -339,6 +340,10 @@ export function BoardPage() {
   const [autoMonitor, setAutoMonitor] = useState(false);
   const [monitorStatus, setMonitorStatus] = useState<MonitorStatus | null>(null);
   const [showMonitorPopover, setShowMonitorPopover] = useState(false);
+=======
+  const [autoReview, setAutoReview] = useState(true);
+  const [autoMerge, setAutoMerge] = useState(true);
+>>>>>>> 6de3bcc (fix: restore autoReview/autoMerge useState declarations lost during conflict resolution)
 
   const refetchBoard = useCallback(async (projectId?: string) => {
     const pid = projectId || activeProjectId;
