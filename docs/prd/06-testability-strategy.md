@@ -188,6 +188,52 @@ pnpm --filter @agentic-kanban/server test    # Unit tests (76 tests)
 pnpm test:e2e                                  # E2E tests (101 tests)
 ```
 
+## Current E2E Coverage
+
+### ✅ Covered features
+
+| Feature | Test file(s) |
+|---------|-------------|
+| F-TASK-01: Issues CRUD (create/update/delete, estimate) | `packages/server/src/__tests__/api.test.ts`, `packages/e2e/tests/api/issues.test.ts` |
+| F-TASK-02: Kanban board view, inline create, detail panel, drag-drop | `packages/e2e/tests/ui/board.test.ts` |
+| F-TASK-02: Collapsible archive column group (Done/Cancelled) | `packages/e2e/tests/ui/archive-columns.test.ts` |
+| F-TASK-03: Real-time search, priority filter | `packages/e2e/tests/ui/search.test.ts` |
+| F-TASK-04: Tags CRUD + assignment to issues (API) | `packages/e2e/tests/api/tags.test.ts` |
+| F-WS-01/03: Workspace creation, board workspace summary | `packages/e2e/tests/api/workspaces.test.ts`, `packages/e2e/tests/api/board-workspace-summary.test.ts` |
+| F-WS-02: Agent session lifecycle, launch/stop, output persistence | `packages/e2e/tests/api/workspace-lifecycle.test.ts`, `packages/e2e/tests/api/session-history.test.ts` |
+| F-WS-02: Stream-json output parsing UI | `packages/e2e/tests/output-parser.spec.ts` |
+| F-WS-02: Mock agent profiles (standard/multi-turn/error/delay) | `packages/e2e/tests/api/mock-agent-profiles.test.ts` |
+| F-WS-04: Git branch creation for workspaces | `packages/e2e/tests/api/workspaces.test.ts` |
+| F-WS-05: Workspace deletion | `packages/e2e/tests/api/workspaces.test.ts` |
+| F-REV-02: Diff comments API (create/edit/delete/filter) | `packages/server/src/__tests__/api.test.ts` |
+| F-MCP-03: Agent command configuration via settings | `packages/e2e/tests/api/settings.test.ts` |
+| F-DATA-02: Board WebSocket events (create/update/delete) | `packages/e2e/tests/api/board-events.test.ts`, `packages/e2e/tests/ui/board-realtime.test.ts` |
+| F-DATA-03: Session history/output persistence + UI selector | `packages/e2e/tests/api/session-history.test.ts`, `packages/e2e/tests/ui/session-history.test.ts` |
+| F-UI-01: Register project / Create project UI | `packages/e2e/tests/ui/register-project.test.ts` |
+| F-UI-03: Command palette (Ctrl+K, filter, navigate, execute) | `packages/e2e/tests/ui/command-palette.test.ts` |
+| F-UI-04: Keyboard shortcuts (? overlay, Escape, `/` search) | `packages/e2e/tests/ui/shortcuts.test.ts` |
+| F-UI-09: Settings panel (agent command, mock agent toggle, persist) | `packages/e2e/tests/ui/settings.test.ts`, `packages/e2e/tests/api/settings.test.ts` |
+| F-UI-02: Workspace panel open, diff view, merge | `packages/e2e/tests/ui/workspace.test.ts` |
+| Preferences API (active-project get/set) | `packages/e2e/tests/api/preferences.test.ts` |
+| Projects API (list, create, statuses, branches) | `packages/e2e/tests/api/projects.test.ts` |
+
+### ❌ Not yet covered
+
+| Feature | Ticket |
+|---------|--------|
+| F-TASK-05: Issue dependencies/relationships UI (add/remove dep badges, cycle detection, Analyze Deps) | #163 |
+| F-TASK-04: Tags management via Settings > Tags tab UI (rename, delete, add) | #160 |
+| F-REV-01: Diff viewer UI (file tree, diff lines, unified/split, inline comments) | #164 |
+| F-REV-03: AI code review flow (manual review button, reviewing badge, session output) | #165 |
+| F-UI-07: Worktree Overview panel (branch icon, worktree list, issue link nav) | #158 |
+| F-UI-08: Expandable issue creation panel (full-screen form, plan mode, skip review checkboxes) | #159 |
+| F-UI-10: Graph view (dependency DAG, nodes, zoom, Show completed toggle) | #166 |
+| F-UI-10: Table view (sortable columns, status filter, row click to detail) | #166 |
+| F-UI-11: Board stats bar (status counts, commits counter, Blocked filter toggle) | #167 |
+| F-UI-12: Quick Tasks panel (skill list, custom prompt input) | #157 |
+| F-MCP-04: Agent Skills UI in Settings (skills tab, built-in protection, skill selector in workspace form) | #168 |
+| F-UI-02: Workspace panel chat input / multi-turn interaction (Send/Stop, Ctrl+Enter, turn state) | #162 |
+
 ## Known Test Considerations
 
 - **Windows git output**: Use `.trim()` for file content assertions (CRLF vs LF)
