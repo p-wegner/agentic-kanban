@@ -126,12 +126,24 @@ export interface WorkspaceResponse {
   baseBranch: string | null;
   isDirect: boolean;
   planMode: boolean;
+  includeVisualProof: boolean;
   readyForMerge: boolean;
   agentCommand?: string | null;
   sessionId?: string;
   createdAt: string;
   updatedAt: string;
   closedAt?: string | null;
+}
+
+export interface IssueArtifact {
+  id: string;
+  issueId: string;
+  workspaceId: string | null;
+  type: "image" | "text" | "link" | "video";
+  mimeType: string | null;
+  content: string;
+  caption: string | null;
+  createdAt: string;
 }
 
 export interface WorkspaceWithIssue extends WorkspaceResponse {
