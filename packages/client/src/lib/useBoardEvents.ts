@@ -70,7 +70,7 @@ export interface LiveSessionStats {
 export function useBoardEvents(
   projectId: string | null,
   onBoardChange: (reason: string) => void,
-  onSessionActivity?: (issueId: string, activity: string) => void,
+  onSessionActivity?: (issueId: string, sessionId: string, activity: string) => void,
   onSessionStats?: (issueId: string, stats: LiveSessionStats) => void,
   onSessionTodos?: (issueId: string, todos: TodoItem[]) => void,
   onApprovalRequested?: (req: ApprovalRequest) => void,
@@ -109,7 +109,7 @@ export function useBoardEvents(
         if (msg.type === "board_changed") {
           onBoardChangeRef.current(msg.reason);
         } else if (msg.type === "session_activity") {
-          onSessionActivityRef.current?.(msg.issueId, msg.activity);
+          onSessionActivityRef.current?.(msg.issueId, msg.sessionId, msg.activity);
         } else if (msg.type === "session_stats") {
           onSessionStatsRef.current?.(msg.issueId, { model: msg.model, contextTokens: msg.contextTokens, toolUses: msg.toolUses ?? 0, subagentCount: msg.subagentCount ?? 0 });
         } else if (msg.type === "session_todos") {
