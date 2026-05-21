@@ -20,9 +20,11 @@ test.describe("AI Code Review Flow", () => {
     const todoStatus = statuses.find((s: { name: string }) => s.name === "Todo");
     todoStatusId = todoStatus ? todoStatus.id : statuses[0].id;
 
-    // Enable mock_agent so review sessions use the mock agent
+    // Enable mock_agent and disable auto_review/auto_merge so workspaces reach "idle"
+    // after the agent exits. Without this, the workflow goes active→reviewing→closed
+    // and tests waiting for "idle" would time out.
     await request.put(`${SERVER_URL}/api/preferences/settings`, {
-      data: { mock_agent: "true" },
+      data: { mock_agent: "true", auto_review: "false", auto_merge: "false" },
     });
   });
 
@@ -34,7 +36,7 @@ test.describe("AI Code Review Flow", () => {
       await request.delete(`${SERVER_URL}/api/issues/${id}`);
     }
     await request.put(`${SERVER_URL}/api/preferences/settings`, {
-      data: { mock_agent: "false" },
+      data: { mock_agent: "false", auto_review: "true", auto_merge: "true" },
     });
   });
 
@@ -229,6 +231,48 @@ test.describe("AI Code Review Flow", () => {
 
     // Workspace status badge transitions to "reviewing"
     await expect(page.locator("span", { hasText: "reviewing" })).toBeVisible({ timeout: 10000 });
+  });
+
+  test("auto_review preference persists and is readable", async ({ request }) => {
+    // Verify that auto_review can be toggled via the preferences API
+    const setFalse = await request.put(`${SERVER_URL}/api/preferences/settings`, {
+      data: { auto_review: "false" },
+    });
+    expect(setFalse.status()).toBe(200);
+
+    const readFalse = await request.get(`${SERVER_URL}/api/preferences/settings`);
+    const settingsFalse = await readFalse.json();
+    expect(settingsFalse.auto_review).toBe("false");
+
+    const setTrue = await request.put(`${SERVER_URL}/api/preferences/settings`, {
+      data: { auto_review: "true" },
+    });
+    expect(setTrue.status()).toBe(200);
+
+    const readTrue = await request.get(`${SERVER_URL}/api/preferences/settings`);
+    const settingsTrue = await readTrue.json();
+    expect(settingsTrue.auto_review).toBe("true");
+
+    // Restore to "false" so subsequent tests in this suite can safely wait for "idle"
+    await request.put(`${SERVER_URL}/api/preferences/settings`, {
+      data: { auto_review: "false" },
+    });
+  });
+
+  test("review_auto_fix preference persists and is readable", async ({ request }) => {
+    const setFalse = await request.put(`${SERVER_URL}/api/preferences/settings`, {
+      data: { review_auto_fix: "false" },
+    });
+    expect(setFalse.status()).toBe(200);
+
+    const read = await request.get(`${SERVER_URL}/api/preferences/settings`);
+    const settings = await read.json();
+    expect(settings.review_auto_fix).toBe("false");
+
+    // Restore default
+    await request.put(`${SERVER_URL}/api/preferences/settings`, {
+      data: { review_auto_fix: "true" },
+    });
   });
 
   test("AI Reviewing badge appears on issue card while review session runs", async ({ page, request }) => {
