@@ -710,18 +710,6 @@ export async function startServer(port?: number) {
                   }
                 }
 
-                const nudgeSkill = await db.select({ prompt: agentSkills.prompt }).from(agentSkills)
-                  .where(sql`${agentSkills.name} = 'monitor-nudge'`)
-                  .limit(1);
-                const nudgeMessage = nudgeSkill[0]?.prompt ?? "Please continue with the task. If you are waiting for input, proceed with your best judgment.";
-                const baseUrl = `http://localhost:${serverPort}`;
-                await fetch(`${baseUrl}/api/workspaces/${ws.wsId}/turn`, {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ message: nudgeMessage }),
-                }).catch(() => {});
-                cycleStats.nudged++;
-                logMonitorAction("nudge", ws.wsId, ws.issueId);
                 console.log(`[monitor] Nudged long-running agent in workspace ${ws.wsId}`);
               }
             }

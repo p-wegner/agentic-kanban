@@ -50,6 +50,8 @@ const NODE_H = 64;
 const H_GAP = 48;
 const V_GAP = 16;
 const COL_HEADER_H = 28;
+const SWIMLANE_NODES_PER_ROW = 2;
+const BAND_GAP = 64; // gap between status groups in swimlane layout
 
 function computeLayout(nodes: IssueWithStatus[], edges: Dependency[]): Node[] {
   if (nodes.length === 0) return [];
@@ -127,14 +129,19 @@ function computeLayout(nodes: IssueWithStatus[], edges: Dependency[]): Node[] {
   const orderedStatuses = [...knownOrder, ...extraStatuses];
 
   const result: Node[] = [];
+  let swimlaneX = 40;
   for (let col = 0; col < orderedStatuses.length; col++) {
     const status = orderedStatuses[col];
     const group = byStatus.get(status)!;
-    const x = col * (NODE_W + H_GAP) + 40;
     for (let i = 0; i < group.length; i++) {
-      const y = i * (NODE_H + V_GAP) + COL_HEADER_H + 48;
+      const subCol = i % SWIMLANE_NODES_PER_ROW;
+      const row = Math.floor(i / SWIMLANE_NODES_PER_ROW);
+      const x = swimlaneX + subCol * (NODE_W + H_GAP);
+      const y = row * (NODE_H + V_GAP) + COL_HEADER_H + 48;
       result.push({ id: group[i].id, x, y, issue: group[i] });
     }
+    const subCols = Math.min(group.length, SWIMLANE_NODES_PER_ROW);
+    swimlaneX += subCols * (NODE_W + H_GAP) + BAND_GAP;
   }
   return result;
 }
@@ -151,11 +158,15 @@ function computeColumns(nodes: IssueWithStatus[], edges: Dependency[]) {
     .filter((s) => !STATUS_ORDER.includes(s))
     .sort();
   const orderedStatuses = [...knownOrder, ...extraStatuses];
-  return orderedStatuses.map((status, col) => ({
-    status,
-    count: byStatus.get(status) ?? 0,
-    x: col * (NODE_W + H_GAP) + 40,
-  }));
+  const result = [];
+  let swimlaneX = 40;
+  for (const status of orderedStatuses) {
+    const count = byStatus.get(status) ?? 0;
+    result.push({ status, count, x: swimlaneX });
+    const subCols = Math.min(count, SWIMLANE_NODES_PER_ROW);
+    swimlaneX += subCols * (NODE_W + H_GAP) + BAND_GAP;
+  }
+  return result;
 }
 
 const ARCHIVE_STATUS_NAMES = new Set(["Done", "Cancelled"]);
@@ -237,7 +248,7 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery }: Gra
       const maxY = Math.max(...laid.map((n) => n.y + NODE_H));
       const contentW = maxX - minX + 80;
       const contentH = maxY - minY + 80;
-      const z = Math.min(1, Math.min(cw / contentW, ch / contentH));
+      const z = Math.max(0.1, Math.min(cw / contentW, ch / contentH));
       const px = (cw - contentW * z) / 2 - minX * z + 40 * z;
       const py = (ch - contentH * z) / 2 - minY * z + 40 * z;
       setZoom(z);
@@ -255,7 +266,7 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery }: Gra
     const maxY = Math.max(...nodes.map((n) => n.y + NODE_H));
     const contentW = maxX - minX + 80;
     const contentH = maxY - minY + 80;
-    const z = Math.min(1, Math.min(cw / contentW, ch / contentH));
+    const z = Math.max(0.1, Math.min(cw / contentW, ch / contentH));
     const px = (cw - contentW * z) / 2 - minX * z + 40 * z;
     const py = (ch - contentH * z) / 2 - minY * z + 40 * z;
     setZoom(z);
@@ -325,7 +336,7 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery }: Gra
   const handleWheel = useCallback((e: WheelEvent) => {
     e.preventDefault();
     const factor = e.deltaY < 0 ? 1.1 : 0.9;
-    setZoom((z) => Math.min(3, Math.max(0.2, z * factor)));
+    setZoom((z) => Math.min(3, Math.max(0.1, z * factor)));
   }, []);
 
   useEffect(() => {
@@ -375,7 +386,7 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery }: Gra
           className="w-7 h-7 bg-white border border-gray-300 rounded text-gray-600 hover:bg-gray-100 flex items-center justify-center text-sm font-bold shadow-sm"
         >+</button>
         <button
-          onClick={() => setZoom((z) => Math.max(0.2, z * 0.8))}
+          onClick={() => setZoom((z) => Math.max(0.1, z * 0.8))}
           className="w-7 h-7 bg-white border border-gray-300 rounded text-gray-600 hover:bg-gray-100 flex items-center justify-center text-sm font-bold shadow-sm"
         >−</button>
         <button
@@ -423,12 +434,14 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery }: Gra
           {/* Column headers (status swimlane mode) */}
           {colHeaders.map(({ status, count, x }) => {
             const color = STATUS_COLORS[status] ?? "#6b7280";
+            const subCols = Math.min(count, SWIMLANE_NODES_PER_ROW);
+            const headerW = subCols * NODE_W + (subCols - 1) * H_GAP;
             return (
               <g key={status}>
                 <rect
                   x={x}
                   y={8}
-                  width={NODE_W}
+                  width={headerW}
                   height={COL_HEADER_H}
                   rx={5}
                   fill={color}
@@ -438,7 +451,7 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery }: Gra
                 <text x={x + 12} y={8 + COL_HEADER_H / 2 + 4} fontSize={11} fontWeight={600} fill={color}>
                   {status}
                 </text>
-                <text x={x + NODE_W - 8} y={8 + COL_HEADER_H / 2 + 4} fontSize={10} fill={color} textAnchor="end" opacity={0.7}>
+                <text x={x + headerW - 8} y={8 + COL_HEADER_H / 2 + 4} fontSize={10} fill={color} textAnchor="end" opacity={0.7}>
                   {count}
                 </text>
               </g>
