@@ -151,10 +151,14 @@ const DEFAULT_SETTINGS: Settings = {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
   nudge_auto_start: "false",
   nudge_wip_limit: "5",
 >>>>>>> badbfcc (feat: add nudge auto-start setting to monitor for unblocked Todo items)
+=======
+  nudge_auto_start: "false",
+>>>>>>> 3dd19d7 (fix: add nudge_auto_start to preferences whitelist and DEFAULT_SETTINGS)
   projects_base_path: "",
 =======
   projects_base_dir: "",
