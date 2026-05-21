@@ -142,6 +142,12 @@ When the user references `#N` (e.g., "review #70", "merge #65", "what's the stat
 Get-NetTCPConnection -LocalPort <port> | Select-Object -ExpandProperty OwningProcess | ForEach-Object { Stop-Process -Id $_ -Force }
 ```
 
+**Starting the dev server headlessly:** Use `Start-Job` — it persists after the tool call returns, unlike background Bash (`&`) which exits immediately:
+```powershell
+Start-Job -ScriptBlock { Set-Location C:\andrena\agentic-kanban; pnpm dev 2>&1 } | Out-Null
+```
+Wait ~10s then verify with `Get-NetTCPConnection -State Listen | Where-Object { $_.LocalPort -eq 3001 -or $_.LocalPort -eq 5173 }`.
+
 **Dangling worktree dev servers:** Worktree `pnpm dev` processes (Vite on 5174, 5175, …; Hono on 3002, 3003, …) survive after a worktree session ends. When the main dev server is killed, one of these can grab port 5173/3001 and prevent a clean restart. Before restarting, sweep the full port range:
 ```powershell
 Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue |
