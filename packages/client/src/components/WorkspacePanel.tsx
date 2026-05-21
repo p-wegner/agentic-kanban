@@ -1171,7 +1171,23 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                 )}
 
                 {ws.workingDir && (
-                  <p className="text-xs text-gray-500 truncate">{ws.workingDir}</p>
+                  <div className="flex items-center gap-2 min-w-0">
+                    <p className="text-xs text-gray-500 truncate flex-1">{ws.workingDir}</p>
+                    <button
+                      title="Open in VS Code"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        apiFetch(`/api/workspaces/${ws.id}/open-editor`, { method: "POST" })
+                          .catch((err) => {
+                            const msg = err instanceof Error ? err.message : "Could not open VS Code";
+                            alert(msg);
+                          });
+                      }}
+                      className="flex-shrink-0 text-xs text-blue-500 hover:text-blue-700 font-medium whitespace-nowrap"
+                    >
+                      VS Code
+                    </button>
+                  </div>
                 )}
 
                 <div className="flex gap-3 text-xs text-gray-400">
