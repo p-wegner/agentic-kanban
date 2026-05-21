@@ -74,6 +74,7 @@ export function IssueDetailPanel({
   onNavigateToIssue,
 }: IssueDetailPanelProps) {
   const [editing, setEditing] = useState(false);
+  const [descriptionMode, setDescriptionMode] = useState<"edit" | "preview">("edit");
   const [expanded, setExpanded] = useState(false);
   const [dragPos, setDragPos] = useState<{ x: number; y: number } | null>(null);
   const dragStartRef = useRef<{ mouseX: number; mouseY: number; panelX: number; panelY: number } | null>(null);
@@ -164,6 +165,7 @@ export function IssueDetailPanel({
       if (!window.confirm("You have unsaved changes. Discard?")) return;
     }
     setEditing(false);
+    setDescriptionMode("edit");
     setPreEnhanceSnapshot(null);
     setTitle(issue.title);
     setDescription(issue.description ?? "");
@@ -258,6 +260,7 @@ export function IssueDetailPanel({
       });
       setPastedImages([]);
       setEditing(false);
+      setDescriptionMode("edit");
       // Don't close panel — F1 fix. Parent will re-render with updated data.
     } finally {
       setSaving(false);
@@ -426,10 +429,40 @@ export function IssueDetailPanel({
 
           {/* Description - always visible, editable in edit mode */}
           <div>
-            <label className="text-xs font-medium text-gray-600 block mb-1">
-              Description
-            </label>
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-xs font-medium text-gray-600">
+                Description
+              </label>
+              {editing && (
+                <div className="flex border border-gray-300 rounded overflow-hidden">
+                  <button
+                    type="button"
+                    onClick={() => setDescriptionMode("edit")}
+                    className={`text-xs px-2 py-0.5 ${descriptionMode === "edit" ? "bg-blue-500 text-white" : "bg-white text-gray-600 hover:bg-gray-50"}`}
+                  >
+                    Edit
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDescriptionMode("preview")}
+                    className={`text-xs px-2 py-0.5 border-l border-gray-300 ${descriptionMode === "preview" ? "bg-blue-500 text-white" : "bg-white text-gray-600 hover:bg-gray-50"}`}
+                  >
+                    Preview
+                  </button>
+                </div>
+              )}
+            </div>
             {editing ? (
+              <>
+              {descriptionMode === "preview" ? (
+                description ? (
+                  <div className="markdown-body min-h-[6rem] border border-gray-200 rounded px-2 py-1.5">
+                    <ReactMarkdown>{description}</ReactMarkdown>
+                  </div>
+                ) : (
+                  <p className="text-sm text-gray-400 italic min-h-[6rem] border border-gray-200 rounded px-2 py-1.5">Nothing to preview.</p>
+                )
+              ) : (
               <>
               <textarea
                 value={description}
@@ -469,6 +502,8 @@ export function IssueDetailPanel({
                     </div>
                   ))}
                 </div>
+              )}
+              </>
               )}
               </>
             ) : issue.description ? (
