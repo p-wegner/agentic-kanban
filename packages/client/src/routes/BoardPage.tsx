@@ -48,6 +48,7 @@ const ARCHIVE_STATUS_NAMES = new Set(["Done", "Cancelled"]);
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 type MonitorAction = { at: string; action: "relaunch" | "merge" | "nudge" | "mark_idle" | "mark_dead"; workspaceId: string; issueId: string };
 =======
 type MonitorAction = { at: string; action: "relaunch" | "merge" | "nudge" | "mark_idle" | "mark_dead"; workspaceId: string };
@@ -99,19 +100,24 @@ type MonitorAction = { at: string; action: "relaunch" | "merge" | "nudge" | "mar
 =======
 type MonitorAction = { at: string; action: "relaunch" | "merge" | "nudge" | "mark_idle" | "mark_dead"; workspaceId: string };
 >>>>>>> bf9db15 (feat: add board monitor visualization panel)
+=======
+type MonitorAction = { at: string; action: "relaunch" | "merge" | "nudge" | "mark_idle" | "mark_dead" | "auto_start"; workspaceId: string; issueId: string };
+>>>>>>> 0c15856 (fix: restore BoardPage.tsx from clean base and re-apply monitor enhancements with issueId/auto_start)
 type MonitorStatus = { enabled: boolean; intervalMin: number; active: boolean; lastRun: { at: string; relaunched: number; merged: number; nudged: number } | null; nextRunAt: string | null; recentActions: MonitorAction[] };
 
 const ACTION_LABELS: Record<MonitorAction["action"], { label: string; color: string }> = {
-  relaunch: { label: "Relaunched agent", color: "text-blue-600" },
-  merge:    { label: "Triggered merge",  color: "text-purple-600" },
-  nudge:    { label: "Nudged agent",     color: "text-amber-600" },
-  mark_idle:{ label: "Marked idle",      color: "text-gray-500" },
-  mark_dead:{ label: "Marked dead",      color: "text-red-500" },
+  relaunch:   { label: "Relaunched agent", color: "text-blue-600" },
+  merge:      { label: "Triggered merge",  color: "text-purple-600" },
+  nudge:      { label: "Nudged agent",     color: "text-amber-600" },
+  mark_idle:  { label: "Marked idle",      color: "text-gray-500" },
+  mark_dead:  { label: "Marked dead",      color: "text-red-500" },
+  auto_start: { label: "Auto-started",     color: "text-green-600" },
 };
 
 <<<<<<< HEAD
 function MonitorPopover({ status, onClose, onOpenWorkspace, columns }: { status: MonitorStatus | null; onClose: () => void; onOpenWorkspace: (workspaceId: string, issueId: string) => void; columns: StatusWithIssues[] }) {
   const [now, setNow] = useState(Date.now());
+<<<<<<< HEAD
 <<<<<<< HEAD
 >>>>>>> 1407a7f (feat: add board monitor visualization panel)
 =======
@@ -125,6 +131,8 @@ function MonitorPopover({ status, onClose, onOpenWorkspace, columns }: { status:
 function MonitorPopover({ status, onClose }: { status: MonitorStatus | null; onClose: () => void }) {
   const [now, setNow] = useState(Date.now());
 >>>>>>> bf9db15 (feat: add board monitor visualization panel)
+=======
+>>>>>>> 0c15856 (fix: restore BoardPage.tsx from clean base and re-apply monitor enhancements with issueId/auto_start)
 
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 1000);
@@ -214,6 +222,7 @@ function MonitorPopover({ status, onClose }: { status: MonitorStatus | null; onC
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
               const issue = issueMap.get(a.issueId);
               const label = issue ? `#${issue.issueNumber} ${issue.title}` : a.workspaceId.slice(0, 8);
               return (
@@ -262,6 +271,17 @@ function MonitorPopover({ status, onClose }: { status: MonitorStatus | null; onC
 >>>>>>> f7a87fc (feat: make monitor action log entries clickable workspace links)
 =======
 >>>>>>> bf9db15 (feat: add board monitor visualization panel)
+=======
+              const issue = columns.flatMap(c => c.issues).find(iss => iss.id === a.issueId);
+              return (
+                <div
+                  key={i}
+                  className="flex items-center justify-between gap-2 cursor-pointer hover:bg-gray-50 rounded px-1 -mx-1 py-0.5"
+                  onClick={() => { onOpenWorkspace(a.workspaceId, a.issueId); onClose(); }}
+                >
+                  <span className={`${meta.color} font-medium truncate`}>{meta.label}</span>
+                  {issue && <span className="text-gray-500 truncate shrink" style={{ fontSize: "10px" }}>#{issue.issueNumber}</span>}
+>>>>>>> 0c15856 (fix: restore BoardPage.tsx from clean base and re-apply monitor enhancements with issueId/auto_start)
                   <span className="text-gray-400 shrink-0">{formatAge(a.at)}</span>
                 </div>
               );
@@ -295,6 +315,7 @@ export function BoardPage() {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
   const [blockedFilter, setBlockedFilter] = useState(false);
 =======
   const [priorityFilter, setPriorityFilter] = useState("");
@@ -318,6 +339,8 @@ export function BoardPage() {
 >>>>>>> 4a222f1 (feat: remove blocked filter from board main page)
 =======
 >>>>>>> f903991 (feat: conditionally show AI Reviewed column and fix stats colors)
+=======
+>>>>>>> 0c15856 (fix: restore BoardPage.tsx from clean base and re-apply monitor enhancements with issueId/auto_start)
   const [showSettings, setShowSettings] = useState(false);
   const [showQuickTasks, setShowQuickTasks] = useState(false);
   const [showWorktreeOverview, setShowWorktreeOverview] = useState(false);
@@ -340,10 +363,13 @@ export function BoardPage() {
   const [autoMonitor, setAutoMonitor] = useState(false);
   const [monitorStatus, setMonitorStatus] = useState<MonitorStatus | null>(null);
   const [showMonitorPopover, setShowMonitorPopover] = useState(false);
+<<<<<<< HEAD
 =======
   const [autoReview, setAutoReview] = useState(true);
   const [autoMerge, setAutoMerge] = useState(true);
 >>>>>>> 6de3bcc (fix: restore autoReview/autoMerge useState declarations lost during conflict resolution)
+=======
+>>>>>>> 0c15856 (fix: restore BoardPage.tsx from clean base and re-apply monitor enhancements with issueId/auto_start)
 
   const refetchBoard = useCallback(async (projectId?: string) => {
     const pid = projectId || activeProjectId;
@@ -462,6 +488,7 @@ export function BoardPage() {
         setDynamicColumnScaling(s.dynamic_column_scaling === "true");
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
         setAutoReview(s.auto_review !== "false");
         setAutoMerge(s.auto_merge !== "false");
 =======
@@ -470,6 +497,10 @@ export function BoardPage() {
         setAutoReview(s.auto_review !== "false");
         setAutoMerge(s.auto_merge !== "false");
 >>>>>>> f974211 (feat: conditionally show AI Reviewed column and fix stats colors)
+=======
+        setAutoReview(s.auto_review !== "false");
+        setAutoMerge(s.auto_merge !== "false");
+>>>>>>> 0c15856 (fix: restore BoardPage.tsx from clean base and re-apply monitor enhancements with issueId/auto_start)
         setAutoMonitor(s.auto_monitor === "true");
         apiFetch<MonitorStatus>("/api/internal/monitor-status")
           .then((r) => setMonitorStatus(r))
@@ -717,14 +748,18 @@ export function BoardPage() {
   }
 
   // Filter columns by search query and priority
+<<<<<<< HEAD
 =======
 
 >>>>>>> 34777de (fix: restore filteredColumns useMemo lost during conflict resolution in BoardPage.tsx)
+=======
+>>>>>>> 0c15856 (fix: restore BoardPage.tsx from clean base and re-apply monitor enhancements with issueId/auto_start)
   const filteredColumns = useMemo(
     () =>
       columns.map((col) => ({
         ...col,
         issues: col.issues.filter((issue) => {
+<<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
@@ -754,6 +789,8 @@ export function BoardPage() {
 =======
           if (priorityFilter && issue.priority !== priorityFilter) return false;
 >>>>>>> 34777de (fix: restore filteredColumns useMemo lost during conflict resolution in BoardPage.tsx)
+=======
+>>>>>>> 0c15856 (fix: restore BoardPage.tsx from clean base and re-apply monitor enhancements with issueId/auto_start)
           if (searchQuery) {
             const q = searchQuery.toLowerCase();
             return (
@@ -764,6 +801,7 @@ export function BoardPage() {
           return true;
         }),
       })),
+<<<<<<< HEAD
 <<<<<<< HEAD
     [columns, searchQuery],
 <<<<<<< HEAD
@@ -782,6 +820,9 @@ export function BoardPage() {
 =======
     [columns, searchQuery, priorityFilter],
 >>>>>>> 34777de (fix: restore filteredColumns useMemo lost during conflict resolution in BoardPage.tsx)
+=======
+    [columns, searchQuery],
+>>>>>>> 0c15856 (fix: restore BoardPage.tsx from clean base and re-apply monitor enhancements with issueId/auto_start)
   );
 
   // "AI Reviewed" = tickets needing human attention (manual merge).
@@ -1161,6 +1202,7 @@ export function BoardPage() {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 >>>>>>> 47c4344 (feat: make monitor action log entries clickable workspace links)
 =======
@@ -1189,6 +1231,9 @@ export function BoardPage() {
 =======
               {showMonitorPopover && <MonitorPopover status={monitorStatus} onClose={() => setShowMonitorPopover(false)} />}
 >>>>>>> bf9db15 (feat: add board monitor visualization panel)
+=======
+              {showMonitorPopover && <MonitorPopover status={monitorStatus} onClose={() => setShowMonitorPopover(false)} onOpenWorkspace={(workspaceId, issueId) => { const issue = columns.flatMap(c => c.issues).find(i => i.id === issueId); if (issue) setWorkspaceIssue(issue); setWorkspaceInitial({ workspaceId, sessionId: "" }); }} columns={columns} />}
+>>>>>>> 0c15856 (fix: restore BoardPage.tsx from clean base and re-apply monitor enhancements with issueId/auto_start)
             </div>
           )}
           <div className="flex items-center gap-1 border border-gray-200 rounded-md p-0.5 bg-white shrink-0">
