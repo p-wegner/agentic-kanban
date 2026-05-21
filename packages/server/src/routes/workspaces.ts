@@ -123,10 +123,15 @@ export function createWorkspacesRoute(
         }
       }
 
-      // Build prompt from issue title + description
-      let agentPrompt = issue.title;
-      if (issue.description) {
-        agentPrompt += `\n\n${issue.description}`;
+      // Build prompt: use customPrompt override if provided, otherwise issue title + description
+      let agentPrompt: string;
+      if (body.customPrompt) {
+        agentPrompt = body.customPrompt;
+      } else {
+        agentPrompt = issue.title;
+        if (issue.description) {
+          agentPrompt += `\n\n${issue.description}`;
+        }
       }
       if (includeVisualProof) {
         const serverPort = process.env.KANBAN_SERVER_PORT || process.env.PORT || "3001";
