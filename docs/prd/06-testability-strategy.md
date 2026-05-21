@@ -219,6 +219,8 @@ pnpm test:e2e                                  # E2E tests (101 tests)
 | F-UI-04: Keyboard shortcuts (? overlay, Escape, `/` search) | `packages/e2e/tests/ui/shortcuts.test.ts` |
 | F-UI-09: Settings panel (agent command, mock agent toggle, persist) | `packages/e2e/tests/ui/settings.test.ts`, `packages/e2e/tests/api/settings.test.ts` |
 | F-UI-02: Workspace panel open, diff view, merge | `packages/e2e/tests/ui/workspace.test.ts` |
+| F-UI-02: Workspace panel chat input / multi-turn interaction (Send/Stop, Ctrl+Enter, turn state) | `packages/e2e/tests/ui/workspace-chat.test.ts` |
+| F-UI-08: Expandable issue creation panel (full-screen form, plan mode, skip review checkboxes) | `packages/e2e/tests/ui/expandable-create-panel.test.ts` |
 | Preferences API (active-project get/set) | `packages/e2e/tests/api/preferences.test.ts` |
 | Projects API (list, create, statuses, branches) | `packages/e2e/tests/api/projects.test.ts` |
 
@@ -231,7 +233,6 @@ pnpm test:e2e                                  # E2E tests (101 tests)
 | F-REV-03: AI code review flow (manual review button, reviewing badge, session output) | #165 |
 | F-UI-07: Worktree Overview panel (branch icon, worktree list, issue link nav) | #158 |
 | F-UI-07: Orphaned worktree identification and bulk-clean in Worktrees panel | #172 |
-| F-UI-08: Expandable issue creation panel (full-screen form, plan mode, skip review checkboxes) | #159 |
 | F-UI-10: Graph view (dependency DAG, nodes, zoom, Show completed toggle) | #166 |
 | F-UI-10: Table view (sortable columns, status filter, row click to detail) | #166 |
 | F-UI-11: Board stats bar (status counts, commits counter, Blocked filter toggle) | #167 |
@@ -239,7 +240,6 @@ pnpm test:e2e                                  # E2E tests (101 tests)
 | F-UI-12: Quick Tasks panel (skill list, custom prompt input) | #157 |
 | F-UI-06: In-app toast notifications (create/delete/merge success toasts, auto-dismiss) | #184 |
 | F-UI-03: Review and Merge actions in command palette (workspace-scoped, disabled state) | #182 |
-| F-UI-02: Workspace panel chat input / multi-turn interaction (Send/Stop, Ctrl+Enter, turn state) | #162 |
 | F-UI-02: baseBranch and skill name display in workspace panel | #176 |
 | F-UI-02: Ready for Merge badge in workspace and All Workspaces panels | #173 |
 | F-WS-08: Workspace setup scripts (API persistence, Settings UI, blocking mode toggle) | #183 |
