@@ -6,6 +6,7 @@
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 import { useState } from "react";
 =======
 >>>>>>> b4a5c74 (feat: add All Workspaces aggregate panel (#101))
@@ -29,6 +30,9 @@ import { useState } from "react";
 =======
 >>>>>>> b4a5c74 (feat: add All Workspaces aggregate panel (#101))
 >>>>>>> 862c38b (feat: add All Workspaces aggregate panel (#101))
+=======
+import { useState } from "react";
+>>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
 import { formatRelativeTime } from "../lib/formatRelativeTime.js";
 import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
 
@@ -46,6 +50,7 @@ interface AllWorkspacesPanelProps {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 >>>>>>> 1bb4b1b (feat: add status filter and text search to All Workspaces panel)
 =======
@@ -54,6 +59,8 @@ interface AllWorkspacesPanelProps {
 >>>>>>> 8baaf16 (feat: add status filter and text search to All Workspaces panel)
 =======
 >>>>>>> 862c38b (feat: add All Workspaces aggregate panel (#101))
+=======
+>>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
 type WsStatusFilter = "all" | "active" | "running" | "idle" | "reviewing" | "closed";
 
 const FILTER_CHIPS: { label: string; value: WsStatusFilter }[] = [
@@ -65,6 +72,7 @@ const FILTER_CHIPS: { label: string; value: WsStatusFilter }[] = [
   { label: "Closed", value: "closed" },
 ];
 
+<<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
@@ -87,6 +95,8 @@ const FILTER_CHIPS: { label: string; value: WsStatusFilter }[] = [
 =======
 >>>>>>> b4a5c74 (feat: add All Workspaces aggregate panel (#101))
 >>>>>>> 862c38b (feat: add All Workspaces aggregate panel (#101))
+=======
+>>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
 const WS_STATUS_COLORS: Record<string, string> = {
   active: "bg-green-100 text-green-700",
   reviewing: "bg-purple-100 text-purple-700",
@@ -112,6 +122,7 @@ export function AllWorkspacesPanel({ columns, onClose, onIssueClick }: AllWorksp
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 >>>>>>> 862c38b (feat: add All Workspaces aggregate panel (#101))
   const [statusFilter, setStatusFilter] = useState<WsStatusFilter>("all");
@@ -143,6 +154,11 @@ export function AllWorkspacesPanel({ columns, onClose, onIssueClick }: AllWorksp
 >>>>>>> 8baaf16 (feat: add status filter and text search to All Workspaces panel)
 =======
 >>>>>>> 862c38b (feat: add All Workspaces aggregate panel (#101))
+=======
+  const [statusFilter, setStatusFilter] = useState<WsStatusFilter>("all");
+  const [searchQuery, setSearchQuery] = useState("");
+
+>>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
   const issuesWithWorkspaces: IssueWithStatus[] = columns
     .flatMap((col) => col.issues)
     .filter((issue) => issue.workspaceSummary && issue.workspaceSummary.total > 0);
@@ -159,6 +175,7 @@ export function AllWorkspacesPanel({ columns, onClose, onIssueClick }: AllWorksp
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 >>>>>>> 1bb4b1b (feat: add status filter and text search to All Workspaces panel)
 =======
@@ -167,6 +184,8 @@ export function AllWorkspacesPanel({ columns, onClose, onIssueClick }: AllWorksp
 >>>>>>> 8baaf16 (feat: add status filter and text search to All Workspaces panel)
 =======
 >>>>>>> 862c38b (feat: add All Workspaces aggregate panel (#101))
+=======
+>>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
   const filtered = issuesWithWorkspaces.filter((issue) => {
     const ws = issue.workspaceSummary!;
     const mainStatus = ws.main?.status ?? "";
@@ -193,6 +212,7 @@ export function AllWorkspacesPanel({ columns, onClose, onIssueClick }: AllWorksp
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 >>>>>>> b4a5c74 (feat: add All Workspaces aggregate panel (#101))
 =======
@@ -211,6 +231,8 @@ export function AllWorkspacesPanel({ columns, onClose, onIssueClick }: AllWorksp
 =======
 >>>>>>> b4a5c74 (feat: add All Workspaces aggregate panel (#101))
 >>>>>>> 862c38b (feat: add All Workspaces aggregate panel (#101))
+=======
+>>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
   return (
     <div className="fixed inset-0 z-50 flex justify-end">
       <div className="absolute inset-0 bg-black/20" onClick={onClose} />
@@ -233,6 +255,7 @@ export function AllWorkspacesPanel({ columns, onClose, onIssueClick }: AllWorksp
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 >>>>>>> 1bb4b1b (feat: add status filter and text search to All Workspaces panel)
 =======
@@ -241,11 +264,14 @@ export function AllWorkspacesPanel({ columns, onClose, onIssueClick }: AllWorksp
 >>>>>>> 8baaf16 (feat: add status filter and text search to All Workspaces panel)
 =======
 >>>>>>> 862c38b (feat: add All Workspaces aggregate panel (#101))
+=======
+>>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
             <span className="text-sm text-gray-500">
               {filtered.length === issuesWithWorkspaces.length
                 ? `(${issuesWithWorkspaces.length})`
                 : `${filtered.length} of ${issuesWithWorkspaces.length}`}
             </span>
+<<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
@@ -273,6 +299,8 @@ export function AllWorkspacesPanel({ columns, onClose, onIssueClick }: AllWorksp
             <span className="text-sm text-gray-500">({issuesWithWorkspaces.length})</span>
 >>>>>>> b4a5c74 (feat: add All Workspaces aggregate panel (#101))
 >>>>>>> 862c38b (feat: add All Workspaces aggregate panel (#101))
+=======
+>>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
             {activeCount > 0 && (
               <span className="text-xs bg-green-100 text-green-700 px-1.5 py-0.5 rounded-full font-medium">
                 {activeCount} active
@@ -295,6 +323,7 @@ export function AllWorkspacesPanel({ columns, onClose, onIssueClick }: AllWorksp
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 >>>>>>> 1bb4b1b (feat: add status filter and text search to All Workspaces panel)
 =======
@@ -303,6 +332,8 @@ export function AllWorkspacesPanel({ columns, onClose, onIssueClick }: AllWorksp
 >>>>>>> 8baaf16 (feat: add status filter and text search to All Workspaces panel)
 =======
 >>>>>>> 862c38b (feat: add All Workspaces aggregate panel (#101))
+=======
+>>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
         {/* Filters */}
         <div className="px-4 py-2 border-b border-gray-100 space-y-2">
           {/* Text search */}
@@ -345,6 +376,7 @@ export function AllWorkspacesPanel({ columns, onClose, onIssueClick }: AllWorksp
           ) : (
             <div className="divide-y divide-gray-100">
               {filtered.map((issue) => {
+<<<<<<< HEAD
 =======
 <<<<<<< HEAD
 =======
@@ -420,6 +452,8 @@ export function AllWorkspacesPanel({ columns, onClose, onIssueClick }: AllWorksp
               {issuesWithWorkspaces.map((issue) => {
 >>>>>>> b4a5c74 (feat: add All Workspaces aggregate panel (#101))
 >>>>>>> 862c38b (feat: add All Workspaces aggregate panel (#101))
+=======
+>>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
                 const ws = issue.workspaceSummary!;
                 const main = ws.main;
 
