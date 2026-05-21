@@ -212,6 +212,8 @@ pnpm test:e2e                                  # E2E tests (101 tests)
 | F-MCP-03: Agent command configuration via settings | `packages/e2e/tests/api/settings.test.ts` |
 | F-MCP-04: Agent Skills UI in Settings (built-in protection, custom skill CRUD, edit/delete) | `packages/e2e/tests/ui/agent-skills.test.ts` |
 | F-MCP-04: Skill selector in inline issue create form (Start Workspace checkbox) | `packages/e2e/tests/ui/agent-skills.test.ts` |
+| F-UI-10: Graph view (dependency DAG, nodes, zoom, Show completed toggle) | `packages/e2e/tests/ui/graph-table-views.test.ts` |
+| F-UI-10: Table view (sortable columns, status filter, row click to detail) | `packages/e2e/tests/ui/graph-table-views.test.ts` |
 | F-DATA-02: Board WebSocket events (create/update/delete) | `packages/e2e/tests/api/board-events.test.ts`, `packages/e2e/tests/ui/board-realtime.test.ts` |
 | F-DATA-03: Session history/output persistence + UI selector | `packages/e2e/tests/api/session-history.test.ts`, `packages/e2e/tests/ui/session-history.test.ts` |
 | F-UI-01: Register project / Create project UI | `packages/e2e/tests/ui/register-project.test.ts` |
@@ -233,8 +235,6 @@ pnpm test:e2e                                  # E2E tests (101 tests)
 | F-REV-03: AI code review flow (manual review button, reviewing badge, session output) | #165 |
 | F-UI-07: Worktree Overview panel (branch icon, worktree list, issue link nav) | #158 |
 | F-UI-07: Orphaned worktree identification and bulk-clean in Worktrees panel | #172 |
-| F-UI-10: Graph view (dependency DAG, nodes, zoom, Show completed toggle) | #166 |
-| F-UI-10: Table view (sortable columns, status filter, row click to detail) | #166 |
 | F-UI-11: Board stats bar (status counts, commits counter, Blocked filter toggle) | #167 |
 | F-UI-11: Priority-based sort for board columns | #170 |
 | F-UI-12: Quick Tasks panel (skill list, custom prompt input) | #157 |
