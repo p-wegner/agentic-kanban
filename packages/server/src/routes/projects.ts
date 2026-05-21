@@ -4,31 +4,7 @@ import { projects, projectStatuses, issues, workspaces, sessions, sessionMessage
 import { eq, inArray, sql, and } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { execFile, execSync } from "node:child_process";
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-import { existsSync, mkdirSync, readdirSync } from "node:fs";
-=======
-import { existsSync, readdirSync, writeFileSync } from "node:fs";
->>>>>>> f36a871 (feat: add optional README and .gitignore template to project creation dialog)
-=======
-import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
->>>>>>> 8c8ad15 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
-=======
-import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
->>>>>>> 7c81e83 (fix: restore name validation and dir cleanup on git init failure)
-=======
-import { existsSync, mkdirSync, readdirSync } from "node:fs";
->>>>>>> 41a314b (feat: implement create project flow (WIP - UI + backend route))
-=======
-import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
->>>>>>> 088aead (WIP: add rmSync and writeFileSync imports to projects.ts)
-=======
 import { existsSync, mkdirSync, readdirSync, writeFileSync, rmSync } from "node:fs";
->>>>>>> 9e9ee57 (fix: add missing fs imports and unify projects_base_path key name)
 import { detectRepoInfo } from "../services/git-info.service.js";
 import { listBranches, listWorktrees, getDiffShortstat, removeWorktree, detectConflicts } from "../services/git.service.js";
 import type { Database } from "../db/index.js";
@@ -217,22 +193,12 @@ export function createProjectsRoute(database: Database = db) {
     if (body.path && body.path.trim()) {
       targetPath = resolve(body.path.trim());
     } else {
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> 7695053 (feat: validate create-project edge cases (WIP))
       // Validate folder name when deriving path from name
       if (/[/\\<>:"|?*\x00]/.test(name)) {
         return c.json({ error: 'Project name contains invalid characters. Avoid: / \\ < > : " | ? *' }, 400);
       }
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-      // Read projects_base_folder from preferences
-=======
       // Read projects_base_path from preferences
->>>>>>> 9e9ee57 (fix: add missing fs imports and unify projects_base_path key name)
       const baseDirRows = await database
         .select({ value: preferences.value })
         .from(preferences)
@@ -262,55 +228,11 @@ export function createProjectsRoute(database: Database = db) {
       return c.json({ error: `Failed to create directory: ${err instanceof Error ? err.message : String(err)}` }, 400);
     }
 
-=======
-=======
->>>>>>> 7695053 (feat: validate create-project edge cases (WIP))
-      // Read projects_base_dir from preferences
-=======
-      // Read projects_base_folder from preferences
->>>>>>> a19889f (fix: resolve preference key mismatch, path traversal in skill names, and cleanup bugs)
-      const baseDirRows = await database
-        .select({ value: preferences.value })
-        .from(preferences)
-        .where(eq(preferences.key, "projects_base_folder"))
-        .limit(1);
-      const baseDir = baseDirRows[0]?.value?.trim();
-      if (!baseDir) {
-        return c.json({ error: "No base directory configured. Set 'Projects base directory' in Settings › Project, or provide an explicit path." }, 400);
-      }
-      targetPath = resolve(join(baseDir, name));
-
-      // Guard against path traversal (e.g. name = "../other")
-      const resolvedBase = resolve(baseDir);
-      if (!targetPath.startsWith(resolvedBase + sep) && targetPath !== resolvedBase) {
-        return c.json({ error: `Invalid project name: "${name}" would escape the base directory.` }, 400);
-      }
-    }
-
-    // Error if the directory already exists — use the Import tab for existing repos
-    if (existsSync(targetPath)) {
-      return c.json({ error: `Directory already exists: ${targetPath}. To use an existing directory, use "Import existing" instead.` }, 409);
-    }
-
-    try {
-      mkdirSync(targetPath, { recursive: true });
-    } catch (err) {
-      return c.json({ error: `Failed to create directory: ${err instanceof Error ? err.message : String(err)}` }, 400);
-    }
-
->>>>>>> 41a314b (feat: implement create project flow (WIP - UI + backend route))
     // Run git init
     try {
       execSync("git init", { cwd: targetPath, stdio: "pipe" });
     } catch (err: any) {
-<<<<<<< HEAD
-<<<<<<< HEAD
       try { rmSync(targetPath, { recursive: true, force: true }); } catch {}
-=======
->>>>>>> 41a314b (feat: implement create project flow (WIP - UI + backend route))
-=======
-      try { rmSync(targetPath, { recursive: true, force: true }); } catch {}
->>>>>>> f6d1a48 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
       return c.json({ error: `git init failed: ${err.stderr ? String(err.stderr).trim() : String(err)}` }, 400);
     }
 
