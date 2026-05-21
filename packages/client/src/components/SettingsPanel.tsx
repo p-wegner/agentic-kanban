@@ -587,6 +587,7 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
   const [newRunInterval, setNewRunInterval] = useState(60);
   const [savingRun, setSavingRun] = useState(false);
   const [triggeringRun, setTriggeringRun] = useState<string | null>(null);
+  const [monitorRunning, setMonitorRunning] = useState(false);
 
   const disabledTools = new Set((settings.disabled_mcp_tools || "").split(",").filter(Boolean));
   function isToolDisabled(name: string) {
@@ -760,6 +761,18 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
+
+  async function handleMonitorRunNow() {
+    setMonitorRunning(true);
+    try {
+      await apiFetch("/api/internal/monitor-run", { method: "POST" });
+      showToast("Monitor cycle triggered", "success");
+    } catch {
+      showToast("Failed to trigger monitor", "error");
+    } finally {
+      setMonitorRunning(false);
+    }
+  }
 
   async function handleSave() {
     setSaving(true);
@@ -961,6 +974,29 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                     label="Learning step before merge (blocking)"
                     hint="When enabled, runs an agent session before merging that reads the worktree's session transcripts and updates docs and Claude hooks with extracted insights. Blocks merge until complete (up to 3 minutes)."
                   />
+
+                  <div className="pt-2 border-t border-gray-100 space-y-2">
+                    <div className="text-xs font-medium text-gray-600">Board Monitoring</div>
+                    <Toggle
+                      checked={settings.auto_monitor === "true"}
+                      onChange={setBool("auto_monitor")}
+                      label="Auto-monitor"
+                      hint="Periodically checks workspaces and relaunches idle agents, triggers merges, and auto-starts unblocked issues."
+                    />
+                    <button
+                      onClick={handleMonitorRunNow}
+                      disabled={monitorRunning}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-green-600 text-white hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                      title="Run a monitor cycle now and restart the interval timer"
+                    >
+                      {monitorRunning ? (
+                        <svg className="w-3 h-3 animate-spin" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>
+                      ) : (
+                        <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path strokeLinecap="round" strokeLinejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 010 1.972l-11.54 6.347a1.125 1.125 0 01-1.667-.986V5.653z"/></svg>
+                      )}
+                      {monitorRunning ? "Running…" : "Run monitor now"}
+                    </button>
+                  </div>
 
                 </>
               )}
