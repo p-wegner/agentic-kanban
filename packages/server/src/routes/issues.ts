@@ -16,12 +16,17 @@ import { buildSpawnEnv } from "../services/agent-provider.js";
 export function createIssuesRoute(database: Database = db, options?: { boardEvents?: BoardEvents }) {
   const router = new Hono();
 
-  // GET /api/issues?projectId=...
+  // GET /api/issues?projectId=...&issueNumber=N
   router.get("/", async (c) => {
     const projectId = c.req.query("projectId");
     if (!projectId) {
       return c.json({ error: "projectId query parameter required" }, 400);
     }
+
+    const issueNumberParam = c.req.query("issueNumber");
+    const whereClause = issueNumberParam
+      ? and(eq(issues.projectId, projectId), eq(issues.issueNumber, Number(issueNumberParam)))
+      : eq(issues.projectId, projectId);
 
     const result = await database
       .select({
@@ -42,7 +47,7 @@ export function createIssuesRoute(database: Database = db, options?: { boardEven
       })
       .from(issues)
       .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
-      .where(eq(issues.projectId, projectId))
+      .where(whereClause)
       .orderBy(issues.sortOrder);
 
     return c.json(result);

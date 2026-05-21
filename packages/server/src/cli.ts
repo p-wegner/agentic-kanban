@@ -679,6 +679,74 @@ Examples:
   });
 
 issueCmd
+  .command("get <issue-number>")
+  .description("Show full details of an issue by its number.\n\nDisplays title, description, priority, status, and workspace info for an issue in the active project.")
+  .option("--json", "Output raw JSON instead of formatted text")
+  .addHelpText("after", `
+Examples:
+  $ agentic-kanban issue get 42
+  $ agentic-kanban issue get 42 --json
+`)
+  .action(async (issueNumberArg: string, options: { json?: boolean }) => {
+    try {
+      await runMigrations();
+      const projectId = await getActiveProjectId();
+
+      const num = Number(issueNumberArg);
+      if (!Number.isInteger(num) || num <= 0) {
+        console.error(`Invalid issue number: ${issueNumberArg}`);
+        process.exit(1);
+      }
+
+      const issueRows = await db
+        .select({
+          id: issues.id,
+          issueNumber: issues.issueNumber,
+          title: issues.title,
+          description: issues.description,
+          priority: issues.priority,
+          statusName: projectStatuses.name,
+          createdAt: issues.createdAt,
+          updatedAt: issues.updatedAt,
+        })
+        .from(issues)
+        .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
+        .where(and(eq(issues.issueNumber, num), eq(issues.projectId, projectId)))
+        .limit(1);
+
+      if (issueRows.length === 0) {
+        console.error(`Issue #${num} not found in active project.`);
+        process.exit(1);
+      }
+
+      const issue = issueRows[0];
+
+      if (options.json) {
+        console.log(JSON.stringify(issue, null, 2));
+        process.exit(0);
+      }
+
+      console.log(`\n  #${issue.issueNumber} ${issue.title}`);
+      console.log(`  Status:   ${issue.statusName}`);
+      console.log(`  Priority: ${issue.priority}`);
+      console.log(`  ID:       ${issue.id}`);
+      if (issue.description) {
+        console.log(`\n  Description:`);
+        for (const line of issue.description.split("\n")) {
+          console.log(`    ${line}`);
+        }
+      } else {
+        console.log(`\n  Description: (none)`);
+      }
+      console.log("");
+      process.exit(0);
+    } catch (err) {
+      console.error("Error:", err instanceof Error ? err.message : String(err));
+      process.exit(1);
+    }
+  });
+
+issueCmd
   .command("create <title>")
   .description("Create a new issue in the active project.\n\nIssue numbers are auto-incrementing per project. The issue is placed in the first project status (typically Todo) unless overridden with -s.")
   .option("-d, --description <description>", "Issue description (markdown supported)")
