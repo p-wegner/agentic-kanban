@@ -170,8 +170,8 @@ function computeColumns(nodes: IssueWithStatus[], edges: Dependency[]) {
 }
 
 const ARCHIVE_STATUS_NAMES = new Set(["Done", "Cancelled"]);
-// Statuses hidden by default due to potentially large volume
-const DEFAULT_HIDDEN_STATUSES = new Set(["Backlog"]);
+// Statuses hidden by default — Backlog can have many items; Done/Cancelled are archive
+const DEFAULT_HIDDEN_STATUSES = new Set(["Backlog", "Done", "Cancelled"]);
 
 interface GraphViewProps {
   columns: StatusWithIssues[];
@@ -183,7 +183,6 @@ interface GraphViewProps {
 export function GraphView({ columns, projectId, onIssueClick, searchQuery }: GraphViewProps) {
   const [graphData, setGraphData] = useState<GraphData | null>(null);
   const [loading, setLoading] = useState(true);
-  const [showArchived, setShowArchived] = useState(false);
   const [hiddenStatuses, setHiddenStatuses] = useState<Set<string>>(new Set(DEFAULT_HIDDEN_STATUSES));
   const [filterOpen, setFilterOpen] = useState(false);
   const filterRef = useRef<HTMLDivElement>(null);
@@ -234,11 +233,7 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery }: Gra
 
   useLayoutEffect(() => {
     if (!graphData) return;
-    const visibleNodes = graphData.nodes.filter((n) => {
-      if (!showArchived && ARCHIVE_STATUS_NAMES.has(n.statusName)) return false;
-      if (hiddenStatuses.has(n.statusName)) return false;
-      return true;
-    });
+    const visibleNodes = graphData.nodes.filter((n) => !hiddenStatuses.has(n.statusName));
     const filtered = searchQuery
       ? visibleNodes.filter(
           (n) =>
@@ -272,7 +267,7 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery }: Gra
       setZoom(z);
       setPan({ x: px, y: py });
     });
-  }, [graphData, searchQuery, showArchived, hiddenStatuses]);
+  }, [graphData, searchQuery, hiddenStatuses]);
 
   const fitView = useCallback(() => {
     if (nodes.length === 0 || !containerRef.current) return;
@@ -386,16 +381,6 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery }: Gra
     <div ref={containerRef} className="relative h-full w-full overflow-hidden bg-gray-50 select-none">
       {/* Top-left controls */}
       <div className="absolute top-3 left-3 z-10 flex items-start gap-2">
-        <button
-          onClick={() => setShowArchived((v) => !v)}
-          className={`px-2.5 py-1 text-xs rounded border shadow-sm font-medium transition-colors ${
-            showArchived
-              ? "bg-blue-50 border-blue-300 text-blue-700"
-              : "bg-white border-gray-300 text-gray-600 hover:bg-gray-50"
-          }`}
-        >
-          {showArchived ? "Hide completed" : "Show completed"}
-        </button>
         {/* Status filter */}
         <div className="relative" ref={filterRef}>
           <button
@@ -409,7 +394,7 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery }: Gra
             <svg viewBox="0 0 16 16" className="w-3 h-3" fill="currentColor">
               <path d="M1.5 3h13l-5 6v4l-3-1.5V9L1.5 3z" />
             </svg>
-            Filter
+            Status
             {hiddenStatuses.size > 0 && (
               <span className="bg-amber-400 text-white rounded-full w-4 h-4 flex items-center justify-center text-[9px] font-bold leading-none">
                 {hiddenStatuses.size}
@@ -420,39 +405,61 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery }: Gra
             const allStatuses = [...new Set(graphData.nodes.map((n) => n.statusName))];
             const knownOrder = STATUS_ORDER.filter((s) => allStatuses.includes(s));
             const extra = allStatuses.filter((s) => !STATUS_ORDER.includes(s)).sort();
-            const ordered = [...knownOrder, ...extra];
+            // Backlog (and any unknown statuses) first, then workflow statuses, then archive
+            const backlogLike = extra;
+            const workflowStatuses = knownOrder.filter((s) => !ARCHIVE_STATUS_NAMES.has(s));
+            const archiveStatuses = knownOrder.filter((s) => ARCHIVE_STATUS_NAMES.has(s));
+
+            const renderStatus = (status: string) => {
+              const count = graphData.nodes.filter((n) => n.statusName === status).length;
+              const isHidden = hiddenStatuses.has(status);
+              const color = STATUS_COLORS[status] ?? "#6b7280";
+              const isDefaultHidden = DEFAULT_HIDDEN_STATUSES.has(status);
+              return (
+                <label key={status} className="flex items-center gap-2 px-1 py-0.5 rounded hover:bg-gray-50 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={!isHidden}
+                    onChange={() => {
+                      setHiddenStatuses((prev) => {
+                        const next = new Set(prev);
+                        if (next.has(status)) next.delete(status);
+                        else next.add(status);
+                        return next;
+                      });
+                    }}
+                    className="w-3 h-3 accent-blue-500"
+                  />
+                  <span className="w-2 h-2 rounded-full shrink-0" style={{ background: color }} />
+                  <span className="text-xs text-gray-700 flex-1">{status}</span>
+                  <span className="text-[10px] text-gray-400">{count}</span>
+                  {isDefaultHidden && (
+                    <span className="text-[9px] text-amber-500 font-medium" title="Hidden by default">off</span>
+                  )}
+                </label>
+              );
+            };
+
             return (
-              <div className="absolute top-full left-0 mt-1 bg-white border border-gray-200 rounded-md shadow-lg p-2 min-w-[160px] space-y-0.5">
-                <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide px-1 mb-1">Visible statuses</div>
-                {ordered.map((status) => {
-                  const count = graphData.nodes.filter((n) => n.statusName === status).length;
-                  const isHidden = hiddenStatuses.has(status);
-                  const color = STATUS_COLORS[status] ?? "#6b7280";
-                  const isDefaultHidden = DEFAULT_HIDDEN_STATUSES.has(status);
-                  return (
-                    <label key={status} className="flex items-center gap-2 px-1 py-0.5 rounded hover:bg-gray-50 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={!isHidden}
-                        onChange={() => {
-                          setHiddenStatuses((prev) => {
-                            const next = new Set(prev);
-                            if (next.has(status)) next.delete(status);
-                            else next.add(status);
-                            return next;
-                          });
-                        }}
-                        className="w-3 h-3 accent-blue-500"
-                      />
-                      <span className="w-2 h-2 rounded-full shrink-0" style={{ background: color }} />
-                      <span className="text-xs text-gray-700 flex-1">{status}</span>
-                      <span className="text-[10px] text-gray-400">{count}</span>
-                      {isDefaultHidden && (
-                        <span className="text-[9px] text-amber-500 font-medium" title="Hidden by default (large)">⚡</span>
-                      )}
-                    </label>
-                  );
-                })}
+              <div className="absolute top-full left-0 mt-1 bg-white border border-gray-200 rounded-md shadow-lg p-2 min-w-[172px]">
+                {backlogLike.length > 0 && (
+                  <>
+                    <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide px-1 mb-0.5">Backlog</div>
+                    <div className="space-y-0.5 mb-1">{backlogLike.map(renderStatus)}</div>
+                  </>
+                )}
+                {workflowStatuses.length > 0 && (
+                  <>
+                    <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide px-1 mb-0.5">Active</div>
+                    <div className="space-y-0.5 mb-1">{workflowStatuses.map(renderStatus)}</div>
+                  </>
+                )}
+                {archiveStatuses.length > 0 && (
+                  <>
+                    <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide px-1 mb-0.5">Archive</div>
+                    <div className="space-y-0.5 mb-1">{archiveStatuses.map(renderStatus)}</div>
+                  </>
+                )}
                 <div className="border-t border-gray-100 mt-1 pt-1 flex gap-1">
                   <button
                     onClick={() => setHiddenStatuses(new Set())}
