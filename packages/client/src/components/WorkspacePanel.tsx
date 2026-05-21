@@ -334,6 +334,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
       setActiveSession(result.sessionId);
       setLastPrompt(prompt.trim());
       setPrompt("");
+      setSelectedHistoryId(null);
       setViewMode("output");
       await fetchWorkspaces();
     } catch (err) {
@@ -359,6 +360,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
       setPrompt("");
       if (result.resumed && result.sessionId) {
         setCompletedMessages([]);
+        setSelectedHistoryId(null);
         setActiveSession(result.sessionId);
         setViewMode("output");
       }
@@ -752,6 +754,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
               onCreated={(result) => {
                 setShowCreate(false);
                 setCompletedMessages([]);
+                setSelectedHistoryId(null);
                 if (result.sessionId) {
                   setSelectedWorkspace(result.id);
                   setActiveSession(result.sessionId);
