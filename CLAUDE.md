@@ -156,7 +156,7 @@ for ($i = 0; $i -lt 25; $i++) {
 ```
 Do NOT use Bash `&` — creates a fully detached orphan that survives all job/port cleanup.
 
-**Stopping the dev server (verified):** Kill by process signature with `taskkill /F /T` (kills entire subtree). Port sweep alone is not enough — the orchestrator respawns Vite. `Get-Job | Stop-Job` is also not enough — jobs from previous PS sessions aren't visible:
+**Stopping the dev server (verified):** Kill by process signature with `taskkill /F /T` (kills entire subtree). Also kill orphaned tsx server processes — they hold the SQLite DB open and cause the next server start to hang on all API calls (symptom: `/health` responds but `/api/projects` times out):
 ```powershell
 Get-CimInstance Win32_Process |
     Where-Object { $_.Name -eq "node.exe" -and $_.CommandLine -like "*dev.mjs*" } |
@@ -164,6 +164,9 @@ Get-CimInstance Win32_Process |
 Get-CimInstance Win32_Process |
     Where-Object { $_.CommandLine -like "*vite/bin/vite.js*" } |
     ForEach-Object { taskkill /F /T /PID $_.ProcessId 2>$null }
+Get-CimInstance Win32_Process |
+    Where-Object { $_.Name -eq "node.exe" -and $_.CommandLine -like "*agentic-kanban*tsx*src/index*" } |
+    ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 Get-Job | Stop-Job -ErrorAction SilentlyContinue; Get-Job | Remove-Job -ErrorAction SilentlyContinue
 ```
 
