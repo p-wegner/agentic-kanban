@@ -109,6 +109,16 @@ import type { Database } from "../db/index.js";
 import { resolve, sep, join } from "node:path";
 import { homedir } from "node:os";
 
+// Limit concurrent background git operations to avoid hammering the filesystem
+let _bgGitRunning = 0;
+const BG_GIT_CONCURRENCY = 5;
+
+function runBgGit(fn: () => Promise<void>): void {
+  if (_bgGitRunning >= BG_GIT_CONCURRENCY) return; // drop if saturated
+  _bgGitRunning++;
+  fn().finally(() => { _bgGitRunning--; });
+}
+
 const GITIGNORE_TEMPLATES: Record<string, string> = {
   node: `node_modules/
 dist/
@@ -1302,12 +1312,17 @@ ${contextParts.join("\n")}`;
           conflictCacheHasConflicts: workspaces.conflictCacheHasConflicts,
           conflictCacheFiles: workspaces.conflictCacheFiles,
           readyForMerge: workspaces.readyForMerge,
+          diffStatCacheCheckedAt: workspaces.diffStatCacheCheckedAt,
+          diffStatCacheFilesChanged: workspaces.diffStatCacheFilesChanged,
+          diffStatCacheInsertions: workspaces.diffStatCacheInsertions,
+          diffStatCacheDeletions: workspaces.diffStatCacheDeletions,
         })
         .from(workspaces)
         .where(inArray(workspaces.issueId, issueIds));
 
       const CONFLICT_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
-      const mainWorkspaceMap = new Map<string, { id: string; branch: string; status: string; updatedAt: string; claudeProfile: string | null; agentCommand: string | null; workingDir: string | null; baseBranch: string | null; isDirect: boolean; conflictCacheCheckedAt: string | null; conflictCacheHasConflicts: boolean | null; conflictCacheFiles: string | null; readyForMerge: boolean }>();
+      const DIFF_STAT_CACHE_TTL_MS = 30 * 1000; // 30 seconds
+      const mainWorkspaceMap = new Map<string, { id: string; branch: string; status: string; updatedAt: string; claudeProfile: string | null; agentCommand: string | null; workingDir: string | null; baseBranch: string | null; isDirect: boolean; conflictCacheCheckedAt: string | null; conflictCacheHasConflicts: boolean | null; conflictCacheFiles: string | null; readyForMerge: boolean; diffStatCacheCheckedAt: string | null; diffStatCacheFilesChanged: number | null; diffStatCacheInsertions: number | null; diffStatCacheDeletions: number | null }>();
       const statusPriority = (s: string) => s === "active" || s === "reviewing" ? 0 : s === "idle" ? 1 : 2;
       for (const row of wsDetailRows) {
         const existing = mainWorkspaceMap.get(row.issueId);
@@ -1322,9 +1337,8 @@ ${contextParts.join("\n")}`;
         }
       }
 
-      // Compute diff stats for each main workspace
+      // Compute diff stats for each main workspace (stale-while-revalidate)
       const defaultBranch = projectRows[0].defaultBranch;
-      const diffStatsPromises: Promise<void>[] = [];
 
       for (const [issueId, summary] of workspaceSummaryMap) {
         const mainWs = mainWorkspaceMap.get(issueId);
@@ -1334,15 +1348,42 @@ ${contextParts.join("\n")}`;
           if (mainWs.workingDir && mainWs.status !== "closed") {
             const diffRef = mainWs.isDirect ? "HEAD" : (mainWs.baseBranch || defaultBranch);
             const mainRef = summary.main;
-            diffStatsPromises.push(
-              getDiffShortstat(mainWs.workingDir, diffRef)
-                .then(stats => {
-                  if (stats.filesChanged > 0 || stats.insertions > 0 || stats.deletions > 0) {
-                    mainRef.diffStats = stats;
-                  }
-                })
-                .catch(() => {})
-            );
+
+            // Serve cached diff stats immediately (stale-while-revalidate)
+            if (mainWs.diffStatCacheCheckedAt && mainWs.diffStatCacheFilesChanged !== null) {
+              if (mainWs.diffStatCacheFilesChanged > 0 || (mainWs.diffStatCacheInsertions ?? 0) > 0 || (mainWs.diffStatCacheDeletions ?? 0) > 0) {
+                mainRef.diffStats = {
+                  filesChanged: mainWs.diffStatCacheFilesChanged,
+                  insertions: mainWs.diffStatCacheInsertions ?? 0,
+                  deletions: mainWs.diffStatCacheDeletions ?? 0,
+                };
+              }
+            }
+
+            // Recompute in background if cache is stale or missing
+            const cacheAge = mainWs.diffStatCacheCheckedAt
+              ? Date.now() - new Date(mainWs.diffStatCacheCheckedAt).getTime()
+              : Infinity;
+            if (cacheAge >= DIFF_STAT_CACHE_TTL_MS) {
+              const wsId = mainWs.id;
+              const workingDir = mainWs.workingDir;
+              runBgGit(() =>
+                getDiffShortstat(workingDir, diffRef)
+                  .then(stats => {
+                    database
+                      .update(workspaces)
+                      .set({
+                        diffStatCacheCheckedAt: new Date().toISOString(),
+                        diffStatCacheFilesChanged: stats.filesChanged,
+                        diffStatCacheInsertions: stats.insertions,
+                        diffStatCacheDeletions: stats.deletions,
+                      })
+                      .where(eq(workspaces.id, wsId))
+                      .catch(() => {});
+                  })
+                  .catch(() => {})
+              );
+            }
             // Conflict detection for non-direct idle workspaces — stale-while-revalidate
             if (!mainWs.isDirect && mainWs.status === "idle") {
               const cacheAge = mainWs.conflictCacheCheckedAt
@@ -1383,28 +1424,26 @@ ${contextParts.join("\n")}`;
                 const wsId = mainWs.id;
                 const baseBranch = mainWs.baseBranch || defaultBranch;
                 const workingDir = mainWs.workingDir;
-                // Fire-and-forget background refresh
-                detectConflicts(workingDir, baseBranch)
-                  .then(result => {
-                    database
-                      .update(workspaces)
-                      .set({
-                        conflictCacheCheckedAt: new Date().toISOString(),
-                        conflictCacheHasConflicts: result.hasConflicts,
-                        conflictCacheFiles: JSON.stringify(result.conflictingFiles),
-                      })
-                      .where(eq(workspaces.id, wsId))
-                      .catch(() => {});
-                  })
-                  .catch(() => {});
+                // Fire-and-forget background refresh (rate-limited)
+                runBgGit(() =>
+                  detectConflicts(workingDir, baseBranch)
+                    .then(result => {
+                      database
+                        .update(workspaces)
+                        .set({
+                          conflictCacheCheckedAt: new Date().toISOString(),
+                          conflictCacheHasConflicts: result.hasConflicts,
+                          conflictCacheFiles: JSON.stringify(result.conflictingFiles),
+                        })
+                        .where(eq(workspaces.id, wsId))
+                        .catch(() => {});
+                    })
+                    .catch(() => {})
+                );
               }
             }
           }
         }
-      }
-
-      if (diffStatsPromises.length > 0) {
-        await Promise.all(diffStatsPromises);
       }
 
       // Fetch latest session per main workspace for timing info
