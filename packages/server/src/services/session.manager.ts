@@ -47,6 +47,8 @@ function createSessionManager(
   const sessionSubagents = new Map<string, number>();
   // Track last known context token count per session for subagent/task_progress broadcasts
   const sessionContextTokens = new Map<string, number>();
+  // Track last tool name used per session for stats persistence
+  const sessionLastTool = new Map<string, string>();
   // Track Agent tool_use IDs per session to decrement count when tool_result arrives
   const sessionAgentToolUseIds = new Map<string, Set<string>>();
   // Track tasks from TaskCreate/TaskUpdate calls per session
@@ -100,8 +102,10 @@ function createSessionManager(
 
         // Persist session stats from result events
         if (evt.stats) {
+          const lastTool = sessionLastTool.get(sessionId);
+          const statsToSave = lastTool ? { ...evt.stats, lastTool } : evt.stats;
           db.update(sessions)
-            .set({ stats: JSON.stringify(evt.stats) })
+            .set({ stats: JSON.stringify(statsToSave) })
             .where(eq(sessions.id, sessionId))
             .catch((err) => console.error("Failed to update session stats:", err));
         }
@@ -130,6 +134,7 @@ function createSessionManager(
 
         // Tool activity broadcasting
         if (evt.toolActivity && ctx) {
+          sessionLastTool.set(sessionId, evt.toolActivity.name);
           const activity = formatToolActivity(evt.toolActivity.name, evt.toolActivity.input);
           if (activity) {
             options?.onActivity?.(ctx.projectId, ctx.issueId, sessionId, activity);
@@ -216,6 +221,7 @@ function createSessionManager(
       sessionToolUses.delete(sessionId);
       sessionModels.delete(sessionId);
       sessionContextTokens.delete(sessionId);
+      sessionLastTool.delete(sessionId);
       sessionAgentToolUseIds.delete(sessionId);
     }
 
@@ -459,6 +465,7 @@ function createSessionManager(
     sessionToolUses.delete(sessionId);
     sessionModels.delete(sessionId);
     sessionContextTokens.delete(sessionId);
+    sessionLastTool.delete(sessionId);
     sessionAgentToolUseIds.delete(sessionId);
     const now = new Date().toISOString();
     await db.update(sessions)

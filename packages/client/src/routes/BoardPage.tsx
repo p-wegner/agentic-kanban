@@ -300,6 +300,7 @@ export function BoardPage() {
   const [nudgeWipLimit, setNudgeWipLimit] = useState("5");
   const [monitorStatus, setMonitorStatus] = useState<MonitorStatus | null>(null);
   const [showMonitorPopover, setShowMonitorPopover] = useState(false);
+  const [monitorRunning, setMonitorRunning] = useState(false);
 
   const refetchBoard = useCallback(async (projectId?: string) => {
     const pid = projectId || activeProjectId;
@@ -464,6 +465,17 @@ export function BoardPage() {
       setMonitorStatus(status);
     } catch {
       setAutoMonitor(!next);
+    }
+  }
+
+  async function handleMonitorRunNow() {
+    setMonitorRunning(true);
+    try {
+      await apiFetch("/api/internal/monitor-run", { method: "POST" });
+      const s = await apiFetch<MonitorStatus>("/api/internal/monitor-status");
+      setMonitorStatus(s);
+    } finally {
+      setMonitorRunning(false);
     }
   }
 
@@ -1150,7 +1162,7 @@ export function BoardPage() {
             </svg>
             Tasks
           </button>
-          <div className="relative shrink-0">
+          <div className="relative shrink-0 flex items-center gap-0.5">
             <button
               onClick={() => setShowMonitorPopover(v => !v)}
               className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium border transition-colors ${autoMonitor ? "bg-green-50 border-green-200 text-green-700 hover:bg-green-100" : "bg-white border-gray-200 text-gray-500 hover:bg-gray-50"}`}
@@ -1159,7 +1171,18 @@ export function BoardPage() {
               {autoMonitor && <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />}
               Monitor
             </button>
-            {showMonitorPopover && <MonitorPopover status={monitorStatus} onClose={() => setShowMonitorPopover(false)} onOpenWorkspace={(workspaceId, issueId) => { const issue = columns.flatMap(c => c.issues).find(i => i.id === issueId); if (issue) setWorkspaceIssue(issue); setWorkspaceInitial({ workspaceId, sessionId: "" }); }} columns={columns} onRunNow={async () => { await apiFetch("/api/internal/monitor-run", { method: "POST" }); const s = await apiFetch<MonitorStatus>("/api/internal/monitor-status"); setMonitorStatus(s); }} autoMonitor={autoMonitor} onToggle={toggleAutoMonitor} interval={autoMonitorInterval} onIntervalChange={handleIntervalChange} nudgeAutoStart={nudgeAutoStart} onNudgeAutoStartChange={handleNudgeAutoStartChange} nudgeWipLimit={nudgeWipLimit} onNudgeWipLimitChange={handleNudgeWipLimitChange} />}
+            <button
+              onClick={handleMonitorRunNow}
+              disabled={monitorRunning}
+              className="flex items-center justify-center w-6 h-6 rounded border border-gray-200 bg-white text-gray-500 hover:bg-gray-50 hover:text-gray-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              title="Run monitor now and reset timer"
+            >
+              {monitorRunning
+                ? <svg className="w-3 h-3 animate-spin" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>
+                : <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path strokeLinecap="round" strokeLinejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 010 1.972l-11.54 6.347a1.125 1.125 0 01-1.667-.986V5.653z"/></svg>
+              }
+            </button>
+            {showMonitorPopover && <MonitorPopover status={monitorStatus} onClose={() => setShowMonitorPopover(false)} onOpenWorkspace={(workspaceId, issueId) => { const issue = columns.flatMap(c => c.issues).find(i => i.id === issueId); if (issue) setWorkspaceIssue(issue); setWorkspaceInitial({ workspaceId, sessionId: "" }); }} columns={columns} onRunNow={handleMonitorRunNow} autoMonitor={autoMonitor} onToggle={toggleAutoMonitor} interval={autoMonitorInterval} onIntervalChange={handleIntervalChange} nudgeAutoStart={nudgeAutoStart} onNudgeAutoStartChange={handleNudgeAutoStartChange} nudgeWipLimit={nudgeWipLimit} onNudgeWipLimitChange={handleNudgeWipLimitChange} />}
           </div>
           <div className="flex items-center gap-1 border border-gray-200 rounded-md p-0.5 bg-white shrink-0">
             <button

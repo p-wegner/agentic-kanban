@@ -1,18 +1,18 @@
-﻿import { useEffect, useRef, useState } from "react";
-import { SplitButton } from "./SplitButton.js";
+import { useEffect, useRef, useState } from "react";
 import { apiFetch } from "../lib/api.js";
 import { formatRelativeTime } from "../lib/formatRelativeTime.js";
 import { getOutputFormatForAgent } from "../lib/agent-output-parser.js";
 import { useWebSocket } from "../lib/useWebSocket.js";
 import { TerminalView } from "./TerminalView.js";
-import { DiffViewer } from "./DiffViewer.js";
+import { CreateWorkspaceForm } from "./CreateWorkspaceForm.js";
+import { WorkspaceDiffPanel } from "./WorkspaceDiffPanel.js";
+import { useWorkspaceSession } from "../hooks/useWorkspaceSession.js";
 import type {
   AgentOutputMessage,
   IssueWithStatus,
   WorkspaceResponse,
   DiffResponse,
   DiffComment,
-  CreateDiffCommentRequest,
   SessionSummaryResponse,
 } from "@agentic-kanban/shared";
 
@@ -120,7 +120,7 @@ function SessionStatsSummary({ stats }: { stats: string | null | undefined }) {
   );
 }
 
-import { suggestBranchName, sanitizeBranchName } from "../lib/branch.js";
+import { suggestBranchName } from "../lib/branch.js";
 
 export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, initialWorkspaceId, initialSessionId, autoSelectId, initialShowCreate }: WorkspacePanelProps) {
   const [workspaces, setWorkspaces] = useState<WorkspaceResponse[]>([]);
@@ -136,63 +136,55 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
   const [conflictState, setConflictState] = useState<{ hasConflicts: boolean; conflictingFiles: string[] } | null>(null);
   const [mergeError, setMergeError] = useState<{ wsId: string; message: string } | null>(null);
 
-  // Session history state
-  const [workspaceSessions, setWorkspaceSessions] = useState<Record<string, SessionInfo[]>>({});
-  const [selectedHistoryId, setSelectedHistoryId] = useState<string | null>(null);
-  const [historyMessages, setHistoryMessages] = useState<AgentOutputMessage[]>([]);
-
-  // Session summary state
-  const [viewMode, setViewMode] = useState<"output" | "summary">("output");
-  const [summaryData, setSummaryData] = useState<SessionSummaryResponse | null>(null);
-  const [summaryLoading, setSummaryLoading] = useState(false);
-  const [summarySessionId, setSummarySessionId] = useState<string | null>(null);
-
-  // Chat-like state: tracks the last session per workspace for resume
-  const [lastSessionPerWorkspace, setLastSessionPerWorkspace] = useState<Record<string, string>>({});
-  // Track messages from completed sessions so TerminalView stays visible after exit
-  const [completedMessages, setCompletedMessages] = useState<AgentOutputMessage[]>([]);
+  const [requiresReview, setRequiresReview] = useState(false);
+  const [prompt, setPrompt] = useState("");
+  const [prefs, setPrefs] = useState<Record<string, string>>({});
   const [lastPrompt, setLastPrompt] = useState<string>(
     initialSessionId ? `${issue.title}${issue.description ? `\n\n${issue.description}` : ""}` : ""
   );
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-
-  // Create form
-  const [branchName, setBranchName] = useState("");
-  const [baseBranch, setBaseBranch] = useState("");
-  const [isDirect, setIsDirect] = useState(false);
-  const [requiresReview, setRequiresReview] = useState(false);
-  const [thoroughReview, setThoroughReview] = useState(false);
-  const [planMode, setPlanMode] = useState(false);
-  const [skipSetup, setSkipSetup] = useState(false);
-  const [prompt, setPrompt] = useState("");
-  const [prefs, setPrefs] = useState<Record<string, string>>({});
-  const [branches, setBranches] = useState<{ local: string[]; remote: string[] } | null>(null);
-  const [availableSkills, setAvailableSkills] = useState<{ id: string; name: string; description: string }[]>([]);
-  const [selectedSkillId, setSelectedSkillId] = useState<string>("");
-  const [availableProfiles, setAvailableProfiles] = useState<string[]>([]);
-  const [selectedProfile, setSelectedProfile] = useState<string>("");
   const suggestion = suggestBranchName(issue);
+
+  const {
+    workspaceSessions,
+    setWorkspaceSessions,
+    selectedHistoryId,
+    setSelectedHistoryId,
+    historyMessages,
+    setHistoryMessages,
+    viewMode,
+    setViewMode,
+    summaryData,
+    summaryLoading,
+    summarySessionId,
+    lastSessionPerWorkspace,
+    setLastSessionPerWorkspace,
+    completedMessages,
+    setCompletedMessages,
+    handleViewHistory,
+    handleFetchSummary,
+  } = useWorkspaceSession({
+    selectedWorkspace,
+    activeSession,
+    issue,
+    setActiveSession,
+    setLastPrompt,
+    setError,
+  });
 
   const { state: wsState, messages, disconnect, isWaitingForInput } = useWebSocket(activeSession);
 
-  // Derive whether agent is currently running (processing a turn)
   const isRunning = activeSession !== null && !messages.some(m => m.type === "exit");
-  // Whether a session is alive (may be processing or waiting for input)
   const isSessionAlive = activeSession !== null && isRunning;
-  // Whether we can resume (workspace not closed, no session running, has previous session with providerSessionId)
   const canResume = (ws: WorkspaceResponse, sessions: SessionInfo[]) =>
     (ws.status === "active" || ws.status === "idle") && !isRunning && !activeSession &&
     !!lastSessionPerWorkspace[ws.id] &&
     sessions.some(s => s.id === lastSessionPerWorkspace[ws.id] && s.providerSessionId);
-  // Whether we can restart (workspace not closed, no session running, but last session has no providerSessionId)
   const canRestart = (ws: WorkspaceResponse, sessions: SessionInfo[]) =>
     (ws.status === "active" || ws.status === "idle") && !isRunning && !activeSession &&
     !!lastSessionPerWorkspace[ws.id] &&
     sessions.some(s => s.id === lastSessionPerWorkspace[ws.id] && !s.providerSessionId);
 
-  // Auto-clear activeSession when agent completes.
-  // Primary: detect exit via WS messages.
-  // Fallback: poll session output API (WS is unreliable via Vite proxy).
   useEffect(() => {
     if (!activeSession) return;
 
@@ -217,7 +209,6 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
       fetchWorkspaces();
     }
 
-    // WS path: if exit message already in messages, complete immediately
     const exitMsg = messages.find(m => m.type === "exit");
     if (exitMsg) {
       apiFetch<AgentOutputMessage[]>(`/api/sessions/${sid}/output`)
@@ -226,7 +217,6 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
       return;
     }
 
-    // Polling fallback: check session output every 1.5s
     const pollInterval = setInterval(() => {
       apiFetch<AgentOutputMessage[]>(`/api/sessions/${sid}/output`)
         .then((data) => {
@@ -246,7 +236,6 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
         `/api/issues/${issue.id}/workspaces`,
       );
       setWorkspaces(data);
-      // Auto-expand: if a specific workspace was requested, or only one exists
       if (data.length > 0 && !selectedWorkspace) {
         const targetId = autoSelectId ?? (data.length === 1 ? data[0].id : undefined);
         if (targetId) {
@@ -262,7 +251,6 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
 
   useEffect(() => {
     fetchWorkspaces();
-    // Load preferences (output_parser, mock_agent)
     apiFetch<Record<string, string>>("/api/preferences/settings")
       .then((s) => {
         setPrefs(s);
@@ -270,24 +258,6 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
       })
       .catch(() => {});
   }, [issue.id]);
-
-  // Fetch branches & profiles & pre-fill branch name when create form opens
-  useEffect(() => {
-    if (!showCreate || !project) return;
-    setBranchName(suggestion);
-    apiFetch<{ local: string[]; remote: string[] }>(`/api/projects/${project.id}/branches`)
-      .then((data) => setBranches(data))
-      .catch(() => setBranches(null));
-    apiFetch<{ profiles: string[] }>("/api/preferences/claude-profiles")
-      .then((data) => {
-        setAvailableProfiles(data.profiles);
-        // Pre-select the currently configured profile
-        apiFetch<Record<string, string>>("/api/preferences/settings")
-          .then((s) => setSelectedProfile(s.claude_profile || ""))
-          .catch(() => {});
-      })
-      .catch(() => {});
-  }, [showCreate]);
 
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
@@ -299,19 +269,6 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [onClose, selectedHistoryId]);
 
-  // Fetch sessions for a workspace when it's expanded
-  useEffect(() => {
-    if (!selectedWorkspace) return;
-    if (workspaceSessions[selectedWorkspace]) return;
-
-    apiFetch<SessionInfo[]>(`/api/workspaces/${selectedWorkspace}/sessions`)
-      .then((sessions) => {
-        setWorkspaceSessions((prev) => ({ ...prev, [selectedWorkspace!]: sessions }));
-      })
-      .catch(() => {});
-  }, [selectedWorkspace]);
-
-  // Auto-load diff/conflicts when an idle non-direct workspace is selected
   useEffect(() => {
     if (!selectedWorkspace) return;
     const ws = workspaces.find(w => w.id === selectedWorkspace);
@@ -325,138 +282,6 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
       })
       .catch(() => {});
   }, [selectedWorkspace, workspaces]);
-
-  // Auto-load session output when expanding a workspace
-  useEffect(() => {
-    if (!selectedWorkspace) return;
-    const sessions = workspaceSessions[selectedWorkspace];
-    if (!sessions || sessions.length === 0) return;
-    if (completedMessages.length > 0 || activeSession) return;
-
-    const wsId = selectedWorkspace;
-    const defaultPrompt = `${issue.title}${issue.description ? `\n\n${issue.description}` : ""}`;
-
-    // If there's a running session, check if it's actually alive before connecting
-    const running = sessions.find(s => s.status === "running");
-    if (running) {
-      apiFetch<AgentOutputMessage[]>(`/api/sessions/${running.id}/output`)
-        .then((msgs) => {
-          if (msgs.some(m => m.type === "exit")) {
-            // Has exit message — definitely stale
-            setLastSessionPerWorkspace((prev) => ({ ...prev, [wsId]: running.id }));
-            setCompletedMessages(msgs);
-            setSelectedHistoryId(running.id);
-            setHistoryMessages(msgs);
-          } else if (msgs.length === 0) {
-            // 0 output — stale if running >2min
-            const ageMs = Date.now() - new Date(running.startedAt).getTime();
-            if (ageMs > 2 * 60 * 1000) {
-              setLastSessionPerWorkspace((prev) => ({ ...prev, [wsId]: running.id }));
-              setCompletedMessages(msgs);
-            } else {
-              setActiveSession(running.id);
-              setLastPrompt(defaultPrompt);
-            }
-          } else {
-            // Has output, no exit — actually running
-            setActiveSession(running.id);
-            setLastPrompt(defaultPrompt);
-          }
-        })
-        .catch(() => {
-          setActiveSession(running.id);
-          setLastPrompt(defaultPrompt);
-        });
-      return;
-    }
-
-    // Otherwise load latest completed session that has output (skip empty sessions)
-    const sortedCompleted = sessions
-      .filter(s => s.status !== "running")
-      .sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime());
-
-    (async () => {
-      for (const session of sortedCompleted) {
-        try {
-          const msgs = await apiFetch<AgentOutputMessage[]>(`/api/sessions/${session.id}/output`);
-          setLastSessionPerWorkspace((prev) => ({ ...prev, [wsId]: session.id }));
-          if (msgs.length > 0) {
-            setCompletedMessages(msgs);
-            setSelectedHistoryId(session.id);
-            setHistoryMessages(msgs);
-            break;
-          }
-        } catch {
-          break;
-        }
-      }
-    })();
-  }, [selectedWorkspace, workspaceSessions, activeSession]);
-
-  async function handleViewHistory(sessionId: string) {
-    try {
-      const msgs = await apiFetch<AgentOutputMessage[]>(`/api/sessions/${sessionId}/output`);
-      setHistoryMessages(msgs);
-      setSelectedHistoryId(sessionId);
-      setViewMode("output");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load session output");
-    }
-  }
-
-  async function handleFetchSummary(sessionId: string, force = false) {
-    if (!force && summarySessionId === sessionId && summaryData) return;
-    setSummaryLoading(true);
-    setSummaryData(null);
-    try {
-      const data = await apiFetch<SessionSummaryResponse>(`/api/sessions/${sessionId}/summary`);
-      setSummaryData(data);
-      setSummarySessionId(sessionId);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load session summary");
-    } finally {
-      setSummaryLoading(false);
-    }
-  }
-
-  async function handleCreateWorkspace() {
-    if (!isDirect && !branchName.trim()) return;
-    setActionLoading(true);
-    setError(null);
-    setCompletedMessages([]);
-    try {
-      const body: Record<string, unknown> = { issueId: issue.id, isDirect, requiresReview, thoroughReview, planMode, skipSetup };
-      if (selectedSkillId) body.skillId = selectedSkillId;
-      if (selectedProfile) body.claudeProfile = selectedProfile;
-      if (!isDirect) {
-        body.branch = branchName.trim();
-        if (baseBranch.trim()) {
-          body.baseBranch = baseBranch.trim();
-        }
-      }
-      const result = await apiFetch<WorkspaceResponse & { sessionId?: string }>("/api/workspaces", {
-        method: "POST",
-        body: JSON.stringify(body),
-      });
-      setBranchName("");
-      setBaseBranch("");
-      setIsDirect(false);
-      setSelectedSkillId("");
-      setShowCreate(false);
-      // If auto-launched, set active session to show terminal immediately
-      if (result.sessionId) {
-        setSelectedWorkspace(result.id);
-        setActiveSession(result.sessionId);
-        setLastPrompt(`${issue.title}${issue.description ? `\n\n${issue.description}` : ""}`);
-      }
-      await fetchWorkspaces();
-      onWorkspaceChange?.();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to create workspace");
-    } finally {
-      setActionLoading(false);
-    }
-  }
 
   async function handleQuickLaunch(withPlanMode: boolean) {
     setActionLoading(true);
@@ -496,7 +321,6 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
     setError(null);
     try {
       const body: Record<string, string> = { prompt: prompt.trim() };
-      // Attach resumeFromId if we have a previous session for this workspace
       const resumeId = lastSessionPerWorkspace[wsId];
       if (resumeId) {
         body.resumeFromId = resumeId;
@@ -511,6 +335,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
       setActiveSession(result.sessionId);
       setLastPrompt(prompt.trim());
       setPrompt("");
+      setSelectedHistoryId(null);
       setViewMode("output");
       await fetchWorkspaces();
     } catch (err) {
@@ -534,9 +359,9 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
       );
       setLastPrompt(prompt.trim());
       setPrompt("");
-      // If server resumed via a new process, wire up the new session
       if (result.resumed && result.sessionId) {
         setCompletedMessages([]);
+        setSelectedHistoryId(null);
         setActiveSession(result.sessionId);
         setViewMode("output");
       }
@@ -553,14 +378,12 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
     try {
       await apiFetch(`/api/workspaces/${wsId}/stop`, { method: "POST" });
       disconnect();
-      // Store session for resume before clearing
       if (activeSession) {
         setLastSessionPerWorkspace((prev) => ({ ...prev, [wsId]: activeSession }));
         setCompletedMessages(messages);
       }
       setActiveSession(null);
       await fetchWorkspaces();
-      // Refresh sessions for this workspace
       setWorkspaceSessions((prev) => {
         const next = { ...prev };
         delete next[wsId];
@@ -587,42 +410,6 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
       setError(err instanceof Error ? err.message : "Failed to get diff");
     } finally {
       setActionLoading(false);
-    }
-  }
-
-  async function handleCreateComment(data: CreateDiffCommentRequest) {
-    if (!selectedWorkspace) return;
-    try {
-      const result = await apiFetch<DiffComment>(`/api/workspaces/${selectedWorkspace}/comments`, {
-        method: "POST",
-        body: JSON.stringify(data),
-      });
-      setDiffComments(prev => [...prev, result]);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to create comment");
-    }
-  }
-
-  async function handleEditComment(commentId: string, body: string) {
-    if (!selectedWorkspace) return;
-    try {
-      await apiFetch(`/api/workspaces/${selectedWorkspace}/comments/${commentId}`, {
-        method: "PATCH",
-        body: JSON.stringify({ body }),
-      });
-      setDiffComments(prev => prev.map(c => c.id === commentId ? { ...c, body, updatedAt: new Date().toISOString() } : c));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to update comment");
-    }
-  }
-
-  async function handleDeleteComment(commentId: string) {
-    if (!selectedWorkspace) return;
-    try {
-      await apiFetch(`/api/workspaces/${selectedWorkspace}/comments/${commentId}`, { method: "DELETE" });
-      setDiffComments(prev => prev.filter(c => c.id !== commentId));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to delete comment");
     }
   }
 
@@ -769,7 +556,6 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
     setActionLoading(true);
     setError(null);
     try {
-      // Try to fetch the previous session's summary to give the new session context
       const prevSessionId = lastSessionPerWorkspace[wsId];
       let contextSection = "";
       if (prevSessionId) {
@@ -792,7 +578,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
             contextSection = `\n\nA previous session worked on this task but was interrupted before finishing. Here is what was already explored so you can pick up without re-reading the same files:\n\n${parts.join("\n\n")}`;
           }
         } catch {
-          // Summary fetch failed — proceed without context
+          // Summary fetch failed -- proceed without context
         }
       }
       const restartPrompt = `Continue where the previous session left off. If you were in the middle of implementing something, pick up from where it stopped. If the implementation is complete, commit your changes and move this issue to In Review.${contextSection}`;
@@ -837,14 +623,11 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
     }
   }
 
-  async function handleReview(wsId: string, thorough = false) {
+  async function handleReview(wsId: string) {
     setActionLoading(true);
     setError(null);
     try {
-      const result = await apiFetch<{ sessionId: string }>(`/api/workspaces/${wsId}/review`, {
-        method: "POST",
-        body: thorough ? JSON.stringify({ thoroughReview: true }) : undefined,
-      });
+      const result = await apiFetch<{ sessionId: string }>(`/api/workspaces/${wsId}/review`, { method: "POST" });
       setActiveSession(result.sessionId);
       setCompletedMessages([]);
       await fetchWorkspaces();
@@ -882,7 +665,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
       <div className="fixed right-0 top-0 h-full w-[min(480px,100vw)] bg-white shadow-xl z-50 flex flex-col border-l border-gray-200 animate-slide-in-right">
         <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200">
           <h2 className="text-sm font-semibold text-gray-900">
-            Workspaces — {issue.title}
+            Workspaces -- {issue.title}
           </h2>
           <button
             onClick={onClose}
@@ -902,7 +685,6 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
             </div>
           )}
 
-          {/* Read-only repo info from project */}
           {project && (
             <div className="text-xs text-gray-500 space-y-0.5">
               <div><span className="font-medium text-gray-600">Repo:</span> {project.repoPath}</div>
@@ -932,7 +714,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                   className="text-sm bg-blue-600 text-white px-2 py-1.5 rounded-r border-l border-blue-500 hover:bg-blue-700 disabled:opacity-50"
                   title="More options"
                 >
-                  ▾
+                  &#9662;
                 </button>
                 {quickDropdownOpen && (
                   <div className="absolute top-full left-0 mt-1 w-52 bg-white border border-gray-200 rounded shadow-lg z-10">
@@ -953,12 +735,6 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                       onClick={() => {
                         setQuickDropdownOpen(false);
                         setShowCreate(true);
-                        if (availableSkills.length === 0) {
-                          const url = project ? `/api/agent-skills?projectId=${project.id}` : "/api/agent-skills";
-                          apiFetch<{ id: string; name: string; description: string }[]>(url)
-                            .then(setAvailableSkills)
-                            .catch(() => {});
-                        }
                       }}
                       className="w-full text-left text-sm px-3 py-2 hover:bg-gray-50 text-gray-500"
                     >
@@ -971,151 +747,25 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
           ) : null}
 
           {showCreate && (
-            <div className="border border-gray-200 rounded p-3 space-y-2">
-              <label className="flex items-center gap-2 text-xs text-gray-600">
-                <input
-                  type="checkbox"
-                  checked={isDirect}
-                  onChange={(e) => setIsDirect(e.target.checked)}
-                  className="rounded border-gray-300"
-                />
-                <span>Work directly on main checkout</span>
-              </label>
-              {isDirect && (
-                <p className="text-xs text-gray-400">
-                  Agent will work on the current branch of the main repository (no worktree created).
-                </p>
-              )}
-              {!isDirect && (
-                <>
-                  <label className="text-xs font-medium text-gray-600 block">
-                    Branch Name
-                  </label>
-                  <input
-                    type="text"
-                    value={branchName}
-                    onChange={(e) => setBranchName(sanitizeBranchName(e.target.value))}
-                    placeholder={suggestion}
-                    className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                  />
-                  <label className="text-xs font-medium text-gray-600 block mt-2">
-                    Base Branch
-                  </label>
-                  {branches ? (
-                    <select
-                      value={baseBranch}
-                      onChange={(e) => setBaseBranch(e.target.value)}
-                      className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                    >
-                      <option value="">Default ({project?.defaultBranch || "main"})</option>
-                      {branches.local.map((b) => (
-                        <option key={b} value={b}>{b}</option>
-                      ))}
-                      {branches.remote.length > 0 && (
-                        <optgroup label="Remote">
-                          {branches.remote.map((b) => (
-                            <option key={`r/${b}`} value={b}>{b}</option>
-                          ))}
-                        </optgroup>
-                      )}
-                    </select>
-                  ) : (
-                    <input
-                      type="text"
-                      value={baseBranch}
-                      onChange={(e) => setBaseBranch(e.target.value)}
-                      placeholder={project?.defaultBranch || "main"}
-                      className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                    />
-                  )}
-                </>
-              )}
-              <label className="flex items-center gap-2 text-xs text-gray-600">
-                <input
-                  type="checkbox"
-                  checked={requiresReview}
-                  onChange={(e) => setRequiresReview(e.target.checked)}
-                  className="rounded border-gray-300"
-                />
-                <span>Request code review before merge</span>
-              </label>
-              <label className="flex items-center gap-2 text-xs text-gray-600">
-                <input
-                  type="checkbox"
-                  checked={thoroughReview}
-                  onChange={(e) => setThoroughReview(e.target.checked)}
-                  className="rounded border-gray-300"
-                />
-                <span>Use thorough review (more capable model — slower &amp; costlier)</span>
-              </label>
-              <label className="flex items-center gap-2 text-xs text-gray-600">
-                <input
-                  type="checkbox"
-                  checked={planMode}
-                  onChange={(e) => setPlanMode(e.target.checked)}
-                  className="rounded border-gray-300"
-                />
-                <span>Plan mode (agent plans before implementing)</span>
-              </label>
-              {project?.setupScript && (
-                <label className="flex items-center gap-2 text-xs text-gray-600">
-                  <input
-                    type="checkbox"
-                    checked={skipSetup}
-                    onChange={(e) => setSkipSetup(e.target.checked)}
-                    className="rounded border-gray-300"
-                  />
-                  <span>Skip setup script</span>
-                </label>
-              )}
-              {availableSkills.length > 0 && (
-                <div>
-                  <label className="text-xs font-medium text-gray-600 block">
-                    Agent Skill
-                  </label>
-                  <select
-                    value={selectedSkillId}
-                    onChange={(e) => setSelectedSkillId(e.target.value)}
-                    className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                  >
-                    <option value="">None (default)</option>
-                    {availableSkills.map((s) => (
-                      <option key={s.id} value={s.id}>{s.name} — {s.description}</option>
-                    ))}
-                  </select>
-                </div>
-              )}
-              {availableProfiles.length > 0 && (
-                <div>
-                  <label className="text-xs font-medium text-gray-600 mb-1 block">Profile</label>
-                  <select
-                    value={selectedProfile}
-                    onChange={(e) => setSelectedProfile(e.target.value)}
-                    className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                  >
-                    <option value="">Default ({prefs.claude_profile || "none"})</option>
-                    {availableProfiles.map((p) => (
-                      <option key={p} value={p}>{p}</option>
-                    ))}
-                  </select>
-                </div>
-              )}
-              <div className="flex gap-2">
-                <button
-                  onClick={handleCreateWorkspace}
-                  disabled={actionLoading || (!isDirect && !branchName.trim())}
-                  className="text-sm bg-blue-600 text-white px-3 py-1.5 rounded hover:bg-blue-700 disabled:opacity-50"
-                >
-                  {actionLoading ? "Creating..." : isDirect ? "Create Direct & Launch" : "Create & Launch"}
-                </button>
-                <button
-                  onClick={() => { setShowCreate(false); setBaseBranch(""); setBranchName(""); setIsDirect(false); setRequiresReview(false); setThoroughReview(false); setPlanMode(false); setSkipSetup(false); }}
-                  className="text-sm text-gray-500 px-3 py-1.5 hover:text-gray-700"
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
+            <CreateWorkspaceForm
+              issue={issue}
+              project={project}
+              prefs={prefs}
+              actionLoading={actionLoading}
+              onCreated={(result) => {
+                setShowCreate(false);
+                setCompletedMessages([]);
+                setSelectedHistoryId(null);
+                if (result.sessionId) {
+                  setSelectedWorkspace(result.id);
+                  setActiveSession(result.sessionId);
+                  setLastPrompt(`${issue.title}${issue.description ? `\n\n${issue.description}` : ""}`);
+                }
+                fetchWorkspaces();
+                onWorkspaceChange?.();
+              }}
+              onCancel={() => setShowCreate(false)}
+            />
           )}
 
           {workspaces.map((ws) => {
@@ -1144,51 +794,17 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                       <span className="ml-1.5 text-[10px] font-medium px-1.5 py-0.5 rounded bg-blue-100 text-blue-700">plan</span>
                     )}
                   </span>
-                  <div className="flex items-center gap-1.5">
-                    {ws.readyForMerge && (
-                      <span className="text-xs font-medium px-1.5 py-0.5 rounded bg-green-100 text-green-700">
-                        Ready to merge
-                      </span>
-                    )}
-                    <span className={`text-xs font-medium px-1.5 py-0.5 rounded ${
-                      isThisRunning ? "bg-green-100 text-green-700 animate-pulse" :
-                      isLaunching ? "bg-blue-100 text-blue-700 animate-pulse" :
-                      badgeColor
-                    }`}>
-                      {isThisRunning ? "running" : isLaunching ? "launching…" : ws.status}
-                    </span>
-                  </div>
+                  <span className={`text-xs font-medium px-1.5 py-0.5 rounded ${
+                    isThisRunning ? "bg-green-100 text-green-700 animate-pulse" :
+                    isLaunching ? "bg-blue-100 text-blue-700 animate-pulse" :
+                    badgeColor
+                  }`}>
+                    {isThisRunning ? "running" : isLaunching ? "launching..." : ws.status}
+                  </span>
                 </div>
 
-                {(ws.baseBranch || ws.skillName) && (
-                  <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-gray-500">
-                    {ws.baseBranch && (
-                      <span><span className="font-medium text-gray-600">Base:</span> {ws.baseBranch}</span>
-                    )}
-                    {ws.skillName && (
-                      <span><span className="font-medium text-gray-600">Skill:</span> {ws.skillName}</span>
-                    )}
-                  </div>
-                )}
-
                 {ws.workingDir && (
-                  <div className="flex items-center gap-2 min-w-0">
-                    <p className="text-xs text-gray-500 truncate flex-1">{ws.workingDir}</p>
-                    <button
-                      title="Open in VS Code"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        apiFetch(`/api/workspaces/${ws.id}/open-editor`, { method: "POST" })
-                          .catch((err) => {
-                            const msg = err instanceof Error ? err.message : "Could not open VS Code";
-                            alert(msg);
-                          });
-                      }}
-                      className="flex-shrink-0 text-xs text-blue-500 hover:text-blue-700 font-medium whitespace-nowrap"
-                    >
-                      VS Code
-                    </button>
-                  </div>
+                  <p className="text-xs text-gray-500 truncate">{ws.workingDir}</p>
                 )}
 
                 <div className="flex gap-3 text-xs text-gray-400">
@@ -1198,7 +814,6 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
 
                 {isSelected && (
                   <div className="space-y-2 pt-2 border-t border-gray-200" onClick={(e) => e.stopPropagation()}>
-                    {/* Session selector — shown when there are completed sessions */}
                     {completedSessions.length > 0 && !isRunning && (
                       <div className="space-y-0.5">
                         {completedSessions.map((session) => {
@@ -1254,7 +869,6 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                       </div>
                     )}
 
-                    {/* Output/Summary toggle — shown when there is session content */}
                     {(selectedHistoryId ? historyMessages : (activeSession || completedMessages.length > 0)) && (
                       <div className="flex border-b border-gray-200">
                         <button
@@ -1284,7 +898,6 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                       </div>
                     )}
 
-                    {/* Summary view */}
                     {viewMode === "summary" && (() => {
                       const sid = selectedHistoryId || activeSession || lastSessionPerWorkspace[ws.id];
                       const summary = sid === summarySessionId ? summaryData : null;
@@ -1301,7 +914,6 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                           )}
                           {summary && (
                             <>
-                              {/* Agent Summary — the final result text from Claude Code */}
                               {summary.agentSummary && (
                                 <div>
                                   <h4 className="text-xs font-semibold text-gray-700 uppercase tracking-wide mb-1">Summary</h4>
@@ -1311,7 +923,6 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                                 </div>
                               )}
 
-                              {/* Overview */}
                               <div>
                                 <h4 className="text-xs font-semibold text-gray-700 uppercase tracking-wide mb-1">Overview</h4>
                                 <p className="text-gray-600 text-xs">{summary.overview}</p>
@@ -1320,7 +931,6 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                                 )}
                               </div>
 
-                              {/* Stats row */}
                               {summary.stats && (() => {
                                 const s = parseStats(JSON.stringify(summary.stats));
                                 if (!s) return null;
@@ -1335,7 +945,6 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                                 );
                               })()}
 
-                              {/* Tasks */}
                               {summary.tasks && summary.tasks.length > 0 && (
                                 <div>
                                   <h4 className="text-xs font-semibold text-gray-700 uppercase tracking-wide mb-1">
@@ -1345,7 +954,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                                     {summary.tasks.filter(t => t.status !== "deleted").map((task) => (
                                       <li key={task.id} className="flex items-start gap-1.5 text-xs">
                                         <span className="mt-0.5 shrink-0">
-                                          {task.status === "completed" ? "✓" : task.status === "in_progress" ? "⟳" : "○"}
+                                          {task.status === "completed" ? "Ô£ô" : task.status === "in_progress" ? "Ôƒ│" : "Ôùï"}
                                         </span>
                                         <span className={task.status === "completed" ? "text-gray-400 line-through" : "text-gray-700"}>
                                           {task.subject}
@@ -1356,7 +965,6 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                                 </div>
                               )}
 
-                              {/* Files read */}
                               {summary.filesRead.length > 0 && (
                                 <div>
                                   <h4 className="text-xs font-semibold text-gray-700 uppercase tracking-wide mb-1">Files Read ({summary.filesRead.length})</h4>
@@ -1371,7 +979,6 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                                 </div>
                               )}
 
-                              {/* Files edited */}
                               {summary.filesEdited.length > 0 && (
                                 <div>
                                   <h4 className="text-xs font-semibold text-gray-700 uppercase tracking-wide mb-1">Files Edited ({summary.filesEdited.length})</h4>
@@ -1383,7 +990,6 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                                 </div>
                               )}
 
-                              {/* Files written */}
                               {summary.filesWritten.length > 0 && (
                                 <div>
                                   <h4 className="text-xs font-semibold text-gray-700 uppercase tracking-wide mb-1">Files Written ({summary.filesWritten.length})</h4>
@@ -1395,7 +1001,6 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                                 </div>
                               )}
 
-                              {/* Commands run */}
                               {summary.commandsRun.length > 0 && (
                                 <div>
                                   <h4 className="text-xs font-semibold text-gray-700 uppercase tracking-wide mb-1">Commands ({summary.commandsRun.length})</h4>
@@ -1410,7 +1015,6 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                                 </div>
                               )}
 
-                              {/* Key excerpts */}
                               {summary.keyExcerpts.length > 0 && (
                                 <div>
                                   <h4 className="text-xs font-semibold text-gray-700 uppercase tracking-wide mb-1">Agent Excerpts</h4>
@@ -1427,7 +1031,6 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                                 </div>
                               )}
 
-                              {/* Errors */}
                               {summary.errors.length > 0 && (
                                 <div>
                                   <h4 className="text-xs font-semibold text-red-700 uppercase tracking-wide mb-1">Errors ({summary.errors.length})</h4>
@@ -1444,7 +1047,6 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                       );
                     })()}
 
-                    {/* TerminalView — show history output or live/completed output (only when viewMode is "output" or agent is running) */}
                     {(viewMode === "output" || isRunning) && (selectedHistoryId ? historyMessages : (activeSession || completedMessages.length > 0)) ? (
                       <TerminalView
                         messages={selectedHistoryId ? historyMessages : (activeSession ? messages : completedMessages)}
@@ -1500,7 +1102,6 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                         />
                     ) : null}
 
-                    {/* Session stats summary — shown below terminal for completed sessions */}
                     {!isRunning && viewMode === "output" && (
                       <SessionStatsSummary
                         stats={selectedHistoryId
@@ -1510,7 +1111,6 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                       />
                     )}
 
-                    {/* Chat input — only when TerminalView is not shown (no sessions yet) */}
                     {!selectedHistoryId && !activeSession && ws.workingDir && ws.status !== "closed" && (
                       <div className="flex gap-2">
                         <textarea
@@ -1553,16 +1153,14 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                       </div>
                     )}
 
-                    {/* Action buttons — visible even while agent runs */}
                     {ws.status !== "closed" && (
                       <>
                       {!ws.workingDir && (
                         <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded px-2 py-1">
-                          Worktree directory unavailable — some actions are disabled.
+                          Worktree directory unavailable -- some actions are disabled.
                         </p>
                       )}
                       <div className="flex gap-2 flex-wrap">
-                        {/* Resume/Restart button — shown when workspace idle/active but no session running */}
                         {ws.workingDir && canResume(ws, sessions) && (
                           <button
                             onClick={() => handleResume(ws.id)}
@@ -1582,7 +1180,6 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                             Restart
                           </button>
                         )}
-                        {/* Update Base — rebase or merge latest base into workspace */}
                         {!ws.isDirect && ws.workingDir && ws.status !== "closed" && !isRunning && (
                           <button
                             onClick={() => handleUpdateBase(ws.id, "rebase")}
@@ -1604,20 +1201,14 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                         </button>
                         )}
                         {ws.workingDir && (
-                        <SplitButton
-                          primary={{
-                            label: "Review",
-                            onClick: () => handleReview(ws.id, false),
-                            title: "Trigger AI code review",
-                          }}
-                          options={[{
-                            label: "Thorough Review",
-                            onClick: () => handleReview(ws.id, true),
-                            title: "Trigger thorough AI code review using a more capable model",
-                          }]}
+                        <button
+                          onClick={() => handleReview(ws.id)}
                           disabled={actionLoading || isRunning}
-                          colorClasses="bg-violet-600 hover:bg-violet-700 border-violet-500"
-                        />
+                          className="text-sm bg-violet-600 text-white px-3 py-1.5 rounded hover:bg-violet-700 disabled:opacity-50"
+                          title="Trigger AI code review"
+                        >
+                          Review
+                        </button>
                         )}
                         {ws.workingDir && (
                         <button
@@ -1645,11 +1236,10 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                           Delete
                         </button>
                       </div>
-                      {/* Fix & merge with AI after merge error */}
                       {mergeError && mergeError.wsId === ws.id && (
                         <div className="mt-2 p-2 bg-orange-50 border border-orange-200 rounded">
                           <div className="flex items-center justify-between">
-                            <span className="text-sm font-medium text-orange-700">Merge failed — AI can fix and retry</span>
+                            <span className="text-sm font-medium text-orange-700">Merge failed -- AI can fix and retry</span>
                             <button
                               onClick={() => handleFixAndMerge(ws.id, mergeError.message)}
                               disabled={actionLoading}
@@ -1661,7 +1251,6 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                           <p className="mt-1 text-xs text-orange-600 font-mono break-all">{mergeError.message}</p>
                         </div>
                       )}
-                      {/* Conflict display */}
                       {conflictState && conflictState.hasConflicts && (
                         <div className="mt-2 p-2 bg-red-50 border border-red-200 rounded">
                           <div className="flex items-center justify-between">
@@ -1695,7 +1284,6 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                       </>
                     )}
 
-                    {/* Delete button for closed workspaces */}
                     {!selectedHistoryId && ws.status === "closed" && (
                       <div className="pt-2 border-t border-gray-200">
                         <button
@@ -1714,25 +1302,14 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
           })}
 
           {diff && (
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <h3 className="text-sm font-medium text-gray-900">Diff</h3>
-                <button
-                  onClick={() => setDiff(null)}
-                  className="text-xs text-gray-400 hover:text-gray-600"
-                >
-                  Close
-                </button>
-              </div>
-              <DiffViewer
-                diff={diff.diff}
-                stats={diff.stats}
-                comments={diffComments}
-                onCreateComment={handleCreateComment}
-                onEditComment={handleEditComment}
-                onDeleteComment={handleDeleteComment}
-              />
-            </div>
+            <WorkspaceDiffPanel
+              diff={diff}
+              diffComments={diffComments}
+              workspaceId={selectedWorkspace!}
+              onClose={() => setDiff(null)}
+              onCommentsChange={setDiffComments}
+              onError={(msg) => setError(msg)}
+            />
           )}
 
           {workspaces.length > 0 && (
@@ -1750,7 +1327,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                 className="text-sm text-blue-600 hover:text-blue-700 disabled:opacity-50 px-1"
                 title="More options"
               >
-                ▾
+                &#9662;
               </button>
               {quickDropdownOpen && (
                 <div className="absolute bottom-full left-0 mb-1 w-52 bg-white border border-gray-200 rounded shadow-lg z-10">
