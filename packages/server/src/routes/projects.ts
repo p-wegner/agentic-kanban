@@ -932,7 +932,7 @@ ${contextParts.join("\n")}`;
                 if (mainWs.conflictCacheHasConflicts !== null) {
                   mainRef.conflicts = {
                     hasConflicts: mainWs.conflictCacheHasConflicts ?? false,
-                    conflictFiles: mainWs.conflictCacheFiles ? JSON.parse(mainWs.conflictCacheFiles) : [],
+                    conflictingFiles: mainWs.conflictCacheFiles ? JSON.parse(mainWs.conflictCacheFiles) : [],
                   };
                 }
               } else {
@@ -940,7 +940,7 @@ ${contextParts.join("\n")}`;
                 if (mainWs.conflictCacheCheckedAt && mainWs.conflictCacheHasConflicts !== null) {
                   mainRef.conflicts = {
                     hasConflicts: mainWs.conflictCacheHasConflicts ?? false,
-                    conflictFiles: mainWs.conflictCacheFiles ? JSON.parse(mainWs.conflictCacheFiles) : [],
+                    conflictingFiles: mainWs.conflictCacheFiles ? JSON.parse(mainWs.conflictCacheFiles) : [],
                   };
                 }
                 const wsId = mainWs.id;
@@ -954,7 +954,7 @@ ${contextParts.join("\n")}`;
                       .set({
                         conflictCacheCheckedAt: new Date().toISOString(),
                         conflictCacheHasConflicts: result.hasConflicts,
-                        conflictCacheFiles: JSON.stringify(result.conflictFiles),
+                        conflictCacheFiles: JSON.stringify(result.conflictingFiles),
                       })
                       .where(eq(workspaces.id, wsId))
                       .catch(() => {});
