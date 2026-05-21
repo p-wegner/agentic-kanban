@@ -170,6 +170,7 @@ function computeColumns(nodes: IssueWithStatus[], edges: Dependency[]) {
 }
 
 const ARCHIVE_STATUS_NAMES = new Set(["Done", "Cancelled"]);
+const BACKLOG_STATUS_NAMES = new Set(["Backlog"]);
 // Statuses hidden by default — Backlog can have many items; Done/Cancelled are archive
 const DEFAULT_HIDDEN_STATUSES = new Set(["Backlog", "Done", "Cancelled"]);
 
@@ -405,9 +406,8 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery }: Gra
             const allStatuses = [...new Set(graphData.nodes.map((n) => n.statusName))];
             const knownOrder = STATUS_ORDER.filter((s) => allStatuses.includes(s));
             const extra = allStatuses.filter((s) => !STATUS_ORDER.includes(s)).sort();
-            // Backlog (and any unknown statuses) first, then workflow statuses, then archive
-            const backlogLike = extra;
-            const workflowStatuses = knownOrder.filter((s) => !ARCHIVE_STATUS_NAMES.has(s));
+            const backlogStatuses = [...knownOrder.filter((s) => BACKLOG_STATUS_NAMES.has(s)), ...extra];
+            const workflowStatuses = knownOrder.filter((s) => !ARCHIVE_STATUS_NAMES.has(s) && !BACKLOG_STATUS_NAMES.has(s));
             const archiveStatuses = knownOrder.filter((s) => ARCHIVE_STATUS_NAMES.has(s));
 
             const renderStatus = (status: string) => {
@@ -442,10 +442,10 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery }: Gra
 
             return (
               <div className="absolute top-full left-0 mt-1 bg-white border border-gray-200 rounded-md shadow-lg p-2 min-w-[172px]">
-                {backlogLike.length > 0 && (
+                {backlogStatuses.length > 0 && (
                   <>
                     <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide px-1 mb-0.5">Backlog</div>
-                    <div className="space-y-0.5 mb-1">{backlogLike.map(renderStatus)}</div>
+                    <div className="space-y-0.5 mb-1">{backlogStatuses.map(renderStatus)}</div>
                   </>
                 )}
                 {workflowStatuses.length > 0 && (
