@@ -30,5 +30,22 @@ Board splits columns into active (Todo, In Progress, In Review) and archive (Don
 ## Command palette
 Actions registered via `registerAction()` in `actions.ts`. BoardPage registers in `useEffect` with cleanup. Ctrl+K intercepted via `window` keydown listener (Playwright can't send Ctrl+K — Chromium intercepts for address bar). E2E tests dispatch via `page.evaluate(() => window.dispatchEvent(...))`.
 
+## SplitButton pattern
+Use `<SplitButton>` (`src/components/SplitButton.tsx`) whenever an action has one clear default and one or more less-frequent variants. The primary action sits on the left; a chevron on the right opens a dropdown with the variants.
+
+```tsx
+<SplitButton
+  primary={{ label: "Review", onClick: () => doReview(false) }}
+  options={[{ label: "Thorough Review", onClick: () => doReview(true) }]}
+  disabled={loading}
+  colorClasses="bg-violet-600 hover:bg-violet-700 border-violet-500"
+  dropUp={false}   // set true when button is near the bottom of the viewport
+/>
+```
+
+**Current usages:** Review/Thorough Review in `WorkspacePanel`. The "New Workspace" quick-launch at the top and bottom of `WorkspacePanel` uses an equivalent inline pattern (not yet migrated because it has complex inline state logic).
+
+**When to apply:** Two separate buttons that do "the same thing but differently" (intensity, model, mode flag) should become one SplitButton. Unrelated actions stay as separate buttons.
+
 ## Workspace panel status guards
 Don't gate session history, TerminalView, and session stats on `ws.status !== "closed"` — auto-merged workspaces set `workingDir: null` and `status: "closed"` but their history is still viewable. Only chat footer and action buttons (Review, Merge, etc.) should be gated on active status.
