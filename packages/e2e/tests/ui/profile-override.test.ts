@@ -1,0 +1,244 @@
+import { test, expect } from "@playwright/test";
+import { SERVER_URL } from "../helpers/port.js";
+
+test.describe("Claude profile override — expanded create panel", () => {
+  let projectId: string;
+  let statusId: string;
+  const createdIssueIds: string[] = [];
+  const createdWorkspaceIds: string[] = [];
+
+  test.beforeAll(async ({ request }) => {
+    const projectsRes = await request.get(`${SERVER_URL}/api/projects`);
+    const projects = await projectsRes.json();
+    projectId = projects[0].id;
+
+    const statusesRes = await request.get(
+      `${SERVER_URL}/api/projects/${projectId}/statuses`,
+    );
+    const statuses = await statusesRes.json();
+    const todo = statuses.find((s: { name: string }) => s.name === "Todo");
+    statusId = todo ? todo.id : statuses[0].id;
+  });
+
+  test.afterAll(async ({ request }) => {
+    for (const id of createdWorkspaceIds) {
+      await request.delete(`${SERVER_URL}/api/workspaces/${id}`);
+    }
+    for (const id of createdIssueIds) {
+      await request.delete(`${SERVER_URL}/api/issues/${id}`);
+    }
+  });
+
+  test("Profile override field appears when Start workspace is checked", async ({
+    page,
+  }) => {
+    await page.goto("/");
+    await page.waitForSelector("h2");
+
+    const firstColumn = page.locator(".bg-gray-100.rounded-lg").first();
+    await firstColumn.locator("button[title='Add issue']").click();
+    await page.locator("button[title='Expand form']").click();
+
+    const panel = page.locator(".fixed.right-0.top-0");
+    await expect(panel).toBeVisible();
+
+    // Profile override input should not be visible before Start workspace is checked
+    await expect(
+      panel.locator("label", { hasText: "Profile override" }),
+    ).not.toBeVisible();
+
+    // Check Start workspace
+    const startWsLabel = panel.locator("label", { hasText: "Start workspace" });
+    const canStartWorkspace = await startWsLabel.isVisible();
+    if (!canStartWorkspace) {
+      test.skip();
+      return;
+    }
+    await startWsLabel.locator("input[type='checkbox']").check();
+
+    // Profile override input should now be visible
+    await expect(
+      panel.locator("label", { hasText: "Profile override" }),
+    ).toBeVisible();
+    await expect(
+      panel.locator("input[placeholder='e.g. zai (blank = default)']"),
+    ).toBeVisible();
+
+    await panel.locator("button[title='Close']").click();
+  });
+
+  test("Profile override field accepts text input", async ({ page }) => {
+    await page.goto("/");
+    await page.waitForSelector("h2");
+
+    const firstColumn = page.locator(".bg-gray-100.rounded-lg").first();
+    await firstColumn.locator("button[title='Add issue']").click();
+    await page.locator("button[title='Expand form']").click();
+
+    const panel = page.locator(".fixed.right-0.top-0");
+    const startWsLabel = panel.locator("label", { hasText: "Start workspace" });
+    const canStartWorkspace = await startWsLabel.isVisible();
+    if (!canStartWorkspace) {
+      test.skip();
+      return;
+    }
+    await startWsLabel.locator("input[type='checkbox']").check();
+
+    const profileInput = panel.locator(
+      "input[placeholder='e.g. zai (blank = default)']",
+    );
+    await profileInput.fill("test-profile");
+    await expect(profileInput).toHaveValue("test-profile");
+
+    // Clear value
+    await profileInput.clear();
+    await expect(profileInput).toHaveValue("");
+
+    await panel.locator("button[title='Close']").click();
+  });
+
+  test("Workspace API stores claudeProfile when passed directly", async ({
+    request,
+  }) => {
+    const suffix = Date.now().toString(36);
+    const profileName = `direct-profile-${suffix}`;
+
+    // Create issue first
+    const issueRes = await request.post(`${SERVER_URL}/api/issues`, {
+      data: {
+        title: `Profile WS direct ${suffix}`,
+        statusId,
+        projectId,
+        skipAutoReview: true,
+      },
+    });
+    expect(issueRes.status()).toBe(201);
+    const issue = await issueRes.json();
+    createdIssueIds.push(issue.id);
+
+    // Create workspace with claudeProfile override
+    const wsRes = await request.post(`${SERVER_URL}/api/workspaces`, {
+      data: {
+        issueId: issue.id,
+        branch: `feature/e2e-profile-${suffix}`,
+        claudeProfile: profileName,
+        requiresReview: false,
+      },
+    });
+    expect(wsRes.status()).toBe(201);
+    const ws = await wsRes.json();
+    createdWorkspaceIds.push(ws.id);
+
+    expect(ws.id).toBeDefined();
+
+    // Verify via board endpoint — workspaceSummary.main.claudeProfile is included there
+    const boardRes = await request.get(
+      `${SERVER_URL}/api/projects/${projectId}/board`,
+    );
+    expect(boardRes.status()).toBe(200);
+    // Board returns array of columns: [{ id, name, issues: [...] }]
+    const columns: any[] = await boardRes.json();
+    const allIssues: any[] = columns.flatMap((col: any) => col.issues ?? []);
+    const targetIssue = allIssues.find((i: any) => i.id === issue.id);
+    expect(targetIssue).toBeDefined();
+    expect(targetIssue.workspaceSummary?.main?.claudeProfile).toBe(profileName);
+  });
+});
+
+test.describe("Claude profile override — workspace panel select", () => {
+  let projectId: string;
+  let statusId: string;
+  const createdIssueIds: string[] = [];
+  const createdWorkspaceIds: string[] = [];
+
+  test.beforeAll(async ({ request }) => {
+    const projectsRes = await request.get(`${SERVER_URL}/api/projects`);
+    const projects = await projectsRes.json();
+    projectId = projects[0].id;
+
+    const statusesRes = await request.get(
+      `${SERVER_URL}/api/projects/${projectId}/statuses`,
+    );
+    const statuses = await statusesRes.json();
+    const inProgress = statuses.find(
+      (s: { name: string }) => s.name === "In Progress",
+    );
+    statusId = inProgress ? inProgress.id : statuses[0].id;
+  });
+
+  test.afterAll(async ({ request }) => {
+    for (const id of createdWorkspaceIds) {
+      await request.delete(`${SERVER_URL}/api/workspaces/${id}`);
+    }
+    for (const id of createdIssueIds) {
+      await request.delete(`${SERVER_URL}/api/issues/${id}`);
+    }
+  });
+
+  test("Profile dropdown only renders when profiles are available", async ({
+    request,
+    page,
+  }) => {
+    // Check if any profiles are available; the dropdown is only rendered when there are profiles
+    const profilesRes = await request.get(
+      `${SERVER_URL}/api/preferences/claude-profiles`,
+    );
+    expect(profilesRes.status()).toBe(200);
+    const { profiles } = await profilesRes.json();
+
+    if (profiles.length === 0) {
+      // No profiles on this machine — just verify the API response shape
+      expect(Array.isArray(profiles)).toBe(true);
+      return;
+    }
+
+    // Profiles exist — create a workspace and open its panel
+    const suffix = Date.now().toString(36);
+    const issueRes = await request.post(`${SERVER_URL}/api/issues`, {
+      data: {
+        title: `Profile panel test ${suffix}`,
+        statusId,
+        projectId,
+        skipAutoReview: true,
+      },
+    });
+    const issue = await issueRes.json();
+    createdIssueIds.push(issue.id);
+
+    const wsRes = await request.post(`${SERVER_URL}/api/workspaces`, {
+      data: {
+        issueId: issue.id,
+        branch: `feature/profile-panel-${suffix}`,
+        requiresReview: false,
+      },
+    });
+    const ws = await wsRes.json();
+    createdWorkspaceIds.push(ws.id);
+
+    await page.goto("/");
+    await page.waitForSelector("h2");
+
+    // Find and click the issue card to open the workspace panel
+    const issueCard = page.locator("p", { hasText: issue.title }).first();
+    await expect(issueCard).toBeVisible({ timeout: 5000 });
+    await issueCard.click();
+
+    // The workspace panel should open; wait for it
+    const wsPanel = page.locator(".fixed.right-0.top-0");
+    await expect(wsPanel).toBeVisible({ timeout: 5000 });
+
+    // Profile select should be visible (profiles available)
+    await expect(
+      wsPanel.locator("label", { hasText: "Profile" }),
+    ).toBeVisible({ timeout: 5000 });
+    const profileSelect = wsPanel.locator("select").filter({
+      has: page.locator("option", { hasText: /Default/ }),
+    });
+    await expect(profileSelect).toBeVisible();
+
+    // Verify all discovered profiles appear as options
+    for (const p of profiles) {
+      await expect(profileSelect.locator(`option[value="${p}"]`)).toBeAttached();
+    }
+  });
+});
