@@ -139,6 +139,8 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
   const [requiresReview, setRequiresReview] = useState(false);
   const [prompt, setPrompt] = useState("");
   const [prefs, setPrefs] = useState<Record<string, string>>({});
+  const [availableProfiles, setAvailableProfiles] = useState<string[]>([]);
+  const [selectedProfile, setSelectedProfile] = useState<string>("");
   const [lastPrompt, setLastPrompt] = useState<string>(
     initialSessionId ? `${issue.title}${issue.description ? `\n\n${issue.description}` : ""}` : ""
   );
@@ -255,7 +257,11 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
       .then((s) => {
         setPrefs(s);
         setRequiresReview(s.auto_review !== "false");
+        setSelectedProfile(s.claude_profile || "");
       })
+      .catch(() => {});
+    apiFetch<{ profiles: string[] }>("/api/preferences/claude-profiles")
+      .then((data) => setAvailableProfiles(data.profiles))
       .catch(() => {});
   }, [issue.id]);
 
@@ -296,6 +302,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
         planMode: withPlanMode,
         branch: suggestion,
       };
+      if (selectedProfile) body.claudeProfile = selectedProfile;
       const result = await apiFetch<WorkspaceResponse & { sessionId?: string }>("/api/workspaces", {
         method: "POST",
         body: JSON.stringify(body),
@@ -718,6 +725,25 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                 </button>
                 {quickDropdownOpen && (
                   <div className="absolute top-full left-0 mt-1 w-52 bg-white border border-gray-200 rounded shadow-lg z-10">
+                    {availableProfiles.length > 0 && (
+                      <>
+                        <div className="px-3 py-1.5">
+                          <label className="block text-xs text-gray-500 mb-1">Profile</label>
+                          <select
+                            value={selectedProfile}
+                            onChange={(e) => setSelectedProfile(e.target.value)}
+                            className="w-full text-sm border border-gray-200 rounded px-2 py-1"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <option value="">Default</option>
+                            {availableProfiles.map((p) => (
+                              <option key={p} value={p}>{p}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <div className="border-t border-gray-100" />
+                      </>
+                    )}
                     <button
                       onClick={() => handleQuickLaunch(false)}
                       className="w-full text-left text-sm px-3 py-2 hover:bg-gray-50"
@@ -1347,6 +1373,25 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
               </button>
               {quickDropdownOpen && (
                 <div className="absolute bottom-full left-0 mb-1 w-52 bg-white border border-gray-200 rounded shadow-lg z-10">
+                  {availableProfiles.length > 0 && (
+                    <>
+                      <div className="px-3 py-1.5">
+                        <label className="block text-xs text-gray-500 mb-1">Profile</label>
+                        <select
+                          value={selectedProfile}
+                          onChange={(e) => setSelectedProfile(e.target.value)}
+                          className="w-full text-sm border border-gray-200 rounded px-2 py-1"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <option value="">Default</option>
+                          {availableProfiles.map((p) => (
+                            <option key={p} value={p}>{p}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="border-t border-gray-100" />
+                    </>
+                  )}
                   <button
                     onClick={() => handleQuickLaunch(false)}
                     className="w-full text-left text-sm px-3 py-2 hover:bg-gray-50"
