@@ -963,7 +963,15 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                   />
 
                   <div className="pt-2 border-t border-gray-100">
-                    <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Board Monitoring</div>
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Board Monitoring</div>
+                      <button
+                        onClick={() => apiFetch("/api/internal/monitor-run", { method: "POST" }).then(() => showToast("Monitor cycle started", "success")).catch(() => showToast("Failed to run monitor", "error"))}
+                        className="text-xs px-2 py-1 bg-green-600 hover:bg-green-700 text-white rounded"
+                      >
+                        Run now
+                      </button>
+                    </div>
                     <Toggle
                       checked={settings.auto_monitor === "true"}
                       onChange={setBool("auto_monitor")}
