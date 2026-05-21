@@ -53,6 +53,7 @@ export interface UpdateIssueRequest {
   statusId?: string;
   sortOrder?: number;
   estimate?: IssueEstimate | null;
+  skipAutoReview?: boolean;
 }
 
 export interface MainWorkspaceInfo {
