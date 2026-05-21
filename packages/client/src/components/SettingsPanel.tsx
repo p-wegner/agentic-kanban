@@ -246,20 +246,6 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
   const [newSkill, setNewSkill] = useState<{ name: string; description: string; prompt: string; model: string } | null>(null);
   const [installedSkills, setInstalledSkills] = useState<Record<string, boolean>>({});
   const [installingSkill, setInstallingSkill] = useState<string | null>(null);
-<<<<<<< HEAD
-
-  // Tags state
-  const [tagsList, setTagsList] = useState<{ id: string; name: string; color: string | null }[]>([]);
-  const [editingTag, setEditingTag] = useState<string | null>(null);
-  const [editTagName, setEditTagName] = useState("");
-  const [editTagColor, setEditTagColor] = useState("");
-  const [newTagName, setNewTagName] = useState("");
-  const [newTagColor, setNewTagColor] = useState("#6B7280");
-  const [selectedTagIds, setSelectedTagIds] = useState<Set<string>>(new Set());
-  const [mergeTargetId, setMergeTargetId] = useState<string>("");
-  const [mergingTags, setMergingTags] = useState(false);
-=======
->>>>>>> 9e48722 (feat: install kanban skills to project .claude/skills/ from Settings UI)
 
   // Tags state
   const [tagsList, setTagsList] = useState<{ id: string; name: string; color: string | null }[]>([]);
@@ -296,22 +282,6 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
         setProfiles(profileData.profiles);
         setSkills(skillsData);
         setTagsList(tagsData);
-<<<<<<< HEAD
-
-        // Check install status for each skill
-        const statusEntries = await Promise.all(
-          skillsData.map(async (skill) => {
-            try {
-              const s = await apiFetch<{ installed: boolean }>(`/api/agent-skills/${skill.id}/install-status`);
-              return [skill.id, s.installed] as const;
-            } catch {
-              return [skill.id, false] as const;
-            }
-          })
-        );
-        setInstalledSkills(Object.fromEntries(statusEntries));
-=======
->>>>>>> 0ab88a1 (feat: add Tags management tab to Settings panel)
 
         // Check install status for each skill
         const statusEntries = await Promise.all(
@@ -581,6 +551,30 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                           className="w-16 text-xs border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500"
                         />
                         <span className="text-xs text-gray-500">minutes</span>
+                      </div>
+                    )}
+                    {settings.auto_monitor === "true" && (
+                      <div className="mt-3">
+                        <Toggle
+                          checked={settings.nudge_auto_start === "true"}
+                          onChange={setBool("nudge_auto_start")}
+                          label="Auto-start unblocked Todo items"
+                          hint="When enabled, the monitor will also create workspaces for Todo issues whose dependencies are resolved, up to the In Progress WIP limit."
+                        />
+                        {settings.nudge_auto_start === "true" && (
+                          <div className="pl-5 mt-2 flex items-center gap-2">
+                            <label className="text-xs text-gray-500 whitespace-nowrap">In Progress WIP limit</label>
+                            <input
+                              type="number"
+                              min={1}
+                              max={20}
+                              value={settings.nudge_wip_limit ?? "5"}
+                              onChange={(e) => setSettings(s => ({ ...s, nudge_wip_limit: e.target.value }))}
+                              className="w-16 text-xs border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                            />
+                            <span className="text-xs text-gray-500">issues max</span>
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
