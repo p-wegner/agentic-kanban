@@ -812,6 +812,21 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                   {ws.closedAt && <span>Closed {formatRelativeTime(ws.closedAt)}</span>}
                 </div>
 
+                {(ws.contextTokens || ws.lastTool) && (
+                  <div className="flex items-center gap-2 text-[10px] text-gray-400">
+                    {ws.contextTokens ? (
+                      <span>
+                        {ws.contextTokens >= 1000
+                          ? `${Math.round(ws.contextTokens / 1000)}k ctx`
+                          : `${ws.contextTokens} ctx`}
+                      </span>
+                    ) : null}
+                    {ws.lastTool ? (
+                      <span className="truncate" title={ws.lastTool}>{ws.lastTool}</span>
+                    ) : null}
+                  </div>
+                )}
+
                 {isSelected && (
                   <div className="space-y-2 pt-2 border-t border-gray-200" onClick={(e) => e.stopPropagation()}>
                     {completedSessions.length > 0 && !isRunning && (
@@ -1228,10 +1243,11 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                           {ws.isDirect ? "Close" : "Merge"}
                         </button>
                         )}
+                        <span className="border-l border-gray-300 self-stretch" />
                         <button
                           onClick={() => handleDeleteWorkspace(ws.id)}
                           disabled={actionLoading}
-                          className="text-sm bg-red-600 text-white px-3 py-1.5 rounded hover:bg-red-700 disabled:opacity-50"
+                          className="text-sm text-red-600 px-3 py-1.5 rounded hover:bg-red-50 disabled:opacity-50 border border-red-300"
                         >
                           Delete
                         </button>

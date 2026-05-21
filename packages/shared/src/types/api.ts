@@ -140,6 +140,8 @@ export interface WorkspaceResponse {
   createdAt: string;
   updatedAt: string;
   closedAt?: string | null;
+  contextTokens?: number | null;
+  lastTool?: string | null;
 }
 
 export interface IssueArtifact {
