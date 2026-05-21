@@ -609,61 +609,6 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                     hint="When enabled, runs an agent session before merging that reads the worktree's session transcripts and updates docs and Claude hooks with extracted insights. Blocks merge until complete (up to 3 minutes)."
                   />
 
-                  <div className="pt-2 border-t border-gray-100">
-                    <div className="flex items-center justify-between mb-3">
-                      <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Board Monitoring</div>
-                      <button
-                        onClick={() => apiFetch("/api/internal/monitor-run", { method: "POST" }).then(() => showToast("Monitor cycle started", "success")).catch(() => showToast("Failed to run monitor", "error"))}
-                        className="text-xs px-2 py-1 bg-green-600 hover:bg-green-700 text-white rounded"
-                      >
-                        Run now
-                      </button>
-                    </div>
-                    <Toggle
-                      checked={settings.auto_monitor === "true"}
-                      onChange={setBool("auto_monitor")}
-                      label="Auto-monitor board for stuck agents"
-                      hint="Periodically checks all active workspaces. Relaunches idle workspaces, triggers merges for completed reviews, and nudges agents waiting for input."
-                    />
-                    {settings.auto_monitor === "true" && (
-                      <div className="pl-5 mt-2 flex items-center gap-2">
-                        <label className="text-xs text-gray-500 whitespace-nowrap">Check every</label>
-                        <input
-                          type="number"
-                          min={1}
-                          max={60}
-                          value={settings.auto_monitor_interval ?? "4"}
-                          onChange={(e) => setSettings(s => ({ ...s, auto_monitor_interval: e.target.value }))}
-                          className="w-16 text-xs border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                        />
-                        <span className="text-xs text-gray-500">minutes</span>
-                      </div>
-                    )}
-                    {settings.auto_monitor === "true" && (
-                      <div className="mt-3">
-                        <Toggle
-                          checked={settings.nudge_auto_start === "true"}
-                          onChange={setBool("nudge_auto_start")}
-                          label="Auto-start unblocked Todo items"
-                          hint="When enabled, the monitor will also create workspaces for Todo issues whose dependencies are resolved, up to the In Progress WIP limit."
-                        />
-                        {settings.nudge_auto_start === "true" && (
-                          <div className="pl-5 mt-2 flex items-center gap-2">
-                            <label className="text-xs text-gray-500 whitespace-nowrap">In Progress WIP limit</label>
-                            <input
-                              type="number"
-                              min={1}
-                              max={20}
-                              value={settings.nudge_wip_limit ?? "5"}
-                              onChange={(e) => setSettings(s => ({ ...s, nudge_wip_limit: e.target.value }))}
-                              className="w-16 text-xs border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                            />
-                            <span className="text-xs text-gray-500">issues max</span>
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
                 </>
               )}
 
