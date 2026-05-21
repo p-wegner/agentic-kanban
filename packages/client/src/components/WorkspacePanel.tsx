@@ -55,6 +55,7 @@ interface WorkspacePanelProps {
   initialWorkspaceId?: string;
   initialSessionId?: string;
   autoSelectId?: string;
+  initialShowCreate?: boolean;
 }
 
 const STATUS_COLORS: Record<string, string> = {
@@ -120,10 +121,10 @@ function SessionStatsSummary({ stats }: { stats: string | null | undefined }) {
 
 import { suggestBranchName, sanitizeBranchName } from "../lib/branch.js";
 
-export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, initialWorkspaceId, initialSessionId, autoSelectId }: WorkspacePanelProps) {
+export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, initialWorkspaceId, initialSessionId, autoSelectId, initialShowCreate }: WorkspacePanelProps) {
   const [workspaces, setWorkspaces] = useState<WorkspaceResponse[]>([]);
   const [loading, setLoading] = useState(true);
-  const [showCreate, setShowCreate] = useState(false);
+  const [showCreate, setShowCreate] = useState(initialShowCreate ?? false);
   const [quickDropdownOpen, setQuickDropdownOpen] = useState(false);
   const [selectedWorkspace, setSelectedWorkspace] = useState<string | null>(initialWorkspaceId ?? null);
   const [activeSession, setActiveSession] = useState<string | null>(initialSessionId || null);
