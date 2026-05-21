@@ -54,6 +54,13 @@ function tagClass(color: string | null | undefined) {
   return TAG_COLORS[color ?? ""] ?? "bg-gray-100 text-gray-600";
 }
 
+function formatDate(iso: string) {
+  return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+}
+
+export function TableView({ columns, onIssueClick, searchQuery }: TableViewProps) {
+  const [sort, setSort] = useState<{ key: SortKey; dir: SortDir }>({ key: "number", dir: "asc" });
+  const [statusFilter, setStatusFilter] = useState<string>("active");
 
   const allIssues = columns.flatMap((col) =>
     col.issues.map((issue) => ({ ...issue, statusName: col.name }))
@@ -101,6 +108,22 @@ function tagClass(color: string | null | undefined) {
           className="text-xs border border-gray-200 rounded px-2 py-1 bg-white text-gray-700"
         >
           <option value="active">Active only</option>
+          <option value="all">All statuses</option>
+          {statusNames.map((s) => <option key={s} value={s}>{s}</option>)}
+        </select>
+      </div>
+      <div className="flex-1 overflow-auto rounded-lg border border-gray-200 bg-white">
+        <table className="w-full text-sm border-collapse">
+          <thead className="sticky top-0 bg-gray-50 z-10">
+            <tr>
+              {(
+                [
+                  ["number", "#"],
+                  ["title", "Title"],
+                  ["status", "Status"],
+                  ["priority", "Priority"],
+                  ["estimate", "Estimate"],
+                  ["updated", "Updated"],
                 ] as [SortKey, string][]
               ).map(([key, label]) => (
                 <th
@@ -114,6 +137,12 @@ function tagClass(color: string | null | undefined) {
               <th className="text-left text-xs font-medium text-gray-500 px-3 py-2 border-b border-gray-200 whitespace-nowrap">
                 Tags
               </th>
+            </tr>
+          </thead>
+          <tbody>
+            {sorted.length === 0 && (
+              <tr>
+                <td colSpan={7} className="text-center text-gray-400 text-sm py-12">No issues found</td>
               </tr>
             )}
             {sorted.map((issue) => (
