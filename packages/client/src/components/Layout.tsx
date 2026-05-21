@@ -16,42 +16,13 @@ interface LayoutProps {
   projects?: Project[];
   activeProjectId?: string | null;
   onProjectChange?: (id: string) => void;
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-  onRegisterProject?: (repoPath: string) => Promise<void>;
-  onCreateProject?: (name: string, path: string) => Promise<void>;
-<<<<<<< HEAD
-=======
-  onRegisterProject?: (opts: RegisterOptions) => Promise<void>;
->>>>>>> f36a871 (feat: add optional README and .gitignore template to project creation dialog)
-=======
   onRegisterProject?: (args: { repoPath: string; gitignoreTemplate: string; generateReadme: boolean }) => Promise<void>;
-=======
-  onRegisterProject?: (opts: { repoPath: string; gitignoreTemplate: string; generateReadme: boolean }) => Promise<void>;
->>>>>>> 76091bc (fix: correct LayoutProps onRegisterProject type signature)
-=======
-  onRegisterProject?: (options: { repoPath: string; gitignoreTemplate: string; generateReadme: boolean }) => Promise<void>;
->>>>>>> 3ce95e1 (feat: add All Workspaces aggregate panel (#101))
   onCreateProject?: (name: string, path: string, gitignoreTemplate: string, generateReadme: boolean) => Promise<void>;
->>>>>>> 7dd2d0e (fix: correct onRegisterProject prop type to accept object in Layout.tsx)
-=======
->>>>>>> 41a314b (feat: implement create project flow (WIP - UI + backend route))
   searchQuery?: string;
   onSearchChange?: (query: string) => void;
-<<<<<<< HEAD
-<<<<<<< HEAD
   priorityFilter?: string;
   onPriorityFilterChange?: (priority: string) => void;
   onAllWorkspacesClick?: () => void;
-=======
->>>>>>> 1040497 (feat: remove priority filter from frontend UI)
-=======
-  priorityFilter?: string;
-  onPriorityFilterChange?: (priority: string) => void;
-  onAllWorkspacesClick?: () => void;
->>>>>>> b4a5c74 (feat: add All Workspaces aggregate panel (#101))
   onWorktreeOverviewClick?: () => void;
   onSettingsClick?: () => void;
 }
@@ -65,18 +36,9 @@ export function Layout({
   onCreateProject,
   searchQuery = "",
   onSearchChange,
-<<<<<<< HEAD
-<<<<<<< HEAD
   priorityFilter = "",
   onPriorityFilterChange,
   onAllWorkspacesClick,
-=======
->>>>>>> 1040497 (feat: remove priority filter from frontend UI)
-=======
-  priorityFilter = "",
-  onPriorityFilterChange,
-  onAllWorkspacesClick,
->>>>>>> b4a5c74 (feat: add All Workspaces aggregate panel (#101))
   onWorktreeOverviewClick,
   onSettingsClick,
 }: LayoutProps) {
@@ -91,18 +53,7 @@ export function Layout({
   const [createPath, setCreatePath] = useState("");
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
   const createNameInvalid = /[/\\<>:"|?*\x00]/.test(createName);
-=======
->>>>>>> 41a314b (feat: implement create project flow (WIP - UI + backend route))
-=======
-  const createNameInvalid = !createPath.trim() && /[/\\<>:"|?*\x00]/.test(createName);
->>>>>>> 7695053 (feat: validate create-project edge cases (WIP))
-=======
-  const createNameInvalid = /[/\\<>:"|?*\x00]/.test(createName);
->>>>>>> f6d1a48 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
   const inputRef = useRef<HTMLInputElement>(null);
 
   async function handleRegisterSubmit(e: React.FormEvent) {
@@ -129,7 +80,7 @@ export function Layout({
     setCreating(true);
     setCreateError(null);
     try {
-      await onCreateProject?.(createName.trim(), createPath.trim());
+      await onCreateProject?.(createName.trim(), createPath.trim(), gitignoreTemplate, generateReadme);
       setShowRegister(false);
       setCreateName("");
       setCreatePath("");
@@ -144,138 +95,10 @@ export function Layout({
     setRegisterError(null);
     setCreateError(null);
     setRepoPath("");
-<<<<<<< HEAD
-<<<<<<< HEAD
     setCreateName("");
     setCreatePath("");
-    setModalTab("import");
-=======
     setGitignoreTemplate("");
     setGenerateReadme(false);
->>>>>>> f36a871 (feat: add optional README and .gitignore template to project creation dialog)
-=======
-    setCreateName("");
-    setCreatePath("");
-    setModalTab("import");
->>>>>>> 41a314b (feat: implement create project flow (WIP - UI + backend route))
-    setShowRegister(true);
-    setTimeout(() => inputRef.current?.focus(), 50);
-  }
-
-  return (
-    <div className="h-screen flex flex-col bg-gray-50">
-      <header className="bg-white border-b border-gray-200 px-4 py-2 shrink-0">
-        <div className="flex items-center justify-between gap-4 flex-wrap">
-          <div className="flex items-center gap-2 min-w-0">
-            <h1 className="text-xl font-semibold text-gray-900 shrink-0">
-              Agentic Kanban
-            </h1>
-            {projects.length > 1 && (
-              <select
-                value={activeProjectId ?? ""}
-                onChange={(e) => onProjectChange?.(e.target.value)}
-                className="text-sm border border-gray-300 rounded-md px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500"
-              >
-                {projects.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                  </option>
-                ))}
-              </select>
-            )}
-            {projects.length === 1 && (
-              <span className="text-sm text-gray-500">{projects[0].name}</span>
-            )}
-            <button
-              onClick={openRegister}
-              className="p-1 text-gray-400 hover:text-gray-600 rounded-md hover:bg-gray-100"
-              title="Register project"
-            >
-              <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                <path d="M12 5v14M5 12h14" />
-              </svg>
-            </button>
-          </div>
-          <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
-            <div className="relative">
-              <svg
-                className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-              >
-                <circle cx="11" cy="11" r="8" />
-                <path d="m21 21-4.3-4.3" />
-              </svg>
-              <input
-                id="search-input"
-                type="text"
-                value={searchQuery}
-                onChange={(e) => onSearchChange?.(e.target.value)}
-                placeholder='Search issues... ("/")'
-                className="pl-8 pr-3 py-1.5 text-sm border border-gray-300 rounded-md w-32 sm:w-48 md:w-64 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
-              />
-              {searchQuery && (
-                <button
-                  onClick={() => onSearchChange?.("")}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-xs"
-                >
-                  &times;
-                </button>
-              )}
-            </div>
-<<<<<<< HEAD
-            <button
-              onClick={onAllWorkspacesClick}
-              className="p-1.5 text-gray-400 hover:text-gray-600 rounded-md hover:bg-gray-100"
-              title="All Workspaces"
-            >
-              <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <rect x="3" y="3" width="7" height="7" rx="1" />
-                <rect x="14" y="3" width="7" height="7" rx="1" />
-                <rect x="3" y="14" width="7" height="7" rx="1" />
-                <rect x="14" y="14" width="7" height="7" rx="1" />
-              </svg>
-            </button>
-            <button
-              onClick={onAllWorkspacesClick}
-              className="p-1.5 text-gray-400 hover:text-gray-600 rounded-md hover:bg-gray-100"
-              title="All Workspaces"
-            >
-              <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <rect x="3" y="3" width="7" height="7" rx="1" />
-                <rect x="14" y="3" width="7" height="7" rx="1" />
-                <rect x="3" y="14" width="7" height="7" rx="1" />
-                <rect x="14" y="14" width="7" height="7" rx="1" />
-              </svg>
-            </button>
-=======
->>>>>>> 1040497 (feat: remove priority filter from frontend UI)
-            <button
-              onClick={onAllWorkspacesClick}
-              className="p-1.5 text-gray-400 hover:text-gray-600 rounded-md hover:bg-gray-100"
-              title="All Workspaces"
-            >
-              <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <rect x="3" y="3" width="7" height="7" rx="1" />
-                <rect x="14" y="3" width="7" height="7" rx="1" />
-                <rect x="3" y="14" width="7" height="7" rx="1" />
-                <rect x="14" y="14" width="7" height="7" rx="1" />
-              </svg>
-            </button>
-            <button
-              onClick={onAllWorkspacesClick}
-              className="p-1.5 text-gray-400 hover:text-gray-600 rounded-md hover:bg-gray-100"
-              title="All Workspaces"
-            >
-              <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <rect x="3" y="3" width="7" height="7" rx="1" />
-                <rect x="14" y="3" width="7" height="7" rx="1" />
-                <rect x="3" y="14" width="7" height="7" rx="1" />
-                <rect x="14" y="14" width="7" height="7" rx="1" />
-              </svg>
-            </button>
             <button
               onClick={onWorktreeOverviewClick}
               className="p-1.5 text-gray-400 hover:text-gray-600 rounded-md hover:bg-gray-100"
@@ -309,10 +132,6 @@ export function Layout({
           onClick={(e) => { if (e.target === e.currentTarget) setShowRegister(false); }}
         >
           <div className="bg-white rounded-lg shadow-xl w-full max-w-md mx-4 p-6">
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> 41a314b (feat: implement create project flow (WIP - UI + backend route))
             <h2 className="text-lg font-semibold text-gray-900 mb-4">Add Project</h2>
             <div className="flex border-b border-gray-200 mb-4">
               <button
@@ -382,27 +201,12 @@ export function Layout({
                     value={createName}
                     onChange={(e) => setCreateName(e.target.value)}
                     placeholder="my-project"
-<<<<<<< HEAD
-<<<<<<< HEAD
                     className={`w-full text-sm border rounded-md px-3 py-2 focus:outline-none focus:ring-1 ${createNameInvalid ? "border-red-400 focus:ring-red-400 focus:border-red-400" : "border-gray-300 focus:ring-blue-500 focus:border-blue-500"}`}
                     autoFocus
                   />
                   {createNameInvalid && (
                     <p className="mt-1 text-xs text-red-600">Name cannot contain: / \ &lt; &gt; : " | ? *</p>
                   )}
-=======
-                    className="w-full text-sm border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
-                    autoFocus
-                  />
->>>>>>> 41a314b (feat: implement create project flow (WIP - UI + backend route))
-=======
-                    className={`w-full text-sm border rounded-md px-3 py-2 focus:outline-none focus:ring-1 ${createNameInvalid ? "border-red-400 focus:ring-red-400 focus:border-red-400" : "border-gray-300 focus:ring-blue-500 focus:border-blue-500"}`}
-                    autoFocus
-                  />
-                  {createNameInvalid && (
-                    <p className="mt-1 text-xs text-red-600">Name cannot contain: / \ &lt; &gt; : " | ? *</p>
-                  )}
->>>>>>> 7695053 (feat: validate create-project edge cases (WIP))
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -419,6 +223,34 @@ export function Layout({
                     Leave blank to use the base directory from Settings › Project. A new folder and git repo will be created.
                   </p>
                 </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    .gitignore template
+                  </label>
+                  <select
+                    value={gitignoreTemplate}
+                    onChange={(e) => setGitignoreTemplate(e.target.value)}
+                    className="w-full text-sm border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                  >
+                    <option value="">None</option>
+                    <option value="node">Node</option>
+                    <option value="python">Python</option>
+                    <option value="java">Java</option>
+                    <option value="go">Go</option>
+                    <option value="rust">Rust</option>
+                    <option value="ruby">Ruby</option>
+                    <option value="dotnet">.NET / C#</option>
+                  </select>
+                </div>
+                <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={generateReadme}
+                    onChange={(e) => setGenerateReadme(e.target.checked)}
+                    className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                  />
+                  Generate README.md
+                </label>
                 {createError && (
                   <p className="text-sm text-red-600">{createError}</p>
                 )}
@@ -432,15 +264,7 @@ export function Layout({
                   </button>
                   <button
                     type="submit"
-<<<<<<< HEAD
-<<<<<<< HEAD
                     disabled={creating || !createName.trim() || createNameInvalid}
-=======
-                    disabled={creating || !createName.trim()}
->>>>>>> 41a314b (feat: implement create project flow (WIP - UI + backend route))
-=======
-                    disabled={creating || !createName.trim() || createNameInvalid}
->>>>>>> 7695053 (feat: validate create-project edge cases (WIP))
                     className="px-3 py-1.5 text-sm text-white bg-blue-600 rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     {creating ? "Creating…" : "Create project"}
@@ -448,77 +272,6 @@ export function Layout({
                 </div>
               </form>
             )}
-<<<<<<< HEAD
-=======
-            <h2 className="text-lg font-semibold text-gray-900 mb-4">Register Project</h2>
-            <form onSubmit={handleRegisterSubmit} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Repository path
-                </label>
-                <input
-                  ref={inputRef}
-                  type="text"
-                  value={repoPath}
-                  onChange={(e) => setRepoPath(e.target.value)}
-                  placeholder="C:/path/to/repo"
-                  className="w-full text-sm border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
-                />
-                <p className="mt-1 text-xs text-gray-500">
-                  Absolute path to a git repository. Branch and remote URL are auto-detected.
-                </p>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  .gitignore template
-                </label>
-                <select
-                  value={gitignoreTemplate}
-                  onChange={(e) => setGitignoreTemplate(e.target.value)}
-                  className="w-full text-sm border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
-                >
-                  <option value="">None</option>
-                  <option value="node">Node</option>
-                  <option value="python">Python</option>
-                  <option value="java">Java</option>
-                  <option value="go">Go</option>
-                  <option value="rust">Rust</option>
-                  <option value="ruby">Ruby</option>
-                  <option value="dotnet">.NET / C#</option>
-                </select>
-              </div>
-              <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer select-none">
-                <input
-                  type="checkbox"
-                  checked={generateReadme}
-                  onChange={(e) => setGenerateReadme(e.target.checked)}
-                  className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                />
-                Generate README.md
-              </label>
-              {registerError && (
-                <p className="text-sm text-red-600">{registerError}</p>
-              )}
-              <div className="flex justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => setShowRegister(false)}
-                  className="px-3 py-1.5 text-sm text-gray-700 border border-gray-300 rounded-md hover:bg-gray-50"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={registering || !repoPath.trim()}
-                  className="px-3 py-1.5 text-sm text-white bg-blue-600 rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {registering ? "Registering…" : "Register"}
-                </button>
-              </div>
-            </form>
->>>>>>> f36a871 (feat: add optional README and .gitignore template to project creation dialog)
-=======
->>>>>>> 41a314b (feat: implement create project flow (WIP - UI + backend route))
           </div>
         </div>
       )}
