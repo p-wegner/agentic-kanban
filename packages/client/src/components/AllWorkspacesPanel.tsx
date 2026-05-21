@@ -34,12 +34,14 @@ import { useState } from "react";
 import { useState } from "react";
 >>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
 import { formatRelativeTime } from "../lib/formatRelativeTime.js";
+import { apiFetch } from "../lib/api.js";
 import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
 
 interface AllWorkspacesPanelProps {
   columns: StatusWithIssues[];
   onClose: () => void;
   onIssueClick: (issue: IssueWithStatus) => void;
+  onRefresh?: () => void;
 }
 
 <<<<<<< HEAD
@@ -113,6 +115,7 @@ const ISSUE_STATUS_COLORS: Record<string, string> = {
   "Cancelled": "bg-red-100 text-red-500",
 };
 
+<<<<<<< HEAD
 export function AllWorkspacesPanel({ columns, onClose, onIssueClick }: AllWorkspacesPanelProps) {
 <<<<<<< HEAD
 <<<<<<< HEAD
@@ -125,8 +128,12 @@ export function AllWorkspacesPanel({ columns, onClose, onIssueClick }: AllWorksp
 <<<<<<< HEAD
 =======
 >>>>>>> 862c38b (feat: add All Workspaces aggregate panel (#101))
+=======
+export function AllWorkspacesPanel({ columns, onClose, onIssueClick, onRefresh }: AllWorkspacesPanelProps) {
+>>>>>>> f8e9393 (feat: add Close idle workspaces bulk action to All Workspaces panel)
   const [statusFilter, setStatusFilter] = useState<WsStatusFilter>("all");
   const [searchQuery, setSearchQuery] = useState("");
+  const [closingIdle, setClosingIdle] = useState(false);
 
 =======
 >>>>>>> b4a5c74 (feat: add All Workspaces aggregate panel (#101))
@@ -176,6 +183,7 @@ export function AllWorkspacesPanel({ columns, onClose, onIssueClick }: AllWorksp
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 >>>>>>> 1bb4b1b (feat: add status filter and text search to All Workspaces panel)
 =======
@@ -186,6 +194,30 @@ export function AllWorkspacesPanel({ columns, onClose, onIssueClick }: AllWorksp
 >>>>>>> 862c38b (feat: add All Workspaces aggregate panel (#101))
 =======
 >>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
+=======
+  const idleWorkspaceIds = issuesWithWorkspaces
+    .filter((i) => i.workspaceSummary?.main?.status === "idle")
+    .map((i) => i.workspaceSummary!.main!.id);
+
+  async function handleCloseIdle() {
+    if (idleWorkspaceIds.length === 0) return;
+    const confirmed = window.confirm(
+      `Close ${idleWorkspaceIds.length} idle workspace${idleWorkspaceIds.length !== 1 ? "s" : ""}?`
+    );
+    if (!confirmed) return;
+    setClosingIdle(true);
+    for (const id of idleWorkspaceIds) {
+      try {
+        await apiFetch(`/api/workspaces/${id}`, { method: "DELETE" });
+      } catch {
+        // non-fatal — continue with the rest
+      }
+      onRefresh?.();
+    }
+    setClosingIdle(false);
+  }
+
+>>>>>>> f8e9393 (feat: add Close idle workspaces bulk action to All Workspaces panel)
   const filtered = issuesWithWorkspaces.filter((issue) => {
     const ws = issue.workspaceSummary!;
     const mainStatus = ws.main?.status ?? "";
@@ -307,12 +339,23 @@ export function AllWorkspacesPanel({ columns, onClose, onIssueClick }: AllWorksp
               </span>
             )}
           </div>
-          <button
-            onClick={onClose}
-            className="text-gray-400 hover:text-gray-600 text-lg leading-none"
-          >
-            &times;
-          </button>
+          <div className="flex items-center gap-2">
+            {idleWorkspaceIds.length > 0 && (
+              <button
+                onClick={handleCloseIdle}
+                disabled={closingIdle}
+                className="text-xs px-2.5 py-1 rounded bg-yellow-100 text-yellow-700 hover:bg-yellow-200 disabled:opacity-50 font-medium"
+              >
+                {closingIdle ? "Closing…" : `Close ${idleWorkspaceIds.length} idle`}
+              </button>
+            )}
+            <button
+              onClick={onClose}
+              className="text-gray-400 hover:text-gray-600 text-lg leading-none"
+            >
+              &times;
+            </button>
+          </div>
         </div>
 
 <<<<<<< HEAD
