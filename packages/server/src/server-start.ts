@@ -10,7 +10,7 @@ import { db } from "./db/index.js";
 import { createSessionManager } from "./services/session.manager.js";
 import type { ProviderId } from "./services/agent-provider.js";
 import { createBoardEvents } from "./services/board-events.js";
-import { workspaces, issues, projects, projectStatuses, preferences, sessions, agentSkills } from "@agentic-kanban/shared/schema";
+import { workspaces, issues, projects, projectStatuses, preferences, sessions, agentSkills, issueDependencies } from "@agentic-kanban/shared/schema";
 import { eq, sql, desc } from "drizzle-orm";
 import * as agentService from "./services/agent.service.js";
 import * as gitService from "./services/git.service.js";
@@ -546,7 +546,7 @@ export async function startServer(port?: number) {
   let monitorTimer: ReturnType<typeof setTimeout> | null = null;
   let monitorNextRunAt: string | null = null;
   let monitorLastRun: { at: string; relaunched: number; merged: number; nudged: number } | null = null;
-  type MonitorAction = { at: string; action: "relaunch" | "merge" | "nudge" | "mark_idle" | "mark_dead"; workspaceId: string; issueId: string };
+  type MonitorAction = { at: string; action: "relaunch" | "merge" | "nudge" | "mark_idle" | "mark_dead" | "auto_start"; workspaceId: string; issueId: string };
   const monitorRecentActions: MonitorAction[] = [];
 
   function logMonitorAction(action: MonitorAction["action"], workspaceId: string, issueId: string) {
@@ -648,6 +648,94 @@ export async function startServer(port?: number) {
           }
         } catch (err) {
           console.warn(`[monitor] Error processing workspace ${ws.wsId}:`, err);
+        }
+      }
+      // Auto-start unblocked Todo items if enabled
+      if (prefMap.get("nudge_auto_start") === "true") {
+        const wipLimit = parseInt(prefMap.get("nudge_wip_limit") || "5", 10);
+
+        // Count current In Progress issues
+        const inProgressStatus = await db
+          .select({ id: projectStatuses.id, projectId: projectStatuses.projectId })
+          .from(projectStatuses)
+          .where(sql`${projectStatuses.name} = 'In Progress'`);
+
+        for (const inProgressSt of inProgressStatus) {
+          const inProgressCount = await db
+            .select({ count: sql<number>`count(*)` })
+            .from(issues)
+            .where(eq(issues.statusId, inProgressSt.id));
+          const currentWip = inProgressCount[0]?.count ?? 0;
+          if (currentWip >= wipLimit) continue;
+
+          // Find Todo status for the same project
+          const todoStatus = await db
+            .select({ id: projectStatuses.id })
+            .from(projectStatuses)
+            .where(sql`${projectStatuses.name} = 'Todo' AND ${projectStatuses.projectId} = ${inProgressSt.projectId}`)
+            .limit(1);
+          if (todoStatus.length === 0) continue;
+
+          const slotsAvailable = wipLimit - currentWip;
+
+          // Find Todo issues with no open workspace and all dependencies satisfied
+          const todoIssues = await db
+            .select({ id: issues.id, title: issues.title, projectId: issues.projectId })
+            .from(issues)
+            .where(eq(issues.statusId, todoStatus[0].id))
+            .limit(slotsAvailable * 3); // fetch extra to filter by dependencies
+
+          // Get all done/cancelled status IDs for any project (for dependency check)
+          const doneStatuses = await db
+            .select({ id: projectStatuses.id })
+            .from(projectStatuses)
+            .where(sql`${projectStatuses.name} IN ('Done', 'Cancelled')`);
+          const doneStatusIds = new Set(doneStatuses.map(s => s.id));
+
+          let started = 0;
+          for (const issue of todoIssues) {
+            if (started >= slotsAvailable) break;
+
+            // Check if issue already has an open workspace
+            const existingWs = await db
+              .select({ id: workspaces.id })
+              .from(workspaces)
+              .where(sql`${workspaces.issueId} = ${issue.id} AND ${workspaces.status} != 'closed'`)
+              .limit(1);
+            if (existingWs.length > 0) continue;
+
+            // Check all dependencies are resolved (depends_on type — blocker must be done/cancelled)
+            const deps = await db
+              .select({ dependsOnId: issueDependencies.dependsOnId })
+              .from(issueDependencies)
+              .where(sql`${issueDependencies.issueId} = ${issue.id} AND ${issueDependencies.type} = 'depends_on'`);
+
+            if (deps.length > 0) {
+              const blockerIssues = await db
+                .select({ statusId: issues.statusId })
+                .from(issues)
+                .where(sql`${issues.id} IN (${sql.join(deps.map(d => sql`${d.dependsOnId}`), sql`, `)})`);
+              const allResolved = blockerIssues.every(b => b.statusId && doneStatusIds.has(b.statusId));
+              if (!allResolved) continue;
+            }
+
+            // Create workspace for this issue
+            const baseUrl = `http://localhost:${serverPort}`;
+            const resp = await fetch(`${baseUrl}/api/workspaces`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ issueId: issue.id }),
+            }).catch(() => null);
+
+            if (resp && resp.ok) {
+              const wsData = await resp.json().catch(() => null) as { id?: string } | null;
+              const wsId = wsData?.id ?? "unknown";
+              logMonitorAction("auto_start", wsId, issue.id);
+              console.log(`[monitor] Auto-started workspace for unblocked issue "${issue.title}" (${issue.id})`);
+              boardEvents.broadcast(issue.projectId, "board_changed");
+              started++;
+            }
+          }
         }
       }
     } catch (err) {
