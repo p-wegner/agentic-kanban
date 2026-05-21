@@ -536,6 +536,13 @@ export function AllWorkspacesPanel({ columns, onClose, onIssueClick, onRefresh }
                           {main.status}
                         </span>
 
+                        {/* Ready to merge */}
+                        {main.readyForMerge && (
+                          <span className="text-xs px-1.5 py-0.5 rounded bg-green-100 text-green-700">
+                            Ready to merge
+                          </span>
+                        )}
+
                         {/* Diff stats */}
                         {main.diffStats && main.diffStats.filesChanged > 0 && (
                           <span className="text-xs text-gray-500">
