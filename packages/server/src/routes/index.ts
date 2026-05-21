@@ -7,6 +7,7 @@ import { createTagsRoute, tagsRoute } from "./tags.js";
 import { createPreferencesRoute, preferencesRoute } from "./preferences.js";
 import { createAgentSkillsRoute, agentSkillsRoute } from "./agent-skills.js";
 import { createApprovalsRoute } from "./approvals.js";
+import { createScheduledRunsRoute } from "./scheduled-runs.js";
 import type { Database } from "../db/index.js";
 import type { SessionManager } from "../services/session.manager.js";
 import type { BoardEvents } from "../services/board-events.js";
@@ -14,6 +15,7 @@ import type { BoardEvents } from "../services/board-events.js";
 interface RouteOptions {
   boardEvents?: BoardEvents;
   fixAndMergeSessionIds?: Set<string>;
+  serverPort?: number;
 }
 
 export function createRoutes(database: Database, getSessionManager: () => SessionManager, options?: RouteOptions) {
@@ -25,6 +27,7 @@ export function createRoutes(database: Database, getSessionManager: () => Sessio
   routes.route("/tags", createTagsRoute(database));
   routes.route("/preferences", createPreferencesRoute(database));
   routes.route("/agent-skills", createAgentSkillsRoute(database));
+  routes.route("/scheduled-runs", createScheduledRunsRoute(database, options?.serverPort));
   if (options?.boardEvents) {
     routes.route("/approvals", createApprovalsRoute(options.boardEvents));
   }
