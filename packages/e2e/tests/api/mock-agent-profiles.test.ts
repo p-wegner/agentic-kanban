@@ -376,6 +376,91 @@ test.describe("Mock agent profiles", () => {
     expect(["completed", "stopped"]).toContain(session.status);
   });
 
+  test("multi-turn POST /turn sends message and agent echoes response", async ({ request }) => {
+    const { workspaceId } = await createWorkspaceWithSetup(
+      `multiturn-turn-${Date.now().toString(36)}`,
+      request,
+    );
+
+    const launchRes = await request.post(
+      `${SERVER_URL}/api/workspaces/${workspaceId}/launch`,
+      {
+        data: {
+          prompt: "start multi-turn",
+          agentCommand: `${MOCK_AGENT_COMMAND} --delay-ms 100`,
+          multiTurn: true,
+        },
+      },
+    );
+    expect(launchRes.status()).toBe(201);
+    const { sessionId } = await launchRes.json();
+
+    // Poll POST /turn until the agent accepts it (not 409 = still processing)
+    // The mock agent emits result after the first turn; once "waiting", /turn returns 200
+    const turnContent = "hello from test turn";
+    let turnRes: any = null;
+    const deadline = Date.now() + 10000;
+    while (Date.now() < deadline) {
+      const res = await request.post(
+        `${SERVER_URL}/api/workspaces/${workspaceId}/turn`,
+        { data: { content: turnContent } },
+      );
+      if (res.status() === 200) {
+        turnRes = res;
+        break;
+      }
+      // 409 = agent still processing first turn; wait and retry
+      await new Promise((r) => setTimeout(r, 300));
+    }
+    expect(turnRes).not.toBeNull();
+    expect(turnRes.status()).toBe(200);
+
+    // Wait for the second turn to produce a result event in session output
+    let echoVerified = false;
+    const deadline2 = Date.now() + 8000;
+    while (Date.now() < deadline2) {
+      const outputRes = await request.get(`${SERVER_URL}/api/sessions/${sessionId}/output`);
+      if (outputRes.status() === 200) {
+        const msgs = await outputRes.json();
+        const events = msgs
+          .filter((m: any) => m.type === "stdout" && m.data)
+          .flatMap((m: any) =>
+            m.data
+              .split("\n")
+              .filter((l: string) => l.trim())
+              .map((l: string) => { try { return JSON.parse(l); } catch { return null; } })
+              .filter(Boolean),
+          );
+        const hasEcho = events.some(
+          (e: any) =>
+            e.type === "assistant" &&
+            e.message?.content?.some(
+              (c: any) => c.type === "text" && c.text?.includes(`Received: ${turnContent}`),
+            ),
+        );
+        if (hasEcho) { echoVerified = true; break; }
+      }
+      await new Promise((r) => setTimeout(r, 500));
+    }
+    expect(echoVerified).toBe(true);
+
+    // Stop the session and verify ≥2 result events (first turn + follow-up)
+    await request.post(`${SERVER_URL}/api/workspaces/${workspaceId}/stop`, { data: {} });
+    const outputRes = await request.get(`${SERVER_URL}/api/sessions/${sessionId}/output`);
+    const allMessages = await outputRes.json();
+    const events = allMessages
+      .filter((m: any) => m.type === "stdout" && m.data)
+      .flatMap((m: any) =>
+        m.data
+          .split("\n")
+          .filter((l: string) => l.trim())
+          .map((l: string) => { try { return JSON.parse(l); } catch { return null; } })
+          .filter(Boolean),
+      );
+    const resultEvents = events.filter((e: any) => e.type === "result");
+    expect(resultEvents.length).toBeGreaterThanOrEqual(2);
+  });
+
   test("error profile exits with failure", async ({ request }) => {
     const { workspaceId } = await createWorkspaceWithSetup(
       `error-${Date.now().toString(36)}`,
