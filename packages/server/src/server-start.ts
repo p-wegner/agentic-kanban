@@ -511,15 +511,26 @@ export async function startServer(port?: number) {
 
   await migrate(db, { migrationsFolder: getMigrationsFolder() });
 
-  // Clean up stale sessions
-  const staleSessions = await db.select({ workspaceId: sessions.workspaceId }).from(sessions).where(eq(sessions.status, "running"));
+  // Clean up stale sessions — but skip any whose agent process is still alive (survived hot-reload)
+  const staleSessions = await db.select({ id: sessions.id, workspaceId: sessions.workspaceId, pid: sessions.pid }).from(sessions).where(eq(sessions.status, "running"));
   if (staleSessions.length > 0) {
-    console.log(`[startup] Cleaning up ${staleSessions.length} stale session(s)`);
     const now = new Date().toISOString();
-    await db.update(sessions).set({ status: "stopped", endedAt: now }).where(eq(sessions.status, "running"));
-    const workspaceIds = [...new Set(staleSessions.map(s => s.workspaceId))];
-    for (const wsId of workspaceIds) {
-      await db.update(workspaces).set({ status: "idle", updatedAt: now }).where(eq(workspaces.id, wsId));
+    const dead = staleSessions.filter(s => {
+      if (!s.pid) return true;
+      try { process.kill(s.pid, 0); return false; } catch { return true; }
+    });
+    const alive = staleSessions.filter(s => !dead.includes(s));
+    if (alive.length > 0) {
+      console.log(`[startup] ${alive.length} session(s) have surviving agent processes — leaving as running`);
+    }
+    if (dead.length > 0) {
+      console.log(`[startup] Cleaning up ${dead.length} dead stale session(s)`);
+      const deadIds = dead.map(s => s.id);
+      await db.update(sessions).set({ status: "stopped", endedAt: now }).where(sql`${sessions.id} IN (${sql.join(deadIds.map(id => sql`${id}`), sql`, `)})`);
+      const workspaceIds = [...new Set(dead.map(s => s.workspaceId))];
+      for (const wsId of workspaceIds) {
+        await db.update(workspaces).set({ status: "idle", updatedAt: now }).where(eq(workspaces.id, wsId));
+      }
     }
   }
 
@@ -908,6 +919,18 @@ export async function startServer(port?: number) {
   // Also run once at startup
   syncMonitorState().catch(() => {});
 
+  // Trigger an immediate monitor run and reset the interval timer
+  app.post("/api/internal/monitor-run", async (c) => {
+    if (monitorTimer) {
+      clearTimeout(monitorTimer);
+      monitorTimer = null;
+    }
+    monitorNextRunAt = null;
+    // Run in background; reschedule is handled inside runMonitorCycle
+    runMonitorCycle().catch(() => {});
+    return c.json({ triggered: true });
+  });
+
   // Expose monitor state via internal endpoint so UI can show it
   app.get("/api/internal/monitor-status", async (c) => {
     const prefRows = await db.select().from(preferences);
@@ -935,8 +958,10 @@ export async function startServer(port?: number) {
   });
 
   function shutdown(signal: string) {
-    const activeCount = agentService.killAll();
-    console.log(`[shutdown] Received ${signal} — closing server (${activeCount} agent process(es) terminated)...`);
+    // Agent processes are spawned detached+unref'd — they survive hot-reload without being killed.
+    // Only kill them on explicit SIGINT (user Ctrl+C) to avoid orphaning on intentional shutdown.
+    const activeCount = signal === "SIGINT" ? agentService.killAll() : 0;
+    console.log(`[shutdown] Received ${signal} — closing server (${activeCount} agent process(es) terminated, survivors continue)...`);
     server.close(() => {
       console.log("[shutdown] Server closed.");
       process.exit(0);

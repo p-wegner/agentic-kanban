@@ -867,7 +867,7 @@ ${contextParts.join("\n")}`;
 
     // Fetch workspace summaries grouped by issueId
     const issueIds = projectIssues.map((i) => i.id);
-    const workspaceSummaryMap = new Map<string, { total: number; active: number; idle: number; closed: number; branches: string[]; main?: { id: string; branch: string; status: "active" | "reviewing" | "idle" | "closed"; claudeProfile: string | null; agentCommand: string | null; readyForMerge?: boolean; diffStats?: { filesChanged: number; insertions: number; deletions: number } | null; conflicts?: { hasConflicts: boolean; conflictingFiles: string[] } | null; lastSessionAt?: string | null } }>();
+    const workspaceSummaryMap = new Map<string, { total: number; active: number; idle: number; closed: number; branches: string[]; main?: { id: string; branch: string; status: "active" | "reviewing" | "idle" | "closed"; claudeProfile: string | null; agentCommand: string | null; readyForMerge?: boolean; diffStats?: { filesChanged: number; insertions: number; deletions: number } | null; conflicts?: { hasConflicts: boolean; conflictingFiles: string[] } | null; lastSessionAt?: string | null; contextTokens?: number | null; lastTool?: string | null } }>();
 
     if (issueIds.length > 0) {
       const wsRows = await database
