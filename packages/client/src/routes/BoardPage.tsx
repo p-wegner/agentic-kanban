@@ -1000,6 +1000,14 @@ export function BoardPage() {
         else if (e.key === "t") setViewMode("table");
         return;
       }
+      // "a" to toggle All Workspaces panel
+      if (e.key === "a" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        const target = e.target as HTMLElement;
+        if (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT") return;
+        e.preventDefault();
+        setShowAllWorkspaces(prev => !prev);
+        return;
+      }
       // "q" to open Quick Tasks panel
       if (e.key === "q" && !e.ctrlKey && !e.metaKey && !e.altKey) {
         const target = e.target as HTMLElement;
