@@ -155,6 +155,36 @@ function EditSkillForm({ skill, isNew, onSave, onCancel }: {
   const [description, setDescription] = useState(skill.description);
   const [prompt, setPrompt] = useState(skill.prompt);
   const [model, setModel] = useState(skill.model || "");
+  const [enhancing, setEnhancing] = useState(false);
+  const [preEnhanceSnapshot, setPreEnhanceSnapshot] = useState<{ name: string; description: string; prompt: string } | null>(null);
+
+  async function handleEnhance() {
+    if (!name.trim() || enhancing) return;
+    setEnhancing(true);
+    try {
+      setPreEnhanceSnapshot({ name, description, prompt });
+      const result = await apiFetch<{ name: string; description: string; prompt: string }>("/api/agent-skills/enhance", {
+        method: "POST",
+        body: JSON.stringify({ name, description, prompt }),
+      });
+      setName(result.name);
+      setDescription(result.description);
+      setPrompt(result.prompt);
+    } catch (err) {
+      setPreEnhanceSnapshot(null);
+      showToast(err instanceof Error ? err.message : "Enhancement failed", "error");
+    } finally {
+      setEnhancing(false);
+    }
+  }
+
+  function handleUndoEnhance() {
+    if (!preEnhanceSnapshot) return;
+    setName(preEnhanceSnapshot.name);
+    setDescription(preEnhanceSnapshot.description);
+    setPrompt(preEnhanceSnapshot.prompt);
+    setPreEnhanceSnapshot(null);
+  }
 
   return (
     <div className="space-y-2">
@@ -189,7 +219,7 @@ function EditSkillForm({ skill, isNew, onSave, onCancel }: {
           className="flex-1 text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
         />
       </div>
-      <div className="flex gap-2">
+      <div className="flex gap-2 flex-wrap">
         <button
           onClick={() => onSave({ name, description, prompt, model })}
           disabled={!name || !prompt}
@@ -200,6 +230,28 @@ function EditSkillForm({ skill, isNew, onSave, onCancel }: {
         <button onClick={onCancel} className="text-xs px-3 py-1.5 text-gray-600 hover:bg-gray-100 rounded">
           Cancel
         </button>
+        <button
+          onClick={handleEnhance}
+          disabled={!name.trim() || enhancing}
+          className="text-xs px-3 py-1.5 text-purple-700 border border-purple-300 rounded hover:bg-purple-50 disabled:opacity-50 flex items-center gap-1"
+        >
+          {enhancing ? (
+            <>
+              <span className="inline-block w-3 h-3 border-2 border-purple-400 border-t-transparent rounded-full animate-spin" />
+              Enhancing…
+            </>
+          ) : (
+            "Enhance with AI"
+          )}
+        </button>
+        {preEnhanceSnapshot && (
+          <button
+            onClick={handleUndoEnhance}
+            className="text-xs px-3 py-1.5 text-gray-600 border border-gray-300 rounded hover:bg-gray-50"
+          >
+            Undo enhance
+          </button>
+        )}
       </div>
     </div>
   );
