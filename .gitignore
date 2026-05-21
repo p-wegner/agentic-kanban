@@ -21,3 +21,4 @@ packages/desktop/src-tauri/gen/
 docs/temp/
 bash.exe.stackdump
 .claude/settings.local.json
+*.log
