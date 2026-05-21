@@ -498,6 +498,7 @@ Only include genuinely useful dependencies, not just topical similarity.`;
     if (body.statusId !== undefined) { updates.statusId = body.statusId; updates.statusChangedAt = now; }
     if (body.sortOrder !== undefined) updates.sortOrder = body.sortOrder;
     if (body.estimate !== undefined) updates.estimate = body.estimate;
+    if (body.skipAutoReview !== undefined) updates.skipAutoReview = body.skipAutoReview;
 
     await database.update(issues).set(updates).where(eq(issues.id, id));
 

@@ -82,6 +82,7 @@ export function IssueDetailPanel({
   const [pastedImages, setPastedImages] = useState<string[]>([]);
   const [priority, setPriority] = useState(issue.priority);
   const [estimate, setEstimate] = useState<string>(issue.estimate ?? "");
+  const [skipAutoReview, setSkipAutoReview] = useState(issue.skipAutoReview ?? false);
   const [saving, setSaving] = useState(false);
   const depTypeRef = useRef<HTMLSelectElement>(null);
   const [depSearch, setDepSearch] = useState("");
@@ -107,7 +108,8 @@ export function IssueDetailPanel({
     title !== issue.title ||
     description !== (issue.description ?? "") ||
     priority !== issue.priority ||
-    estimate !== (issue.estimate ?? "")
+    estimate !== (issue.estimate ?? "") ||
+    skipAutoReview !== (issue.skipAutoReview ?? false)
   );
 
   useEffect(() => {
@@ -139,6 +141,7 @@ export function IssueDetailPanel({
       setDescription(issue.description ?? "");
       setPriority(issue.priority);
       setEstimate(issue.estimate ?? "");
+      setSkipAutoReview(issue.skipAutoReview ?? false);
     }
   }, [issue, editing]);
 
@@ -166,6 +169,7 @@ export function IssueDetailPanel({
     setDescription(issue.description ?? "");
     setPriority(issue.priority);
     setEstimate(issue.estimate ?? "");
+    setSkipAutoReview(issue.skipAutoReview ?? false);
   }
 
   async function handleEnhance() {
@@ -250,6 +254,7 @@ export function IssueDetailPanel({
         description: fullDescription || undefined,
         priority: priority as UpdateIssueRequest["priority"],
         estimate: (estimate || null) as UpdateIssueRequest["estimate"],
+        skipAutoReview,
       });
       setPastedImages([]);
       setEditing(false);
@@ -508,6 +513,33 @@ export function IssueDetailPanel({
               <span className="text-xs text-gray-400">—</span>
             )}
           </div>
+
+          {/* Skip auto review indicator - view mode only */}
+          {!editing && issue.skipAutoReview && (
+            <div>
+              <span className="inline-flex items-center gap-1 text-xs font-medium px-1.5 py-0.5 rounded bg-amber-100 text-amber-700">
+                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
+                </svg>
+                Skip auto review
+              </span>
+            </div>
+          )}
+
+          {/* Skip auto review toggle - edit mode only */}
+          {editing && (
+            <div>
+              <label className="flex items-center gap-2 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={skipAutoReview}
+                  onChange={(e) => setSkipAutoReview(e.target.checked)}
+                  className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                />
+                <span className="text-sm text-gray-700">Skip auto AI code review</span>
+              </label>
+            </div>
+          )}
 
           {/* Workspaces section - always visible */}
           {!editing && (
