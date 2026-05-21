@@ -199,6 +199,7 @@ pnpm test:e2e                                  # E2E tests (101 tests)
 | F-TASK-02: Collapsible archive column group (Done/Cancelled) | `packages/e2e/tests/ui/archive-columns.test.ts` |
 | F-TASK-03: Real-time search, priority filter | `packages/e2e/tests/ui/search.test.ts` |
 | F-TASK-04: Tags CRUD + assignment to issues (API) | `packages/e2e/tests/api/tags.test.ts` |
+| F-TASK-04: Tags management via Settings > Tags tab UI (rename, delete, add, merge, color) | `packages/e2e/tests/ui/settings-tags.test.ts` |
 | F-WS-01/03: Workspace creation, board workspace summary | `packages/e2e/tests/api/workspaces.test.ts`, `packages/e2e/tests/api/board-workspace-summary.test.ts` |
 | F-WS-02: Agent session lifecycle, launch/stop, output persistence | `packages/e2e/tests/api/workspace-lifecycle.test.ts`, `packages/e2e/tests/api/session-history.test.ts` |
 | F-WS-02: Stream-json output parsing UI | `packages/e2e/tests/output-parser.spec.ts` |
@@ -225,7 +226,6 @@ pnpm test:e2e                                  # E2E tests (101 tests)
 | Feature | Ticket |
 |---------|--------|
 | F-TASK-05: Issue dependencies/relationships UI (add/remove dep badges, cycle detection, Analyze Deps) | #163 |
-| F-TASK-04: Tags management via Settings > Tags tab UI (rename, delete, add) | #160 |
 | F-REV-03: AI code review flow (manual review button, reviewing badge, session output) | #165 |
 | F-UI-07: Worktree Overview panel (branch icon, worktree list, issue link nav) | #158 |
 | F-UI-07: Orphaned worktree identification and bulk-clean in Worktrees panel | #172 |
@@ -235,7 +235,7 @@ pnpm test:e2e                                  # E2E tests (101 tests)
 | F-UI-11: Board stats bar (status counts, commits counter, Blocked filter toggle) | #167 |
 | F-UI-11: Priority-based sort for board columns | #170 |
 | F-UI-12: Quick Tasks panel (skill list, custom prompt input) | #157 |
-| F-UI-03: Review and Merge actions in command palette (workspace-scoped, disabled state) | #180 |
+| F-UI-03: Review and Merge actions in command palette (workspace-scoped, disabled state) | #182 |
 | F-UI-02: Workspace panel chat input / multi-turn interaction (Send/Stop, Ctrl+Enter, turn state) | #162 |
 | F-UI-02: baseBranch and skill name display in workspace panel | #176 |
 | F-UI-02: Ready for Merge badge in workspace and All Workspaces panels | #173 |
