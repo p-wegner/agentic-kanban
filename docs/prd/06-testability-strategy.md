@@ -190,6 +190,8 @@ pnpm test:e2e                                  # E2E tests (~212 tests)
 
 ## Current E2E Coverage
 
+_Last updated: 2026-05-21_
+
 ### ✅ Covered features
 
 | Feature | Test file(s) |
@@ -212,7 +214,7 @@ pnpm test:e2e                                  # E2E tests (~212 tests)
 | F-MCP-03: Agent command configuration via settings | `packages/e2e/tests/api/settings.test.ts` |
 | F-MCP-04: Agent Skills UI in Settings (built-in protection, custom skill CRUD, edit/delete) | `packages/e2e/tests/ui/agent-skills.test.ts` |
 | F-MCP-04: Skill selector in inline issue create form (Start Workspace checkbox) | `packages/e2e/tests/ui/agent-skills.test.ts` |
-| F-UI-09: "Enhance with AI" button for skill creation/editing in Settings > Skills tab (#192) | `packages/e2e/tests/ui/agent-skills.test.ts` |
+| F-UI-09: "Enhance with AI" button for skill creation/editing in Settings > Skills tab | `packages/e2e/tests/ui/agent-skills.test.ts` |
 | F-REV-03: AI code review flow (manual review button, reviewing badge, session output) | `packages/e2e/tests/ui/code-review.test.ts` |
 | F-UI-10: Graph view (dependency DAG, nodes, zoom, Show completed toggle) | `packages/e2e/tests/ui/graph-table-views.test.ts` |
 | F-UI-10: Table view (sortable columns, status filter, row click to detail) | `packages/e2e/tests/ui/graph-table-views.test.ts` |
@@ -234,40 +236,16 @@ pnpm test:e2e                                  # E2E tests (~212 tests)
 
 | Feature | Ticket |
 |---------|--------|
-| F-TASK-05: Issue dependencies/relationships UI (add/remove dep badges, cycle detection, Analyze Deps) | #163 |
-| F-TASK-05: Blocked-by summary banner in issue detail panel (blocked by N issues count) | #185 |
-| F-UI-07: Worktree Overview panel (branch icon, worktree list, issue link nav) | #158 |
-| F-UI-07: Orphaned worktree identification and bulk-clean in Worktrees panel | #172 |
-| F-UI-11: Board stats bar (status counts, commits counter, Blocked filter toggle) | #167 (In Progress) |
-| F-UI-11: Priority-based sort for board columns | #170 |
-| F-UI-12: Quick Tasks panel (skill list, custom prompt input) | #157 |
-| F-UI-06: In-app toast notifications (create/delete/merge success toasts, auto-dismiss) | #184 |
-| F-UI-03: Review and Merge actions in command palette (workspace-scoped, disabled state) | #182 |
-| F-UI-02: baseBranch and skill name display in workspace panel | #176 |
-| F-UI-02: Ready for Merge badge in workspace and All Workspaces panels | #173 |
-| F-WS-08: Workspace setup scripts (API persistence, Settings UI, blocking mode toggle) | #183 |
-| All Workspaces panel (filter, search, bulk close idle, workspace list grouped by issue) | #169 |
-| Skip auto review toggle in issue detail edit mode | #174 |
-| Hover quick-start buttons on issue cards (Start Workspace / Resume) | #175 |
-| Copy-to-clipboard for issue reference (#N) in detail panel | #177 |
-| Markdown rendering in issue descriptions (detail panel view mode) | #178 |
-| Scheduled Runs UI in Settings panel (create/list/delete scheduled runs) | #179 |
-| F-UI-04: View-switching keyboard shortcuts (b=Board, g=Graph, t=Table, q=Quick Tasks) | #188 |
-| F-UI-09: Board monitor visualization panel and workflow toggles (Settings > Workflow) | #189 |
-| F-UI-02: Expand button for issue detail panel (full-width mode) | #190 |
-| F-UI-02: AI Reviewed column conditional display and "Awaiting manual merge" hint | #191 |
-| F-WS-02: Live session stats on issue cards (real-time model name + context token count via WebSocket) | #193 |
-| F-WS-02: Agent task progress bar on issue cards (TodoProgress N/M tasks + K active) | #194 |
-| F-WS-04: Direct workspace UI (purple badge, "Close"/"View Changes" vs "Merge"/"View Diff") | #195 |
-| F-TASK-01: "Enhance with AI" button in issue edit panel (AI-powered title/description improvement) | #196 |
-| F-MCP-04: Install skill to .claude/skills/ button in Settings > Skills tab (install status badge) | #197 |
-| F-UI-02: Follow-up task creation in issue detail panel (+ Create follow-up task form) | #198 |
-| F-UI-09: Auto-start follow-up tasks setting in Settings > Workflow (auto_start_followup toggle) | #199 |
-| "Open in VS Code" button in workspace panel (F-UI-02 addition) | #204 |
-| Markdown preview toggle in issue description edit mode (F-UI-02 addition) | #203 |
-| Issue artifacts API (create/list/delete attachments, migration 0029) | #205 |
-| Worktrees panel row actions (Open-in-Explorer, Delete per row) | #206 |
-| Graph view zoom-to-fit + auto-center; Table view Tags + Updated columns | #207 |
+| F-TASK-05: Issue dependencies/relationships UI (add/remove dep badges, cycle detection, Analyze Deps) | #144 |
+| F-UI-11: Board Stats Bar (status counts, commits counter, Blocked filter toggle) | #145 |
+| F-UI-12: Quick Tasks panel (skill list, custom prompt input) | #146 |
+| F-UI-07: Worktree Overview panel (branch icon, worktree list, issue link nav) | #147 |
+| All Workspaces panel (workspace list grouped by issue, diff stats, timestamps) | #148 |
+| F-UI-06: In-app toast notifications (create/delete/merge success toasts, auto-dismiss) | #149 |
+| F-UI-09: Settings Workflow tab (pipeline visualization, auto-review/fix/merge toggles) | #150 |
+| F-WS-04: Direct workspace UI (purple badge, "Close"/"View Changes" vs "Merge"/"View Diff") | #151 |
+| F-UI-11: Priority-based sort for board columns | #152 |
+| Markdown rendering in issue descriptions (detail panel view mode) | #153 |
 
 
 ## Known Test Considerations
