@@ -142,6 +142,14 @@ When the user references `#N` (e.g., "review #70", "merge #65", "what's the stat
 Get-NetTCPConnection -LocalPort <port> | Select-Object -ExpandProperty OwningProcess | ForEach-Object { Stop-Process -Id $_ -Force }
 ```
 
+**Dangling worktree dev servers:** Worktree `pnpm dev` processes (Vite on 5174, 5175, …; Hono on 3002, 3003, …) survive after a worktree session ends. When the main dev server is killed, one of these can grab port 5173/3001 and prevent a clean restart. Before restarting, sweep the full port range:
+```powershell
+Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue |
+  Where-Object { ($_.LocalPort -ge 3001 -and $_.LocalPort -le 3020) -or ($_.LocalPort -ge 5173 -and $_.LocalPort -le 5190) } |
+  Select-Object -ExpandProperty OwningProcess | Sort-Object -Unique |
+  ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }
+```
+
 ## Workspace Flow
 `POST /api/workspaces` (one step): DB record + worktree + auto-launch agent. Key endpoints:
 - `POST /api/workspaces/:id/turn` — send follow-up message (multi-turn), 409 if agent still processing
