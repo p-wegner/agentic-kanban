@@ -66,6 +66,8 @@ export interface MainWorkspaceInfo {
   diffStats?: { filesChanged: number; insertions: number; deletions: number } | null;
   conflicts?: { hasConflicts: boolean; conflictingFiles: string[] } | null;
   lastSessionAt?: string | null;
+  contextTokens?: number | null;
+  lastTool?: string | null;
 }
 
 export interface WorkspaceSummary {
