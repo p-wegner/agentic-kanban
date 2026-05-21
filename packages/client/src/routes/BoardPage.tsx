@@ -863,6 +863,49 @@ export function BoardPage() {
       }));
     }
 
+    // Register Review and Merge actions for issues with eligible workspaces
+    const allIssues = columns.flatMap((col) => col.issues);
+    for (const issue of allIssues) {
+      const ws = issue.workspaceSummary?.main;
+      if (!ws) continue;
+
+      if (ws.status === "active" || ws.status === "idle" || ws.status === "reviewing") {
+        unregisters.push(registerAction({
+          id: `review-workspace-${ws.id}`,
+          label: `Review: #${issue.issueNumber} ${issue.title}`,
+          description: "Trigger AI code review for this workspace",
+          icon: "⑃",
+          category: "issue",
+          handler: async () => {
+            try {
+              await apiFetch(`/api/workspaces/${ws.id}/review`, { method: "POST" });
+              showToast("Review started", "success");
+            } catch {
+              showToast("Failed to start review", "error");
+            }
+          },
+        }));
+      }
+
+      if (ws.status === "reviewing" || ws.status === "idle") {
+        unregisters.push(registerAction({
+          id: `merge-workspace-${ws.id}`,
+          label: `Merge: #${issue.issueNumber} ${issue.title}`,
+          description: "Merge this workspace branch into the base branch",
+          icon: "⤵",
+          category: "issue",
+          handler: async () => {
+            try {
+              await apiFetch(`/api/workspaces/${ws.id}/merge`, { method: "POST" });
+              showToast("Merge started", "success");
+            } catch {
+              showToast("Failed to merge", "error");
+            }
+          },
+        }));
+      }
+    }
+
     return () => unregisters.forEach((fn) => fn());
   }, [columns, filteredColumns]);
 
