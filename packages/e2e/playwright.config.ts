@@ -10,6 +10,7 @@ export default defineConfig({
   globalSetup: "./global-setup.ts",
   use: {
     baseURL: `http://localhost:${clientPort}`,
+    channel: "chrome",
   },
   webServer: [
     {
