@@ -1,7 +1,4 @@
-<<<<<<< HEAD
 import { useState } from "react";
-=======
->>>>>>> b4a5c74 (feat: add All Workspaces aggregate panel (#101))
 import { formatRelativeTime } from "../lib/formatRelativeTime.js";
 import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
 
@@ -11,7 +8,6 @@ interface AllWorkspacesPanelProps {
   onIssueClick: (issue: IssueWithStatus) => void;
 }
 
-<<<<<<< HEAD
 type WsStatusFilter = "all" | "active" | "running" | "idle" | "reviewing" | "closed";
 
 const FILTER_CHIPS: { label: string; value: WsStatusFilter }[] = [
@@ -23,8 +19,6 @@ const FILTER_CHIPS: { label: string; value: WsStatusFilter }[] = [
   { label: "Closed", value: "closed" },
 ];
 
-=======
->>>>>>> b4a5c74 (feat: add All Workspaces aggregate panel (#101))
 const WS_STATUS_COLORS: Record<string, string> = {
   active: "bg-green-100 text-green-700",
   reviewing: "bg-purple-100 text-purple-700",
@@ -42,12 +36,9 @@ const ISSUE_STATUS_COLORS: Record<string, string> = {
 };
 
 export function AllWorkspacesPanel({ columns, onClose, onIssueClick }: AllWorkspacesPanelProps) {
-<<<<<<< HEAD
   const [statusFilter, setStatusFilter] = useState<WsStatusFilter>("all");
   const [searchQuery, setSearchQuery] = useState("");
 
-=======
->>>>>>> b4a5c74 (feat: add All Workspaces aggregate panel (#101))
   const issuesWithWorkspaces: IssueWithStatus[] = columns
     .flatMap((col) => col.issues)
     .filter((issue) => issue.workspaceSummary && issue.workspaceSummary.total > 0);
@@ -56,7 +47,6 @@ export function AllWorkspacesPanel({ columns, onClose, onIssueClick }: AllWorksp
     (i) => i.workspaceSummary?.main?.status === "active" || i.workspaceSummary?.main?.status === "reviewing"
   ).length;
 
-<<<<<<< HEAD
   const filtered = issuesWithWorkspaces.filter((issue) => {
     const ws = issue.workspaceSummary!;
     const mainStatus = ws.main?.status ?? "";
@@ -79,8 +69,6 @@ export function AllWorkspacesPanel({ columns, onClose, onIssueClick }: AllWorksp
     return true;
   });
 
-=======
->>>>>>> b4a5c74 (feat: add All Workspaces aggregate panel (#101))
   return (
     <div className="fixed inset-0 z-50 flex justify-end">
       <div className="absolute inset-0 bg-black/20" onClick={onClose} />
@@ -95,15 +83,11 @@ export function AllWorkspacesPanel({ columns, onClose, onIssueClick }: AllWorksp
               <rect x="14" y="14" width="7" height="7" rx="1" />
             </svg>
             <h2 className="text-lg font-semibold text-gray-900">All Workspaces</h2>
-<<<<<<< HEAD
             <span className="text-sm text-gray-500">
               {filtered.length === issuesWithWorkspaces.length
                 ? `(${issuesWithWorkspaces.length})`
                 : `${filtered.length} of ${issuesWithWorkspaces.length}`}
             </span>
-=======
-            <span className="text-sm text-gray-500">({issuesWithWorkspaces.length})</span>
->>>>>>> b4a5c74 (feat: add All Workspaces aggregate panel (#101))
             {activeCount > 0 && (
               <span className="text-xs bg-green-100 text-green-700 px-1.5 py-0.5 rounded-full font-medium">
                 {activeCount} active
@@ -118,7 +102,6 @@ export function AllWorkspacesPanel({ columns, onClose, onIssueClick }: AllWorksp
           </button>
         </div>
 
-<<<<<<< HEAD
         {/* Filters */}
         <div className="px-4 py-2 border-b border-gray-100 space-y-2">
           {/* Text search */}
@@ -158,17 +141,6 @@ export function AllWorkspacesPanel({ columns, onClose, onIssueClick }: AllWorksp
           ) : (
             <div className="divide-y divide-gray-100">
               {filtered.map((issue) => {
-=======
-        {/* Content */}
-        <div className="flex-1 overflow-y-auto">
-          {issuesWithWorkspaces.length === 0 ? (
-            <div className="px-4 py-12 text-center text-sm text-gray-500">
-              No workspaces yet. Create a workspace from an issue to get started.
-            </div>
-          ) : (
-            <div className="divide-y divide-gray-100">
-              {issuesWithWorkspaces.map((issue) => {
->>>>>>> b4a5c74 (feat: add All Workspaces aggregate panel (#101))
                 const ws = issue.workspaceSummary!;
                 const main = ws.main;
 
