@@ -179,6 +179,7 @@ export function BoardPage() {
   const [workspaceInitial, setWorkspaceInitial] = useState<{ workspaceId: string; sessionId: string } | null>(null);
   const [workspaceOpenCreate, setWorkspaceOpenCreate] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [showBlocked, setShowBlocked] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showQuickTasks, setShowQuickTasks] = useState(false);
   const [showWorktreeOverview, setShowWorktreeOverview] = useState(false);
@@ -549,6 +550,9 @@ export function BoardPage() {
       columns.map((col) => ({
         ...col,
         issues: col.issues.filter((issue) => {
+          if (showBlocked && !(issue as IssueWithStatus & { isBlocked?: boolean }).isBlocked) {
+            return false;
+          }
           if (searchQuery) {
             const q = searchQuery.toLowerCase();
             return (
@@ -559,7 +563,7 @@ export function BoardPage() {
           return true;
         }),
       })),
-    [columns, searchQuery],
+    [columns, searchQuery, showBlocked],
   );
 
   // "AI Reviewed" = tickets needing human attention (manual merge).
@@ -952,6 +956,8 @@ export function BoardPage() {
             archiveColumns={archiveColumns}
             searchQuery={searchQuery}
             projectId={activeProjectId}
+            showBlocked={showBlocked}
+            onToggleBlocked={() => setShowBlocked((v) => !v)}
           />
           <button
             onClick={() => setShowQuickTasks(true)}
