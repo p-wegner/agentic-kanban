@@ -309,7 +309,7 @@ function createSessionManager(
     });
 
     try {
-      agentService.launch(workspace.workingDir, sessionId, prompt, agentArgs, (event) => { // onOutput callback
+      const proc = agentService.launch(workspace.workingDir, sessionId, prompt, agentArgs, (event) => { // onOutput callback
         // Broadcast to WebSocket subscribers
         const message: AgentOutputMessage = event;
         broadcast(sessionId, message);
@@ -338,6 +338,14 @@ function createSessionManager(
         }
       // When resumeWithNewModel is true, omit --resume so the new profile/provider is used instead
       }, resumeWithNewModel ? undefined : providerSessionId, agentCommand, claudeProfile, multiTurn, permissionPromptTool, planMode, provider);
+
+      // Persist PID so hot-reload can detect surviving processes
+      if (proc.pid) {
+        db.update(sessions)
+          .set({ pid: proc.pid })
+          .where(eq(sessions.id, sessionId))
+          .catch((err) => console.error("Failed to store session pid:", err));
+      }
     } catch (err) {
       throw err;
     }
