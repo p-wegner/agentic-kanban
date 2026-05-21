@@ -1,17 +1,13 @@
 import { Hono } from "hono";
 import { db } from "../db/index.js";
-import { issues, projectStatuses, workspaces, tags, issueTags, sessions, sessionMessages, diffComments, issueDependencies, preferences, agentSkills, issueArtifacts } from "@agentic-kanban/shared/schema";
+import { issues, projectStatuses, workspaces, tags, issueTags, sessions, sessionMessages, diffComments, issueDependencies, agentSkills, issueArtifacts } from "@agentic-kanban/shared/schema";
 import type { DependencyType } from "@agentic-kanban/shared/schema";
 import { eq, and, sql, inArray, desc } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
-import { execFile, execSync } from "node:child_process";
-import { existsSync } from "node:fs";
-import { join } from "node:path";
-import { homedir } from "node:os";
 import type { Database } from "../db/index.js";
 import type { BoardEvents } from "../services/board-events.js";
 import { parseSessionSummary, formatDurationStr } from "../services/session-summary.js";
-import { buildSpawnEnv } from "../services/agent-provider.js";
+import { invokeClaudePrompt } from "../services/claude-cli.service.js";
 
 export function createIssuesRoute(database: Database = db, options?: { boardEvents?: BoardEvents }) {
   const router = new Hono();
@@ -65,26 +61,6 @@ export function createIssuesRoute(database: Database = db, options?: { boardEven
       return c.json({ error: "title is required" }, 400);
     }
 
-    // Read agent_command and claude_profile from global preferences
-    let agentCommand = "claude";
-    let claudeProfile: string | undefined;
-    const prefs = await database
-      .select({ key: preferences.key, value: preferences.value })
-      .from(preferences)
-      .where(inArray(preferences.key, ["agent_command", "claude_profile"]));
-    for (const p of prefs) {
-      if (p.key === "agent_command" && p.value) agentCommand = p.value;
-      if (p.key === "claude_profile" && p.value) claudeProfile = p.value;
-    }
-
-    // On Windows, resolve claude.exe to avoid cmd.exe stdout buffering
-    if (process.platform === "win32" && agentCommand === "claude") {
-      try {
-        const resolved = execSync("where claude.exe 2>nul", { encoding: "utf8" }).trim().split("\n")[0]?.trim();
-        if (resolved) agentCommand = resolved;
-      } catch {}
-    }
-
     const prompt = `You are helping enhance a kanban issue ticket for an AI coding agent.
 Given a title and optional description, return an improved version that is clear, actionable, and well-structured.
 Keep the title concise (under 80 chars). Expand the description with context, acceptance criteria, and agent instructions if helpful.
@@ -94,31 +70,9 @@ Respond ONLY with valid JSON — no markdown, no explanation:
 Current title: ${body.title}
 Current description: ${body.description?.trim() || "(none)"}`;
 
-    // Pass prompt via stdin (-p without value reads from stdin) to avoid shell quoting issues
-    const args: string[] = ["--output-format", "text", "-p"];
-    if (claudeProfile) {
-      const settingsPath = join(homedir(), ".claude", `settings_${claudeProfile}.json`);
-      if (existsSync(settingsPath)) {
-        args.push("--settings", settingsPath);
-      }
-    }
-
     let stdout: string;
-    let stderr: string;
     try {
-      ({ stdout, stderr } = await new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
-        const child = execFile(agentCommand, args, {
-          encoding: "utf8",
-          timeout: 60000,
-          shell: false,
-          maxBuffer: 1024 * 1024,
-          env: buildSpawnEnv(claudeProfile),
-        }, (err, out, se) => {
-          if (err) reject(err);
-          else resolve({ stdout: out ?? "", stderr: se ?? "" });
-        });
-        child.stdin?.end(prompt);
-      }));
+      stdout = await invokeClaudePrompt(prompt, { database });
     } catch (err: any) {
       const parts: string[] = [];
       if (err.message) parts.push(err.message);
@@ -229,48 +183,9 @@ Use "parent_of" when the target is an epic containing another issue.
 Use "child_of" when the target is a subtask of another issue.
 Only include genuinely useful dependencies, not just topical similarity.`;
 
-    // Read agent_command and claude_profile from global preferences
-    let agentCommand = "claude";
-    let claudeProfile: string | undefined;
-    const prefs = await database
-      .select({ key: preferences.key, value: preferences.value })
-      .from(preferences)
-      .where(inArray(preferences.key, ["agent_command", "claude_profile"]));
-    for (const p of prefs) {
-      if (p.key === "agent_command" && p.value) agentCommand = p.value;
-      if (p.key === "claude_profile" && p.value) claudeProfile = p.value;
-    }
-
-    if (process.platform === "win32" && agentCommand === "claude") {
-      try {
-        const resolved = execSync("where claude.exe 2>nul", { encoding: "utf8" }).trim().split("\n")[0]?.trim();
-        if (resolved) agentCommand = resolved;
-      } catch {}
-    }
-
-    const args: string[] = ["--output-format", "text", "-p"];
-    if (claudeProfile) {
-      const settingsPath = join(homedir(), ".claude", `settings_${claudeProfile}.json`);
-      if (existsSync(settingsPath)) {
-        args.push("--settings", settingsPath);
-      }
-    }
-
     let stdout: string;
     try {
-      ({ stdout } = await new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
-        const child = execFile(agentCommand, args, {
-          encoding: "utf8",
-          timeout: 60000,
-          shell: false,
-          maxBuffer: 1024 * 1024,
-          env: buildSpawnEnv(claudeProfile),
-        }, (err, out, se) => {
-          if (err) reject(err);
-          else resolve({ stdout: out ?? "", stderr: se ?? "" });
-        });
-        child.stdin?.end(prompt);
-      }));
+      stdout = await invokeClaudePrompt(prompt, { database });
     } catch (err: any) {
       const parts: string[] = [];
       if (err.message) parts.push(err.message);

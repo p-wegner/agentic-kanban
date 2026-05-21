@@ -3,13 +3,13 @@ import { db } from "../db/index.js";
 import { projects, projectStatuses, issues, workspaces, sessions, sessionMessages, diffComments, issueDependencies, preferences, tags, issueTags } from "@agentic-kanban/shared/schema";
 import { eq, inArray, sql, and } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
-import { execFile, execSync } from "node:child_process";
+import { execSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, writeFileSync, rmSync } from "node:fs";
 import { detectRepoInfo } from "../services/git-info.service.js";
 import { listBranches, listWorktrees, getDiffShortstat, removeWorktree, detectConflicts } from "../services/git.service.js";
 import type { Database } from "../db/index.js";
 import { resolve, sep, join } from "node:path";
-import { homedir } from "node:os";
+import { invokeClaudePrompt } from "../services/claude-cli.service.js";
 
 // Limit concurrent background git operations to avoid hammering the filesystem
 let _bgGitRunning = 0;
@@ -354,25 +354,6 @@ export function createProjectsRoute(database: Database = db) {
       // Can't read directory
     }
 
-    // Read agent_command and claude_profile from global preferences
-    let agentCommand = "claude";
-    let claudeProfile: string | undefined;
-    const prefs = await database
-      .select({ key: preferences.key, value: preferences.value })
-      .from(preferences)
-      .where(inArray(preferences.key, ["agent_command", "claude_profile"]));
-    for (const p of prefs) {
-      if (p.key === "agent_command" && p.value) agentCommand = p.value;
-      if (p.key === "claude_profile" && p.value) claudeProfile = p.value;
-    }
-
-    if (process.platform === "win32" && agentCommand === "claude") {
-      try {
-        const resolved = execSync("where claude.exe 2>nul", { encoding: "utf8" }).trim().split("\n")[0]?.trim();
-        if (resolved) agentCommand = resolved;
-      } catch {}
-    }
-
     const prompt = `You are analyzing a software project to determine the correct setup command(s) to run after cloning the repository into a fresh git worktree.
 Based on the files detected in the project root, suggest the appropriate setup command(s) for the project "${repoName}".
 
@@ -383,29 +364,9 @@ If no setup is needed, respond with an empty string.
 
 Detected files: ${detected.length > 0 ? detected.join(", ") : "none"}`;
 
-    const args: string[] = ["--output-format", "text", "-p"];
-    if (claudeProfile) {
-      const settingsPath = join(homedir(), ".claude", `settings_${claudeProfile}.json`);
-      if (existsSync(settingsPath)) {
-        args.push("--settings", settingsPath);
-      }
-    }
-
     let setupScript: string;
     try {
-      const result = await new Promise<string>((resolve, reject) => {
-        const child = execFile(agentCommand, args, {
-          encoding: "utf8",
-          timeout: 30000,
-          shell: false,
-          maxBuffer: 1024 * 1024,
-        }, (err, stdout) => {
-          if (err) reject(err);
-          else resolve(stdout ?? "");
-        });
-        child.stdin?.end(prompt);
-      });
-      setupScript = result.trim();
+      setupScript = (await invokeClaudePrompt(prompt, { timeout: 30000, database })).trim();
     } catch (err: any) {
       const parts: string[] = [];
       if (err.message) parts.push(err.message);
@@ -457,25 +418,6 @@ Detected files: ${detected.length > 0 ? detected.join(", ") : "none"}`;
       // Can't read directory
     }
 
-    // Read agent_command and claude_profile from global preferences
-    let agentCommand = "claude";
-    let claudeProfile: string | undefined;
-    const prefs = await database
-      .select({ key: preferences.key, value: preferences.value })
-      .from(preferences)
-      .where(inArray(preferences.key, ["agent_command", "claude_profile"]));
-    for (const p of prefs) {
-      if (p.key === "agent_command" && p.value) agentCommand = p.value;
-      if (p.key === "claude_profile" && p.value) claudeProfile = p.value;
-    }
-
-    if (process.platform === "win32" && agentCommand === "claude") {
-      try {
-        const resolved = execSync("where claude.exe 2>nul", { encoding: "utf8" }).trim().split("\n")[0]?.trim();
-        if (resolved) agentCommand = resolved;
-      } catch {}
-    }
-
     const contextParts: string[] = [];
     if (detected.length > 0) contextParts.push(`Detected files: ${detected.join(", ")}`);
     if (setupScript) contextParts.push(`Current setup script: ${setupScript}`);
@@ -495,29 +437,9 @@ If no teardown is needed, respond with an empty string.
 
 ${contextParts.join("\n")}`;
 
-    const args: string[] = ["--output-format", "text", "-p"];
-    if (claudeProfile) {
-      const settingsPath = join(homedir(), ".claude", `settings_${claudeProfile}.json`);
-      if (existsSync(settingsPath)) {
-        args.push("--settings", settingsPath);
-      }
-    }
-
     let teardownScript: string;
     try {
-      const result = await new Promise<string>((resolve, reject) => {
-        const child = execFile(agentCommand, args, {
-          encoding: "utf8",
-          timeout: 30000,
-          shell: false,
-          maxBuffer: 1024 * 1024,
-        }, (err, stdout) => {
-          if (err) reject(err);
-          else resolve(stdout ?? "");
-        });
-        child.stdin?.end(prompt);
-      });
-      teardownScript = result.trim();
+      teardownScript = (await invokeClaudePrompt(prompt, { timeout: 30000, database })).trim();
     } catch (err: any) {
       const parts: string[] = [];
       if (err.message) parts.push(err.message);
