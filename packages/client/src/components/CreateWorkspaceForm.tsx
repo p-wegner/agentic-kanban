@@ -29,8 +29,7 @@ export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCr
   const [baseBranch, setBaseBranch] = useState("");
   const [isDirect, setIsDirect] = useState(false);
   const [requiresReview, setRequiresReview] = useState(prefs.auto_review !== "false");
-  const [thoroughReview] = useState(false);
-  const [planMode, setPlanMode] = useState(false);
+const [planMode, setPlanMode] = useState(false);
   const [skipSetup, setSkipSetup] = useState(false);
   const [branches, setBranches] = useState<{ local: string[]; remote: string[] } | null>(null);
   const [availableSkills, setAvailableSkills] = useState<{ id: string; name: string; description: string }[]>([]);
