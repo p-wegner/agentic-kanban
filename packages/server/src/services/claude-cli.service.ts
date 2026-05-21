@@ -37,13 +37,14 @@ export async function invokeClaudePrompt(
     } catch {}
   }
 
-  const args: string[] = ["--output-format", "text", "-p"];
+  const args: string[] = ["--output-format", "text"];
   if (claudeProfile) {
     const settingsPath = join(homedir(), ".claude", `settings_${claudeProfile}.json`);
     if (existsSync(settingsPath)) {
       args.push("--settings", settingsPath);
     }
   }
+  args.push("-p");
 
   return new Promise<string>((resolve, reject) => {
     const child = execFile(agentCommand, args, {
