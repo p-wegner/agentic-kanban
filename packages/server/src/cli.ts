@@ -152,30 +152,30 @@ Setup:
       // Resolve base folder: --path flag takes precedence over preference
       let baseFolder = options.path;
       if (!baseFolder) {
-        const pref = await db.select().from(preferences).where(eq(preferences.key, “projects_base_path”)).limit(1);
+        const pref = await db.select().from(preferences).where(eq(preferences.key, "projects_base_path")).limit(1);
         if (pref.length > 0 && pref[0].value) {
           baseFolder = pref[0].value;
         }
       }
 
       if (!baseFolder) {
-        console.error(“No base folder configured. Use --path <base-path> or set the projects_base_path preference:”);
-        console.error(“  pnpm cli -- preferences set projects_base_path /path/to/projects”);
+        console.error("No base folder configured. Use --path <base-path> or set the projects_base_path preference:");
+        console.error("  pnpm cli -- preferences set projects_base_path /path/to/projects");
         process.exit(1);
       }
 
-      const { mkdir, access, rm } = await import(“node:fs/promises”);
-      const { join, resolve: resolvePath, sep } = await import(“node:path”);
-      const { execFile } = await import(“node:child_process”);
-      const { promisify } = await import(“node:util”);
+      const { mkdir, access, rm } = await import("node:fs/promises");
+      const { join, resolve: resolvePath, sep } = await import("node:path");
+      const { execFile } = await import("node:child_process");
+      const { promisify } = await import("node:util");
       const execFileAsync = promisify(execFile);
 
       const resolvedBase = resolvePath(baseFolder);
       const repoPath = resolvePath(join(resolvedBase, folderName));
 
-      // Guard against path traversal (e.g. folderName = “../../etc”)
+      // Guard against path traversal (e.g. folderName = "../../etc")
       if (!repoPath.startsWith(resolvedBase + sep) && repoPath !== resolvedBase) {
-        console.error(`Invalid folder name: “${folderName}” escapes the base directory.`);
+        console.error(`Invalid folder name: "${folderName}" escapes the base directory.`);
         process.exit(1);
       }
 
@@ -188,7 +188,7 @@ Setup:
         // Expected: directory doesn't exist yet
       }
 
-      // Create directory — track so we can clean up on failure
+      // Create directory -- track so we can clean up on failure
       await mkdir(repoPath, { recursive: true });
       let dirCreated = true;
 
@@ -456,7 +456,7 @@ Example:
 
 program
   .command("cleanup")
-  .description("Show stale worktrees for closed workspaces.\n\nLists git worktrees belonging to closed/merged workspaces. These worktrees are no longer needed and can be removed manually with 'git worktree remove --force <path>'.\n\nThis command does NOT auto-remove worktrees â€” it only reports them.")
+  .description("Show stale worktrees for closed workspaces.\n\nLists git worktrees belonging to closed/merged workspaces. These worktrees are no longer needed and can be removed manually with 'git worktree remove --force <path>'.\n\nThis command does NOT auto-remove worktrees -- it only reports them.")
   .addHelpText("after", `
 Example:
   $ agentic-kanban cleanup
@@ -481,7 +481,7 @@ Example:
 
       console.log(`Found ${withWorktrees.length} closed workspace(s) with worktrees:`);
       for (const ws of withWorktrees) {
-        console.log(`  ${ws.branch} â†’ ${ws.workingDir}`);
+        console.log(`  ${ws.branch} ->' ${ws.workingDir}`);
       }
       console.log("\nThese worktrees can be removed manually with:");
       console.log("  git worktree remove --force <path>");
@@ -519,7 +519,7 @@ Examples:
   $ agentic-kanban status -w -i 10              # auto-refresh every 10s
 
 Status indicators:
-  â— = active workspace   â—‹ = idle workspace   â—Ž = reviewing   Â· = no workspace
+  * = active workspace   o = idle workspace   o = reviewing   . = no workspace
 `)
   .action(async (options: { project?: string; all?: boolean; json?: boolean; watch?: boolean; interval?: string }) => {
     try {
@@ -550,8 +550,7 @@ Status indicators:
         for (const issue of status.issues) {
           const num = issue.issueNumber != null ? `#${issue.issueNumber}` : "???";
           const wsStatus = issue.workspace?.status ?? "no workspace";
-          const marker = wsStatus === "active" ? "â—" : wsStatus === "idle" ? "â—‹" : wsStatus === "reviewing" ? "â—Ž" : "Â·";
-
+          const marker = wsStatus === "active" ? "*" : wsStatus === "idle" ? "o" : wsStatus === "reviewing" ? "o" : ".";
           console.log(`  ${marker} ${num.padEnd(4)} ${issue.title}`);
           console.log(`         [${issue.statusName}]  priority: ${issue.priority}  workspace: ${wsStatus}`);
 
@@ -626,8 +625,7 @@ async function getActiveProjectId(): Promise<string> {
   return pref[0].value;
 }
 
-// â”€â”€ issue commands â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-
+// ?? issue commands ??
 const issueCmd = program.command("issue").description("Manage issues on the board.\n\nSubcommands: list, create, move, summary, dependency");
 
 issueCmd
@@ -975,8 +973,7 @@ Examples:
     }
   });
 
-// â”€â”€ workspace commands â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-
+// ?? workspace commands ??
 const wsCmd = program.command("workspace").description("Manage workspaces (git worktrees linked to issues).\n\nWorkspaces create isolated git worktrees where agents can work on issues. Each workspace is tied to a single issue.\n\nSubcommands: list, create");
 
 wsCmd
@@ -1187,8 +1184,7 @@ Example:
     }
   });
 
-// â”€â”€ skill commands â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-
+// ?? skill commands ??
 program
   .command("delete-status <status-id>")
   .description("Delete a project status (fails if issues are linked to it)")
@@ -1202,7 +1198,7 @@ program
       }
       const linked = await db.select({ id: issues.id }).from(issues).where(eq(issues.statusId, statusId)).limit(1);
       if (linked.length > 0) {
-        console.error(`Cannot delete status "${rows[0].name}" â€” it has linked issues. Move or delete those issues first.`);
+        console.error(`Cannot delete status "${rows[0].name}" -- it has linked issues. Move or delete those issues first.`);
         process.exit(1);
       }
       await db.delete(projectStatuses).where(eq(projectStatuses.id, statusId));
@@ -1414,8 +1410,7 @@ Examples:
     }
   });
 
-// â”€â”€ dependency commands â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-
+// ?? dependency commands ??
 const depCmd = issueCmd.command("dependency").description("Manage issue dependencies.\n\nDependencies link issues together with typed relationships. Available types: depends_on, blocked_by, related_to, duplicates, parent_of, child_of.\n\nSubcommands: list, add, remove");
 
 depCmd
@@ -1613,13 +1608,12 @@ program
     }
   });
 
-// â”€â”€ sessions debug command â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-
+// ?? sessions debug command ??
 const sessionDebugCmd = program
   .command("session-history [issue-number]")
   .alias("sh")
   .description(
-    "Inspect Claude Code session transcript files from ~/.claude/projects/.\n\nParses JSONL session files for worktrees linked to this project's issues, showing what the agent did and why it stopped â€” without loading entire large files."
+    "Inspect Claude Code session transcript files from ~/.claude/projects/.\n\nParses JSONL session files for worktrees linked to this project's issues, showing what the agent did and why it stopped -- without loading entire large files."
   )
   .option("-t, --tail <lines>", "Number of tail lines to parse per session file (default: 60)", "60")
   .option("-a, --all", "Show all sessions for the issue, not just the latest", false)
@@ -1716,7 +1710,7 @@ Via pnpm (use -- to pass args):
         if (!options.all) jsonlFiles = jsonlFiles.slice(0, 1);
 
         for (const jf of jsonlFiles) {
-          // Read only the tail â€” avoid loading huge files
+          // Read only the tail -- avoid loading huge files
           const raw = readFileSync(jf.path, "utf8");
           const allLines = raw.split("\n").filter(Boolean);
           const tailStart = Math.max(0, allLines.length - tailLines);
@@ -1764,7 +1758,7 @@ Via pnpm (use -- to pass args):
           results.push({
             issueNum: dir.issueNum,
             dir: dir.name,
-            file: jf.name.replace(".jsonl", "").slice(0, 8) + "â€¦",
+            file: jf.name.replace(".jsonl", "").slice(0, 8) + "--",
             fileSizeBytes: jf.size,
             lastModified: jf.mtime.toISOString(),
             linesParsed: linesToParse.length,
@@ -1774,7 +1768,7 @@ Via pnpm (use -- to pass args):
             stopReason,
             sessionStarted,
             agentResponded,
-            sessionId: sessionId ? (sessionId as string).slice(0, 8) + "â€¦" : null,
+            sessionId: sessionId ? (sessionId as string).slice(0, 8) + "--" : null,
           });
         }
       }
@@ -1791,11 +1785,11 @@ Via pnpm (use -- to pass args):
       for (const r of results) {
         if (r.issueNum !== currentIssue) {
           currentIssue = r.issueNum;
-          console.log(`  â”€â”€ #${r.issueNum ?? "?"} â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€`);
+          console.log(`  -- #${r.issueNum ?? "?"} ----------------------------------`);
         }
         const size = r.fileSizeBytes < 1024 ? `${r.fileSizeBytes}B` : `${(r.fileSizeBytes / 1024).toFixed(0)}KB`;
         const age = timeSince(new Date(r.lastModified));
-        const started = r.sessionStarted ? (r.agentResponded ? "âœ“ responded" : "âœ— no response") : "âœ— no prompt";
+        const started = r.sessionStarted ? (r.agentResponded ? "OK responded" : "FAIL no response") : "FAIL no prompt";
         console.log(`  ${r.file}  ${size}  ${age} ago  [${started}]  turns:${r.turns}`);
         if (r.stopReason) console.log(`    stop_reason: ${r.stopReason}`);
         if (r.lastToolCall) console.log(`    last tool:   ${r.lastToolCall}`);
