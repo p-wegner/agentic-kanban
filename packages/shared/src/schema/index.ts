@@ -11,3 +11,4 @@ export { diffComments, diffCommentsRelations } from "./diff-comments.js";
 export { issueDependencies, issueDependenciesRelations, DEPENDENCY_TYPES, DEPENDENCY_TYPE_LABELS } from "./issue-dependencies.js";
 export type { DependencyType } from "./issue-dependencies.js";
 export { agentSkills } from "./agent-skills.js";
+export { issueArtifacts, issueArtifactsRelations } from "./issue-artifacts.js";
