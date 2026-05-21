@@ -976,21 +976,58 @@ export async function startServer(port?: number) {
           console.warn(`[monitor] Error processing workspace ${ws.wsId}:`, err);
         }
       }
+      // Auto-start In Progress issues that have no open workspace (e.g. manually moved without creating workspace)
+      if (prefMap.get("nudge_auto_start") === "true") {
+        const inProgressStatuses = await db
+          .select({ id: projectStatuses.id, projectId: projectStatuses.projectId })
+          .from(projectStatuses)
+          .where(sql`${projectStatuses.name} = 'In Progress'`);
+        for (const inProgressSt of inProgressStatuses) {
+          const inProgressIssues = await db
+            .select({ id: issues.id, title: issues.title, description: issues.description, issueNumber: issues.issueNumber })
+            .from(issues)
+            .where(eq(issues.statusId, inProgressSt.id));
+          for (const issue of inProgressIssues) {
+            const openWs = await db
+              .select({ id: workspaces.id })
+              .from(workspaces)
+              .where(sql`${workspaces.issueId} = ${issue.id} AND ${workspaces.status} != 'closed'`)
+              .limit(1);
+            if (openWs.length > 0) continue;
+            // No open workspace — create one and launch
+            const baseUrl = `http://localhost:${serverPort}`;
+            const branchSlug = issue.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").substring(0, 40);
+            const branch = `feature/ak-${issue.issueNumber}-${branchSlug}`;
+            const prompt = issue.description ? `${issue.title}\n\n${issue.description}` : issue.title;
+            await fetch(`${baseUrl}/api/workspaces`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ issueId: issue.id, branch, customPrompt: prompt }),
+            }).catch(() => {});
+            logMonitorAction("auto_start", "", issue.id);
+            boardEvents.broadcast(inProgressSt.projectId, "board_changed");
+            console.log(`[monitor] Auto-started workspace for In Progress issue #${issue.issueNumber} (no open workspace)`);
+          }
+        }
+      }
+
       // Auto-start unblocked Todo items if enabled
       if (prefMap.get("nudge_auto_start") === "true") {
         const wipLimit = parseInt(prefMap.get("nudge_wip_limit") || "5", 10);
 
-        // Count current In Progress issues
+        // Count current In Progress issues that have an open workspace (true WIP = agent work in flight)
         const inProgressStatus = await db
           .select({ id: projectStatuses.id, projectId: projectStatuses.projectId })
           .from(projectStatuses)
           .where(sql`${projectStatuses.name} = 'In Progress'`);
 
         for (const inProgressSt of inProgressStatus) {
+          // Count only issues with an open workspace (agent work actually in flight)
           const inProgressCount = await db
-            .select({ count: sql<number>`count(*)` })
+            .select({ count: sql<number>`count(distinct ${issues.id})` })
             .from(issues)
-            .where(eq(issues.statusId, inProgressSt.id));
+            .innerJoin(workspaces, eq(workspaces.issueId, issues.id))
+            .where(sql`${issues.statusId} = ${inProgressSt.id} AND ${workspaces.status} != 'closed'`);
           const currentWip = inProgressCount[0]?.count ?? 0;
           if (currentWip >= wipLimit) continue;
 
@@ -1095,9 +1132,12 @@ export async function startServer(port?: number) {
     const enabled = prefMap.get("auto_monitor") === "true";
     if (enabled && !monitorTimer) {
       const intervalMin = parseInt(prefMap.get("auto_monitor_interval") || "4", 10);
-      console.log(`[monitor] Starting board monitoring loop (every ${intervalMin}m)`);
-      monitorNextRunAt = new Date(Date.now() + intervalMin * 60 * 1000).toISOString();
-      monitorTimer = setTimeout(runMonitorCycle, intervalMin * 60 * 1000);
+      console.log(`[monitor] Starting board monitoring loop (every ${intervalMin}m) — running immediately`);
+      monitorNextRunAt = null;
+      // Set a placeholder so syncMonitorState won't re-enter on the next 30s poll
+      monitorTimer = setTimeout(() => {}, 0);
+      // Run now; runMonitorCycle finally block will reschedule the real timer
+      runMonitorCycle().catch(() => {});
     } else if (!enabled && monitorTimer) {
       console.log("[monitor] Stopping board monitoring loop");
       clearTimeout(monitorTimer);
