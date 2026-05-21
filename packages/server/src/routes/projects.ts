@@ -20,6 +20,7 @@ import { execFile, execSync } from "node:child_process";
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 import { existsSync, mkdirSync, readdirSync } from "node:fs";
 =======
@@ -99,6 +100,9 @@ import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:
 >>>>>>> 088856d (WIP: add rmSync and writeFileSync imports to projects.ts)
 =======
 >>>>>>> dbea783 (fix: add missing fs imports and unify projects_base_path key name)
+=======
+import { existsSync, mkdirSync, readdirSync, writeFileSync, rmSync } from "node:fs";
+>>>>>>> f903991 (feat: conditionally show AI Reviewed column and fix stats colors)
 import { detectRepoInfo } from "../services/git-info.service.js";
 import { listBranches, listWorktrees, getDiffShortstat, removeWorktree, detectConflicts } from "../services/git.service.js";
 import type { Database } from "../db/index.js";
@@ -297,6 +301,7 @@ export function createProjectsRoute(database: Database = db) {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 >>>>>>> 7695053 (feat: validate create-project edge cases (WIP))
 =======
@@ -311,11 +316,14 @@ export function createProjectsRoute(database: Database = db) {
 =======
 >>>>>>> 7695053 (feat: validate create-project edge cases (WIP))
 >>>>>>> 62b2c9d (feat: validate create-project edge cases (WIP))
+=======
+>>>>>>> f903991 (feat: conditionally show AI Reviewed column and fix stats colors)
       // Validate folder name when deriving path from name
       if (/[/\\<>:"|?*\x00]/.test(name)) {
         return c.json({ error: 'Project name contains invalid characters. Avoid: / \\ < > : " | ? *' }, 400);
       }
 
+<<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
@@ -341,6 +349,9 @@ export function createProjectsRoute(database: Database = db) {
       // Read projects_base_path from preferences
 >>>>>>> 9e9ee57 (fix: add missing fs imports and unify projects_base_path key name)
 <<<<<<< HEAD
+=======
+      // Read projects_base_path from preferences
+>>>>>>> f903991 (feat: conditionally show AI Reviewed column and fix stats colors)
       const baseDirRows = await database
         .select({ value: preferences.value })
         .from(preferences)
@@ -370,6 +381,7 @@ export function createProjectsRoute(database: Database = db) {
       return c.json({ error: `Failed to create directory: ${err instanceof Error ? err.message : String(err)}` }, 400);
     }
 
+<<<<<<< HEAD
 =======
 =======
 >>>>>>> 7695053 (feat: validate create-project edge cases (WIP))
@@ -566,10 +578,13 @@ export function createProjectsRoute(database: Database = db) {
 
 >>>>>>> 41a314b (feat: implement create project flow (WIP - UI + backend route))
 >>>>>>> 19a00ff (feat: implement create project flow (WIP - UI + backend route))
+=======
+>>>>>>> f903991 (feat: conditionally show AI Reviewed column and fix stats colors)
     // Run git init
     try {
       execSync("git init", { cwd: targetPath, stdio: "pipe" });
     } catch (err: any) {
+<<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
@@ -611,6 +626,9 @@ export function createProjectsRoute(database: Database = db) {
 >>>>>>> 19a00ff (feat: implement create project flow (WIP - UI + backend route))
 =======
 >>>>>>> 89f4fdb (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
+=======
+      try { rmSync(targetPath, { recursive: true, force: true }); } catch {}
+>>>>>>> f903991 (feat: conditionally show AI Reviewed column and fix stats colors)
       return c.json({ error: `git init failed: ${err.stderr ? String(err.stderr).trim() : String(err)}` }, 400);
     }
 

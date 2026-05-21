@@ -294,6 +294,7 @@ export function BoardPage() {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
   const [blockedFilter, setBlockedFilter] = useState(false);
 =======
   const [priorityFilter, setPriorityFilter] = useState("");
@@ -313,6 +314,8 @@ export function BoardPage() {
 =======
 >>>>>>> 4f0c0a0 (feat: remove blocked filter from board main page)
 >>>>>>> 4a222f1 (feat: remove blocked filter from board main page)
+=======
+>>>>>>> f903991 (feat: conditionally show AI Reviewed column and fix stats colors)
   const [showSettings, setShowSettings] = useState(false);
   const [showQuickTasks, setShowQuickTasks] = useState(false);
   const [showWorktreeOverview, setShowWorktreeOverview] = useState(false);
@@ -716,6 +719,7 @@ export function BoardPage() {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
           if (blockedFilter && !(issue as IssueWithStatus & { isBlocked?: boolean }).isBlocked) return false;
 =======
           if (priorityFilter && issue.priority !== priorityFilter) return false;
@@ -735,6 +739,8 @@ export function BoardPage() {
 =======
 >>>>>>> 4f0c0a0 (feat: remove blocked filter from board main page)
 >>>>>>> 4a222f1 (feat: remove blocked filter from board main page)
+=======
+>>>>>>> f903991 (feat: conditionally show AI Reviewed column and fix stats colors)
           if (searchQuery) {
             const q = searchQuery.toLowerCase();
             return (
