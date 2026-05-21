@@ -661,12 +661,12 @@ export async function startServer(port?: number) {
     return hasActive; // skip if clearly active
   }
 
-  async function runMonitorCycle() {
+  async function runMonitorCycle(force = false) {
     const cycleStats = { relaunched: 0, merged: 0, nudged: 0 };
     try {
       const prefRows = await db.select().from(preferences);
       const prefMap = new Map(prefRows.map(r => [r.key, r.value]));
-      if (prefMap.get("auto_monitor") !== "true") return;
+      if (!force && prefMap.get("auto_monitor") !== "true") return;
 
       const intervalMin = parseInt(prefMap.get("auto_monitor_interval") || "4", 10);
 
