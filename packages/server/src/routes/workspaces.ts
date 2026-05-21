@@ -37,6 +37,7 @@ export function createWorkspacesRoute(
 
     const requiresReview = body.requiresReview === true;
     const planMode = body.planMode === true;
+    const includeVisualProof = body.includeVisualProof === true;
     const now = new Date().toISOString();
     const id = randomUUID();
     let sessionId: string | undefined;
@@ -126,6 +127,10 @@ export function createWorkspacesRoute(
       if (issue.description) {
         agentPrompt += `\n\n${issue.description}`;
       }
+      if (includeVisualProof) {
+        const serverPort = process.env.KANBAN_SERVER_PORT || process.env.PORT || "3001";
+        agentPrompt += `\n\nAfter completing the implementation, attach visual proof to this ticket. Use the playwright-cli skill to open the running app, take a screenshot of the working result, and post it as an artifact:\nPOST http://localhost:${serverPort}/api/issues/${body.issueId}/artifacts\nBody: { "type": "image", "mimeType": "image/png", "content": "<base64 data URL>", "caption": "Screenshot of the working result" }`;
+      }
 
       // Write skill as a SKILL.md file for progressive disclosure (agent invokes on demand).
       // If the project has a locally installed version (.claude/skills/<name>/SKILL.md in repoPath),
@@ -173,6 +178,7 @@ export function createWorkspacesRoute(
         isDirect,
         requiresReview,
         planMode,
+        includeVisualProof,
         skillId,
         status: "active",
         claudeProfile: claudeProfile ?? null,
@@ -242,6 +248,7 @@ export function createWorkspacesRoute(
           isDirect,
           requiresReview,
           planMode,
+          includeVisualProof,
           status: "active",
           claudeProfile: claudeProfile ?? null,
           agentCommand: agentCommand ?? null,
@@ -253,7 +260,7 @@ export function createWorkspacesRoute(
       }
 
       return c.json(
-        { id, issueId: body.issueId, branch, workingDir: worktreePath, baseBranch, isDirect, planMode, status: "active", error: errorMsg },
+        { id, issueId: body.issueId, branch, workingDir: worktreePath, baseBranch, isDirect, planMode, includeVisualProof, status: "active", error: errorMsg },
         201,
       );
     }
@@ -272,6 +279,7 @@ export function createWorkspacesRoute(
         baseBranch: workspaces.baseBranch,
         isDirect: workspaces.isDirect,
         planMode: workspaces.planMode,
+        includeVisualProof: workspaces.includeVisualProof,
         status: workspaces.status,
         createdAt: workspaces.createdAt,
         updatedAt: workspaces.updatedAt,
@@ -295,6 +303,7 @@ export function createWorkspacesRoute(
       baseBranch: row.baseBranch,
       isDirect: row.isDirect,
       planMode: row.planMode,
+      includeVisualProof: row.includeVisualProof,
       status: row.status,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,

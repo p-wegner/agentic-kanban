@@ -209,10 +209,20 @@
       "tag": "0028_perf_indexes_conflict_cache",
       "breakpoints": true
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 >>>>>>> b6a4ecf (feat: add estimate/sizing field to issues (XS/S/M/L/XL))
 =======
 >>>>>>> d778ce3 (perf: add DB indexes and stale-while-revalidate conflict cache for board load)
+=======
+    },
+    {
+      "idx": 29,
+      "version": "6",
+      "when": 1779784000000,
+      "tag": "0029_issue_artifacts",
+      "breakpoints": true
+>>>>>>> 0b16b06 (feat: add issue artifacts schema and routes (from feature/ak-151))
     }
   ]
 }
