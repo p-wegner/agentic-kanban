@@ -142,28 +142,32 @@ When the user references `#N` (e.g., "review #70", "merge #65", "what's the stat
 Get-NetTCPConnection -LocalPort <port> | Select-Object -ExpandProperty OwningProcess | ForEach-Object { Stop-Process -Id $_ -Force }
 ```
 
-**Stopping the dev server:** Stop the `Start-Job` first, then sweep ports — otherwise the job restarts Vite after the port kill:
-```powershell
-Get-Job | Stop-Job; Get-Job | Remove-Job
-Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue |
-  Where-Object { ($_.LocalPort -ge 3001 -and $_.LocalPort -le 3020) -or ($_.LocalPort -ge 5173 -and $_.LocalPort -le 5190) } |
-  Select-Object -ExpandProperty OwningProcess | Sort-Object -Unique |
-  ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }
-```
-
-**Starting the dev server headlessly:** Use `Start-Job` — it persists after the tool call returns. Do NOT use Bash `&` — it creates a fully detached orphan process that survives all subsequent `Get-Job`/`Stop-Job` cleanup and requires manual PID hunting to kill:
+**Starting the dev server headlessly (verified):** Use `Start-Job` with the wait loop in the SAME PowerShell call — if the session exits before child processes fully detach, the job dies and nothing starts:
 ```powershell
 Start-Job -ScriptBlock { Set-Location C:\andrena\agentic-kanban; pnpm dev 2>&1 } | Out-Null
+for ($i = 0; $i -lt 25; $i++) {
+    Start-Sleep -Seconds 1
+    $p = Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue |
+        Where-Object { $_.LocalPort -eq 3001 -or $_.LocalPort -eq 5173 }
+    if (($p | Where-Object { $_.LocalPort -eq 3001 }) -and ($p | Where-Object { $_.LocalPort -eq 5173 })) {
+        Write-Host "UP after ${i}s"; break
+    }
+}
 ```
-Wait ~10s then verify with `Get-NetTCPConnection -State Listen | Where-Object { $_.LocalPort -eq 3001 -or $_.LocalPort -eq 5173 }`.
+Do NOT use Bash `&` — creates a fully detached orphan that survives all job/port cleanup.
 
-**Dangling worktree dev servers:** Worktree `pnpm dev` processes (Vite on 5174, 5175, …; Hono on 3002, 3003, …) survive after a worktree session ends. When the main dev server is killed, one of these can grab port 5173/3001 and prevent a clean restart. Before restarting, sweep the full port range:
+**Stopping the dev server (verified):** Kill by process signature with `taskkill /F /T` (kills entire subtree). Port sweep alone is not enough — the orchestrator respawns Vite. `Get-Job | Stop-Job` is also not enough — jobs from previous PS sessions aren't visible:
 ```powershell
-Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue |
-  Where-Object { ($_.LocalPort -ge 3001 -and $_.LocalPort -le 3020) -or ($_.LocalPort -ge 5173 -and $_.LocalPort -le 5190) } |
-  Select-Object -ExpandProperty OwningProcess | Sort-Object -Unique |
-  ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }
+Get-CimInstance Win32_Process |
+    Where-Object { $_.Name -eq "node.exe" -and $_.CommandLine -like "*dev.mjs*" } |
+    ForEach-Object { taskkill /F /T /PID $_.ProcessId 2>$null }
+Get-CimInstance Win32_Process |
+    Where-Object { $_.CommandLine -like "*vite/bin/vite.js*" } |
+    ForEach-Object { taskkill /F /T /PID $_.ProcessId 2>$null }
+Get-Job | Stop-Job -ErrorAction SilentlyContinue; Get-Job | Remove-Job -ErrorAction SilentlyContinue
 ```
+
+**Dangling worktree dev servers:** Worktree `pnpm dev` processes (Vite on 5174, 5175, …; Hono on 3002, 3003, …) survive after a worktree session ends and can grab port 5173/3001. The stop command above catches these too (same `dev.mjs` / `vite.js` signature).
 
 ## Workspace Flow
 `POST /api/workspaces` (one step): DB record + worktree + auto-launch agent. Key endpoints:
