@@ -368,6 +368,41 @@ export function IssueDetailPanel({
         </div>
 
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
+          {/* Blocked banner — shown when issue has unresolved blocking dependencies */}
+          {(() => {
+            const RESOLVED = ["done", "cancelled", "ai reviewed"];
+            const blockingDeps = dependencies.dependencies.filter((dep) => {
+              const isIncoming = dep.issueId !== issue.id;
+              const isBlockingType = dep.type === "depends_on" || dep.type === "blocked_by";
+              if (!isBlockingType) return false;
+              if (isIncoming) return false; // incoming depends_on means I'm blocking them, not the other way
+              const statusLower = (dep.issueStatusName ?? "").toLowerCase();
+              return !RESOLVED.includes(statusLower);
+            });
+            if (blockingDeps.length === 0) return null;
+            return (
+              <div className="bg-amber-50 border border-amber-300 rounded-md px-3 py-2.5 text-sm">
+                <div className="flex items-center gap-1.5 font-medium text-amber-800 mb-1.5">
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 shrink-0" viewBox="0 0 20 20" fill="currentColor">
+                    <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                  </svg>
+                  Blocked by {blockingDeps.length} unresolved {blockingDeps.length === 1 ? "dependency" : "dependencies"}
+                </div>
+                <ul className="space-y-0.5 pl-5.5">
+                  {blockingDeps.map((dep) => (
+                    <li key={dep.id} className="text-amber-700 flex items-center gap-1">
+                      <span className="text-amber-500 shrink-0">•</span>
+                      {dep.issueNumber != null && (
+                        <span className="font-mono text-xs shrink-0">#{dep.issueNumber}</span>
+                      )}
+                      <span className="truncate">{dep.issueTitle}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            );
+          })()}
+
           {/* Title - always visible, editable in edit mode */}
           <div>
             {editing ? (
