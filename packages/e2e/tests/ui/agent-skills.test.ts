@@ -162,6 +162,133 @@ test.describe("Settings > Skills tab", () => {
     if (created) createdSkillIds.push(created.id);
   });
 
+  test("Enhance with AI button appears in the new-skill form and updates fields on success", async ({ page }) => {
+    await openSkillsTab(page);
+
+    await page.locator("button", { hasText: "+ Add Skill" }).click();
+
+    const nameInput = page.locator('input[placeholder="Skill name (e.g. dependency-analyzer)"]');
+    await nameInput.fill("my-test-skill");
+
+    // Mock the enhance endpoint before clicking
+    await page.route("**/api/agent-skills/enhance", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          name: "my-test-skill",
+          description: "Enhanced description from AI",
+          prompt: "Enhanced prompt text from AI",
+        }),
+      });
+    });
+
+    const enhanceBtn = page.locator("button", { hasText: "Enhance with AI" });
+    await expect(enhanceBtn).toBeVisible();
+    await enhanceBtn.click();
+
+    // Loading state: button shows "Enhancing…" while request is in-flight
+    // (may be too fast to catch with mock, so just verify final state)
+    const descInput = page.locator('input[placeholder="Short description"]');
+    await expect(descInput).toHaveValue("Enhanced description from AI");
+
+    const promptArea = page.locator('textarea[placeholder*="Skill prompt"]');
+    await expect(promptArea).toHaveValue("Enhanced prompt text from AI");
+
+    // "Undo enhance" button should appear after successful enhancement
+    await expect(page.locator("button", { hasText: "Undo enhance" })).toBeVisible();
+
+    // Cancel to avoid creating a skill
+    await page.locator("button", { hasText: /^Cancel$/ }).click();
+  });
+
+  test("Undo enhance reverts fields to pre-enhancement values", async ({ page }) => {
+    await openSkillsTab(page);
+
+    await page.locator("button", { hasText: "+ Add Skill" }).click();
+
+    const nameInput = page.locator('input[placeholder="Skill name (e.g. dependency-analyzer)"]');
+    await nameInput.fill("undo-test-skill");
+
+    const descInput = page.locator('input[placeholder="Short description"]');
+    await descInput.fill("original description");
+
+    const promptArea = page.locator('textarea[placeholder*="Skill prompt"]');
+    await promptArea.fill("original prompt");
+
+    await page.route("**/api/agent-skills/enhance", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          name: "undo-test-skill",
+          description: "AI-enhanced description",
+          prompt: "AI-enhanced prompt",
+        }),
+      });
+    });
+
+    await page.locator("button", { hasText: "Enhance with AI" }).click();
+    await expect(descInput).toHaveValue("AI-enhanced description");
+
+    // Click undo — should restore original values
+    await page.locator("button", { hasText: "Undo enhance" }).click();
+    await expect(descInput).toHaveValue("original description");
+    await expect(promptArea).toHaveValue("original prompt");
+
+    // "Undo enhance" button disappears after undoing
+    await expect(page.locator("button", { hasText: "Undo enhance" })).not.toBeVisible();
+
+    await page.locator("button", { hasText: /^Cancel$/ }).click();
+  });
+
+  test("Enhance with AI button appears when editing a custom skill", async ({ page, request }) => {
+    const skillName = `e2e-enhance-edit-${Date.now()}`;
+    const res = await request.post(`${SERVER_URL}/api/agent-skills`, {
+      data: { name: skillName, description: "original desc", prompt: "original prompt" },
+    });
+    expect(res.status()).toBe(201);
+    const created = await res.json();
+    createdSkillIds.push(created.id);
+
+    await openSkillsTab(page);
+
+    const skillCard = page.locator("div.border.border-gray-200.rounded-md", { hasText: skillName });
+    await skillCard.locator("button", { hasText: "Edit" }).click();
+
+    // Enhance with AI button should be visible in the edit form
+    await expect(skillCard.locator("button", { hasText: "Enhance with AI" })).toBeVisible();
+  });
+
+  test("Enhance with AI button appears when editing a built-in skill", async ({ page }) => {
+    await openSkillsTab(page);
+
+    // Click Edit on the first builtin skill (board-navigator)
+    const firstSkillCard = page.locator("div.border.border-gray-200.rounded-md").first();
+    await firstSkillCard.locator("button", { hasText: "Edit" }).click();
+
+    await expect(firstSkillCard.locator("button", { hasText: "Enhance with AI" })).toBeVisible();
+
+    // Cancel out without saving changes
+    await firstSkillCard.locator("button", { hasText: /^Cancel$/ }).click();
+  });
+
+  test("Enhance with AI button is disabled when skill name is empty", async ({ page }) => {
+    await openSkillsTab(page);
+
+    await page.locator("button", { hasText: "+ Add Skill" }).click();
+
+    // Name field is empty by default — button should be disabled
+    const enhanceBtn = page.locator("button", { hasText: "Enhance with AI" });
+    await expect(enhanceBtn).toBeDisabled();
+
+    // Fill name — button becomes enabled
+    await page.locator('input[placeholder="Skill name (e.g. dependency-analyzer)"]').fill("some-name");
+    await expect(enhanceBtn).toBeEnabled();
+
+    await page.locator("button", { hasText: /^Cancel$/ }).click();
+  });
+
   test("delete a custom skill removes it from the list", async ({ page, request }) => {
     // Create a skill via API to delete via UI
     const skillName = `e2e-delete-skill-${Date.now()}`;
