@@ -263,7 +263,7 @@ pnpm test:e2e                                  # E2E tests (101 tests)
 | F-MCP-04: Install skill to .claude/skills/ button in Settings > Skills tab (install status badge) | #197 |
 | F-UI-02: Follow-up task creation in issue detail panel (+ Create follow-up task form) | #198 |
 | F-UI-09: Auto-start follow-up tasks setting in Settings > Workflow (auto_start_followup toggle) | #199 |
-| "Open in VS Code" button in workspace panel (F-UI-02 addition) | #200 |
+| "Open in VS Code" button in workspace panel (F-UI-02 addition) | #204 |
 | Markdown preview toggle in issue description edit mode (F-UI-02 addition) | #203 |
 
 
