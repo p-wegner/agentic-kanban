@@ -50,6 +50,7 @@ export function launch(
   const proc = spawn(command, args, {
     cwd: worktreePath,
     shell: useShell,
+    windowsHide: true,
     env: {
       ...spawnEnv,
       FORCE_COLOR: "0",
@@ -125,7 +126,7 @@ export function kill(sessionId: string): boolean {
   console.log(`[agent] killing: sessionId=${sessionId} pid=${proc.pid}`);
   if (process.platform === "win32") {
     // On Windows, use taskkill to kill the process tree
-    spawn("taskkill", ["/pid", String(proc.pid), "/T", "/F"], { shell: true });
+    spawn("taskkill", ["/pid", String(proc.pid), "/T", "/F"], { shell: true, windowsHide: true });
   } else {
     proc.kill("SIGTERM");
   }
@@ -171,7 +172,7 @@ export function killAll(): number {
   for (const [sessionId, proc] of activeProcesses) {
     console.log(`[agent] killAll: sessionId=${sessionId} pid=${proc.pid}`);
     if (process.platform === "win32") {
-      spawn("taskkill", ["/pid", String(proc.pid), "/T", "/F"], { shell: true });
+      spawn("taskkill", ["/pid", String(proc.pid), "/T", "/F"], { shell: true, windowsHide: true });
     } else {
       proc.kill("SIGTERM");
     }
