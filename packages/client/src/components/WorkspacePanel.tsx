@@ -1,4 +1,5 @@
 ﻿import { useEffect, useRef, useState } from "react";
+import { SplitButton } from "./SplitButton.js";
 import { apiFetch } from "../lib/api.js";
 import { formatRelativeTime } from "../lib/formatRelativeTime.js";
 import { getOutputFormatForAgent } from "../lib/agent-output-parser.js";
@@ -1603,24 +1604,20 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                         </button>
                         )}
                         {ws.workingDir && (
-                        <button
-                          onClick={() => handleReview(ws.id, false)}
+                        <SplitButton
+                          primary={{
+                            label: "Review",
+                            onClick: () => handleReview(ws.id, false),
+                            title: "Trigger AI code review",
+                          }}
+                          options={[{
+                            label: "Thorough Review",
+                            onClick: () => handleReview(ws.id, true),
+                            title: "Trigger thorough AI code review using a more capable model",
+                          }]}
                           disabled={actionLoading || isRunning}
-                          className="text-sm bg-violet-600 text-white px-3 py-1.5 rounded hover:bg-violet-700 disabled:opacity-50"
-                          title="Trigger AI code review"
-                        >
-                          Review
-                        </button>
-                        )}
-                        {ws.workingDir && (
-                        <button
-                          onClick={() => handleReview(ws.id, true)}
-                          disabled={actionLoading || isRunning}
-                          className="text-sm bg-violet-800 text-white px-3 py-1.5 rounded hover:bg-violet-900 disabled:opacity-50"
-                          title="Trigger thorough AI code review using a more capable model"
-                        >
-                          Thorough Review
-                        </button>
+                          colorClasses="bg-violet-600 hover:bg-violet-700 border-violet-500"
+                        />
                         )}
                         {ws.workingDir && (
                         <button
