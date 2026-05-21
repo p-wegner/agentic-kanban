@@ -918,12 +918,23 @@ export function BoardPage() {
         e.preventDefault();
         setShowShortcutHelp((prev) => !prev);
       }
-      // "t" to open Quick Tasks
-      if (e.key === "t" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      // "b", "g", "t" to switch views
+      if ((e.key === "b" || e.key === "g" || e.key === "t") && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        const target = e.target as HTMLElement;
+        if (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT") return;
+        e.preventDefault();
+        if (e.key === "b") setViewMode("kanban");
+        else if (e.key === "g") setViewMode("graph");
+        else if (e.key === "t") setViewMode("table");
+        return;
+      }
+      // "q" to open Quick Tasks panel
+      if (e.key === "q" && !e.ctrlKey && !e.metaKey && !e.altKey) {
         const target = e.target as HTMLElement;
         if (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT") return;
         e.preventDefault();
         setShowQuickTasks(true);
+        return;
       }
       // "c" to create issue, "w" to create issue + workspace
       if ((e.key === "c" || e.key === "w") && !e.ctrlKey && !e.metaKey && !e.altKey) {
@@ -941,7 +952,7 @@ export function BoardPage() {
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [searchQuery, showCommandPalette, showAllWorkspaces, showWorktreeOverview, showShortcutHelp, filteredColumns, columns]);
+  }, [searchQuery, showCommandPalette, showAllWorkspaces, showWorktreeOverview, showShortcutHelp, filteredColumns, columns, setViewMode, setShowQuickTasks]);
 
   // Register command palette actions
   useEffect(() => {
@@ -1030,6 +1041,46 @@ export function BoardPage() {
       shortcut: "?",
       category: "settings",
       handler: () => setShowShortcutHelp(true),
+    }));
+
+    unregisters.push(registerAction({
+      id: "open-quick-tasks",
+      label: "Open Quick Tasks",
+      description: "View installed skills and run custom agent tasks",
+      icon: "⚡",
+      shortcut: "q",
+      category: "board",
+      handler: () => setShowQuickTasks(true),
+    }));
+
+    unregisters.push(registerAction({
+      id: "view-board",
+      label: "Switch to Board View",
+      description: "Show kanban board columns",
+      icon: "⊟",
+      shortcut: "b",
+      category: "navigation",
+      handler: () => setViewMode("kanban"),
+    }));
+
+    unregisters.push(registerAction({
+      id: "view-graph",
+      label: "Switch to Graph View",
+      description: "Show dependency graph",
+      icon: "⬡",
+      shortcut: "g",
+      category: "navigation",
+      handler: () => setViewMode("graph"),
+    }));
+
+    unregisters.push(registerAction({
+      id: "view-table",
+      label: "Switch to Table View",
+      description: "Show flat table list",
+      icon: "☰",
+      shortcut: "t",
+      category: "navigation",
+      handler: () => setViewMode("table"),
     }));
 
     // Register "Go to: [column]" for each column
