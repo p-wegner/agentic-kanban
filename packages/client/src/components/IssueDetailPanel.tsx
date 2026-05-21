@@ -621,32 +621,50 @@ export function IssueDetailPanel({
                 <div className="flex flex-col gap-1">
                   <button
                     onClick={() => onManageWorkspaces(issue, issue.workspaceSummary!.main!.id)}
-                    className={`w-full flex items-center gap-2 p-2 rounded border transition-colors text-left ${
+                    className={`w-full flex flex-col gap-1 p-2 rounded border transition-colors text-left ${
                       issue.workspaceSummary.main.conflicts?.hasConflicts
                         ? "border-red-200 hover:border-red-300 hover:bg-red-50"
                         : "border-gray-200 hover:border-blue-300 hover:bg-blue-50"
                     }`}
                   >
-                    <span className={`inline-block w-2 h-2 rounded-full shrink-0 ${
-                      issue.workspaceSummary.main.status === "active" ? "bg-green-500" :
-                      issue.workspaceSummary.main.status === "idle" ? "bg-amber-500" :
-                      "bg-gray-400"
-                    }`} />
-                    <span className="text-sm font-mono text-gray-700 truncate">{issue.workspaceSummary.main.branch}</span>
-                    <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${
-                      issue.workspaceSummary.main.status === "active" ? "bg-green-100 text-green-700" :
-                      issue.workspaceSummary.main.status === "idle" ? "bg-amber-100 text-amber-700" :
-                      "bg-gray-100 text-gray-500"
-                    }`}>
-                      {issue.workspaceSummary.main.status}
-                    </span>
-                    {issue.workspaceSummary.main.conflicts?.hasConflicts && (
-                      <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-red-100 text-red-700 text-[10px] font-medium shrink-0">
-                        {issue.workspaceSummary.main.conflicts.conflictingFiles.length} conflict{issue.workspaceSummary.main.conflicts.conflictingFiles.length !== 1 ? "s" : ""}
+                    <div className="flex items-center gap-2 w-full">
+                      <span className={`inline-block w-2 h-2 rounded-full shrink-0 ${
+                        issue.workspaceSummary.main.status === "active" ? "bg-green-500" :
+                        issue.workspaceSummary.main.status === "idle" ? "bg-amber-500" :
+                        "bg-gray-400"
+                      }`} />
+                      <span className="text-sm font-mono text-gray-700 truncate">{issue.workspaceSummary.main.branch}</span>
+                      <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded shrink-0 ${
+                        issue.workspaceSummary.main.status === "active" ? "bg-green-100 text-green-700" :
+                        issue.workspaceSummary.main.status === "idle" ? "bg-amber-100 text-amber-700" :
+                        "bg-gray-100 text-gray-500"
+                      }`}>
+                        {issue.workspaceSummary.main.status}
                       </span>
-                    )}
-                    {issue.workspaceSummary!.total > 1 && (
-                      <span className="text-xs text-gray-400 ml-auto">+{issue.workspaceSummary!.total - 1}</span>
+                      {issue.workspaceSummary.main.conflicts?.hasConflicts && (
+                        <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-red-100 text-red-700 text-[10px] font-medium shrink-0">
+                          {issue.workspaceSummary.main.conflicts.conflictingFiles.length} conflict{issue.workspaceSummary.main.conflicts.conflictingFiles.length !== 1 ? "s" : ""}
+                        </span>
+                      )}
+                      {issue.workspaceSummary!.total > 1 && (
+                        <span className="text-xs text-gray-400 ml-auto">+{issue.workspaceSummary!.total - 1}</span>
+                      )}
+                    </div>
+                    {(issue.workspaceSummary.main.contextTokens || issue.workspaceSummary.main.lastTool) && (
+                      <div className="flex items-center gap-2 pl-4">
+                        {issue.workspaceSummary.main.contextTokens ? (
+                          <span className="text-[10px] text-gray-400">
+                            {issue.workspaceSummary.main.contextTokens >= 1000
+                              ? `${Math.round(issue.workspaceSummary.main.contextTokens / 1000)}k ctx`
+                              : `${issue.workspaceSummary.main.contextTokens} ctx`}
+                          </span>
+                        ) : null}
+                        {issue.workspaceSummary.main.lastTool ? (
+                          <span className="text-[10px] text-gray-400 truncate" title={issue.workspaceSummary.main.lastTool}>
+                            {issue.workspaceSummary.main.lastTool}
+                          </span>
+                        ) : null}
+                      </div>
                     )}
                   </button>
                   {issue.workspaceSummary.main.conflicts?.hasConflicts && (

@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { db } from "../db/index.js";
 import { projects, projectStatuses, issues, workspaces, sessions, sessionMessages, diffComments, issueDependencies, preferences, tags, issueTags } from "@agentic-kanban/shared/schema";
-import { eq, inArray, sql, and } from "drizzle-orm";
+import { eq, inArray, sql, and, desc } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { execFile, execSync } from "node:child_process";
 <<<<<<< HEAD
@@ -1452,20 +1452,52 @@ ${contextParts.join("\n")}`;
       if (mainWsIds.length > 0) {
         const sessionRows = await database
           .select({
+            id: sessions.id,
             workspaceId: sessions.workspaceId,
             status: sessions.status,
             startedAt: sessions.startedAt,
             endedAt: sessions.endedAt,
+            stats: sessions.stats,
           })
           .from(sessions)
           .where(inArray(sessions.workspaceId, mainWsIds))
           .orderBy(sessions.startedAt);
 
         // Group by workspace, pick latest per workspace
-        const latestByWs = new Map<string, { status: string; startedAt: string; endedAt: string | null }>();
+        const latestByWs = new Map<string, { id: string; status: string; startedAt: string; endedAt: string | null; stats: string | null }>();
         for (const s of sessionRows) {
           if (!latestByWs.has(s.workspaceId)) {
-            latestByWs.set(s.workspaceId, { status: s.status, startedAt: s.startedAt, endedAt: s.endedAt });
+            latestByWs.set(s.workspaceId, { id: s.id, status: s.status, startedAt: s.startedAt, endedAt: s.endedAt, stats: s.stats });
+          }
+        }
+
+        // Collect session IDs for message lookup
+        const latestSessionIds = [...latestByWs.values()].map(s => s.id);
+
+        // Fetch recent messages to extract last tool call
+        const lastToolBySession = new Map<string, string>();
+        if (latestSessionIds.length > 0) {
+          const msgRows = await database
+            .select({ sessionId: sessionMessages.sessionId, data: sessionMessages.data })
+            .from(sessionMessages)
+            .where(inArray(sessionMessages.sessionId, latestSessionIds))
+            .orderBy(desc(sessionMessages.id));
+
+          for (const msg of msgRows) {
+            if (lastToolBySession.has(msg.sessionId)) continue;
+            if (!msg.data) continue;
+            try {
+              const obj = JSON.parse(msg.data) as Record<string, unknown>;
+              if (obj.type === "assistant") {
+                const content = (obj.message as { content?: unknown[] })?.content ?? [];
+                for (const block of content as { type: string; name?: string; input?: unknown }[]) {
+                  if (block.type === "tool_use" && block.name) {
+                    lastToolBySession.set(msg.sessionId, block.name);
+                    break;
+                  }
+                }
+              }
+            } catch { /* ignore */ }
           }
         }
 
@@ -1474,6 +1506,15 @@ ${contextParts.join("\n")}`;
             const sess = latestByWs.get(summary.main.id);
             if (sess) {
               summary.main.lastSessionAt = sess.status === "running" ? sess.startedAt : sess.endedAt;
+              if (sess.stats) {
+                try {
+                  const p = JSON.parse(sess.stats) as Record<string, unknown>;
+                  const inputTokens = (p.inputTokens as number) ?? 0;
+                  const cachedTokens = (p.cacheReadTokens as number) ?? 0;
+                  summary.main.contextTokens = inputTokens + cachedTokens || null;
+                } catch { /* ignore */ }
+              }
+              summary.main.lastTool = lastToolBySession.get(sess.id) ?? null;
             }
           }
         }
