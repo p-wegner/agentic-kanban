@@ -249,6 +249,10 @@ pnpm test:e2e                                  # E2E tests (101 tests)
 | Copy-to-clipboard for issue reference (#N) in detail panel | #177 |
 | Markdown rendering in issue descriptions (detail panel view mode) | #178 |
 | Scheduled Runs UI in Settings panel (create/list/delete scheduled runs) | #179 |
+| F-UI-04: View-switching keyboard shortcuts (b=Board, g=Graph, t=Table, q=Quick Tasks) | #188 |
+| F-UI-09: Board monitor visualization panel and workflow toggles (Settings > Workflow) | #189 |
+| F-UI-02: Expand button for issue detail panel (full-width mode) | #190 |
+| F-UI-02: AI Reviewed column conditional display and "Awaiting manual merge" hint | #191 |
 
 ## Known Test Considerations
 
