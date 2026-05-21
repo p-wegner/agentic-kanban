@@ -131,7 +131,7 @@ export function useWorkspaceSession({
         }
       }
     })();
-  }, [selectedWorkspace, workspaceSessions, activeSession]);
+  }, [selectedWorkspace, workspaceSessions, activeSession, issue]);
 
   async function handleViewHistory(sessionId: string) {
     try {
