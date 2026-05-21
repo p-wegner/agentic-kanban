@@ -10,7 +10,7 @@ import { db } from "./db/index.js";
 import { createSessionManager } from "./services/session.manager.js";
 import type { ProviderId } from "./services/agent-provider.js";
 import { createBoardEvents } from "./services/board-events.js";
-import { workspaces, issues, projects, projectStatuses, preferences, sessions, agentSkills } from "@agentic-kanban/shared/schema";
+import { workspaces, issues, projects, projectStatuses, preferences, sessions, agentSkills, sessionMessages } from "@agentic-kanban/shared/schema";
 import { eq, sql, desc } from "drizzle-orm";
 import * as agentService from "./services/agent.service.js";
 import * as gitService from "./services/git.service.js";
@@ -554,6 +554,55 @@ export async function startServer(port?: number) {
     if (monitorRecentActions.length > 30) monitorRecentActions.splice(30);
   }
 
+  async function getRecentAgentExcerpts(sessionId: string, count = 3): Promise<string[]> {
+    // Fetch last stdout rows for the session and extract assistant text blocks
+    const rows = await db.select({ data: sessionMessages.data })
+      .from(sessionMessages)
+      .where(eq(sessionMessages.sessionId, sessionId))
+      .orderBy(desc(sessionMessages.id))
+      .limit(50);
+
+    const excerpts: string[] = [];
+    for (const row of rows) {
+      if (!row.data || excerpts.length >= count) break;
+      const lines = row.data.split("\n").reverse();
+      for (const line of lines) {
+        if (excerpts.length >= count) break;
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        let obj: Record<string, unknown>;
+        try { obj = JSON.parse(trimmed); } catch { continue; }
+        if (obj.type !== "assistant") continue;
+        const content = ((obj.message as Record<string, unknown>)?.content as Array<Record<string, unknown>>) || [];
+        for (const block of content) {
+          if (block.type === "text" && block.text) {
+            excerpts.push((block.text as string).slice(0, 500));
+            if (excerpts.length >= count) break;
+          }
+        }
+      }
+    }
+    return excerpts;
+  }
+
+  function shouldSkipNudge(excerpts: string[]): boolean {
+    if (excerpts.length === 0) return false;
+    const combined = excerpts.join(" ").toLowerCase();
+    // Skip if agent's last message clearly indicates it's still actively working
+    const activeSignals = [
+      "i'll now", "i will now", "let me now", "next i'll", "continuing",
+      "i'm now", "proceeding to", "moving on to", "i've completed",
+    ];
+    const waitingSignals = [
+      "?", "please let me know", "should i", "would you like", "do you want",
+      "waiting", "what would", "can you", "could you", "i need your",
+    ];
+    const hasWaiting = waitingSignals.some(s => combined.includes(s));
+    if (hasWaiting) return false; // definitely nudge
+    const hasActive = activeSignals.some(s => combined.includes(s));
+    return hasActive; // skip if clearly active
+  }
+
   async function runMonitorCycle() {
     const cycleStats = { relaunched: 0, merged: 0, nudged: 0 };
     try {
@@ -630,6 +679,23 @@ export async function startServer(port?: number) {
               // Check if agent is waiting for input (running > 5min without activity)
               const runningMs = Date.now() - new Date(sess.startedAt).getTime();
               if (runningMs > 5 * 60 * 1000) {
+                // Check if we've already nudged this workspace before (repeat nudge scenario)
+                const previousNudge = monitorRecentActions.find(
+                  a => a.action === "nudge" && a.workspaceId === ws.wsId
+                );
+
+                if (previousNudge) {
+                  // Before re-nudging, check what the agent last said
+                  const excerpts = await getRecentAgentExcerpts(sess.id);
+                  if (shouldSkipNudge(excerpts)) {
+                    console.log(`[monitor] Skipping re-nudge for workspace ${ws.wsId} — agent appears to be actively working`);
+                    continue;
+                  }
+                  if (excerpts.length > 0) {
+                    console.log(`[monitor] Re-nudging workspace ${ws.wsId} — last agent excerpt: "${excerpts[0]?.slice(0, 100)}..."`);
+                  }
+                }
+
                 const nudgeSkill = await db.select({ prompt: agentSkills.prompt }).from(agentSkills)
                   .where(sql`${agentSkills.name} = 'monitor-nudge'`)
                   .limit(1);
