@@ -213,6 +213,7 @@ pnpm test:e2e                                  # E2E tests (101 tests)
 | F-MCP-04: Agent Skills UI in Settings (built-in protection, custom skill CRUD, edit/delete) | `packages/e2e/tests/ui/agent-skills.test.ts` |
 | F-MCP-04: Skill selector in inline issue create form (Start Workspace checkbox) | `packages/e2e/tests/ui/agent-skills.test.ts` |
 | F-UI-09: "Enhance with AI" button for skill creation/editing in Settings > Skills tab (#192) | `packages/e2e/tests/ui/agent-skills.test.ts` |
+| F-REV-03: AI code review flow (manual review button, reviewing badge, session output) | `packages/e2e/tests/ui/code-review.test.ts` |
 | F-UI-10: Graph view (dependency DAG, nodes, zoom, Show completed toggle) | `packages/e2e/tests/ui/graph-table-views.test.ts` |
 | F-UI-10: Table view (sortable columns, status filter, row click to detail) | `packages/e2e/tests/ui/graph-table-views.test.ts` |
 | F-DATA-02: Board WebSocket events (create/update/delete) | `packages/e2e/tests/api/board-events.test.ts`, `packages/e2e/tests/ui/board-realtime.test.ts` |
@@ -233,7 +234,6 @@ pnpm test:e2e                                  # E2E tests (101 tests)
 |---------|--------|
 | F-TASK-05: Issue dependencies/relationships UI (add/remove dep badges, cycle detection, Analyze Deps) | #163 |
 | F-TASK-05: Blocked-by summary banner in issue detail panel (blocked by N issues count) | #185 |
-| F-REV-03: AI code review flow (manual review button, reviewing badge, session output) | #165 |
 | F-UI-07: Worktree Overview panel (branch icon, worktree list, issue link nav) | #158 |
 | F-UI-07: Orphaned worktree identification and bulk-clean in Worktrees panel | #172 |
 | F-UI-11: Board stats bar (status counts, commits counter, Blocked filter toggle) | #167 |
