@@ -43,7 +43,7 @@ On Windows, `claude.exe` buffers stdout until stdin closed. Always use `stdin.en
 `suggestBranchName()` format: `feature/ak-<issue-number>-<sanitized-title>`. Base branch uses `<select>` from `GET /api/projects/:id/branches`, falls back to text input on failure.
 
 ## Git worktree base branch
-`createWorktree()` accepts optional `baseBranch`. When creating new branch, runs `git branch <branch> <baseBranch>` instead of defaulting to HEAD. Both git services must be kept in sync (`packages/server/src/services/git.service.ts` and `packages/mcp-server/src/git-service.ts` are duplicates).
+`createWorktree()` accepts optional `baseBranch`. When creating new branch, runs `git branch <branch> <baseBranch>` instead of defaulting to HEAD. The shared git service (`packages/shared/src/lib/git-service.ts`) is the single source of truth — both server and mcp-server re-export from it.
 
 ## Workspace setup scripts
 Projects have `setup_script` (nullable text) and `setup_blocking` (boolean, default true) columns. `runSetupScript()` in `@agentic-kanban/shared/lib/setup-script.ts`. Blocking: await script then launch. Parallel: fire-and-forget. Non-fatal. PATCH `/api/projects/:id` updates setup script config.
