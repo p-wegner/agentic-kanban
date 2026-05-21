@@ -25,6 +25,10 @@ export const workspaces = sqliteTable("workspaces", {
   conflictCacheCheckedAt: text("conflict_cache_checked_at"),
   conflictCacheHasConflicts: integer("conflict_cache_has_conflicts", { mode: "boolean" }),
   conflictCacheFiles: text("conflict_cache_files"),
+  diffStatCacheCheckedAt: text("diff_stat_cache_checked_at"),
+  diffStatCacheFilesChanged: integer("diff_stat_cache_files_changed"),
+  diffStatCacheInsertions: integer("diff_stat_cache_insertions"),
+  diffStatCacheDeletions: integer("diff_stat_cache_deletions"),
 });
 
 export const workspacesRelations = relations(workspaces, ({ one, many }) => ({
