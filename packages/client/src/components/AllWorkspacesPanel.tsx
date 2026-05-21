@@ -246,6 +246,22 @@ export function AllWorkspacesPanel({ columns, onClose, onIssueClick, onRefresh }
                             {formatRelativeTime(main.lastSessionAt)}
                           </span>
                         )}
+
+                        {/* Context usage */}
+                        {main.contextTokens ? (
+                          <span className="text-xs text-gray-400" title={`${main.contextTokens.toLocaleString()} context tokens`}>
+                            {main.contextTokens >= 1000
+                              ? `${Math.round(main.contextTokens / 1000)}k ctx`
+                              : `${main.contextTokens} ctx`}
+                          </span>
+                        ) : null}
+
+                        {/* Last tool */}
+                        {main.lastTool ? (
+                          <span className="text-xs text-gray-400 truncate max-w-[160px]" title={`Last tool: ${main.lastTool}`}>
+                            <span className="font-medium text-gray-500">tool:</span> {main.lastTool}
+                          </span>
+                        ) : null}
                       </div>
                     )}
 
