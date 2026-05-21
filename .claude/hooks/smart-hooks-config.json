@@ -16,7 +16,7 @@
         "filePatterns": ["packages/**/*.ts", "packages/**/*.tsx"],
         "enabled": true,
         "blocking": true,
-        "timeout": 60
+        "timeout": 180
       },
       {
         "name": "Remind Playwright",
