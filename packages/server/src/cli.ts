@@ -598,6 +598,7 @@ Setup:
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 >>>>>>> b794815 (feat: add cli create subcommand and preferences set/get)
 =======
@@ -681,6 +682,9 @@ Setup:
 =======
         const pref = await db.select().from(preferences).where(eq(preferences.key, “projects_base_path”)).limit(1);
 >>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
+=======
+        const pref = await db.select().from(preferences).where(eq(preferences.key, "projects_base_path")).limit(1);
+>>>>>>> b3ad77e (fix: replace smart quotes with straight quotes in cli.ts (esbuild parse error))
         if (pref.length > 0 && pref[0].value) {
           baseFolder = pref[0].value;
         }
