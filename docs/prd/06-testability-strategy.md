@@ -208,6 +208,7 @@ pnpm test:e2e                                  # E2E tests (101 tests)
 | F-WS-05: Workspace deletion | `packages/e2e/tests/api/workspaces.test.ts` |
 | F-REV-01: Diff viewer UI (file tree, diff lines, unified/split view, real diff content) | `packages/e2e/tests/ui/diff-viewer.test.ts` |
 | F-REV-02: Diff comments API (create/edit/delete/filter) + inline comment UI (CRUD via diff viewer) | `packages/server/src/__tests__/api.test.ts`, `packages/e2e/tests/ui/diff-viewer.test.ts` |
+| F-MCP-01: MCP server tools (get_context, list/create/update/get_issue, list_workspaces, active-project resolution) | `packages/mcp-server/src/__tests__/mcp-tools.test.ts` |
 | F-MCP-03: Agent command configuration via settings | `packages/e2e/tests/api/settings.test.ts` |
 | F-MCP-04: Agent Skills UI in Settings (built-in protection, custom skill CRUD, edit/delete) | `packages/e2e/tests/ui/agent-skills.test.ts` |
 | F-MCP-04: Skill selector in inline issue create form (Start Workspace checkbox) | `packages/e2e/tests/ui/agent-skills.test.ts` |
@@ -235,10 +236,12 @@ pnpm test:e2e                                  # E2E tests (101 tests)
 | F-UI-11: Board stats bar (status counts, commits counter, Blocked filter toggle) | #167 |
 | F-UI-11: Priority-based sort for board columns | #170 |
 | F-UI-12: Quick Tasks panel (skill list, custom prompt input) | #157 |
+| F-UI-06: In-app toast notifications (create/delete/merge success toasts, auto-dismiss) | #184 |
 | F-UI-03: Review and Merge actions in command palette (workspace-scoped, disabled state) | #182 |
 | F-UI-02: Workspace panel chat input / multi-turn interaction (Send/Stop, Ctrl+Enter, turn state) | #162 |
 | F-UI-02: baseBranch and skill name display in workspace panel | #176 |
 | F-UI-02: Ready for Merge badge in workspace and All Workspaces panels | #173 |
+| F-WS-08: Workspace setup scripts (API persistence, Settings UI, blocking mode toggle) | #183 |
 | All Workspaces panel (filter, search, bulk close idle, workspace list grouped by issue) | #169 |
 | Skip auto review toggle in issue detail edit mode | #174 |
 | Hover quick-start buttons on issue cards (Start Workspace / Resume) | #175 |
