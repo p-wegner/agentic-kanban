@@ -34,6 +34,7 @@ Cleanroom reimplementation of [vibe-kanban](https://github.com/BloopAI/vibe-kanb
 - **Direct workspace diff only shows tracked files**: `git diff HEAD` excludes untracked files. `getWorkingTreeDiff()` also runs `git ls-files --others --exclude-standard` for new files.
 
 ### E2E testing
+- **Playwright browsers are pre-installed** — do NOT run `playwright install` or `playwright install chromium` in agent sessions. The headless-shell binary is already at `%LOCALAPPDATA%\ms-playwright\chromium_headless_shell-1217\`. Running install again wastes time and may corrupt the lock file. If you see "Executable not found", check `packages/e2e/playwright.config.ts` — it auto-detects the binary path.
 - **E2E locator specificity**: `page.locator("text=X")` can match multiple elements — use scoped selectors: `page.locator("label", { hasText: "X" })` or `.first()`.
 - **E2E test data cleanup**: Use `test.afterAll` to reset preferences/settings state. Use `Date.now()` suffixes for edited titles — hardcoded titles accumulate across runs. Known flaky: `board.test.ts` "edit issue from detail panel".
 - **Pre-existing test failures**: Never dismiss as "pre-existing" without investigating root cause (data accumulation, race condition, API change). Fix if straightforward; document if not.
