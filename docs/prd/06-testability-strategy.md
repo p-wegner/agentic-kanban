@@ -261,6 +261,8 @@ pnpm test:e2e                                  # E2E tests (101 tests)
 | F-MCP-04: Install skill to .claude/skills/ button in Settings > Skills tab (install status badge) | #197 |
 | F-UI-02: Follow-up task creation in issue detail panel (+ Create follow-up task form) | #198 |
 | F-UI-09: Auto-start follow-up tasks setting in Settings > Workflow (auto_start_followup toggle) | #199 |
+| F-TASK-01: Image paste in issue description editor (Ctrl+V, preview thumbnails, markdown insert) | #201 |
+| F-UI-08: Profile override field in expanded issue create panel and workspace create relaunch | #202 |
 
 ## Known Test Considerations
 
