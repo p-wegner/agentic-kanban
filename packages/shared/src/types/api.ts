@@ -135,6 +135,8 @@ export interface WorkspaceResponse {
   readyForMerge: boolean;
   agentCommand?: string | null;
   sessionId?: string;
+  skillId?: string | null;
+  skillName?: string | null;
   createdAt: string;
   updatedAt: string;
   closedAt?: string | null;

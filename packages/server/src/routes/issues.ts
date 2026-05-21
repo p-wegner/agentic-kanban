@@ -547,8 +547,28 @@ Only include genuinely useful dependencies, not just topical similarity.`;
   router.get("/:id/workspaces", async (c) => {
     const issueId = c.req.param("id");
     const result = await database
-      .select()
+      .select({
+        id: workspaces.id,
+        issueId: workspaces.issueId,
+        branch: workspaces.branch,
+        workingDir: workspaces.workingDir,
+        baseBranch: workspaces.baseBranch,
+        isDirect: workspaces.isDirect,
+        planMode: workspaces.planMode,
+        includeVisualProof: workspaces.includeVisualProof,
+        requiresReview: workspaces.requiresReview,
+        thoroughReview: workspaces.thoroughReview,
+        readyForMerge: workspaces.readyForMerge,
+        status: workspaces.status,
+        agentCommand: workspaces.agentCommand,
+        skillId: workspaces.skillId,
+        skillName: agentSkills.name,
+        createdAt: workspaces.createdAt,
+        updatedAt: workspaces.updatedAt,
+        closedAt: workspaces.closedAt,
+      })
       .from(workspaces)
+      .leftJoin(agentSkills, eq(workspaces.skillId, agentSkills.id))
       .where(eq(workspaces.issueId, issueId));
     return c.json(result);
   });
