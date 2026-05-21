@@ -51,6 +51,8 @@ export function launch(
     cwd: worktreePath,
     shell: useShell,
     windowsHide: true,
+    // Detach from server process group so hot-reload restarts don't kill agents
+    detached: true,
     env: {
       ...spawnEnv,
       FORCE_COLOR: "0",
@@ -62,14 +64,19 @@ export function launch(
     },
     stdio: ["pipe", "pipe", "pipe"] as const,
   });
+  // Allow server to exit/restart without waiting for agents
+  proc.unref();
 
   console.log(`[agent] spawned: sessionId=${sessionId} pid=${proc.pid} command=${command} shell=${useShell}`);
 
-  // Send prompt via stdin and close immediately.
-  // On Windows, claude.exe buffers stdout until stdin is closed.
-  // Multi-turn follow-ups are handled via --resume (new process per turn).
-  proc.stdin?.end(prompt + "\n");
-
+  // In keepAlive (multi-turn) mode, keep stdin open so follow-ups can be sent via sendInput.
+  // Otherwise close stdin immediately — on Windows, claude.exe buffers stdout until stdin closes.
+  if (keepAlive) {
+    proc.stdin?.write(prompt + "\n");
+    stdinOpen.set(sessionId, true);
+  } else {
+    proc.stdin?.end(prompt + "\n");
+  }
 
   activeProcesses.set(sessionId, proc);
 
