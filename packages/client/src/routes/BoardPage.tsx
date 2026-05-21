@@ -344,6 +344,7 @@ export function BoardPage() {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
   const [blockedFilter, setBlockedFilter] = useState(false);
 =======
   const [priorityFilter, setPriorityFilter] = useState("");
@@ -371,6 +372,9 @@ export function BoardPage() {
 >>>>>>> 0c15856 (fix: restore BoardPage.tsx from clean base and re-apply monitor enhancements with issueId/auto_start)
 =======
 >>>>>>> 52ef66c (fix: repair pre-existing build errors (smart quotes in cli.ts, truncated TableView/BoardPage from bad merge))
+=======
+  const [showBlocked, setShowBlocked] = useState(false);
+>>>>>>> 34c67d9 (feat: add E2E tests for board stats bar and Blocked filter)
   const [showSettings, setShowSettings] = useState(false);
   const [showQuickTasks, setShowQuickTasks] = useState(false);
   const [showWorktreeOverview, setShowWorktreeOverview] = useState(false);
@@ -808,6 +812,7 @@ export function BoardPage() {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
           if (blockedFilter && !(issue as IssueWithStatus & { isBlocked?: boolean }).isBlocked) return false;
 =======
           if (priorityFilter && issue.priority !== priorityFilter) return false;
@@ -836,6 +841,11 @@ export function BoardPage() {
 >>>>>>> 0c15856 (fix: restore BoardPage.tsx from clean base and re-apply monitor enhancements with issueId/auto_start)
 =======
 >>>>>>> 52ef66c (fix: repair pre-existing build errors (smart quotes in cli.ts, truncated TableView/BoardPage from bad merge))
+=======
+          if (showBlocked && !(issue as IssueWithStatus & { isBlocked?: boolean }).isBlocked) {
+            return false;
+          }
+>>>>>>> 34c67d9 (feat: add E2E tests for board stats bar and Blocked filter)
           if (searchQuery) {
             const q = searchQuery.toLowerCase();
             return (
@@ -846,6 +856,7 @@ export function BoardPage() {
           return true;
         }),
       })),
+<<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
     [columns, searchQuery],
@@ -868,6 +879,9 @@ export function BoardPage() {
 =======
     [columns, searchQuery],
 >>>>>>> 0c15856 (fix: restore BoardPage.tsx from clean base and re-apply monitor enhancements with issueId/auto_start)
+=======
+    [columns, searchQuery, showBlocked],
+>>>>>>> 34c67d9 (feat: add E2E tests for board stats bar and Blocked filter)
   );
 
   // "AI Reviewed" = tickets needing human attention (manual merge).
@@ -1350,6 +1364,8 @@ export function BoardPage() {
             archiveColumns={archiveColumns}
             searchQuery={searchQuery}
             projectId={activeProjectId}
+            showBlocked={showBlocked}
+            onToggleBlocked={() => setShowBlocked((v) => !v)}
           />
           {backlogColumn !== undefined && (
             <BacklogPanel
