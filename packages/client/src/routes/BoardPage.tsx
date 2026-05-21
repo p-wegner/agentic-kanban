@@ -24,6 +24,7 @@ import { ApprovalDialog } from "../components/ApprovalDialog.js";
 import { sendDesktopNotification } from "../lib/desktop.js";
 import { registerAction } from "../lib/actions.js";
 import { QuickTasksPanel } from "../components/QuickTasksPanel.js";
+import { BacklogPanel } from "../components/BacklogPanel.js";
 import type {
   CreateIssueRequest,
   IssueWithStatus,
@@ -41,6 +42,7 @@ interface Project {
 }
 
 const ARCHIVE_STATUS_NAMES = new Set(["Done", "Cancelled"]);
+const BACKLOG_STATUS_NAME = "Backlog";
 
 <<<<<<< HEAD
 <<<<<<< HEAD
@@ -378,7 +380,16 @@ export function BoardPage() {
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(
     new Set(["archive"]),
   );
-  const [sessionActivity, setSessionActivity] = useState<Record<string, string>>({});
+  const [sessionActivityRaw, setSessionActivityRaw] = useState<Record<string, Record<string, string>>>({});
+  const sessionActivity = useMemo(() => {
+    const derived: Record<string, string> = {};
+    for (const [issueId, sessions] of Object.entries(sessionActivityRaw)) {
+      const values = Object.values(sessions);
+      const last = [...values].reverse().find((v: string) => v);
+      if (last) derived[issueId] = last;
+    }
+    return derived;
+  }, [sessionActivityRaw]);
   const [liveStats, setLiveStats] = useState<Record<string, LiveSessionStats>>({});
   const [sessionTodos, setSessionTodos] = useState<Record<string, TodoItem[]>>({});
   const [approvalRequests, setApprovalRequests] = useState<ApprovalRequest[]>([]);
@@ -459,15 +470,21 @@ export function BoardPage() {
       return;
     }
     refetchBoard();
-  }, [refetchBoard, creatingInColumnId]), useCallback((issueId: string, activity: string) => {
-    setSessionActivity((prev) => {
+  }, [refetchBoard, creatingInColumnId]), useCallback((issueId: string, sessionId: string, activity: string) => {
+    setSessionActivityRaw((prev) => {
+      const sessions = { ...(prev[issueId] ?? {}) };
       if (!activity) {
+        delete sessions[sessionId];
+      } else {
+        if (sessions[sessionId] === activity) return prev;
+        sessions[sessionId] = activity;
+      }
+      if (Object.keys(sessions).length === 0) {
         const next = { ...prev };
         delete next[issueId];
         return next;
       }
-      if (prev[issueId] === activity) return prev;
-      return { ...prev, [issueId]: activity };
+      return { ...prev, [issueId]: sessions };
     });
   }, []), useCallback((issueId: string, stats: LiveSessionStats) => {
     setLiveStats((prev) => {
@@ -863,11 +880,17 @@ export function BoardPage() {
     [columns, autoReview, autoMerge],
   );
 
+  const backlogColumn = useMemo(
+    () => filteredColumns.find((col) => col.name === BACKLOG_STATUS_NAME),
+    [filteredColumns],
+  );
+
   const activeColumns = useMemo(
     () =>
       filteredColumns.filter(
         (col) =>
           !ARCHIVE_STATUS_NAMES.has(col.name) &&
+          col.name !== BACKLOG_STATUS_NAME &&
           (col.name !== "AI Reviewed" || showAiReviewedColumn),
       ),
     [filteredColumns, showAiReviewedColumn],
@@ -1328,6 +1351,15 @@ export function BoardPage() {
             searchQuery={searchQuery}
             projectId={activeProjectId}
           />
+          {backlogColumn !== undefined && (
+            <BacklogPanel
+              backlogColumn={backlogColumn}
+              activeColumns={activeColumns}
+              searchQuery={searchQuery}
+              onIssueClick={handleIssueClick}
+              onMoved={() => refetchBoard()}
+            />
+          )}
           <button
             onClick={() => setShowQuickTasks(true)}
             title="Quick Tasks — run a skill directly on the main branch (t)"
