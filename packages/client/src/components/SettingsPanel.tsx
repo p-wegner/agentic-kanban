@@ -30,6 +30,8 @@ interface Settings {
   learning_step_before_merge?: string;
   auto_monitor?: string;
   auto_monitor_interval?: string;
+  nudge_auto_start?: string;
+  nudge_wip_limit?: string;
   projects_base_path?: string;
 }
 
