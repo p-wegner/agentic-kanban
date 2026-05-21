@@ -43,9 +43,11 @@ interface SessionStats {
   totalCostUsd: number;
   inputTokens: number;
   outputTokens: number;
+  cacheReadTokens?: number;
   numTurns: number;
   model: string;
   success: boolean;
+  lastTool?: string;
 }
 
 interface WorkspacePanelProps {
@@ -97,11 +99,16 @@ function parseStats(statsStr: string | null | undefined): SessionStats | null {
   }
 }
 
+function contextTokens(s: SessionStats): number {
+  return s.inputTokens + (s.cacheReadTokens ?? 0);
+}
+
 function SessionStatsBadge({ stats }: { stats: string | null | undefined }) {
   const s = parseStats(stats);
   if (!s) return null;
+  const ctx = contextTokens(s);
   return (
-    <span className="text-[10px] text-gray-400" title={`Tokens: ${s.inputTokens.toLocaleString()} in / ${s.outputTokens.toLocaleString()} out\nCost: $${s.totalCostUsd.toFixed(4)}\nDuration: ${(s.durationMs / 1000).toFixed(0)}s`}>
+    <span className="text-[10px] text-gray-400" title={`Context: ${ctx.toLocaleString()} tokens\nTokens: ${s.inputTokens.toLocaleString()} in / ${s.outputTokens.toLocaleString()} out\nCost: $${s.totalCostUsd.toFixed(4)}\nDuration: ${(s.durationMs / 1000).toFixed(0)}s${s.lastTool ? `\nLast tool: ${s.lastTool}` : ""}`}>
       ${s.totalCostUsd.toFixed(2)}
     </span>
   );
@@ -110,12 +117,15 @@ function SessionStatsBadge({ stats }: { stats: string | null | undefined }) {
 function SessionStatsSummary({ stats }: { stats: string | null | undefined }) {
   const s = parseStats(stats);
   if (!s) return null;
+  const ctx = contextTokens(s);
   return (
-    <div className="flex items-center gap-3 text-xs text-gray-500 py-1 px-1">
+    <div className="flex items-center flex-wrap gap-3 text-xs text-gray-500 py-1 px-1">
       <span title="Input / output tokens">{formatTokenCount(s.inputTokens)} in / {formatTokenCount(s.outputTokens)} out</span>
+      {ctx > 0 && <span title="Context window usage">{formatTokenCount(ctx)} ctx</span>}
       <span>${s.totalCostUsd.toFixed(2)}</span>
       <span>{(s.durationMs / 1000).toFixed(0)}s</span>
       {s.numTurns > 1 && <span>{s.numTurns} turns</span>}
+      {s.lastTool && <span className="text-gray-400" title="Last tool used">&#x2192; {s.lastTool}</span>}
     </div>
   );
 }
@@ -1199,15 +1209,16 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                 {(() => {
                   const main = issue.workspaceSummary?.main;
                   if (!main || main.id !== ws.id) return null;
-                  const { contextTokens, lastTool } = main;
-                  if (!contextTokens && !lastTool) return null;
+                  const ctxTokens = main.contextTokens;
+                  const lastTool = main.lastTool;
+                  if (!ctxTokens && !lastTool) return null;
                   return (
                     <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-gray-400">
-                      {contextTokens ? (
-                        <span title={`${contextTokens.toLocaleString()} context tokens`}>
-                          {contextTokens >= 1000
-                            ? `${Math.round(contextTokens / 1000)}k ctx`
-                            : `${contextTokens} ctx`}
+                      {ctxTokens ? (
+                        <span title={`${ctxTokens.toLocaleString()} context tokens`}>
+                          {ctxTokens >= 1000
+                            ? `${Math.round(ctxTokens / 1000)}k ctx`
+                            : `${ctxTokens} ctx`}
                         </span>
                       ) : null}
                       {lastTool ? (
