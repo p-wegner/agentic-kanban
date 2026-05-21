@@ -142,10 +142,12 @@ When the user references `#N` (e.g., "review #70", "merge #65", "what's the stat
 Get-NetTCPConnection -LocalPort <port> | Select-Object -ExpandProperty OwningProcess | ForEach-Object { Stop-Process -Id $_ -Force }
 ```
 
-**Starting the dev server headlessly (verified):** Use the **Bash tool** with `&` — creates a truly detached process that survives the Claude Code session. Then use a separate PowerShell call (with `run_in_background: true`) to wait for ports and verify:
+**Starting the dev server headlessly (verified):** Use the **Bash tool** with `nohup` + `disown` — survives the Bash session exit (plain `&` gets SIGHUP when the shell exits). Then use a separate PowerShell call (with `run_in_background: true`) to wait for ports and verify:
 ```bash
 # Bash tool:
-pnpm dev > /tmp/kanban-dev.log 2>&1 &
+cd /c/andrena/agentic-kanban
+nohup pnpm dev > /tmp/kanban-dev.log 2>&1 &
+disown
 echo "Started PID: $!"
 ```
 ```powershell
@@ -160,7 +162,7 @@ for ($i = 0; $i -lt 30; $i++) {
 }
 try { $r = Invoke-RestMethod "http://localhost:3001/api/projects" -TimeoutSec 5; Write-Host "API OK: $($r.Count) projects" } catch { Write-Host "API FAILED: $_" }
 ```
-Do NOT use `Start-Job` — when the PowerShell session exits, the job and its direct child (dev.mjs) die, taking tsx/vite with them.
+Do NOT use `Start-Job` — when the PowerShell session exits, the job and its direct child (dev.mjs) die, taking tsx/vite with them. Do NOT use plain `&` without `nohup` — the process receives SIGHUP when the Bash session exits and dies.
 
 **Stopping the dev server (verified):** Kill by process signature with `taskkill /F /T` (kills entire subtree). Also kill orphaned tsx server processes — they hold the SQLite DB open and cause the next server start to hang on all API calls (symptom: `/health` responds but `/api/projects` times out):
 ```powershell
