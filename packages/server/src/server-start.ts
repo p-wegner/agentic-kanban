@@ -762,8 +762,11 @@ export async function startServer(port?: number) {
         .select({
           wsId: workspaces.id,
           wsStatus: workspaces.status,
+          workingDir: workspaces.workingDir,
           projectId: issues.projectId,
           issueId: issues.id,
+          issueTitle: issues.title,
+          issueNumber: issues.issueNumber,
         })
         .from(workspaces)
         .innerJoin(issues, eq(workspaces.issueId, issues.id))
@@ -804,7 +807,24 @@ export async function startServer(port?: number) {
 >>>>>>> bf9db15 (feat: add board monitor visualization panel)
             console.log(`[monitor] Relaunched idle workspace ${ws.wsId}`);
             boardEvents.broadcast(ws.projectId, "board_changed");
-          } else if (ws.wsStatus === "reviewing" && sess && sess.status === "stopped") {
+          } else if (ws.wsStatus === "reviewing") {
+            // Ghost workspace: workingDir is empty — branch/worktree is gone, merge will always fail
+            if (!ws.workingDir) {
+              console.log(`[monitor] Ghost workspace ${ws.wsId} (workingDir empty) — deleting and resetting issue to In Progress`);
+              const baseUrl = `http://localhost:${serverPort}`;
+              await fetch(`${baseUrl}/api/workspaces/${ws.wsId}`, { method: "DELETE" }).catch(() => {});
+              // Move issue back to In Progress
+              const inProgressSt = await db
+                .select({ id: projectStatuses.id })
+                .from(projectStatuses)
+                .where(sql`${projectStatuses.name} = 'In Progress' AND ${projectStatuses.projectId} = ${ws.projectId}`)
+                .limit(1);
+              if (inProgressSt.length > 0) {
+                await db.update(issues).set({ statusId: inProgressSt[0].id }).where(eq(issues.id, ws.issueId)).catch(() => {});
+              }
+              logMonitorAction("mark_idle", ws.wsId, ws.issueId);
+              boardEvents.broadcast(ws.projectId, "board_changed");
+            } else if (sess && sess.status === "stopped") {
             // Trigger merge for reviewing workspaces with stopped sessions
             const baseUrl = `http://localhost:${serverPort}`;
             await fetch(`${baseUrl}/api/workspaces/${ws.wsId}/merge`, { method: "POST" }).catch(() => {});
@@ -828,6 +848,7 @@ export async function startServer(port?: number) {
 >>>>>>> bf9db15 (feat: add board monitor visualization panel)
             console.log(`[monitor] Triggered merge for reviewing workspace ${ws.wsId}`);
             boardEvents.broadcast(ws.projectId, "board_changed");
+            }
           } else if (ws.wsStatus === "active" && sess && sess.status === "stopped") {
             // Active workspace but session has stopped — agent exited without transitioning workspace.
             // Mark workspace as idle so the next cycle will relaunch it.
@@ -974,7 +995,7 @@ export async function startServer(port?: number) {
 
           // Find Todo issues with no open workspace and all dependencies satisfied
           const todoIssues = await db
-            .select({ id: issues.id, title: issues.title, projectId: issues.projectId })
+            .select({ id: issues.id, title: issues.title, projectId: issues.projectId, issueNumber: issues.issueNumber })
             .from(issues)
             .where(eq(issues.statusId, todoStatus[0].id))
             .limit(slotsAvailable * 3); // fetch extra to filter by dependencies
@@ -1013,12 +1034,19 @@ export async function startServer(port?: number) {
               if (!allResolved) continue;
             }
 
-            // Create workspace for this issue
+            // Create workspace for this issue (branch name required by API)
+            const slug = issue.title
+              .toLowerCase()
+              .replace(/[^a-z0-9\s]/g, "")
+              .replace(/\s+/g, "-")
+              .slice(0, 40)
+              .replace(/-+$/, "");
+            const branch = `feature/ak-${issue.issueNumber}-${slug}`;
             const baseUrl = `http://localhost:${serverPort}`;
             const resp = await fetch(`${baseUrl}/api/workspaces`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ issueId: issue.id }),
+              body: JSON.stringify({ issueId: issue.id, branch }),
             }).catch(() => null);
 
             if (resp && resp.ok) {
