@@ -229,17 +229,33 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
         </div>
       )}
       {todos && todos.length > 0 && <TodoProgress todos={todos} />}
-      {!hasActiveWorkspace && onStartWorkspace && (
-        <button
-          onClick={(e) => { e.stopPropagation(); onStartWorkspace(issue); }}
-          className="mt-1.5 w-full flex items-center justify-center gap-1 text-xs text-blue-600 hover:text-white hover:bg-blue-600 border border-blue-200 hover:border-blue-600 rounded px-2 py-1 transition-colors opacity-0 group-hover:opacity-100"
-          title="Start a new workspace for this issue"
-        >
-          <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
-          </svg>
-          Start Workspace
-        </button>
+      {issue.statusName !== "Done" && issue.statusName !== "Cancelled" && (
+        <>
+          {hasActiveWorkspace && onWorkspaceClick && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onWorkspaceClick(issue, ws?.main?.id); }}
+              className="mt-1.5 w-full flex items-center justify-center gap-1 text-xs text-green-700 hover:text-white hover:bg-green-600 border border-green-200 hover:border-green-600 rounded px-2 py-1 transition-colors opacity-0 group-hover:opacity-100"
+              title="Resume the active workspace"
+            >
+              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 0 1 0 1.972l-11.54 6.347a1.125 1.125 0 0 1-1.667-.986V5.653Z" />
+              </svg>
+              Resume
+            </button>
+          )}
+          {!hasActiveWorkspace && onStartWorkspace && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onStartWorkspace(issue); }}
+              className="mt-1.5 w-full flex items-center justify-center gap-1 text-xs text-blue-600 hover:text-white hover:bg-blue-600 border border-blue-200 hover:border-blue-600 rounded px-2 py-1 transition-colors opacity-0 group-hover:opacity-100"
+              title="Start a new workspace for this issue"
+            >
+              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+              </svg>
+              Start Workspace
+            </button>
+          )}
+        </>
       )}
     </div>
   );

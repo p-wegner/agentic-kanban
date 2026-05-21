@@ -177,6 +177,7 @@ export function BoardPage() {
   const [mutating, setMutating] = useState(false);
   const [workspaceIssue, setWorkspaceIssue] = useState<IssueWithStatus | null>(null);
   const [workspaceInitial, setWorkspaceInitial] = useState<{ workspaceId: string; sessionId: string } | null>(null);
+  const [workspaceOpenCreate, setWorkspaceOpenCreate] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [showSettings, setShowSettings] = useState(false);
   const [showQuickTasks, setShowQuickTasks] = useState(false);
@@ -528,42 +529,17 @@ export function BoardPage() {
   function handleManageWorkspaces(issue: IssueWithStatus, workspaceId?: string) {
     setSelectedIssue(null);
     setWorkspaceIssue(issue);
+    setWorkspaceOpenCreate(false);
     if (workspaceId) {
       setWorkspaceInitial({ workspaceId, sessionId: "" });
     }
   }
 
-  async function handleStartWorkspace(issue: IssueWithStatus) {
-    if (!activeProject) return;
-    setMutating(true);
-    try {
-      const branch = suggestBranchName({
-        issueNumber: issue.issueNumber,
-        title: issue.title,
-      });
-      const ws = await apiFetch<{ id: string; sessionId?: string }>("/api/workspaces", {
-        method: "POST",
-        body: JSON.stringify({
-          issueId: issue.id,
-          branch,
-          baseBranch: activeProject.defaultBranch,
-        }),
-      });
-      setSelectedIssue(null);
-      const board = await refetchBoard();
-      const updated = board?.flatMap((col) => col.issues).find((i) => i.id === issue.id) ?? issue;
-      setWorkspaceIssue(updated);
-      if (ws.sessionId) {
-        setWorkspaceInitial({ workspaceId: ws.id, sessionId: ws.sessionId });
-      } else {
-        setWorkspaceInitial({ workspaceId: ws.id, sessionId: "" });
-      }
-      showToast("Workspace created", "success");
-    } catch (err) {
-      showToast("Failed to create workspace", "error");
-    } finally {
-      setMutating(false);
-    }
+  function handleStartWorkspace(issue: IssueWithStatus) {
+    setSelectedIssue(null);
+    setWorkspaceIssue(issue);
+    setWorkspaceInitial(null);
+    setWorkspaceOpenCreate(true);
   }
 
   // Filter columns by search query and priority
@@ -1151,10 +1127,11 @@ export function BoardPage() {
         <WorkspacePanel
           issue={workspaceIssue}
           project={activeProject ?? null}
-          onClose={() => { setWorkspaceIssue(null); setWorkspaceInitial(null); }}
+          onClose={() => { setWorkspaceIssue(null); setWorkspaceInitial(null); setWorkspaceOpenCreate(false); }}
           onWorkspaceChange={() => refetchBoard()}
           initialWorkspaceId={workspaceInitial?.workspaceId}
           initialSessionId={workspaceInitial?.sessionId}
+          initialShowCreate={workspaceOpenCreate}
         />
       )}
       <ApprovalDialog
