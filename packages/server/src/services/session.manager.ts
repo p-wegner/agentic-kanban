@@ -221,6 +221,7 @@ function createSessionManager(
       sessionToolUses.delete(sessionId);
       sessionModels.delete(sessionId);
       sessionContextTokens.delete(sessionId);
+      sessionLastTool.delete(sessionId);
       sessionAgentToolUseIds.delete(sessionId);
     }
 
@@ -464,6 +465,7 @@ function createSessionManager(
     sessionToolUses.delete(sessionId);
     sessionModels.delete(sessionId);
     sessionContextTokens.delete(sessionId);
+    sessionLastTool.delete(sessionId);
     sessionAgentToolUseIds.delete(sessionId);
     const now = new Date().toISOString();
     await db.update(sessions)
