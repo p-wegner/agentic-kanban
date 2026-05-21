@@ -980,7 +980,7 @@ export async function startServer(port?: number) {
     }
     monitorNextRunAt = null;
     // Run in background; reschedule is handled inside runMonitorCycle
-    runMonitorCycle().catch(() => {});
+    runMonitorCycle(true).catch(() => {});
     return c.json({ triggered: true });
   });
 
