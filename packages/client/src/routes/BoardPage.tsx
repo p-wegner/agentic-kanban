@@ -42,15 +42,16 @@ interface Project {
 
 const ARCHIVE_STATUS_NAMES = new Set(["Done", "Cancelled"]);
 
-type MonitorAction = { at: string; action: "relaunch" | "merge" | "nudge" | "mark_idle" | "mark_dead"; workspaceId: string; issueId: string };
+type MonitorAction = { at: string; action: "relaunch" | "merge" | "nudge" | "mark_idle" | "mark_dead" | "auto_start"; workspaceId: string; issueId: string };
 type MonitorStatus = { enabled: boolean; intervalMin: number; active: boolean; lastRun: { at: string; relaunched: number; merged: number; nudged: number } | null; nextRunAt: string | null; recentActions: MonitorAction[] };
 
 const ACTION_LABELS: Record<MonitorAction["action"], { label: string; color: string }> = {
-  relaunch: { label: "Relaunched agent", color: "text-blue-600" },
-  merge:    { label: "Triggered merge",  color: "text-purple-600" },
-  nudge:    { label: "Nudged agent",     color: "text-amber-600" },
-  mark_idle:{ label: "Marked idle",      color: "text-gray-500" },
-  mark_dead:{ label: "Marked dead",      color: "text-red-500" },
+  relaunch:   { label: "Relaunched agent",  color: "text-blue-600" },
+  merge:      { label: "Triggered merge",   color: "text-purple-600" },
+  nudge:      { label: "Nudged agent",      color: "text-amber-600" },
+  mark_idle:  { label: "Marked idle",       color: "text-gray-500" },
+  mark_dead:  { label: "Marked dead",       color: "text-red-500" },
+  auto_start: { label: "Auto-started issue", color: "text-green-600" },
 };
 
 function MonitorPopover({ status, onClose, onOpenWorkspace, columns }: { status: MonitorStatus | null; onClose: () => void; onOpenWorkspace: (workspaceId: string, issueId: string) => void; columns: StatusWithIssues[] }) {
@@ -185,6 +186,7 @@ export function BoardPage() {
   const [workspaceInitial, setWorkspaceInitial] = useState<{ workspaceId: string; sessionId: string } | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [blockedFilter, setBlockedFilter] = useState(false);
+  const [priorityFilter, setPriorityFilter] = useState("");
   const [showSettings, setShowSettings] = useState(false);
   const [showQuickTasks, setShowQuickTasks] = useState(false);
   const [showWorktreeOverview, setShowWorktreeOverview] = useState(false);
@@ -574,6 +576,7 @@ export function BoardPage() {
         ...col,
         issues: col.issues.filter((issue) => {
           if (blockedFilter && !(issue as IssueWithStatus & { isBlocked?: boolean }).isBlocked) return false;
+          if (priorityFilter && issue.priority !== priorityFilter) return false;
           if (searchQuery) {
             const q = searchQuery.toLowerCase();
             return (
@@ -883,14 +886,6 @@ export function BoardPage() {
             searchQuery={searchQuery}
             projectId={activeProjectId}
           />
-          <button
-            onClick={() => setBlockedFilter(!blockedFilter)}
-            title="Filter to show only blocked issues"
-            className={`shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium border transition-colors ${blockedFilter ? "bg-amber-50 border-amber-300 text-amber-700" : "bg-white border-gray-200 text-gray-600 hover:bg-gray-50"}`}
-          >
-            <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 16 16"><path d="M8 1a2 2 0 0 1 2 2v4H6V3a2 2 0 0 1 2-2zm3 6V3a3 3 0 0 0-6 0v4a2 2 0 0 0 2 2v2.5a.5.5 0 0 0 1 0V9a2 2 0 0 0 2-2z"/></svg>
-            Blocked
-          </button>
           <button
             onClick={() => setShowQuickTasks(true)}
             title="Quick Tasks — run a skill directly on the main branch (t)"

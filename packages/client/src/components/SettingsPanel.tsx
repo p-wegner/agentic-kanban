@@ -553,6 +553,30 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                         <span className="text-xs text-gray-500">minutes</span>
                       </div>
                     )}
+                    {settings.auto_monitor === "true" && (
+                      <div className="mt-3">
+                        <Toggle
+                          checked={settings.nudge_auto_start === "true"}
+                          onChange={setBool("nudge_auto_start")}
+                          label="Auto-start unblocked Todo items"
+                          hint="When enabled, the monitor will also create workspaces for Todo issues whose dependencies are resolved, up to the In Progress WIP limit."
+                        />
+                        {settings.nudge_auto_start === "true" && (
+                          <div className="pl-5 mt-2 flex items-center gap-2">
+                            <label className="text-xs text-gray-500 whitespace-nowrap">In Progress WIP limit</label>
+                            <input
+                              type="number"
+                              min={1}
+                              max={20}
+                              value={settings.nudge_wip_limit ?? "5"}
+                              onChange={(e) => setSettings(s => ({ ...s, nudge_wip_limit: e.target.value }))}
+                              className="w-16 text-xs border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                            />
+                            <span className="text-xs text-gray-500">issues max</span>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </>
               )}
