@@ -142,10 +142,15 @@ When the user references `#N` (e.g., "review #70", "merge #65", "what's the stat
 Get-NetTCPConnection -LocalPort <port> | Select-Object -ExpandProperty OwningProcess | ForEach-Object { Stop-Process -Id $_ -Force }
 ```
 
-**Starting the dev server headlessly (verified):** Use `Start-Job` with the wait loop in the SAME PowerShell call — if the session exits before child processes fully detach, the job dies and nothing starts. Always pass `run_in_background: true` on the PowerShell tool call so Claude Code doesn't block waiting for ports:
+**Starting the dev server headlessly (verified):** Use the **Bash tool** with `&` — creates a truly detached process that survives the Claude Code session. Then use a separate PowerShell call (with `run_in_background: true`) to wait for ports and verify:
+```bash
+# Bash tool:
+pnpm dev > /tmp/kanban-dev.log 2>&1 &
+echo "Started PID: $!"
+```
 ```powershell
-Start-Job -ScriptBlock { Set-Location C:\andrena\agentic-kanban; pnpm dev 2>&1 } | Out-Null
-for ($i = 0; $i -lt 25; $i++) {
+# PowerShell tool (run_in_background: true):
+for ($i = 0; $i -lt 30; $i++) {
     Start-Sleep -Seconds 1
     $p = Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue |
         Where-Object { $_.LocalPort -eq 3001 -or $_.LocalPort -eq 5173 }
@@ -153,8 +158,9 @@ for ($i = 0; $i -lt 25; $i++) {
         Write-Host "UP after ${i}s"; break
     }
 }
+try { $r = Invoke-RestMethod "http://localhost:3001/api/projects" -TimeoutSec 5; Write-Host "API OK: $($r.Count) projects" } catch { Write-Host "API FAILED: $_" }
 ```
-Do NOT use Bash `&` — creates a fully detached orphan that survives all job/port cleanup.
+Do NOT use `Start-Job` — when the PowerShell session exits, the job and its direct child (dev.mjs) die, taking tsx/vite with them.
 
 **Stopping the dev server (verified):** Kill by process signature with `taskkill /F /T` (kills entire subtree). Also kill orphaned tsx server processes — they hold the SQLite DB open and cause the next server start to hang on all API calls (symptom: `/health` responds but `/api/projects` times out):
 ```powershell
