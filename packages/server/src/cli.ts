@@ -600,6 +600,7 @@ Setup:
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 >>>>>>> b794815 (feat: add cli create subcommand and preferences set/get)
 =======
@@ -689,6 +690,9 @@ Setup:
 =======
         const pref = await db.select().from(preferences).where(eq(preferences.key, "projects_base_path")).limit(1);
 >>>>>>> 52ef66c (fix: repair pre-existing build errors (smart quotes in cli.ts, truncated TableView/BoardPage from bad merge))
+=======
+        const pref = await db.select().from(preferences).where(eq(preferences.key, "projects_base_path")).limit(1);
+>>>>>>> 0feb213 (fix: replace smart quotes with ASCII quotes in cli.ts)
         if (pref.length > 0 && pref[0].value) {
           baseFolder = pref[0].value;
         }
