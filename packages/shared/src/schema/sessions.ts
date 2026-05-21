@@ -1,4 +1,4 @@
-import { sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
 import { relations } from "drizzle-orm";
 import { workspaces } from "./workspaces.js";
 import { sessionMessages } from "./session-messages.js";
@@ -14,6 +14,7 @@ export const sessions = sqliteTable("sessions", {
   providerSessionId: text("provider_session_id"),
   resumeFromId: text("resume_from_id"),
   stats: text("stats"),
+  pid: integer("pid"),
 });
 
 export const sessionsRelations = relations(sessions, ({ one, many }) => ({
