@@ -212,7 +212,7 @@ const DEFAULT_SETTINGS: Settings = {
 >>>>>>> 7effda9 (fix: align projects_base_dir -> projects_base_path across cli.ts and SettingsPanel.tsx)
 };
 
-type Tab = "agent" | "workflow" | "skills" | "mcp" | "ui" | "project" | "tags" | "advanced";
+type Tab = "agent" | "workflow" | "skills" | "mcp" | "ui" | "project" | "tags" | "advanced" | "schedule";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "agent", label: "Agent" },
@@ -222,6 +222,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "ui", label: "UI" },
   { id: "project", label: "Project" },
   { id: "tags", label: "Tags" },
+  { id: "schedule", label: "Schedule" },
   { id: "advanced", label: "Advanced" },
 ];
 
@@ -377,6 +378,12 @@ function ToolToggle({ name, description, disabled, onToggle }: {
   );
 }
 
+type ScheduledRun = {
+  id: string; name: string; description: string | null; projectId: string;
+  prompt: string | null; skillId: string | null; intervalMinutes: number;
+  enabled: boolean; lastRunAt: string | null; lastRunStatus: string | null;
+};
+
 export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) {
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [profiles, setProfiles] = useState<string[]>([]);
@@ -509,6 +516,14 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
   const [mergeTargetId, setMergeTargetId] = useState<string>("");
   const [mergingTags, setMergingTags] = useState(false);
 
+  // Scheduled runs state
+  const [scheduledRunsList, setScheduledRunsList] = useState<ScheduledRun[]>([]);
+  const [newRunName, setNewRunName] = useState("");
+  const [newRunPrompt, setNewRunPrompt] = useState("");
+  const [newRunInterval, setNewRunInterval] = useState(60);
+  const [savingRun, setSavingRun] = useState(false);
+  const [triggeringRun, setTriggeringRun] = useState<string | null>(null);
+
   const disabledTools = new Set((settings.disabled_mcp_tools || "").split(",").filter(Boolean));
   function isToolDisabled(name: string) {
     return disabledTools.has(name);
@@ -631,6 +646,14 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
           })
         );
         setInstalledSkills(Object.fromEntries(statusEntries));
+
+        // Load scheduled runs
+        if (activeProjectId) {
+          try {
+            const runs = await apiFetch<ScheduledRun[]>(`/api/scheduled-runs?projectId=${activeProjectId}`);
+            setScheduledRunsList(runs);
+          } catch { /* non-fatal */ }
+        }
 
         // Load project-specific settings
         if (activeProjectId) {
@@ -1501,6 +1524,129 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                         className="text-xs px-3 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
                       >
                         Add
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Schedule tab */}
+              {tab === "schedule" && (
+                <div className="space-y-4">
+                  <p className="text-xs text-gray-500">
+                    Configure recurring agent runs. Each scheduled run creates a direct workspace on its system issue at the configured interval.
+                  </p>
+
+                  {/* Existing runs */}
+                  {scheduledRunsList.length === 0 ? (
+                    <p className="text-sm text-gray-400 italic">No scheduled runs configured yet.</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {scheduledRunsList.map((run) => (
+                        <div key={run.id} className="border border-gray-200 rounded-md px-3 py-2 space-y-1">
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="checkbox"
+                              checked={run.enabled}
+                              onChange={async (e) => {
+                                await apiFetch(`/api/scheduled-runs/${run.id}`, {
+                                  method: "PUT",
+                                  body: JSON.stringify({ enabled: e.target.checked }),
+                                });
+                                setScheduledRunsList((r) => r.map((x) => x.id === run.id ? { ...x, enabled: e.target.checked } : x));
+                              }}
+                              className="rounded border-gray-300"
+                            />
+                            <span className="flex-1 text-sm font-medium text-gray-800">{run.name}</span>
+                            <span className="text-xs text-gray-400">every {run.intervalMinutes}m</span>
+                            <button
+                              disabled={triggeringRun === run.id}
+                              onClick={async () => {
+                                setTriggeringRun(run.id);
+                                try {
+                                  await apiFetch(`/api/scheduled-runs/${run.id}/run`, { method: "POST" });
+                                  showToast("Run triggered", "success");
+                                  const runs = await apiFetch<ScheduledRun[]>(`/api/scheduled-runs?projectId=${activeProjectId}`);
+                                  setScheduledRunsList(runs);
+                                } catch { showToast("Trigger failed", "error"); }
+                                finally { setTriggeringRun(null); }
+                              }}
+                              className="text-xs px-2 py-1 text-blue-600 hover:bg-blue-50 rounded border border-blue-200"
+                            >
+                              {triggeringRun === run.id ? "Running…" : "Run now"}
+                            </button>
+                            <button
+                              onClick={async () => {
+                                if (!confirm(`Delete scheduled run "${run.name}"?`)) return;
+                                await apiFetch(`/api/scheduled-runs/${run.id}`, { method: "DELETE" });
+                                setScheduledRunsList((r) => r.filter((x) => x.id !== run.id));
+                                showToast("Deleted", "success");
+                              }}
+                              className="text-xs text-gray-400 hover:text-red-600"
+                            >
+                              Delete
+                            </button>
+                          </div>
+                          {run.prompt && (
+                            <p className="text-xs text-gray-500 pl-5 truncate">{run.prompt}</p>
+                          )}
+                          {run.lastRunAt && (
+                            <p className="text-xs text-gray-400 pl-5">
+                              Last run: {new Date(run.lastRunAt).toLocaleString()} — {run.lastRunStatus ?? "unknown"}
+                            </p>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* New run form */}
+                  <div className="border-t border-gray-100 pt-3 space-y-2">
+                    <p className="text-xs font-medium text-gray-600">Add scheduled run</p>
+                    <input
+                      type="text"
+                      value={newRunName}
+                      onChange={(e) => setNewRunName(e.target.value)}
+                      placeholder="Name (e.g. Daily standup update)"
+                      className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    />
+                    <textarea
+                      value={newRunPrompt}
+                      onChange={(e) => setNewRunPrompt(e.target.value)}
+                      placeholder="Prompt for the agent"
+                      rows={3}
+                      className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 font-mono"
+                    />
+                    <div className="flex items-center gap-2">
+                      <label className="text-xs text-gray-600 whitespace-nowrap">Interval (minutes):</label>
+                      <input
+                        type="number"
+                        min={1}
+                        value={newRunInterval}
+                        onChange={(e) => setNewRunInterval(Number(e.target.value))}
+                        className="w-24 text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                      />
+                      <button
+                        disabled={!newRunName.trim() || !newRunPrompt.trim() || savingRun || !activeProjectId}
+                        onClick={async () => {
+                          if (!newRunName.trim() || !newRunPrompt.trim() || !activeProjectId) return;
+                          setSavingRun(true);
+                          try {
+                            const created = await apiFetch<ScheduledRun>("/api/scheduled-runs", {
+                              method: "POST",
+                              body: JSON.stringify({ name: newRunName.trim(), prompt: newRunPrompt.trim(), intervalMinutes: newRunInterval, projectId: activeProjectId }),
+                            });
+                            setScheduledRunsList((r) => [...r, created]);
+                            setNewRunName("");
+                            setNewRunPrompt("");
+                            setNewRunInterval(60);
+                            showToast("Scheduled run created", "success");
+                          } catch { showToast("Failed to create", "error"); }
+                          finally { setSavingRun(false); }
+                        }}
+                        className="text-xs px-3 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
+                      >
+                        {savingRun ? "Creating…" : "Add"}
                       </button>
                     </div>
                   </div>

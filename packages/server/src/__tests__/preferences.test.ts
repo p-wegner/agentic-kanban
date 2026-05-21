@@ -18,6 +18,22 @@ const MIGRATION_FILES = [
   "../../../shared/drizzle/0004_boring_wind_dancer.sql",
   "../../../shared/drizzle/0005_silky_frog_thor.sql",
   "../../../shared/drizzle/0006_wide_ogun.sql",
+  "../../../shared/drizzle/0007_diff_comments.sql",
+  "../../../shared/drizzle/0008_direct_workspace.sql",
+  "../../../shared/drizzle/0009_requires_review.sql",
+  "../../../shared/drizzle/0010_session_messages_cascade.sql",
+  "../../../shared/drizzle/0011_timestamps.sql",
+  "../../../shared/drizzle/0012_session_stats.sql",
+  "../../../shared/drizzle/0013_plan_mode.sql",
+  "../../../shared/drizzle/0014_issue_dependencies.sql",
+  "../../../shared/drizzle/0015_ai_reviewed_status.sql",
+  "../../../shared/drizzle/0016_skip_auto_review.sql",
+  "../../../shared/drizzle/0017_agent_config.sql",
+  "../../../shared/drizzle/0018_agent_skills.sql",
+  "../../../shared/drizzle/0019_workspace_skill.sql",
+  "../../../shared/drizzle/0023_dependency_types.sql",
+  "../../../shared/drizzle/0020_setup_script.sql",
+  "../../../shared/drizzle/0021_project_skills.sql",
   "../../../shared/drizzle/0022_teardown_script.sql",
   "../../../shared/drizzle/0024_setup_enabled.sql",
   "../../../shared/drizzle/0025_provider_session_id.sql",
@@ -30,6 +46,7 @@ const MIGRATION_FILES = [
 <<<<<<< HEAD
 <<<<<<< HEAD
   "../../../shared/drizzle/0028_perf_indexes_conflict_cache.sql",
+<<<<<<< HEAD
 =======
 >>>>>>> b6a4ecf (feat: add estimate/sizing field to issues (XS/S/M/L/XL))
 =======
@@ -45,6 +62,11 @@ const MIGRATION_FILES = [
 =======
   "../../../shared/drizzle/0028_perf_indexes_conflict_cache.sql",
 >>>>>>> 59675e9 (perf: add DB indexes and stale-while-revalidate conflict cache for board load)
+=======
+  "../../../shared/drizzle/0029_issue_artifacts.sql",
+  "../../../shared/drizzle/0030_thorough_review.sql",
+  "../../../shared/drizzle/0031_scheduled_runs.sql",
+>>>>>>> 35a39bb (feat: cherry-pick scheduled runs feature from #155 with conflict resolution)
 ];
 
 function createTestApp() {
