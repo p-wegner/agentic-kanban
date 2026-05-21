@@ -131,6 +131,7 @@ const ACTION_LABELS: Record<MonitorAction["action"], { label: string; color: str
 };
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 function MonitorPopover({ status, onClose, onOpenWorkspace, columns }: { status: MonitorStatus | null; onClose: () => void; onOpenWorkspace: (workspaceId: string, issueId: string) => void; columns: StatusWithIssues[] }) {
   const [now, setNow] = useState(Date.now());
 <<<<<<< HEAD
@@ -151,6 +152,16 @@ function MonitorPopover({ status, onClose }: { status: MonitorStatus | null; onC
 >>>>>>> 0c15856 (fix: restore BoardPage.tsx from clean base and re-apply monitor enhancements with issueId/auto_start)
 =======
 >>>>>>> 52ef66c (fix: repair pre-existing build errors (smart quotes in cli.ts, truncated TableView/BoardPage from bad merge))
+=======
+function MonitorPopover({ status, onClose, onOpenWorkspace, columns, onRunNow }: { status: MonitorStatus | null; onClose: () => void; onOpenWorkspace: (workspaceId: string, issueId: string) => void; columns: StatusWithIssues[]; onRunNow: () => Promise<void> }) {
+  const [now, setNow] = useState(Date.now());
+  const [running, setRunning] = useState(false);
+
+  async function handleRunNow() {
+    setRunning(true);
+    try { await onRunNow(); } finally { setRunning(false); }
+  }
+>>>>>>> 1adff89 (feat: add Run now button to monitor popover (#220))
 
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 1000);
@@ -190,10 +201,25 @@ function MonitorPopover({ status, onClose }: { status: MonitorStatus | null; onC
     >
       <div className="px-3 py-2.5 border-b border-gray-100 flex items-center justify-between">
         <span className="font-semibold text-gray-700">Board Monitor</span>
-        <span className="flex items-center gap-1.5 text-green-600">
-          <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
-          Active
-        </span>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleRunNow}
+            disabled={running}
+            className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium bg-green-600 text-white hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            title="Run monitor cycle now and reset the timer"
+          >
+            {running ? (
+              <svg className="w-2.5 h-2.5 animate-spin" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>
+            ) : (
+              <svg className="w-2.5 h-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path strokeLinecap="round" strokeLinejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 010 1.972l-11.54 6.347a1.125 1.125 0 01-1.667-.986V5.653z"/></svg>
+            )}
+            {running ? "Running…" : "Run now"}
+          </button>
+          <span className="flex items-center gap-1.5 text-green-600">
+            <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
+            Active
+          </span>
+        </div>
       </div>
 
       <div className="px-3 py-2 border-b border-gray-100 space-y-1.5">
@@ -1403,6 +1429,7 @@ export function BoardPage() {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 >>>>>>> 47c4344 (feat: make monitor action log entries clickable workspace links)
 =======
@@ -1437,6 +1464,9 @@ export function BoardPage() {
 =======
               {showMonitorPopover && <MonitorPopover status={monitorStatus} onClose={() => setShowMonitorPopover(false)} onOpenWorkspace={(workspaceId, issueId) => { const issue = columns.flatMap(c => c.issues).find(i => i.id === issueId); if (issue) setWorkspaceIssue(issue); setWorkspaceInitial({ workspaceId, sessionId: "" }); }} columns={columns} />}
 >>>>>>> 52ef66c (fix: repair pre-existing build errors (smart quotes in cli.ts, truncated TableView/BoardPage from bad merge))
+=======
+              {showMonitorPopover && <MonitorPopover status={monitorStatus} onClose={() => setShowMonitorPopover(false)} onOpenWorkspace={(workspaceId, issueId) => { const issue = columns.flatMap(c => c.issues).find(i => i.id === issueId); if (issue) setWorkspaceIssue(issue); setWorkspaceInitial({ workspaceId, sessionId: "" }); }} columns={columns} onRunNow={async () => { await apiFetch("/api/internal/monitor-run", { method: "POST" }); const s = await apiFetch<MonitorStatus>("/api/internal/monitor-status"); setMonitorStatus(s); }} />}
+>>>>>>> 1adff89 (feat: add Run now button to monitor popover (#220))
             </div>
           )}
           <div className="flex items-center gap-1 border border-gray-200 rounded-md p-0.5 bg-white shrink-0">
