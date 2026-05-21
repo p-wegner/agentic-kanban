@@ -206,21 +206,19 @@ function MonitorPopover({ status, onClose, onOpenWorkspace, columns, onRunNow, a
       <div className="px-3 py-2.5 border-b border-gray-100 flex items-center justify-between">
         <span className="font-semibold text-gray-700">Board Monitor</span>
         <div className="flex items-center gap-2">
-          {autoMonitor && (
-            <button
-              onClick={handleRunNow}
-              disabled={running}
-              className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium bg-green-600 text-white hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-              title="Run monitor cycle now and reset the timer"
-            >
-              {running ? (
-                <svg className="w-2.5 h-2.5 animate-spin" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>
-              ) : (
-                <svg className="w-2.5 h-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path strokeLinecap="round" strokeLinejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 010 1.972l-11.54 6.347a1.125 1.125 0 01-1.667-.986V5.653z"/></svg>
-              )}
-              {running ? "Running…" : "Run now"}
-            </button>
-          )}
+          <button
+            onClick={handleRunNow}
+            disabled={running}
+            className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium bg-green-600 text-white hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            title="Run monitor cycle now and reset the timer"
+          >
+            {running ? (
+              <svg className="w-2.5 h-2.5 animate-spin" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>
+            ) : (
+              <svg className="w-2.5 h-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path strokeLinecap="round" strokeLinejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 010 1.972l-11.54 6.347a1.125 1.125 0 01-1.667-.986V5.653z"/></svg>
+            )}
+            {running ? "Running…" : "Run now"}
+          </button>
           <button
             onClick={onToggle}
             className={`relative inline-flex h-4 w-7 items-center rounded-full transition-colors focus:outline-none ${autoMonitor ? "bg-green-500" : "bg-gray-300"}`}
@@ -574,7 +572,10 @@ export function BoardPage() {
             found.priority !== selectedIssue.priority ||
             found.statusId !== selectedIssue.statusId ||
             found.statusName !== selectedIssue.statusName ||
-            found.updatedAt !== selectedIssue.updatedAt) {
+            found.updatedAt !== selectedIssue.updatedAt ||
+            found.workspaceSummary?.main?.contextTokens !== selectedIssue.workspaceSummary?.main?.contextTokens ||
+            found.workspaceSummary?.main?.lastTool !== selectedIssue.workspaceSummary?.main?.lastTool ||
+            found.workspaceSummary?.main?.status !== selectedIssue.workspaceSummary?.main?.status) {
           setSelectedIssue(found);
         }
         return;
