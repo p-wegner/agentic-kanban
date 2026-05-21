@@ -253,6 +253,7 @@ pnpm test:e2e                                  # E2E tests (101 tests)
 | F-UI-09: Board monitor visualization panel and workflow toggles (Settings > Workflow) | #189 |
 | F-UI-02: Expand button for issue detail panel (full-width mode) | #190 |
 | F-UI-02: AI Reviewed column conditional display and "Awaiting manual merge" hint | #191 |
+| F-UI-09: "Enhance with AI" button for skill creation/editing in Settings > Skills tab | #192 |
 
 ## Known Test Considerations
 
