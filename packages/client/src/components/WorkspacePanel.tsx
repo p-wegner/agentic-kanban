@@ -1159,6 +1159,17 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                   </div>
                 </div>
 
+                {(ws.baseBranch || ws.skillName) && (
+                  <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-gray-500">
+                    {ws.baseBranch && (
+                      <span><span className="font-medium text-gray-600">Base:</span> {ws.baseBranch}</span>
+                    )}
+                    {ws.skillName && (
+                      <span><span className="font-medium text-gray-600">Skill:</span> {ws.skillName}</span>
+                    )}
+                  </div>
+                )}
+
                 {ws.workingDir && (
                   <p className="text-xs text-gray-500 truncate">{ws.workingDir}</p>
                 )}
