@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+﻿import React, { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import type { IssueWithStatus, UpdateIssueRequest, DependencyInfo } from "@agentic-kanban/shared";
 import { apiFetch } from "../lib/api.js";
@@ -74,6 +74,7 @@ export function IssueDetailPanel({
   onNavigateToIssue,
 }: IssueDetailPanelProps) {
   const [editing, setEditing] = useState(false);
+  const [descriptionMode, setDescriptionMode] = useState<"edit" | "preview">("edit");
   const [expanded, setExpanded] = useState(false);
   const [dragPos, setDragPos] = useState<{ x: number; y: number } | null>(null);
   const dragStartRef = useRef<{ mouseX: number; mouseY: number; panelX: number; panelY: number } | null>(null);
@@ -128,7 +129,7 @@ export function IssueDetailPanel({
         setDependencies(deps);
         setAvailableIssues(issues.filter(i => i.id !== issue.id));
       } catch {
-        // Ignore — non-critical
+        // Ignore â€” non-critical
       }
     }
     loadData();
@@ -164,6 +165,7 @@ export function IssueDetailPanel({
       if (!window.confirm("You have unsaved changes. Discard?")) return;
     }
     setEditing(false);
+    setDescriptionMode("edit");
     setPreEnhanceSnapshot(null);
     setTitle(issue.title);
     setDescription(issue.description ?? "");
@@ -258,7 +260,8 @@ export function IssueDetailPanel({
       });
       setPastedImages([]);
       setEditing(false);
-      // Don't close panel — F1 fix. Parent will re-render with updated data.
+      setDescriptionMode("edit");
+      // Don't close panel â€” F1 fix. Parent will re-render with updated data.
     } finally {
       setSaving(false);
     }
@@ -368,7 +371,7 @@ export function IssueDetailPanel({
         </div>
 
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
-          {/* Blocked banner — shown when issue has unresolved blocking dependencies */}
+          {/* Blocked banner â€” shown when issue has unresolved blocking dependencies */}
           {(() => {
             const RESOLVED = ["done", "cancelled", "ai reviewed"];
             const blockingDeps = dependencies.dependencies.filter((dep) => {
@@ -391,7 +394,7 @@ export function IssueDetailPanel({
                 <ul className="space-y-0.5 pl-5.5">
                   {blockingDeps.map((dep) => (
                     <li key={dep.id} className="text-amber-700 flex items-center gap-1">
-                      <span className="text-amber-500 shrink-0">•</span>
+                      <span className="text-amber-500 shrink-0">â€¢</span>
                       {dep.issueNumber != null && (
                         <span className="font-mono text-xs shrink-0">#{dep.issueNumber}</span>
                       )}
@@ -426,10 +429,40 @@ export function IssueDetailPanel({
 
           {/* Description - always visible, editable in edit mode */}
           <div>
-            <label className="text-xs font-medium text-gray-600 block mb-1">
-              Description
-            </label>
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-xs font-medium text-gray-600">
+                Description
+              </label>
+              {editing && (
+                <div className="flex border border-gray-300 rounded overflow-hidden">
+                  <button
+                    type="button"
+                    onClick={() => setDescriptionMode("edit")}
+                    className={`text-xs px-2 py-0.5 ${descriptionMode === "edit" ? "bg-blue-500 text-white" : "bg-white text-gray-600 hover:bg-gray-50"}`}
+                  >
+                    Edit
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDescriptionMode("preview")}
+                    className={`text-xs px-2 py-0.5 border-l border-gray-300 ${descriptionMode === "preview" ? "bg-blue-500 text-white" : "bg-white text-gray-600 hover:bg-gray-50"}`}
+                  >
+                    Preview
+                  </button>
+                </div>
+              )}
+            </div>
             {editing ? (
+              <>
+              {descriptionMode === "preview" ? (
+                description ? (
+                  <div className="markdown-body min-h-[6rem] border border-gray-200 rounded px-2 py-1.5">
+                    <ReactMarkdown>{description}</ReactMarkdown>
+                  </div>
+                ) : (
+                  <p className="text-sm text-gray-400 italic min-h-[6rem] border border-gray-200 rounded px-2 py-1.5">Nothing to preview.</p>
+                )
+              ) : (
               <>
               <textarea
                 value={description}
@@ -465,10 +498,12 @@ export function IssueDetailPanel({
                         type="button"
                         onClick={() => setPastedImages((prev) => prev.filter((_, j) => j !== i))}
                         className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-red-500 text-white rounded-full text-xs leading-none flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-                      >×</button>
+                      >Ã—</button>
                     </div>
                   ))}
                 </div>
+              )}
+              </>
               )}
               </>
             ) : issue.description ? (
@@ -545,7 +580,7 @@ export function IssueDetailPanel({
                 {issue.estimate}
               </span>
             ) : (
-              <span className="text-xs text-gray-400">—</span>
+              <span className="text-xs text-gray-400">â€”</span>
             )}
           </div>
 
@@ -883,7 +918,7 @@ export function IssueDetailPanel({
                         ref={depInputRef}
                         type="text"
                         className="text-xs border border-gray-300 rounded px-1.5 py-0.5 w-44 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                        placeholder="+ Add dependency…"
+                        placeholder="+ Add dependencyâ€¦"
                         value={depSearch}
                         onChange={(e) => {
                           setDepSearch(e.target.value);
@@ -979,8 +1014,8 @@ export function IssueDetailPanel({
                   onClick={handleCreateFollowUp}
                   disabled={!followUpTitle.trim() || followUpCreating}
                   className="text-xs bg-blue-600 text-white px-2 py-1 rounded hover:bg-blue-700 disabled:opacity-50 whitespace-nowrap"
-                >{followUpCreating ? "…" : "Create"}</button>
-                <button onClick={() => { setShowFollowUp(false); setFollowUpTitle(""); }} className="text-xs text-gray-400 hover:text-gray-600">✕</button>
+                >{followUpCreating ? "â€¦" : "Create"}</button>
+                <button onClick={() => { setShowFollowUp(false); setFollowUpTitle(""); }} className="text-xs text-gray-400 hover:text-gray-600">âœ•</button>
               </div>
             )}
           </div>
