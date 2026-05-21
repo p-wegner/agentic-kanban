@@ -205,8 +205,11 @@ pnpm test:e2e                                  # E2E tests (101 tests)
 | F-WS-02: Mock agent profiles (standard/multi-turn/error/delay) | `packages/e2e/tests/api/mock-agent-profiles.test.ts` |
 | F-WS-04: Git branch creation for workspaces | `packages/e2e/tests/api/workspaces.test.ts` |
 | F-WS-05: Workspace deletion | `packages/e2e/tests/api/workspaces.test.ts` |
-| F-REV-02: Diff comments API (create/edit/delete/filter) | `packages/server/src/__tests__/api.test.ts` |
+| F-REV-01: Diff viewer UI (file tree, diff lines, unified/split view, real diff content) | `packages/e2e/tests/ui/diff-viewer.test.ts` |
+| F-REV-02: Diff comments API (create/edit/delete/filter) + inline comment UI (CRUD via diff viewer) | `packages/server/src/__tests__/api.test.ts`, `packages/e2e/tests/ui/diff-viewer.test.ts` |
 | F-MCP-03: Agent command configuration via settings | `packages/e2e/tests/api/settings.test.ts` |
+| F-MCP-04: Agent Skills UI in Settings (built-in protection, custom skill CRUD, edit/delete) | `packages/e2e/tests/ui/agent-skills.test.ts` |
+| F-MCP-04: Skill selector in inline issue create form (Start Workspace checkbox) | `packages/e2e/tests/ui/agent-skills.test.ts` |
 | F-DATA-02: Board WebSocket events (create/update/delete) | `packages/e2e/tests/api/board-events.test.ts`, `packages/e2e/tests/ui/board-realtime.test.ts` |
 | F-DATA-03: Session history/output persistence + UI selector | `packages/e2e/tests/api/session-history.test.ts`, `packages/e2e/tests/ui/session-history.test.ts` |
 | F-UI-01: Register project / Create project UI | `packages/e2e/tests/ui/register-project.test.ts` |
@@ -223,7 +226,6 @@ pnpm test:e2e                                  # E2E tests (101 tests)
 |---------|--------|
 | F-TASK-05: Issue dependencies/relationships UI (add/remove dep badges, cycle detection, Analyze Deps) | #163 |
 | F-TASK-04: Tags management via Settings > Tags tab UI (rename, delete, add) | #160 |
-| F-REV-01: Diff viewer UI (file tree, diff lines, unified/split, inline comments) | #164 |
 | F-REV-03: AI code review flow (manual review button, reviewing badge, session output) | #165 |
 | F-UI-07: Worktree Overview panel (branch icon, worktree list, issue link nav) | #158 |
 | F-UI-07: Orphaned worktree identification and bulk-clean in Worktrees panel | #172 |
@@ -233,8 +235,7 @@ pnpm test:e2e                                  # E2E tests (101 tests)
 | F-UI-11: Board stats bar (status counts, commits counter, Blocked filter toggle) | #167 |
 | F-UI-11: Priority-based sort for board columns | #170 |
 | F-UI-12: Quick Tasks panel (skill list, custom prompt input) | #157 |
-| F-MCP-04: Agent Skills UI in Settings (skills tab, built-in protection, skill selector in workspace form) | #168 |
-| F-MCP-04: Skill selector in inline issue create form (Start Workspace checkbox) | #171 |
+| F-UI-03: Review and Merge actions in command palette (workspace-scoped, disabled state) | #180 |
 | F-UI-02: Workspace panel chat input / multi-turn interaction (Send/Stop, Ctrl+Enter, turn state) | #162 |
 | F-UI-02: baseBranch and skill name display in workspace panel | #176 |
 | F-UI-02: Ready for Merge badge in workspace and All Workspaces panels | #173 |
