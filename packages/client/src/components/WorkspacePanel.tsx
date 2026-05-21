@@ -1196,6 +1196,29 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                   {ws.closedAt && <span>Closed {formatRelativeTime(ws.closedAt)}</span>}
                 </div>
 
+                {(() => {
+                  const main = issue.workspaceSummary?.main;
+                  if (!main || main.id !== ws.id) return null;
+                  const { contextTokens, lastTool } = main;
+                  if (!contextTokens && !lastTool) return null;
+                  return (
+                    <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-gray-400">
+                      {contextTokens ? (
+                        <span title={`${contextTokens.toLocaleString()} context tokens`}>
+                          {contextTokens >= 1000
+                            ? `${Math.round(contextTokens / 1000)}k ctx`
+                            : `${contextTokens} ctx`}
+                        </span>
+                      ) : null}
+                      {lastTool ? (
+                        <span className="truncate max-w-[200px]" title={`Last tool: ${lastTool}`}>
+                          <span className="font-medium text-gray-500">tool:</span> {lastTool}
+                        </span>
+                      ) : null}
+                    </div>
+                  );
+                })()}
+
                 {isSelected && (
                   <div className="space-y-2 pt-2 border-t border-gray-200" onClick={(e) => e.stopPropagation()}>
                     {/* Session selector — shown when there are completed sessions */}
