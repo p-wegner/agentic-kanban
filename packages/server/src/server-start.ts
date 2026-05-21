@@ -785,17 +785,29 @@ export async function startServer(port?: number) {
         }
       }
       // Auto-start In Progress issues that have no open workspace (e.g. manually moved without creating workspace)
+      // Respects the same WIP limit as auto-start for Todo items.
       if (prefMap.get("nudge_auto_start") === "true") {
+        const wipLimit = parseInt(prefMap.get("nudge_wip_limit") || "5", 10);
         const inProgressStatuses = await db
           .select({ id: projectStatuses.id, projectId: projectStatuses.projectId })
           .from(projectStatuses)
           .where(sql`${projectStatuses.name} = 'In Progress'`);
         for (const inProgressSt of inProgressStatuses) {
+          // Count active workspace slots consumed in this project
+          const activeWipRows = await db
+            .select({ count: sql<number>`count(distinct ${issues.id})` })
+            .from(issues)
+            .innerJoin(workspaces, eq(workspaces.issueId, issues.id))
+            .where(sql`${issues.statusId} = ${inProgressSt.id} AND ${workspaces.status} != 'closed'`);
+          let currentWip = activeWipRows[0]?.count ?? 0;
+          if (currentWip >= wipLimit) continue;
+
           const inProgressIssues = await db
             .select({ id: issues.id, title: issues.title, description: issues.description, issueNumber: issues.issueNumber })
             .from(issues)
             .where(eq(issues.statusId, inProgressSt.id));
           for (const issue of inProgressIssues) {
+            if (currentWip >= wipLimit) break;
             const openWs = await db
               .select({ id: workspaces.id })
               .from(workspaces)
@@ -812,6 +824,7 @@ export async function startServer(port?: number) {
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ issueId: issue.id, branch, customPrompt: prompt }),
             }).catch(() => {});
+            currentWip++;
             logMonitorAction("auto_start", "", issue.id);
             boardEvents.broadcast(inProgressSt.projectId, "board_changed");
             console.log(`[monitor] Auto-started workspace for In Progress issue #${issue.issueNumber} (no open workspace)`);
