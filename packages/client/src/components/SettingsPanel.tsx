@@ -524,6 +524,14 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
   const [savingRun, setSavingRun] = useState(false);
   const [triggeringRun, setTriggeringRun] = useState<string | null>(null);
 
+  // Scheduled runs state
+  const [scheduledRunsList, setScheduledRunsList] = useState<ScheduledRun[]>([]);
+  const [newRunName, setNewRunName] = useState("");
+  const [newRunPrompt, setNewRunPrompt] = useState("");
+  const [newRunInterval, setNewRunInterval] = useState(60);
+  const [savingRun, setSavingRun] = useState(false);
+  const [triggeringRun, setTriggeringRun] = useState<string | null>(null);
+
   const disabledTools = new Set((settings.disabled_mcp_tools || "").split(",").filter(Boolean));
   function isToolDisabled(name: string) {
     return disabledTools.has(name);
@@ -646,6 +654,14 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
           })
         );
         setInstalledSkills(Object.fromEntries(statusEntries));
+
+        // Load scheduled runs
+        if (activeProjectId) {
+          try {
+            const runs = await apiFetch<ScheduledRun[]>(`/api/scheduled-runs?projectId=${activeProjectId}`);
+            setScheduledRunsList(runs);
+          } catch { /* non-fatal */ }
+        }
 
         // Load scheduled runs
         if (activeProjectId) {

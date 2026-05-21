@@ -383,10 +383,15 @@ export function BoardPage() {
   const [approvalRequests, setApprovalRequests] = useState<ApprovalRequest[]>([]);
   const pendingBoardRefreshRef = useRef(false);
 <<<<<<< HEAD
+<<<<<<< HEAD
   const pendingGRef = useRef(false);
   const pendingGTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 =======
 >>>>>>> 52ef66c (fix: repair pre-existing build errors (smart quotes in cli.ts, truncated TableView/BoardPage from bad merge))
+=======
+  const pendingGRef = useRef(false);
+  const pendingGTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+>>>>>>> ffa8d96 (fix: restore scheduled-runs feature and keyboard shortcuts lost in bad merge fix)
   const [expandedCreatePanel, setExpandedCreatePanel] = useState<{ statusId: string; statusName: string; state: Partial<CreateIssueFormState> } | null>(null);
   const [viewMode, setViewMode] = useState<"kanban" | "graph" | "table">("kanban");
   const [dynamicColumnScaling, setDynamicColumnScaling] = useState(false);
