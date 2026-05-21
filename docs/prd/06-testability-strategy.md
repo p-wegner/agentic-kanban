@@ -226,13 +226,24 @@ pnpm test:e2e                                  # E2E tests (101 tests)
 | F-REV-01: Diff viewer UI (file tree, diff lines, unified/split, inline comments) | #164 |
 | F-REV-03: AI code review flow (manual review button, reviewing badge, session output) | #165 |
 | F-UI-07: Worktree Overview panel (branch icon, worktree list, issue link nav) | #158 |
+| F-UI-07: Orphaned worktree identification and bulk-clean in Worktrees panel | #172 |
 | F-UI-08: Expandable issue creation panel (full-screen form, plan mode, skip review checkboxes) | #159 |
 | F-UI-10: Graph view (dependency DAG, nodes, zoom, Show completed toggle) | #166 |
 | F-UI-10: Table view (sortable columns, status filter, row click to detail) | #166 |
 | F-UI-11: Board stats bar (status counts, commits counter, Blocked filter toggle) | #167 |
+| F-UI-11: Priority-based sort for board columns | #170 |
 | F-UI-12: Quick Tasks panel (skill list, custom prompt input) | #157 |
 | F-MCP-04: Agent Skills UI in Settings (skills tab, built-in protection, skill selector in workspace form) | #168 |
+| F-MCP-04: Skill selector in inline issue create form (Start Workspace checkbox) | #171 |
 | F-UI-02: Workspace panel chat input / multi-turn interaction (Send/Stop, Ctrl+Enter, turn state) | #162 |
+| F-UI-02: baseBranch and skill name display in workspace panel | #176 |
+| F-UI-02: Ready for Merge badge in workspace and All Workspaces panels | #173 |
+| All Workspaces panel (filter, search, bulk close idle, workspace list grouped by issue) | #169 |
+| Skip auto review toggle in issue detail edit mode | #174 |
+| Hover quick-start buttons on issue cards (Start Workspace / Resume) | #175 |
+| Copy-to-clipboard for issue reference (#N) in detail panel | #177 |
+| Markdown rendering in issue descriptions (detail panel view mode) | #178 |
+| Scheduled Runs UI in Settings panel (create/list/delete scheduled runs) | #179 |
 
 ## Known Test Considerations
 
