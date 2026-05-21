@@ -258,6 +258,9 @@ pnpm test:e2e                                  # E2E tests (101 tests)
 | F-WS-02: Agent task progress bar on issue cards (TodoProgress N/M tasks + K active) | #194 |
 | F-WS-04: Direct workspace UI (purple badge, "Close"/"View Changes" vs "Merge"/"View Diff") | #195 |
 | F-TASK-01: "Enhance with AI" button in issue edit panel (AI-powered title/description improvement) | #196 |
+| F-MCP-04: Install skill to .claude/skills/ button in Settings > Skills tab (install status badge) | #197 |
+| F-UI-02: Follow-up task creation in issue detail panel (+ Create follow-up task form) | #198 |
+| F-UI-09: Auto-start follow-up tasks setting in Settings > Workflow (auto_start_followup toggle) | #199 |
 
 ## Known Test Considerations
 
