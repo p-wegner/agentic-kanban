@@ -41,6 +41,9 @@ const MIGRATION_FILES = [
   "../../../shared/drizzle/0026_ready_for_merge.sql",
   "../../../shared/drizzle/0027_estimate_field.sql",
   "../../../shared/drizzle/0028_perf_indexes_conflict_cache.sql",
+  "../../../shared/drizzle/0029_issue_artifacts.sql",
+  "../../../shared/drizzle/0030_thorough_review.sql",
+  "../../../shared/drizzle/0031_scheduled_runs.sql",
 ];
 
 function createTestApp() {
