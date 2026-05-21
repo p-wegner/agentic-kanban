@@ -4,12 +4,18 @@ import type { CreateIssueFormState } from "./CreateIssueForm.js";
 import { apiFetch } from "../lib/api.js";
 import { showToast } from "./Toast.js";
 
+interface Skill {
+  id: string;
+  name: string;
+  description: string | null;
+}
+
 interface CreateIssuePanelProps {
   projectId: string;
   statusId: string;
   statusName?: string;
   initialState?: Partial<CreateIssueFormState>;
-  onSubmit: (data: CreateIssueRequest & { startWorkspace?: boolean; planMode?: boolean; skipAutoReview?: boolean; claudeProfile?: string; isDirect?: boolean }) => Promise<void>;
+  onSubmit: (data: CreateIssueRequest & { startWorkspace?: boolean; planMode?: boolean; skipAutoReview?: boolean; claudeProfile?: string; isDirect?: boolean; skillId?: string }) => Promise<void>;
   onClose: () => void;
   canStartWorkspace?: boolean;
 }
@@ -31,6 +37,8 @@ export function CreateIssuePanel({
   const [skipAutoReview, setSkipAutoReview] = useState(initialState?.skipAutoReview ?? false);
   const [claudeProfile, setClaudeProfile] = useState("");
   const [isDirect, setIsDirect] = useState(false);
+  const [skillId, setSkillId] = useState<string>(initialState?.skillId ?? "");
+  const [skills, setSkills] = useState<Skill[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [enhancing, setEnhancing] = useState(false);
   const [preEnhanceSnapshot, setPreEnhanceSnapshot] = useState<{ title: string; description: string } | null>(null);
@@ -67,6 +75,13 @@ export function CreateIssuePanel({
   }, []);
 
   useEffect(() => {
+    if (!startWorkspace || !projectId) return;
+    apiFetch<Skill[]>(`/api/agent-skills?projectId=${projectId}`)
+      .then(setSkills)
+      .catch(() => {});
+  }, [startWorkspace, projectId]);
+
+  useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
       if (e.key === "Escape") onClose();
     }
@@ -90,6 +105,7 @@ export function CreateIssuePanel({
         skipAutoReview: (startWorkspace && skipAutoReview) || undefined,
         claudeProfile: (startWorkspace && claudeProfile.trim()) ? claudeProfile.trim() : undefined,
         isDirect: (startWorkspace && isDirect) || undefined,
+        skillId: (startWorkspace && skillId) || undefined,
       });
     } finally {
       setSubmitting(false);
@@ -205,6 +221,21 @@ export function CreateIssuePanel({
                     />
                     Work directly on master (no worktree)
                   </label>
+                  {skills.length > 0 && (
+                    <div className="flex items-center gap-2">
+                      <label className="text-sm text-gray-600 whitespace-nowrap">Skill</label>
+                      <select
+                        value={skillId}
+                        onChange={(e) => setSkillId(e.target.value)}
+                        className="flex-1 text-sm border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                      >
+                        <option value="">None</option>
+                        {skills.map((s) => (
+                          <option key={s.id} value={s.id}>{s.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
