@@ -92,8 +92,11 @@ function tagClass(color: string | null | undefined) {
   return TAG_COLORS[color ?? ""] ?? "bg-gray-100 text-gray-600";
 }
 
+<<<<<<< HEAD
 =======
 >>>>>>> ab93bc6 (feat: add table view as third board view alongside kanban and graph)
+=======
+>>>>>>> ab01232 (fix: restore TableView.tsx mangled by conflict resolution — use clean version from 4fb96d3)
 function formatDate(iso: string) {
   return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
 }
@@ -101,10 +104,14 @@ function formatDate(iso: string) {
 export function TableView({ columns, onIssueClick, searchQuery }: TableViewProps) {
   const [sort, setSort] = useState<{ key: SortKey; dir: SortDir }>({ key: "number", dir: "asc" });
 <<<<<<< HEAD
+<<<<<<< HEAD
   const [statusFilter, setStatusFilter] = useState<string>("active");
 =======
   const [statusFilter, setStatusFilter] = useState<string>("all");
 >>>>>>> ab93bc6 (feat: add table view as third board view alongside kanban and graph)
+=======
+  const [statusFilter, setStatusFilter] = useState<string>("active");
+>>>>>>> ab01232 (fix: restore TableView.tsx mangled by conflict resolution — use clean version from 4fb96d3)
 
   const allIssues = columns.flatMap((col) =>
     col.issues.map((issue) => ({ ...issue, statusName: col.name }))
@@ -161,8 +168,11 @@ export function TableView({ columns, onIssueClick, searchQuery }: TableViewProps
         >
 <<<<<<< HEAD
           <option value="active">Active only</option>
+<<<<<<< HEAD
 =======
 >>>>>>> ab93bc6 (feat: add table view as third board view alongside kanban and graph)
+=======
+>>>>>>> ab01232 (fix: restore TableView.tsx mangled by conflict resolution — use clean version from 4fb96d3)
           <option value="all">All statuses</option>
           {statusNames.map((s) => <option key={s} value={s}>{s}</option>)}
         </select>
@@ -179,10 +189,14 @@ export function TableView({ columns, onIssueClick, searchQuery }: TableViewProps
                   ["priority", "Priority"],
                   ["estimate", "Estimate"],
 <<<<<<< HEAD
+<<<<<<< HEAD
                   ["updated", "Updated"],
 =======
                   ["created", "Created"],
 >>>>>>> ab93bc6 (feat: add table view as third board view alongside kanban and graph)
+=======
+                  ["updated", "Updated"],
+>>>>>>> ab01232 (fix: restore TableView.tsx mangled by conflict resolution — use clean version from 4fb96d3)
                 ] as [SortKey, string][]
               ).map(([key, label]) => (
                 <th
@@ -197,18 +211,25 @@ export function TableView({ columns, onIssueClick, searchQuery }: TableViewProps
               <th className="text-left text-xs font-medium text-gray-500 px-3 py-2 border-b border-gray-200 whitespace-nowrap">
                 Tags
               </th>
+<<<<<<< HEAD
 =======
 >>>>>>> ab93bc6 (feat: add table view as third board view alongside kanban and graph)
+=======
+>>>>>>> ab01232 (fix: restore TableView.tsx mangled by conflict resolution — use clean version from 4fb96d3)
             </tr>
           </thead>
           <tbody>
             {sorted.length === 0 && (
               <tr>
 <<<<<<< HEAD
+<<<<<<< HEAD
                 <td colSpan={7} className="text-center text-gray-400 text-sm py-12">No issues found</td>
 =======
                 <td colSpan={6} className="text-center text-gray-400 text-sm py-12">No issues found</td>
 >>>>>>> ab93bc6 (feat: add table view as third board view alongside kanban and graph)
+=======
+                <td colSpan={7} className="text-center text-gray-400 text-sm py-12">No issues found</td>
+>>>>>>> ab01232 (fix: restore TableView.tsx mangled by conflict resolution — use clean version from 4fb96d3)
               </tr>
             )}
             {sorted.map((issue) => (
