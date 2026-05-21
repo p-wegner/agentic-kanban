@@ -236,16 +236,40 @@ _Last updated: 2026-05-21_
 
 | Feature | Ticket |
 |---------|--------|
-| F-TASK-05: Issue dependencies/relationships UI (add/remove dep badges, cycle detection, Analyze Deps) | #144 |
-| F-UI-11: Board Stats Bar (status counts, commits counter, Blocked filter toggle) | #145 |
-| F-UI-12: Quick Tasks panel (skill list, custom prompt input) | #146 |
-| F-UI-07: Worktree Overview panel (branch icon, worktree list, issue link nav) | #147 |
-| All Workspaces panel (workspace list grouped by issue, diff stats, timestamps) | #148 |
-| F-UI-06: In-app toast notifications (create/delete/merge success toasts, auto-dismiss) | #149 |
-| F-UI-09: Settings Workflow tab (pipeline visualization, auto-review/fix/merge toggles) | #150 |
-| F-WS-04: Direct workspace UI (purple badge, "Close"/"View Changes" vs "Merge"/"View Diff") | #151 |
-| F-UI-11: Priority-based sort for board columns | #152 |
-| Markdown rendering in issue descriptions (detail panel view mode) | #153 |
+| F-TASK-05: Issue dependencies/relationships UI (add/remove dep badges, cycle detection, Analyze Deps) | #163 |
+| F-UI-11: Board Stats Bar (status counts, commits counter, Blocked filter toggle) | #167 |
+| F-UI-12: Quick Tasks panel (skill list, custom prompt input) | #157 |
+| F-UI-07: Worktree Overview panel (branch icon, worktree list, issue link nav) | #158 |
+| All Workspaces panel (workspace list grouped by issue, diff stats, timestamps) | #169 |
+| F-UI-06: In-app toast notifications (create/delete/merge success toasts, auto-dismiss) | #184 |
+| F-UI-09: Settings Workflow tab (board monitor visualization, auto-review/fix/merge toggles) | #189 |
+| F-WS-04: Direct workspace UI (purple badge, "Close"/"View Changes" vs "Merge"/"View Diff") | #195 |
+| F-UI-11: Priority-based sort for board columns | #170 |
+| Markdown rendering in issue descriptions (detail panel view mode) | #178 |
+| E2E: cover view-switching keyboard shortcuts (b/g/t/q) | #188 |
+| E2E: cover baseBranch and skill name display in workspace panel | #176 |
+| E2E: cover hover quick-start buttons on issue cards | #175 |
+| E2E: cover skip auto review toggle in issue detail edit | #174 |
+| E2E: cover Ready for Merge badge in workspace/All Workspaces panels | #173 |
+| E2E: cover orphaned worktree identification and bulk-clean in Worktrees panel | #172 |
+| E2E: cover copy-to-clipboard for issue reference in detail panel | #177 |
+| E2E: cover Scheduled Runs UI in Settings | #179 |
+| E2E: cover Review and Merge actions in command palette | #182 |
+| E2E: cover workspace setup scripts (F-WS-08) | #183 |
+| E2E: cover blocked-by summary banner in issue detail panel | #185 |
+| E2E: cover expand button for issue detail panel (full-width mode) | #190 |
+| E2E: cover AI Reviewed column conditional display and Awaiting manual merge hint | #191 |
+| E2E: cover live session stats on issue cards (model name + context tokens) | #193 |
+| E2E: cover agent task progress bar on issue cards (TodoProgress) | #194 |
+| E2E: cover Enhance with AI button in issue edit panel | #196 |
+| E2E: cover install skills to .claude/skills/ button in Settings > Skills tab | #197 |
+| E2E: cover follow-up task creation in issue detail panel | #198 |
+| E2E: cover auto-start follow-up tasks setting in Settings > Workflow | #199 |
+| E2E: cover markdown preview toggle in issue description edit mode | #203 |
+| E2E: cover Open in VS Code button in workspace panel | #204 |
+| E2E: cover issue artifacts API (create/list/delete attachments on issues) | #205 |
+| E2E: cover Worktrees panel row actions (Open-in-Explorer, Delete) | #206 |
+| E2E: cover graph view zoom-to-fit and table view Tags/Updated columns | #207 |
 
 
 ## Known Test Considerations
