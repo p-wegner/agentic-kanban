@@ -1301,12 +1301,13 @@ ${contextParts.join("\n")}`;
           conflictCacheCheckedAt: workspaces.conflictCacheCheckedAt,
           conflictCacheHasConflicts: workspaces.conflictCacheHasConflicts,
           conflictCacheFiles: workspaces.conflictCacheFiles,
+          readyForMerge: workspaces.readyForMerge,
         })
         .from(workspaces)
         .where(inArray(workspaces.issueId, issueIds));
 
       const CONFLICT_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
-      const mainWorkspaceMap = new Map<string, { id: string; branch: string; status: string; updatedAt: string; claudeProfile: string | null; agentCommand: string | null; workingDir: string | null; baseBranch: string | null; isDirect: boolean; conflictCacheCheckedAt: string | null; conflictCacheHasConflicts: boolean | null; conflictCacheFiles: string | null }>();
+      const mainWorkspaceMap = new Map<string, { id: string; branch: string; status: string; updatedAt: string; claudeProfile: string | null; agentCommand: string | null; workingDir: string | null; baseBranch: string | null; isDirect: boolean; conflictCacheCheckedAt: string | null; conflictCacheHasConflicts: boolean | null; conflictCacheFiles: string | null; readyForMerge: boolean }>();
       const statusPriority = (s: string) => s === "active" || s === "reviewing" ? 0 : s === "idle" ? 1 : 2;
       for (const row of wsDetailRows) {
         const existing = mainWorkspaceMap.get(row.issueId);
