@@ -1353,10 +1353,14 @@ ${contextParts.join("\n")}`;
                   mainRef.conflicts = {
                     hasConflicts: mainWs.conflictCacheHasConflicts ?? false,
 <<<<<<< HEAD
+<<<<<<< HEAD
                     conflictFiles: mainWs.conflictCacheFiles ? (() => { try { return JSON.parse(mainWs.conflictCacheFiles!); } catch { return []; } })() : [],
 =======
                     conflictFiles: mainWs.conflictCacheFiles ? JSON.parse(mainWs.conflictCacheFiles) : [],
 >>>>>>> 59675e9 (perf: add DB indexes and stale-while-revalidate conflict cache for board load)
+=======
+                    conflictingFiles: mainWs.conflictCacheFiles ? JSON.parse(mainWs.conflictCacheFiles) : [],
+>>>>>>> e14a84e (fix: revert conflictFiles rename to conflictingFiles — breaking API contract)
                   };
                 }
               } else {
@@ -1365,10 +1369,14 @@ ${contextParts.join("\n")}`;
                   mainRef.conflicts = {
                     hasConflicts: mainWs.conflictCacheHasConflicts ?? false,
 <<<<<<< HEAD
+<<<<<<< HEAD
                     conflictFiles: mainWs.conflictCacheFiles ? (() => { try { return JSON.parse(mainWs.conflictCacheFiles!); } catch { return []; } })() : [],
 =======
                     conflictFiles: mainWs.conflictCacheFiles ? JSON.parse(mainWs.conflictCacheFiles) : [],
 >>>>>>> 59675e9 (perf: add DB indexes and stale-while-revalidate conflict cache for board load)
+=======
+                    conflictingFiles: mainWs.conflictCacheFiles ? JSON.parse(mainWs.conflictCacheFiles) : [],
+>>>>>>> e14a84e (fix: revert conflictFiles rename to conflictingFiles — breaking API contract)
                   };
                 }
                 const wsId = mainWs.id;
@@ -1382,7 +1390,7 @@ ${contextParts.join("\n")}`;
                       .set({
                         conflictCacheCheckedAt: new Date().toISOString(),
                         conflictCacheHasConflicts: result.hasConflicts,
-                        conflictCacheFiles: JSON.stringify(result.conflictFiles),
+                        conflictCacheFiles: JSON.stringify(result.conflictingFiles),
                       })
                       .where(eq(workspaces.id, wsId))
                       .catch(() => {});
