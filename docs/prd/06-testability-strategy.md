@@ -25,13 +25,13 @@ Every feature must be verifiable through automated tests that an AI agent can ru
 - Run via `pnpm --filter @agentic-kanban/server test`
 - In-memory SQLite database for isolation
 - Factory-style test data setup
-- 76 tests covering: tags CRUD, preferences, issue numbers, API routes, git service
+- 263 tests covering: tags CRUD, preferences, issue numbers, API routes, git service
 
 ### E2E Tests (Playwright)
 - Run via `pnpm test:e2e`
 - Full server + client startup via global setup
 - Tests create their own data, no shared state dependencies
-- 101 tests covering: API endpoints, UI interactions, MCP tools, board events, sessions
+- ~212 tests covering: API endpoints, UI interactions, MCP tools, board events, sessions
 
 ### MCP Protocol Tests
 - Custom stdio JSON-RPC client against MCP server
@@ -184,8 +184,8 @@ test("MCP round-trip: create → list → update", async () => {
 ## Test Commands
 
 ```bash
-pnpm --filter @agentic-kanban/server test    # Unit tests (76 tests)
-pnpm test:e2e                                  # E2E tests (101 tests)
+pnpm --filter @agentic-kanban/server test    # Unit tests (263 tests)
+pnpm test:e2e                                  # E2E tests (~212 tests)
 ```
 
 ## Current E2E Coverage
