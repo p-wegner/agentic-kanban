@@ -7,6 +7,8 @@ interface BoardStatsProps {
   archiveColumns: StatusWithIssues[];
   searchQuery: string;
   projectId?: string;
+  showBlocked?: boolean;
+  onToggleBlocked?: () => void;
 }
 
 const COLUMN_COLORS: Record<string, string> = {
@@ -32,6 +34,8 @@ export function BoardStats({
   archiveColumns,
   searchQuery,
   projectId,
+  showBlocked,
+  onToggleBlocked,
 }: BoardStatsProps) {
   const isFiltered = !!searchQuery;
   const totalActive = activeColumns.reduce((sum, col) => sum + col.issues.length, 0);
@@ -72,7 +76,7 @@ export function BoardStats({
   }, [total, prevTotal]);
 
   return (
-    <div className="flex items-center gap-3 px-1 text-xs select-none">
+    <div data-testid="board-stats-bar" className="flex items-center gap-3 px-1 text-xs select-none">
       <div className="flex items-center gap-1.5">
         <span
           key={popKey}
@@ -143,6 +147,26 @@ export function BoardStats({
               </div>
             ))}
           </div>
+        </>
+      )}
+
+      {onToggleBlocked && (
+        <>
+          <div className="h-3 w-px bg-gray-200" />
+          <button
+            onClick={onToggleBlocked}
+            title="Show only blocked issues"
+            className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium transition-colors ${
+              showBlocked
+                ? "bg-amber-100 text-amber-700"
+                : "text-gray-400 hover:text-gray-600"
+            }`}
+          >
+            <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 16 16">
+              <path d="M8 1a2 2 0 0 1 2 2v4H6V3a2 2 0 0 1 2-2zm3 6V3a3 3 0 0 0-6 0v4a2 2 0 0 0 2 2v2.5a.5.5 0 0 0 1 0V9a2 2 0 0 0 2-2z"/>
+            </svg>
+            Blocked
+          </button>
         </>
       )}
     </div>
