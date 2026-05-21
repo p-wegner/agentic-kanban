@@ -226,6 +226,7 @@ pnpm test:e2e                                  # E2E tests (101 tests)
 | F-UI-02: Workspace panel chat input / multi-turn interaction (Send/Stop, Ctrl+Enter, turn state) | `packages/e2e/tests/ui/workspace-chat.test.ts` |
 | F-UI-08: Expandable issue creation panel (full-screen form, plan mode, skip review checkboxes) | `packages/e2e/tests/ui/expandable-create-panel.test.ts` |
 | F-UI-08: Profile override field in expanded issue create panel and workspace create relaunch | `packages/e2e/tests/ui/profile-override.test.ts` |
+| F-TASK-01: Image paste in issue description editor (Ctrl+V, preview thumbnails, markdown insert) | `packages/e2e/tests/ui/issue-description-paste.test.ts` |
 | Preferences API (active-project get/set) | `packages/e2e/tests/api/preferences.test.ts` |
 | Projects API (list, create, statuses, branches) | `packages/e2e/tests/api/projects.test.ts` |
 
@@ -262,7 +263,8 @@ pnpm test:e2e                                  # E2E tests (101 tests)
 | F-MCP-04: Install skill to .claude/skills/ button in Settings > Skills tab (install status badge) | #197 |
 | F-UI-02: Follow-up task creation in issue detail panel (+ Create follow-up task form) | #198 |
 | F-UI-09: Auto-start follow-up tasks setting in Settings > Workflow (auto_start_followup toggle) | #199 |
-| F-TASK-01: Image paste in issue description editor (Ctrl+V, preview thumbnails, markdown insert) | #201 |
+| "Open in VS Code" button in workspace panel (F-UI-02 addition) | #200 |
+| Markdown preview toggle in issue description edit mode (F-UI-02 addition) | #203 |
 
 
 ## Known Test Considerations
