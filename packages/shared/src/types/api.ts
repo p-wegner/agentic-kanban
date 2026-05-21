@@ -68,6 +68,7 @@ export interface MainWorkspaceInfo {
   lastSessionAt?: string | null;
   contextTokens?: number | null;
   lastTool?: string | null;
+  lastAssistantMessage?: string | null;
 }
 
 export interface WorkspaceSummary {
