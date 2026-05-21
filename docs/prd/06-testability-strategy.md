@@ -238,7 +238,7 @@ pnpm test:e2e                                  # E2E tests (~212 tests)
 | F-TASK-05: Blocked-by summary banner in issue detail panel (blocked by N issues count) | #185 |
 | F-UI-07: Worktree Overview panel (branch icon, worktree list, issue link nav) | #158 |
 | F-UI-07: Orphaned worktree identification and bulk-clean in Worktrees panel | #172 |
-| F-UI-11: Board stats bar (status counts, commits counter, Blocked filter toggle) | #167 |
+| F-UI-11: Board stats bar (status counts, commits counter, Blocked filter toggle) | #167 (In Progress) |
 | F-UI-11: Priority-based sort for board columns | #170 |
 | F-UI-12: Quick Tasks panel (skill list, custom prompt input) | #157 |
 | F-UI-06: In-app toast notifications (create/delete/merge success toasts, auto-dismiss) | #184 |
@@ -265,6 +265,9 @@ pnpm test:e2e                                  # E2E tests (~212 tests)
 | F-UI-09: Auto-start follow-up tasks setting in Settings > Workflow (auto_start_followup toggle) | #199 |
 | "Open in VS Code" button in workspace panel (F-UI-02 addition) | #204 |
 | Markdown preview toggle in issue description edit mode (F-UI-02 addition) | #203 |
+| Issue artifacts API (create/list/delete attachments, migration 0029) | #205 |
+| Worktrees panel row actions (Open-in-Explorer, Delete per row) | #206 |
+| Graph view zoom-to-fit + auto-center; Table view Tags + Updated columns | #207 |
 
 
 ## Known Test Considerations
