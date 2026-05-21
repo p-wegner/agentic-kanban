@@ -1183,6 +1183,7 @@ export function BoardPage() {
             setSelectedIssue(issue);
             setShowAllWorkspaces(false);
           }}
+          onRefresh={() => refetchBoard()}
         />
       )}
       {showWorktreeOverview && activeProjectId && (
