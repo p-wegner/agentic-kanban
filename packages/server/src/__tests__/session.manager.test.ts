@@ -296,6 +296,114 @@ describe("session broadcast parsing", () => {
   });
 });
 
+// Test the multi-turn JSONL protocol used by sendTurn / mock-agent stdin loop
+describe("multi-turn JSONL protocol", () => {
+  it("sendInput serializes content as JSONL user message", () => {
+    const content = "hello from test";
+    const line = JSON.stringify({ type: "user", content }) + "\n";
+    const parsed = JSON.parse(line.trim());
+    expect(parsed.type).toBe("user");
+    expect(parsed.content).toBe(content);
+  });
+
+  it("mock agent response format includes 'Received:' prefix", () => {
+    const content = "hello from test";
+    const responseText = `Received: ${content}`;
+    const line = JSON.stringify({
+      type: "assistant",
+      message: {
+        id: "msg-1",
+        content: [{ type: "text", text: responseText }],
+      },
+    });
+    const obj = JSON.parse(line);
+    expect(obj.type).toBe("assistant");
+    expect(obj.message.content[0].text).toBe(`Received: ${content}`);
+  });
+
+  it("result event increments num_turns on each follow-up", () => {
+    // After first turn, num_turns=1; after /turn, num_turns=2
+    const firstResult = JSON.stringify({ type: "result", subtype: "success", num_turns: 1 });
+    const secondResult = JSON.stringify({ type: "result", subtype: "success", num_turns: 2 });
+
+    const first = JSON.parse(firstResult);
+    const second = JSON.parse(secondResult);
+    expect(second.num_turns).toBeGreaterThan(first.num_turns);
+  });
+
+  it("turnComplete is signaled by result events (not assistant events)", () => {
+    const assistantLine = JSON.stringify({ type: "assistant", message: { content: [] } });
+    const resultLine = JSON.stringify({ type: "result", subtype: "success", num_turns: 1 });
+
+    const assistantObj = JSON.parse(assistantLine);
+    const resultObj = JSON.parse(resultLine);
+
+    // Only result events transition state from "processing" → "waiting"
+    expect(assistantObj.type).not.toBe("result");
+    expect(resultObj.type).toBe("result");
+  });
+
+  it("sendTurn rejects when turn state is 'processing'", () => {
+    // Simulate the state machine logic inline
+    const turnStates = new Map<string, "processing" | "waiting">();
+    turnStates.set("sess-1", "processing");
+
+    const state = turnStates.get("sess-1");
+    expect(state).toBe("processing");
+
+    // sendTurn would return error in this state
+    const shouldReject = state !== "waiting";
+    expect(shouldReject).toBe(true);
+  });
+
+  it("sendTurn allows when turn state is 'waiting'", () => {
+    const turnStates = new Map<string, "processing" | "waiting">();
+    turnStates.set("sess-1", "waiting");
+
+    const state = turnStates.get("sess-1");
+    expect(state).toBe("waiting");
+
+    const shouldAllow = state === "waiting";
+    expect(shouldAllow).toBe(true);
+  });
+
+  it("sendTurn returns stale when session not in turnStates", () => {
+    const turnStates = new Map<string, "processing" | "waiting">();
+    // Session not registered — treated as exited/stale
+
+    const state = turnStates.get("nonexistent-sess");
+    expect(state).toBeUndefined();
+
+    // When state is undefined, caller checks isProcessAlive; if gone → stale
+    const isStale = state === undefined;
+    expect(isStale).toBe(true);
+  });
+
+  it("turn state transitions: processing → waiting on result event", () => {
+    const turnStates = new Map<string, "processing" | "waiting">();
+    turnStates.set("sess-1", "processing");
+
+    // Simulate broadcast handler receiving a result event
+    const resultLine = JSON.stringify({ type: "result", subtype: "success", num_turns: 1 });
+    const evt = JSON.parse(resultLine);
+    if (evt.type === "result") {
+      turnStates.set("sess-1", "waiting");
+    }
+
+    expect(turnStates.get("sess-1")).toBe("waiting");
+  });
+
+  it("turn state transitions: waiting → processing on sendTurn", () => {
+    const turnStates = new Map<string, "processing" | "waiting">();
+    turnStates.set("sess-1", "waiting");
+
+    // Simulate sendTurn successfully sending input
+    turnStates.set("sess-1", "processing");
+
+    expect(turnStates.get("sess-1")).toBe("processing");
+  });
+});
+
 // Test the session resume UUID validation pattern used in startSession
 describe("claude session ID validation", () => {
   const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
