@@ -394,10 +394,10 @@ export function BoardPage() {
     showToast(`Created "${result.name}"`, "success");
   }
 
-  async function handleCreateIssue(data: CreateIssueRequest & { startWorkspace?: boolean; planMode?: boolean; claudeProfile?: string; isDirect?: boolean }) {
+  async function handleCreateIssue(data: CreateIssueRequest & { startWorkspace?: boolean; planMode?: boolean; claudeProfile?: string; isDirect?: boolean; skillId?: string }) {
     setMutating(true);
     setError(null);
-    const { startWorkspace, planMode, claudeProfile, isDirect, ...issueData } = data;
+    const { startWorkspace, planMode, claudeProfile, isDirect, skillId, ...issueData } = data;
     try {
       const created = await apiFetch<{ id: string; issueNumber: number; title: string }>(
         "/api/issues",
@@ -423,6 +423,7 @@ export function BoardPage() {
               isDirect: isDirect || undefined,
               planMode: planMode || undefined,
               claudeProfile: claudeProfile || undefined,
+              skillId: skillId || undefined,
             }),
           });
           for (const col of board ?? columns) {

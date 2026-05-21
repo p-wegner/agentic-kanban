@@ -3,6 +3,12 @@ import type { CreateIssueRequest } from "@agentic-kanban/shared";
 import { apiFetch } from "../lib/api.js";
 import { showToast } from "./Toast.js";
 
+interface Skill {
+  id: string;
+  name: string;
+  description: string | null;
+}
+
 export interface CreateIssueFormState {
   title: string;
   description: string;
@@ -10,12 +16,13 @@ export interface CreateIssueFormState {
   startWorkspace: boolean;
   planMode: boolean;
   skipAutoReview: boolean;
+  skillId?: string;
 }
 
 interface CreateIssueFormProps {
   projectId: string;
   statusId: string;
-  onSubmit: (data: CreateIssueRequest & { startWorkspace?: boolean; planMode?: boolean; skipAutoReview?: boolean; isDirect?: boolean }) => Promise<void>;
+  onSubmit: (data: CreateIssueRequest & { startWorkspace?: boolean; planMode?: boolean; skipAutoReview?: boolean; isDirect?: boolean; skillId?: string }) => Promise<void>;
   onCancel: () => void;
   canStartWorkspace?: boolean;
   onExpand?: (state: CreateIssueFormState) => void;
@@ -38,6 +45,8 @@ export function CreateIssueForm({
   const [planMode, setPlanMode] = useState(initialState?.planMode ?? false);
   const [skipAutoReview, setSkipAutoReview] = useState(initialState?.skipAutoReview ?? false);
   const [isDirect, setIsDirect] = useState(false);
+  const [skillId, setSkillId] = useState<string>(initialState?.skillId ?? "");
+  const [skills, setSkills] = useState<Skill[]>([]);
   const titleRef = useRef<HTMLTextAreaElement>(null);
   const descRef = useRef<HTMLTextAreaElement>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -52,6 +61,13 @@ export function CreateIssueForm({
 
   useEffect(() => { autoResize(titleRef.current); }, [title]);
   useEffect(() => { autoResize(descRef.current); }, [description]);
+
+  useEffect(() => {
+    if (!startWorkspace || !projectId) return;
+    apiFetch<Skill[]>(`/api/agent-skills?projectId=${projectId}`)
+      .then(setSkills)
+      .catch(() => {});
+  }, [startWorkspace, projectId]);
 
   async function handleEnhance() {
     if (!title.trim() || enhancing) return;
@@ -94,6 +110,7 @@ export function CreateIssueForm({
         planMode: (startWorkspace && planMode) || undefined,
         skipAutoReview: (startWorkspace && skipAutoReview) || undefined,
         isDirect: (startWorkspace && isDirect) || undefined,
+        skillId: (startWorkspace && skillId) || undefined,
       });
     } finally {
       setSubmitting(false);
@@ -203,6 +220,21 @@ export function CreateIssueForm({
             />
             Work directly on master (no worktree)
           </label>
+          {skills.length > 0 && (
+            <div className="flex items-center gap-2">
+              <label className="text-xs text-gray-600 shrink-0">Skill:</label>
+              <select
+                value={skillId}
+                onChange={(e) => setSkillId(e.target.value)}
+                className="flex-1 text-xs border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              >
+                <option value="">None</option>
+                {skills.map((s) => (
+                  <option key={s.id} value={s.id}>{s.name}</option>
+                ))}
+              </select>
+            </div>
+          )}
         </div>
       )}
       <div className="flex gap-2 items-center">
@@ -257,7 +289,7 @@ export function CreateIssueForm({
         {onExpand && (
           <button
             type="button"
-            onClick={() => onExpand({ title, description, priority, startWorkspace, planMode, skipAutoReview })}
+            onClick={() => onExpand({ title, description, priority, startWorkspace, planMode, skipAutoReview, skillId })}
             className="ml-auto text-gray-400 hover:text-gray-600 p-1 rounded"
             title="Expand form"
           >
