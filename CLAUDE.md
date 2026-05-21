@@ -142,7 +142,7 @@ When the user references `#N` (e.g., "review #70", "merge #65", "what's the stat
 Get-NetTCPConnection -LocalPort <port> | Select-Object -ExpandProperty OwningProcess | ForEach-Object { Stop-Process -Id $_ -Force }
 ```
 
-**Starting the dev server headlessly (verified):** Use `Start-Job` with the wait loop in the SAME PowerShell call — if the session exits before child processes fully detach, the job dies and nothing starts:
+**Starting the dev server headlessly (verified):** Use `Start-Job` with the wait loop in the SAME PowerShell call — if the session exits before child processes fully detach, the job dies and nothing starts. Always pass `run_in_background: true` on the PowerShell tool call so Claude Code doesn't block waiting for ports:
 ```powershell
 Start-Job -ScriptBlock { Set-Location C:\andrena\agentic-kanban; pnpm dev 2>&1 } | Out-Null
 for ($i = 0; $i -lt 25; $i++) {
