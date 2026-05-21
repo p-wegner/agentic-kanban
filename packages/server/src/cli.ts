@@ -152,7 +152,7 @@ Setup:
       // Resolve base folder: --path flag takes precedence over preference
       let baseFolder = options.path;
       if (!baseFolder) {
-        const pref = await db.select().from(preferences).where(eq(preferences.key, “projects_base_path”)).limit(1);
+        const pref = await db.select().from(preferences).where(eq(preferences.key, "projects_base_path")).limit(1);
         if (pref.length > 0 && pref[0].value) {
           baseFolder = pref[0].value;
         }
