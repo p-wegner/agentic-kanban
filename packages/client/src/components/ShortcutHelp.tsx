@@ -9,7 +9,10 @@ const SHORTCUTS = [
   { keys: ["?"], description: "Show keyboard shortcuts" },
   { keys: ["c"], description: "Create new issue" },
   { keys: ["w"], description: "New issue + start workspace" },
-  { keys: ["t"], description: "Open Quick Tasks panel" },
+  { keys: ["q"], description: "Open Quick Tasks panel" },
+  { keys: ["b"], description: "Switch to Board view" },
+  { keys: ["g"], description: "Switch to Graph view" },
+  { keys: ["t"], description: "Switch to Table view" },
   { keys: ["g", "s"], description: "Open settings" },
 ];
 
