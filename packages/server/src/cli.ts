@@ -57,6 +57,7 @@ Examples:
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 >>>>>>> b794815 (feat: add cli create subcommand and preferences set/get)
 =======
@@ -120,6 +121,9 @@ Examples:
   $ agentic-kanban preferences set projects_base_path /path/to/projects
 >>>>>>> 9e9ee57 (fix: add missing fs imports and unify projects_base_path key name)
 >>>>>>> dbea783 (fix: add missing fs imports and unify projects_base_path key name)
+=======
+  $ agentic-kanban preferences set projects_base_path /path/to/projects
+>>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
 `);
 
 program
@@ -223,6 +227,7 @@ program
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 >>>>>>> b794815 (feat: add cli create subcommand and preferences set/get)
 =======
@@ -315,6 +320,11 @@ program
 >>>>>>> 7effda9 (fix: align projects_base_dir -> projects_base_path across cli.ts and SettingsPanel.tsx)
 =======
 >>>>>>> dbea783 (fix: add missing fs imports and unify projects_base_path key name)
+=======
+  .description("Create a new git repo and register it as a project.\n\nCreates a directory under the configured projects_base_path preference (or --path), runs 'git init', and registers the repo.\n\nUse 'pnpm cli -- register <path>' to register an existing repo instead.")
+  .argument("<folder-name>", "Name of the new project folder to create")
+  .option("--path <base-path>", "Base directory to create the folder in (overrides projects_base_path preference)")
+>>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
   .option("-n, --name <name>", "Custom project name (defaults to folder name)")
   .option("-b, --branch <branch>", "Initial branch name (default: main)")
   .addHelpText("after", `
@@ -335,6 +345,7 @@ Examples:
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 >>>>>>> b794815 (feat: add cli create subcommand and preferences set/get)
 =======
@@ -398,12 +409,16 @@ Examples:
   $ agentic-kanban create my-app                        # uses projects_base_path preference
 >>>>>>> 9e9ee57 (fix: add missing fs imports and unify projects_base_path key name)
 >>>>>>> dbea783 (fix: add missing fs imports and unify projects_base_path key name)
+=======
+  $ agentic-kanban create my-app                        # uses projects_base_path preference
+>>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
   $ agentic-kanban create my-app --path /projects       # create in /projects/my-app
   $ agentic-kanban create my-app -n "My Application"   # custom project name
   $ agentic-kanban create my-app -b master              # use 'master' as initial branch
 
 Setup:
   Set the base folder preference first:
+<<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
@@ -550,12 +565,18 @@ Setup:
     };
 
 >>>>>>> 088856d (WIP: add rmSync and writeFileSync imports to projects.ts)
+=======
+  $ agentic-kanban preferences set projects_base_path /path/to/projects
+`)
+  .action(async (folderName: string, options: { path?: string; name?: string; branch?: string }) => {
+>>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
     try {
       await runMigrations();
 
       // Resolve base folder: --path flag takes precedence over preference
       let baseFolder = options.path;
       if (!baseFolder) {
+<<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
@@ -657,12 +678,16 @@ Setup:
 >>>>>>> 7effda9 (fix: align projects_base_dir -> projects_base_path across cli.ts and SettingsPanel.tsx)
 =======
 >>>>>>> dbea783 (fix: add missing fs imports and unify projects_base_path key name)
+=======
+        const pref = await db.select().from(preferences).where(eq(preferences.key, “projects_base_path”)).limit(1);
+>>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
         if (pref.length > 0 && pref[0].value) {
           baseFolder = pref[0].value;
         }
       }
 
       if (!baseFolder) {
+<<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
@@ -855,48 +880,20 @@ Setup:
 >>>>>>> 63066d9 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
 =======
 >>>>>>> dbea783 (fix: add missing fs imports and unify projects_base_path key name)
+=======
+        console.error("No base folder configured. Use --path <base-path> or set the projects_base_path preference:");
+        console.error("  pnpm cli -- preferences set projects_base_path /path/to/projects");
+>>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
         process.exit(1);
       }
 
       const { mkdir, access, rm } = await import("node:fs/promises");
       const { join, resolve: resolvePath, sep } = await import("node:path");
-=======
-        console.error("No base folder configured. Use --path <base-path> or set the projects_base_folder preference:");
-        console.error("  pnpm cli -- preferences set projects_base_folder /path/to/projects");
-=======
-        console.error("No base folder configured. Use --path <base-path> or set the projects_base_dir preference:");
-        console.error("  pnpm cli -- preferences set projects_base_dir /path/to/projects");
->>>>>>> f6d1a48 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
-        process.exit(1);
-      }
-
-      const { mkdir, access, rm } = await import("node:fs/promises");
-<<<<<<< HEAD
-      const { join, resolve: resolvePath } = await import("node:path");
->>>>>>> 4ff54fb (feat: add cli create subcommand and preferences set/get)
-=======
-      const { join, resolve: resolvePath, sep } = await import("node:path");
->>>>>>> 76d53ab (fix: guard against path traversal in cli create command)
       const { execFile } = await import("node:child_process");
       const { promisify } = await import("node:util");
-=======
-        console.error(“No base folder configured. Use --path <base-path> or set the projects_base_dir preference:”);
-        console.error(“  pnpm cli -- preferences set projects_base_dir /path/to/projects”);
-=======
-        console.error(“No base folder configured. Use --path <base-path> or set the projects_base_path preference:”);
-        console.error(“  pnpm cli -- preferences set projects_base_path /path/to/projects”);
->>>>>>> a5e9504 (fix: align projects_base_dir -> projects_base_path across cli.ts and SettingsPanel.tsx)
-        process.exit(1);
-      }
-
-      const { mkdir, access, rm: rmFs } = await import(“node:fs/promises”);
-      rmFn = rmFs;
-      const { join, resolve: resolvePath, sep } = await import(“node:path”);
-      const { execFile } = await import(“node:child_process”);
-      const { promisify } = await import(“node:util”);
->>>>>>> 088aead (WIP: add rmSync and writeFileSync imports to projects.ts)
       const execFileAsync = promisify(execFile);
 
+<<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
@@ -909,14 +906,17 @@ Setup:
 =======
 >>>>>>> 76d53ab (fix: guard against path traversal in cli create command)
 >>>>>>> 09277d7 (fix: guard against path traversal in cli create command)
+=======
+>>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
       const resolvedBase = resolvePath(baseFolder);
-      repoPath = resolvePath(join(resolvedBase, folderName));
+      const repoPath = resolvePath(join(resolvedBase, folderName));
 
-      // Guard against path traversal (e.g. folderName = “../../etc”)
+      // Guard against path traversal (e.g. folderName = "../../etc")
       if (!repoPath.startsWith(resolvedBase + sep) && repoPath !== resolvedBase) {
-        console.error(`Invalid folder name: “${folderName}” escapes the base directory.`);
+        console.error(`Invalid folder name: "${folderName}" escapes the base directory.`);
         process.exit(1);
       }
+<<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
 >>>>>>> a1f5d7d (fix: guard against path traversal in cli create command)
@@ -932,6 +932,8 @@ Setup:
 =======
 >>>>>>> 76d53ab (fix: guard against path traversal in cli create command)
 >>>>>>> 09277d7 (fix: guard against path traversal in cli create command)
+=======
+>>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
 
       // Check if directory already exists
       try {
@@ -942,6 +944,7 @@ Setup:
         // Expected: directory doesn't exist yet
       }
 
+<<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
@@ -1076,6 +1079,9 @@ Setup:
 =======
       // Create directory â€” track so we can clean up on failure
 >>>>>>> f6d1a48 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
+=======
+      // Create directory -- track so we can clean up on failure
+>>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
       await mkdir(repoPath, { recursive: true });
       let dirCreated = true;
 
@@ -1084,14 +1090,16 @@ Setup:
           try { await rm(repoPath, { recursive: true, force: true }); } catch { /* best-effort */ }
         }
       };
->>>>>>> 907d84b (fix: clean up created directory if git init/commit fails in cli create command)
 
+<<<<<<< HEAD
 <<<<<<< HEAD
 >>>>>>> dd3f860 (feat: add cli create subcommand and preferences set/get)
 =======
 =======
 >>>>>>> 2d6d43c (fix: add missing rmSync/writeFileSync imports in projects.ts; fix cleanupDir scope in cli create command)
 >>>>>>> ea92e79 (fix: add missing rmSync/writeFileSync imports in projects.ts; fix cleanupDir scope in cli create command)
+=======
+>>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
       // Run git init
       const branch = options.branch ?? "main";
       try {
@@ -1116,6 +1124,7 @@ Setup:
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 >>>>>>> 907d84b (fix: clean up created directory if git init/commit fails in cli create command)
 =======
@@ -1130,6 +1139,8 @@ Setup:
 =======
 >>>>>>> 907d84b (fix: clean up created directory if git init/commit fails in cli create command)
 >>>>>>> 09fa7b4 (fix: clean up created directory if git init/commit fails in cli create command)
+=======
+>>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
       // Create an initial empty commit so the repo has a HEAD.
       // git commit requires user.name/email to be configured; give a clear error if not.
       try {
@@ -1146,6 +1157,7 @@ Setup:
         }
         process.exit(1);
       }
+<<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
@@ -1214,6 +1226,8 @@ Setup:
 >>>>>>> b794815 (feat: add cli create subcommand and preferences set/get)
 =======
 >>>>>>> ea9ffef (fix: resolve preference key mismatch, path traversal in skill names, and cleanup bugs)
+=======
+>>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
       // Register the new repo
       const { detectRepoInfo: detectInfo } = await import("./services/git-info.service.js");
       const repoInfo = await detectInfo(repoPath);
@@ -1266,6 +1280,7 @@ Setup:
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 >>>>>>> ea9ffef (fix: resolve preference key mismatch, path traversal in skill names, and cleanup bugs)
       dirCreated = false; // DB registration succeeded; keep the directory
@@ -1297,6 +1312,9 @@ Setup:
 >>>>>>> b794815 (feat: add cli create subcommand and preferences set/get)
 =======
 >>>>>>> ea9ffef (fix: resolve preference key mismatch, path traversal in skill names, and cleanup bugs)
+=======
+      dirCreated = false; // DB registration succeeded; keep the directory
+>>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
       console.log(`Created and registered project "${projectName}"`);
       console.log(`  Path: ${repoInfo.repoPath}`);
       console.log(`  Branch: ${repoInfo.defaultBranch}`);
@@ -1314,6 +1332,7 @@ Setup:
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 >>>>>>> ea9ffef (fix: resolve preference key mismatch, path traversal in skill names, and cleanup bugs)
       await cleanupDir();
@@ -1345,6 +1364,9 @@ Setup:
 >>>>>>> b794815 (feat: add cli create subcommand and preferences set/get)
 =======
 >>>>>>> ea9ffef (fix: resolve preference key mismatch, path traversal in skill names, and cleanup bugs)
+=======
+      await cleanupDir();
+>>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
       console.error("Error:", err instanceof Error ? err.message : String(err));
       process.exit(1);
     }
@@ -1355,6 +1377,7 @@ const prefCmd = program
   .description("Manage CLI preferences.\n\nSubcommands: get, set")
   .addHelpText("after", `
 Examples:
+<<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
@@ -1450,6 +1473,10 @@ Examples:
 >>>>>>> 7effda9 (fix: align projects_base_dir -> projects_base_path across cli.ts and SettingsPanel.tsx)
 =======
 >>>>>>> dbea783 (fix: add missing fs imports and unify projects_base_path key name)
+=======
+  $ agentic-kanban preferences get projects_base_path
+  $ agentic-kanban preferences set projects_base_path /path/to/projects
+>>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
 `);
 
 prefCmd
@@ -1617,6 +1644,7 @@ program
   .command("cleanup")
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
   .description("Show stale worktrees for closed workspaces.\n\nLists git worktrees belonging to closed/merged workspaces. These worktrees are no longer needed and can be removed manually with 'git worktree remove --force <path>'.\n\nThis command does NOT auto-remove worktrees -- it only reports them.")
 =======
   .description("Show stale worktrees for closed workspaces.\n\nLists git worktrees belonging to closed/merged workspaces. These worktrees are no longer needed and can be removed manually with 'git worktree remove --force <path>'.\n\nThis command does NOT auto-remove worktrees â€” it only reports them.")
@@ -1624,6 +1652,9 @@ program
 =======
   .description("Show stale worktrees for closed workspaces.\n\nLists git worktrees belonging to closed/merged workspaces. These worktrees are no longer needed and can be removed manually with 'git worktree remove --force <path>'.\n\nThis command does NOT auto-remove worktrees â€” it only reports them.")
 >>>>>>> 63066d9 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
+=======
+  .description("Show stale worktrees for closed workspaces.\n\nLists git worktrees belonging to closed/merged workspaces. These worktrees are no longer needed and can be removed manually with 'git worktree remove --force <path>'.\n\nThis command does NOT auto-remove worktrees -- it only reports them.")
+>>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
   .addHelpText("after", `
 Example:
   $ agentic-kanban cleanup
@@ -1650,6 +1681,7 @@ Example:
       for (const ws of withWorktrees) {
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
         console.log(`  ${ws.branch} ->' ${ws.workingDir}`);
 =======
         console.log(`  ${ws.branch} â†’ ${ws.workingDir}`);
@@ -1657,6 +1689,9 @@ Example:
 =======
         console.log(`  ${ws.branch} â†’ ${ws.workingDir}`);
 >>>>>>> 63066d9 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
+=======
+        console.log(`  ${ws.branch} ->' ${ws.workingDir}`);
+>>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
       }
       console.log("\nThese worktrees can be removed manually with:");
       console.log("  git worktree remove --force <path>");
@@ -1696,6 +1731,7 @@ Examples:
 Status indicators:
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
   * = active workspace   o = idle workspace   o = reviewing   . = no workspace
 =======
   â— = active workspace   â—‹ = idle workspace   â—Ž = reviewing   Â· = no workspace
@@ -1703,6 +1739,9 @@ Status indicators:
 =======
   â— = active workspace   â—‹ = idle workspace   â—Ž = reviewing   Â· = no workspace
 >>>>>>> 63066d9 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
+=======
+  * = active workspace   o = idle workspace   o = reviewing   . = no workspace
+>>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
 `)
   .action(async (options: { project?: string; all?: boolean; json?: boolean; watch?: boolean; interval?: string }) => {
     try {
@@ -1735,6 +1774,7 @@ Status indicators:
           const wsStatus = issue.workspace?.status ?? "no workspace";
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
           const marker = wsStatus === "active" ? "*" : wsStatus === "idle" ? "o" : wsStatus === "reviewing" ? "o" : ".";
 =======
 =======
@@ -1742,6 +1782,9 @@ Status indicators:
           const marker = wsStatus === "active" ? "â—" : wsStatus === "idle" ? "â—‹" : wsStatus === "reviewing" ? "â—Ž" : "Â·";
 
 >>>>>>> 5ffc0d0 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
+=======
+          const marker = wsStatus === "active" ? "*" : wsStatus === "idle" ? "o" : wsStatus === "reviewing" ? "o" : ".";
+>>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
           console.log(`  ${marker} ${num.padEnd(4)} ${issue.title}`);
           console.log(`         [${issue.statusName}]  priority: ${issue.priority}  workspace: ${wsStatus}`);
 
@@ -1818,6 +1861,7 @@ async function getActiveProjectId(): Promise<string> {
 
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 // ?? issue commands ??
 =======
 =======
@@ -1825,6 +1869,9 @@ async function getActiveProjectId(): Promise<string> {
 // â”€â”€ issue commands â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 >>>>>>> 5ffc0d0 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
+=======
+// ?? issue commands ??
+>>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
 const issueCmd = program.command("issue").description("Manage issues on the board.\n\nSubcommands: list, create, move, summary, dependency");
 
 issueCmd
@@ -2174,6 +2221,7 @@ Examples:
 
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 // ?? workspace commands ??
 =======
 =======
@@ -2181,6 +2229,9 @@ Examples:
 // â”€â”€ workspace commands â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 >>>>>>> 5ffc0d0 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
+=======
+// ?? workspace commands ??
+>>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
 const wsCmd = program.command("workspace").description("Manage workspaces (git worktrees linked to issues).\n\nWorkspaces create isolated git worktrees where agents can work on issues. Each workspace is tied to a single issue.\n\nSubcommands: list, create");
 
 wsCmd
@@ -2393,6 +2444,7 @@ Example:
 
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 // ?? skill commands ??
 =======
 =======
@@ -2400,6 +2452,9 @@ Example:
 // â”€â”€ skill commands â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 >>>>>>> 5ffc0d0 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
+=======
+// ?? skill commands ??
+>>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
 program
   .command("delete-status <status-id>")
   .description("Delete a project status (fails if issues are linked to it)")
@@ -2415,6 +2470,7 @@ program
       if (linked.length > 0) {
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
         console.error(`Cannot delete status "${rows[0].name}" -- it has linked issues. Move or delete those issues first.`);
 =======
         console.error(`Cannot delete status "${rows[0].name}" â€” it has linked issues. Move or delete those issues first.`);
@@ -2422,6 +2478,9 @@ program
 =======
         console.error(`Cannot delete status "${rows[0].name}" â€” it has linked issues. Move or delete those issues first.`);
 >>>>>>> 63066d9 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
+=======
+        console.error(`Cannot delete status "${rows[0].name}" -- it has linked issues. Move or delete those issues first.`);
+>>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
         process.exit(1);
       }
       await db.delete(projectStatuses).where(eq(projectStatuses.id, statusId));
@@ -2635,6 +2694,7 @@ Examples:
 
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 // ?? dependency commands ??
 =======
 =======
@@ -2642,6 +2702,9 @@ Examples:
 // â”€â”€ dependency commands â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 >>>>>>> 5ffc0d0 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
+=======
+// ?? dependency commands ??
+>>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
 const depCmd = issueCmd.command("dependency").description("Manage issue dependencies.\n\nDependencies link issues together with typed relationships. Available types: depends_on, blocked_by, related_to, duplicates, parent_of, child_of.\n\nSubcommands: list, add, remove");
 
 depCmd
@@ -2841,6 +2904,7 @@ program
 
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 // ?? sessions debug command ??
 =======
 =======
@@ -2848,10 +2912,14 @@ program
 // â”€â”€ sessions debug command â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 >>>>>>> 5ffc0d0 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
+=======
+// ?? sessions debug command ??
+>>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
 const sessionDebugCmd = program
   .command("session-history [issue-number]")
   .alias("sh")
   .description(
+<<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
     "Inspect Claude Code session transcript files from ~/.claude/projects/.\n\nParses JSONL session files for worktrees linked to this project's issues, showing what the agent did and why it stopped -- without loading entire large files."
@@ -2861,6 +2929,9 @@ const sessionDebugCmd = program
 =======
     "Inspect Claude Code session transcript files from ~/.claude/projects/.\n\nParses JSONL session files for worktrees linked to this project's issues, showing what the agent did and why it stopped â€” without loading entire large files."
 >>>>>>> 63066d9 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
+=======
+    "Inspect Claude Code session transcript files from ~/.claude/projects/.\n\nParses JSONL session files for worktrees linked to this project's issues, showing what the agent did and why it stopped -- without loading entire large files."
+>>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
   )
   .option("-t, --tail <lines>", "Number of tail lines to parse per session file (default: 60)", "60")
   .option("-a, --all", "Show all sessions for the issue, not just the latest", false)
@@ -2959,6 +3030,7 @@ Via pnpm (use -- to pass args):
         for (const jf of jsonlFiles) {
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
           // Read only the tail -- avoid loading huge files
 =======
           // Read only the tail â€” avoid loading huge files
@@ -2966,6 +3038,9 @@ Via pnpm (use -- to pass args):
 =======
           // Read only the tail â€” avoid loading huge files
 >>>>>>> 63066d9 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
+=======
+          // Read only the tail -- avoid loading huge files
+>>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
           const raw = readFileSync(jf.path, "utf8");
           const allLines = raw.split("\n").filter(Boolean);
           const tailStart = Math.max(0, allLines.length - tailLines);
@@ -3015,6 +3090,7 @@ Via pnpm (use -- to pass args):
             dir: dir.name,
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
             file: jf.name.replace(".jsonl", "").slice(0, 8) + "--",
 =======
             file: jf.name.replace(".jsonl", "").slice(0, 8) + "â€¦",
@@ -3022,6 +3098,9 @@ Via pnpm (use -- to pass args):
 =======
             file: jf.name.replace(".jsonl", "").slice(0, 8) + "â€¦",
 >>>>>>> 63066d9 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
+=======
+            file: jf.name.replace(".jsonl", "").slice(0, 8) + "--",
+>>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
             fileSizeBytes: jf.size,
             lastModified: jf.mtime.toISOString(),
             linesParsed: linesToParse.length,
@@ -3033,6 +3112,7 @@ Via pnpm (use -- to pass args):
             agentResponded,
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
             sessionId: sessionId ? (sessionId as string).slice(0, 8) + "--" : null,
 =======
             sessionId: sessionId ? (sessionId as string).slice(0, 8) + "â€¦" : null,
@@ -3040,6 +3120,9 @@ Via pnpm (use -- to pass args):
 =======
             sessionId: sessionId ? (sessionId as string).slice(0, 8) + "â€¦" : null,
 >>>>>>> 63066d9 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
+=======
+            sessionId: sessionId ? (sessionId as string).slice(0, 8) + "--" : null,
+>>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
           });
         }
       }
@@ -3056,6 +3139,7 @@ Via pnpm (use -- to pass args):
       for (const r of results) {
         if (r.issueNum !== currentIssue) {
           currentIssue = r.issueNum;
+<<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
           console.log(`  -- #${r.issueNum ?? "?"} ----------------------------------`);
@@ -3077,6 +3161,13 @@ Via pnpm (use -- to pass args):
         const age = timeSince(new Date(r.lastModified));
         const started = r.sessionStarted ? (r.agentResponded ? "âœ“ responded" : "âœ— no response") : "âœ— no prompt";
 >>>>>>> 63066d9 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
+=======
+          console.log(`  -- #${r.issueNum ?? "?"} ----------------------------------`);
+        }
+        const size = r.fileSizeBytes < 1024 ? `${r.fileSizeBytes}B` : `${(r.fileSizeBytes / 1024).toFixed(0)}KB`;
+        const age = timeSince(new Date(r.lastModified));
+        const started = r.sessionStarted ? (r.agentResponded ? "OK responded" : "FAIL no response") : "FAIL no prompt";
+>>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
         console.log(`  ${r.file}  ${size}  ${age} ago  [${started}]  turns:${r.turns}`);
         if (r.stopReason) console.log(`    stop_reason: ${r.stopReason}`);
         if (r.lastToolCall) console.log(`    last tool:   ${r.lastToolCall}`);
