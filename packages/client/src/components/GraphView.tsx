@@ -133,7 +133,6 @@ function computeLayout(nodes: IssueWithStatus[], edges: Dependency[]): Node[] {
   for (let col = 0; col < orderedStatuses.length; col++) {
     const status = orderedStatuses[col];
     const group = byStatus.get(status)!;
-    const rowCount = Math.ceil(group.length / SWIMLANE_NODES_PER_ROW);
     for (let i = 0; i < group.length; i++) {
       const subCol = i % SWIMLANE_NODES_PER_ROW;
       const row = Math.floor(i / SWIMLANE_NODES_PER_ROW);
@@ -141,10 +140,8 @@ function computeLayout(nodes: IssueWithStatus[], edges: Dependency[]): Node[] {
       const y = row * (NODE_H + V_GAP) + COL_HEADER_H + 48;
       result.push({ id: group[i].id, x, y, issue: group[i] });
     }
-    // Advance x by the actual width used (sub-columns * nodeW + gaps between sub-cols)
     const subCols = Math.min(group.length, SWIMLANE_NODES_PER_ROW);
     swimlaneX += subCols * (NODE_W + H_GAP) + BAND_GAP;
-    void rowCount; // used for layout width calculation above
   }
   return result;
 }
