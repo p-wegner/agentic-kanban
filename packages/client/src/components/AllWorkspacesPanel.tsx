@@ -1,11 +1,13 @@
 import { useState } from "react";
 import { formatRelativeTime } from "../lib/formatRelativeTime.js";
+import { apiFetch } from "../lib/api.js";
 import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
 
 interface AllWorkspacesPanelProps {
   columns: StatusWithIssues[];
   onClose: () => void;
   onIssueClick: (issue: IssueWithStatus) => void;
+  onRefresh?: () => void;
 }
 
 type WsStatusFilter = "all" | "active" | "running" | "idle" | "reviewing" | "closed";
@@ -35,9 +37,10 @@ const ISSUE_STATUS_COLORS: Record<string, string> = {
   "Cancelled": "bg-red-100 text-red-500",
 };
 
-export function AllWorkspacesPanel({ columns, onClose, onIssueClick }: AllWorkspacesPanelProps) {
+export function AllWorkspacesPanel({ columns, onClose, onIssueClick, onRefresh }: AllWorkspacesPanelProps) {
   const [statusFilter, setStatusFilter] = useState<WsStatusFilter>("all");
   const [searchQuery, setSearchQuery] = useState("");
+  const [closingIdle, setClosingIdle] = useState(false);
 
   const issuesWithWorkspaces: IssueWithStatus[] = columns
     .flatMap((col) => col.issues)
@@ -46,6 +49,28 @@ export function AllWorkspacesPanel({ columns, onClose, onIssueClick }: AllWorksp
   const activeCount = issuesWithWorkspaces.filter(
     (i) => i.workspaceSummary?.main?.status === "active" || i.workspaceSummary?.main?.status === "reviewing"
   ).length;
+
+  const idleWorkspaceIds = issuesWithWorkspaces
+    .filter((i) => i.workspaceSummary?.main?.status === "idle")
+    .map((i) => i.workspaceSummary!.main!.id);
+
+  async function handleCloseIdle() {
+    if (idleWorkspaceIds.length === 0) return;
+    const confirmed = window.confirm(
+      `Close ${idleWorkspaceIds.length} idle workspace${idleWorkspaceIds.length !== 1 ? "s" : ""}?`
+    );
+    if (!confirmed) return;
+    setClosingIdle(true);
+    for (const id of idleWorkspaceIds) {
+      try {
+        await apiFetch(`/api/workspaces/${id}`, { method: "DELETE" });
+      } catch {
+        // non-fatal — continue with the rest
+      }
+      onRefresh?.();
+    }
+    setClosingIdle(false);
+  }
 
   const filtered = issuesWithWorkspaces.filter((issue) => {
     const ws = issue.workspaceSummary!;
@@ -94,12 +119,23 @@ export function AllWorkspacesPanel({ columns, onClose, onIssueClick }: AllWorksp
               </span>
             )}
           </div>
-          <button
-            onClick={onClose}
-            className="text-gray-400 hover:text-gray-600 text-lg leading-none"
-          >
-            &times;
-          </button>
+          <div className="flex items-center gap-2">
+            {idleWorkspaceIds.length > 0 && (
+              <button
+                onClick={handleCloseIdle}
+                disabled={closingIdle}
+                className="text-xs px-2.5 py-1 rounded bg-yellow-100 text-yellow-700 hover:bg-yellow-200 disabled:opacity-50 font-medium"
+              >
+                {closingIdle ? "Closing…" : `Close ${idleWorkspaceIds.length} idle`}
+              </button>
+            )}
+            <button
+              onClick={onClose}
+              className="text-gray-400 hover:text-gray-600 text-lg leading-none"
+            >
+              &times;
+            </button>
+          </div>
         </div>
 
         {/* Filters */}
