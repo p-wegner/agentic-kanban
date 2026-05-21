@@ -197,6 +197,31 @@ function MonitorPopover({ status, onClose, onOpenWorkspace, columns, onRunNow, a
             )}
           </div>
 
+          {(() => {
+            const activeWs = columns.flatMap(c => c.issues).filter(iss =>
+              iss.workspaceSummary?.main &&
+              (iss.workspaceSummary.main.status === "active" || iss.workspaceSummary.main.status === "reviewing") &&
+              iss.workspaceSummary.main.lastAssistantMessage
+            );
+            if (activeWs.length === 0) return null;
+            return (
+              <div className="px-3 py-2 border-b border-gray-100">
+                <div className="text-gray-400 font-medium uppercase tracking-wide mb-1.5" style={{ fontSize: "10px" }}>Active agents</div>
+                <div className="space-y-1.5 max-h-36 overflow-y-auto">
+                  {activeWs.map(iss => (
+                    <div key={iss.id} className="cursor-pointer hover:bg-gray-50 rounded px-1 -mx-1 py-0.5" onClick={() => { onOpenWorkspace(iss.workspaceSummary!.main!.id, iss.id); onClose(); }}>
+                      <div className="flex items-center gap-1.5 mb-0.5">
+                        <span className="font-medium text-gray-600">#{iss.issueNumber}</span>
+                        <span className="text-gray-400 truncate" style={{ fontSize: "10px" }}>{iss.title}</span>
+                      </div>
+                      <p className="text-gray-500 leading-snug line-clamp-2" style={{ fontSize: "10px" }}>{iss.workspaceSummary!.main!.lastAssistantMessage}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
+
           {status?.recentActions && status.recentActions.length > 0 ? (
             <div className="px-3 py-2">
               <div className="text-gray-400 font-medium uppercase tracking-wide mb-1.5" style={{ fontSize: "10px" }}>Recent actions</div>
