@@ -151,7 +151,7 @@ Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue |
   ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }
 ```
 
-**Starting the dev server headlessly:** Use `Start-Job` — it persists after the tool call returns, unlike background Bash (`&`) which exits immediately:
+**Starting the dev server headlessly:** Use `Start-Job` — it persists after the tool call returns. Do NOT use Bash `&` — it creates a fully detached orphan process that survives all subsequent `Get-Job`/`Stop-Job` cleanup and requires manual PID hunting to kill:
 ```powershell
 Start-Job -ScriptBlock { Set-Location C:\andrena\agentic-kanban; pnpm dev 2>&1 } | Out-Null
 ```
