@@ -856,7 +856,7 @@ ${contextParts.join("\n")}`;
 
     // Fetch workspace summaries grouped by issueId
     const issueIds = projectIssues.map((i) => i.id);
-    const workspaceSummaryMap = new Map<string, { total: number; active: number; idle: number; closed: number; branches: string[]; main?: { id: string; branch: string; status: "active" | "reviewing" | "idle" | "closed"; claudeProfile: string | null; agentCommand: string | null; diffStats?: { filesChanged: number; insertions: number; deletions: number } | null; conflicts?: { hasConflicts: boolean; conflictingFiles: string[] } | null; lastSessionAt?: string | null } }>();
+    const workspaceSummaryMap = new Map<string, { total: number; active: number; idle: number; closed: number; branches: string[]; main?: { id: string; branch: string; status: "active" | "reviewing" | "idle" | "closed"; claudeProfile: string | null; agentCommand: string | null; readyForMerge?: boolean; diffStats?: { filesChanged: number; insertions: number; deletions: number } | null; conflicts?: { hasConflicts: boolean; conflictingFiles: string[] } | null; lastSessionAt?: string | null } }>();
 
     if (issueIds.length > 0) {
       const wsRows = await database
@@ -933,7 +933,7 @@ ${contextParts.join("\n")}`;
       for (const [issueId, summary] of workspaceSummaryMap) {
         const mainWs = mainWorkspaceMap.get(issueId);
         if (mainWs) {
-          summary.main = { id: mainWs.id, branch: mainWs.branch, status: mainWs.status as "active" | "reviewing" | "idle" | "closed", claudeProfile: mainWs.claudeProfile, agentCommand: mainWs.agentCommand };
+          summary.main = { id: mainWs.id, branch: mainWs.branch, status: mainWs.status as "active" | "reviewing" | "idle" | "closed", claudeProfile: mainWs.claudeProfile, agentCommand: mainWs.agentCommand, readyForMerge: mainWs.readyForMerge };
 
           if (mainWs.workingDir && mainWs.status !== "closed") {
             const diffRef = mainWs.isDirect ? "HEAD" : (mainWs.baseBranch || defaultBranch);
