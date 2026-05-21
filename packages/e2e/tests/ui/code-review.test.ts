@@ -8,9 +8,10 @@ test.describe("AI Code Review Flow", () => {
   const createdIssueIds: string[] = [];
 
   test.beforeAll(async ({ request }) => {
-    const projectsRes = await request.get(`${SERVER_URL}/api/projects`);
-    const projects = await projectsRes.json();
-    projectId = projects[0].id;
+    // Use the active project (set by global-setup to the worktree's registered project)
+    const activePrefRes = await request.get(`${SERVER_URL}/api/preferences/active-project`);
+    const activePref = await activePrefRes.json();
+    projectId = activePref.projectId;
 
     const statusesRes = await request.get(
       `${SERVER_URL}/api/projects/${projectId}/statuses`,
@@ -188,8 +189,9 @@ test.describe("AI Code Review Flow", () => {
     // Expand the workspace row by clicking the branch name
     await page.locator(`text=${branchName}`).first().click({ force: true });
 
-    // Review button should be visible and enabled
-    const reviewBtn = page.locator('button:has-text("Review")').first();
+    // Review button should be visible and enabled (scoped to workspace panel to avoid "In Review" column button)
+    const wsPanel = page.locator("section, div").filter({ has: page.locator("h2", { hasText: "Workspaces —" }) }).first();
+    const reviewBtn = wsPanel.locator('button', { hasText: /^Review$/ }).first();
     await expect(reviewBtn).toBeVisible({ timeout: 5000 });
     await expect(reviewBtn).toBeEnabled();
   });
@@ -221,7 +223,9 @@ test.describe("AI Code Review Flow", () => {
 
     await page.locator(`text=${branchName}`).first().click({ force: true });
 
-    await page.locator('button:has-text("Review")').first().click();
+    // Scope to workspace panel to avoid matching "In Review" column navigation button
+    const wsPanel2 = page.locator("section, div").filter({ has: page.locator("h2", { hasText: "Workspaces —" }) }).first();
+    await wsPanel2.locator('button', { hasText: /^Review$/ }).first().click();
 
     // Workspace status badge transitions to "reviewing"
     await expect(page.locator("span", { hasText: "reviewing" })).toBeVisible({ timeout: 10000 });
