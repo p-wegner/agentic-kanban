@@ -1,15 +1,11 @@
 import { Hono } from "hono";
 import { db } from "../db/index.js";
 import { agentSkills, preferences, projects } from "@agentic-kanban/shared/schema";
-import { eq, and, isNull, sql, inArray } from "drizzle-orm";
+import { eq, and, isNull, sql } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
-import { execFile, execSync } from "node:child_process";
-import { homedir } from "node:os";
-import { join } from "node:path";
-import { existsSync } from "node:fs";
 import type { Database } from "../db/index.js";
 import { writeAgentSkillFile, isSkillInstalledLocally } from "@agentic-kanban/shared/lib/agent-skill-files";
-import { buildSpawnEnv } from "../services/agent-provider.js";
+import { invokeClaudePrompt } from "../services/claude-cli.service.js";
 
 export function createAgentSkillsRoute(database: Database = db) {
   const router = new Hono();
@@ -48,24 +44,6 @@ export function createAgentSkillsRoute(database: Database = db) {
       return c.json({ error: "name is required" }, 400);
     }
 
-    let agentCommand = "claude";
-    let claudeProfile: string | undefined;
-    const prefs = await database
-      .select({ key: preferences.key, value: preferences.value })
-      .from(preferences)
-      .where(inArray(preferences.key, ["agent_command", "claude_profile"]));
-    for (const p of prefs) {
-      if (p.key === "agent_command" && p.value) agentCommand = p.value;
-      if (p.key === "claude_profile" && p.value) claudeProfile = p.value;
-    }
-
-    if (process.platform === "win32" && agentCommand === "claude") {
-      try {
-        const resolved = execSync("where claude.exe 2>nul", { encoding: "utf8" }).trim().split("\n")[0]?.trim();
-        if (resolved) agentCommand = resolved;
-      } catch {}
-    }
-
     const prompt = `You are helping create an agent skill definition for a kanban board AI coding system.
 Given a skill name and optional description/prompt, return an improved version that is clear, actionable, and well-structured.
 The description should be one concise sentence explaining what the skill does.
@@ -77,29 +55,9 @@ Current name: ${body.name}
 Current description: ${body.description?.trim() || "(none)"}
 Current prompt: ${body.prompt?.trim() || "(none)"}`;
 
-    const args: string[] = ["--output-format", "text", "-p"];
-    if (claudeProfile) {
-      const settingsPath = join(homedir(), ".claude", `settings_${claudeProfile}.json`);
-      if (existsSync(settingsPath)) {
-        args.push("--settings", settingsPath);
-      }
-    }
-
     let stdout: string;
     try {
-      ({ stdout } = await new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
-        const child = execFile(agentCommand, args, {
-          encoding: "utf8",
-          timeout: 60000,
-          shell: false,
-          maxBuffer: 1024 * 1024,
-          env: buildSpawnEnv(claudeProfile),
-        }, (err, out, se) => {
-          if (err) reject(err);
-          else resolve({ stdout: out ?? "", stderr: se ?? "" });
-        });
-        child.stdin?.end(prompt);
-      }));
+      stdout = await invokeClaudePrompt(prompt, { database });
     } catch (err: any) {
       const parts: string[] = [];
       if (err.message) parts.push(err.message);
