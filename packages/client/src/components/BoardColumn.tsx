@@ -3,6 +3,31 @@ import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
 import type { LiveSessionStats, TodoItem } from "../lib/useBoardEvents.js";
 import { IssueCard } from "./IssueCard.js";
 
+type SortMode = "default" | "priority";
+
+const PRIORITY_ORDER: Record<string, number> = {
+  critical: 0,
+  high: 1,
+  medium: 2,
+  low: 3,
+};
+
+function sortIssues(issues: IssueWithStatus[], mode: SortMode): IssueWithStatus[] {
+  if (mode === "default") return issues;
+  return [...issues].sort(
+    (a, b) =>
+      (PRIORITY_ORDER[a.priority] ?? 99) - (PRIORITY_ORDER[b.priority] ?? 99)
+  );
+}
+
+function loadSortMode(columnId: string): SortMode {
+  try {
+    return (localStorage.getItem(`col-sort-${columnId}`) as SortMode) ?? "default";
+  } catch {
+    return "default";
+  }
+}
+
 interface BoardColumnProps {
   column: StatusWithIssues;
   projectId: string;
@@ -44,6 +69,7 @@ export function BoardColumn({
   const dragCounterRef = useRef(0);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [scrollState, setScrollState] = useState<"top" | "middle" | "bottom" | "none">("none");
+  const [sortMode, setSortMode] = useState<SortMode>(() => loadSortMode(column.id));
 
   const updateScrollState = useCallback(() => {
     const el = scrollRef.current;
@@ -95,18 +121,27 @@ export function BoardColumn({
   }
 
   function computeGapSortOrder(beforeIndex: number): number {
-    const issues = column.issues;
+    // Uses displayedIssues so gap positions match visual order
     if (beforeIndex === 0) {
-      // Before first item
-      const first = issues[0].sortOrder;
-      return first - 100;
+      return displayedIssues[0].sortOrder - 100;
     }
-    const before = issues[beforeIndex - 1].sortOrder;
-    const after = issues[beforeIndex].sortOrder;
+    const before = displayedIssues[beforeIndex - 1].sortOrder;
+    const after = displayedIssues[beforeIndex].sortOrder;
     return Math.round((before + after) / 2);
   }
 
+  function toggleSort() {
+    const next: SortMode = sortMode === "default" ? "priority" : "default";
+    setSortMode(next);
+    try {
+      localStorage.setItem(`col-sort-${column.id}`, next);
+    } catch {
+      // ignore
+    }
+  }
+
   const isCreating = creatingInColumn === column.id;
+  const displayedIssues = sortIssues(column.issues, sortMode);
 
   return (
     <div
@@ -168,15 +203,28 @@ export function BoardColumn({
             <span className="text-[10px] text-purple-500 font-medium">Awaiting manual merge</span>
           )}
         </div>
-        {!isCreating && column.name === "Todo" && (
+        <div className="flex items-center gap-1">
           <button
-            onClick={() => onCreateClick(column.id)}
-            className="text-gray-400 hover:text-gray-600 hover:bg-white/60 rounded-md w-6 h-6 flex items-center justify-center text-lg leading-none transition-colors"
-            title="Add issue"
+            onClick={toggleSort}
+            className={`text-xs rounded-md px-1.5 py-0.5 transition-colors ${
+              sortMode === "priority"
+                ? "bg-blue-100 text-blue-600 hover:bg-blue-200"
+                : "text-gray-400 hover:text-gray-600 hover:bg-white/60"
+            }`}
+            title={sortMode === "priority" ? "Sorted by priority — click for default" : "Sort by priority"}
           >
-            +
+            ↑P
           </button>
-        )}
+          {!isCreating && column.name === "Todo" && (
+            <button
+              onClick={() => onCreateClick(column.id)}
+              className="text-gray-400 hover:text-gray-600 hover:bg-white/60 rounded-md w-6 h-6 flex items-center justify-center text-lg leading-none transition-colors"
+              title="Add issue"
+            >
+              +
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="relative flex-1 min-h-0 overflow-hidden rounded-lg">
@@ -188,7 +236,7 @@ export function BoardColumn({
           onScroll={updateScrollState}
           className="space-y-1.5 h-full overflow-y-auto column-scroll-container pb-6"
         >
-          {column.issues.map((issue: IssueWithStatus, idx: number) => (
+          {displayedIssues.map((issue: IssueWithStatus, idx: number) => (
             <div key={issue.id}>
               <DropGap
                 visible={dragOver}
@@ -207,7 +255,7 @@ export function BoardColumn({
               />
             </div>
           ))}
-          {dragOver && column.issues.length > 0 && (
+          {dragOver && displayedIssues.length > 0 && (
             <DropGap
               visible={true}
               onDrop={(e) => {
