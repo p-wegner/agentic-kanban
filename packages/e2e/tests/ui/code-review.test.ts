@@ -207,7 +207,7 @@ test.describe("AI Code Review Flow", () => {
     await waitForWorkspaceStatus(request, workspaceId, "idle");
 
     await page.goto("/");
-    await page.waitForSelector("h2");
+    await page.waitForLoadState("networkidle");
 
     await page.locator("p", { hasText: issueTitle }).first().click();
     await expect(page.locator("h2", { hasText: "Issue Details" })).toBeVisible();
