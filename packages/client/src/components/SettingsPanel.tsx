@@ -57,6 +57,7 @@ const DEFAULT_SETTINGS: Settings = {
   learning_step_before_merge: "false",
   auto_monitor: "false",
   auto_monitor_interval: "4",
+  nudge_auto_start: "false",
   projects_base_path: "",
 };
 
