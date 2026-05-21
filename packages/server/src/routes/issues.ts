@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { db } from "../db/index.js";
-import { issues, projectStatuses, workspaces, tags, issueTags, sessions, sessionMessages, diffComments, issueDependencies, preferences, agentSkills } from "@agentic-kanban/shared/schema";
+import { issues, projectStatuses, workspaces, tags, issueTags, sessions, sessionMessages, diffComments, issueDependencies, preferences, agentSkills, issueArtifacts } from "@agentic-kanban/shared/schema";
 import type { DependencyType } from "@agentic-kanban/shared/schema";
 import { eq, and, sql, inArray, desc } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
@@ -699,6 +699,63 @@ Only include genuinely useful dependencies, not just topical similarity.`;
       options?.boardEvents?.broadcast(rows[0].projectId, "dependency_removed");
     }
 
+    return c.json({ success: true });
+  });
+
+  // GET /api/issues/:id/artifacts
+  router.get("/:id/artifacts", async (c) => {
+    const issueId = c.req.param("id");
+    const result = await database
+      .select()
+      .from(issueArtifacts)
+      .where(eq(issueArtifacts.issueId, issueId))
+      .orderBy(issueArtifacts.createdAt);
+    return c.json(result);
+  });
+
+  // POST /api/issues/:id/artifacts
+  router.post("/:id/artifacts", async (c) => {
+    const issueId = c.req.param("id");
+    let body: { type: string; mimeType?: string; content: string; caption?: string; workspaceId?: string };
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ error: "invalid JSON body" }, 400);
+    }
+    if (!body.type || !body.content) {
+      return c.json({ error: "type and content are required" }, 400);
+    }
+    const validTypes = ["image", "text", "link", "video"];
+    if (!validTypes.includes(body.type)) {
+      return c.json({ error: `type must be one of: ${validTypes.join(", ")}` }, 400);
+    }
+
+    const id = randomUUID();
+    await database.insert(issueArtifacts).values({
+      id,
+      issueId,
+      workspaceId: body.workspaceId ?? null,
+      type: body.type,
+      mimeType: body.mimeType ?? null,
+      content: body.content,
+      caption: body.caption ?? null,
+    });
+
+    // Resolve projectId for broadcast
+    const rows = await database.select({ projectId: issues.projectId }).from(issues).where(eq(issues.id, issueId)).limit(1);
+    if (rows.length > 0) {
+      options?.boardEvents?.broadcast(rows[0].projectId, "issue_updated");
+    }
+
+    return c.json({ id }, 201);
+  });
+
+  // DELETE /api/issues/:id/artifacts/:artifactId
+  router.delete("/:id/artifacts/:artifactId", async (c) => {
+    const issueId = c.req.param("id");
+    const artifactId = c.req.param("artifactId");
+    await database.delete(issueArtifacts)
+      .where(and(eq(issueArtifacts.id, artifactId), eq(issueArtifacts.issueId, issueId)));
     return c.json({ success: true });
   });
 
