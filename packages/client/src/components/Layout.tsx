@@ -431,6 +431,7 @@ export function Layout({
               </svg>
             </button>
             <button
+<<<<<<< HEAD
               onClick={onAllWorkspacesClick}
               className="p-1.5 text-gray-400 hover:text-gray-600 rounded-md hover:bg-gray-100"
               title="All Workspaces"
@@ -579,6 +580,8 @@ export function Layout({
     setGenerateReadme(false);
 >>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
             <button
+=======
+>>>>>>> a02c853 (fix: remove duplicate All Workspaces button from toolbar (#219))
               onClick={onWorktreeOverviewClick}
               className="p-1.5 text-gray-400 hover:text-gray-600 rounded-md hover:bg-gray-100"
               title="Worktrees"
