@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+﻿import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Layout } from "../components/Layout.js";
 import { GraphView } from "../components/GraphView.js";
 import { TableView } from "../components/TableView.js";
@@ -42,25 +42,19 @@ interface Project {
 
 const ARCHIVE_STATUS_NAMES = new Set(["Done", "Cancelled"]);
 
-type MonitorAction = { at: string; action: "relaunch" | "merge" | "nudge" | "mark_idle" | "mark_dead" | "auto_start"; workspaceId: string; issueId: string };
+type MonitorAction = { at: string; action: "relaunch" | "merge" | "nudge" | "mark_idle" | "mark_dead"; workspaceId: string };
 type MonitorStatus = { enabled: boolean; intervalMin: number; active: boolean; lastRun: { at: string; relaunched: number; merged: number; nudged: number } | null; nextRunAt: string | null; recentActions: MonitorAction[] };
 
 const ACTION_LABELS: Record<MonitorAction["action"], { label: string; color: string }> = {
-  relaunch:   { label: "Relaunched agent",  color: "text-blue-600" },
-  merge:      { label: "Triggered merge",   color: "text-purple-600" },
-  nudge:      { label: "Nudged agent",      color: "text-amber-600" },
-  mark_idle:  { label: "Marked idle",       color: "text-gray-500" },
-  mark_dead:  { label: "Marked dead",       color: "text-red-500" },
-  auto_start: { label: "Auto-started issue", color: "text-green-600" },
+  relaunch: { label: "Relaunched agent", color: "text-blue-600" },
+  merge:    { label: "Triggered merge",  color: "text-purple-600" },
+  nudge:    { label: "Nudged agent",     color: "text-amber-600" },
+  mark_idle:{ label: "Marked idle",      color: "text-gray-500" },
+  mark_dead:{ label: "Marked dead",      color: "text-red-500" },
 };
 
-function MonitorPopover({ status, onClose, onOpenWorkspace, columns }: { status: MonitorStatus | null; onClose: () => void; onOpenWorkspace: (workspaceId: string, issueId: string) => void; columns: StatusWithIssues[] }) {
+function MonitorPopover({ status, onClose }: { status: MonitorStatus | null; onClose: () => void }) {
   const [now, setNow] = useState(Date.now());
-  const issueMap = useMemo(() => {
-    const m = new Map<string, IssueWithStatus>();
-    for (const col of columns) for (const issue of col.issues) m.set(issue.id, issue);
-    return m;
-  }, [columns]);
 
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 1000);
@@ -145,17 +139,10 @@ function MonitorPopover({ status, onClose, onOpenWorkspace, columns }: { status:
           <div className="space-y-1 max-h-48 overflow-y-auto">
             {status.recentActions.map((a, i) => {
               const meta = ACTION_LABELS[a.action];
-              const issue = issueMap.get(a.issueId);
-              const label = issue ? `#${issue.issueNumber} ${issue.title}` : a.workspaceId.slice(0, 8);
               return (
-                <div key={i} className="flex items-center justify-between gap-2 min-w-0">
-                  <span className={`${meta.color} font-medium shrink-0`}>{meta.label}</span>
-                  <button
-                    className="text-blue-500 hover:text-blue-700 hover:underline truncate text-left min-w-0 flex-1"
-                    style={{ fontSize: "11px" }}
-                    onClick={() => { onOpenWorkspace(a.workspaceId, a.issueId); onClose(); }}
-                    title={issue ? issue.title : a.workspaceId}
-                  >{label}</button>
+                <div key={i} className="flex items-center justify-between gap-2">
+                  <span className={`${meta.color} font-medium`}>{meta.label}</span>
+                  <span className="text-gray-400 shrink-0 font-mono" style={{ fontSize: "10px" }}>{a.workspaceId.slice(0, 8)}</span>
                   <span className="text-gray-400 shrink-0">{formatAge(a.at)}</span>
                 </div>
               );
@@ -185,7 +172,395 @@ export function BoardPage() {
   const [workspaceIssue, setWorkspaceIssue] = useState<IssueWithStatus | null>(null);
   const [workspaceInitial, setWorkspaceInitial] = useState<{ workspaceId: string; sessionId: string } | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
-  const [blockedFilter, setBlockedFilter] = useState(false);
+  const [priorityFilter, setPriorityFilter] = useState("");
+  const [showSettings, setShowSettings] = useState(false);
+  const [showQuickTasks, setShowQuickTasks] = useState(false);
+  const [showWorktreeOverview, setShowWorktreeOverview] = useState(false);
+  const [showAllWorkspaces, setShowAllWorkspaces] = useState(false);
+  const [showCommandPalette, setShowCommandPalette] = useState(false);
+  const [showShortcutHelp, setShowShortcutHelp] = useState(false);
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(
+    new Set(["archive"]),
+  );
+  const [sessionActivity, setSessionActivity] = useState<Record<string, string>>({});
+  const [liveStats, setLiveStats] = useState<Record<string, LiveSessionStats>>({});
+  const [sessionTodos, setSessionTodos] = useState<Record<string, TodoItem[]>>({});
+  const [approvalRequests, setApprovalRequests] = useState<ApprovalRequest[]>([]);
+  const pendingBoardRefreshRef = useRef(false);
+  const [expandedCreatePanel, setExpandedCreatePanel] = useState<{ statusId: string; statusName: string; state: Partial<CreateIssueFormState> } | null>(null);
+  const [viewMode, setViewMode] = useState<"kanban" | "graph" | "table">("kanban");
+  const [dynamicColumnScaling, setDynamicColumnScaling] = useState(false);
+  const [autoMonitor, setAutoMonitor] = useState(false);
+  const [monitorStatus, setMonitorStatus] = useState<MonitorStatus | null>(null);
+  const [showMonitorPopover, setShowMonitorPopover] = useState(false);
+
+  const refetchBoard = useCallback(async (projectId?: string) => {
+    const pid = projectId || activeProjectId;
+    if (!pid) return;
+    const board = await apiFetch<StatusWithIssues[]>(
+      `/api/projects/${pid}/board`,
+    );
+    setColumns(board);
+    return board;
+  }, [activeProjectId]);
+
+  // Keep selectedIssue in sync with board data (F6 stale data fix)
+  useEffect(() => {
+    if (!selectedIssue) return;
+    for (const col of columns) {
+      const found = col.issues.find((i) => i.id === selectedIssue.id);
+      if (found) {
+        // Only update if data actually changed to avoid unnecessary re-renders
+        if (found.title !== selectedIssue.title ||
+            found.description !== selectedIssue.description ||
+            found.priority !== selectedIssue.priority ||
+            found.statusId !== selectedIssue.statusId ||
+            found.statusName !== selectedIssue.statusName ||
+            found.updatedAt !== selectedIssue.updatedAt) {
+          setSelectedIssue(found);
+        }
+        return;
+      }
+    }
+    // Issue was deleted — close panel
+    setSelectedIssue(null);
+  }, [columns, selectedIssue]);
+
+  // Real-time board updates via WebSocket (debounced while create form is open)
+  useBoardEvents(activeProjectId, useCallback((reason: string) => {
+    console.log(`[board-events] board changed: ${reason}`);
+    // Desktop notification for agent events
+    if (reason === "session_completed") {
+      sendDesktopNotification("Agentic Kanban", "Agent session completed");
+    } else if (reason === "workspace_merged") {
+      sendDesktopNotification("Agentic Kanban", "Workspace merged successfully");
+    }
+    if (creatingInColumnId) {
+      // Don't refresh while create form is open — batch the update
+      pendingBoardRefreshRef.current = true;
+      return;
+    }
+    refetchBoard();
+  }, [refetchBoard, creatingInColumnId]), useCallback((issueId: string, activity: string) => {
+    setSessionActivity((prev) => {
+      if (!activity) {
+        const next = { ...prev };
+        delete next[issueId];
+        return next;
+      }
+      if (prev[issueId] === activity) return prev;
+      return { ...prev, [issueId]: activity };
+    });
+  }, []), useCallback((issueId: string, stats: LiveSessionStats) => {
+    setLiveStats((prev) => {
+      if (prev[issueId]?.model === stats.model && prev[issueId]?.contextTokens === stats.contextTokens && prev[issueId]?.toolUses === stats.toolUses && prev[issueId]?.subagentCount === stats.subagentCount) return prev;
+      return { ...prev, [issueId]: stats };
+    });
+  }, []), useCallback((issueId: string, todos: TodoItem[]) => {
+    setSessionTodos((prev) => ({ ...prev, [issueId]: todos }));
+  }, []), useCallback((req: ApprovalRequest) => {
+    setApprovalRequests((prev) => [...prev, req]);
+  }, []));
+
+  // Process pending board refresh when create form closes
+  useEffect(() => {
+    if (!creatingInColumnId && pendingBoardRefreshRef.current) {
+      pendingBoardRefreshRef.current = false;
+      refetchBoard();
+    }
+  }, [creatingInColumnId, refetchBoard]);
+
+  const loadProjects = useCallback(async () => {
+    const projs = await apiFetch<Project[]>("/api/projects");
+    setProjects(projs);
+    if (projs.length === 0) return;
+
+    // Get active project preference
+    try {
+      const pref = await apiFetch<{ projectId: string | null }>("/api/preferences/active-project");
+      if (pref.projectId && projs.some((p) => p.id === pref.projectId)) {
+        setActiveProjectId(pref.projectId);
+        return pref.projectId;
+      }
+    } catch {
+      // Ignore — fall back to first project
+    }
+
+    // Fallback to first project
+    const firstId = projs[0].id;
+    setActiveProjectId(firstId);
+    return firstId;
+  }, []);
+
+  useEffect(() => {
+    async function load() {
+      try {
+        const pid = await loadProjects();
+        if (pid) {
+          const board = await apiFetch<StatusWithIssues[]>(
+            `/api/projects/${pid}/board`,
+          );
+          setColumns(board);
+        }
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to load board");
+      }
+      // Load preferences independently so they work even if board fails
+      try {
+        const s = await apiFetch<Record<string, string>>("/api/preferences/settings");
+        setDynamicColumnScaling(s.dynamic_column_scaling === "true");
+        setAutoMonitor(s.auto_monitor === "true");
+        apiFetch<MonitorStatus>("/api/internal/monitor-status")
+          .then((r) => setMonitorStatus(r))
+          .catch(() => {});
+      } catch {
+        // ignore
+      }
+      setLoading(false);
+    }
+    load();
+  }, [loadProjects]);
+
+  useEffect(() => {
+    if (!autoMonitor) return;
+    const t = setInterval(() => {
+      apiFetch<MonitorStatus>("/api/internal/monitor-status")
+        .then((r) => setMonitorStatus(r))
+        .catch(() => {});
+    }, 30_000);
+    return () => clearInterval(t);
+  }, [autoMonitor]);
+
+  async function toggleAutoMonitor() {
+    const next = !autoMonitor;
+    setAutoMonitor(next);
+    try {
+      await apiFetch("/api/preferences/settings", {
+        method: "PUT",
+        body: JSON.stringify({ auto_monitor: String(next) }),
+      });
+      const status = await apiFetch<MonitorStatus>("/api/internal/monitor-status");
+      setMonitorStatus(status);
+    } catch {
+      setAutoMonitor(!next);
+    }
+  }
+
+  async function handleProjectChange(id: string) {
+    setActiveProjectId(id);
+    try {
+      await apiFetch("/api/preferences/active-project", {
+        method: "PUT",
+        body: JSON.stringify({ projectId: id }),
+      });
+      await refetchBoard(id);
+    } catch (err) {
+      showToast("Failed to switch project", "error");
+    }
+  }
+
+  async function handleRegisterProject({ repoPath, gitignoreTemplate, generateReadme }: { repoPath: string; gitignoreTemplate: string; generateReadme: boolean }) {
+    const result = await apiFetch<{ id: string; name: string; error?: string }>(
+      "/api/projects",
+      { method: "POST", body: JSON.stringify({ repoPath, gitignoreTemplate: gitignoreTemplate || undefined, generateReadme: generateReadme || undefined }) },
+    );
+    if (result.error) throw new Error(result.error);
+    await loadProjects();
+    await handleProjectChange(result.id);
+    showToast(`Registered "${result.name}"`, "success");
+  }
+
+  async function handleCreateProject(name: string, path: string) {
+    const body: Record<string, string> = { name };
+    if (path) body.path = path;
+    const result = await apiFetch<{ id: string; name: string; error?: string }>(
+      "/api/projects/create",
+      { method: "POST", body: JSON.stringify(body) },
+    );
+    if (result.error) throw new Error(result.error);
+    await loadProjects();
+    await handleProjectChange(result.id);
+    showToast(`Created "${result.name}"`, "success");
+  }
+
+  async function handleCreateIssue(data: CreateIssueRequest & { startWorkspace?: boolean; planMode?: boolean; claudeProfile?: string; isDirect?: boolean }) {
+    setMutating(true);
+    setError(null);
+    const { startWorkspace, planMode, claudeProfile, isDirect, ...issueData } = data;
+    try {
+      const created = await apiFetch<{ id: string; issueNumber: number; title: string }>(
+        "/api/issues",
+        { method: "POST", body: JSON.stringify(issueData) },
+      );
+      setCreatingInColumnId(null);
+      setExpandedCreatePanel(null);
+      const board = await refetchBoard();
+      pendingBoardRefreshRef.current = false;
+
+      if (startWorkspace && activeProject) {
+        try {
+          const branch = suggestBranchName({
+            issueNumber: created.issueNumber,
+            title: created.title,
+          });
+          const ws = await apiFetch<{ id: string; sessionId?: string }>("/api/workspaces", {
+            method: "POST",
+            body: JSON.stringify({
+              issueId: created.id,
+              branch: isDirect ? undefined : branch,
+              baseBranch: isDirect ? undefined : activeProject.defaultBranch,
+              isDirect: isDirect || undefined,
+              planMode: planMode || undefined,
+              claudeProfile: claudeProfile || undefined,
+            }),
+          });
+          for (const col of board ?? columns) {
+            const found = col.issues.find((i) => i.id === created.id);
+            if (found) {
+              setWorkspaceIssue(found);
+              if (ws.sessionId) {
+                setWorkspaceInitial({ workspaceId: ws.id, sessionId: ws.sessionId });
+              }
+              break;
+            }
+          }
+          showToast("Issue and workspace created", "success");
+        } catch {
+          showToast("Issue created, but workspace creation failed", "error");
+        }
+      } else {
+        showToast("Issue created", "success");
+      }
+    } catch (err) {
+      showToast("Failed to create issue", "error");
+    } finally {
+      setMutating(false);
+    }
+  }
+
+  async function handleUpdateIssue(id: string, data: UpdateIssueRequest) {
+    setMutating(true);
+    setError(null);
+    try {
+      await apiFetch(`/api/issues/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify(data),
+      });
+      const board = await refetchBoard();
+      // Re-find updated issue in new columns to keep panel open (F1)
+      // refetchBoard now returns the board data
+      void board; // used below via columns state update
+      showToast("Issue updated", "success");
+    } catch (err) {
+      showToast("Failed to update issue", "error");
+    } finally {
+      setMutating(false);
+    }
+  }
+
+  async function handleDeleteIssue(id: string) {
+    setMutating(true);
+    setError(null);
+    try {
+      await apiFetch(`/api/issues/${id}`, { method: "DELETE" });
+      setSelectedIssue(null);
+      await refetchBoard();
+      showToast("Issue deleted", "success");
+    } catch (err) {
+      showToast("Failed to delete issue", "error");
+    } finally {
+      setMutating(false);
+    }
+  }
+
+  function handleDragStart(e: React.DragEvent, issue: IssueWithStatus) {
+    e.dataTransfer.setData("application/json", JSON.stringify({
+      issueId: issue.id,
+      sourceStatusId: issue.statusId,
+    }));
+    e.dataTransfer.effectAllowed = "move";
+  }
+
+  async function handleDrop(targetStatusId: string, sortOrder?: number) {
+    try {
+      const raw = (window as unknown as Record<string, unknown>).__dragData;
+      let issueId: string | undefined;
+      let sourceStatusId: string | undefined;
+
+      // Read from dataTransfer wasn't stored, so we use a global bridge
+      if (raw && typeof raw === "object") {
+        const data = raw as { issueId: string; sourceStatusId: string };
+        issueId = data.issueId;
+        sourceStatusId = data.sourceStatusId;
+      }
+
+      if (!issueId) return;
+      if (sourceStatusId === targetStatusId && sortOrder === undefined) return;
+
+      const body: UpdateIssueRequest = { statusId: targetStatusId };
+      if (sortOrder !== undefined) body.sortOrder = sortOrder;
+
+      await apiFetch(`/api/issues/${issueId}`, {
+        method: "PATCH",
+        body: JSON.stringify(body),
+      });
+      await refetchBoard();
+    } catch (err) {
+      showToast("Failed to move issue", "error");
+    }
+  }
+
+  function handleIssueClick(issue: IssueWithStatus) {
+    setSelectedIssue(issue);
+  }
+
+  function handleManageWorkspaces(issue: IssueWithStatus, workspaceId?: string) {
+    setSelectedIssue(null);
+    setWorkspaceIssue(issue);
+    if (workspaceId) {
+      setWorkspaceInitial({ workspaceId, sessionId: "" });
+    }
+  }
+
+  async function handleStartWorkspace(issue: IssueWithStatus) {
+    if (!activeProject) return;
+    setMutating(true);
+    try {
+      const branch = suggestBranchName({
+        issueNumber: issue.issueNumber,
+        title: issue.title,
+      });
+      const ws = await apiFetch<{ id: string; sessionId?: string }>("/api/workspaces", {
+        method: "POST",
+        body: JSON.stringify({
+          issueId: issue.id,
+          branch,
+          baseBranch: activeProject.defaultBranch,
+        }),
+      });
+      setSelectedIssue(null);
+      const board = await refetchBoard();
+      const updated = board?.flatMap((col) => col.issues).find((i) => i.id === issue.id) ?? issue;
+      setWorkspaceIssue(updated);
+      if (ws.sessionId) {
+        setWorkspaceInitial({ workspaceId: ws.id, sessionId: ws.sessionId });
+      } else {
+        setWorkspaceInitial({ workspaceId: ws.id, sessionId: "" });
+      }
+      showToast("Workspace created", "success");
+    } catch (err) {
+      showToast("Failed to create workspace", "error");
+    } finally {
+      setMutating(false);
+    }
+  }
+
+  // Filter columns by search query and priority
+  const filteredColumns = useMemo(
+    () =>
+      columns.map((col) => ({
+        ...col,
+        issues: col.issues.filter((issue) => {
           if (priorityFilter && issue.priority !== priorityFilter) return false;
           if (searchQuery) {
             const q = searchQuery.toLowerCase();
@@ -516,15 +891,7 @@ export function BoardPage() {
                 <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
                 Monitor
               </button>
-              {showMonitorPopover && <MonitorPopover
-                status={monitorStatus}
-                onClose={() => setShowMonitorPopover(false)}
-                columns={columns}
-                onOpenWorkspace={(workspaceId, issueId) => {
-                  const issue = columns.flatMap(c => c.issues).find(i => i.id === issueId);
-                  if (issue) handleManageWorkspaces(issue, workspaceId);
-                }}
-              />}
+              {showMonitorPopover && <MonitorPopover status={monitorStatus} onClose={() => setShowMonitorPopover(false)} />}
             </div>
           )}
           <div className="flex items-center gap-1 border border-gray-200 rounded-md p-0.5 bg-white shrink-0">
