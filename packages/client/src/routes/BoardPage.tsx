@@ -132,6 +132,7 @@ const ACTION_LABELS: Record<MonitorAction["action"], { label: string; color: str
 
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 function MonitorPopover({ status, onClose, onOpenWorkspace, columns }: { status: MonitorStatus | null; onClose: () => void; onOpenWorkspace: (workspaceId: string, issueId: string) => void; columns: StatusWithIssues[] }) {
   const [now, setNow] = useState(Date.now());
 <<<<<<< HEAD
@@ -154,6 +155,9 @@ function MonitorPopover({ status, onClose }: { status: MonitorStatus | null; onC
 >>>>>>> 52ef66c (fix: repair pre-existing build errors (smart quotes in cli.ts, truncated TableView/BoardPage from bad merge))
 =======
 function MonitorPopover({ status, onClose, onOpenWorkspace, columns, onRunNow }: { status: MonitorStatus | null; onClose: () => void; onOpenWorkspace: (workspaceId: string, issueId: string) => void; columns: StatusWithIssues[]; onRunNow: () => Promise<void> }) {
+=======
+function MonitorPopover({ status, onClose, onOpenWorkspace, columns, onRunNow, autoMonitor, onToggle, interval, onIntervalChange, nudgeAutoStart, onNudgeAutoStartChange, nudgeWipLimit, onNudgeWipLimitChange }: { status: MonitorStatus | null; onClose: () => void; onOpenWorkspace: (workspaceId: string, issueId: string) => void; columns: StatusWithIssues[]; onRunNow: () => Promise<void>; autoMonitor: boolean; onToggle: () => void; interval: string; onIntervalChange: (v: string) => void; nudgeAutoStart: boolean; onNudgeAutoStartChange: (v: boolean) => void; nudgeWipLimit: string; onNudgeWipLimitChange: (v: string) => void }) {
+>>>>>>> 693fe5c (feat: move monitor toggle and settings to board view popover)
   const [now, setNow] = useState(Date.now());
   const [running, setRunning] = useState(false);
 
@@ -202,59 +206,100 @@ function MonitorPopover({ status, onClose, onOpenWorkspace, columns, onRunNow }:
       <div className="px-3 py-2.5 border-b border-gray-100 flex items-center justify-between">
         <span className="font-semibold text-gray-700">Board Monitor</span>
         <div className="flex items-center gap-2">
+          {autoMonitor && (
+            <button
+              onClick={handleRunNow}
+              disabled={running}
+              className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium bg-green-600 text-white hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              title="Run monitor cycle now and reset the timer"
+            >
+              {running ? (
+                <svg className="w-2.5 h-2.5 animate-spin" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>
+              ) : (
+                <svg className="w-2.5 h-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path strokeLinecap="round" strokeLinejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 010 1.972l-11.54 6.347a1.125 1.125 0 01-1.667-.986V5.653z"/></svg>
+              )}
+              {running ? "Running…" : "Run now"}
+            </button>
+          )}
           <button
-            onClick={handleRunNow}
-            disabled={running}
-            className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium bg-green-600 text-white hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-            title="Run monitor cycle now and reset the timer"
+            onClick={onToggle}
+            className={`relative inline-flex h-4 w-7 items-center rounded-full transition-colors focus:outline-none ${autoMonitor ? "bg-green-500" : "bg-gray-300"}`}
+            title={autoMonitor ? "Disable auto-monitor" : "Enable auto-monitor"}
           >
-            {running ? (
-              <svg className="w-2.5 h-2.5 animate-spin" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>
-            ) : (
-              <svg className="w-2.5 h-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path strokeLinecap="round" strokeLinejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 010 1.972l-11.54 6.347a1.125 1.125 0 01-1.667-.986V5.653z"/></svg>
-            )}
-            {running ? "Running…" : "Run now"}
+            <span className={`inline-block h-3 w-3 transform rounded-full bg-white shadow transition-transform ${autoMonitor ? "translate-x-3.5" : "translate-x-0.5"}`} />
           </button>
-          <span className="flex items-center gap-1.5 text-green-600">
-            <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
-            Active
-          </span>
         </div>
       </div>
 
-      <div className="px-3 py-2 border-b border-gray-100 space-y-1.5">
-        {status?.lastRun ? (
-          <div className="flex justify-between text-gray-500">
-            <span>Last run</span>
-            <span className="text-gray-700">{formatAge(status.lastRun.at)} — {new Date(status.lastRun.at).toLocaleTimeString()}</span>
-          </div>
-        ) : (
-          <div className="text-gray-400">No runs yet this session</div>
-        )}
-        {status?.nextRunAt && (
-          <div className="flex justify-between text-gray-500">
-            <span>Next run</span>
-            <span className="font-medium text-gray-700">{formatCountdown(status.nextRunAt)}</span>
-          </div>
-        )}
-        {status?.intervalMin && (
-          <div className="flex justify-between text-gray-500">
-            <span>Interval</span>
-            <span>{status.intervalMin}m</span>
-          </div>
-        )}
-        {status?.lastRun && (
-          <div className="flex gap-3 pt-0.5">
-            {status.lastRun.relaunched > 0 && <span className="text-blue-600">{status.lastRun.relaunched} relaunched</span>}
-            {status.lastRun.merged > 0 && <span className="text-purple-600">{status.lastRun.merged} merged</span>}
-            {status.lastRun.nudged > 0 && <span className="text-amber-600">{status.lastRun.nudged} nudged</span>}
-            {status.lastRun.relaunched === 0 && status.lastRun.merged === 0 && status.lastRun.nudged === 0 && (
-              <span className="text-gray-400">No actions needed</span>
-            )}
+      <div className="px-3 py-2 border-b border-gray-100 space-y-2">
+        <div className="flex items-center gap-2">
+          <label className="text-gray-500 whitespace-nowrap">Check every</label>
+          <input
+            type="number"
+            min={1}
+            max={60}
+            value={interval}
+            onChange={(e) => onIntervalChange(e.target.value)}
+            disabled={!autoMonitor}
+            className="w-14 border border-gray-300 rounded px-2 py-0.5 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-40"
+          />
+          <span className="text-gray-500">minutes</span>
+        </div>
+        <div className="flex items-center justify-between">
+          <span className={`${!autoMonitor ? "opacity-40" : ""}`}>Auto-start unblocked Todo items</span>
+          <button
+            onClick={() => onNudgeAutoStartChange(!nudgeAutoStart)}
+            disabled={!autoMonitor}
+            className={`relative inline-flex h-4 w-7 items-center rounded-full transition-colors focus:outline-none disabled:opacity-40 ${nudgeAutoStart && autoMonitor ? "bg-green-500" : "bg-gray-300"}`}
+          >
+            <span className={`inline-block h-3 w-3 transform rounded-full bg-white shadow transition-transform ${nudgeAutoStart ? "translate-x-3.5" : "translate-x-0.5"}`} />
+          </button>
+        </div>
+        {nudgeAutoStart && autoMonitor && (
+          <div className="flex items-center gap-2 pl-2">
+            <label className="text-gray-500 whitespace-nowrap">In Progress WIP limit</label>
+            <input
+              type="number"
+              min={1}
+              max={20}
+              value={nudgeWipLimit}
+              onChange={(e) => onNudgeWipLimitChange(e.target.value)}
+              className="w-14 border border-gray-300 rounded px-2 py-0.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            />
           </div>
         )}
       </div>
 
+      {autoMonitor && (
+        <>
+          <div className="px-3 py-2 border-b border-gray-100 space-y-1.5">
+            {status?.lastRun ? (
+              <div className="flex justify-between text-gray-500">
+                <span>Last run</span>
+                <span className="text-gray-700">{formatAge(status.lastRun.at)} — {new Date(status.lastRun.at).toLocaleTimeString()}</span>
+              </div>
+            ) : (
+              <div className="text-gray-400">No runs yet this session</div>
+            )}
+            {status?.nextRunAt && (
+              <div className="flex justify-between text-gray-500">
+                <span>Next run</span>
+                <span className="font-medium text-gray-700">{formatCountdown(status.nextRunAt)}</span>
+              </div>
+            )}
+            {status?.lastRun && (
+              <div className="flex gap-3 pt-0.5">
+                {status.lastRun.relaunched > 0 && <span className="text-blue-600">{status.lastRun.relaunched} relaunched</span>}
+                {status.lastRun.merged > 0 && <span className="text-purple-600">{status.lastRun.merged} merged</span>}
+                {status.lastRun.nudged > 0 && <span className="text-amber-600">{status.lastRun.nudged} nudged</span>}
+                {status.lastRun.relaunched === 0 && status.lastRun.merged === 0 && status.lastRun.nudged === 0 && (
+                  <span className="text-gray-400">No actions needed</span>
+                )}
+              </div>
+            )}
+          </div>
+
+<<<<<<< HEAD
       {status?.recentActions && status.recentActions.length > 0 ? (
         <div className="px-3 py-2">
           <div className="text-gray-400 font-medium uppercase tracking-wide mb-1.5" style={{ fontSize: "10px" }}>Recent actions</div>
@@ -342,11 +387,34 @@ function MonitorPopover({ status, onClose, onOpenWorkspace, columns, onRunNow }:
         </div>
       ) : (
         <div className="px-3 py-2 text-gray-400">No actions recorded yet</div>
+=======
+          {status?.recentActions && status.recentActions.length > 0 ? (
+            <div className="px-3 py-2">
+              <div className="text-gray-400 font-medium uppercase tracking-wide mb-1.5" style={{ fontSize: "10px" }}>Recent actions</div>
+              <div className="space-y-1 max-h-48 overflow-y-auto">
+                {status.recentActions.map((a, i) => {
+                  const meta = ACTION_LABELS[a.action];
+                  const issue = columns.flatMap(c => c.issues).find(iss => iss.id === a.issueId);
+                  return (
+                    <div
+                      key={i}
+                      className="flex items-center justify-between gap-2 cursor-pointer hover:bg-gray-50 rounded px-1 -mx-1 py-0.5"
+                      onClick={() => { onOpenWorkspace(a.workspaceId, a.issueId); onClose(); }}
+                    >
+                      <span className={`${meta.color} font-medium truncate`}>{meta.label}</span>
+                      {issue && <span className="text-gray-500 truncate shrink" style={{ fontSize: "10px" }}>#{issue.issueNumber}</span>}
+                      <span className="text-gray-400 shrink-0">{formatAge(a.at)}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ) : (
+            <div className="px-3 py-2 text-gray-400">No actions recorded yet</div>
+          )}
+        </>
+>>>>>>> 693fe5c (feat: move monitor toggle and settings to board view popover)
       )}
-
-      <div className="px-3 py-2 border-t border-gray-100 text-gray-400">
-        Configure in Settings → Workflow
-      </div>
     </div>
   );
 }
@@ -440,6 +508,9 @@ export function BoardPage() {
   const [autoReview, setAutoReview] = useState(true);
   const [autoMerge, setAutoMerge] = useState(true);
   const [autoMonitor, setAutoMonitor] = useState(false);
+  const [autoMonitorInterval, setAutoMonitorInterval] = useState("4");
+  const [nudgeAutoStart, setNudgeAutoStart] = useState(false);
+  const [nudgeWipLimit, setNudgeWipLimit] = useState("5");
   const [monitorStatus, setMonitorStatus] = useState<MonitorStatus | null>(null);
   const [showMonitorPopover, setShowMonitorPopover] = useState(false);
 <<<<<<< HEAD
@@ -595,6 +666,9 @@ export function BoardPage() {
         setAutoMerge(s.auto_merge !== "false");
 >>>>>>> 52ef66c (fix: repair pre-existing build errors (smart quotes in cli.ts, truncated TableView/BoardPage from bad merge))
         setAutoMonitor(s.auto_monitor === "true");
+        setAutoMonitorInterval(s.auto_monitor_interval ?? "4");
+        setNudgeAutoStart(s.nudge_auto_start === "true");
+        setNudgeWipLimit(s.nudge_wip_limit ?? "5");
         apiFetch<MonitorStatus>("/api/internal/monitor-status")
           .then((r) => setMonitorStatus(r))
           .catch(() => {});
@@ -629,6 +703,21 @@ export function BoardPage() {
     } catch {
       setAutoMonitor(!next);
     }
+  }
+
+  async function handleIntervalChange(v: string) {
+    setAutoMonitorInterval(v);
+    await apiFetch("/api/preferences/settings", { method: "PUT", body: JSON.stringify({ auto_monitor_interval: v }) }).catch(() => {});
+  }
+
+  async function handleNudgeAutoStartChange(v: boolean) {
+    setNudgeAutoStart(v);
+    await apiFetch("/api/preferences/settings", { method: "PUT", body: JSON.stringify({ nudge_auto_start: String(v) }) }).catch(() => {});
+  }
+
+  async function handleNudgeWipLimitChange(v: string) {
+    setNudgeWipLimit(v);
+    await apiFetch("/api/preferences/settings", { method: "PUT", body: JSON.stringify({ nudge_wip_limit: v }) }).catch(() => {});
   }
 
   async function handleProjectChange(id: string) {
@@ -1412,6 +1501,7 @@ export function BoardPage() {
             </svg>
             Tasks
           </button>
+<<<<<<< HEAD
           {autoMonitor && (
             <div className="relative shrink-0">
               <button
@@ -1469,6 +1559,19 @@ export function BoardPage() {
 >>>>>>> 1adff89 (feat: add Run now button to monitor popover (#220))
             </div>
           )}
+=======
+          <div className="relative shrink-0">
+            <button
+              onClick={() => setShowMonitorPopover(v => !v)}
+              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium border transition-colors ${autoMonitor ? "bg-green-50 border-green-200 text-green-700 hover:bg-green-100" : "bg-white border-gray-200 text-gray-500 hover:bg-gray-50"}`}
+              title={autoMonitor ? "Board monitor active — click for details" : "Board monitor — click to configure"}
+            >
+              {autoMonitor && <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />}
+              Monitor
+            </button>
+            {showMonitorPopover && <MonitorPopover status={monitorStatus} onClose={() => setShowMonitorPopover(false)} onOpenWorkspace={(workspaceId, issueId) => { const issue = columns.flatMap(c => c.issues).find(i => i.id === issueId); if (issue) setWorkspaceIssue(issue); setWorkspaceInitial({ workspaceId, sessionId: "" }); }} columns={columns} onRunNow={async () => { await apiFetch("/api/internal/monitor-run", { method: "POST" }); const s = await apiFetch<MonitorStatus>("/api/internal/monitor-status"); setMonitorStatus(s); }} autoMonitor={autoMonitor} onToggle={toggleAutoMonitor} interval={autoMonitorInterval} onIntervalChange={handleIntervalChange} nudgeAutoStart={nudgeAutoStart} onNudgeAutoStartChange={handleNudgeAutoStartChange} nudgeWipLimit={nudgeWipLimit} onNudgeWipLimitChange={handleNudgeWipLimitChange} />}
+          </div>
+>>>>>>> 693fe5c (feat: move monitor toggle and settings to board view popover)
           <div className="flex items-center gap-1 border border-gray-200 rounded-md p-0.5 bg-white shrink-0">
             <button
               onClick={() => setViewMode("kanban")}
@@ -1777,6 +1880,9 @@ export function BoardPage() {
               setAutoMerge(s.auto_merge !== "false");
 >>>>>>> f974211 (feat: conditionally show AI Reviewed column and fix stats colors)
               setAutoMonitor(s.auto_monitor === "true");
+              setAutoMonitorInterval(s.auto_monitor_interval ?? "4");
+              setNudgeAutoStart(s.nudge_auto_start === "true");
+              setNudgeWipLimit(s.nudge_wip_limit ?? "5");
               return apiFetch<MonitorStatus>("/api/internal/monitor-status");
             })
             .then(r => setMonitorStatus(r))
