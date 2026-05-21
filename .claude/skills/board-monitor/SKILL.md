@@ -1,19 +1,19 @@
 ---
 name: board-monitor
-description: Full board health cycle — conflict scan, server/frontend health, board operations (relaunch idle, merge reviewing, nudge stuck, auto-start). Run every 4 minutes via /loop.
+description: System-level board health — conflict scan, server/frontend health check. Board operations (relaunch/merge/nudge/auto-start) are handled by the app's built-in monitor (Settings → Workflow → Board Monitoring). Run Sections 1-3 every cycle; only do Section 4 if the app monitor is OFF.
 ---
 
-You are the board monitor. Run all sections in order. Use PowerShell for system checks and REST API for board operations.
+You are the board monitor. The app has a built-in server-side monitor (`runMonitorCycle` in `server-start.ts`) that handles board operations automatically when enabled. Your job is the system-level checks it cannot do itself.
 
 ---
 
 ## SECTION 1 — Conflict marker scan & auto-fix
 
-Scan for `<<<<<<< HEAD` conflict markers injected by tsx hot-reload:
+Scan for `<<<<<<< HEAD` conflict markers injected by tsx hot-reload. Exclude `.claude/skills/board-monitor/` (SKILL.md itself contains the literal string as documentation).
 
 ```bash
 grep -rl "<<<<<<< HEAD" packages/server/src/ packages/client/src/ packages/shared/src/ \
-  packages/shared/drizzle/meta/_journal.json .claude/skills/ 2>/dev/null
+  packages/shared/drizzle/meta/_journal.json 2>/dev/null
 ```
 
 If any files found:
@@ -65,7 +65,11 @@ playwright-cli close
 
 ---
 
-## SECTION 4 — Board operations
+## SECTION 4 — Board operations (only if app monitor is OFF)
+
+The app's built-in monitor handles: idle→relaunch, reviewing→merge, active+stopped→mark_idle, dead process→mark_idle, running>5min→nudge (with smart re-nudge check), auto-start with WIP limit, dependency check, branch name generation (`feature/ak-{N}-{slug}`), and ghost workspace detection (empty workingDir → delete + reset to In Progress).
+
+**Only run this section manually if `auto_monitor` preference is `false`.**
 
 Get the board:
 ```powershell
@@ -77,28 +81,22 @@ For each issue in `In Progress` and `In Review` columns, check `workspaceSummary
 
 | Workspace status | Session status | Action |
 |---|---|---|
-| `idle` | any | **Relaunch**: `POST /api/workspaces/:id/launch` `{"prompt": "<issue title>"}` |
-| `reviewing` | any | **Merge**: `POST /api/workspaces/:id/merge` (60s timeout) |
-| `active` | `stopped`, exitCode `null` | **Relaunch** (ZAI pattern — glm-5.1 exits immediately) |
+| `idle` | any | **Relaunch**: `POST /api/workspaces/:id/launch` |
+| `reviewing`, workingDir empty | — | **Ghost**: delete workspace, reset issue to In Progress, create fresh workspace |
+| `reviewing` | `stopped` | **Merge**: `POST /api/workspaces/:id/merge` (60s timeout) |
+| `active` | `stopped` | Mark idle: `PATCH /api/workspaces/:id` `{"status":"idle"}` |
 | `active` | `running`, age >5min | **Nudge**: `POST /api/workspaces/:id/turn` `{"message": "Please continue with the task..."}` |
 | `active` | `running`, age ≤5min | Leave alone — too fresh |
-| `closed`, workingDir empty | — | **Ghost workspace** — delete it, move issue back to In Progress, create fresh workspace |
 
 **If merge times out repeatedly (3+ attempts):**
 1. Check `GET /api/workspaces/:id/conflicts` — `hasConflicts: true` means branch diverged
 2. If conflicts: cherry-pick the feature commit to master manually, resolve conflicts, commit, then delete the workspace and mark issue Done
-3. If no conflicts but still timing out: the branch/worktree may be gone — check `workingDir` field. If empty, it's a ghost; clean it up as above.
-
-**Branch name for new workspaces:**
-```powershell
-$slug = ($issue.title -replace '[^a-zA-Z0-9\s]','' -replace '\s+','-').ToLower().Substring(0, [Math]::Min(40, ...))
-$branch = "feature/ak-$($issue.issueNumber)-$slug"
-```
+3. If no conflicts but still timing out: check `workingDir` field — empty = ghost workspace.
 
 **Auto-start:** If fewer than 3 issues In Progress, start the highest-priority Todo:
 ```powershell
-$todoIssues = ($board | Where-Object { $_.name -eq "Todo" }).issues |
-  Sort-Object { @{critical=0;high=1;medium=2;low=3}[$_.priority] }
+$slug = ($issue.title -replace '[^a-zA-Z0-9\s]','' -replace '\s+','-').ToLower().Substring(0, [Math]::Min(40, $issue.title.Length))
+$branch = "feature/ak-$($issue.issueNumber)-$slug"
 # POST /api/workspaces with { issueId, branch }
 ```
 
