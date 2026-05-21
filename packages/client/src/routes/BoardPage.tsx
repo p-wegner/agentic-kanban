@@ -298,6 +298,7 @@ export function BoardPage() {
   const [blockedFilter, setBlockedFilter] = useState(false);
 =======
   const [priorityFilter, setPriorityFilter] = useState("");
+<<<<<<< HEAD
 >>>>>>> 53a9dc5 (feat: remove blocked filter from board main page)
 =======
   const [priorityFilter, setPriorityFilter] = useState("");
@@ -711,11 +712,15 @@ export function BoardPage() {
   }
 
   // Filter columns by search query and priority
+=======
+
+>>>>>>> 34777de (fix: restore filteredColumns useMemo lost during conflict resolution in BoardPage.tsx)
   const filteredColumns = useMemo(
     () =>
       columns.map((col) => ({
         ...col,
         issues: col.issues.filter((issue) => {
+<<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
@@ -741,6 +746,9 @@ export function BoardPage() {
 >>>>>>> 4a222f1 (feat: remove blocked filter from board main page)
 =======
 >>>>>>> f903991 (feat: conditionally show AI Reviewed column and fix stats colors)
+=======
+          if (priorityFilter && issue.priority !== priorityFilter) return false;
+>>>>>>> 34777de (fix: restore filteredColumns useMemo lost during conflict resolution in BoardPage.tsx)
           if (searchQuery) {
             const q = searchQuery.toLowerCase();
             return (
@@ -751,6 +759,7 @@ export function BoardPage() {
           return true;
         }),
       })),
+<<<<<<< HEAD
     [columns, searchQuery],
 <<<<<<< HEAD
   );
@@ -765,6 +774,9 @@ export function BoardPage() {
     [columns, autoReview, autoMerge],
 =======
 >>>>>>> 46e7ac8 (feat: remove priority filter from frontend UI)
+=======
+    [columns, searchQuery, priorityFilter],
+>>>>>>> 34777de (fix: restore filteredColumns useMemo lost during conflict resolution in BoardPage.tsx)
   );
 
   // "AI Reviewed" = tickets needing human attention (manual merge).
