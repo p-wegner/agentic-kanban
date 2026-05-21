@@ -19,6 +19,7 @@ export async function runScript(
       cwd,
       timeout: SCRIPT_TIMEOUT_MS,
       maxBuffer: 1024 * 1024,
+      windowsHide: true,
     });
 
     const output = (stdout || "") + (stderr || "");
