@@ -77,6 +77,9 @@ export function useBoardEvents(
 ) {
   const wsRef = useRef<WebSocket | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reconnectDelayRef = useRef(1000);
+  const unmountedRef = useRef(false);
   const onBoardChangeRef = useRef(onBoardChange);
   const onSessionActivityRef = useRef(onSessionActivity);
   const onSessionStatsRef = useRef(onSessionStats);
@@ -88,11 +91,13 @@ export function useBoardEvents(
   onSessionTodosRef.current = onSessionTodos;
   onApprovalRequestedRef.current = onApprovalRequested;
 
-  const connect = useCallback(() => {
-    if (!projectId) return;
+  const connectRef = useRef<() => void>(() => {});
 
-    // Close existing connection
+  const connect = useCallback(() => {
+    if (!projectId || unmountedRef.current) return;
+
     if (wsRef.current) {
+      wsRef.current.onclose = null;
       wsRef.current.close();
       wsRef.current = null;
     }
@@ -102,6 +107,12 @@ export function useBoardEvents(
 
     const ws = new WebSocket(url);
     wsRef.current = ws;
+
+    ws.onopen = () => {
+      reconnectDelayRef.current = 1000;
+      // Refresh board data immediately on reconnect to pick up changes during disconnect
+      onBoardChangeRef.current("reconnect");
+    };
 
     ws.onmessage = (event) => {
       try {
@@ -123,14 +134,24 @@ export function useBoardEvents(
     };
 
     ws.onerror = () => {
-      // Silently ignore — board events are nice-to-have
+      // Error will be followed by onclose — let reconnect handle it
     };
 
-    return ws;
+    ws.onclose = () => {
+      wsRef.current = null;
+      if (unmountedRef.current) return;
+      const delay = reconnectDelayRef.current;
+      reconnectDelayRef.current = Math.min(delay * 2, 30_000);
+      reconnectTimerRef.current = setTimeout(() => connectRef.current(), delay);
+    };
   }, [projectId]);
 
+  connectRef.current = connect;
+
   useEffect(() => {
-    const ws = connect();
+    unmountedRef.current = false;
+    reconnectDelayRef.current = 1000;
+    connect();
 
     // Periodic polling fallback — catches MCP mutations, second-tab changes,
     // CLI edits, and any other mutations that bypass WS broadcast.
@@ -141,10 +162,13 @@ export function useBoardEvents(
     }
 
     return () => {
-      if (ws) {
-        ws.close();
+      unmountedRef.current = true;
+      if (reconnectTimerRef.current) {
+        clearTimeout(reconnectTimerRef.current);
+        reconnectTimerRef.current = null;
       }
       if (wsRef.current) {
+        wsRef.current.onclose = null;
         wsRef.current.close();
         wsRef.current = null;
       }
