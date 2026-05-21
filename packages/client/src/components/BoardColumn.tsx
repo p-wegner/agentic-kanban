@@ -121,12 +121,17 @@ export function BoardColumn({
       onDrop={handleDrop}
     >
       <div className="flex items-center justify-between mb-2 px-1 shrink-0">
-        <h2 className="font-semibold text-sm text-gray-700 flex items-center gap-2">
-          {column.name}
-          <span className="text-[11px] text-gray-400 bg-white/80 rounded-full px-2 py-0.5 font-medium shadow-sm">
-            {column.issues.length}
-          </span>
-        </h2>
+        <div className="flex flex-col gap-0.5">
+          <h2 className="font-semibold text-sm text-gray-700 flex items-center gap-2">
+            {column.name}
+            <span className="text-[11px] text-gray-400 bg-white/80 rounded-full px-2 py-0.5 font-medium shadow-sm">
+              {column.issues.length}
+            </span>
+          </h2>
+          {column.name === "AI Reviewed" && (
+            <span className="text-[10px] text-purple-500 font-medium">Awaiting manual merge</span>
+          )}
+        </div>
         {!isCreating && column.name === "Todo" && (
           <button
             onClick={() => onCreateClick(column.id)}
