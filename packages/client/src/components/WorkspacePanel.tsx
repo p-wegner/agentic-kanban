@@ -36,6 +36,7 @@ interface SessionInfo {
   exitCode: string | null;
   stats: string | null;
   providerSessionId: string | null;
+  resumeFromId: string | null;
   triggerType: string | null;
   skillName: string | null;
 }
@@ -905,8 +906,12 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                         {completedSessions.map((session) => {
                           const sessionBadge = SESSION_STATUS_COLORS[session.status] ?? "bg-gray-100 text-gray-500";
                           const isActive = selectedHistoryId === session.id;
+                          const isContinuation = !!session.resumeFromId && completedSessions.some(s => s.id === session.resumeFromId);
                           return (
-                            <div key={session.id} className="flex items-center gap-1">
+                            <div key={session.id} className={`flex items-center gap-1 ${isContinuation ? "ml-3" : ""}`}>
+                              {isContinuation && (
+                                <span className="text-gray-300 shrink-0 select-none">↳</span>
+                              )}
                               <button
                                 data-session-id={session.id}
                                 onClick={() => handleViewHistory(session.id)}
