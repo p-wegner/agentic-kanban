@@ -13,6 +13,7 @@ interface SessionInfo {
   stats: string | null;
   providerSessionId: string | null;
   triggerType: string | null;
+  skillName: string | null;
 }
 
 interface UseWorkspaceSessionParams {
