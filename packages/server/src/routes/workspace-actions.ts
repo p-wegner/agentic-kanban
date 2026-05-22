@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { db } from "../db/index.js";
-import { workspaces, sessions, issues, projects, preferences, diffComments, agentSkills } from "@agentic-kanban/shared/schema";
+import { workspaces, sessions, issues, preferences, diffComments, agentSkills } from "@agentic-kanban/shared/schema";
 import { eq, and } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import * as gitService from "../services/git.service.js";
@@ -13,7 +13,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { writeFileSync } from "node:fs";
 import { spawn, spawnSync } from "node:child_process";
-import { resolveProjectRepo, resolveProjectId, moveIssueToDone, getWorkspaceById, updateWorkspaceStatus } from "../repositories/workspace.repository.js";
+import { resolveProjectRepo, resolveProjectFull, resolveProjectId, moveIssueToDone, getWorkspaceById, updateWorkspaceStatus } from "../repositories/workspace.repository.js";
 import { loadAgentSettings, resolveAgentSettings } from "../services/agent-settings.service.js";
 import { PREF_LEARNING_STEP_BEFORE_MERGE, PREF_AUTO_START_FOLLOWUP } from "../constants/preference-keys.js";
 import { autoStartFollowups } from "../services/followup-workspace.service.js";
@@ -309,12 +309,7 @@ export function createWorkspaceActionsRoute(
     if (!workspace) return c.json({ error: "Workspace not found" }, 404);
 
     try {
-      // Resolve project for teardown script
-      const issueRows = await database.select({ projectId: issues.projectId }).from(issues).where(eq(issues.id, workspace.issueId)).limit(1);
-      const projectRows = issueRows.length > 0
-        ? await database.select().from(projects).where(eq(projects.id, issueRows[0].projectId)).limit(1)
-        : [];
-      const project = projectRows[0] ?? null;
+      const { project, repoPath, defaultBranch } = await resolveProjectFull(id, database);
 
       // Pre-merge cleanup: kill processes and run teardown script (best effort)
       // Skip process cleanup for direct workspaces — their workingDir is the main repo, killing would take down the dev server
@@ -379,16 +374,13 @@ export function createWorkspaceActionsRoute(
 
       // Check for merge conflicts before attempting merge
       if (workspace.workingDir) {
-        const { repoPath: projectRepo } = await resolveProjectRepo(id, database);
-        const projectRows = await database.select({ defaultBranch: projects.defaultBranch }).from(projects).where(eq(projects.repoPath, projectRepo)).limit(1);
-        const baseBranch = workspace.baseBranch || projectRows[0]?.defaultBranch || "main";
+        const baseBranch = workspace.baseBranch || defaultBranch;
         const conflicts = await gitService.detectConflicts(workspace.workingDir, baseBranch);
         if (conflicts.hasConflicts) {
           return c.json({ error: "Merge conflicts detected", conflictingFiles: conflicts.conflictingFiles }, 409);
         }
       }
 
-      const { repoPath } = await resolveProjectRepo(id, database);
       console.log(`[workspace-actions] merge: workspaceId=${id} branch=${workspace.branch} repoPath=${repoPath}`);
 
       // Before merging, sync the branch ref to the worktree's HEAD.
