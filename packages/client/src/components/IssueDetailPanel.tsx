@@ -4,6 +4,7 @@ import type { IssueWithStatus, UpdateIssueRequest, DependencyInfo } from "@agent
 import { apiFetch } from "../lib/api.js";
 import { formatRelativeTime } from "../lib/formatRelativeTime.js";
 import { showToast } from "./Toast.js";
+import { MoveToDoneDialog } from "./MoveToDoneDialog.js";
 
 interface StatusOption {
   id: string;
@@ -94,6 +95,7 @@ export function IssueDetailPanel({
   const [enhancing, setEnhancing] = useState(false);
   const [preEnhanceSnapshot, setPreEnhanceSnapshot] = useState<{ title: string; description: string } | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [moveToDonePending, setMoveToDonePending] = useState<{ confirm: () => Promise<void> } | null>(null);
   const [workspaceCount, setWorkspaceCount] = useState(0);
   const [issueTags, setIssueTags] = useState<{ id: string; name: string; color: string | null }[]>([]);
   const [allTags, setAllTags] = useState<{ id: string; name: string; color: string | null }[]>([]);
@@ -269,6 +271,18 @@ export function IssueDetailPanel({
 
   async function handleStatusChange(newStatusId: string) {
     if (newStatusId === issue.statusId) return;
+    const targetStatus = statuses.find((s) => s.id === newStatusId);
+    const isArchive = targetStatus && ["Done", "Cancelled"].includes(targetStatus.name);
+    const ws = issue.workspaceSummary?.main;
+    if (isArchive && ws && ws.status !== "closed") {
+      setMoveToDonePending({
+        confirm: async () => {
+          await onUpdate(issue.id, { statusId: newStatusId });
+          setMoveToDonePending(null);
+        },
+      });
+      return;
+    }
     try {
       await onUpdate(issue.id, { statusId: newStatusId });
     } catch {
@@ -1122,6 +1136,13 @@ export function IssueDetailPanel({
           )}
         </div>
       </div>
+      {moveToDonePending && (
+        <MoveToDoneDialog
+          issue={issue}
+          onConfirm={moveToDonePending.confirm}
+          onCancel={() => setMoveToDonePending(null)}
+        />
+      )}
     </>
   );
 }
