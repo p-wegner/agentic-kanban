@@ -1156,16 +1156,16 @@ export function BoardPage() {
           </div>
         </div>
       )}
-      <div className="flex flex-col gap-3 p-4 h-full overflow-hidden">
+      <div className="flex flex-col gap-2 p-4 h-full overflow-hidden">
+        <BoardStats
+          activeColumns={activeColumns}
+          archiveColumns={archiveColumns}
+          searchQuery={searchQuery}
+          projectId={activeProjectId}
+          showBlocked={showBlocked}
+          onToggleBlocked={() => setShowBlocked((v) => !v)}
+        />
         <div className="flex items-start gap-2 flex-wrap">
-          <BoardStats
-            activeColumns={activeColumns}
-            archiveColumns={archiveColumns}
-            searchQuery={searchQuery}
-            projectId={activeProjectId}
-            showBlocked={showBlocked}
-            onToggleBlocked={() => setShowBlocked((v) => !v)}
-          />
           {backlogColumn !== undefined && (
             <BacklogPanel
               backlogColumn={backlogColumn}
