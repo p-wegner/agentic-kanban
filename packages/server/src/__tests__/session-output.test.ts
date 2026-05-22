@@ -209,6 +209,33 @@ describe("session-output", () => {
       expect(result).toEqual(["Working on it", "Done!"]);
     });
 
+    it("extracts rate_limit_event", () => {
+      const messages = [
+        {
+          type: "stdout",
+          data: JSON.stringify({
+            type: "rate_limit_event",
+            rate_limit_info: {
+              status: "allowed",
+              resetsAt: 1779492000,
+              rateLimitType: "five_hour",
+              overageStatus: "rejected",
+              overageDisabledReason: "org_level_disabled",
+              isUsingOverage: false,
+            },
+            uuid: "a64f60d7-08b9-4205-9a86-9fb0836be447",
+            session_id: "594ffd37-ba74-490e-bad1-e03d3121a992",
+          }),
+        },
+      ];
+      const result = extractMeaningfulOutput(messages, 10);
+      expect(result).toHaveLength(1);
+      expect(result[0]).toContain("[rate_limit]");
+      expect(result[0]).toContain("five_hour");
+      expect(result[0]).toContain("allowed");
+      expect(result[0]).toContain("overage rejected");
+    });
+
     it("takes last line of multi-line text blocks", () => {
       const messages = [
         {
