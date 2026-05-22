@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { db } from "../db/index.js";
-import { workspaces, sessions, issues, projects, preferences, diffComments, projectStatuses, issueDependencies, agentSkills } from "@agentic-kanban/shared/schema";
-import { eq, and, inArray } from "drizzle-orm";
+import { workspaces, sessions, issues, diffComments, agentSkills } from "@agentic-kanban/shared/schema";
+import { eq, and } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import * as gitService from "../services/git.service.js";
 import { killProcessesInDir } from "../services/process-cleanup.js";
@@ -9,69 +9,16 @@ import { runScript } from "../services/script-runner.js";
 import type { SessionManager } from "../services/session.manager.js";
 import type { BoardEvents } from "../services/board-events.js";
 import type { Database } from "../db/index.js";
-import { resolve, dirname, join } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { writeFileSync } from "node:fs";
 import { spawn, spawnSync } from "node:child_process";
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const MOCK_AGENT_PATH = resolve(__dirname, "../scripts/mock-agent.ts");
-// Resolve tsx from server's node_modules so the mock agent works from any CWD (e.g. worktrees)
-const TSX_LOADER = resolve(__dirname, "../../node_modules/tsx/dist/loader.mjs");
-const TSX_URL = pathToFileURL(TSX_LOADER).href;
-const MOCK_AGENT_COMMAND = `node --import ${TSX_URL} "${MOCK_AGENT_PATH}"`;
-
-/**
- * Resolve repo info from workspace → issue → project chain.
- */
-async function resolveProjectRepo(
-  workspaceId: string,
-  database: Database = db,
-): Promise<{ repoPath: string; defaultBranch: string }> {
-  const wsRows = await database
-    .select()
-    .from(workspaces)
-    .where(eq(workspaces.id, workspaceId))
-    .limit(1);
-  if (wsRows.length === 0) {
-    throw new Error("Workspace not found");
-  }
-
-  const issueRows = await database
-    .select({ projectId: issues.projectId })
-    .from(issues)
-    .where(eq(issues.id, wsRows[0].issueId))
-    .limit(1);
-  if (issueRows.length === 0) {
-    throw new Error("Issue not found");
-  }
-
-  const projectRows = await database
-    .select({ repoPath: projects.repoPath, defaultBranch: projects.defaultBranch })
-    .from(projects)
-    .where(eq(projects.id, issueRows[0].projectId))
-    .limit(1);
-  if (projectRows.length === 0) {
-    throw new Error("Project not found");
-  }
-
-  return {
-    repoPath: projectRows[0].repoPath,
-    defaultBranch: projectRows[0].defaultBranch,
-  };
-}
-
-async function resolveProjectId(
-  workspaceId: string,
-  database: Database = db,
-): Promise<string | null> {
-  const wsRows = await database.select().from(workspaces).where(eq(workspaces.id, workspaceId)).limit(1);
-  if (wsRows.length === 0) return null;
-  const issueRows = await database.select({ projectId: issues.projectId }).from(issues).where(eq(issues.id, wsRows[0].issueId)).limit(1);
-  if (issueRows.length === 0) return null;
-  return issueRows[0].projectId;
-}
+import { resolveProjectRepo, resolveProjectFull, resolveProjectId, moveIssueToDone, getWorkspaceById, updateWorkspaceStatus } from "../repositories/workspace.repository.js";
+import { loadAgentSettings } from "../services/agent-settings.service.js";
+import { PREF_AUTO_START_FOLLOWUP } from "../constants/preference-keys.js";
+import { autoStartFollowups } from "../services/followup-workspace.service.js";
+import { parseDiffStats } from "../services/board-aggregation.service.js";
+import { getConflictingFiles, buildConflictResolutionPrompt, runLearningStep } from "../services/merge-helpers.service.js";
 
 export function createWorkspaceActionsRoute(
   getSessionManager: () => SessionManager,
@@ -84,13 +31,8 @@ export function createWorkspaceActionsRoute(
   router.post("/:id/setup", async (c) => {
     const id = c.req.param("id");
 
-    // Look up workspace
-    const rows = await database.select().from(workspaces).where(eq(workspaces.id, id)).limit(1);
-    if (rows.length === 0) {
-      return c.json({ error: "Workspace not found" }, 404);
-    }
-
-    const workspace = rows[0];
+    const workspace = await getWorkspaceById(id, database);
+    if (!workspace) return c.json({ error: "Workspace not found" }, 404);
 
     // Already set up — return existing info
     if (workspace.workingDir) {
@@ -128,28 +70,16 @@ export function createWorkspaceActionsRoute(
   router.post("/:id/terminal", async (c) => {
     const id = c.req.param("id");
 
-    const rows = await database.select().from(workspaces).where(eq(workspaces.id, id)).limit(1);
-    if (rows.length === 0) {
-      return c.json({ error: "Workspace not found" }, 404);
-    }
-
-    const workspace = rows[0];
+    const workspace = await getWorkspaceById(id, database);
+    if (!workspace) return c.json({ error: "Workspace not found" }, 404);
     if (!workspace.workingDir) {
       return c.json({ error: "Workspace not set up" }, 400);
     }
 
     try {
-      const prefRows = await database.select().from(preferences);
-      const prefMap = new Map(prefRows.map(r => [r.key, r.value]));
-
-      const agentCommand = prefMap.get("agent_command") || "claude";
-      const skipPerms = prefMap.get("skip_permissions") === "true";
-      const baseArgs = prefMap.get("agent_args") || "";
-      const agentArgs = skipPerms
-        ? (baseArgs ? baseArgs + " --dangerously-skip-permissions" : "--dangerously-skip-permissions")
-        : baseArgs;
-
-      const fullCommand = agentArgs ? `${agentCommand} ${agentArgs}` : agentCommand;
+      const { agentCommand, agentArgs } = await loadAgentSettings(database);
+      const resolvedCommand = agentCommand || "claude";
+      const fullCommand = agentArgs ? `${resolvedCommand} ${agentArgs}` : resolvedCommand;
 
       if (process.platform === "win32") {
         // Write a temp batch file to avoid quoting/escaping issues with nested cmd.exe
@@ -184,14 +114,12 @@ export function createWorkspaceActionsRoute(
     let body: Record<string, unknown> = {};
     try { body = await c.req.json(); } catch { /* empty body is fine */ }
 
-    const rows = await database.select().from(workspaces).where(eq(workspaces.id, id)).limit(1);
-    if (rows.length === 0) {
-      return c.json({ error: "Workspace not found" }, 404);
-    }
+    const ws0 = await getWorkspaceById(id, database);
+    if (!ws0) return c.json({ error: "Workspace not found" }, 404);
 
     // Auto-build prompt from issue when not provided
     if (!body.prompt) {
-      const ws = rows[0];
+      const ws = ws0;
       const issueRows = await database
         .select({ title: issues.title, description: issues.description })
         .from(issues)
@@ -205,45 +133,19 @@ export function createWorkspaceActionsRoute(
     }
 
     try {
-      // Read agent settings from preferences
-      const prefRows = await database.select().from(preferences);
-      const prefMap = new Map(prefRows.map(r => [r.key, r.value]));
-
-      // Determine agent command: explicit body > mock_agent pref / env > agent_command pref > default
-      let agentCommand = body.agentCommand || undefined;
-      if (!agentCommand) {
-        const useMock = prefMap.get("mock_agent") === "true" || process.env.MOCK_AGENT === "1";
-        if (useMock) {
-          agentCommand = MOCK_AGENT_COMMAND;
-        } else {
-          agentCommand = prefMap.get("agent_command") || undefined;
-        }
-      }
-      const skipPerms = prefMap.get("skip_permissions") === "true";
-      const baseArgs = prefMap.get("agent_args") || "";
-      const agentArgs = skipPerms
-        ? (baseArgs ? baseArgs + " --dangerously-skip-permissions" : "--dangerously-skip-permissions")
-        : (baseArgs || undefined);
-      const claudeProfile = prefMap.get("claude_profile") || undefined;
-      const resumeWithNewModel = prefMap.get("resume_with_new_model") === "true";
-      const permissionPromptToolPref = prefMap.get("permission_prompt_tool");
-      const permissionPromptTool = permissionPromptToolPref === "true"
-        ? "mcp__agentic-kanban__approve_tool_use"
-        : (permissionPromptToolPref && permissionPromptToolPref !== "false" ? permissionPromptToolPref : undefined);
+      const { agentCommand, agentArgs, claudeProfile, resumeWithNewModel, permissionPromptTool } =
+        await loadAgentSettings(database, body.agentCommand as string | undefined);
 
       const promptStr = body.prompt as string;
       const truncatedPrompt = promptStr.length > 80 ? promptStr.slice(0, 80) + "..." : promptStr;
       console.log(`[workspace-actions] launch: workspaceId=${id} prompt="${truncatedPrompt}" agentCommand=${agentCommand ?? "default"} agentArgs=${agentArgs ?? "none"} profile=${claudeProfile ?? "none"} resumeFromId=${body.resumeFromId ?? "none"} resumeWithNewModel=${resumeWithNewModel}`);
 
-      // Read planMode from workspace record
-      const wsRows = await database.select({ planMode: workspaces.planMode }).from(workspaces).where(eq(workspaces.id, id)).limit(1);
-      const planMode = wsRows.length > 0 ? wsRows[0].planMode : false;
+      const planMode = ws0.planMode ?? false;
 
       const resumeFromId = typeof body.resumeFromId === "string" ? body.resumeFromId : undefined;
       const sessionId = await getSessionManager().startSession(id, promptStr, agentCommand, agentArgs, resumeFromId, claudeProfile, false, permissionPromptTool, planMode, resumeWithNewModel, undefined, "chat");
 
-      const now = new Date().toISOString();
-      await database.update(workspaces).set({ status: "active", claudeProfile: claudeProfile ?? null, agentCommand: agentCommand ?? null, updatedAt: now }).where(eq(workspaces.id, id));
+      await updateWorkspaceStatus(id, "active", { claudeProfile: claudeProfile ?? null, agentCommand: agentCommand ?? null }, database);
 
       // Broadcast board event
       const projectId = await resolveProjectId(id, database);
@@ -288,19 +190,9 @@ export function createWorkspaceActionsRoute(
     if (!result.ok) {
       if ((result as any).stale) {
         // Process is gone — launch a new session with --resume
-        const prefRows = await database.select().from(preferences);
-        const prefMap = new Map(prefRows.map((r) => [r.key, r.value]));
-        const useMock = prefMap.get("mock_agent") === "true" || process.env.MOCK_AGENT === "1";
-        const agentCommand = useMock ? MOCK_AGENT_COMMAND : (prefMap.get("agent_command") || undefined);
-        const skipPerms = prefMap.get("skip_permissions") === "true";
-        const baseArgs = prefMap.get("agent_args") || "";
-        const agentArgs = skipPerms
-          ? (baseArgs ? baseArgs + " --dangerously-skip-permissions" : "--dangerously-skip-permissions")
-          : (baseArgs || undefined);
-        const claudeProfile = prefMap.get("claude_profile") || undefined;
-        const resumeWithNewModel = prefMap.get("resume_with_new_model") === "true";
-        const wsRows = await database.select({ planMode: workspaces.planMode }).from(workspaces).where(eq(workspaces.id, id)).limit(1);
-        const planMode = wsRows.length > 0 ? wsRows[0].planMode : false;
+        const { agentCommand, agentArgs, claudeProfile, resumeWithNewModel } = await loadAgentSettings(database);
+        const wsForTurn = await getWorkspaceById(id, database);
+        const planMode = wsForTurn?.planMode ?? false;
 
         const sessionId = await getSessionManager().startSession(
           id,
@@ -316,8 +208,7 @@ export function createWorkspaceActionsRoute(
           undefined,
           "chat",
         );
-        const now = new Date().toISOString();
-        await database.update(workspaces).set({ status: "active", claudeProfile: claudeProfile ?? null, agentCommand: agentCommand ?? null, updatedAt: now }).where(eq(workspaces.id, id));
+        await updateWorkspaceStatus(id, "active", { claudeProfile: claudeProfile ?? null, agentCommand: agentCommand ?? null }, database);
         const projectId = await resolveProjectId(id, database);
         if (projectId) options?.boardEvents?.broadcast(projectId, "session_launched");
         return c.json({ sessionId, resumed: true }, 201);
@@ -347,8 +238,7 @@ export function createWorkspaceActionsRoute(
       }
     }
 
-    const now = new Date().toISOString();
-    await database.update(workspaces).set({ status: "idle", updatedAt: now }).where(eq(workspaces.id, id));
+    await updateWorkspaceStatus(id, "idle", {}, database);
 
     // Broadcast board event
     const projectId = await resolveProjectId(id, database);
@@ -361,12 +251,8 @@ export function createWorkspaceActionsRoute(
   router.get("/:id/diff", async (c) => {
     const id = c.req.param("id");
 
-    const rows = await database.select().from(workspaces).where(eq(workspaces.id, id)).limit(1);
-    if (rows.length === 0) {
-      return c.json({ error: "Workspace not found" }, 404);
-    }
-
-    const workspace = rows[0];
+    const workspace = await getWorkspaceById(id, database);
+    if (!workspace) return c.json({ error: "Workspace not found" }, 404);
     if (!workspace.workingDir && !workspace.branch) {
       return c.json({ error: "Workspace not set up" }, 400);
     }
@@ -420,20 +306,11 @@ export function createWorkspaceActionsRoute(
   router.post("/:id/merge", async (c) => {
     const id = c.req.param("id");
 
-    const rows = await database.select().from(workspaces).where(eq(workspaces.id, id)).limit(1);
-    if (rows.length === 0) {
-      return c.json({ error: "Workspace not found" }, 404);
-    }
-
-    const workspace = rows[0];
+    const workspace = await getWorkspaceById(id, database);
+    if (!workspace) return c.json({ error: "Workspace not found" }, 404);
 
     try {
-      // Resolve project for teardown script
-      const issueRows = await database.select({ projectId: issues.projectId }).from(issues).where(eq(issues.id, workspace.issueId)).limit(1);
-      const projectRows = issueRows.length > 0
-        ? await database.select().from(projects).where(eq(projects.id, issueRows[0].projectId)).limit(1)
-        : [];
-      const project = projectRows[0] ?? null;
+      const { project, repoPath, defaultBranch } = await resolveProjectFull(id, database);
 
       // Pre-merge cleanup: kill processes and run teardown script (best effort)
       // Skip process cleanup for direct workspaces — their workingDir is the main repo, killing would take down the dev server
@@ -453,24 +330,9 @@ export function createWorkspaceActionsRoute(
       // Direct workspace: no merge needed, just close
       if (workspace.isDirect) {
         const now = new Date().toISOString();
-        await database
-          .update(workspaces)
-          .set({ status: "closed", closedAt: now, updatedAt: now })
-          .where(eq(workspaces.id, id));
+        await updateWorkspaceStatus(id, "closed", { closedAt: now }, database);
 
-        // Move issue to Done — work is complete after merge
-        try {
-          const projectId = await resolveProjectId(id, database);
-          if (projectId) {
-            const statuses = await database.select().from(projectStatuses).where(eq(projectStatuses.projectId, projectId));
-            const doneStatus = statuses.find(s => s.name === "Done") ?? statuses.find(s => s.name === "AI Reviewed");
-            if (doneStatus) {
-              await database.update(issues).set({ statusId: doneStatus.id, updatedAt: now, statusChangedAt: now }).where(eq(issues.id, workspace.issueId));
-            }
-          }
-        } catch (err) {
-          console.warn("[workspaces] Failed to move issue to Done:", err);
-        }
+        await moveIssueToDone(id, workspace.issueId, now, database, true);
 
         const projectId = await resolveProjectId(id, database);
         if (projectId) options?.boardEvents?.broadcast(projectId, "workspace_merged");
@@ -478,51 +340,24 @@ export function createWorkspaceActionsRoute(
         return c.json({ id, mergeOutput: "Direct workspace closed (no merge needed)" });
       }
 
+      // Load preferences once for learning step + auto-start checks
+      const prefRows = await database.select().from(preferences);
+      const prefMap = new Map(prefRows.map(r => [r.key, r.value]));
+
       // Optional learning step: run an agent session to extract insights before merge
-      const prefRowsLearning = await database.select().from(preferences);
-      const prefMapLearning = new Map(prefRowsLearning.map(r => [r.key, r.value]));
-      if (prefMapLearning.get("learning_step_before_merge") === "true" && workspace.workingDir && getSessionManager) {
-        try {
-          const learningPrompt = `/learning-step\n\nRun the learning step skill to extract insights from recent session transcripts and update docs/hooks before this workspace is merged.`;
-          const agentCmd = prefMapLearning.get("agent_command") || undefined;
-          const agentArgs = prefMapLearning.get("agent_args") || undefined;
-          const claudeProfile = prefMapLearning.get("claude_profile") || undefined;
-          const sm = getSessionManager();
-          const learningSessId = await sm.startSession(id, learningPrompt, agentCmd, agentArgs ? agentArgs.split(" ") : undefined, undefined, claudeProfile, undefined, undefined, undefined, undefined, undefined, "learning");
-          console.log(`[workspace-actions] learning step started: session=${learningSessId}`);
-          // Wait up to 3 minutes for the learning session to complete
-          await new Promise<void>((resolve) => {
-            const timeout = setTimeout(() => {
-              console.log("[workspace-actions] learning step timed out after 3m, proceeding with merge");
-              resolve();
-            }, 3 * 60 * 1000);
-            const poll = setInterval(async () => {
-              const sessRows = await database.select({ status: sessions.status }).from(sessions).where(eq(sessions.id, learningSessId)).limit(1);
-              if (sessRows.length > 0 && sessRows[0].status !== "running") {
-                clearInterval(poll);
-                clearTimeout(timeout);
-                console.log(`[workspace-actions] learning step finished: status=${sessRows[0].status}`);
-                resolve();
-              }
-            }, 5000);
-          });
-        } catch (err) {
-          console.warn("[workspace-actions] learning step failed (non-fatal):", err);
-        }
+      if (workspace.workingDir && getSessionManager) {
+        await runLearningStep(id, prefMap, database, getSessionManager);
       }
 
       // Check for merge conflicts before attempting merge
       if (workspace.workingDir) {
-        const { repoPath: projectRepo } = await resolveProjectRepo(id, database);
-        const projectRows = await database.select({ defaultBranch: projects.defaultBranch }).from(projects).where(eq(projects.repoPath, projectRepo)).limit(1);
-        const baseBranch = workspace.baseBranch || projectRows[0]?.defaultBranch || "main";
+        const baseBranch = workspace.baseBranch || defaultBranch;
         const conflicts = await gitService.detectConflicts(workspace.workingDir, baseBranch);
         if (conflicts.hasConflicts) {
           return c.json({ error: "Merge conflicts detected", conflictingFiles: conflicts.conflictingFiles }, 409);
         }
       }
 
-      const { repoPath } = await resolveProjectRepo(id, database);
       console.log(`[workspace-actions] merge: workspaceId=${id} branch=${workspace.branch} repoPath=${repoPath}`);
 
       // Before merging, sync the branch ref to the worktree's HEAD.
@@ -554,24 +389,9 @@ export function createWorkspaceActionsRoute(
       }
 
       const now = new Date().toISOString();
-      await database
-        .update(workspaces)
-        .set({ status: "closed", workingDir: null, closedAt: now, updatedAt: now })
-        .where(eq(workspaces.id, id));
+      await updateWorkspaceStatus(id, "closed", { workingDir: null, closedAt: now }, database);
 
-      // Auto-move issue to "Done"
-      try {
-        const projectId = await resolveProjectId(id, database);
-        if (projectId) {
-          const statuses = await database.select().from(projectStatuses).where(eq(projectStatuses.projectId, projectId));
-          const doneStatus = statuses.find(s => s.name === "Done");
-          if (doneStatus) {
-            await database.update(issues).set({ statusId: doneStatus.id, updatedAt: now, statusChangedAt: now }).where(eq(issues.id, workspace.issueId));
-          }
-        }
-      } catch (err) {
-        console.warn("[workspaces] Failed to move issue to Done:", err);
-      }
+      await moveIssueToDone(id, workspace.issueId, now, database);
 
       // Broadcast board event
       const projectId = await resolveProjectId(id, database);
@@ -579,10 +399,8 @@ export function createWorkspaceActionsRoute(
 
       // Auto-start follow-up issues if setting enabled
       try {
-        const prefRows2 = await database.select().from(preferences);
-        const prefMap2 = new Map(prefRows2.map(r => [r.key, r.value]));
-        if (prefMap2.get("auto_start_followup") === "true" && projectId) {
-          await autoStartFollowups(workspace.issueId, projectId, database, getSessionManager, prefMap2, options);
+        if (prefMap.get(PREF_AUTO_START_FOLLOWUP) === "true" && projectId) {
+          await autoStartFollowups(workspace.issueId, projectId, database, getSessionManager, prefMap, options);
         }
       } catch (err) {
         console.warn("[workspace-actions] auto_start_followup check failed:", err);
@@ -600,11 +418,8 @@ export function createWorkspaceActionsRoute(
   // GET /api/workspaces/:id/conflicts — on-demand conflict detection
   router.get("/:id/conflicts", async (c) => {
     const id = c.req.param("id");
-    const rows = await database.select().from(workspaces).where(eq(workspaces.id, id)).limit(1);
-    if (rows.length === 0) {
-      return c.json({ error: "Workspace not found" }, 404);
-    }
-    const workspace = rows[0];
+    const workspace = await getWorkspaceById(id, database);
+    if (!workspace) return c.json({ error: "Workspace not found" }, 404);
     if (!workspace.workingDir || workspace.isDirect) {
       return c.json({ hasConflicts: false, conflictingFiles: [] });
     }
@@ -624,11 +439,8 @@ export function createWorkspaceActionsRoute(
     const body = await c.req.json();
     const mode = body.mode === "merge" ? "merge" : "rebase";
 
-    const rows = await database.select().from(workspaces).where(eq(workspaces.id, id)).limit(1);
-    if (rows.length === 0) {
-      return c.json({ error: "Workspace not found" }, 404);
-    }
-    const workspace = rows[0];
+    const workspace = await getWorkspaceById(id, database);
+    if (!workspace) return c.json({ error: "Workspace not found" }, 404);
     if (!workspace.workingDir || workspace.isDirect) {
       return c.json({ error: "Not supported for direct workspaces" }, 400);
     }
@@ -662,11 +474,8 @@ export function createWorkspaceActionsRoute(
   // POST /api/workspaces/:id/abort-rebase — abort in-progress rebase
   router.post("/:id/abort-rebase", async (c) => {
     const id = c.req.param("id");
-    const rows = await database.select().from(workspaces).where(eq(workspaces.id, id)).limit(1);
-    if (rows.length === 0) {
-      return c.json({ error: "Workspace not found" }, 404);
-    }
-    const workspace = rows[0];
+    const workspace = await getWorkspaceById(id, database);
+    if (!workspace) return c.json({ error: "Workspace not found" }, 404);
     if (!workspace.workingDir) {
       return c.json({ error: "Workspace not set up" }, 400);
     }
@@ -684,11 +493,8 @@ export function createWorkspaceActionsRoute(
   // POST /api/workspaces/:id/resolve-conflicts — launch AI agent to resolve conflicts
   router.post("/:id/resolve-conflicts", async (c) => {
     const id = c.req.param("id");
-    const rows = await database.select().from(workspaces).where(eq(workspaces.id, id)).limit(1);
-    if (rows.length === 0) {
-      return c.json({ error: "Workspace not found" }, 404);
-    }
-    const workspace = rows[0];
+    const workspace = await getWorkspaceById(id, database);
+    if (!workspace) return c.json({ error: "Workspace not found" }, 404);
     if (!workspace.workingDir) {
       return c.json({ error: "Workspace not set up" }, 400);
     }
@@ -697,58 +503,19 @@ export function createWorkspaceActionsRoute(
     }
 
     try {
-      // Get conflicting files from the in-progress rebase/merge
-      let conflictingFiles: string[] = [];
-      try {
-        const unmerged = await gitService.getDiff(workspace.workingDir, "HEAD");
-        // Parse file names from the diff output — but simpler to just use diff --name-only
-        const { execFile } = await import("node:child_process");
-        const output = await new Promise<string>((res, rej) => {
-          execFile("git", ["diff", "--name-only", "--diff-filter=U"], { cwd: workspace.workingDir! }, (err, stdout) => {
-            if (err) rej(err); else res(stdout.toString());
-          });
-        });
-        conflictingFiles = output.trim().split("\n").filter(Boolean);
-      } catch { /* no conflicts or not in merge state */ }
+      const conflictingFiles = await getConflictingFiles(workspace.workingDir);
 
       const { defaultBranch } = await resolveProjectRepo(id, database);
       const baseBranch = workspace.baseBranch || defaultBranch;
 
-      const prompt = `Resolve the merge/rebase conflicts in this workspace.
+      const prompt = buildConflictResolutionPrompt(conflictingFiles, baseBranch);
 
-Conflicting files:
-${conflictingFiles.map(f => `- ${f}`).join("\n")}
-
-For each conflicting file:
-1. Read the file and examine the conflict markers (<<<<<<<, =======, >>>>>>>)
-2. Understand the intent of both changes
-3. Resolve the conflict by keeping the correct code from both sides — prefer the feature branch changes unless the base branch change is clearly needed
-4. Remove all conflict markers
-5. Stage the resolved file with: git add <filename> (use the actual filename)
-
-After resolving all conflicts:
-- If this was a rebase: run "git rebase --continue"
-- If this was a merge: run "git commit --no-edit"
-
-Base branch: ${baseBranch}`;
-
-      // Read preferences for agent launch
-      const prefRows = await database.select().from(preferences);
-      const prefMap = new Map(prefRows.map(r => [r.key, r.value]));
-      const useMock = prefMap.get("mock_agent") === "true" || process.env.MOCK_AGENT === "1";
-      const agentCommand = useMock ? MOCK_AGENT_COMMAND : (prefMap.get("agent_command") || undefined);
-      const skipPerms = prefMap.get("skip_permissions") === "true";
-      const baseArgs = prefMap.get("agent_args") || "";
-      const agentArgs = skipPerms
-        ? (baseArgs ? baseArgs + " --dangerously-skip-permissions" : "--dangerously-skip-permissions")
-        : (baseArgs || undefined);
-      const claudeProfile = prefMap.get("claude_profile") || undefined;
+      const { agentCommand, agentArgs, claudeProfile } = await loadAgentSettings(database);
 
       const sessionId = await getSessionManager().startSession(id, prompt, agentCommand, agentArgs, undefined, claudeProfile, true, undefined, undefined, undefined, undefined, "fix-conflicts");
       options?.fixAndMergeSessionIds?.add(sessionId);
 
-      const now = new Date().toISOString();
-      await database.update(workspaces).set({ status: "fixing", updatedAt: now }).where(eq(workspaces.id, id));
+      await updateWorkspaceStatus(id, "fixing", {}, database);
 
       const projectId = await resolveProjectId(id, database);
       if (projectId) options?.boardEvents?.broadcast(projectId, "session_launched");
@@ -785,10 +552,8 @@ Base branch: ${baseBranch}`;
       return c.json({ error: "filePath and body are required" }, 400);
     }
 
-    const wsRows = await database.select().from(workspaces).where(eq(workspaces.id, id)).limit(1);
-    if (wsRows.length === 0) {
-      return c.json({ error: "Workspace not found" }, 404);
-    }
+    const wsCheck = await getWorkspaceById(id, database);
+    if (!wsCheck) return c.json({ error: "Workspace not found" }, 404);
 
     const now = new Date().toISOString();
     const comment = {
@@ -859,13 +624,8 @@ Base branch: ${baseBranch}`;
   router.get("/:id/sessions", async (c) => {
     const id = c.req.param("id");
 
-    const wsRows = await database
-      .select({ skillId: workspaces.skillId })
-      .from(workspaces)
-      .where(eq(workspaces.id, id))
-      .limit(1);
-
-    const skillId = wsRows[0]?.skillId ?? null;
+    const wsSessions = await getWorkspaceById(id, database);
+    const skillId = wsSessions?.skillId ?? null;
     let skillName: string | null = null;
     if (skillId) {
       const skillRows = await database
@@ -888,10 +648,10 @@ Base branch: ${baseBranch}`;
   router.post("/:id/open-editor", async (c) => {
     const id = c.req.param("id");
 
-    const rows = await database.select().from(workspaces).where(eq(workspaces.id, id)).limit(1);
-    if (rows.length === 0) return c.json({ error: "Workspace not found" }, 404);
+    const wsEditor = await getWorkspaceById(id, database);
+    if (!wsEditor) return c.json({ error: "Workspace not found" }, 404);
 
-    const { workingDir } = rows[0];
+    const { workingDir } = wsEditor;
     if (!workingDir) return c.json({ error: "Workspace has no working directory" }, 422);
 
     // Verify VS Code is available
@@ -906,139 +666,4 @@ Base branch: ${baseBranch}`;
   });
 
   return router;
-}
-
-/**
- * After an issue is merged, find issues that depended on it and are now unblocked.
- * An issue is unblocked when all its depends_on/blocked_by dependencies are Done.
- * For unblocked issues that have no active workspace, create a workspace and launch agent.
- */
-async function autoStartFollowups(
-  mergedIssueId: string,
-  projectId: string,
-  database: Database,
-  getSessionManager: () => SessionManager,
-  prefMap: Map<string, string>,
-  options?: { boardEvents?: BoardEvents },
-): Promise<void> {
-  // Find issues that depend on the merged issue
-  const dependents = await database
-    .select({ issueId: issueDependencies.issueId, type: issueDependencies.type })
-    .from(issueDependencies)
-    .where(and(
-      eq(issueDependencies.dependsOnId, mergedIssueId),
-      inArray(issueDependencies.type, ["depends_on", "blocked_by"]),
-    ));
-
-  if (dependents.length === 0) return;
-
-  // Load Done/Cancelled statuses for the project
-  const statuses = await database.select().from(projectStatuses).where(eq(projectStatuses.projectId, projectId));
-  const terminalNames = new Set(["Done", "Cancelled"]);
-  const doneStatusIds = new Set(statuses.filter(s => terminalNames.has(s.name)).map(s => s.id));
-  const todoStatus = statuses.find(s => s.name === "Todo") ?? statuses[0];
-  const project = await database.select().from(projects).where(eq(projects.id, projectId)).limit(1);
-  if (!project[0]) return;
-
-  for (const dep of dependents) {
-    // Check all dependencies of this issue — if all are Done/Cancelled, it's unblocked
-    const allDeps = await database
-      .select({ dependsOnId: issueDependencies.dependsOnId, type: issueDependencies.type })
-      .from(issueDependencies)
-      .where(and(
-        eq(issueDependencies.issueId, dep.issueId),
-        inArray(issueDependencies.type, ["depends_on", "blocked_by"]),
-      ));
-
-    const depIssueIds = allDeps.map(d => d.dependsOnId);
-    if (depIssueIds.length === 0) continue;
-
-    const depIssueRows = await database
-      .select({ id: issues.id, statusId: issues.statusId })
-      .from(issues)
-      .where(inArray(issues.id, depIssueIds));
-
-    const allResolved = depIssueRows.every(i => doneStatusIds.has(i.statusId));
-    if (!allResolved) continue;
-
-    // Check this issue doesn't already have an active workspace
-    const existingWs = await database
-      .select({ id: workspaces.id, status: workspaces.status })
-      .from(workspaces)
-      .where(eq(workspaces.issueId, dep.issueId));
-    const hasActive = existingWs.some(w => w.status !== "closed");
-    if (hasActive) continue;
-
-    // Get the follow-up issue details
-    const followupIssue = await database.select().from(issues).where(eq(issues.id, dep.issueId)).limit(1);
-    if (!followupIssue[0]) continue;
-
-    // Create workspace + launch agent for the follow-up issue
-    try {
-      const sanitized = followupIssue[0].title
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, "-")
-        .replace(/^-+|-+$/g, "")
-        .slice(0, 50);
-      const branch = `feature/ak-${followupIssue[0].issueNumber ?? "f"}-${sanitized}`;
-      const wsId = randomUUID();
-      const now = new Date().toISOString();
-
-      const worktreePath = await gitService.createWorktree(project[0].repoPath, branch, project[0].defaultBranch);
-
-      await database.insert(workspaces).values({
-        id: wsId,
-        issueId: dep.issueId,
-        branch,
-        status: "idle",
-        workingDir: worktreePath,
-        baseBranch: project[0].defaultBranch,
-        isDirect: false,
-        planMode: false,
-        createdAt: now,
-        updatedAt: now,
-      });
-
-      // Move issue to In Progress
-      const inProgressStatus = statuses.find(s => s.name === "In Progress") ?? todoStatus;
-      await database.update(issues).set({ statusId: inProgressStatus.id, updatedAt: now, statusChangedAt: now }).where(eq(issues.id, dep.issueId));
-
-      const useMock = prefMap.get("mock_agent") === "true" || process.env.MOCK_AGENT === "1";
-      const agentCommand = useMock ? MOCK_AGENT_COMMAND : (prefMap.get("agent_command") || undefined);
-      const skipPerms = prefMap.get("skip_permissions") === "true";
-      const baseArgs = prefMap.get("agent_args") || "";
-      const agentArgs = skipPerms
-        ? (baseArgs ? baseArgs + " --dangerously-skip-permissions" : "--dangerously-skip-permissions")
-        : (baseArgs || undefined);
-      const claudeProfile = prefMap.get("claude_profile") || undefined;
-      const prompt = `${followupIssue[0].title}\n\n${followupIssue[0].description ?? ""}`.trim();
-
-      await getSessionManager().startSession(wsId, prompt, agentCommand, agentArgs, undefined, claudeProfile, undefined, undefined, undefined, undefined, undefined, "auto-start");
-      await database.update(workspaces).set({ status: "active", updatedAt: now }).where(eq(workspaces.id, wsId));
-
-      console.log(`[workspace-actions] auto-started follow-up workspace for issue ${followupIssue[0].issueNumber ?? dep.issueId}`);
-      options?.boardEvents?.broadcast(projectId, "workspace_merged");
-    } catch (err) {
-      console.warn(`[workspace-actions] failed to auto-start follow-up for issue ${dep.issueId}:`, err);
-    }
-  }
-}
-
-/** Parse basic stats from unified diff output. */
-function parseDiffStats(diff: string): { filesChanged: number; insertions: number; deletions: number } {
-  let filesChanged = 0;
-  let insertions = 0;
-  let deletions = 0;
-
-  for (const line of diff.split("\n")) {
-    if (line.startsWith("+++ ") && !line.startsWith("+++ /dev/null")) {
-      filesChanged++;
-    } else if (line.startsWith("+") && !line.startsWith("+++")) {
-      insertions++;
-    } else if (line.startsWith("-") && !line.startsWith("---")) {
-      deletions++;
-    }
-  }
-
-  return { filesChanged, insertions, deletions };
 }
