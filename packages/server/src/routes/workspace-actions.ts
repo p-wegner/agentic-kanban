@@ -76,7 +76,7 @@ async function resolveProjectId(
 export function createWorkspaceActionsRoute(
   getSessionManager: () => SessionManager,
   database: Database = db,
-  options?: { boardEvents?: BoardEvents },
+  options?: { boardEvents?: BoardEvents; fixAndMergeSessionIds?: Set<string> },
 ) {
   const router = new Hono();
 
@@ -692,6 +692,9 @@ export function createWorkspaceActionsRoute(
     if (!workspace.workingDir) {
       return c.json({ error: "Workspace not set up" }, 400);
     }
+    if (workspace.status === "fixing") {
+      return c.json({ error: "Conflict resolution already in progress" }, 409);
+    }
 
     try {
       // Get conflicting files from the in-progress rebase/merge
@@ -742,6 +745,7 @@ Base branch: ${baseBranch}`;
       const claudeProfile = prefMap.get("claude_profile") || undefined;
 
       const sessionId = await getSessionManager().startSession(id, prompt, agentCommand, agentArgs, undefined, claudeProfile, true, undefined, undefined, undefined, undefined, "fix-conflicts");
+      options?.fixAndMergeSessionIds?.add(sessionId);
 
       const now = new Date().toISOString();
       await database.update(workspaces).set({ status: "fixing", updatedAt: now }).where(eq(workspaces.id, id));
