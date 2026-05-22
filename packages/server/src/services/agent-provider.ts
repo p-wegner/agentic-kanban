@@ -76,6 +76,8 @@ export interface ParsedStreamEvent {
     toolUseId: string;
     images?: Array<{ mediaType: string; data: string }>;
   };
+  /** Set on assistant events that contain text content. */
+  assistantText?: string;
   /** Set on TodoWrite or equivalent task-tracking events. */
   todos?: Array<{ subject: string; status: string }>;
   /** Set on rate_limit_event events. */
@@ -218,11 +220,14 @@ export class ClaudeProvider implements AgentProvider {
         result.liveStats = { model, contextTokens };
       }
 
-      // Tool use blocks
+      // Text and tool_use blocks from assistant messages
       const content = obj.message.content;
       if (Array.isArray(content)) {
+        const textParts: string[] = [];
         for (const block of content) {
-          if (block.type === "tool_use") {
+          if (block.type === "text" && typeof block.text === "string" && block.text) {
+            textParts.push(block.text);
+          } else if (block.type === "tool_use" && !result.toolActivity) {
             result.toolActivity = {
               name: block.name,
               input: block.input ?? {},
@@ -241,8 +246,10 @@ export class ClaudeProvider implements AgentProvider {
                 subagentDelta: 1,
               };
             }
-            break; // one tool_activity per parsed event
           }
+        }
+        if (textParts.length > 0) {
+          result.assistantText = textParts.join("\n");
         }
       }
     }
