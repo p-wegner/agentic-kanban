@@ -1097,6 +1097,32 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                     {completedSessions.length > 0 && (
                       <div className="space-y-1">
                         <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide">Sessions</div>
+                        {(() => {
+                          const specialSessions = completedSessions.filter(s =>
+                            s.triggerType && s.triggerType !== "agent" && s.triggerType !== "chat"
+                            || (!s.triggerType && s.skillName)
+                          );
+                          if (specialSessions.length === 0) return null;
+                          const counts = new Map<string, { label: string; className: string; count: number; lastStatus: string }>();
+                          for (const s of specialSessions) {
+                            const tl = getTriggerTypeLabel(s.triggerType, s.skillName) ?? { label: s.triggerType ?? "Skill", className: "bg-purple-100 text-purple-700" };
+                            const key = s.triggerType ?? `skill:${s.skillName}`;
+                            const existing = counts.get(key);
+                            if (existing) { existing.count++; existing.lastStatus = s.status; }
+                            else counts.set(key, { ...tl, count: 1, lastStatus: s.status });
+                          }
+                          return (
+                            <div className="flex flex-wrap gap-1 pb-0.5">
+                              {[...counts.entries()].map(([key, { label, className, count, lastStatus }]) => (
+                                <span key={key} className={`text-[10px] font-medium px-1.5 py-0.5 rounded flex items-center gap-1 ${className}`}>
+                                  {label}
+                                  <span className="opacity-60">×{count}</span>
+                                  {lastStatus === "completed" ? <span className="text-green-600">✓</span> : lastStatus === "stopped" ? <span className="text-yellow-500">⏹</span> : null}
+                                </span>
+                              ))}
+                            </div>
+                          );
+                        })()}
                         <div className="space-y-0.5 max-h-48 overflow-y-auto">
                         {completedSessions.map((session) => {
                           const sessionBadge = SESSION_STATUS_COLORS[session.status] ?? "bg-gray-100 text-gray-500";
