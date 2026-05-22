@@ -20,7 +20,7 @@ const DEFAULT_CLIENT_PORT = 5173;
 
 function run(cmd) {
   try {
-    return execSync(cmd, { encoding: "utf8", stdio: ["pipe", "pipe", "pipe"] }).trim();
+    return execSync(cmd, { encoding: "utf8", stdio: ["pipe", "pipe", "pipe"], windowsHide: true }).trim();
   } catch {
     return "";
   }
@@ -91,14 +91,14 @@ async function freePort(port, label) {
     // Works on Windows (netstat) and Unix (lsof)
     const isWin = process.platform === "win32";
     if (isWin) {
-      const out = execSync(`netstat -ano | findstr ":${port} "`, { encoding: "utf8", stdio: ["pipe","pipe","pipe"] });
+      const out = execSync(`netstat -ano | findstr ":${port} "`, { encoding: "utf8", stdio: ["pipe","pipe","pipe"], windowsHide: true });
       const pids = [...new Set(
         out.split("\n")
           .map(l => l.trim().split(/\s+/).at(-1))
           .filter(p => /^\d+$/.test(p) && p !== "0")
       )];
       for (const pid of pids) {
-        try { execSync(`taskkill /PID ${pid} /T /F`, { stdio: "pipe" }); } catch {}
+        try { execSync(`taskkill /PID ${pid} /T /F`, { stdio: "pipe", windowsHide: true }); } catch {}
       }
     } else {
       execSync(`lsof -ti :${port} | xargs kill -9`, { stdio: "pipe" });
@@ -150,14 +150,14 @@ const serverProc = spawnProcess(
   "server",
   "pnpm",
   ["--filter", "agentic-kanban", "dev"],
-  { shell: false }
+  { shell: false, windowsHide: true }
 );
 
 const clientProc = spawnProcess(
   "client",
   "pnpm",
   ["--filter", "client", "dev"],
-  { shell: false }
+  { shell: false, windowsHide: true }
 );
 
 function shutdown() {
