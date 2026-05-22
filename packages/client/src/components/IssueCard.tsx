@@ -15,6 +15,20 @@ function relativeTime(iso: string): string {
   return `${days}d ago`;
 }
 
+function getLastSessionBadge(triggerType: string | null | undefined): { label: string; className: string } | null {
+  if (!triggerType) return null;
+  const map: Record<string, { label: string; className: string }> = {
+    review: { label: "AI Review", className: "bg-violet-100 text-violet-700" },
+    merge: { label: "AI Merge", className: "bg-emerald-100 text-emerald-700" },
+    "fix-conflicts": { label: "Fix Conflicts", className: "bg-orange-100 text-orange-700" },
+    learning: { label: "Learning", className: "bg-teal-100 text-teal-700" },
+    "auto-start": { label: "Auto-start", className: "bg-gray-100 text-gray-600" },
+  };
+  if (map[triggerType]) return map[triggerType];
+  if (triggerType.startsWith("skill:")) return { label: triggerType.slice(6), className: "bg-purple-100 text-purple-700" };
+  return null;
+}
+
 const priorityColors: Record<string, string> = {
   low: "bg-gray-200 text-gray-700",
   medium: "bg-blue-100 text-blue-700",
@@ -167,7 +181,7 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
           ) : ws.main.status === "fixing" ? (
             <>
               <span className="inline-block w-2 h-2 rounded-full shrink-0 bg-orange-500 animate-pulse" />
-              <span className="font-medium text-orange-700">AI Fixing</span>
+              <span className="font-medium text-orange-700">Fixing Conflicts</span>
             </>
           ) : (
             <>
@@ -177,6 +191,10 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
                 "bg-gray-400"
               }`} />
               <span className="font-mono text-gray-600 truncate">{ws.main.branch}</span>
+              {ws.main.status === "idle" && (() => {
+                const badge = getLastSessionBadge(ws.main.lastSessionTriggerType);
+                return badge ? <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded shrink-0 ${badge.className}`}>{badge.label}</span> : null;
+              })()}
             </>
           )}
           {ws.main.status === "closed" && (
