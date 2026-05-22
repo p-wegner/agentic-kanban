@@ -8,6 +8,7 @@ import type { Database } from "../db/index.js";
 import type { BoardEvents } from "../services/board-events.js";
 import { parseSessionSummary, formatDurationStr } from "../services/session-summary.js";
 import { analyzeDependencies, enhanceIssue } from "../services/issue-ai.service.js";
+import { wouldCreateCycle } from "../services/board-aggregation.service.js";
 import { deleteWorkspaceCascade } from "../repositories/workspace.repository.js";
 
 export function createIssuesRoute(database: Database = db, options?: { boardEvents?: BoardEvents }) {
@@ -638,38 +639,3 @@ export function createIssuesRoute(database: Database = db, options?: { boardEven
 }
 
 export const issuesRoute = createIssuesRoute();
-
-async function wouldCreateCycle(database: Database, issueId: string, dependsOnId: string, projectId: string): Promise<boolean> {
-  // Load all dependencies for the project
-  const allDeps = await database
-    .select({
-      depIssueId: issueDependencies.issueId,
-      depDependsOnId: issueDependencies.dependsOnId,
-    })
-    .from(issueDependencies)
-    .innerJoin(issues, eq(issueDependencies.issueId, issues.id))
-    .where(eq(issues.projectId, projectId));
-
-  // Build adjacency: issueId -> Set of dependsOnIds
-  const adj = new Map<string, Set<string>>();
-  for (const dep of allDeps) {
-    let set = adj.get(dep.depIssueId);
-    if (!set) { set = new Set(); adj.set(dep.depIssueId, set); }
-    set.add(dep.depDependsOnId);
-  }
-
-  // DFS from dependsOnId: if we can reach issueId, adding this edge creates a cycle
-  const visited = new Set<string>();
-  const stack = [dependsOnId];
-  while (stack.length > 0) {
-    const current = stack.pop()!;
-    if (current === issueId) return true;
-    if (visited.has(current)) continue;
-    visited.add(current);
-    const neighbors = adj.get(current);
-    if (neighbors) {
-      for (const n of neighbors) stack.push(n);
-    }
-  }
-  return false;
-}
