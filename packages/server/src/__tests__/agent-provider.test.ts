@@ -355,12 +355,18 @@ describe("ClaudeProvider", () => {
             rateLimitType: "five_hour",
             resetsAt: 1779492000,
             overageStatus: "rejected",
+            overageDisabledReason: "org_level_disabled",
+            isUsingOverage: false,
           },
+          uuid: "a64f60d7-08b9-4205-9a86-9fb0836be447",
+          session_id: "594ffd37-ba74-490e-bad1-e03d3121a992",
         })
       );
       expect(evt?.rateLimitInfo?.status).toBe("allowed");
       expect(evt?.rateLimitInfo?.rateLimitType).toBe("five_hour");
       expect(evt?.rateLimitInfo?.resetsAt).toBe(1779492000);
+      expect(evt?.rateLimitInfo?.overageDisabledReason).toBe("org_level_disabled");
+      expect(evt?.rateLimitInfo?.isUsingOverage).toBe(false);
     });
 
     it("returns undefined for unrecognized JSON events", () => {
