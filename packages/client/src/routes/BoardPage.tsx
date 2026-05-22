@@ -1537,6 +1537,7 @@ export function BoardPage() {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
       <div className="flex flex-col gap-3 p-4 h-full overflow-hidden">
 <<<<<<< HEAD
 =======
@@ -1586,6 +1587,18 @@ export function BoardPage() {
             showBlocked={showBlocked}
             onToggleBlocked={() => setShowBlocked((v) => !v)}
           />
+=======
+      <div className="flex flex-col gap-2 p-4 h-full overflow-hidden">
+        <BoardStats
+          activeColumns={activeColumns}
+          archiveColumns={archiveColumns}
+          searchQuery={searchQuery}
+          projectId={activeProjectId}
+          showBlocked={showBlocked}
+          onToggleBlocked={() => setShowBlocked((v) => !v)}
+        />
+        <div className="flex items-start gap-2 flex-wrap">
+>>>>>>> a52a9fb (feat: move BoardStats to its own row and make progress bar full-width)
           {backlogColumn !== undefined && (
             <BacklogPanel
               backlogColumn={backlogColumn}
