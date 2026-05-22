@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { db } from "../db/index.js";
-import { workspaces, sessions, issues, diffComments, agentSkills } from "@agentic-kanban/shared/schema";
+import { workspaces, sessions, issues, preferences, diffComments, agentSkills } from "@agentic-kanban/shared/schema";
 import { eq, and } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import * as gitService from "../services/git.service.js";
