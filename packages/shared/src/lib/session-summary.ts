@@ -43,7 +43,7 @@ export function parseSessionSummary(
   const errors: string[] = [];
   let model = "";
   let initFound = false;
-  let agentSummary: string | null = null;
+  const agentSummaryParts: string[] = [];
   let taskCounter = 0;
   const tasksMap = new Map<string, TaskSummaryItem>();
 
@@ -142,7 +142,7 @@ export function parseSessionSummary(
 
       if (type === "result") {
         const resultText = (obj.result as string) || "";
-        if (resultText) agentSummary = resultText;
+        if (resultText) agentSummaryParts.push(resultText);
         continue;
       }
     }
@@ -161,6 +161,8 @@ export function parseSessionSummary(
   if (filesWritten.size > 0) parts.push(`wrote ${filesWritten.size} file${filesWritten.size !== 1 ? "s" : ""}`);
   if (commandsRun.length > 0) parts.push(`ran ${commandsRun.length} command${commandsRun.length !== 1 ? "s" : ""}`);
   const overview = parts.length > 0 ? parts.join(", ") : "No activity recorded";
+
+  const agentSummary = agentSummaryParts.length > 0 ? agentSummaryParts.join("\n\n---\n\n") : null;
 
   return {
     overview,
