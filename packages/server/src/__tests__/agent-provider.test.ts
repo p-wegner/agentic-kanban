@@ -346,6 +346,23 @@ describe("ClaudeProvider", () => {
       expect(evt?.toolResult?.toolUseId).toBe("tu-1");
     });
 
+    it("parses rate_limit_event", () => {
+      const evt = provider.parseStreamEvent(
+        JSON.stringify({
+          type: "rate_limit_event",
+          rate_limit_info: {
+            status: "allowed",
+            rateLimitType: "five_hour",
+            resetsAt: 1779492000,
+            overageStatus: "rejected",
+          },
+        })
+      );
+      expect(evt?.rateLimitInfo?.status).toBe("allowed");
+      expect(evt?.rateLimitInfo?.rateLimitType).toBe("five_hour");
+      expect(evt?.rateLimitInfo?.resetsAt).toBe(1779492000);
+    });
+
     it("returns undefined for unrecognized JSON events", () => {
       const evt = provider.parseStreamEvent(
         JSON.stringify({ type: "unknown", data: "stuff" })

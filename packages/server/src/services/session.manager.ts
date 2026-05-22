@@ -185,6 +185,11 @@ function createSessionManager(
           }
         }
 
+        // Rate limit event: log for observability
+        if (evt.rateLimitInfo) {
+          console.warn(`[agent] rate_limit_event: sessionId=${sessionId} status=${evt.rateLimitInfo.status} type=${evt.rateLimitInfo.rateLimitType}`);
+        }
+
         // Tool result: decrement subagent count for tracked Agent tool_use IDs
         if (evt.toolResult) {
           const agentIds = sessionAgentToolUseIds.get(sessionId);
