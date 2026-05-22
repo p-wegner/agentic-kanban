@@ -165,8 +165,8 @@ export function BoardStats({
 
       {/* Segmented progress bar */}
       {total > 0 && (
-        <div className="flex items-center gap-2">
-          <div className="flex h-1.5 rounded-full overflow-hidden gap-px flex-1 min-w-[120px] max-w-xs bg-gray-100">
+        <div className="flex items-center gap-3">
+          <div className="flex h-2 rounded-full overflow-hidden gap-px flex-1 bg-gray-100">
             {allColumns.map((col) => {
               if (col.issues.length === 0) return null;
               const pct = (col.issues.length / total) * 100;
@@ -182,7 +182,7 @@ export function BoardStats({
             })}
           </div>
           {/* Legend dots */}
-          <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex items-center gap-2 flex-wrap shrink-0">
             {allColumns.map((col) => {
               const cfg = getConfig(col.name);
               const isActive = col.issues.length > 0;
