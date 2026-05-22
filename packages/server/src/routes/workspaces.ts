@@ -142,10 +142,12 @@ export function createWorkspacesRoute(
       // If the project has a locally installed version (.claude/skills/<name>/SKILL.md in repoPath),
       // use that prompt so users can customise it; otherwise fall back to the DB prompt.
       const skillId: string | null = body.skillId || null;
+      let skillName: string | null = null;
       if (skillId && worktreePath) {
         const skillRows = await database.select().from(agentSkills).where(eq(agentSkills.id, skillId)).limit(1);
         if (skillRows.length > 0) {
           const skill = skillRows[0];
+          skillName = skill.name;
           const localPrompt = await readLocalSkillPrompt(project.repoPath, skill.name);
           const effectiveSkill = localPrompt ? { ...skill, prompt: localPrompt } : skill;
           await writeAgentSkillFile(worktreePath, effectiveSkill);
@@ -215,7 +217,7 @@ export function createWorkspacesRoute(
       if (getSessionManager) {
         const truncatedPrompt = agentPrompt.length > 80 ? agentPrompt.slice(0, 80) + "..." : agentPrompt;
         console.log(`[workspaces] auto-launch: workspaceId=${id} branch=${branch} isDirect=${isDirect} prompt="${truncatedPrompt}" agentCommand=${agentCommand ?? "default"}`);
-        sessionId = await getSessionManager().startSession(id, agentPrompt, agentCommand, agentArgs, undefined, claudeProfile, undefined, permissionPromptTool, planMode, undefined, provider, "agent");
+        sessionId = await getSessionManager().startSession(id, agentPrompt, agentCommand, agentArgs, undefined, claudeProfile, undefined, permissionPromptTool, planMode, undefined, provider, skillName ? `skill:${skillName}` : "agent");
       }
 
       // Broadcast board event
