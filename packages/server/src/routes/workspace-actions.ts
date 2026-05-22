@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { db } from "../db/index.js";
-import { workspaces, sessions, issues, projects, preferences, diffComments, projectStatuses, issueDependencies } from "@agentic-kanban/shared/schema";
+import { workspaces, sessions, issues, projects, preferences, diffComments, projectStatuses, issueDependencies, agentSkills } from "@agentic-kanban/shared/schema";
 import { eq, and, inArray } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import * as gitService from "../services/git.service.js";
@@ -855,12 +855,29 @@ Base branch: ${baseBranch}`;
   router.get("/:id/sessions", async (c) => {
     const id = c.req.param("id");
 
+    const wsRows = await database
+      .select({ skillId: workspaces.skillId })
+      .from(workspaces)
+      .where(eq(workspaces.id, id))
+      .limit(1);
+
+    const skillId = wsRows[0]?.skillId ?? null;
+    let skillName: string | null = null;
+    if (skillId) {
+      const skillRows = await database
+        .select({ name: agentSkills.name })
+        .from(agentSkills)
+        .where(eq(agentSkills.id, skillId))
+        .limit(1);
+      skillName = skillRows[0]?.name ?? null;
+    }
+
     const result = await database
       .select()
       .from(sessions)
       .where(eq(sessions.workspaceId, id));
 
-    return c.json(result);
+    return c.json(result.map(s => ({ ...s, skillName })));
   });
 
   // POST /api/workspaces/:id/open-editor — open the workspace directory in VS Code
