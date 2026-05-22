@@ -46,7 +46,7 @@ export function BoardStats({
   // Active workspace counts
   const activeWorkspaces = activeColumns.reduce((sum, col) => {
     return sum + col.issues.filter((i) => {
-      const ws = (i as any).workspaceSummary?.main;
+      const ws = i.workspaceSummary?.main;
       return ws?.status === "active" || ws?.status === "reviewing";
     }).length;
   }, 0);
