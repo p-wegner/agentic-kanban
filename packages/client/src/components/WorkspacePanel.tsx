@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { apiFetch } from "../lib/api.js";
 import { formatRelativeTime } from "../lib/formatRelativeTime.js";
 import { getOutputFormatForAgent } from "../lib/agent-output-parser.js";
@@ -162,6 +162,11 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
   const [quickDropdownOpen, setQuickDropdownOpen] = useState(false);
   const [selectedWorkspace, setSelectedWorkspace] = useState<string | null>(initialWorkspaceId ?? null);
   const [activeSession, setActiveSession] = useState<string | null>(initialSessionId || null);
+  const [panelMode, setPanelMode] = useState<"sidebar" | "modal">("sidebar");
+  const [sidebarSide, setSidebarSide] = useState<"left" | "right">("right");
+  const [dragPos, setDragPos] = useState<{ x: number; y: number } | null>(null);
+  const [snapZone, setSnapZone] = useState<"left" | "right" | null>(null);
+  const dragStartRef = useRef<{ mouseX: number; mouseY: number; panelX: number; panelY: number } | null>(null);
   const [diff, setDiff] = useState<DiffResponse | null>(null);
   const [diffComments, setDiffComments] = useState<DiffComment[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -748,15 +753,126 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
     }
   }
 
+  function handleHeaderMouseDown(e: React.MouseEvent) {
+    if ((e.target as HTMLElement).closest("button")) return;
+    const panel = (e.currentTarget as HTMLElement).closest("[data-panel]") as HTMLElement;
+    if (!panel) return;
+    const rect = panel.getBoundingClientRect();
+    dragStartRef.current = { mouseX: e.clientX, mouseY: e.clientY, panelX: rect.left, panelY: rect.top };
+
+    const EDGE_SNAP_THRESHOLD = 80;
+    let currentDragMode: "sidebar" | "modal" = panelMode;
+    let cleanup: (() => void) | null = null;
+
+    if (currentDragMode === "sidebar") {
+      const isLeftSidebar = sidebarSide === "left";
+      const modalX = isLeftSidebar
+        ? Math.min(window.innerWidth - 580, 200)
+        : Math.max(0, dragStartRef.current.panelX - 10);
+      const modalY = Math.max(0, dragStartRef.current.panelY + 40);
+      currentDragMode = "modal";
+      setPanelMode("modal");
+      setDragPos({ x: modalX, y: modalY });
+      dragStartRef.current = { ...dragStartRef.current, panelX: modalX, panelY: modalY };
+    }
+
+    const onMove = (ev: MouseEvent) => {
+      if (!dragStartRef.current) return;
+      const dx = ev.clientX - dragStartRef.current.mouseX;
+      const dy = ev.clientY - dragStartRef.current.mouseY;
+      const newX = dragStartRef.current.panelX + dx;
+      const newY = dragStartRef.current.panelY + dy;
+      if (currentDragMode === "modal") {
+        const panelRect = panel.getBoundingClientRect();
+        const nearRightEdge = newX + panelRect.width >= window.innerWidth - EDGE_SNAP_THRESHOLD;
+        const nearLeftEdge = newX <= EDGE_SNAP_THRESHOLD;
+        if (nearRightEdge) {
+          currentDragMode = "sidebar";
+          setPanelMode("sidebar");
+          setSidebarSide("right");
+          setSnapZone(null);
+          setDragPos(null);
+          dragStartRef.current = null;
+          cleanup?.();
+          return;
+        }
+        if (nearLeftEdge) {
+          currentDragMode = "sidebar";
+          setPanelMode("sidebar");
+          setSidebarSide("left");
+          setSnapZone(null);
+          setDragPos(null);
+          dragStartRef.current = null;
+          cleanup?.();
+          return;
+        }
+        const SNAP_PREVIEW_THRESHOLD = EDGE_SNAP_THRESHOLD + 60;
+        const approachingRight = newX + panelRect.width >= window.innerWidth - SNAP_PREVIEW_THRESHOLD;
+        const approachingLeft = newX <= SNAP_PREVIEW_THRESHOLD;
+        setSnapZone(approachingRight ? "right" : approachingLeft ? "left" : null);
+        setDragPos({ x: newX, y: newY });
+      }
+    };
+    const onUp = () => {
+      dragStartRef.current = null;
+      setSnapZone(null);
+      cleanup?.();
+    };
+    cleanup = () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  }
+
   return (
     <>
+      {snapZone === "left" && (
+        <div className="fixed left-0 top-0 h-full w-[min(560px,100vw)] z-40 bg-blue-500/20 border-r-2 border-blue-400 pointer-events-none" />
+      )}
+      {snapZone === "right" && (
+        <div className="fixed right-0 top-0 h-full w-[min(560px,100vw)] z-40 bg-blue-500/20 border-l-2 border-blue-400 pointer-events-none" />
+      )}
       <div className="fixed inset-0 bg-black/30 z-40" onClick={onClose} />
-      <div className="fixed right-0 top-0 h-full w-[min(560px,100vw)] bg-white shadow-xl z-50 flex flex-col border-l border-gray-200 animate-slide-in-right">
-        <div className="flex items-center gap-2 px-4 py-3 border-b border-gray-200 min-w-0">
+      <div
+        data-panel
+        className={`fixed bg-white shadow-xl z-50 flex flex-col animate-slide-in-right ${
+          panelMode === "modal"
+            ? "top-[5vh] left-1/2 -translate-x-1/2 w-[min(560px,96vw)] h-[90vh] rounded-lg border border-gray-200"
+            : sidebarSide === "left"
+            ? "left-0 top-0 h-full border-r border-gray-200 w-[min(560px,100vw)]"
+            : "right-0 top-0 h-full border-l border-gray-200 w-[min(560px,100vw)]"
+        }`}
+        style={
+          dragPos && panelMode === "modal"
+            ? { position: "fixed", left: dragPos.x, top: dragPos.y, transform: "none" }
+            : undefined
+        }
+      >
+        <div
+          className={`flex items-center gap-2 px-4 py-3 border-b border-gray-200 min-w-0 cursor-grab active:cursor-grabbing ${panelMode === "modal" ? "rounded-t-lg" : ""}`}
+          onMouseDown={handleHeaderMouseDown}
+        >
           <h2 className="flex-1 min-w-0 text-sm font-semibold text-gray-900 truncate" title={issue.title}>
             {issue.title}
           </h2>
           <div className="flex items-center gap-2 shrink-0">
+            <button
+              onClick={() => { setPanelMode(m => m === "sidebar" ? "modal" : "sidebar"); setDragPos(null); }}
+              title={panelMode === "sidebar" ? "Detach to floating panel" : "Snap back to sidebar"}
+              className="text-gray-400 hover:text-gray-600 p-0.5 rounded"
+            >
+              {panelMode === "modal" ? (
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 9L4 4m0 0h5m-5 0v5M15 9l5-5m0 0h-5m5 0v5M9 15l-5 5m0 0h5m-5 0v-5M15 15l5 5m0 0h-5m5 0v-5" />
+                </svg>
+              ) : (
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 8V4m0 0h4M4 4l5 5M20 8V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5M20 16v4m0 0h-4m4 0l-5-5" />
+                </svg>
+              )}
+            </button>
             <button
               onClick={handleMonitorRunNow}
               disabled={monitorRunning}
@@ -1000,13 +1116,31 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                                     : "hover:bg-gray-50 text-gray-600"
                                 }`}
                               >
-                                <span className={`w-1.5 h-1.5 rounded-full ${session.status === "completed" ? "bg-green-500" : session.status === "stopped" ? "bg-yellow-500" : "bg-gray-300"}`} />
-                                <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${sessionBadge}`}>
-                                  {session.status}
-                                </span>
                                 {(() => {
                                   const tl = getTriggerTypeLabel(session.triggerType, session.skillName);
-                                  return tl ? <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${tl.className}`}>{tl.label}</span> : null;
+                                  const isSpecial = tl && session.triggerType !== "agent" && session.triggerType !== "chat" && session.triggerType !== "auto-start";
+                                  const parsedStats = parseStats(session.stats);
+                                  if (isSpecial) {
+                                    const succeeded = parsedStats?.success;
+                                    const outcomeIcon = session.status === "completed"
+                                      ? (succeeded === false ? <span className="text-red-500 font-bold">✗</span> : <span className="text-green-500 font-bold">✓</span>)
+                                      : session.status === "stopped" ? <span className="text-yellow-500 font-bold">⏹</span> : null;
+                                    return (
+                                      <>
+                                        {outcomeIcon}
+                                        <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${tl.className}`}>{tl.label}</span>
+                                      </>
+                                    );
+                                  }
+                                  return (
+                                    <>
+                                      <span className={`w-1.5 h-1.5 rounded-full ${session.status === "completed" ? "bg-green-500" : session.status === "stopped" ? "bg-yellow-500" : "bg-gray-300"}`} />
+                                      <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${sessionBadge}`}>
+                                        {session.status}
+                                      </span>
+                                      {tl && <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${tl.className}`}>{tl.label}</span>}
+                                    </>
+                                  );
                                 })()}
                                 <span className="text-xs text-gray-600">
                                   {formatRelativeTime(session.startedAt)}
@@ -1046,6 +1180,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
 
                     {ws.status !== "closed" && !isRunning && ws.workingDir && (() => {
                       const lastReview = completedSessions.filter(s => s.triggerType === "review").at(-1);
+                      const lastMerge = completedSessions.filter(s => s.triggerType === "merge").at(-1);
                       return (
                       <div className="space-y-1 pt-1">
                         <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide">Quick Actions</div>
@@ -1074,6 +1209,11 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                             >
                               {ws.isDirect ? "Close" : "AI Merge"}
                             </button>
+                            {lastMerge && (
+                              <span className={`text-[9px] px-1 ${lastMerge.status === "completed" ? "text-green-600" : "text-yellow-600"}`}>
+                                {lastMerge.status === "completed" ? "✓" : "✗"} {formatRelativeTime(lastMerge.endedAt ?? lastMerge.startedAt)}
+                              </span>
+                            )}
                           </div>
                           {availableSkills.map((skill) => {
                             const lastSkill = completedSessions.filter(s => s.triggerType === `skill:${skill.name}`).at(-1);
