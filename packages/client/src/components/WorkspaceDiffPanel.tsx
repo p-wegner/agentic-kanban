@@ -46,8 +46,8 @@ export function WorkspaceDiffPanel({ diff, diffComments, workspaceId, onClose, o
   }
 
   return (
-    <div className="space-y-2">
-      <div className="flex items-center justify-between">
+    <div className="border border-gray-200 rounded overflow-hidden">
+      <div className="flex items-center justify-between px-3 py-2 bg-gray-50 border-b border-gray-200">
         <h3 className="text-sm font-medium text-gray-900">Diff</h3>
         <button
           onClick={onClose}
@@ -56,6 +56,7 @@ export function WorkspaceDiffPanel({ diff, diffComments, workspaceId, onClose, o
           Close
         </button>
       </div>
+      <div className="max-h-[60vh] overflow-y-auto">
       <DiffViewer
         diff={diff.diff}
         stats={diff.stats}
@@ -64,6 +65,7 @@ export function WorkspaceDiffPanel({ diff, diffComments, workspaceId, onClose, o
         onEditComment={handleEditComment}
         onDeleteComment={handleDeleteComment}
       />
+      </div>
     </div>
   );
 }
