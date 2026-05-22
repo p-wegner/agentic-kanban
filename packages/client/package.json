@@ -17,6 +17,14 @@
     "react-markdown": "^10.1.0"
   },
   "devDependencies": {
+    "@babel/code-frame": "^7.29.0",
+    "@babel/core": "^7.29.0",
+    "@babel/generator": "^7.29.1",
+    "@babel/helpers": "^7.29.2",
+    "@babel/parser": "^7.29.3",
+    "@babel/template": "^7.28.6",
+    "@babel/traverse": "^7.29.0",
+    "@babel/types": "^7.29.0",
     "@tailwindcss/vite": "^4.2.0",
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",

@@ -224,11 +224,6 @@ function createSessionManager(
       if (ctx) {
         options?.onActivity?.(ctx.projectId, ctx.issueId, sessionId, "");
         options?.onTodos?.(ctx.projectId, ctx.issueId, []);
-        // Broadcast final stats with zero subagents
-        const model = sessionModels.get(sessionId) ?? "";
-        const toolUses = sessionToolUses.get(sessionId) ?? 0;
-        const lastContextTokens = sessionContextTokens.get(sessionId) ?? 0;
-        options?.onLiveStats?.(ctx.projectId, ctx.issueId, model, lastContextTokens, toolUses, 0);
       }
       sessionSubagents.delete(sessionId);
       sessionTasks.delete(sessionId);
