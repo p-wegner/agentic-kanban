@@ -37,6 +37,7 @@ interface SessionInfo {
   stats: string | null;
   providerSessionId: string | null;
   triggerType: string | null;
+  skillName: string | null;
 }
 
 interface SessionStats {
@@ -919,6 +920,11 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                                   {session.status}
                                 </span>
                                 {(() => { const tl = getTriggerTypeLabel(session.triggerType); return tl ? <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${tl.className}`}>{tl.label}</span> : null; })()}
+                                {session.skillName && (
+                                  <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700" title={`Skill: ${session.skillName}`}>
+                                    {session.skillName}
+                                  </span>
+                                )}
                                 <span className="text-xs text-gray-600">
                                   {formatRelativeTime(session.startedAt)}
                                 </span>
