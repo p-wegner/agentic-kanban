@@ -60,6 +60,13 @@ Use `update_issue` to log blockers, decisions, or scope changes in the descripti
 update_issue(issueId, description="## Progress\n- Schema migrated\n- API route WIP\n- UI pending")
 ```
 
+### 4b. Direct workspaces (isDirect: true)
+Some workspaces have `isDirect: true` — the agent is working directly on the project's default branch (e.g. master) instead of a separate feature branch. In this case:
+- There is no separate branch to merge — changes go directly to master.
+- **You must still move the issue status** when done. Do not skip status transitions just because there is no branch to merge.
+- After committing, move to **In Review** (if review is desired) or directly to **Done** (if the work is trivially correct and no review is needed).
+- The absence of a feature branch is NOT a reason to leave the ticket in "In Progress" forever.
+
 ### 5. Commit your changes
 **This is mandatory before finishing.** After implementation is complete:
 1. Stage and commit all changed files with a descriptive message
