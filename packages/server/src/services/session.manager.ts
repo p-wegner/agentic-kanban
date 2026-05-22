@@ -51,6 +51,8 @@ function createSessionManager(
   const sessionLastTool = new Map<string, string>();
   // Track Agent tool_use IDs per session to decrement count when tool_result arrives
   const sessionAgentToolUseIds = new Map<string, Set<string>>();
+  // Track all assistant text responses per session for agentSummary
+  const sessionTextParts = new Map<string, string[]>();
   // Track tasks from TaskCreate/TaskUpdate calls per session
   const sessionTasks = new Map<string, Map<string, { subject: string; status: string }>>();
   // Track whether a TodoWrite has been seen for each session (takes precedence over TaskCreate/TaskUpdate)
@@ -100,10 +102,18 @@ function createSessionManager(
           turnStates.set(sessionId, "waiting");
         }
 
+        // Accumulate assistant text for agentSummary
+        if (evt.assistantText) {
+          if (!sessionTextParts.has(sessionId)) sessionTextParts.set(sessionId, []);
+          sessionTextParts.get(sessionId)!.push(evt.assistantText);
+        }
+
         // Persist session stats from result events
         if (evt.stats) {
           const lastTool = sessionLastTool.get(sessionId);
-          const statsToSave = lastTool ? { ...evt.stats, lastTool } : evt.stats;
+          const textParts = sessionTextParts.get(sessionId) ?? [];
+          const fullAgentSummary = textParts.length > 0 ? textParts.join("\n\n---\n\n") : evt.stats.agentSummary;
+          const statsToSave = { ...evt.stats, agentSummary: fullAgentSummary, ...(lastTool ? { lastTool } : {}) };
           db.update(sessions)
             .set({ stats: JSON.stringify(statsToSave) })
             .where(eq(sessions.id, sessionId))
@@ -228,6 +238,7 @@ function createSessionManager(
       sessionContextTokens.delete(sessionId);
       sessionLastTool.delete(sessionId);
       sessionAgentToolUseIds.delete(sessionId);
+      sessionTextParts.delete(sessionId);
     }
 
     const subs = subscribers.get(sessionId);
