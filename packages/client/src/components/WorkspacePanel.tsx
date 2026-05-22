@@ -1031,7 +1031,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
             const completedSessions = sessions.filter((s) => s.status !== "running");
             const runningSession = sessions.find((s) => s.status === "running");
             const runningTriggerLabel = runningSession
-              ? getTriggerTypeLabel(runningSession.triggerType, runningSession.skillName)
+              ? (getTriggerTypeLabel(runningSession.triggerType, runningSession.skillName) ?? { label: "Agent", className: "bg-blue-50 text-blue-600" })
               : null;
 
             return (
@@ -1118,27 +1118,27 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                               >
                                 {(() => {
                                   const tl = getTriggerTypeLabel(session.triggerType, session.skillName);
-                                  const isSpecial = tl && session.triggerType !== "agent" && session.triggerType !== "chat" && session.triggerType !== "auto-start";
                                   const parsedStats = parseStats(session.stats);
-                                  if (isSpecial) {
-                                    const succeeded = parsedStats?.success;
-                                    const outcomeIcon = session.status === "completed"
-                                      ? (succeeded === false ? <span className="text-red-500 font-bold">✗</span> : <span className="text-green-500 font-bold">✓</span>)
-                                      : session.status === "stopped" ? <span className="text-yellow-500 font-bold">⏹</span> : null;
+                                  const isAgentOrChat = (session.triggerType === "agent" || session.triggerType === "chat" || !session.triggerType) && !session.skillName;
+                                  const statusDot = <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${session.status === "completed" ? "bg-green-500" : session.status === "stopped" ? "bg-yellow-500" : "bg-blue-400"}`} />;
+                                  const fallbackLabel = { label: "Agent", className: "bg-blue-50 text-blue-600" };
+                                  if (isAgentOrChat) {
                                     return (
                                       <>
-                                        {outcomeIcon}
-                                        <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${tl.className}`}>{tl.label}</span>
+                                        {statusDot}
+                                        <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${(tl ?? fallbackLabel).className}`}>{(tl ?? fallbackLabel).label}</span>
                                       </>
                                     );
                                   }
+                                  const succeeded = parsedStats?.success;
+                                  const outcomeIcon = session.status === "completed"
+                                    ? (succeeded === false ? <span className="text-red-500 font-bold text-[10px]">✗</span> : <span className="text-green-500 font-bold text-[10px]">✓</span>)
+                                    : session.status === "stopped" ? <span className="text-yellow-500 font-bold text-[10px]">⏹</span>
+                                    : statusDot;
                                   return (
                                     <>
-                                      <span className={`w-1.5 h-1.5 rounded-full ${session.status === "completed" ? "bg-green-500" : session.status === "stopped" ? "bg-yellow-500" : "bg-gray-300"}`} />
-                                      <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${sessionBadge}`}>
-                                        {session.status}
-                                      </span>
-                                      {tl && <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${tl.className}`}>{tl.label}</span>}
+                                      {outcomeIcon}
+                                      {tl && <span className={`text-[11px] font-semibold px-1.5 py-0.5 rounded ${tl.className}`}>{tl.label}</span>}
                                     </>
                                   );
                                 })()}
