@@ -751,7 +751,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
   return (
     <>
       <div className="fixed inset-0 bg-black/30 z-40" onClick={onClose} />
-      <div className="fixed right-0 top-0 h-full w-[min(480px,100vw)] bg-white shadow-xl z-50 flex flex-col border-l border-gray-200 animate-slide-in-right">
+      <div className="fixed right-0 top-0 h-full w-[min(560px,100vw)] bg-white shadow-xl z-50 flex flex-col border-l border-gray-200 animate-slide-in-right">
         <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200">
           <h2 className="text-sm font-semibold text-gray-900">
             Workspaces -- {issue.title}
@@ -777,7 +777,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
           </div>
         </div>
 
-        <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-4">
+        <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden p-4 space-y-4">
           {error && (
             <div className="p-2 bg-red-50 border border-red-200 rounded text-sm text-red-700">
               {error}
@@ -961,7 +961,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                   {ws.closedAt && <span>Closed {formatRelativeTime(ws.closedAt)}</span>}
                 </div>
 
-                {(ws.status === "active" || ws.status === "fixing") && (ws.contextTokens || ws.lastTool) && (
+                {isThisRunning && (ws.contextTokens || ws.lastTool) && (
                   <div className="flex items-center gap-2 text-[10px] text-gray-400">
                     {ws.contextTokens ? (
                       <span>
@@ -1041,6 +1041,38 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                       </div>
                     )}
 
+                    {ws.status !== "closed" && !isRunning && ws.workingDir && (
+                      <div className="flex flex-wrap gap-1.5 pt-1">
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleReview(ws.id); }}
+                          disabled={actionLoading}
+                          className="text-[10px] font-medium px-2 py-0.5 rounded bg-violet-100 text-violet-700 hover:bg-violet-200 disabled:opacity-50"
+                          title="Trigger AI code review"
+                        >
+                          AI Review
+                        </button>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleMerge(ws.id); }}
+                          disabled={actionLoading}
+                          className="text-[10px] font-medium px-2 py-0.5 rounded bg-emerald-100 text-emerald-700 hover:bg-emerald-200 disabled:opacity-50"
+                          title="Merge this workspace"
+                        >
+                          {ws.isDirect ? "Close" : "AI Merge"}
+                        </button>
+                        {availableSkills.map((skill) => (
+                          <button
+                            key={skill.id}
+                            onClick={(e) => { e.stopPropagation(); handleSkillQuickLaunch(skill.id); }}
+                            disabled={actionLoading}
+                            className="text-[10px] font-medium px-2 py-0.5 rounded bg-purple-100 text-purple-700 hover:bg-purple-200 disabled:opacity-50"
+                            title={skill.description}
+                          >
+                            ✨ {humanizeSkillName(skill.name)}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+
                     {(selectedHistoryId ? historyMessages : (activeSession || completedMessages.length > 0)) && (
                       <div className="flex border-b border-gray-200">
                         <button
@@ -1077,7 +1109,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                         ? completedSessions.find(s => s.id === selectedHistoryId)?.stats ?? null
                         : completedSessions.find(s => s.id === lastSessionPerWorkspace[ws.id])?.stats ?? null;
                       return (
-                        <div className="border border-gray-200 rounded p-3 space-y-3 text-sm max-h-96 overflow-y-auto">
+                        <div className="border border-gray-200 rounded p-3 space-y-3 text-sm max-h-80 overflow-y-auto">
                           {summaryLoading && (
                             <div className="text-gray-500 text-xs animate-pulse">Loading summary...</div>
                           )}
