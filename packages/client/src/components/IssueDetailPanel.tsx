@@ -321,8 +321,6 @@ export function IssueDetailPanel({
       const dy = ev.clientY - dragStartRef.current.mouseY;
       const newX = dragStartRef.current.panelX + dx;
       const newY = dragStartRef.current.panelY + dy;
-      console.log("[drag]", currentDragMode, dx, dy);
-
       if (currentDragMode === "sidebar") {
         // Switch to modal as soon as it's dragged away from the right edge
         if (dx < -20) {
