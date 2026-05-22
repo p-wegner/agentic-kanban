@@ -12,6 +12,7 @@ import { resolve, sep, join } from "node:path";
 import { buildWorkspaceSummaryMap, buildBlockedMap, buildTagMap, buildGraphEdges } from "../services/board-aggregation.service.js";
 import { deleteWorkspaceCascade } from "../repositories/workspace.repository.js";
 import { generateSetupScript, generateTeardownScript } from "../services/project-setup.service.js";
+import { initializeProjectStatuses } from "../repositories/issue.repository.js";
 
 const GITIGNORE_TEMPLATES: Record<string, string> = {
   node: `node_modules/
@@ -84,16 +85,6 @@ obj/
 `,
 };
 
-const DEFAULT_STATUSES = [
-  { name: "Backlog", sortOrder: -1, isDefault: false },
-  { name: "Todo", sortOrder: 0, isDefault: true },
-  { name: "In Progress", sortOrder: 1, isDefault: false },
-  { name: "In Review", sortOrder: 2, isDefault: false },
-  { name: "AI Reviewed", sortOrder: 3, isDefault: false },
-  { name: "Done", sortOrder: 4, isDefault: false },
-  { name: "Cancelled", sortOrder: 5, isDefault: false },
-];
-
 
 export function createProjectsRoute(database: Database = db) {
   const router = new Hono();
@@ -149,16 +140,7 @@ export function createProjectsRoute(database: Database = db) {
       updatedAt: now,
     });
 
-    for (const status of DEFAULT_STATUSES) {
-      await database.insert(projectStatuses).values({
-        id: randomUUID(),
-        projectId: id,
-        name: status.name,
-        sortOrder: status.sortOrder,
-        isDefault: status.isDefault,
-        createdAt: now,
-      });
-    }
+    await initializeProjectStatuses(id, now, database);
 
     // Write optional .gitignore
     if (body.gitignoreTemplate && GITIGNORE_TEMPLATES[body.gitignoreTemplate]) {
@@ -274,16 +256,7 @@ export function createProjectsRoute(database: Database = db) {
       updatedAt: now,
     });
 
-    for (const status of DEFAULT_STATUSES) {
-      await database.insert(projectStatuses).values({
-        id: randomUUID(),
-        projectId: id,
-        name: status.name,
-        sortOrder: status.sortOrder,
-        isDefault: status.isDefault,
-        createdAt: now,
-      });
-    }
+    await initializeProjectStatuses(id, now, database);
 
     return c.json({ id, name: projectName, repoPath: repoInfo.repoPath }, 201);
   });

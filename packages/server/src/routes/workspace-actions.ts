@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { db } from "../db/index.js";
-import { workspaces, sessions, issues, preferences, diffComments, agentSkills } from "@agentic-kanban/shared/schema";
+import { workspaces, sessions, issues, diffComments, agentSkills } from "@agentic-kanban/shared/schema";
 import { eq, and } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import * as gitService from "../services/git.service.js";
@@ -14,10 +14,11 @@ import { tmpdir } from "node:os";
 import { writeFileSync } from "node:fs";
 import { spawn, spawnSync } from "node:child_process";
 import { resolveProjectRepo, resolveProjectFull, resolveProjectId, moveIssueToDone, getWorkspaceById, updateWorkspaceStatus } from "../repositories/workspace.repository.js";
-import { loadAgentSettings, resolveAgentSettings } from "../services/agent-settings.service.js";
-import { PREF_LEARNING_STEP_BEFORE_MERGE, PREF_AUTO_START_FOLLOWUP } from "../constants/preference-keys.js";
+import { loadAgentSettings } from "../services/agent-settings.service.js";
+import { PREF_AUTO_START_FOLLOWUP } from "../constants/preference-keys.js";
 import { autoStartFollowups } from "../services/followup-workspace.service.js";
 import { parseDiffStats } from "../services/board-aggregation.service.js";
+import { getConflictingFiles, buildConflictResolutionPrompt, runLearningStep } from "../services/merge-helpers.service.js";
 
 export function createWorkspaceActionsRoute(
   getSessionManager: () => SessionManager,
@@ -344,32 +345,8 @@ export function createWorkspaceActionsRoute(
       const prefMap = new Map(prefRows.map(r => [r.key, r.value]));
 
       // Optional learning step: run an agent session to extract insights before merge
-      if (prefMap.get(PREF_LEARNING_STEP_BEFORE_MERGE) === "true" && workspace.workingDir && getSessionManager) {
-        try {
-          const learningPrompt = `/learning-step\n\nRun the learning step skill to extract insights from recent session transcripts and update docs/hooks before this workspace is merged.`;
-          const { agentCommand: agentCmd, agentArgs, claudeProfile } = resolveAgentSettings(prefMap);
-          const sm = getSessionManager();
-          const learningSessId = await sm.startSession(id, learningPrompt, agentCmd, agentArgs, undefined, claudeProfile, undefined, undefined, undefined, undefined, undefined, "learning");
-          console.log(`[workspace-actions] learning step started: session=${learningSessId}`);
-          // Wait up to 3 minutes for the learning session to complete
-          await new Promise<void>((resolve) => {
-            const timeout = setTimeout(() => {
-              console.log("[workspace-actions] learning step timed out after 3m, proceeding with merge");
-              resolve();
-            }, 3 * 60 * 1000);
-            const poll = setInterval(async () => {
-              const sessRows = await database.select({ status: sessions.status }).from(sessions).where(eq(sessions.id, learningSessId)).limit(1);
-              if (sessRows.length > 0 && sessRows[0].status !== "running") {
-                clearInterval(poll);
-                clearTimeout(timeout);
-                console.log(`[workspace-actions] learning step finished: status=${sessRows[0].status}`);
-                resolve();
-              }
-            }, 5000);
-          });
-        } catch (err) {
-          console.warn("[workspace-actions] learning step failed (non-fatal):", err);
-        }
+      if (workspace.workingDir && getSessionManager) {
+        await runLearningStep(id, prefMap, database, getSessionManager);
       }
 
       // Check for merge conflicts before attempting merge
@@ -526,40 +503,12 @@ export function createWorkspaceActionsRoute(
     }
 
     try {
-      // Get conflicting files from the in-progress rebase/merge
-      let conflictingFiles: string[] = [];
-      try {
-        const unmerged = await gitService.getDiff(workspace.workingDir, "HEAD");
-        // Parse file names from the diff output — but simpler to just use diff --name-only
-        const { execFile } = await import("node:child_process");
-        const output = await new Promise<string>((res, rej) => {
-          execFile("git", ["diff", "--name-only", "--diff-filter=U"], { cwd: workspace.workingDir! }, (err, stdout) => {
-            if (err) rej(err); else res(stdout.toString());
-          });
-        });
-        conflictingFiles = output.trim().split("\n").filter(Boolean);
-      } catch { /* no conflicts or not in merge state */ }
+      const conflictingFiles = await getConflictingFiles(workspace.workingDir);
 
       const { defaultBranch } = await resolveProjectRepo(id, database);
       const baseBranch = workspace.baseBranch || defaultBranch;
 
-      const prompt = `Resolve the merge/rebase conflicts in this workspace.
-
-Conflicting files:
-${conflictingFiles.map(f => `- ${f}`).join("\n")}
-
-For each conflicting file:
-1. Read the file and examine the conflict markers (<<<<<<<, =======, >>>>>>>)
-2. Understand the intent of both changes
-3. Resolve the conflict by keeping the correct code from both sides — prefer the feature branch changes unless the base branch change is clearly needed
-4. Remove all conflict markers
-5. Stage the resolved file with: git add <filename> (use the actual filename)
-
-After resolving all conflicts:
-- If this was a rebase: run "git rebase --continue"
-- If this was a merge: run "git commit --no-edit"
-
-Base branch: ${baseBranch}`;
+      const prompt = buildConflictResolutionPrompt(conflictingFiles, baseBranch);
 
       const { agentCommand, agentArgs, claudeProfile } = await loadAgentSettings(database);
 
