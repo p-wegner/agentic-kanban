@@ -64,9 +64,10 @@ export function launch(
       SERVER_PORT: process.env.SERVER_PORT || process.env.PORT || "3001",
       PORT: process.env.PORT || "3001",
     },
-    // stderr is "ignore" so grandchild processes spawned by the agent (e.g. claude.exe → cmd.exe
-    // for registry queries) don't inherit a broken pipe handle after the server hot-reloads.
-    stdio: ["pipe", "pipe", "ignore"] as const,
+    // For real (detached) agents on Windows, use "ignore" for stderr so grandchild processes
+    // spawned by claude.exe don't inherit a broken pipe handle after the server hot-reloads.
+    // Mock agents (not detached) use "pipe" so we can capture the "resuming session" log.
+    stdio: ["pipe", "pipe", shouldDetach ? "ignore" as const : "pipe" as const],
   });
   // Allow server to exit/restart without waiting for real agents
   if (shouldDetach) proc.unref();
