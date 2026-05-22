@@ -1538,6 +1538,7 @@ export function BoardPage() {
 <<<<<<< HEAD
 <<<<<<< HEAD
       <div className="flex flex-col gap-3 p-4 h-full overflow-hidden">
+<<<<<<< HEAD
 =======
       <div className="flex flex-col gap-2 sm:gap-3 p-2 sm:p-4 h-full overflow-hidden">
 >>>>>>> 65f7a08 (feat: make kanban board truly responsive for mobile)
@@ -1574,6 +1575,9 @@ export function BoardPage() {
 =======
         <div className="flex items-center gap-2 flex-wrap">
 >>>>>>> ab93bc6 (feat: add table view as third board view alongside kanban and graph)
+=======
+        <div className="flex items-start gap-2 flex-wrap">
+>>>>>>> 9dd8920 (feat: redesign BoardStats with pills, progress bar, and status legend)
           <BoardStats
             activeColumns={activeColumns}
             archiveColumns={archiveColumns}
