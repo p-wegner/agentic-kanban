@@ -195,6 +195,22 @@ const DEFAULT_STATUSES = [
   { name: "Cancelled", sortOrder: 5, isDefault: false },
 ];
 
+const PROJECT_MARKER_FILES = [
+  "package.json", "pnpm-lock.yaml", "yarn.lock", "bun.lockb", "bun.lock",
+  "Cargo.toml", "go.mod", "requirements.txt", "Pipfile", "pyproject.toml",
+  "pom.xml", "build.gradle", "build.gradle.kts", "Gemfile", "mix.exs",
+  "Makefile", "justfile", "Taskfile.yml",
+];
+
+function detectProjectMarkers(repoPath: string): string[] {
+  try {
+    const files = readdirSync(repoPath);
+    return files.filter(f => PROJECT_MARKER_FILES.includes(f));
+  } catch {
+    return [];
+  }
+}
+
 export function createProjectsRoute(database: Database = db) {
   const router = new Hono();
 
@@ -728,22 +744,7 @@ export function createProjectsRoute(database: Database = db) {
 
     const { repoPath, repoName } = projectRows[0];
 
-    // Detect project marker files
-    const markers = [
-      "package.json", "pnpm-lock.yaml", "yarn.lock", "bun.lockb", "bun.lock",
-      "Cargo.toml", "go.mod", "requirements.txt", "Pipfile", "pyproject.toml",
-      "pom.xml", "build.gradle", "build.gradle.kts", "Gemfile", "mix.exs",
-      "Makefile", "justfile", "Taskfile.yml",
-    ];
-    const detected: string[] = [];
-    try {
-      const files = readdirSync(repoPath);
-      for (const f of files) {
-        if (markers.includes(f)) detected.push(f);
-      }
-    } catch {
-      // Can't read directory
-    }
+    const detected = detectProjectMarkers(repoPath);
 
     const prompt = `You are analyzing a software project to determine the correct setup command(s) to run after cloning the repository into a fresh git worktree.
 Based on the files detected in the project root, suggest the appropriate setup command(s) for the project "${repoName}".
@@ -792,22 +793,7 @@ Detected files: ${detected.length > 0 ? detected.join(", ") : "none"}`;
 
     const { repoPath, repoName, setupScript } = projectRows[0];
 
-    // Detect project marker files
-    const markers = [
-      "package.json", "pnpm-lock.yaml", "yarn.lock", "bun.lockb", "bun.lock",
-      "Cargo.toml", "go.mod", "requirements.txt", "Pipfile", "pyproject.toml",
-      "pom.xml", "build.gradle", "build.gradle.kts", "Gemfile", "mix.exs",
-      "Makefile", "justfile", "Taskfile.yml",
-    ];
-    const detected: string[] = [];
-    try {
-      const files = readdirSync(repoPath);
-      for (const f of files) {
-        if (markers.includes(f)) detected.push(f);
-      }
-    } catch {
-      // Can't read directory
-    }
+    const detected = detectProjectMarkers(repoPath);
 
     const contextParts: string[] = [];
     if (detected.length > 0) contextParts.push(`Detected files: ${detected.join(", ")}`);
