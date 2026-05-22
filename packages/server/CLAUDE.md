@@ -6,6 +6,9 @@ Route modules that need services (e.g., `sessionManager`) should receive them vi
 ## MCP server DB path
 Uses `import.meta.dirname` relative path (`../../server/kanban.db`) since pnpm changes CWD per package. Scripts using `import.meta.dirname` from `packages/server/src/scripts/` must account for depth — `../../../kanban.db` points to repo root, not the actual DB.
 
+## Agent process survival across hot-reload
+Agent subprocesses are spawned with `detached: true` + `proc.unref()` in `agent.service.ts` so they are not in the server's process group and survive a tsx hot-reload restart. PIDs are persisted to `sessions.pid`. On startup, `server-start.ts` checks which "running" sessions still have a live PID (`process.kill(pid, 0)`) and skips marking those as stopped. The shutdown handler only calls `agentService.killAll()` on `SIGINT` (user Ctrl+C), not `SIGTERM` (hot-reload signal), so agents survive server restarts but are cleaned up on intentional shutdown.
+
 ## WebSocket setup
 `@hono/node-ws` requires `createNodeWebSocket({ app })` then `injectWebSocket(server)` after `serve()` returns.
 
