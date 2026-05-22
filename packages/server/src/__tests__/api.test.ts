@@ -79,7 +79,11 @@ const MIGRATION_FILES = [
   "../../../shared/drizzle/0032_diff_stat_cache.sql",
   "../../../shared/drizzle/0033_backlog_status.sql",
   "../../../shared/drizzle/0034_session_pid.sql",
+<<<<<<< HEAD
 >>>>>>> 1ea0691 (feat: prevent server hot-reload from killing agent processes (#222))
+=======
+  "../../../shared/drizzle/0035_session_trigger.sql",
+>>>>>>> 437c42a (feat: add triggerType to sessions — show AI Review, Chat, Fix Conflicts badges in session history)
 ];
 
 function createTestApp() {
