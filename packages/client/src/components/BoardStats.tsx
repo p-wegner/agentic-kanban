@@ -11,23 +11,20 @@ interface BoardStatsProps {
   onToggleBlocked?: () => void;
 }
 
-const COLUMN_COLORS: Record<string, string> = {
-  "Todo": "bg-slate-400",
-  "In Progress": "bg-amber-400",
-  "In Review": "bg-blue-400",
-  "AI Reviewed": "bg-purple-400",
-  "Done": "bg-emerald-400",
-  "Cancelled": "bg-gray-400",
+const STATUS_CONFIG: Record<string, { bar: string; dot: string; text: string; bg: string }> = {
+  "Todo":        { bar: "bg-slate-400",   dot: "bg-slate-300",   text: "text-slate-600",   bg: "bg-slate-50" },
+  "In Progress": { bar: "bg-amber-400",   dot: "bg-amber-300",   text: "text-amber-700",   bg: "bg-amber-50" },
+  "In Review":   { bar: "bg-blue-400",    dot: "bg-blue-300",    text: "text-blue-700",    bg: "bg-blue-50" },
+  "AI Reviewed": { bar: "bg-purple-400",  dot: "bg-purple-300",  text: "text-purple-700",  bg: "bg-purple-50" },
+  "Done":        { bar: "bg-emerald-400", dot: "bg-emerald-300", text: "text-emerald-700", bg: "bg-emerald-50" },
+  "Cancelled":   { bar: "bg-gray-400",    dot: "bg-gray-300",    text: "text-gray-500",    bg: "bg-gray-50" },
 };
 
-const COLUMN_DOT_COLORS: Record<string, string> = {
-  "Todo": "bg-slate-300",
-  "In Progress": "bg-amber-300",
-  "In Review": "bg-blue-300",
-  "AI Reviewed": "bg-purple-300",
-  "Done": "bg-emerald-300",
-  "Cancelled": "bg-gray-300",
-};
+const DEFAULT_CONFIG = { bar: "bg-gray-400", dot: "bg-gray-300", text: "text-gray-600", bg: "bg-gray-50" };
+
+function getConfig(name: string) {
+  return STATUS_CONFIG[name] ?? DEFAULT_CONFIG;
+}
 
 export function BoardStats({
   activeColumns,
@@ -38,11 +35,22 @@ export function BoardStats({
   onToggleBlocked,
 }: BoardStatsProps) {
   const isFiltered = !!searchQuery;
+  const allColumns = [...activeColumns, ...archiveColumns];
   const totalActive = activeColumns.reduce((sum, col) => sum + col.issues.length, 0);
   const totalArchive = archiveColumns.reduce((sum, col) => sum + col.issues.length, 0);
   const total = totalActive + totalArchive;
 
-  // Profile usage counts across active columns (In Progress, In Review, AI Reviewed)
+  const doneCount = archiveColumns.find((c) => c.name === "Done")?.issues.length ?? 0;
+  const completionPct = total > 0 ? Math.round((doneCount / total) * 100) : 0;
+
+  // Active workspace counts
+  const activeWorkspaces = activeColumns.reduce((sum, col) => {
+    return sum + col.issues.filter((i) => {
+      const ws = i.workspaceSummary?.main;
+      return ws?.status === "active" || ws?.status === "reviewing";
+    }).length;
+  }, 0);
+
   const profileCounts = new Map<string, number>();
   for (const col of activeColumns) {
     for (const issue of col.issues) {
@@ -75,91 +83,96 @@ export function BoardStats({
     }
   }, [total, prevTotal]);
 
+  const circumference = 2 * Math.PI * 14;
+  const dashOffset = circumference * (1 - completionPct / 100);
+
   return (
-    <div data-testid="board-stats-bar" className="flex items-center gap-3 px-1 text-xs select-none">
-      <div className="flex items-center gap-1.5">
-        <span
-          key={popKey}
-          className={`inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full text-[11px] font-semibold text-white ${
-            isFiltered ? "bg-violet-500" : "bg-gray-700"
-          } ${popKey > 0 ? "count-pop" : ""}`}
-        >
-          {total}
-        </span>
-        <span className="text-gray-400 font-medium">
-          {isFiltered ? "filtered" : "tickets"}
-        </span>
-      </div>
+    <div data-testid="board-stats-bar" className="flex flex-col gap-2 w-full select-none">
+      {/* Summary row */}
+      <div className="flex items-center gap-2 flex-wrap">
+        {/* Completion ring + total */}
+        <div className="flex items-center gap-2 px-2.5 py-1 rounded-full bg-gray-100 border border-gray-200">
+          {total > 0 && (
+            <svg width="20" height="20" viewBox="0 0 32 32" className="shrink-0 -rotate-90">
+              <circle cx="16" cy="16" r="14" fill="none" stroke="#e5e7eb" strokeWidth="4" />
+              <circle
+                cx="16" cy="16" r="14"
+                fill="none"
+                stroke="#34d399"
+                strokeWidth="4"
+                strokeDasharray={circumference}
+                strokeDashoffset={dashOffset}
+                strokeLinecap="round"
+                style={{ transition: "stroke-dashoffset 0.5s ease" }}
+              />
+            </svg>
+          )}
+          <span
+            key={popKey}
+            className={`inline-flex items-center justify-center min-w-[18px] h-4 px-1 rounded-full text-[10px] font-bold text-white ${
+              isFiltered ? "bg-violet-500" : "bg-gray-600"
+            } ${popKey > 0 ? "count-pop" : ""}`}
+          >
+            {total}
+          </span>
+          <span className="text-xs font-medium text-gray-600">
+            {isFiltered ? "filtered" : "tickets"}
+          </span>
+          {total > 0 && (
+            <span className="text-xs font-semibold text-emerald-600">{completionPct}%</span>
+          )}
+        </div>
 
-      <div className="h-3 w-px bg-gray-200" />
-
-      <div className="flex items-center gap-2.5">
-        {activeColumns.map((col) => (
-          <div key={col.id} className="flex items-center gap-1">
-            <span
-              className={`w-2 h-2 rounded-full ${
-                col.issues.length > 0
-                  ? COLUMN_COLORS[col.name] ?? "bg-gray-400"
-                  : COLUMN_DOT_COLORS[col.name] ?? "bg-gray-200"
-              }`}
-            />
-            <span className="text-gray-500 hidden sm:inline">{col.name}</span>
-            <span className="text-gray-400 font-medium sm:font-normal">
-              {col.issues.length}
-            </span>
+        {/* Done count badge */}
+        {doneCount > 0 && (
+          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-50 border border-emerald-200">
+            <svg className="w-3 h-3 text-emerald-500" fill="none" viewBox="0 0 12 12" stroke="currentColor" strokeWidth={2}>
+              <polyline points="2,6 5,9 10,3" />
+            </svg>
+            <span className="text-xs font-semibold text-emerald-700">{doneCount} done</span>
           </div>
-        ))}
-      </div>
+        )}
 
-      {totalArchive > 0 && (
-        <>
-          <div className="h-3 w-px bg-gray-200" />
-          <div className="flex items-center gap-1">
-            <span className="w-2 h-2 rounded-full bg-emerald-300" />
-            <span className="text-gray-400">
-              {totalArchive} done
+        {/* Active agents badge */}
+        {activeWorkspaces > 0 && (
+          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-indigo-50 border border-indigo-200">
+            <span className="relative flex h-2 w-2">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75" />
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-indigo-500" />
             </span>
+            <span className="text-xs font-semibold text-indigo-700">{activeWorkspaces}</span>
+            <span className="text-xs text-indigo-600">active</span>
           </div>
-        </>
-      )}
+        )}
 
-      {commitCount !== null && (
-        <>
-          <div className="h-3 w-px bg-gray-200" />
-          <div className="flex items-center gap-1" title="Commits on main branch">
+        {/* Commit count */}
+        {commitCount !== null && (
+          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-gray-50 border border-gray-200" title="Commits on main branch">
             <svg className="w-3 h-3 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
               <circle cx="12" cy="12" r="3" /><line x1="12" y1="3" x2="12" y2="9" /><line x1="12" y1="15" x2="12" y2="21" />
             </svg>
-            <span className="text-gray-400">{commitCount.toLocaleString()} commits</span>
+            <span className="text-xs text-gray-500">{commitCount.toLocaleString()} commits</span>
           </div>
-        </>
-      )}
+        )}
 
-      {profileCounts.size > 0 && (
-        <>
-          <div className="h-3 w-px bg-gray-200" />
-          <div className="flex items-center gap-2" title="Active workspaces by profile">
-            {[...profileCounts.entries()].map(([profile, count]) => (
-              <div key={profile} className="flex items-center gap-1">
-                <span className="w-1.5 h-1.5 rounded-full bg-indigo-400" />
-                <span className="text-gray-500 hidden sm:inline">{profile}</span>
-                <span className="text-gray-400 font-medium">{count}</span>
-              </div>
-            ))}
+        {/* Profile badges */}
+        {[...profileCounts.entries()].map(([profile, count]) => (
+          <div key={profile} className="flex items-center gap-1 px-2 py-1 rounded-full bg-violet-50 border border-violet-200" title="Active profile">
+            <span className="w-1.5 h-1.5 rounded-full bg-violet-400" />
+            <span className="text-xs text-violet-600 hidden sm:inline">{profile}</span>
+            <span className="text-xs font-semibold text-violet-700">{count}</span>
           </div>
-        </>
-      )}
+        ))}
 
-      {onToggleBlocked && (
-        <>
-          <div className="h-3 w-px bg-gray-200" />
+        {/* Blocked filter */}
+        {onToggleBlocked && (
           <button
             onClick={onToggleBlocked}
             title="Show only blocked issues"
-            className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium transition-colors ${
+            className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium transition-colors border ${
               showBlocked
-                ? "bg-amber-100 text-amber-700"
-                : "text-gray-400 hover:text-gray-600"
+                ? "bg-amber-100 text-amber-700 border-amber-300"
+                : "bg-gray-50 text-gray-400 border-gray-200 hover:text-gray-600 hover:border-gray-300"
             }`}
           >
             <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 16 16">
@@ -167,7 +180,46 @@ export function BoardStats({
             </svg>
             Blocked
           </button>
-        </>
+        )}
+      </div>
+
+      {/* Segmented progress bar + status legend */}
+      {total > 0 && (
+        <div className="flex items-center gap-3">
+          <div className="flex h-3 rounded-full overflow-hidden gap-px flex-1 bg-gray-100 shadow-inner">
+            {allColumns.map((col) => {
+              if (col.issues.length === 0) return null;
+              const pct = (col.issues.length / total) * 100;
+              const cfg = getConfig(col.name);
+              return (
+                <div
+                  key={col.id}
+                  className={`${cfg.bar} transition-all duration-300 relative group`}
+                  style={{ width: `${pct}%` }}
+                  title={`${col.name}: ${col.issues.length} (${Math.round(pct)}%)`}
+                />
+              );
+            })}
+          </div>
+          {/* Status legend pills */}
+          <div className="flex items-center gap-1.5 flex-wrap shrink-0">
+            {allColumns.map((col) => {
+              const cfg = getConfig(col.name);
+              const isActive = col.issues.length > 0;
+              if (!isActive) return null;
+              return (
+                <div
+                  key={col.id}
+                  className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-medium ${cfg.text} ${cfg.bg} border border-gray-200`}
+                >
+                  <span className={`w-1.5 h-1.5 rounded-full ${cfg.bar} shrink-0`} />
+                  <span className="hidden sm:inline">{col.name}</span>
+                  <span className="font-bold">{col.issues.length}</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
       )}
     </div>
   );
