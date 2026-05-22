@@ -936,13 +936,20 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                       <span className="ml-1.5 text-[10px] font-medium px-1.5 py-0.5 rounded bg-blue-100 text-blue-700">plan</span>
                     )}
                   </span>
-                  <span className={`text-xs font-medium px-1.5 py-0.5 rounded ${
-                    isThisRunning ? "bg-green-100 text-green-700 animate-pulse" :
-                    isLaunching ? "bg-blue-100 text-blue-700 animate-pulse" :
-                    badgeColor
-                  }`}>
-                    {isThisRunning ? "running" : isLaunching ? "launching..." : ws.status}
-                  </span>
+                  <div className="flex items-center gap-1.5">
+                    {isThisRunning && runningTriggerLabel && (
+                      <span className={`text-xs font-medium px-1.5 py-0.5 rounded animate-pulse ${runningTriggerLabel.className}`}>
+                        {runningTriggerLabel.label}
+                      </span>
+                    )}
+                    <span className={`text-xs font-medium px-1.5 py-0.5 rounded ${
+                      isThisRunning ? "bg-green-100 text-green-700 animate-pulse" :
+                      isLaunching ? "bg-blue-100 text-blue-700 animate-pulse" :
+                      badgeColor
+                    }`}>
+                      {isThisRunning ? "running" : isLaunching ? "launching..." : ws.status}
+                    </span>
+                  </div>
                 </div>
 
                 {ws.workingDir && (
