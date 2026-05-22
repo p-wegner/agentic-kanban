@@ -85,6 +85,9 @@ export interface ParsedStreamEvent {
     status: string;
     rateLimitType: string;
     resetsAt?: number;
+    overageStatus?: string;
+    overageDisabledReason?: string;
+    isUsingOverage?: boolean;
   };
 }
 
@@ -299,6 +302,9 @@ export class ClaudeProvider implements AgentProvider {
         status: (rli.status as string) ?? "",
         rateLimitType: (rli.rateLimitType as string) ?? "",
         resetsAt: rli.resetsAt as number | undefined,
+        overageStatus: rli.overageStatus as string | undefined,
+        overageDisabledReason: rli.overageDisabledReason as string | undefined,
+        isUsingOverage: rli.isUsingOverage as boolean | undefined,
       };
     }
 
