@@ -166,6 +166,8 @@ export async function startServer(port?: number) {
 
       const now = new Date().toISOString();
       await db.update(workspaces).set({ status: "idle", updatedAt: now }).where(eq(workspaces.id, workspaceId));
+      // Clear live activity/stats on the client before broadcasting board_changed
+      boardEvents.broadcastActivity(projectId, { issueId, sessionId, activity: "" });
       boardEvents.broadcast(projectId, "session_completed");
       boardEvents.broadcast(projectId, "workspace_idle");
 
