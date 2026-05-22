@@ -1,5 +1,7 @@
 import { workspaces, issues, projects, sessions, sessionMessages, diffComments, projectStatuses } from "@agentic-kanban/shared/schema";
 import { eq, inArray } from "drizzle-orm";
+
+type Project = typeof projects.$inferSelect;
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 
@@ -24,6 +26,35 @@ export async function updateWorkspaceStatus(
     .update(workspaces)
     .set({ status, updatedAt: now, ...extra } as Partial<Workspace>)
     .where(eq(workspaces.id, workspaceId));
+}
+
+export async function resolveProjectFull(
+  workspaceId: string,
+  database: Database = db,
+): Promise<{ project: Project | null; repoPath: string; defaultBranch: string }> {
+  const wsRows = await database
+    .select({ issueId: workspaces.issueId })
+    .from(workspaces)
+    .where(eq(workspaces.id, workspaceId))
+    .limit(1);
+  if (wsRows.length === 0) throw new Error("Workspace not found");
+
+  const issueRows = await database
+    .select({ projectId: issues.projectId })
+    .from(issues)
+    .where(eq(issues.id, wsRows[0].issueId))
+    .limit(1);
+  if (issueRows.length === 0) throw new Error("Issue not found");
+
+  const projectRows = await database
+    .select()
+    .from(projects)
+    .where(eq(projects.id, issueRows[0].projectId))
+    .limit(1);
+  if (projectRows.length === 0) throw new Error("Project not found");
+
+  const project = projectRows[0];
+  return { project, repoPath: project.repoPath, defaultBranch: project.defaultBranch };
 }
 
 export async function resolveProjectRepo(
