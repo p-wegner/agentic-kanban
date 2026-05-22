@@ -9,69 +9,13 @@ import { runScript } from "../services/script-runner.js";
 import type { SessionManager } from "../services/session.manager.js";
 import type { BoardEvents } from "../services/board-events.js";
 import type { Database } from "../db/index.js";
-import { resolve, dirname, join } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { writeFileSync } from "node:fs";
 import { spawn, spawnSync } from "node:child_process";
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const MOCK_AGENT_PATH = resolve(__dirname, "../scripts/mock-agent.ts");
-// Resolve tsx from server's node_modules so the mock agent works from any CWD (e.g. worktrees)
-const TSX_LOADER = resolve(__dirname, "../../node_modules/tsx/dist/loader.mjs");
-const TSX_URL = pathToFileURL(TSX_LOADER).href;
-const MOCK_AGENT_COMMAND = `node --import ${TSX_URL} "${MOCK_AGENT_PATH}"`;
-
-/**
- * Resolve repo info from workspace → issue → project chain.
- */
-async function resolveProjectRepo(
-  workspaceId: string,
-  database: Database = db,
-): Promise<{ repoPath: string; defaultBranch: string }> {
-  const wsRows = await database
-    .select()
-    .from(workspaces)
-    .where(eq(workspaces.id, workspaceId))
-    .limit(1);
-  if (wsRows.length === 0) {
-    throw new Error("Workspace not found");
-  }
-
-  const issueRows = await database
-    .select({ projectId: issues.projectId })
-    .from(issues)
-    .where(eq(issues.id, wsRows[0].issueId))
-    .limit(1);
-  if (issueRows.length === 0) {
-    throw new Error("Issue not found");
-  }
-
-  const projectRows = await database
-    .select({ repoPath: projects.repoPath, defaultBranch: projects.defaultBranch })
-    .from(projects)
-    .where(eq(projects.id, issueRows[0].projectId))
-    .limit(1);
-  if (projectRows.length === 0) {
-    throw new Error("Project not found");
-  }
-
-  return {
-    repoPath: projectRows[0].repoPath,
-    defaultBranch: projectRows[0].defaultBranch,
-  };
-}
-
-async function resolveProjectId(
-  workspaceId: string,
-  database: Database = db,
-): Promise<string | null> {
-  const wsRows = await database.select().from(workspaces).where(eq(workspaces.id, workspaceId)).limit(1);
-  if (wsRows.length === 0) return null;
-  const issueRows = await database.select({ projectId: issues.projectId }).from(issues).where(eq(issues.id, wsRows[0].issueId)).limit(1);
-  if (issueRows.length === 0) return null;
-  return issueRows[0].projectId;
-}
+import { resolveProjectRepo, resolveProjectId } from "../repositories/workspace.repository.js";
+import { loadAgentSettings, resolveAgentSettings, MOCK_AGENT_COMMAND } from "../services/agent-settings.service.js";
+import { PREF_MOCK_AGENT, PREF_AGENT_COMMAND, PREF_AGENT_ARGS, PREF_SKIP_PERMISSIONS, PREF_CLAUDE_PROFILE, PREF_LEARNING_STEP_BEFORE_MERGE, PREF_AUTO_START_FOLLOWUP } from "../constants/preference-keys.js";
 
 export function createWorkspaceActionsRoute(
   getSessionManager: () => SessionManager,
@@ -205,31 +149,8 @@ export function createWorkspaceActionsRoute(
     }
 
     try {
-      // Read agent settings from preferences
-      const prefRows = await database.select().from(preferences);
-      const prefMap = new Map(prefRows.map(r => [r.key, r.value]));
-
-      // Determine agent command: explicit body > mock_agent pref / env > agent_command pref > default
-      let agentCommand = body.agentCommand || undefined;
-      if (!agentCommand) {
-        const useMock = prefMap.get("mock_agent") === "true" || process.env.MOCK_AGENT === "1";
-        if (useMock) {
-          agentCommand = MOCK_AGENT_COMMAND;
-        } else {
-          agentCommand = prefMap.get("agent_command") || undefined;
-        }
-      }
-      const skipPerms = prefMap.get("skip_permissions") === "true";
-      const baseArgs = prefMap.get("agent_args") || "";
-      const agentArgs = skipPerms
-        ? (baseArgs ? baseArgs + " --dangerously-skip-permissions" : "--dangerously-skip-permissions")
-        : (baseArgs || undefined);
-      const claudeProfile = prefMap.get("claude_profile") || undefined;
-      const resumeWithNewModel = prefMap.get("resume_with_new_model") === "true";
-      const permissionPromptToolPref = prefMap.get("permission_prompt_tool");
-      const permissionPromptTool = permissionPromptToolPref === "true"
-        ? "mcp__agentic-kanban__approve_tool_use"
-        : (permissionPromptToolPref && permissionPromptToolPref !== "false" ? permissionPromptToolPref : undefined);
+      const { agentCommand, agentArgs, claudeProfile, resumeWithNewModel, permissionPromptTool } =
+        await loadAgentSettings(database, body.agentCommand as string | undefined);
 
       const promptStr = body.prompt as string;
       const truncatedPrompt = promptStr.length > 80 ? promptStr.slice(0, 80) + "..." : promptStr;
@@ -288,17 +209,7 @@ export function createWorkspaceActionsRoute(
     if (!result.ok) {
       if ((result as any).stale) {
         // Process is gone — launch a new session with --resume
-        const prefRows = await database.select().from(preferences);
-        const prefMap = new Map(prefRows.map((r) => [r.key, r.value]));
-        const useMock = prefMap.get("mock_agent") === "true" || process.env.MOCK_AGENT === "1";
-        const agentCommand = useMock ? MOCK_AGENT_COMMAND : (prefMap.get("agent_command") || undefined);
-        const skipPerms = prefMap.get("skip_permissions") === "true";
-        const baseArgs = prefMap.get("agent_args") || "";
-        const agentArgs = skipPerms
-          ? (baseArgs ? baseArgs + " --dangerously-skip-permissions" : "--dangerously-skip-permissions")
-          : (baseArgs || undefined);
-        const claudeProfile = prefMap.get("claude_profile") || undefined;
-        const resumeWithNewModel = prefMap.get("resume_with_new_model") === "true";
+        const { agentCommand, agentArgs, claudeProfile, resumeWithNewModel } = await loadAgentSettings(database);
         const wsRows = await database.select({ planMode: workspaces.planMode }).from(workspaces).where(eq(workspaces.id, id)).limit(1);
         const planMode = wsRows.length > 0 ? wsRows[0].planMode : false;
 
@@ -481,14 +392,12 @@ export function createWorkspaceActionsRoute(
       // Optional learning step: run an agent session to extract insights before merge
       const prefRowsLearning = await database.select().from(preferences);
       const prefMapLearning = new Map(prefRowsLearning.map(r => [r.key, r.value]));
-      if (prefMapLearning.get("learning_step_before_merge") === "true" && workspace.workingDir && getSessionManager) {
+      if (prefMapLearning.get(PREF_LEARNING_STEP_BEFORE_MERGE) === "true" && workspace.workingDir && getSessionManager) {
         try {
           const learningPrompt = `/learning-step\n\nRun the learning step skill to extract insights from recent session transcripts and update docs/hooks before this workspace is merged.`;
-          const agentCmd = prefMapLearning.get("agent_command") || undefined;
-          const agentArgs = prefMapLearning.get("agent_args") || undefined;
-          const claudeProfile = prefMapLearning.get("claude_profile") || undefined;
+          const { agentCommand: agentCmd, agentArgs, claudeProfile } = resolveAgentSettings(prefMapLearning);
           const sm = getSessionManager();
-          const learningSessId = await sm.startSession(id, learningPrompt, agentCmd, agentArgs ? agentArgs.split(" ") : undefined, undefined, claudeProfile, undefined, undefined, undefined, undefined, undefined, "learning");
+          const learningSessId = await sm.startSession(id, learningPrompt, agentCmd, agentArgs, undefined, claudeProfile, undefined, undefined, undefined, undefined, undefined, "learning");
           console.log(`[workspace-actions] learning step started: session=${learningSessId}`);
           // Wait up to 3 minutes for the learning session to complete
           await new Promise<void>((resolve) => {
@@ -581,7 +490,7 @@ export function createWorkspaceActionsRoute(
       try {
         const prefRows2 = await database.select().from(preferences);
         const prefMap2 = new Map(prefRows2.map(r => [r.key, r.value]));
-        if (prefMap2.get("auto_start_followup") === "true" && projectId) {
+        if (prefMap2.get(PREF_AUTO_START_FOLLOWUP) === "true" && projectId) {
           await autoStartFollowups(workspace.issueId, projectId, database, getSessionManager, prefMap2, options);
         }
       } catch (err) {
@@ -732,17 +641,7 @@ After resolving all conflicts:
 
 Base branch: ${baseBranch}`;
 
-      // Read preferences for agent launch
-      const prefRows = await database.select().from(preferences);
-      const prefMap = new Map(prefRows.map(r => [r.key, r.value]));
-      const useMock = prefMap.get("mock_agent") === "true" || process.env.MOCK_AGENT === "1";
-      const agentCommand = useMock ? MOCK_AGENT_COMMAND : (prefMap.get("agent_command") || undefined);
-      const skipPerms = prefMap.get("skip_permissions") === "true";
-      const baseArgs = prefMap.get("agent_args") || "";
-      const agentArgs = skipPerms
-        ? (baseArgs ? baseArgs + " --dangerously-skip-permissions" : "--dangerously-skip-permissions")
-        : (baseArgs || undefined);
-      const claudeProfile = prefMap.get("claude_profile") || undefined;
+      const { agentCommand, agentArgs, claudeProfile } = await loadAgentSettings(database);
 
       const sessionId = await getSessionManager().startSession(id, prompt, agentCommand, agentArgs, undefined, claudeProfile, true, undefined, undefined, undefined, undefined, "fix-conflicts");
       options?.fixAndMergeSessionIds?.add(sessionId);
@@ -1003,14 +902,7 @@ async function autoStartFollowups(
       const inProgressStatus = statuses.find(s => s.name === "In Progress") ?? todoStatus;
       await database.update(issues).set({ statusId: inProgressStatus.id, updatedAt: now, statusChangedAt: now }).where(eq(issues.id, dep.issueId));
 
-      const useMock = prefMap.get("mock_agent") === "true" || process.env.MOCK_AGENT === "1";
-      const agentCommand = useMock ? MOCK_AGENT_COMMAND : (prefMap.get("agent_command") || undefined);
-      const skipPerms = prefMap.get("skip_permissions") === "true";
-      const baseArgs = prefMap.get("agent_args") || "";
-      const agentArgs = skipPerms
-        ? (baseArgs ? baseArgs + " --dangerously-skip-permissions" : "--dangerously-skip-permissions")
-        : (baseArgs || undefined);
-      const claudeProfile = prefMap.get("claude_profile") || undefined;
+      const { agentCommand, agentArgs, claudeProfile } = resolveAgentSettings(prefMap);
       const prompt = `${followupIssue[0].title}\n\n${followupIssue[0].description ?? ""}`.trim();
 
       await getSessionManager().startSession(wsId, prompt, agentCommand, agentArgs, undefined, claudeProfile, undefined, undefined, undefined, undefined, undefined, "auto-start");
