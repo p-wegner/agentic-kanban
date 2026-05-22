@@ -1168,10 +1168,11 @@ export async function startServer(port?: number) {
   app.post("/api/internal/monitor-run", async (c) => {
     if (monitorTimer) {
       clearTimeout(monitorTimer);
-      monitorTimer = null;
     }
+    // Placeholder prevents syncMonitorState from starting a duplicate run while this one is in flight
+    monitorTimer = setTimeout(() => {}, 0);
     monitorNextRunAt = null;
-    // Run in background; reschedule is handled inside runMonitorCycle
+    // Run in background; reschedule is handled inside runMonitorCycle's finally block
     runMonitorCycle(true).catch(() => {});
     return c.json({ triggered: true });
   });
