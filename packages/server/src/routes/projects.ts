@@ -1466,9 +1466,7 @@ ${contextParts.join("\n")}`;
         // Group by workspace, pick latest per workspace
         const latestByWs = new Map<string, { id: string; status: string; startedAt: string; endedAt: string | null; stats: string | null }>();
         for (const s of sessionRows) {
-          if (!latestByWs.has(s.workspaceId)) {
-            latestByWs.set(s.workspaceId, { id: s.id, status: s.status, startedAt: s.startedAt, endedAt: s.endedAt, stats: s.stats });
-          }
+          latestByWs.set(s.workspaceId, { id: s.id, status: s.status, startedAt: s.startedAt, endedAt: s.endedAt, stats: s.stats });
         }
 
         // Collect session IDs for message lookup
