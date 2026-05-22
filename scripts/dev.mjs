@@ -150,14 +150,14 @@ const serverProc = spawnProcess(
   "server",
   "pnpm",
   ["--filter", "agentic-kanban", "dev"],
-  { shell: false, windowsHide: true }
+  { shell: false }
 );
 
 const clientProc = spawnProcess(
   "client",
   "pnpm",
   ["--filter", "client", "dev"],
-  { shell: false, windowsHide: true }
+  { shell: false }
 );
 
 function shutdown() {
