@@ -296,7 +296,17 @@
       "when": 1780215600000,
       "tag": "0034_session_pid",
       "breakpoints": true
+<<<<<<< HEAD
 >>>>>>> 1ea0691 (feat: prevent server hot-reload from killing agent processes (#222))
+=======
+    },
+    {
+      "idx": 35,
+      "version": "6",
+      "when": 1780302000000,
+      "tag": "0035_session_trigger",
+      "breakpoints": true
+>>>>>>> 437c42a (feat: add triggerType to sessions — show AI Review, Chat, Fix Conflicts badges in session history)
     }
   ]
 }

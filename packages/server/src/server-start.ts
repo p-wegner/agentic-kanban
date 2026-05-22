@@ -227,7 +227,7 @@ export async function startServer(port?: number) {
             const agentArgsLearn = prefMap.get("agent_args") || undefined;
             const claudeProfileLearn = useMockLearn ? undefined : (prefMap.get("claude_profile") || undefined);
             const learningPrompt = `/learning-step\n\nRun the learning step skill to extract insights from recent session transcripts and update docs/hooks.`;
-            const learnSessId = await sessionManager.startSession(workspace.id, learningPrompt, agentCmdLearn, agentArgsLearn ? agentArgsLearn.split(" ") : undefined, undefined, claudeProfileLearn);
+            const learnSessId = await sessionManager.startSession(workspace.id, learningPrompt, agentCmdLearn, agentArgsLearn ? agentArgsLearn.split(" ") : undefined, undefined, claudeProfileLearn, undefined, undefined, undefined, undefined, undefined, "learning");
             learningSessionIds.add(learnSessId);
             console.log(`[workflow] learning step (after review) started: session=${learnSessId}`);
             learningAfterReviewPromise = new Promise<void>((resolve) => {
@@ -292,7 +292,7 @@ export async function startServer(port?: number) {
             const agentArgsLearn = prefMap.get("agent_args") || undefined;
             const claudeProfileLearn = useMockLearn ? undefined : (prefMap.get("claude_profile") || undefined);
             const learningPrompt = `/learning-step\n\nRun the learning step skill to extract insights from recent session transcripts and update docs/hooks.`;
-            const learnSessId = await sessionManager.startSession(workspace.id, learningPrompt, agentCmdLearn, agentArgsLearn ? agentArgsLearn.split(" ") : undefined, undefined, claudeProfileLearn);
+            const learnSessId = await sessionManager.startSession(workspace.id, learningPrompt, agentCmdLearn, agentArgsLearn ? agentArgsLearn.split(" ") : undefined, undefined, claudeProfileLearn, undefined, undefined, undefined, undefined, undefined, "learning");
             learningSessionIds.add(learnSessId);
             console.log(`[workflow] learning step (after agent) started: session=${learnSessId}`);
           } catch (err) {
@@ -329,7 +329,7 @@ export async function startServer(port?: number) {
             await db.update(workspaces).set({ status: "reviewing", updatedAt: now }).where(eq(workspaces.id, workspaceId));
             boardEvents.broadcast(projectId, "issue_updated");
 
-            const reviewSessionId = await sessionManager.startSession(workspaceId, reviewPromptText, agentCommand, reviewArgsWithModel, undefined, claudeProfile, undefined, undefined, undefined, undefined, provider);
+            const reviewSessionId = await sessionManager.startSession(workspaceId, reviewPromptText, agentCommand, reviewArgsWithModel, undefined, claudeProfile, undefined, undefined, undefined, undefined, provider, "review");
             reviewSessionIds.add(reviewSessionId);
             console.log(`[workflow] launched ${reviewSkillName} session ${reviewSessionId} for workspace ${workspaceId}`);
           } catch (err) {
@@ -361,7 +361,7 @@ export async function startServer(port?: number) {
           const agentCmd = prefMapLearning.get("agent_command") || undefined;
           const agentArgs = prefMapLearning.get("agent_args") || undefined;
           const claudeProfile = prefMapLearning.get("claude_profile") || undefined;
-          const learningSessId = await sessionManager.startSession(workspace.id, learningPrompt, agentCmd, agentArgs ? agentArgs.split(" ") : undefined, undefined, claudeProfile);
+          const learningSessId = await sessionManager.startSession(workspace.id, learningPrompt, agentCmd, agentArgs ? agentArgs.split(" ") : undefined, undefined, claudeProfile, undefined, undefined, undefined, undefined, undefined, "learning");
           learningSessionIds.add(learningSessId);
           console.log(`[workflow] learning step started: session=${learningSessId}`);
           await new Promise<void>((resolve) => {
@@ -534,7 +534,7 @@ export async function startServer(port?: number) {
       await db.update(workspaces).set({ status: "reviewing", updatedAt: now }).where(eq(workspaces.id, workspaceId));
       boardEvents.broadcast(projectId, "issue_updated");
 
-      const reviewSessionId = await sessionManager.startSession(workspaceId, reviewPromptText, agentCommand, reviewArgsWithModel, undefined, claudeProfile, undefined, undefined, undefined, undefined, provider);
+      const reviewSessionId = await sessionManager.startSession(workspaceId, reviewPromptText, agentCommand, reviewArgsWithModel, undefined, claudeProfile, undefined, undefined, undefined, undefined, provider, "review");
       reviewSessionIds.add(reviewSessionId);
       console.log(`[workflow] manual review session ${reviewSessionId} for workspace ${workspaceId}`);
 
