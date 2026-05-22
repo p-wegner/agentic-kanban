@@ -79,6 +79,7 @@ export function IssueDetailPanel({
   const [panelMode, setPanelMode] = useState<"sidebar" | "modal" | "fullscreen">("sidebar");
   const [sidebarSide, setSidebarSide] = useState<"left" | "right">("right");
   const [dragPos, setDragPos] = useState<{ x: number; y: number } | null>(null);
+  const [snapZone, setSnapZone] = useState<"left" | "right" | null>(null);
   const dragStartRef = useRef<{ mouseX: number; mouseY: number; panelX: number; panelY: number } | null>(null);
   const [title, setTitle] = useState(issue.title);
   const [description, setDescription] = useState(issue.description ?? "");
@@ -343,6 +344,7 @@ export function IssueDetailPanel({
           currentDragMode = "sidebar";
           setPanelMode("sidebar");
           setSidebarSide("right");
+          setSnapZone(null);
           setDragPos(null);
           dragStartRef.current = null;
           cleanup?.();
@@ -352,16 +354,23 @@ export function IssueDetailPanel({
           currentDragMode = "sidebar";
           setPanelMode("sidebar");
           setSidebarSide("left");
+          setSnapZone(null);
           setDragPos(null);
           dragStartRef.current = null;
           cleanup?.();
           return;
         }
+        // Show snap zone preview when approaching edges
+        const SNAP_PREVIEW_THRESHOLD = EDGE_SNAP_THRESHOLD + 60;
+        const approachingRight = newX + panelRect.width >= window.innerWidth - SNAP_PREVIEW_THRESHOLD;
+        const approachingLeft = newX <= SNAP_PREVIEW_THRESHOLD;
+        setSnapZone(approachingRight ? "right" : approachingLeft ? "left" : null);
         setDragPos({ x: newX, y: newY });
       }
     };
     const onUp = () => {
       dragStartRef.current = null;
+      setSnapZone(null);
       cleanup?.();
     };
     cleanup = () => {
@@ -383,6 +392,13 @@ export function IssueDetailPanel({
 
   return (
     <>
+      {/* Snap zone indicators shown while dragging */}
+      {snapZone === "left" && (
+        <div className="fixed left-0 top-0 h-full w-[min(384px,100vw)] z-40 bg-blue-500/20 border-r-2 border-blue-400 pointer-events-none transition-opacity" />
+      )}
+      {snapZone === "right" && (
+        <div className="fixed right-0 top-0 h-full w-[min(384px,100vw)] z-40 bg-blue-500/20 border-l-2 border-blue-400 pointer-events-none transition-opacity" />
+      )}
       {/* Backdrop */}
       <div
         className="fixed inset-0 bg-black/30 z-40"
