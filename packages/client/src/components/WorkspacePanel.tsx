@@ -89,7 +89,7 @@ function getTriggerTypeLabel(triggerType: string | null): { label: string; class
   if (TRIGGER_TYPE_LABELS[triggerType]) return TRIGGER_TYPE_LABELS[triggerType];
   if (triggerType.startsWith("skill:")) {
     const name = triggerType.slice(6);
-    return { label: name, className: "bg-purple-100 text-purple-700" };
+    return { label: `Skill: ${name}`, className: "bg-purple-100 text-purple-700" };
   }
   return null;
 }
@@ -920,12 +920,12 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                                 <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${sessionBadge}`}>
                                   {session.status}
                                 </span>
-                                {(() => { const tl = getTriggerTypeLabel(session.triggerType); return tl ? <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${tl.className}`}>{tl.label}</span> : null; })()}
-                                {session.skillName && (
-                                  <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700" title={`Skill: ${session.skillName}`}>
-                                    {session.skillName}
-                                  </span>
-                                )}
+                                {(() => {
+                                  const tl = getTriggerTypeLabel(session.triggerType);
+                                  if (tl) return <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${tl.className}`}>{tl.label}</span>;
+                                  if (session.skillName) return <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-purple-100 text-purple-700">{`Skill: ${session.skillName}`}</span>;
+                                  return null;
+                                })()}
                                 <span className="text-xs text-gray-600">
                                   {formatRelativeTime(session.startedAt)}
                                 </span>
