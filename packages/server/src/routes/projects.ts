@@ -974,9 +974,9 @@ ${contextParts.join("\n")}`;
           .orderBy(sessions.startedAt);
 
         // Group by workspace, pick latest per workspace
-        const latestByWs = new Map<string, { id: string; status: string; startedAt: string; endedAt: string | null; stats: string | null }>();
+        const latestByWs = new Map<string, { id: string; status: string; startedAt: string; endedAt: string | null; stats: string | null; triggerType: string | null }>();
         for (const s of sessionRows) {
-          latestByWs.set(s.workspaceId, { id: s.id, status: s.status, startedAt: s.startedAt, endedAt: s.endedAt, stats: s.stats });
+          latestByWs.set(s.workspaceId, { id: s.id, status: s.status, startedAt: s.startedAt, endedAt: s.endedAt, stats: s.stats, triggerType: s.triggerType ?? null });
         }
 
         // Collect session IDs for message lookup
@@ -1019,6 +1019,7 @@ ${contextParts.join("\n")}`;
             const sess = latestByWs.get(summary.main.id);
             if (sess) {
               summary.main.lastSessionAt = sess.status === "running" ? sess.startedAt : sess.endedAt;
+              summary.main.lastSessionTriggerType = sess.triggerType;
               if (sess.stats) {
                 try {
                   const p = JSON.parse(sess.stats) as Record<string, unknown>;
