@@ -226,32 +226,60 @@ function MonitorPopover({ status, onClose, onOpenWorkspace, columns, onRunNow, a
       <div
         ref={popoverRef}
         id="monitor-popover"
-        className="fixed top-0 right-0 z-50 w-80 bg-white border-l border-gray-200 shadow-2xl text-xs flex flex-col overflow-hidden"
-        style={{ height: "100dvh", maxHeight: "100dvh" }}
+        className="fixed top-0 right-0 z-50 w-72 bg-white border-l border-gray-200 shadow-2xl text-xs flex flex-col"
+        style={{ height: "100dvh" }}
       >
         {/* Header */}
-        <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between shrink-0 bg-gray-50">
+        <div className="px-3 py-2.5 border-b border-gray-100 flex items-center justify-between shrink-0 bg-gray-50">
           <div className="flex items-center gap-2">
-            {autoMonitor && <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse shrink-0" />}
+            {autoMonitor && <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse shrink-0" />}
             <span className="font-semibold text-gray-800 text-sm">Board Monitor</span>
+            {autoMonitor && status?.nextRunAt && (
+              <span className="text-gray-400 text-[10px]">· {formatCountdown(status.nextRunAt)}</span>
+            )}
           </div>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 transition-colors p-0.5 rounded" title="Close">
-            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+            <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+          </button>
+        </div>
+
+        {/* Controls row */}
+        <div className="px-3 py-2.5 border-b border-gray-100 flex items-center gap-2 shrink-0">
+          <button
+            onClick={handleRunNow}
+            disabled={running}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium bg-green-600 text-white hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            title="Run monitor cycle now and reset the timer"
+          >
+            {running ? (
+              <svg className="w-3 h-3 animate-spin" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>
+            ) : (
+              <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path strokeLinecap="round" strokeLinejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 010 1.972l-11.54 6.347a1.125 1.125 0 01-1.667-.986V5.653z"/></svg>
+            )}
+            {running ? "Running..." : "Run now"}
+          </button>
+          <span className="text-gray-300">|</span>
+          <span className="text-gray-500">Auto</span>
+          <button
+            onClick={onToggle}
+            className={`relative inline-flex h-4.5 w-8 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-green-400 focus:ring-offset-1 ${autoMonitor ? "bg-green-500" : "bg-gray-300"}`}
+            title={autoMonitor ? "Disable auto-monitor" : "Enable auto-monitor"}
+          >
+            <span className={`inline-block h-3 w-3 transform rounded-full bg-white shadow transition-transform ${autoMonitor ? "translate-x-[1rem]" : "translate-x-0.5"}`} />
           </button>
         </div>
 
         {/* Scrollable body */}
         <div className="overflow-y-auto flex-1 min-h-0">
 
-          {/* Auto-monitor toggle + run */}
-          <div className="px-4 py-3 border-b border-gray-100">
-            <div className="flex items-center justify-between mb-3">
-              <div>
-                <div className="font-medium text-gray-700">Auto-monitor</div>
-                {autoMonitor && status?.nextRunAt && (
-                  <div className="text-gray-400 mt-0.5">Next run in {formatCountdown(status.nextRunAt)}</div>
-                )}
+          {/* Active agents — scrollable sub-section capped at ~3 items */}
+          {activeWs.length > 0 && (
+            <div className="border-b border-gray-100">
+              <div className="px-3 pt-2.5 pb-1.5 flex items-center gap-1.5">
+                <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-400">Active agents</span>
+                <span className="text-[10px] font-semibold text-green-600">({activeWs.length})</span>
               </div>
+<<<<<<< HEAD
               <button
                 onClick={onToggle}
                 className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-green-400 focus:ring-offset-1 ${autoMonitor ? "bg-green-500" : "bg-gray-300"}`}
@@ -466,6 +494,31 @@ function MonitorPopover({ status, onClose, onOpenWorkspace, columns, onRunNow, a
               </div>
             )}
           </div>
+=======
+              <div className="overflow-y-auto" style={{ maxHeight: "11rem" }}>
+                {activeWs.map(iss => (
+                  <div
+                    key={iss.id}
+                    className="cursor-pointer hover:bg-gray-50 px-3 py-2 transition-colors border-t border-gray-50 first:border-t-0 group"
+                    onClick={() => { onOpenWorkspace(iss.workspaceSummary!.main!.id, iss.id); onClose(); }}
+                  >
+                    <div className="flex items-start gap-2">
+                      <span className="w-1.5 h-1.5 rounded-full bg-green-400 shrink-0 animate-pulse mt-1" />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-baseline gap-1 mb-0.5">
+                          <span className="font-semibold text-gray-700 shrink-0">#{iss.issueNumber}</span>
+                          <span className="text-gray-500 truncate text-[11px]">{iss.title}</span>
+                        </div>
+                        <p className="text-gray-400 leading-snug line-clamp-1 text-[11px]">{iss.workspaceSummary!.main!.lastAssistantMessage}</p>
+                      </div>
+                      <svg className="w-3 h-3 text-gray-300 group-hover:text-gray-400 shrink-0 mt-0.5 transition-colors" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7"/></svg>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+>>>>>>> eb24005 (fix: redesign board monitor panel for better viewport fit and UX)
 
 <<<<<<< HEAD
 <<<<<<< HEAD
@@ -520,25 +573,25 @@ function MonitorPopover({ status, onClose, onOpenWorkspace, columns, onRunNow, a
                   })}
 =======
           {/* Last run summary */}
-          <div className="px-4 py-3 border-b border-gray-100">
-            <div className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 mb-2">Last run</div>
+          <div className="px-3 py-2.5 border-b border-gray-100">
+            <div className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 mb-1.5">Last run</div>
             {status?.lastRun ? (
               <div className="space-y-1.5">
                 <div className="text-gray-400">{formatAge(status.lastRun.at)}</div>
-                <div className="flex flex-wrap gap-1.5">
+                <div className="flex flex-wrap gap-1">
                   {status.lastRun.relaunched > 0 && (
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 font-medium">
-                      <span className="w-1.5 h-1.5 rounded-full bg-blue-400" />{status.lastRun.relaunched} relaunched
+                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-blue-50 text-blue-700 font-medium">
+                      <span className="w-1 h-1 rounded-full bg-blue-400" />{status.lastRun.relaunched} relaunched
                     </span>
                   )}
                   {status.lastRun.merged > 0 && (
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-purple-50 text-purple-700 font-medium">
-                      <span className="w-1.5 h-1.5 rounded-full bg-purple-400" />{status.lastRun.merged} merged
+                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-purple-50 text-purple-700 font-medium">
+                      <span className="w-1 h-1 rounded-full bg-purple-400" />{status.lastRun.merged} merged
                     </span>
                   )}
                   {status.lastRun.nudged > 0 && (
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 font-medium">
-                      <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />{status.lastRun.nudged} nudged
+                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-700 font-medium">
+                      <span className="w-1 h-1 rounded-full bg-amber-400" />{status.lastRun.nudged} nudged
                     </span>
                   )}
                   {status.lastRun.relaunched === 0 && status.lastRun.merged === 0 && status.lastRun.nudged === 0 && (
@@ -552,48 +605,18 @@ function MonitorPopover({ status, onClose, onOpenWorkspace, columns, onRunNow, a
             )}
           </div>
 
-          {/* Active agents */}
-          {activeWs.length > 0 && (
-            <div className="px-4 py-3 border-b border-gray-100">
-              <div className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 mb-2">
-                Active agents <span className="text-green-600">({activeWs.length})</span>
-              </div>
-              <div className="space-y-1.5">
-                {activeWs.map(iss => (
-                  <div
-                    key={iss.id}
-                    className="cursor-pointer hover:bg-gray-50 rounded-lg p-2.5 -mx-1 transition-colors border border-transparent hover:border-gray-200 group"
-                    onClick={() => { onOpenWorkspace(iss.workspaceSummary!.main!.id, iss.id); onClose(); }}
-                  >
-                    <div className="flex items-start gap-2">
-                      <span className="w-1.5 h-1.5 rounded-full bg-green-400 shrink-0 animate-pulse mt-1" />
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-baseline gap-1.5 mb-0.5">
-                          <span className="font-semibold text-gray-800 shrink-0">#{iss.issueNumber}</span>
-                          <span className="text-gray-600 truncate text-[11px]">{iss.title}</span>
-                        </div>
-                        <p className="text-gray-400 leading-snug line-clamp-2 text-[11px]">{iss.workspaceSummary!.main!.lastAssistantMessage}</p>
-                      </div>
-                      <svg className="w-3 h-3 text-gray-300 group-hover:text-gray-400 shrink-0 mt-0.5 transition-colors" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7"/></svg>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
           {/* Recent actions */}
-          <div className="px-4 py-3">
-            <div className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 mb-2">Recent actions</div>
+          <div className="px-3 py-2.5 border-b border-gray-100">
+            <div className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 mb-1.5">Recent actions</div>
             {status?.recentActions && status.recentActions.length > 0 ? (
-              <div className="space-y-1">
+              <div className="space-y-0.5">
                 {status.recentActions.map((a, i) => {
                   const meta = ACTION_LABELS[a.action];
                   const issue = columns.flatMap(c => c.issues).find(iss => iss.id === a.issueId);
                   return (
                     <div
                       key={i}
-                      className="flex items-center gap-2 cursor-pointer hover:bg-gray-50 rounded-md px-2 -mx-1 py-1 transition-colors"
+                      className="flex items-center gap-2 cursor-pointer hover:bg-gray-50 rounded px-1.5 -mx-1.5 py-1 transition-colors"
                       onClick={() => { onOpenWorkspace(a.workspaceId, a.issueId); onClose(); }}
                     >
                       <span className={`${meta.color} font-medium truncate flex-1`}>{meta.label}</span>
@@ -605,6 +628,52 @@ function MonitorPopover({ status, onClose, onOpenWorkspace, columns, onRunNow, a
               </div>
             ) : (
               <div className="text-gray-400">No actions recorded yet</div>
+            )}
+          </div>
+
+          {/* Settings */}
+          <div className="px-3 py-2.5 space-y-2.5">
+            <div className="text-[10px] font-semibold uppercase tracking-wider text-gray-400">Settings</div>
+            <div className="flex items-center gap-2">
+              <label className="text-gray-500 flex-1">Check interval</label>
+              <div className="flex items-center gap-1.5">
+                <input
+                  type="number"
+                  min={1}
+                  max={60}
+                  value={interval}
+                  onChange={(e) => onIntervalChange(e.target.value)}
+                  disabled={!autoMonitor}
+                  className="w-12 border border-gray-300 rounded px-2 py-1 text-center focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-40 disabled:bg-gray-50"
+                />
+                <span className="text-gray-500">min</span>
+              </div>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className={`text-gray-600 ${!autoMonitor ? "opacity-40" : ""}`}>Auto-start unblocked todos</span>
+              <button
+                onClick={() => onNudgeAutoStartChange(!nudgeAutoStart)}
+                disabled={!autoMonitor}
+                className={`relative inline-flex h-4.5 w-8 items-center rounded-full transition-colors focus:outline-none disabled:opacity-40 ${nudgeAutoStart && autoMonitor ? "bg-green-500" : "bg-gray-300"}`}
+              >
+                <span className={`inline-block h-3 w-3 transform rounded-full bg-white shadow transition-transform ${nudgeAutoStart ? "translate-x-[1rem]" : "translate-x-0.5"}`} />
+              </button>
+            </div>
+            {nudgeAutoStart && autoMonitor && (
+              <div className="flex items-center gap-2 pl-2.5 border-l-2 border-green-200">
+                <label className="text-gray-500 flex-1">WIP limit</label>
+                <div className="flex items-center gap-1.5">
+                  <input
+                    type="number"
+                    min={1}
+                    max={20}
+                    value={nudgeWipLimit}
+                    onChange={(e) => onNudgeWipLimitChange(e.target.value)}
+                    className="w-12 border border-gray-300 rounded px-2 py-1 text-center focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  />
+                  <span className="text-gray-500">in progress</span>
+                </div>
+              </div>
             )}
           </div>
         </div>
