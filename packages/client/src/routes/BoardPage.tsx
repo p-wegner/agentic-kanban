@@ -185,20 +185,18 @@ function MonitorPopover({ status, onClose, onOpenWorkspace, columns, onRunNow, a
       const anchor = anchorRef.current;
       if (!anchor) return;
       const rect = anchor.getBoundingClientRect();
-      const popoverWidth = 352; // 22rem
+      const popoverWidth = 320; // 20rem
       const margin = 8;
       const spaceBelow = window.innerHeight - rect.bottom - margin;
       const spaceAbove = rect.top - margin;
-      const maxContentHeight = Math.min(window.innerHeight * 0.8, 560);
-      const above = spaceBelow < Math.min(maxContentHeight, 300) && spaceAbove > spaceBelow;
-      const maxHeight = above ? Math.min(spaceAbove - margin, maxContentHeight) : Math.min(spaceBelow - margin, maxContentHeight);
-      // Align right edge of popover to right edge of anchor, clamped so both edges stay on-screen
+      const above = spaceAbove > spaceBelow && spaceBelow < 300;
+      const availableHeight = above ? spaceAbove : spaceBelow;
+      const maxHeight = Math.max(180, Math.min(availableHeight - margin, window.innerHeight - 32));
       let left = rect.right - popoverWidth;
       left = Math.max(margin, Math.min(left, window.innerWidth - popoverWidth - margin));
-      const top = above ? rect.top - maxHeight - margin : rect.bottom + margin;
+      const top = above ? Math.max(margin, rect.top - maxHeight - margin) : rect.bottom + margin;
       setPos({ top, left, maxHeight, above });
     }
-    // Defer first position calculation to after paint so getBoundingClientRect is accurate
     const raf = requestAnimationFrame(reposition);
     window.addEventListener("resize", reposition);
     window.addEventListener("scroll", reposition, true);
@@ -243,7 +241,7 @@ function MonitorPopover({ status, onClose, onOpenWorkspace, columns, onRunNow, a
       ref={popoverRef}
       id="monitor-popover"
       className="fixed z-50 bg-white border border-gray-200 rounded-lg shadow-xl text-xs flex flex-col"
-      style={pos ? { top: pos.top, left: pos.left, width: "22rem", maxHeight: pos.maxHeight } : { visibility: "hidden", top: 0, left: 0, width: "22rem", maxHeight: 520 }}
+      style={pos ? { top: pos.top, left: pos.left, width: "20rem", maxHeight: pos.maxHeight, overflow: "hidden" } : { visibility: "hidden", top: 0, left: 0, width: "20rem", maxHeight: 480 }}
     >
       {/* Fixed header */}
       <div className="px-3 py-2.5 border-b border-gray-100 flex items-center justify-between shrink-0">
@@ -280,7 +278,7 @@ function MonitorPopover({ status, onClose, onOpenWorkspace, columns, onRunNow, a
 
       {/* Scrollable content */}
       <div className="overflow-y-auto flex-1 min-h-0">
-        <div className="px-3 py-2 border-b border-gray-100 space-y-2">
+        <div className="px-3 py-1.5 border-b border-gray-100 space-y-1.5">
           <div className="flex items-center gap-2">
             <label className="text-gray-500 whitespace-nowrap">Check every</label>
             <input
@@ -290,12 +288,12 @@ function MonitorPopover({ status, onClose, onOpenWorkspace, columns, onRunNow, a
               value={interval}
               onChange={(e) => onIntervalChange(e.target.value)}
               disabled={!autoMonitor}
-              className="w-14 border border-gray-300 rounded px-2 py-0.5 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-40"
+              className="w-12 border border-gray-300 rounded px-1.5 py-0.5 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-40"
             />
-            <span className="text-gray-500">minutes</span>
+            <span className="text-gray-500">min</span>
           </div>
           <div className="flex items-center justify-between">
-            <span className={`${!autoMonitor ? "opacity-40" : ""}`}>Auto-start unblocked Todo items</span>
+            <span className={`${!autoMonitor ? "opacity-40" : ""}`}>Auto-start unblocked todos</span>
             <button
               onClick={() => onNudgeAutoStartChange(!nudgeAutoStart)}
               disabled={!autoMonitor}
@@ -305,16 +303,17 @@ function MonitorPopover({ status, onClose, onOpenWorkspace, columns, onRunNow, a
             </button>
           </div>
           {nudgeAutoStart && autoMonitor && (
-            <div className="flex items-center gap-2 pl-2">
-              <label className="text-gray-500 whitespace-nowrap">In Progress WIP limit</label>
+            <div className="flex items-center gap-2 pl-1">
+              <label className="text-gray-500 whitespace-nowrap">WIP limit</label>
               <input
                 type="number"
                 min={1}
                 max={20}
                 value={nudgeWipLimit}
                 onChange={(e) => onNudgeWipLimitChange(e.target.value)}
-                className="w-14 border border-gray-300 rounded px-2 py-0.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                className="w-12 border border-gray-300 rounded px-1.5 py-0.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
               />
+              <span className="text-gray-500">in progress</span>
             </div>
           )}
         </div>
@@ -536,6 +535,7 @@ function MonitorPopover({ status, onClose, onOpenWorkspace, columns, onRunNow, a
 
 export function BoardPage() {
   const [columns, setColumns] = useState<StatusWithIssues[]>([]);
+  const columnsRef = useRef<StatusWithIssues[]>([]);
   const [loading, setLoading] = useState(true);
   const [projects, setProjects] = useState<Project[]>([]);
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
@@ -688,6 +688,7 @@ export function BoardPage() {
       `/api/projects/${pid}/board`,
     );
     setColumns(board);
+    columnsRef.current = board;
     // Clear stale live data for issues whose agent is no longer running
     const inactiveIssueIds = new Set<string>();
     for (const col of board) {
@@ -760,6 +761,10 @@ export function BoardPage() {
     }
     refetchBoard();
   }, [refetchBoard, creatingInColumnId]), useCallback((issueId: string, sessionId: string, activity: string) => {
+    const isActive = columnsRef.current.some(col =>
+      col.issues.some(iss => iss.id === issueId && (iss.workspaceSummary?.main?.status === "active" || iss.workspaceSummary?.main?.status === "fixing"))
+    );
+    if (!isActive && activity) return;
     setSessionActivityRaw((prev) => {
       const sessions = { ...(prev[issueId] ?? {}) };
       if (!activity) {
@@ -776,6 +781,11 @@ export function BoardPage() {
       return { ...prev, [issueId]: sessions };
     });
   }, []), useCallback((issueId: string, stats: LiveSessionStats) => {
+    // Ignore stats for workspaces that are no longer active (agent finished)
+    const isActive = columnsRef.current.some(col =>
+      col.issues.some(iss => iss.id === issueId && (iss.workspaceSummary?.main?.status === "active" || iss.workspaceSummary?.main?.status === "fixing"))
+    );
+    if (!isActive) return;
     setLiveStats((prev) => {
       if (prev[issueId]?.model === stats.model && prev[issueId]?.contextTokens === stats.contextTokens && prev[issueId]?.toolUses === stats.toolUses && prev[issueId]?.subagentCount === stats.subagentCount) return prev;
       return { ...prev, [issueId]: stats };
@@ -825,6 +835,7 @@ export function BoardPage() {
             `/api/projects/${pid}/board`,
           );
           setColumns(board);
+          columnsRef.current = board;
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to load board");
