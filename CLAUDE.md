@@ -136,35 +136,26 @@ When the user references `#N` (e.g., "review #70", "merge #65", "what's the stat
 **CRITICAL: Run all commands headlessly — never flash terminal windows.**
 - **Never use `Start-Process`** — use `Invoke-Expression`, `&`, or Bash tool instead.
 - When spawning processes in Node.js, always add `windowsHide: true`.
+- **Never poll with `Get-NetTCPConnection` in a loop** — each iteration spawns a terminal window on Windows.
 
-**CRITICAL: Never kill ALL node processes.** Kill by specific port or PID:
-```powershell
-Get-NetTCPConnection -LocalPort <port> | Select-Object -ExpandProperty OwningProcess | ForEach-Object { Stop-Process -Id $_ -Force }
-```
+**CRITICAL: Never kill ALL node processes.**
 
-**Starting the dev server headlessly (verified):** Use the **Bash tool** with `nohup` + `disown` — survives the Bash session exit (plain `&` gets SIGHUP when the shell exits). Then use a separate PowerShell call (with `run_in_background: true`) to wait for ports and verify:
+**Starting the dev server** — two steps, no polling:
 ```bash
-# Bash tool:
-cd /c/andrena/agentic-kanban
+# Step 1 — Bash tool: launch and detach
 nohup pnpm dev > /tmp/kanban-dev.log 2>&1 &
 disown
 echo "Started PID: $!"
 ```
 ```powershell
-# PowerShell tool (run_in_background: true):
-for ($i = 0; $i -lt 30; $i++) {
-    Start-Sleep -Seconds 1
-    $p = Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue |
-        Where-Object { $_.LocalPort -eq 3001 -or $_.LocalPort -eq 5173 }
-    if (($p | Where-Object { $_.LocalPort -eq 3001 }) -and ($p | Where-Object { $_.LocalPort -eq 5173 })) {
-        Write-Host "UP after ${i}s"; break
-    }
-}
-try { $r = Invoke-RestMethod "http://localhost:3001/api/projects" -TimeoutSec 5; Write-Host "API OK: $($r.Count) projects" } catch { Write-Host "API FAILED: $_" }
+# Step 2 — PowerShell tool (run_in_background: true): single fixed delay then one HTTP check
+Start-Sleep -Seconds 15
+try { $r = Invoke-RestMethod "http://localhost:3001/api/projects" -TimeoutSec 10; Write-Host "API OK: $($r.Count) projects" } catch { Write-Host "API FAILED: $_" }
 ```
-Do NOT use `Start-Job` — when the PowerShell session exits, the job and its direct child (dev.mjs) die, taking tsx/vite with them. Do NOT use plain `&` without `nohup` — the process receives SIGHUP when the Bash session exits and dies.
+- Use `nohup` + `disown` so the process survives the Bash session exit (plain `&` gets SIGHUP).
+- Do NOT use `Start-Job` — when PowerShell exits, the job and its children die.
 
-**Stopping the dev server (verified):** Kill by process signature with `taskkill /F /T` (kills entire subtree). Also kill orphaned tsx server processes — they hold the SQLite DB open and cause the next server start to hang on all API calls (symptom: `/health` responds but `/api/projects` times out):
+**Stopping the dev server** — kill by process signature (catches main + dangling worktree servers):
 ```powershell
 Get-CimInstance Win32_Process |
     Where-Object { $_.Name -eq "node.exe" -and $_.CommandLine -like "*dev.mjs*" } |
@@ -175,10 +166,8 @@ Get-CimInstance Win32_Process |
 Get-CimInstance Win32_Process |
     Where-Object { $_.Name -eq "node.exe" -and $_.CommandLine -like "*agentic-kanban*tsx*src/index*" } |
     ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
-Get-Job | Stop-Job -ErrorAction SilentlyContinue; Get-Job | Remove-Job -ErrorAction SilentlyContinue
 ```
-
-**Dangling worktree dev servers:** Worktree `pnpm dev` processes (Vite on 5174, 5175, …; Hono on 3002, 3003, …) survive after a worktree session ends and can grab port 5173/3001. The stop command above catches these too (same `dev.mjs` / `vite.js` signature).
+Also kill orphaned tsx server processes — they hold the SQLite DB open, causing `/api/projects` to hang even when `/health` responds.
 
 ## Workspace Flow
 `POST /api/workspaces` (one step): DB record + worktree + auto-launch agent. Key endpoints:
