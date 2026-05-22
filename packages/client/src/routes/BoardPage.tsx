@@ -167,6 +167,7 @@ function MonitorPopover({ status, onClose, onOpenWorkspace, columns, onRunNow, a
   const [now, setNow] = useState(Date.now());
   const [running, setRunning] = useState(false);
   const popoverRef = useRef<HTMLDivElement>(null);
+  const [popoverPos, setPopoverPos] = useState<{ top: number; right: number } | null>(null);
 
   async function handleRunNow() {
     setRunning(true);
@@ -178,6 +179,15 @@ function MonitorPopover({ status, onClose, onOpenWorkspace, columns, onRunNow, a
     const t = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(t);
   }, []);
+
+  useEffect(() => {
+    if (!anchorRef.current) return;
+    const rect = anchorRef.current.getBoundingClientRect();
+    const popoverWidth = 320;
+    const right = Math.max(8, window.innerWidth - rect.right);
+    const top = rect.bottom + 6;
+    setPopoverPos({ top, right });
+  }, [anchorRef]);
 
   useEffect(() => {
     function handler(e: MouseEvent) {
@@ -226,8 +236,14 @@ function MonitorPopover({ status, onClose, onOpenWorkspace, columns, onRunNow, a
       <div
         ref={popoverRef}
         id="monitor-popover"
-        className="fixed top-10 right-2 z-50 w-80 bg-white border border-gray-200 rounded-xl shadow-xl text-xs flex flex-col"
-        style={{ maxHeight: "min(600px, calc(100dvh - 3rem))" }}
+        className="fixed z-50 w-80 bg-white border border-gray-200 rounded-xl shadow-xl text-xs flex flex-col"
+        style={{
+          top: popoverPos ? `${popoverPos.top}px` : "2.5rem",
+          right: popoverPos ? `${popoverPos.right}px` : "0.5rem",
+          maxHeight: popoverPos
+            ? `min(600px, calc(100dvh - ${popoverPos.top + 8}px))`
+            : "min(600px, calc(100dvh - 3rem))",
+        }}
       >
         {/* Header */}
         <div className="px-3 py-2.5 border-b border-gray-100 flex items-center justify-between shrink-0 rounded-t-xl bg-gray-50">
