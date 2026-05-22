@@ -226,7 +226,7 @@ function MonitorPopover({ status, onClose, onOpenWorkspace, columns, onRunNow, a
       <div
         ref={popoverRef}
         id="monitor-popover"
-        className="fixed top-0 right-0 z-50 h-screen w-72 bg-white border-l border-gray-200 shadow-2xl text-xs flex flex-col"
+        className="fixed top-0 right-0 z-50 h-screen w-80 bg-white border-l border-gray-200 shadow-2xl text-xs flex flex-col"
         style={{ maxHeight: "100dvh" }}
       >
         {/* Header */}
@@ -558,19 +558,24 @@ function MonitorPopover({ status, onClose, onOpenWorkspace, columns, onRunNow, a
               <div className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 mb-2">
                 Active agents <span className="text-green-600">({activeWs.length})</span>
               </div>
-              <div className="space-y-2">
+              <div className="space-y-1.5">
                 {activeWs.map(iss => (
                   <div
                     key={iss.id}
-                    className="cursor-pointer hover:bg-gray-50 rounded-lg p-2 -mx-1 transition-colors border border-transparent hover:border-gray-200"
+                    className="cursor-pointer hover:bg-gray-50 rounded-lg p-2.5 -mx-1 transition-colors border border-transparent hover:border-gray-200 group"
                     onClick={() => { onOpenWorkspace(iss.workspaceSummary!.main!.id, iss.id); onClose(); }}
                   >
-                    <div className="flex items-center gap-1.5 mb-1">
-                      <span className="w-1.5 h-1.5 rounded-full bg-green-400 shrink-0 animate-pulse" />
-                      <span className="font-semibold text-gray-700">#{iss.issueNumber}</span>
-                      <span className="text-gray-500 truncate">{iss.title}</span>
+                    <div className="flex items-start gap-2">
+                      <span className="w-1.5 h-1.5 rounded-full bg-green-400 shrink-0 animate-pulse mt-1" />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-baseline gap-1.5 mb-0.5">
+                          <span className="font-semibold text-gray-800 shrink-0">#{iss.issueNumber}</span>
+                          <span className="text-gray-600 truncate text-[11px]">{iss.title}</span>
+                        </div>
+                        <p className="text-gray-400 leading-snug line-clamp-2 text-[11px]">{iss.workspaceSummary!.main!.lastAssistantMessage}</p>
+                      </div>
+                      <svg className="w-3 h-3 text-gray-300 group-hover:text-gray-400 shrink-0 mt-0.5 transition-colors" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7"/></svg>
                     </div>
-                    <p className="text-gray-400 leading-snug line-clamp-2 pl-3">{iss.workspaceSummary!.main!.lastAssistantMessage}</p>
                   </div>
                 ))}
               </div>
