@@ -511,6 +511,14 @@ export async function startServer(port?: number) {
 
   await migrate(db, { migrationsFolder: getMigrationsFolder() });
 
+  // Disable auto_monitor on every startup — prevents mass agent spawns from idle workspaces
+  {
+    const now = new Date().toISOString();
+    await db.insert(preferences).values({ key: "auto_monitor", value: "false", updatedAt: now })
+      .onConflictDoUpdate({ target: preferences.key, set: { value: "false", updatedAt: now } });
+    console.log("[startup] auto_monitor disabled — re-enable in Settings → Workflow → Board Monitoring");
+  }
+
   // Clean up stale sessions — but skip any whose agent process is still alive (survived hot-reload)
   const staleSessions = await db.select({ id: sessions.id, workspaceId: sessions.workspaceId, pid: sessions.pid }).from(sessions).where(eq(sessions.status, "running"));
   if (staleSessions.length > 0) {
