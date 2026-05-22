@@ -207,7 +207,11 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
             </>
           )}
           {ws.main.status === "closed" && (
-            <span className="text-green-600 font-medium shrink-0">merged</span>
+            ws.main.lastSessionTriggerType === "fix-conflicts" ? (
+              <span className="text-orange-600 font-medium shrink-0">merged conflicts</span>
+            ) : (
+              <span className="text-green-600 font-medium shrink-0">merged</span>
+            )
           )}
           <span className="inline-flex items-center gap-1 text-[10px] font-mono shrink-0 ml-auto">
             {ws.main.diffStats && (liveActivity || liveStats) && (
