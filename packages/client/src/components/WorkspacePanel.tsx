@@ -884,7 +884,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                   {ws.closedAt && <span>Closed {formatRelativeTime(ws.closedAt)}</span>}
                 </div>
 
-                {(ws.contextTokens || ws.lastTool) && (
+                {(ws.status === "active" || ws.status === "fixing") && (ws.contextTokens || ws.lastTool) && (
                   <div className="flex items-center gap-2 text-[10px] text-gray-400">
                     {ws.contextTokens ? (
                       <span>
