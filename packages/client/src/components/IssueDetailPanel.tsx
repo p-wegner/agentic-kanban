@@ -715,6 +715,7 @@ export function IssueDetailPanel({
                         {issue.workspaceSummary.main.status === "reviewing" ? "AI Reviewing" :
                          issue.workspaceSummary.main.status === "fixing" ? "AI Fixing Conflicts" :
                          issue.workspaceSummary.main.conflicts?.hasConflicts ? "Merge Conflicts" :
+                         issue.workspaceSummary.main.status === "closed" && issue.workspaceSummary.main.lastSessionTriggerType === "fix-conflicts" ? "merged conflicts" :
                          issue.workspaceSummary.main.status}
                       </span>
                       {issue.workspaceSummary.main.conflicts?.hasConflicts && issue.workspaceSummary.main.status !== "fixing" && (
