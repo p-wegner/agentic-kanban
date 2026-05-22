@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { db } from "../db/index.js";
 import { projects, projectStatuses, issues, workspaces, sessions, sessionMessages, diffComments, issueDependencies, preferences, tags, issueTags } from "@agentic-kanban/shared/schema";
-import { eq, inArray, sql, and, desc } from "drizzle-orm";
+import { eq, inArray, sql, and } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 <<<<<<< HEAD
 import { execFile, execSync } from "node:child_process";
@@ -108,20 +108,11 @@ import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:
 import { existsSync, mkdirSync, readdirSync, writeFileSync, rmSync } from "node:fs";
 >>>>>>> f903991 (feat: conditionally show AI Reviewed column and fix stats colors)
 import { detectRepoInfo } from "../services/git-info.service.js";
-import { listBranches, listWorktrees, getDiffShortstat, removeWorktree, detectConflicts } from "../services/git.service.js";
+import { listBranches, listWorktrees, getDiffShortstat, removeWorktree } from "../services/git.service.js";
 import type { Database } from "../db/index.js";
 import { resolve, sep, join } from "node:path";
 import { invokeClaudePrompt } from "../services/claude-cli.service.js";
-
-// Limit concurrent background git operations to avoid hammering the filesystem
-let _bgGitRunning = 0;
-const BG_GIT_CONCURRENCY = 5;
-
-function runBgGit(fn: () => Promise<void>): void {
-  if (_bgGitRunning >= BG_GIT_CONCURRENCY) return; // drop if saturated
-  _bgGitRunning++;
-  fn().finally(() => { _bgGitRunning--; });
-}
+import { buildWorkspaceSummaryMap, buildBlockedMap, buildTagMap } from "../services/board-aggregation.service.js";
 
 const GITIGNORE_TEMPLATES: Record<string, string> = {
   node: `node_modules/
@@ -1187,22 +1178,17 @@ ${contextParts.join("\n")}`;
       .where(eq(issues.projectId, projectId))
       .orderBy(issues.sortOrder);
 
-    // Fetch workspace summaries grouped by issueId
+    // Fetch workspace summaries, blocked status, and tags via aggregation service
     const issueIds = projectIssues.map((i) => i.id);
-    const workspaceSummaryMap = new Map<string, { total: number; active: number; idle: number; closed: number; branches: string[]; main?: { id: string; branch: string; status: "active" | "reviewing" | "idle" | "closed"; claudeProfile: string | null; agentCommand: string | null; readyForMerge?: boolean; diffStats?: { filesChanged: number; insertions: number; deletions: number } | null; conflicts?: { hasConflicts: boolean; conflictingFiles: string[] } | null; lastSessionAt?: string | null; contextTokens?: number | null; lastTool?: string | null; lastAssistantMessage?: string | null } }>();
+    const defaultBranch = projectRows[0].defaultBranch;
 
-    if (issueIds.length > 0) {
-      const wsRows = await database
-        .select({
-          issueId: workspaces.issueId,
-          status: workspaces.status,
-          branch: workspaces.branch,
-          count: sql<number>`count(*)`.as("count"),
-        })
-        .from(workspaces)
-        .where(inArray(workspaces.issueId, issueIds))
-        .groupBy(workspaces.issueId, workspaces.status, workspaces.branch);
+    const [workspaceSummaryMap, blockedMap, issueTagMap] = await Promise.all([
+      buildWorkspaceSummaryMap(issueIds, defaultBranch, database),
+      buildBlockedMap(issueIds, database),
+      buildTagMap(issueIds, database),
+    ]);
 
+<<<<<<< HEAD
       for (const row of wsRows) {
         let summary = workspaceSummaryMap.get(row.issueId);
         if (!summary) {
@@ -1456,71 +1442,17 @@ ${contextParts.join("\n")}`;
 
     // Attach workspace summaries to issues
     const issuesWithSummary: Array<typeof projectIssues[number] & { workspaceSummary?: typeof workspaceSummaryMap extends Map<string, infer V> ? V : never }> = projectIssues.map((issue) => {
+=======
+    const issuesWithBlocked = projectIssues.map((issue) => {
+>>>>>>> 713c396 (refactor: extract business logic from mega-route files into service layer)
       const wsSummary = workspaceSummaryMap.get(issue.id);
-      return wsSummary ? { ...issue, workspaceSummary: wsSummary } : issue;
+      const blocked = blockedMap.get(issue.id);
+      return {
+        ...issue,
+        ...(wsSummary ? { workspaceSummary: wsSummary } : {}),
+        ...(blocked ? { isBlocked: blocked.isBlocked, dependencyCount: blocked.dependencyCount } : {}),
+      };
     });
-
-    // Compute isBlocked for each issue
-    const issuesWithBlocked: Array<typeof issuesWithSummary[number] & { isBlocked?: boolean }> = [...issuesWithSummary];
-    if (issueIds.length > 0) {
-      const depRows = await database
-        .select({
-          issueId: issueDependencies.issueId,
-          dependsOnId: issueDependencies.dependsOnId,
-          type: issueDependencies.type,
-        })
-        .from(issueDependencies)
-        .where(inArray(issueDependencies.issueId, issueIds));
-
-      // Map each depended-on issue to its status name
-      const dependsOnIds = [...new Set(depRows.map(d => d.dependsOnId))];
-      const depStatusMap = new Map<string, string>();
-      if (dependsOnIds.length > 0) {
-        const depStatuses = await database
-          .select({ id: issues.id, statusName: projectStatuses.name })
-          .from(issues)
-          .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
-          .where(inArray(issues.id, dependsOnIds));
-        for (const ds of depStatuses) depStatusMap.set(ds.id, ds.statusName);
-      }
-
-      // Group blocking deps by issue (only depends_on and blocked_by types cause blocking)
-      const depsByIssue = new Map<string, { dependsOnId: string; type: string }[]>();
-      for (const dep of depRows) {
-        let arr = depsByIssue.get(dep.issueId);
-        if (!arr) { arr = []; depsByIssue.set(dep.issueId, arr); }
-        arr.push({ dependsOnId: dep.dependsOnId, type: dep.type });
-      }
-
-      for (let i = 0; i < issuesWithBlocked.length; i++) {
-        const issue = issuesWithBlocked[i];
-        const deps = depsByIssue.get(issue.id);
-        if (deps && deps.length > 0) {
-          const isBlocked = deps.some(dep => {
-            const isBlockingType = dep.type === "depends_on" || dep.type === "blocked_by";
-            if (!isBlockingType) return false;
-            const s = depStatusMap.get(dep.dependsOnId);
-            return s !== "Done" && s !== "AI Reviewed";
-          });
-          issuesWithBlocked[i] = { ...issue, isBlocked, dependencyCount: deps.length };
-        }
-      }
-    }
-
-    // Fetch tags for all issues in one query
-    const issueTagMap = new Map<string, { id: string; name: string; color: string | null }[]>();
-    if (issueIds.length > 0) {
-      const tagRows = await database
-        .select({ issueId: issueTags.issueId, id: tags.id, name: tags.name, color: tags.color })
-        .from(issueTags)
-        .innerJoin(tags, eq(issueTags.tagId, tags.id))
-        .where(inArray(issueTags.issueId, issueIds));
-      for (const row of tagRows) {
-        let arr = issueTagMap.get(row.issueId);
-        if (!arr) { arr = []; issueTagMap.set(row.issueId, arr); }
-        arr.push({ id: row.id, name: row.name, color: row.color });
-      }
-    }
 
     const result = statuses.map((s) => ({
       id: s.id,
