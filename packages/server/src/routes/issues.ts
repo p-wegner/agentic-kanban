@@ -1,13 +1,15 @@
 import { Hono } from "hono";
 import { db } from "../db/index.js";
-import { issues, projectStatuses, workspaces, tags, issueTags, sessions, sessionMessages, diffComments, issueDependencies, agentSkills, issueArtifacts } from "@agentic-kanban/shared/schema";
+import { issues, projectStatuses, workspaces, tags, issueTags, diffComments, issueDependencies, agentSkills, issueArtifacts } from "@agentic-kanban/shared/schema";
 import type { DependencyType } from "@agentic-kanban/shared/schema";
-import { eq, and, sql, inArray, desc } from "drizzle-orm";
+import { eq, and, inArray } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import type { Database } from "../db/index.js";
 import type { BoardEvents } from "../services/board-events.js";
-import { parseSessionSummary, formatDurationStr } from "../services/session-summary.js";
-import { invokeClaudePrompt } from "../services/claude-cli.service.js";
+import { analyzeDependencies, enhanceIssue } from "../services/issue-ai.service.js";
+import { getIssueSummary, resolveNewIssueDefaults } from "../repositories/issue.repository.js";
+import { wouldCreateCycle, enrichWorkspacesWithSessionData } from "../services/board-aggregation.service.js";
+import { deleteWorkspaceCascade } from "../repositories/workspace.repository.js";
 
 export function createIssuesRoute(database: Database = db, options?: { boardEvents?: BoardEvents }) {
   const router = new Hono();
@@ -61,39 +63,20 @@ export function createIssuesRoute(database: Database = db, options?: { boardEven
       return c.json({ error: "title is required" }, 400);
     }
 
-    const prompt = `You are helping enhance a kanban issue ticket for an AI coding agent.
-Given a title and optional description, return an improved version that is clear, actionable, and well-structured.
-Keep the title concise (under 80 chars). Expand the description with context, acceptance criteria, and agent instructions if helpful.
-Respond ONLY with valid JSON — no markdown, no explanation:
-{"title": "...", "description": "..."}
-
-Current title: ${body.title}
-Current description: ${body.description?.trim() || "(none)"}`;
-
-    let stdout: string;
     try {
-      stdout = await invokeClaudePrompt(prompt, { database });
+      const result = await enhanceIssue(body.title, body.description, database);
+      return c.json(result);
     } catch (err: any) {
+      if (err.message?.includes("JSON") || err instanceof SyntaxError) {
+        console.error("[enhance] failed to parse claude output:", err.message);
+        return c.json({ error: "Failed to parse AI response" }, 500);
+      }
       const parts: string[] = [];
       if (err.message) parts.push(err.message);
       if (err.stderr) parts.push(String(err.stderr).trim());
       const msg = parts.length > 0 ? parts.join(" | ") : "claude CLI failed";
       console.error("[enhance] claude error:", msg);
       return c.json({ error: "AI enhancement failed", detail: msg }, 500);
-    }
-
-    const output = stdout.trim();
-    // Strip markdown code fences if present
-    const cleaned = output.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
-    try {
-      const enhanced = JSON.parse(cleaned) as { title?: string; description?: string };
-      return c.json({
-        title: enhanced.title?.trim() || body.title,
-        description: enhanced.description?.trim() ?? body.description ?? "",
-      });
-    } catch {
-      console.error("[enhance] failed to parse claude output:", output);
-      return c.json({ error: "Failed to parse AI response", raw: output }, 500);
     }
   });
 
@@ -109,130 +92,24 @@ Current description: ${body.description?.trim() || "(none)"}`;
       return c.json({ error: "issueId and projectId are required" }, 400);
     }
 
-    // Look up the issue
-    const issueRows = await database
-      .select({ id: issues.id, issueNumber: issues.issueNumber, title: issues.title, description: issues.description })
-      .from(issues)
-      .where(eq(issues.id, body.issueId))
-      .limit(1);
-    if (issueRows.length === 0) {
-      return c.json({ error: "Issue not found" }, 404);
-    }
-    const targetIssue = issueRows[0];
-
-    // Get all open issues in the project (exclude Done/Cancelled)
-    const doneCancelledStatuses = await database
-      .select({ id: projectStatuses.id })
-      .from(projectStatuses)
-      .where(and(
-        eq(projectStatuses.projectId, body.projectId),
-        inArray(projectStatuses.name, ["Done", "Cancelled"]),
-      ));
-    const excludeStatusIds = doneCancelledStatuses.map(s => s.id);
-
-    let openIssues: { id: string; issueNumber: number | null; title: string; description: string | null }[];
-    if (excludeStatusIds.length > 0) {
-      openIssues = await database
-        .select({ id: issues.id, issueNumber: issues.issueNumber, title: issues.title, description: issues.description })
-        .from(issues)
-        .where(and(
-          eq(issues.projectId, body.projectId),
-          sql`${issues.statusId} NOT IN (${sql.join(excludeStatusIds.map(id => sql`${id}`), sql`, `)})`,
-        ));
-    } else {
-      openIssues = await database
-        .select({ id: issues.id, issueNumber: issues.issueNumber, title: issues.title, description: issues.description })
-        .from(issues)
-        .where(eq(issues.projectId, body.projectId));
-    }
-
-    // Look up the dependency-analyzer skill (prefer project-scoped, fall back to global)
-    const skillRows = await database
-      .select({ prompt: agentSkills.prompt })
-      .from(agentSkills)
-      .where(and(
-        eq(agentSkills.name, "dependency-analyzer"),
-        sql`(${agentSkills.projectId} = ${body.projectId} OR ${agentSkills.projectId} IS NULL)`,
-      ))
-      .orderBy(sql`${agentSkills.projectId} IS NULL`)
-      .limit(1);
-
-    const skillPrompt = skillRows[0]?.prompt || `Analyze the given issue and its relationship to other open issues on the board.`;
-
-    const issuesSummary = openIssues
-      .filter(i => i.id !== body.issueId)
-      .map(i => `  [${i.id}] #${i.issueNumber ?? "?"} ${i.title}${i.description ? `\n    ${i.description.split("\n")[0].slice(0, 100)}` : ""}`)
-      .join("\n");
-
-    const prompt = `${skillPrompt}
-
-Target issue: [${targetIssue.id}] #${targetIssue.issueNumber ?? "?"} "${targetIssue.title}"
-${targetIssue.description ? `Description: ${targetIssue.description}` : ""}
-
-Other open issues on the board (each prefixed with its [id]):
-${issuesSummary || "(no other open issues)"}
-
-IMPORTANT: You must respond ONLY with valid JSON, no markdown, no explanation:
-{"dependencies": [{"issueId": "<id from brackets>", "type": "depends_on|blocked_by|related_to|parent_of|child_of", "reason": "..."}]}
-
-Use the exact id value from the [brackets] prefix for the issueId field.
-Use "depends_on" when the target issue requires another issue to be done first.
-Use "blocked_by" when another issue blocks this one.
-Use "related_to" when issues share code or functionality.
-Use "parent_of" when the target is an epic containing another issue.
-Use "child_of" when the target is a subtask of another issue.
-Only include genuinely useful dependencies, not just topical similarity.`;
-
-    let stdout: string;
     try {
-      stdout = await invokeClaudePrompt(prompt, { database });
+      const result = await analyzeDependencies(body.issueId, body.projectId, database);
+      if (result.total > 0) {
+        options?.boardEvents?.broadcast(body.projectId, "dependency_added");
+      }
+      return c.json(result);
     } catch (err: any) {
+      if (err.statusCode === 404) return c.json({ error: err.message }, 404);
+      if (err.message?.includes("JSON")) {
+        console.error("[analyze-deps] failed to parse claude output:", err.message);
+        return c.json({ error: "Failed to parse AI response" }, 500);
+      }
       const parts: string[] = [];
       if (err.message) parts.push(err.message);
       if (err.stderr) parts.push(String(err.stderr).trim());
       const msg = parts.length > 0 ? parts.join(" | ") : "claude CLI failed";
-      console.error("[analyze-deps] claude error:", msg);
+      console.error("[analyze-deps] error:", msg);
       return c.json({ error: "AI dependency analysis failed", detail: msg }, 500);
-    }
-
-    const output = stdout.trim();
-    const cleaned = output.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
-    try {
-      const parsed = JSON.parse(cleaned) as { dependencies?: Array<{ issueId: string; type: string; reason: string }> };
-      const deps = parsed.dependencies ?? [];
-
-      // Create the dependencies in the DB
-      const created: Array<{ id: string; type: string; issueId: string; reason: string }> = [];
-      for (const dep of deps) {
-        if (!dep.issueId || !dep.type) continue;
-        const validTypes: DependencyType[] = ["depends_on", "blocked_by", "related_to", "parent_of", "child_of"];
-        if (!validTypes.includes(dep.type as DependencyType)) continue;
-        if (dep.issueId === body.issueId) continue;
-
-        try {
-          const id = randomUUID();
-          await database.insert(issueDependencies).values({
-            id,
-            issueId: body.issueId,
-            dependsOnId: dep.issueId,
-            type: dep.type as DependencyType,
-            createdAt: new Date().toISOString(),
-          });
-          created.push({ id, type: dep.type, issueId: dep.issueId, reason: dep.reason ?? "" });
-        } catch (err: any) {
-          if (err.message?.includes("UNIQUE constraint")) continue; // skip duplicates
-          console.error("[analyze-deps] failed to create dependency:", err.message);
-        }
-      }
-
-      if (created.length > 0) {
-        options?.boardEvents?.broadcast(body.projectId, "dependency_added");
-      }
-
-      return c.json({ dependencies: created, total: created.length });
-    } catch {
-      console.error("[analyze-deps] failed to parse claude output:", output);
-      return c.json({ error: "Failed to parse AI response", raw: output }, 500);
     }
   });
 
@@ -242,25 +119,13 @@ Only include genuinely useful dependencies, not just topical similarity.`;
     const now = new Date().toISOString();
     const id = randomUUID();
 
-    // Auto-assign issue number per project
-    const maxResult = await database
-      .select({ maxNum: sql<number | null>`max(${issues.issueNumber})` })
-      .from(issues)
-      .where(eq(issues.projectId, body.projectId));
-    const issueNumber = (maxResult[0]?.maxNum ?? 0) + 1;
-
-    // Default statusId to the first status for the project if not provided
-    let statusId = body.statusId;
-    if (!statusId) {
-      const statuses = await database
-        .select({ id: projectStatuses.id })
-        .from(projectStatuses)
-        .where(eq(projectStatuses.projectId, body.projectId))
-        .limit(1);
-      if (statuses.length === 0) {
-        return c.json({ error: "No statuses found for project" }, 400);
-      }
-      statusId = statuses[0].id;
+    let issueNumber: number;
+    let statusId: string;
+    try {
+      ({ issueNumber, statusId } = await resolveNewIssueDefaults(body.projectId, body.statusId, database));
+    } catch (err: any) {
+      if (err.statusCode === 400) return c.json({ error: err.message }, 400);
+      throw err;
     }
 
     await database.insert(issues).values({
@@ -287,122 +152,9 @@ Only include genuinely useful dependencies, not just topical similarity.`;
   // GET /api/issues/:id/summary — issue summary by UUID or issue number
   router.get("/:id/summary", async (c) => {
     const idParam = c.req.param("id");
-
-    // Resolve issue by UUID or issue number
-    const isNumeric = /^\d+$/.test(idParam);
-    const issueRows = isNumeric
-      ? await database
-          .select()
-          .from(issues)
-          .where(eq(issues.issueNumber, Number(idParam)))
-          .limit(1)
-      : await database
-          .select()
-          .from(issues)
-          .where(eq(issues.id, idParam))
-          .limit(1);
-
-    if (issueRows.length === 0) {
-      return c.json({ error: "Issue not found" }, 404);
-    }
-
-    const issue = issueRows[0];
-
-    // Find workspaces for this issue
-    const wsRows = await database
-      .select()
-      .from(workspaces)
-      .where(eq(workspaces.issueId, issue.id));
-
-    if (wsRows.length === 0) {
-      return c.json({
-        issueId: issue.id,
-        issueNumber: issue.issueNumber,
-        title: issue.title,
-        status: "no workspace",
-        summary: null,
-      });
-    }
-
-    // Find the latest completed session across all workspaces
-    const wsIds = wsRows.map(w => w.id);
-    const sessionRows = await database
-      .select()
-      .from(sessions)
-      .where(inArray(sessions.workspaceId, wsIds))
-      .orderBy(desc(sessions.startedAt));
-
-    // Prefer completed/stopped sessions, fall back to any session
-    const completedSession = sessionRows.find(s => s.status === "completed" || s.status === "stopped")
-      ?? sessionRows[0]
-      ?? null;
-
-    if (!completedSession) {
-      return c.json({
-        issueId: issue.id,
-        issueNumber: issue.issueNumber,
-        title: issue.title,
-        status: "no session",
-        summary: null,
-      });
-    }
-
-    // Fetch session messages
-    const msgRows = await database
-      .select()
-      .from(sessionMessages)
-      .where(eq(sessionMessages.sessionId, completedSession.id))
-      .orderBy(sessionMessages.id);
-
-    // Parse stats
-    let stats: Record<string, unknown> | null = null;
-    if (completedSession.stats) {
-      try { stats = JSON.parse(completedSession.stats); } catch { /* ignore */ }
-    }
-
-    // Compute duration
-    let duration: string | null = null;
-    if (completedSession.endedAt && completedSession.startedAt) {
-      const diffMs = new Date(completedSession.endedAt).getTime() - new Date(completedSession.startedAt).getTime();
-      duration = formatDurationStr(diffMs);
-    }
-
-    const summary = parseSessionSummary(msgRows);
-
-    // Fast-path: pull agentSummary from stored stats
-    if (!summary.agentSummary && stats && typeof stats.agentSummary === "string") {
-      summary.agentSummary = stats.agentSummary;
-    }
-
-    const matchingWorkspace = wsRows.find(w => w.id === completedSession.workspaceId);
-
-    return c.json({
-      issueId: issue.id,
-      issueNumber: issue.issueNumber,
-      title: issue.title,
-      workspace: matchingWorkspace ? {
-        id: matchingWorkspace.id,
-        branch: matchingWorkspace.branch,
-        status: matchingWorkspace.status,
-      } : null,
-      session: {
-        id: completedSession.id,
-        status: completedSession.status,
-        startedAt: completedSession.startedAt,
-        endedAt: completedSession.endedAt,
-        duration,
-      },
-      stats: stats ? {
-        durationMs: (stats as any).durationMs ?? 0,
-        totalCostUsd: (stats as any).totalCostUsd ?? 0,
-        inputTokens: (stats as any).inputTokens ?? 0,
-        outputTokens: (stats as any).outputTokens ?? 0,
-        numTurns: (stats as any).numTurns ?? 1,
-        model: (stats as any).model ?? summary.model,
-        success: (stats as any).success ?? false,
-      } : null,
-      ...summary,
-    });
+    const result = await getIssueSummary(idParam, database);
+    if (!result) return c.json({ error: "Issue not found" }, 404);
+    return c.json(result);
   });
 
   // PATCH /api/issues/:id
@@ -443,13 +195,7 @@ Only include genuinely useful dependencies, not just topical similarity.`;
 
     // Cascade delete each workspace's diff comments, session messages, sessions
     for (const ws of wsRows) {
-      const wsSessions = await database.select({ id: sessions.id }).from(sessions).where(eq(sessions.workspaceId, ws.id));
-      await database.delete(diffComments).where(eq(diffComments.workspaceId, ws.id));
-      if (wsSessions.length > 0) {
-        await database.delete(sessionMessages).where(inArray(sessionMessages.sessionId, wsSessions.map(s => s.id)));
-      }
-      await database.delete(sessions).where(eq(sessions.workspaceId, ws.id));
-      await database.delete(workspaces).where(eq(workspaces.id, ws.id));
+      await deleteWorkspaceCascade(ws.id, database);
     }
 
     // Delete issue tags and the issue itself
@@ -492,61 +238,7 @@ Only include genuinely useful dependencies, not just topical similarity.`;
       .where(eq(workspaces.issueId, issueId));
 
     const wsIds = wsRows.map(w => w.id);
-    const contextTokensMap = new Map<string, number>();
-    const lastToolMap = new Map<string, string>();
-
-    if (wsIds.length > 0) {
-      const sessRows = await database
-        .select({ id: sessions.id, workspaceId: sessions.workspaceId, stats: sessions.stats })
-        .from(sessions)
-        .where(inArray(sessions.workspaceId, wsIds))
-        .orderBy(sessions.startedAt);
-
-      const latestByWs = new Map<string, { id: string; stats: string | null }>();
-      for (const s of sessRows) {
-        latestByWs.set(s.workspaceId, { id: s.id, stats: s.stats });
-      }
-
-      const sessIds = [...latestByWs.values()].map(s => s.id);
-
-      for (const [wsId, sess] of latestByWs) {
-        if (sess.stats) {
-          try {
-            const p = JSON.parse(sess.stats) as Record<string, unknown>;
-            const tokens = ((p.inputTokens as number) ?? 0) + ((p.cacheReadTokens as number) ?? 0);
-            if (tokens) contextTokensMap.set(wsId, tokens);
-          } catch { /* ignore */ }
-        }
-      }
-
-      if (sessIds.length > 0) {
-        const msgRows = await database
-          .select({ sessionId: sessionMessages.sessionId, data: sessionMessages.data })
-          .from(sessionMessages)
-          .where(inArray(sessionMessages.sessionId, sessIds))
-          .orderBy(desc(sessionMessages.id));
-
-        const sessionToWs = new Map<string, string>();
-        for (const [wsId, sess] of latestByWs) sessionToWs.set(sess.id, wsId);
-
-        for (const msg of msgRows) {
-          const wsId = sessionToWs.get(msg.sessionId);
-          if (!wsId || lastToolMap.has(wsId) || !msg.data) continue;
-          try {
-            const obj = JSON.parse(msg.data) as Record<string, unknown>;
-            if (obj.type === "assistant") {
-              const content = (obj.message as { content?: unknown[] })?.content ?? [];
-              for (const block of content as { type: string; name?: string }[]) {
-                if (block.type === "tool_use" && block.name) {
-                  lastToolMap.set(wsId, block.name);
-                  break;
-                }
-              }
-            }
-          } catch { /* ignore */ }
-        }
-      }
-    }
+    const { contextTokensMap, lastToolMap } = await enrichWorkspacesWithSessionData(wsIds, database);
 
     const result = wsRows.map(w => ({
       ...w,
@@ -768,38 +460,3 @@ Only include genuinely useful dependencies, not just topical similarity.`;
 }
 
 export const issuesRoute = createIssuesRoute();
-
-async function wouldCreateCycle(database: Database, issueId: string, dependsOnId: string, projectId: string): Promise<boolean> {
-  // Load all dependencies for the project
-  const allDeps = await database
-    .select({
-      depIssueId: issueDependencies.issueId,
-      depDependsOnId: issueDependencies.dependsOnId,
-    })
-    .from(issueDependencies)
-    .innerJoin(issues, eq(issueDependencies.issueId, issues.id))
-    .where(eq(issues.projectId, projectId));
-
-  // Build adjacency: issueId -> Set of dependsOnIds
-  const adj = new Map<string, Set<string>>();
-  for (const dep of allDeps) {
-    let set = adj.get(dep.depIssueId);
-    if (!set) { set = new Set(); adj.set(dep.depIssueId, set); }
-    set.add(dep.depDependsOnId);
-  }
-
-  // DFS from dependsOnId: if we can reach issueId, adding this edge creates a cycle
-  const visited = new Set<string>();
-  const stack = [dependsOnId];
-  while (stack.length > 0) {
-    const current = stack.pop()!;
-    if (current === issueId) return true;
-    if (visited.has(current)) continue;
-    visited.add(current);
-    const neighbors = adj.get(current);
-    if (neighbors) {
-      for (const n of neighbors) stack.push(n);
-    }
-  }
-  return false;
-}
