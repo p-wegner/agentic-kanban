@@ -527,7 +527,22 @@ export function BoardPage() {
     const isActive = columnsRef.current.some(col =>
       col.issues.some(iss => iss.id === issueId && (iss.workspaceSummary?.main?.status === "active" || iss.workspaceSummary?.main?.status === "fixing"))
     );
-    if (!isActive && activity) return;
+    if (!isActive) {
+      // Workspace no longer active — clear any stale live data immediately
+      setSessionActivityRaw((prev) => {
+        if (!(issueId in prev)) return prev;
+        const next = { ...prev };
+        delete next[issueId];
+        setLiveStats((prev2) => {
+          if (!(issueId in prev2)) return prev2;
+          const next2 = { ...prev2 };
+          delete next2[issueId];
+          return next2;
+        });
+        return next;
+      });
+      return;
+    }
     setSessionActivityRaw((prev) => {
       const sessions = { ...(prev[issueId] ?? {}) };
       if (!activity) {
