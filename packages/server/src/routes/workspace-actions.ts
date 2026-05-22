@@ -240,7 +240,7 @@ export function createWorkspaceActionsRoute(
       const planMode = wsRows.length > 0 ? wsRows[0].planMode : false;
 
       const resumeFromId = typeof body.resumeFromId === "string" ? body.resumeFromId : undefined;
-      const sessionId = await getSessionManager().startSession(id, promptStr, agentCommand, agentArgs, resumeFromId, claudeProfile, body.multiTurn !== false, permissionPromptTool, planMode, resumeWithNewModel);
+      const sessionId = await getSessionManager().startSession(id, promptStr, agentCommand, agentArgs, resumeFromId, claudeProfile, body.multiTurn !== false, permissionPromptTool, planMode, resumeWithNewModel, undefined, "chat");
 
       const now = new Date().toISOString();
       await database.update(workspaces).set({ status: "active", claudeProfile: claudeProfile ?? null, agentCommand: agentCommand ?? null, updatedAt: now }).where(eq(workspaces.id, id));
@@ -313,6 +313,8 @@ export function createWorkspaceActionsRoute(
           undefined,
           planMode,
           resumeWithNewModel,
+          undefined,
+          "chat",
         );
         const now = new Date().toISOString();
         await database.update(workspaces).set({ status: "active", claudeProfile: claudeProfile ?? null, agentCommand: agentCommand ?? null, updatedAt: now }).where(eq(workspaces.id, id));
@@ -486,7 +488,7 @@ export function createWorkspaceActionsRoute(
           const agentArgs = prefMapLearning.get("agent_args") || undefined;
           const claudeProfile = prefMapLearning.get("claude_profile") || undefined;
           const sm = getSessionManager();
-          const learningSessId = await sm.startSession(id, learningPrompt, agentCmd, agentArgs ? agentArgs.split(" ") : undefined, undefined, claudeProfile);
+          const learningSessId = await sm.startSession(id, learningPrompt, agentCmd, agentArgs ? agentArgs.split(" ") : undefined, undefined, claudeProfile, undefined, undefined, undefined, undefined, undefined, "learning");
           console.log(`[workspace-actions] learning step started: session=${learningSessId}`);
           // Wait up to 3 minutes for the learning session to complete
           await new Promise<void>((resolve) => {
@@ -739,7 +741,7 @@ Base branch: ${baseBranch}`;
         : (baseArgs || undefined);
       const claudeProfile = prefMap.get("claude_profile") || undefined;
 
-      const sessionId = await getSessionManager().startSession(id, prompt, agentCommand, agentArgs, undefined, claudeProfile, true);
+      const sessionId = await getSessionManager().startSession(id, prompt, agentCommand, agentArgs, undefined, claudeProfile, true, undefined, undefined, undefined, undefined, "fix-conflicts");
 
       const now = new Date().toISOString();
       await database.update(workspaces).set({ status: "fixing", updatedAt: now }).where(eq(workspaces.id, id));
@@ -990,7 +992,7 @@ async function autoStartFollowups(
       const claudeProfile = prefMap.get("claude_profile") || undefined;
       const prompt = `${followupIssue[0].title}\n\n${followupIssue[0].description ?? ""}`.trim();
 
-      await getSessionManager().startSession(wsId, prompt, agentCommand, agentArgs, undefined, claudeProfile);
+      await getSessionManager().startSession(wsId, prompt, agentCommand, agentArgs, undefined, claudeProfile, undefined, undefined, undefined, undefined, undefined, "auto-start");
       await database.update(workspaces).set({ status: "active", updatedAt: now }).where(eq(workspaces.id, wsId));
 
       console.log(`[workspace-actions] auto-started follow-up workspace for issue ${followupIssue[0].issueNumber ?? dep.issueId}`);

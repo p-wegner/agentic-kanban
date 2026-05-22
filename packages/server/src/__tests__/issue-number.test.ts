@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll } from "vitest";
+﻿import { describe, it, expect, beforeAll } from "vitest";
 import { Hono } from "hono";
 import { drizzle } from "drizzle-orm/libsql";
 import { createClient } from "@libsql/client";
@@ -46,6 +46,7 @@ const MIGRATION_FILES = [
   "../../../shared/drizzle/0032_diff_stat_cache.sql",
   "../../../shared/drizzle/0033_backlog_status.sql",
   "../../../shared/drizzle/0034_session_pid.sql",
+  "../../../shared/drizzle/0035_session_trigger.sql",
 ];
 
 function createTestApp() {
@@ -308,3 +309,4 @@ describe("Issue Number - Independent Per Project", () => {
     expect(numbersB).toEqual([1, 2, 3]);
   });
 });
+
