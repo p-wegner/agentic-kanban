@@ -588,6 +588,14 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
   const [savingRun, setSavingRun] = useState(false);
   const [triggeringRun, setTriggeringRun] = useState<string | null>(null);
   const [monitorRunning, setMonitorRunning] = useState(false);
+  const [monitorStatus, setMonitorStatus] = useState<{
+    enabled: boolean;
+    intervalMin: number;
+    active: boolean;
+    lastRun: string | null;
+    nextRunAt: string | null;
+    recentActions: string[];
+  } | null>(null);
 
   const disabledTools = new Set((settings.disabled_mcp_tools || "").split(",").filter(Boolean));
   function isToolDisabled(name: string) {
@@ -755,6 +763,10 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
   }, []);
 
   useEffect(() => {
+    if (tab === "workflow") fetchMonitorStatus();
+  }, [tab]);
+
+  useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") onClose();
     }
@@ -762,11 +774,19 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
+  async function fetchMonitorStatus() {
+    try {
+      const s = await apiFetch<NonNullable<typeof monitorStatus>>("/api/internal/monitor-status");
+      setMonitorStatus(s);
+    } catch { /* non-fatal */ }
+  }
+
   async function handleMonitorRunNow() {
     setMonitorRunning(true);
     try {
       await apiFetch("/api/internal/monitor-run", { method: "POST" });
       showToast("Monitor cycle triggered", "success");
+      setTimeout(fetchMonitorStatus, 1500);
     } catch {
       showToast("Failed to trigger monitor", "error");
     } finally {
@@ -975,27 +995,69 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                     hint="When enabled, runs an agent session before merging that reads the worktree's session transcripts and updates docs and Claude hooks with extracted insights. Blocks merge until complete (up to 3 minutes)."
                   />
 
-                  <div className="pt-2 border-t border-gray-100 space-y-2">
-                    <div className="text-xs font-medium text-gray-600">Board Monitoring</div>
+                  <div className="pt-3 border-t border-gray-200">
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="text-xs font-semibold text-gray-700 uppercase tracking-wide">Board Monitor</div>
+                      <button
+                        onClick={handleMonitorRunNow}
+                        disabled={monitorRunning}
+                        className="flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium bg-gray-100 text-gray-700 hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                        title="Run a monitor cycle now and restart the interval timer"
+                      >
+                        {monitorRunning ? (
+                          <svg className="w-3 h-3 animate-spin" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>
+                        ) : (
+                          <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path strokeLinecap="round" strokeLinejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 010 1.972l-11.54 6.347a1.125 1.125 0 01-1.667-.986V5.653z"/></svg>
+                        )}
+                        {monitorRunning ? "Running…" : "Run now"}
+                      </button>
+                    </div>
                     <Toggle
                       checked={settings.auto_monitor === "true"}
                       onChange={setBool("auto_monitor")}
                       label="Auto-monitor"
                       hint="Periodically checks workspaces and relaunches idle agents, triggers merges, and auto-starts unblocked issues."
                     />
-                    <button
-                      onClick={handleMonitorRunNow}
-                      disabled={monitorRunning}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-green-600 text-white hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                      title="Run a monitor cycle now and restart the interval timer"
-                    >
-                      {monitorRunning ? (
-                        <svg className="w-3 h-3 animate-spin" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>
-                      ) : (
-                        <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path strokeLinecap="round" strokeLinejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 010 1.972l-11.54 6.347a1.125 1.125 0 01-1.667-.986V5.653z"/></svg>
-                      )}
-                      {monitorRunning ? "Running…" : "Run monitor now"}
-                    </button>
+                    {settings.auto_monitor === "true" && (
+                      <div className="mt-2 pl-5">
+                        <label className="block text-xs text-gray-600 mb-1">Interval (minutes)</label>
+                        <input
+                          type="number"
+                          min="1"
+                          max="60"
+                          value={settings.auto_monitor_interval || "4"}
+                          onChange={(e) => set("auto_monitor_interval")(e.target.value)}
+                          className="w-20 px-2 py-1 text-xs border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                        />
+                      </div>
+                    )}
+                    {monitorStatus && (
+                      <div className="mt-3 bg-gray-50 border border-gray-200 rounded-lg p-3 space-y-2">
+                        <div className="flex items-center gap-3 text-xs text-gray-600">
+                          <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-medium ${monitorStatus.active ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-500"}`}>
+                            <span className={`w-1.5 h-1.5 rounded-full ${monitorStatus.active ? "bg-green-500" : "bg-gray-400"}`} />
+                            {monitorStatus.active ? "Active" : "Inactive"}
+                          </span>
+                          {monitorStatus.lastRun && (
+                            <span>Last run: {new Date(monitorStatus.lastRun).toLocaleTimeString()}</span>
+                          )}
+                          {monitorStatus.nextRunAt && (
+                            <span>Next: {new Date(monitorStatus.nextRunAt).toLocaleTimeString()}</span>
+                          )}
+                        </div>
+                        {monitorStatus.recentActions.length > 0 && (
+                          <div className="space-y-0.5">
+                            <div className="text-[11px] font-medium text-gray-500">Recent actions</div>
+                            {monitorStatus.recentActions.slice(0, 5).map((action, i) => (
+                              <div key={i} className="text-[11px] text-gray-600 truncate">{action}</div>
+                            ))}
+                          </div>
+                        )}
+                        {monitorStatus.recentActions.length === 0 && monitorStatus.lastRun && (
+                          <div className="text-[11px] text-gray-400">No actions taken in last cycle</div>
+                        )}
+                      </div>
+                    )}
                   </div>
 
                 </>
