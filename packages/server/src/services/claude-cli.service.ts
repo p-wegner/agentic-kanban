@@ -51,6 +51,7 @@ export async function invokeClaudePrompt(
       encoding: "utf8",
       timeout,
       shell: false,
+      windowsHide: true,
       maxBuffer: 1024 * 1024,
       env: buildSpawnEnv(claudeProfile),
     }, (err, stdout) => {

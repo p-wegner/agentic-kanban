@@ -47,12 +47,14 @@ export function launch(
 
   console.log(`[agent] launching: command=${command} provider=${provider ?? "auto"} worktree=${worktreePath} sessionId=${sessionId} resume=${providerSessionId ?? "none"}`);
 
+  // On Windows, detached: true breaks stdout pipes when shell: true is used (mock agents).
+  // Only detach non-mock agents — they need to outlive server hot-reload restarts.
+  const shouldDetach = !(isMockAgent && process.platform === "win32");
   const proc = spawn(command, args, {
     cwd: worktreePath,
     shell: useShell,
     windowsHide: true,
-    // Detach from server process group so hot-reload restarts don't kill agents
-    detached: true,
+    detached: shouldDetach,
     env: {
       ...spawnEnv,
       FORCE_COLOR: "0",
@@ -62,10 +64,12 @@ export function launch(
       SERVER_PORT: process.env.SERVER_PORT || process.env.PORT || "3001",
       PORT: process.env.PORT || "3001",
     },
-    stdio: ["pipe", "pipe", "pipe"] as const,
+    // stderr is "ignore" so grandchild processes spawned by the agent (e.g. claude.exe → cmd.exe
+    // for registry queries) don't inherit a broken pipe handle after the server hot-reloads.
+    stdio: ["pipe", "pipe", "ignore"] as const,
   });
-  // Allow server to exit/restart without waiting for agents
-  proc.unref();
+  // Allow server to exit/restart without waiting for real agents
+  if (shouldDetach) proc.unref();
 
   console.log(`[agent] spawned: sessionId=${sessionId} pid=${proc.pid} command=${command} shell=${useShell}`);
 
