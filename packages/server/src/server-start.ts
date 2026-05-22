@@ -664,8 +664,12 @@ export async function startServer(port?: number) {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
   type MonitorAction = { at: string; action: "relaunch" | "merge" | "nudge" | "mark_idle" | "mark_dead"; workspaceId: string; issueId: string };
 =======
+=======
+  let monitorCurrentIntervalMin: number | null = null;
+>>>>>>> a4489dd (fix: restart monitor immediately when interval preference changes)
   type MonitorAction = { at: string; action: "relaunch" | "merge" | "nudge" | "mark_idle" | "mark_dead" | "auto_start"; workspaceId: string; issueId: string };
 >>>>>>> badbfcc (feat: add nudge auto-start setting to monitor for unblocked Todo items)
   const monitorRecentActions: MonitorAction[] = [];
@@ -1143,9 +1147,16 @@ export async function startServer(port?: number) {
     const prefRows = await db.select().from(preferences).catch(() => []);
     const prefMap = new Map(prefRows.map((r: { key: string; value: string }) => [r.key, r.value]));
     const enabled = prefMap.get("auto_monitor") === "true";
-    if (enabled && !monitorTimer) {
-      const intervalMin = parseInt(prefMap.get("auto_monitor_interval") || "4", 10);
-      console.log(`[monitor] Starting board monitoring loop (every ${intervalMin}m) — running immediately`);
+    const intervalMin = parseInt(prefMap.get("auto_monitor_interval") || "4", 10);
+    if (enabled && (!monitorTimer || intervalMin !== monitorCurrentIntervalMin)) {
+      if (monitorTimer && intervalMin !== monitorCurrentIntervalMin) {
+        console.log(`[monitor] Interval changed to ${intervalMin}m — restarting monitor immediately`);
+        clearTimeout(monitorTimer);
+        monitorTimer = null;
+      } else {
+        console.log(`[monitor] Starting board monitoring loop (every ${intervalMin}m) — running immediately`);
+      }
+      monitorCurrentIntervalMin = intervalMin;
       monitorNextRunAt = null;
       // Set a placeholder so syncMonitorState won't re-enter on the next 30s poll
       monitorTimer = setTimeout(() => {}, 0);
@@ -1156,6 +1167,7 @@ export async function startServer(port?: number) {
       clearTimeout(monitorTimer);
       monitorTimer = null;
       monitorNextRunAt = null;
+      monitorCurrentIntervalMin = null;
     }
   }
 
