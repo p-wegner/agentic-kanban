@@ -13,7 +13,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { writeFileSync } from "node:fs";
 import { spawn, spawnSync } from "node:child_process";
-import { resolveProjectRepo, resolveProjectId, moveIssueToDone } from "../repositories/workspace.repository.js";
+import { resolveProjectRepo, resolveProjectId, moveIssueToDone, getWorkspaceById, updateWorkspaceStatus } from "../repositories/workspace.repository.js";
 import { loadAgentSettings, resolveAgentSettings } from "../services/agent-settings.service.js";
 import { PREF_LEARNING_STEP_BEFORE_MERGE, PREF_AUTO_START_FOLLOWUP } from "../constants/preference-keys.js";
 import { autoStartFollowups } from "../services/followup-workspace.service.js";
@@ -30,13 +30,8 @@ export function createWorkspaceActionsRoute(
   router.post("/:id/setup", async (c) => {
     const id = c.req.param("id");
 
-    // Look up workspace
-    const rows = await database.select().from(workspaces).where(eq(workspaces.id, id)).limit(1);
-    if (rows.length === 0) {
-      return c.json({ error: "Workspace not found" }, 404);
-    }
-
-    const workspace = rows[0];
+    const workspace = await getWorkspaceById(id, database);
+    if (!workspace) return c.json({ error: "Workspace not found" }, 404);
 
     // Already set up — return existing info
     if (workspace.workingDir) {
@@ -74,12 +69,8 @@ export function createWorkspaceActionsRoute(
   router.post("/:id/terminal", async (c) => {
     const id = c.req.param("id");
 
-    const rows = await database.select().from(workspaces).where(eq(workspaces.id, id)).limit(1);
-    if (rows.length === 0) {
-      return c.json({ error: "Workspace not found" }, 404);
-    }
-
-    const workspace = rows[0];
+    const workspace = await getWorkspaceById(id, database);
+    if (!workspace) return c.json({ error: "Workspace not found" }, 404);
     if (!workspace.workingDir) {
       return c.json({ error: "Workspace not set up" }, 400);
     }
@@ -122,14 +113,12 @@ export function createWorkspaceActionsRoute(
     let body: Record<string, unknown> = {};
     try { body = await c.req.json(); } catch { /* empty body is fine */ }
 
-    const rows = await database.select().from(workspaces).where(eq(workspaces.id, id)).limit(1);
-    if (rows.length === 0) {
-      return c.json({ error: "Workspace not found" }, 404);
-    }
+    const ws0 = await getWorkspaceById(id, database);
+    if (!ws0) return c.json({ error: "Workspace not found" }, 404);
 
     // Auto-build prompt from issue when not provided
     if (!body.prompt) {
-      const ws = rows[0];
+      const ws = ws0;
       const issueRows = await database
         .select({ title: issues.title, description: issues.description })
         .from(issues)
@@ -150,15 +139,12 @@ export function createWorkspaceActionsRoute(
       const truncatedPrompt = promptStr.length > 80 ? promptStr.slice(0, 80) + "..." : promptStr;
       console.log(`[workspace-actions] launch: workspaceId=${id} prompt="${truncatedPrompt}" agentCommand=${agentCommand ?? "default"} agentArgs=${agentArgs ?? "none"} profile=${claudeProfile ?? "none"} resumeFromId=${body.resumeFromId ?? "none"} resumeWithNewModel=${resumeWithNewModel}`);
 
-      // Read planMode from workspace record
-      const wsRows = await database.select({ planMode: workspaces.planMode }).from(workspaces).where(eq(workspaces.id, id)).limit(1);
-      const planMode = wsRows.length > 0 ? wsRows[0].planMode : false;
+      const planMode = ws0.planMode ?? false;
 
       const resumeFromId = typeof body.resumeFromId === "string" ? body.resumeFromId : undefined;
       const sessionId = await getSessionManager().startSession(id, promptStr, agentCommand, agentArgs, resumeFromId, claudeProfile, false, permissionPromptTool, planMode, resumeWithNewModel, undefined, "chat");
 
-      const now = new Date().toISOString();
-      await database.update(workspaces).set({ status: "active", claudeProfile: claudeProfile ?? null, agentCommand: agentCommand ?? null, updatedAt: now }).where(eq(workspaces.id, id));
+      await updateWorkspaceStatus(id, "active", { claudeProfile: claudeProfile ?? null, agentCommand: agentCommand ?? null }, database);
 
       // Broadcast board event
       const projectId = await resolveProjectId(id, database);
@@ -204,8 +190,8 @@ export function createWorkspaceActionsRoute(
       if ((result as any).stale) {
         // Process is gone — launch a new session with --resume
         const { agentCommand, agentArgs, claudeProfile, resumeWithNewModel } = await loadAgentSettings(database);
-        const wsRows = await database.select({ planMode: workspaces.planMode }).from(workspaces).where(eq(workspaces.id, id)).limit(1);
-        const planMode = wsRows.length > 0 ? wsRows[0].planMode : false;
+        const wsForTurn = await getWorkspaceById(id, database);
+        const planMode = wsForTurn?.planMode ?? false;
 
         const sessionId = await getSessionManager().startSession(
           id,
@@ -221,8 +207,7 @@ export function createWorkspaceActionsRoute(
           undefined,
           "chat",
         );
-        const now = new Date().toISOString();
-        await database.update(workspaces).set({ status: "active", claudeProfile: claudeProfile ?? null, agentCommand: agentCommand ?? null, updatedAt: now }).where(eq(workspaces.id, id));
+        await updateWorkspaceStatus(id, "active", { claudeProfile: claudeProfile ?? null, agentCommand: agentCommand ?? null }, database);
         const projectId = await resolveProjectId(id, database);
         if (projectId) options?.boardEvents?.broadcast(projectId, "session_launched");
         return c.json({ sessionId, resumed: true }, 201);
@@ -252,8 +237,7 @@ export function createWorkspaceActionsRoute(
       }
     }
 
-    const now = new Date().toISOString();
-    await database.update(workspaces).set({ status: "idle", updatedAt: now }).where(eq(workspaces.id, id));
+    await updateWorkspaceStatus(id, "idle", {}, database);
 
     // Broadcast board event
     const projectId = await resolveProjectId(id, database);
@@ -266,12 +250,8 @@ export function createWorkspaceActionsRoute(
   router.get("/:id/diff", async (c) => {
     const id = c.req.param("id");
 
-    const rows = await database.select().from(workspaces).where(eq(workspaces.id, id)).limit(1);
-    if (rows.length === 0) {
-      return c.json({ error: "Workspace not found" }, 404);
-    }
-
-    const workspace = rows[0];
+    const workspace = await getWorkspaceById(id, database);
+    if (!workspace) return c.json({ error: "Workspace not found" }, 404);
     if (!workspace.workingDir && !workspace.branch) {
       return c.json({ error: "Workspace not set up" }, 400);
     }
@@ -325,12 +305,8 @@ export function createWorkspaceActionsRoute(
   router.post("/:id/merge", async (c) => {
     const id = c.req.param("id");
 
-    const rows = await database.select().from(workspaces).where(eq(workspaces.id, id)).limit(1);
-    if (rows.length === 0) {
-      return c.json({ error: "Workspace not found" }, 404);
-    }
-
-    const workspace = rows[0];
+    const workspace = await getWorkspaceById(id, database);
+    if (!workspace) return c.json({ error: "Workspace not found" }, 404);
 
     try {
       // Resolve project for teardown script
@@ -358,10 +334,7 @@ export function createWorkspaceActionsRoute(
       // Direct workspace: no merge needed, just close
       if (workspace.isDirect) {
         const now = new Date().toISOString();
-        await database
-          .update(workspaces)
-          .set({ status: "closed", closedAt: now, updatedAt: now })
-          .where(eq(workspaces.id, id));
+        await updateWorkspaceStatus(id, "closed", { closedAt: now }, database);
 
         await moveIssueToDone(id, workspace.issueId, now, database, true);
 
@@ -447,10 +420,7 @@ export function createWorkspaceActionsRoute(
       }
 
       const now = new Date().toISOString();
-      await database
-        .update(workspaces)
-        .set({ status: "closed", workingDir: null, closedAt: now, updatedAt: now })
-        .where(eq(workspaces.id, id));
+      await updateWorkspaceStatus(id, "closed", { workingDir: null, closedAt: now }, database);
 
       await moveIssueToDone(id, workspace.issueId, now, database);
 
@@ -479,11 +449,8 @@ export function createWorkspaceActionsRoute(
   // GET /api/workspaces/:id/conflicts — on-demand conflict detection
   router.get("/:id/conflicts", async (c) => {
     const id = c.req.param("id");
-    const rows = await database.select().from(workspaces).where(eq(workspaces.id, id)).limit(1);
-    if (rows.length === 0) {
-      return c.json({ error: "Workspace not found" }, 404);
-    }
-    const workspace = rows[0];
+    const workspace = await getWorkspaceById(id, database);
+    if (!workspace) return c.json({ error: "Workspace not found" }, 404);
     if (!workspace.workingDir || workspace.isDirect) {
       return c.json({ hasConflicts: false, conflictingFiles: [] });
     }
@@ -503,11 +470,8 @@ export function createWorkspaceActionsRoute(
     const body = await c.req.json();
     const mode = body.mode === "merge" ? "merge" : "rebase";
 
-    const rows = await database.select().from(workspaces).where(eq(workspaces.id, id)).limit(1);
-    if (rows.length === 0) {
-      return c.json({ error: "Workspace not found" }, 404);
-    }
-    const workspace = rows[0];
+    const workspace = await getWorkspaceById(id, database);
+    if (!workspace) return c.json({ error: "Workspace not found" }, 404);
     if (!workspace.workingDir || workspace.isDirect) {
       return c.json({ error: "Not supported for direct workspaces" }, 400);
     }
@@ -541,11 +505,8 @@ export function createWorkspaceActionsRoute(
   // POST /api/workspaces/:id/abort-rebase — abort in-progress rebase
   router.post("/:id/abort-rebase", async (c) => {
     const id = c.req.param("id");
-    const rows = await database.select().from(workspaces).where(eq(workspaces.id, id)).limit(1);
-    if (rows.length === 0) {
-      return c.json({ error: "Workspace not found" }, 404);
-    }
-    const workspace = rows[0];
+    const workspace = await getWorkspaceById(id, database);
+    if (!workspace) return c.json({ error: "Workspace not found" }, 404);
     if (!workspace.workingDir) {
       return c.json({ error: "Workspace not set up" }, 400);
     }
@@ -563,11 +524,8 @@ export function createWorkspaceActionsRoute(
   // POST /api/workspaces/:id/resolve-conflicts — launch AI agent to resolve conflicts
   router.post("/:id/resolve-conflicts", async (c) => {
     const id = c.req.param("id");
-    const rows = await database.select().from(workspaces).where(eq(workspaces.id, id)).limit(1);
-    if (rows.length === 0) {
-      return c.json({ error: "Workspace not found" }, 404);
-    }
-    const workspace = rows[0];
+    const workspace = await getWorkspaceById(id, database);
+    if (!workspace) return c.json({ error: "Workspace not found" }, 404);
     if (!workspace.workingDir) {
       return c.json({ error: "Workspace not set up" }, 400);
     }
@@ -616,8 +574,7 @@ Base branch: ${baseBranch}`;
       const sessionId = await getSessionManager().startSession(id, prompt, agentCommand, agentArgs, undefined, claudeProfile, true, undefined, undefined, undefined, undefined, "fix-conflicts");
       options?.fixAndMergeSessionIds?.add(sessionId);
 
-      const now = new Date().toISOString();
-      await database.update(workspaces).set({ status: "fixing", updatedAt: now }).where(eq(workspaces.id, id));
+      await updateWorkspaceStatus(id, "fixing", {}, database);
 
       const projectId = await resolveProjectId(id, database);
       if (projectId) options?.boardEvents?.broadcast(projectId, "session_launched");
@@ -654,10 +611,8 @@ Base branch: ${baseBranch}`;
       return c.json({ error: "filePath and body are required" }, 400);
     }
 
-    const wsRows = await database.select().from(workspaces).where(eq(workspaces.id, id)).limit(1);
-    if (wsRows.length === 0) {
-      return c.json({ error: "Workspace not found" }, 404);
-    }
+    const wsCheck = await getWorkspaceById(id, database);
+    if (!wsCheck) return c.json({ error: "Workspace not found" }, 404);
 
     const now = new Date().toISOString();
     const comment = {
@@ -728,13 +683,8 @@ Base branch: ${baseBranch}`;
   router.get("/:id/sessions", async (c) => {
     const id = c.req.param("id");
 
-    const wsRows = await database
-      .select({ skillId: workspaces.skillId })
-      .from(workspaces)
-      .where(eq(workspaces.id, id))
-      .limit(1);
-
-    const skillId = wsRows[0]?.skillId ?? null;
+    const wsSessions = await getWorkspaceById(id, database);
+    const skillId = wsSessions?.skillId ?? null;
     let skillName: string | null = null;
     if (skillId) {
       const skillRows = await database
@@ -757,10 +707,10 @@ Base branch: ${baseBranch}`;
   router.post("/:id/open-editor", async (c) => {
     const id = c.req.param("id");
 
-    const rows = await database.select().from(workspaces).where(eq(workspaces.id, id)).limit(1);
-    if (rows.length === 0) return c.json({ error: "Workspace not found" }, 404);
+    const wsEditor = await getWorkspaceById(id, database);
+    if (!wsEditor) return c.json({ error: "Workspace not found" }, 404);
 
-    const { workingDir } = rows[0];
+    const { workingDir } = wsEditor;
     if (!workingDir) return c.json({ error: "Workspace has no working directory" }, 422);
 
     // Verify VS Code is available
