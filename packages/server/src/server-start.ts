@@ -164,10 +164,9 @@ export async function startServer(port?: number) {
       if (issueRows.length === 0) return;
       const { projectId, id: issueId, skipAutoReview } = issueRows[0];
 
-      boardEvents.broadcast(projectId, "session_completed");
-
       const now = new Date().toISOString();
       await db.update(workspaces).set({ status: "idle", updatedAt: now }).where(eq(workspaces.id, workspaceId));
+      boardEvents.broadcast(projectId, "session_completed");
       boardEvents.broadcast(projectId, "workspace_idle");
 
       const statuses = await db.select().from(projectStatuses).where(eq(projectStatuses.projectId, projectId));
