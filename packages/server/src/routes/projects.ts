@@ -1,25 +1,16 @@
 import { Hono } from "hono";
 import { db } from "../db/index.js";
 import { projects, projectStatuses, issues, workspaces, sessions, sessionMessages, diffComments, issueDependencies, preferences, tags, issueTags } from "@agentic-kanban/shared/schema";
-import { eq, inArray, sql, and, desc } from "drizzle-orm";
+import { eq, inArray, sql, and } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { execSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, writeFileSync, rmSync } from "node:fs";
 import { detectRepoInfo } from "../services/git-info.service.js";
-import { listBranches, listWorktrees, getDiffShortstat, removeWorktree, detectConflicts } from "../services/git.service.js";
+import { listBranches, listWorktrees, getDiffShortstat, removeWorktree } from "../services/git.service.js";
 import type { Database } from "../db/index.js";
 import { resolve, sep, join } from "node:path";
 import { invokeClaudePrompt } from "../services/claude-cli.service.js";
-
-// Limit concurrent background git operations to avoid hammering the filesystem
-let _bgGitRunning = 0;
-const BG_GIT_CONCURRENCY = 5;
-
-function runBgGit(fn: () => Promise<void>): void {
-  if (_bgGitRunning >= BG_GIT_CONCURRENCY) return; // drop if saturated
-  _bgGitRunning++;
-  fn().finally(() => { _bgGitRunning--; });
-}
+import { buildWorkspaceSummaryMap, buildBlockedMap, buildTagMap } from "../services/board-aggregation.service.js";
 
 const GITIGNORE_TEMPLATES: Record<string, string> = {
   node: `node_modules/
@@ -787,322 +778,25 @@ ${contextParts.join("\n")}`;
       .where(eq(issues.projectId, projectId))
       .orderBy(issues.sortOrder);
 
-    // Fetch workspace summaries grouped by issueId
+    // Fetch workspace summaries, blocked status, and tags via aggregation service
     const issueIds = projectIssues.map((i) => i.id);
-    const workspaceSummaryMap = new Map<string, { total: number; active: number; idle: number; closed: number; branches: string[]; main?: { id: string; branch: string; status: "active" | "reviewing" | "idle" | "closed"; claudeProfile: string | null; agentCommand: string | null; readyForMerge?: boolean; diffStats?: { filesChanged: number; insertions: number; deletions: number } | null; conflicts?: { hasConflicts: boolean; conflictingFiles: string[] } | null; lastSessionAt?: string | null; contextTokens?: number | null; lastTool?: string | null; lastAssistantMessage?: string | null } }>();
+    const defaultBranch = projectRows[0].defaultBranch;
 
-    if (issueIds.length > 0) {
-      const wsRows = await database
-        .select({
-          issueId: workspaces.issueId,
-          status: workspaces.status,
-          branch: workspaces.branch,
-          count: sql<number>`count(*)`.as("count"),
-        })
-        .from(workspaces)
-        .where(inArray(workspaces.issueId, issueIds))
-        .groupBy(workspaces.issueId, workspaces.status, workspaces.branch);
+    const [workspaceSummaryMap, blockedMap, issueTagMap] = await Promise.all([
+      buildWorkspaceSummaryMap(issueIds, defaultBranch, database),
+      buildBlockedMap(issueIds, database),
+      buildTagMap(issueIds, database),
+    ]);
 
-      for (const row of wsRows) {
-        let summary = workspaceSummaryMap.get(row.issueId);
-        if (!summary) {
-          summary = { total: 0, active: 0, idle: 0, closed: 0, branches: [] };
-          workspaceSummaryMap.set(row.issueId, summary);
-        }
-        summary.total += row.count;
-        if (row.status === "active" || row.status === "reviewing" || row.status === "fixing") {
-          summary.active += row.count;
-        } else if (row.status === "closed") {
-          summary.closed += row.count;
-        } else {
-          summary.idle += row.count;
-        }
-        if (!summary.branches.includes(row.branch)) {
-          summary.branches.push(row.branch);
-        }
-      }
-
-      // Determine main workspace per issue (active > idle > closed, tie-break by updatedAt)
-      const wsDetailRows = await database
-        .select({
-          id: workspaces.id,
-          issueId: workspaces.issueId,
-          branch: workspaces.branch,
-          status: workspaces.status,
-          updatedAt: workspaces.updatedAt,
-          claudeProfile: workspaces.claudeProfile,
-          agentCommand: workspaces.agentCommand,
-          workingDir: workspaces.workingDir,
-          baseBranch: workspaces.baseBranch,
-          isDirect: workspaces.isDirect,
-          conflictCacheCheckedAt: workspaces.conflictCacheCheckedAt,
-          conflictCacheHasConflicts: workspaces.conflictCacheHasConflicts,
-          conflictCacheFiles: workspaces.conflictCacheFiles,
-          readyForMerge: workspaces.readyForMerge,
-          diffStatCacheCheckedAt: workspaces.diffStatCacheCheckedAt,
-          diffStatCacheFilesChanged: workspaces.diffStatCacheFilesChanged,
-          diffStatCacheInsertions: workspaces.diffStatCacheInsertions,
-          diffStatCacheDeletions: workspaces.diffStatCacheDeletions,
-        })
-        .from(workspaces)
-        .where(inArray(workspaces.issueId, issueIds));
-
-      const CONFLICT_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
-      const DIFF_STAT_CACHE_TTL_MS = 30 * 1000; // 30 seconds
-      const mainWorkspaceMap = new Map<string, { id: string; branch: string; status: string; updatedAt: string; claudeProfile: string | null; agentCommand: string | null; workingDir: string | null; baseBranch: string | null; isDirect: boolean; conflictCacheCheckedAt: string | null; conflictCacheHasConflicts: boolean | null; conflictCacheFiles: string | null; readyForMerge: boolean; diffStatCacheCheckedAt: string | null; diffStatCacheFilesChanged: number | null; diffStatCacheInsertions: number | null; diffStatCacheDeletions: number | null }>();
-      const statusPriority = (s: string) => s === "active" || s === "reviewing" || s === "fixing" ? 0 : s === "idle" ? 1 : 2;
-      for (const row of wsDetailRows) {
-        const existing = mainWorkspaceMap.get(row.issueId);
-        if (!existing) {
-          mainWorkspaceMap.set(row.issueId, row);
-          continue;
-        }
-        const existingP = statusPriority(existing.status);
-        const rowP = statusPriority(row.status);
-        if (rowP < existingP || (rowP === existingP && row.updatedAt > existing.updatedAt)) {
-          mainWorkspaceMap.set(row.issueId, row);
-        }
-      }
-
-      // Compute diff stats for each main workspace (stale-while-revalidate)
-      const defaultBranch = projectRows[0].defaultBranch;
-
-      for (const [issueId, summary] of workspaceSummaryMap) {
-        const mainWs = mainWorkspaceMap.get(issueId);
-        if (mainWs) {
-          summary.main = { id: mainWs.id, branch: mainWs.branch, status: mainWs.status as "active" | "reviewing" | "fixing" | "idle" | "closed", claudeProfile: mainWs.claudeProfile, agentCommand: mainWs.agentCommand, readyForMerge: mainWs.readyForMerge };
-
-          if (mainWs.workingDir && mainWs.status !== "closed") {
-            const diffRef = mainWs.isDirect ? "HEAD" : (mainWs.baseBranch || defaultBranch);
-            const mainRef = summary.main;
-
-            // Serve cached diff stats immediately (stale-while-revalidate)
-            if (mainWs.diffStatCacheCheckedAt && mainWs.diffStatCacheFilesChanged !== null) {
-              if (mainWs.diffStatCacheFilesChanged > 0 || (mainWs.diffStatCacheInsertions ?? 0) > 0 || (mainWs.diffStatCacheDeletions ?? 0) > 0) {
-                mainRef.diffStats = {
-                  filesChanged: mainWs.diffStatCacheFilesChanged,
-                  insertions: mainWs.diffStatCacheInsertions ?? 0,
-                  deletions: mainWs.diffStatCacheDeletions ?? 0,
-                };
-              }
-            }
-
-            // Recompute in background if cache is stale or missing
-            const cacheAge = mainWs.diffStatCacheCheckedAt
-              ? Date.now() - new Date(mainWs.diffStatCacheCheckedAt).getTime()
-              : Infinity;
-            if (cacheAge >= DIFF_STAT_CACHE_TTL_MS) {
-              const wsId = mainWs.id;
-              const workingDir = mainWs.workingDir;
-              runBgGit(() =>
-                getDiffShortstat(workingDir, diffRef)
-                  .then(stats => {
-                    database
-                      .update(workspaces)
-                      .set({
-                        diffStatCacheCheckedAt: new Date().toISOString(),
-                        diffStatCacheFilesChanged: stats.filesChanged,
-                        diffStatCacheInsertions: stats.insertions,
-                        diffStatCacheDeletions: stats.deletions,
-                      })
-                      .where(eq(workspaces.id, wsId))
-                      .catch(() => {});
-                  })
-                  .catch(() => {})
-              );
-            }
-            // Conflict detection for non-direct idle workspaces — stale-while-revalidate
-            if (!mainWs.isDirect && mainWs.status === "idle") {
-              const cacheAge = mainWs.conflictCacheCheckedAt
-                ? Date.now() - new Date(mainWs.conflictCacheCheckedAt).getTime()
-                : Infinity;
-              if (mainWs.conflictCacheCheckedAt && cacheAge < CONFLICT_CACHE_TTL_MS) {
-                // Cache is fresh — use it immediately
-                if (mainWs.conflictCacheHasConflicts !== null) {
-                  mainRef.conflicts = {
-                    hasConflicts: mainWs.conflictCacheHasConflicts ?? false,
-                    conflictingFiles: mainWs.conflictCacheFiles ? JSON.parse(mainWs.conflictCacheFiles) : [],
-                  };
-                }
-              } else {
-                // Cache is stale — recompute and persist in background, serve stale value now
-                if (mainWs.conflictCacheCheckedAt && mainWs.conflictCacheHasConflicts !== null) {
-                  mainRef.conflicts = {
-                    hasConflicts: mainWs.conflictCacheHasConflicts ?? false,
-                    conflictingFiles: mainWs.conflictCacheFiles ? JSON.parse(mainWs.conflictCacheFiles) : [],
-                  };
-                }
-                const wsId = mainWs.id;
-                const baseBranch = mainWs.baseBranch || defaultBranch;
-                const workingDir = mainWs.workingDir;
-                // Fire-and-forget background refresh (rate-limited)
-                runBgGit(() =>
-                  detectConflicts(workingDir, baseBranch)
-                    .then(result => {
-                      database
-                        .update(workspaces)
-                        .set({
-                          conflictCacheCheckedAt: new Date().toISOString(),
-                          conflictCacheHasConflicts: result.hasConflicts,
-                          conflictCacheFiles: JSON.stringify(result.conflictingFiles),
-                        })
-                        .where(eq(workspaces.id, wsId))
-                        .catch(() => {});
-                    })
-                    .catch(() => {})
-                );
-              }
-            }
-          }
-        }
-      }
-
-      // Fetch latest session per main workspace for timing info
-      const mainWsIds = [...mainWorkspaceMap.values()].map(w => w.id);
-      if (mainWsIds.length > 0) {
-        const sessionRows = await database
-          .select({
-            id: sessions.id,
-            workspaceId: sessions.workspaceId,
-            status: sessions.status,
-            startedAt: sessions.startedAt,
-            endedAt: sessions.endedAt,
-            stats: sessions.stats,
-          })
-          .from(sessions)
-          .where(inArray(sessions.workspaceId, mainWsIds))
-          .orderBy(sessions.startedAt);
-
-        // Group by workspace, pick latest per workspace
-        const latestByWs = new Map<string, { id: string; status: string; startedAt: string; endedAt: string | null; stats: string | null; triggerType: string | null }>();
-        for (const s of sessionRows) {
-          latestByWs.set(s.workspaceId, { id: s.id, status: s.status, startedAt: s.startedAt, endedAt: s.endedAt, stats: s.stats, triggerType: s.triggerType ?? null });
-        }
-
-        // Collect session IDs for message lookup
-        const latestSessionIds = [...latestByWs.values()].map(s => s.id);
-
-        // Fetch recent messages to extract last tool call and last assistant text
-        const lastToolBySession = new Map<string, string>();
-        const lastAssistantMsgBySession = new Map<string, string>();
-        if (latestSessionIds.length > 0) {
-          const msgRows = await database
-            .select({ sessionId: sessionMessages.sessionId, data: sessionMessages.data })
-            .from(sessionMessages)
-            .where(inArray(sessionMessages.sessionId, latestSessionIds))
-            .orderBy(desc(sessionMessages.id));
-
-          for (const msg of msgRows) {
-            const hasTool = lastToolBySession.has(msg.sessionId);
-            const hasMsg = lastAssistantMsgBySession.has(msg.sessionId);
-            if (hasTool && hasMsg) continue;
-            if (!msg.data) continue;
-            try {
-              const obj = JSON.parse(msg.data) as Record<string, unknown>;
-              if (obj.type === "assistant") {
-                const content = (obj.message as { content?: unknown[] })?.content ?? [];
-                for (const block of content as { type: string; name?: string; text?: string; input?: unknown }[]) {
-                  if (!hasTool && block.type === "tool_use" && block.name) {
-                    lastToolBySession.set(msg.sessionId, block.name);
-                  }
-                  if (!hasMsg && block.type === "text" && block.text?.trim()) {
-                    lastAssistantMsgBySession.set(msg.sessionId, block.text.trim());
-                  }
-                }
-              }
-            } catch { /* ignore */ }
-          }
-        }
-
-        for (const [issueId, summary] of workspaceSummaryMap) {
-          if (summary.main) {
-            const sess = latestByWs.get(summary.main.id);
-            if (sess) {
-              summary.main.lastSessionAt = sess.status === "running" ? sess.startedAt : sess.endedAt;
-              summary.main.lastSessionTriggerType = sess.triggerType;
-              if (sess.stats) {
-                try {
-                  const p = JSON.parse(sess.stats) as Record<string, unknown>;
-                  const inputTokens = (p.inputTokens as number) ?? 0;
-                  const cachedTokens = (p.cacheReadTokens as number) ?? 0;
-                  summary.main.contextTokens = inputTokens + cachedTokens || null;
-                } catch { /* ignore */ }
-              }
-              summary.main.lastTool = lastToolBySession.get(sess.id) ?? null;
-              summary.main.lastAssistantMessage = lastAssistantMsgBySession.get(sess.id) ?? null;
-            }
-          }
-        }
-      }
-    }
-
-    // Attach workspace summaries to issues
-    const issuesWithSummary: Array<typeof projectIssues[number] & { workspaceSummary?: typeof workspaceSummaryMap extends Map<string, infer V> ? V : never }> = projectIssues.map((issue) => {
+    const issuesWithBlocked = projectIssues.map((issue) => {
       const wsSummary = workspaceSummaryMap.get(issue.id);
-      return wsSummary ? { ...issue, workspaceSummary: wsSummary } : issue;
+      const blocked = blockedMap.get(issue.id);
+      return {
+        ...issue,
+        ...(wsSummary ? { workspaceSummary: wsSummary } : {}),
+        ...(blocked ? { isBlocked: blocked.isBlocked, dependencyCount: blocked.dependencyCount } : {}),
+      };
     });
-
-    // Compute isBlocked for each issue
-    const issuesWithBlocked: Array<typeof issuesWithSummary[number] & { isBlocked?: boolean }> = [...issuesWithSummary];
-    if (issueIds.length > 0) {
-      const depRows = await database
-        .select({
-          issueId: issueDependencies.issueId,
-          dependsOnId: issueDependencies.dependsOnId,
-          type: issueDependencies.type,
-        })
-        .from(issueDependencies)
-        .where(inArray(issueDependencies.issueId, issueIds));
-
-      // Map each depended-on issue to its status name
-      const dependsOnIds = [...new Set(depRows.map(d => d.dependsOnId))];
-      const depStatusMap = new Map<string, string>();
-      if (dependsOnIds.length > 0) {
-        const depStatuses = await database
-          .select({ id: issues.id, statusName: projectStatuses.name })
-          .from(issues)
-          .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
-          .where(inArray(issues.id, dependsOnIds));
-        for (const ds of depStatuses) depStatusMap.set(ds.id, ds.statusName);
-      }
-
-      // Group blocking deps by issue (only depends_on and blocked_by types cause blocking)
-      const depsByIssue = new Map<string, { dependsOnId: string; type: string }[]>();
-      for (const dep of depRows) {
-        let arr = depsByIssue.get(dep.issueId);
-        if (!arr) { arr = []; depsByIssue.set(dep.issueId, arr); }
-        arr.push({ dependsOnId: dep.dependsOnId, type: dep.type });
-      }
-
-      for (let i = 0; i < issuesWithBlocked.length; i++) {
-        const issue = issuesWithBlocked[i];
-        const deps = depsByIssue.get(issue.id);
-        if (deps && deps.length > 0) {
-          const isBlocked = deps.some(dep => {
-            const isBlockingType = dep.type === "depends_on" || dep.type === "blocked_by";
-            if (!isBlockingType) return false;
-            const s = depStatusMap.get(dep.dependsOnId);
-            return s !== "Done" && s !== "AI Reviewed";
-          });
-          issuesWithBlocked[i] = { ...issue, isBlocked, dependencyCount: deps.length };
-        }
-      }
-    }
-
-    // Fetch tags for all issues in one query
-    const issueTagMap = new Map<string, { id: string; name: string; color: string | null }[]>();
-    if (issueIds.length > 0) {
-      const tagRows = await database
-        .select({ issueId: issueTags.issueId, id: tags.id, name: tags.name, color: tags.color })
-        .from(issueTags)
-        .innerJoin(tags, eq(issueTags.tagId, tags.id))
-        .where(inArray(issueTags.issueId, issueIds));
-      for (const row of tagRows) {
-        let arr = issueTagMap.get(row.issueId);
-        if (!arr) { arr = []; issueTagMap.set(row.issueId, arr); }
-        arr.push({ id: row.id, name: row.name, color: row.color });
-      }
-    }
 
     const result = statuses.map((s) => ({
       id: s.id,
