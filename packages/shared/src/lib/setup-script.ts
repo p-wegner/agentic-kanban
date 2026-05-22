@@ -16,6 +16,7 @@ export function runSetupScript(worktreePath: string, script: string): Promise<Se
       cwd: worktreePath,
       env: { ...process.env } as Record<string, string>,
       stdio: ["pipe", "pipe", "pipe"],
+      windowsHide: true,
     });
 
     let stdout = "";
