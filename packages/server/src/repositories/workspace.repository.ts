@@ -1,4 +1,4 @@
-import { workspaces, issues, projects, sessions, sessionMessages, diffComments } from "@agentic-kanban/shared/schema";
+import { workspaces, issues, projects, sessions, sessionMessages, diffComments, projectStatuses } from "@agentic-kanban/shared/schema";
 import { eq, inArray } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
@@ -50,6 +50,31 @@ export async function resolveProjectId(
   if (issueRows.length === 0) return null;
 
   return issueRows[0].projectId;
+}
+
+/**
+ * Move the issue associated with a workspace to "Done" (or "AI Reviewed" as fallback).
+ * Logs a warning on failure but never throws.
+ */
+export async function moveIssueToDone(
+  workspaceId: string,
+  issueId: string,
+  now: string,
+  database: Database = db,
+  fallbackToAiReviewed = false,
+): Promise<void> {
+  try {
+    const projectId = await resolveProjectId(workspaceId, database);
+    if (!projectId) return;
+    const statuses = await database.select().from(projectStatuses).where(eq(projectStatuses.projectId, projectId));
+    const doneStatus = statuses.find(s => s.name === "Done")
+      ?? (fallbackToAiReviewed ? statuses.find(s => s.name === "AI Reviewed") : undefined);
+    if (doneStatus) {
+      await database.update(issues).set({ statusId: doneStatus.id, updatedAt: now, statusChangedAt: now }).where(eq(issues.id, issueId));
+    }
+  } catch (err) {
+    console.warn("[workspaces] Failed to move issue to Done:", err);
+  }
 }
 
 /** Cascade delete a workspace: diff comments → session messages → sessions → workspace record. */
