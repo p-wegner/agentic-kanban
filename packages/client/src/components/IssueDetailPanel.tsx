@@ -329,9 +329,13 @@ export function IssueDetailPanel({
           setDragPos({ x: newX, y: newY });
         }
       } else if (currentDragMode === "modal") {
-        // Snap back to sidebar when dragged close to the right edge
-        const panelWidth = panel.getBoundingClientRect().width;
-        if (newX + panelWidth >= window.innerWidth - EDGE_SNAP_THRESHOLD) {
+        // Snap to sidebar when dragged close to any screen edge
+        const panelRect = panel.getBoundingClientRect();
+        const nearRightEdge = newX + panelRect.width >= window.innerWidth - EDGE_SNAP_THRESHOLD;
+        const nearLeftEdge = newX <= EDGE_SNAP_THRESHOLD;
+        const nearTopEdge = newY <= EDGE_SNAP_THRESHOLD;
+        const nearBottomEdge = newY + panelRect.height >= window.innerHeight - EDGE_SNAP_THRESHOLD;
+        if (nearRightEdge || nearLeftEdge || nearTopEdge || nearBottomEdge) {
           currentDragMode = "sidebar";
           setPanelMode("sidebar");
           setDragPos(null);
