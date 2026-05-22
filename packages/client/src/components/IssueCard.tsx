@@ -200,7 +200,7 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
                 "bg-gray-400"
               }`} />
               <span className="font-mono text-gray-600 truncate">{ws.main.branch}</span>
-              {ws.main.status === "idle" && (liveActivity || liveStats) && (() => {
+              {ws.main.status === "idle" && liveActivity && (() => {
                 const badge = getLastSessionBadge(ws.main.lastSessionTriggerType);
                 return badge ? <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded shrink-0 ${badge.className}`}>{badge.label}</span> : null;
               })()}
@@ -214,7 +214,7 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
             )
           )}
           <span className="inline-flex items-center gap-1 text-[10px] font-mono shrink-0 ml-auto">
-            {ws.main.diffStats && (liveActivity || liveStats) && (
+            {ws.main.diffStats && liveActivity && (
               <>
                 <span className="text-green-600">+{ws.main.diffStats.insertions}</span>
                 <span className="text-red-500">-{ws.main.diffStats.deletions}</span>
@@ -230,10 +230,10 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
               {ws.main.conflicts.conflictingFiles.length} file{ws.main.conflicts.conflictingFiles.length !== 1 ? "s" : ""}
             </span>
           )}
-          {ws.main.claudeProfile && (ws.main.status === "active" || ws.main.status === "fixing") && (liveActivity || liveStats) && (
+          {ws.main.claudeProfile && (ws.main.status === "active" || ws.main.status === "fixing") && liveActivity && (
             <span className="inline-flex items-center px-1 rounded bg-indigo-50 text-indigo-600 font-medium shrink-0">{ws.main.claudeProfile}</span>
           )}
-          {!ws.main.claudeProfile && ws.main.agentCommand && ws.main.agentCommand !== "claude" && (ws.main.status === "active" || ws.main.status === "fixing") && (liveActivity || liveStats) && (
+          {!ws.main.claudeProfile && ws.main.agentCommand && ws.main.agentCommand !== "claude" && (ws.main.status === "active" || ws.main.status === "fixing") && liveActivity && (
             <span className="inline-flex items-center px-1 rounded bg-gray-100 text-gray-500 font-mono text-[10px] shrink-0">{ws.main.agentCommand}</span>
           )}
           {ws.total > 1 && (
