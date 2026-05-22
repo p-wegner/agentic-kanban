@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import ReactMarkdown from "react-markdown";
 import type { CreateIssueRequest } from "@agentic-kanban/shared";
 import type { CreateIssueFormState } from "./CreateIssueForm.js";
 import { apiFetch } from "../lib/api.js";
@@ -39,6 +40,10 @@ export function CreateIssuePanel({
   const [isDirect, setIsDirect] = useState(false);
   const [skillId, setSkillId] = useState<string>(initialState?.skillId ?? "");
   const [skills, setSkills] = useState<Skill[]>([]);
+<<<<<<< HEAD
+=======
+  const [descriptionMode, setDescriptionMode] = useState<"edit" | "preview">("edit");
+>>>>>>> d93731e (feat: markdown rendering for ticket descriptions with edit/preview toggle)
   const [submitting, setSubmitting] = useState(false);
   const [enhancing, setEnhancing] = useState(false);
   const [preEnhanceSnapshot, setPreEnhanceSnapshot] = useState<{ title: string; description: string } | null>(null);
@@ -148,13 +153,41 @@ export function CreateIssuePanel({
           </div>
 
           <div className="flex flex-col gap-1.5 flex-1">
-            <label className="text-xs font-medium text-gray-600">Description</label>
-            <textarea
-              placeholder="Describe the issue, agent instructions, acceptance criteria…"
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              className="w-full flex-1 min-h-[200px] text-sm border border-gray-300 rounded px-3 py-2 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none"
-            />
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-medium text-gray-600">Description</label>
+              <div className="flex border border-gray-300 rounded overflow-hidden">
+                <button
+                  type="button"
+                  onClick={() => setDescriptionMode("edit")}
+                  className={`text-xs px-2 py-0.5 ${descriptionMode === "edit" ? "bg-blue-500 text-white" : "bg-white text-gray-600 hover:bg-gray-50"}`}
+                >
+                  Edit
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDescriptionMode("preview")}
+                  className={`text-xs px-2 py-0.5 border-l border-gray-300 ${descriptionMode === "preview" ? "bg-blue-500 text-white" : "bg-white text-gray-600 hover:bg-gray-50"}`}
+                >
+                  Preview
+                </button>
+              </div>
+            </div>
+            {descriptionMode === "preview" ? (
+              description ? (
+                <div className="markdown-body flex-1 min-h-[200px] border border-gray-200 rounded px-3 py-2">
+                  <ReactMarkdown>{description}</ReactMarkdown>
+                </div>
+              ) : (
+                <p className="text-sm text-gray-400 italic flex-1 min-h-[200px] border border-gray-200 rounded px-3 py-2">Nothing to preview.</p>
+              )
+            ) : (
+              <textarea
+                placeholder="Describe the issue, agent instructions, acceptance criteria…"
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                className="w-full flex-1 min-h-[200px] text-sm border border-gray-300 rounded px-3 py-2 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none"
+              />
+            )}
           </div>
 
           <div className="flex flex-col gap-1.5">
