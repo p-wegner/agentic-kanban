@@ -18,6 +18,7 @@ interface ParsedLine {
   is_error?: boolean;
   summary?: string;
   status?: string;
+  rate_limit_info?: { status?: string; rateLimitType?: string; resetsAt?: number; overageStatus?: string };
 }
 
 function parseJsonLine(line: string): ParsedLine | null {
@@ -72,6 +73,14 @@ export function extractMeaningfulOutput(
         if (obj.type === "system" && obj.subtype === "task_notification") {
           const summary = obj.summary || obj.status || "";
           if (summary) lines.push(`[task] ${summary}`);
+        }
+
+        if (obj.type === "rate_limit_event" && obj.rate_limit_info) {
+          const rli = obj.rate_limit_info;
+          const parts = [`[rate_limit] ${rli.rateLimitType ?? "unknown"}: ${rli.status ?? "unknown"}`];
+          if (rli.overageStatus === "rejected") parts.push("overage rejected");
+          if (rli.resetsAt) parts.push(`resets ${new Date(rli.resetsAt * 1000).toISOString()}`);
+          lines.push(parts.join(" | "));
         }
       } else {
         if (trimmedLine.length > 2) {
