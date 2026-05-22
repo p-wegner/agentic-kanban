@@ -171,6 +171,7 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
           className={`flex items-center gap-1.5 mt-1.5 text-xs cursor-pointer rounded px-1 py-0.5 -mx-1 transition-colors ${
             ws.main.status === "reviewing" ? "bg-purple-50 hover:bg-purple-100" :
             ws.main.status === "fixing" ? "bg-orange-50 hover:bg-orange-100" :
+            ws.main.conflicts?.hasConflicts ? "bg-red-50 hover:bg-red-100" :
             "hover:bg-gray-50"
           }`}
           title={`Workspace: ${ws.main.branch} (${ws.main.status})`}
@@ -185,6 +186,11 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
             <>
               <span className="inline-block w-2 h-2 rounded-full shrink-0 bg-orange-500 animate-pulse" />
               <span className="font-medium text-orange-700">Fixing Conflicts</span>
+            </>
+          ) : ws.main.conflicts?.hasConflicts ? (
+            <>
+              <span className="inline-block w-2 h-2 rounded-full shrink-0 bg-red-500" />
+              <span className="font-medium text-red-700">Merge Conflicts</span>
             </>
           ) : (
             <>
@@ -215,9 +221,9 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
               <span className="text-gray-400">{ws.main.diffStats ? "· " : ""}{relativeTime(ws.main.lastSessionAt)}</span>
             )}
           </span>
-          {ws.main.conflicts?.hasConflicts && (
+          {ws.main.conflicts?.hasConflicts && ws.main.status !== "fixing" && (
             <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-red-100 text-red-700 text-[10px] font-medium shrink-0">
-              {ws.main.conflicts.conflictingFiles.length} conflict{ws.main.conflicts.conflictingFiles.length !== 1 ? "s" : ""}
+              {ws.main.conflicts.conflictingFiles.length} file{ws.main.conflicts.conflictingFiles.length !== 1 ? "s" : ""}
             </span>
           )}
           {ws.main.claudeProfile && (
