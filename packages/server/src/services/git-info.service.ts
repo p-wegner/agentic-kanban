@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { execFile, execSync } from "node:child_process";
 import { resolve, basename } from "node:path";
 
 export interface RepoInfo {
@@ -64,4 +64,24 @@ export async function detectRepoInfo(repoPath: string): Promise<RepoInfo> {
     defaultBranch,
     remoteUrl,
   };
+}
+
+export interface ProjectGitStats {
+  commitCount: number;
+  recentCommits: { hash: string; message: string; date: string }[];
+}
+
+export function getProjectGitStats(repoPath: string, defaultBranch: string): ProjectGitStats {
+  let commitCount = 0;
+  let recentCommits: { hash: string; message: string; date: string }[] = [];
+  try {
+    const countOut = execSync(`git rev-list --count ${defaultBranch}`, { cwd: repoPath, timeout: 5000 }).toString().trim();
+    commitCount = parseInt(countOut, 10) || 0;
+    const logOut = execSync(`git log ${defaultBranch} --oneline --format="%H|%s|%cr" -10`, { cwd: repoPath, timeout: 5000 }).toString().trim();
+    recentCommits = logOut.split("\n").filter(Boolean).map((line) => {
+      const [hash, message, date] = line.split("|");
+      return { hash: hash?.slice(0, 7) ?? "", message: message ?? "", date: date ?? "" };
+    });
+  } catch { /* git unavailable or no commits */ }
+  return { commitCount, recentCommits };
 }
