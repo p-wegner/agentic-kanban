@@ -78,6 +78,7 @@ const TRIGGER_TYPE_LABELS: Record<string, { label: string; className: string }> 
   agent: { label: "Agent", className: "bg-blue-50 text-blue-600" },
   chat: { label: "Chat", className: "bg-indigo-50 text-indigo-600" },
   review: { label: "AI Review", className: "bg-violet-100 text-violet-700" },
+  merge: { label: "AI Merge", className: "bg-emerald-100 text-emerald-700" },
   "fix-conflicts": { label: "Fix Conflicts", className: "bg-orange-100 text-orange-700" },
   learning: { label: "Learning", className: "bg-teal-100 text-teal-700" },
   "auto-start": { label: "Auto-start", className: "bg-gray-100 text-gray-600" },
@@ -88,7 +89,7 @@ function getTriggerTypeLabel(triggerType: string | null): { label: string; class
   if (TRIGGER_TYPE_LABELS[triggerType]) return TRIGGER_TYPE_LABELS[triggerType];
   if (triggerType.startsWith("skill:")) {
     const name = triggerType.slice(6);
-    return { label: `Skill: ${name}`, className: "bg-purple-100 text-purple-700" };
+    return { label: name, className: "bg-purple-100 text-purple-700" };
   }
   return null;
 }
