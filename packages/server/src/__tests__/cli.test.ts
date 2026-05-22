@@ -56,6 +56,7 @@ const MIGRATION_FILES = [
   "../../../shared/drizzle/0032_diff_stat_cache.sql",
   "../../../shared/drizzle/0033_backlog_status.sql",
   "../../../shared/drizzle/0034_session_pid.sql",
+  "../../../shared/drizzle/0035_session_trigger.sql",
 ];
 
 const DEFAULT_STATUSES = [
@@ -600,3 +601,4 @@ describe("CLI issue dependency", () => {
     expect(result.stdout).toContain("Removed dependency");
   });
 });
+

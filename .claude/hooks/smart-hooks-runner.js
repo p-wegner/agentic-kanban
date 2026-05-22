@@ -87,7 +87,7 @@ function runCheck(check, inputData, editedFiles) {
   };
   try {
     execSync(check.command, {
-      cwd: getProjectDir(),
+      cwd: check.cwd || getProjectDir(),
       timeout,
       encoding: "utf8",
       input: inputData ? JSON.stringify(inputData) : "",

@@ -248,6 +248,7 @@ function createSessionManager(
     planMode?: boolean,
     resumeWithNewModel?: boolean,
     provider?: import("./agent-provider.js").ProviderId,
+    triggerType?: string,
   ) {
     // Look up workspace to get workingDir
     const wsRows = await db
@@ -312,6 +313,7 @@ function createSessionManager(
       startedAt: now,
       endedAt: null,
       resumeFromId: resumeFromId ?? null,
+      triggerType: triggerType ?? null,
     });
 
     try {

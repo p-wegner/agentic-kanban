@@ -46,6 +46,7 @@ const MIGRATION_FILES = [
   "../../../shared/drizzle/0032_diff_stat_cache.sql",
   "../../../shared/drizzle/0033_backlog_status.sql",
   "../../../shared/drizzle/0034_session_pid.sql",
+  "../../../shared/drizzle/0035_session_trigger.sql",
 ];
 
 function createTestApp() {

@@ -15,6 +15,7 @@ export const sessions = sqliteTable("sessions", {
   resumeFromId: text("resume_from_id"),
   stats: text("stats"),
   pid: integer("pid"),
+  triggerType: text("trigger_type"),
 });
 
 export const sessionsRelations = relations(sessions, ({ one, many }) => ({
