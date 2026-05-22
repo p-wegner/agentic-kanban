@@ -247,7 +247,7 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
           <span className="truncate">{liveActivity}</span>
         </div>
       )}
-      {(ws?.main?.status === "active" || ws?.main?.status === "fixing") && liveStats && (
+      {(ws?.main?.status === "active" || ws?.main?.status === "fixing") && liveActivity && liveStats && (
         <div className="flex items-center gap-2 mt-0.5 text-[10px] text-gray-400 px-1">
           {liveStats.model && <span className="font-mono">{liveStats.model}</span>}
           {liveStats.contextTokens > 0 && (
