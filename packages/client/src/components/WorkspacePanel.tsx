@@ -752,11 +752,11 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
     <>
       <div className="fixed inset-0 bg-black/30 z-40" onClick={onClose} />
       <div className="fixed right-0 top-0 h-full w-[min(560px,100vw)] bg-white shadow-xl z-50 flex flex-col border-l border-gray-200 animate-slide-in-right">
-        <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200">
-          <h2 className="text-sm font-semibold text-gray-900">
-            Workspaces -- {issue.title}
+        <div className="flex items-center gap-2 px-4 py-3 border-b border-gray-200 min-w-0">
+          <h2 className="flex-1 min-w-0 text-sm font-semibold text-gray-900 truncate" title={issue.title}>
+            {issue.title}
           </h2>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 shrink-0">
             <button
               onClick={handleMonitorRunNow}
               disabled={monitorRunning}
@@ -979,7 +979,9 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                 {isSelected && (
                   <div className="space-y-2 pt-2 border-t border-gray-200" onClick={(e) => e.stopPropagation()}>
                     {completedSessions.length > 0 && (
-                      <div className="space-y-0.5">
+                      <div className="space-y-1">
+                        <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide">Sessions</div>
+                        <div className="space-y-0.5 max-h-48 overflow-y-auto">
                         {completedSessions.map((session) => {
                           const sessionBadge = SESSION_STATUS_COLORS[session.status] ?? "bg-gray-100 text-gray-500";
                           const isActive = selectedHistoryId === session.id;
@@ -1038,38 +1040,42 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                             </div>
                           );
                         })}
+                        </div>
                       </div>
                     )}
 
                     {ws.status !== "closed" && !isRunning && ws.workingDir && (
-                      <div className="flex flex-wrap gap-1.5 pt-1">
-                        <button
-                          onClick={(e) => { e.stopPropagation(); handleReview(ws.id); }}
-                          disabled={actionLoading}
-                          className="text-[10px] font-medium px-2 py-0.5 rounded bg-violet-100 text-violet-700 hover:bg-violet-200 disabled:opacity-50"
-                          title="Trigger AI code review"
-                        >
-                          AI Review
-                        </button>
-                        <button
-                          onClick={(e) => { e.stopPropagation(); handleMerge(ws.id); }}
-                          disabled={actionLoading}
-                          className="text-[10px] font-medium px-2 py-0.5 rounded bg-emerald-100 text-emerald-700 hover:bg-emerald-200 disabled:opacity-50"
-                          title="Merge this workspace"
-                        >
-                          {ws.isDirect ? "Close" : "AI Merge"}
-                        </button>
-                        {availableSkills.map((skill) => (
+                      <div className="space-y-1 pt-1">
+                        <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide">Quick Actions</div>
+                        <div className="flex flex-wrap gap-1.5">
                           <button
-                            key={skill.id}
-                            onClick={(e) => { e.stopPropagation(); handleSkillQuickLaunch(skill.id); }}
+                            onClick={(e) => { e.stopPropagation(); handleReview(ws.id); }}
                             disabled={actionLoading}
-                            className="text-[10px] font-medium px-2 py-0.5 rounded bg-purple-100 text-purple-700 hover:bg-purple-200 disabled:opacity-50"
-                            title={skill.description}
+                            className="text-[10px] font-medium px-2 py-0.5 rounded bg-violet-100 text-violet-700 hover:bg-violet-200 disabled:opacity-50"
+                            title="Trigger AI code review"
                           >
-                            ✨ {humanizeSkillName(skill.name)}
+                            AI Review
                           </button>
-                        ))}
+                          <button
+                            onClick={(e) => { e.stopPropagation(); handleMerge(ws.id); }}
+                            disabled={actionLoading}
+                            className="text-[10px] font-medium px-2 py-0.5 rounded bg-emerald-100 text-emerald-700 hover:bg-emerald-200 disabled:opacity-50"
+                            title="Merge this workspace"
+                          >
+                            {ws.isDirect ? "Close" : "AI Merge"}
+                          </button>
+                          {availableSkills.map((skill) => (
+                            <button
+                              key={skill.id}
+                              onClick={(e) => { e.stopPropagation(); handleSkillQuickLaunch(skill.id); }}
+                              disabled={actionLoading}
+                              className="text-[10px] font-medium px-2 py-0.5 rounded bg-purple-100 text-purple-700 hover:bg-purple-200 disabled:opacity-50"
+                              title={skill.description}
+                            >
+                              ✨ {humanizeSkillName(skill.name)}
+                            </button>
+                          ))}
+                        </div>
                       </div>
                     )}
 
