@@ -74,6 +74,7 @@ export interface ParsedStreamEvent {
   /** Set on tool_result events for tracked tool_use IDs. */
   toolResult?: {
     toolUseId: string;
+    images?: Array<{ mediaType: string; data: string }>;
   };
   /** Set on TodoWrite or equivalent task-tracking events. */
   todos?: Array<{ subject: string; status: string }>;
@@ -263,7 +264,15 @@ export class ClaudeProvider implements AgentProvider {
       if (Array.isArray(content)) {
         for (const block of content) {
           if (block.type === "tool_result" && block.tool_use_id) {
-            result.toolResult = { toolUseId: block.tool_use_id };
+            const images: Array<{ mediaType: string; data: string }> = [];
+            if (Array.isArray(block.content)) {
+              for (const inner of block.content) {
+                if (inner.type === "image" && inner.source?.type === "base64" && inner.source.data) {
+                  images.push({ mediaType: inner.source.media_type ?? "image/png", data: inner.source.data });
+                }
+              }
+            }
+            result.toolResult = { toolUseId: block.tool_use_id, ...(images.length > 0 ? { images } : {}) };
             break;
           }
         }
