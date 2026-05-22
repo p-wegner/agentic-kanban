@@ -8,6 +8,7 @@ import type { Database } from "../db/index.js";
 import type { BoardEvents } from "../services/board-events.js";
 import { parseSessionSummary, formatDurationStr } from "../services/session-summary.js";
 import { invokeClaudePrompt } from "../services/claude-cli.service.js";
+import { analyzeDependencies } from "../services/issue-ai.service.js";
 
 export function createIssuesRoute(database: Database = db, options?: { boardEvents?: BoardEvents }) {
   const router = new Hono();
@@ -109,130 +110,24 @@ Current description: ${body.description?.trim() || "(none)"}`;
       return c.json({ error: "issueId and projectId are required" }, 400);
     }
 
-    // Look up the issue
-    const issueRows = await database
-      .select({ id: issues.id, issueNumber: issues.issueNumber, title: issues.title, description: issues.description })
-      .from(issues)
-      .where(eq(issues.id, body.issueId))
-      .limit(1);
-    if (issueRows.length === 0) {
-      return c.json({ error: "Issue not found" }, 404);
-    }
-    const targetIssue = issueRows[0];
-
-    // Get all open issues in the project (exclude Done/Cancelled)
-    const doneCancelledStatuses = await database
-      .select({ id: projectStatuses.id })
-      .from(projectStatuses)
-      .where(and(
-        eq(projectStatuses.projectId, body.projectId),
-        inArray(projectStatuses.name, ["Done", "Cancelled"]),
-      ));
-    const excludeStatusIds = doneCancelledStatuses.map(s => s.id);
-
-    let openIssues: { id: string; issueNumber: number | null; title: string; description: string | null }[];
-    if (excludeStatusIds.length > 0) {
-      openIssues = await database
-        .select({ id: issues.id, issueNumber: issues.issueNumber, title: issues.title, description: issues.description })
-        .from(issues)
-        .where(and(
-          eq(issues.projectId, body.projectId),
-          sql`${issues.statusId} NOT IN (${sql.join(excludeStatusIds.map(id => sql`${id}`), sql`, `)})`,
-        ));
-    } else {
-      openIssues = await database
-        .select({ id: issues.id, issueNumber: issues.issueNumber, title: issues.title, description: issues.description })
-        .from(issues)
-        .where(eq(issues.projectId, body.projectId));
-    }
-
-    // Look up the dependency-analyzer skill (prefer project-scoped, fall back to global)
-    const skillRows = await database
-      .select({ prompt: agentSkills.prompt })
-      .from(agentSkills)
-      .where(and(
-        eq(agentSkills.name, "dependency-analyzer"),
-        sql`(${agentSkills.projectId} = ${body.projectId} OR ${agentSkills.projectId} IS NULL)`,
-      ))
-      .orderBy(sql`${agentSkills.projectId} IS NULL`)
-      .limit(1);
-
-    const skillPrompt = skillRows[0]?.prompt || `Analyze the given issue and its relationship to other open issues on the board.`;
-
-    const issuesSummary = openIssues
-      .filter(i => i.id !== body.issueId)
-      .map(i => `  [${i.id}] #${i.issueNumber ?? "?"} ${i.title}${i.description ? `\n    ${i.description.split("\n")[0].slice(0, 100)}` : ""}`)
-      .join("\n");
-
-    const prompt = `${skillPrompt}
-
-Target issue: [${targetIssue.id}] #${targetIssue.issueNumber ?? "?"} "${targetIssue.title}"
-${targetIssue.description ? `Description: ${targetIssue.description}` : ""}
-
-Other open issues on the board (each prefixed with its [id]):
-${issuesSummary || "(no other open issues)"}
-
-IMPORTANT: You must respond ONLY with valid JSON, no markdown, no explanation:
-{"dependencies": [{"issueId": "<id from brackets>", "type": "depends_on|blocked_by|related_to|parent_of|child_of", "reason": "..."}]}
-
-Use the exact id value from the [brackets] prefix for the issueId field.
-Use "depends_on" when the target issue requires another issue to be done first.
-Use "blocked_by" when another issue blocks this one.
-Use "related_to" when issues share code or functionality.
-Use "parent_of" when the target is an epic containing another issue.
-Use "child_of" when the target is a subtask of another issue.
-Only include genuinely useful dependencies, not just topical similarity.`;
-
-    let stdout: string;
     try {
-      stdout = await invokeClaudePrompt(prompt, { database });
+      const result = await analyzeDependencies(body.issueId, body.projectId, database);
+      if (result.total > 0) {
+        options?.boardEvents?.broadcast(body.projectId, "dependency_added");
+      }
+      return c.json(result);
     } catch (err: any) {
+      if (err.statusCode === 404) return c.json({ error: err.message }, 404);
+      if (err.message?.includes("JSON")) {
+        console.error("[analyze-deps] failed to parse claude output:", err.message);
+        return c.json({ error: "Failed to parse AI response" }, 500);
+      }
       const parts: string[] = [];
       if (err.message) parts.push(err.message);
       if (err.stderr) parts.push(String(err.stderr).trim());
       const msg = parts.length > 0 ? parts.join(" | ") : "claude CLI failed";
-      console.error("[analyze-deps] claude error:", msg);
+      console.error("[analyze-deps] error:", msg);
       return c.json({ error: "AI dependency analysis failed", detail: msg }, 500);
-    }
-
-    const output = stdout.trim();
-    const cleaned = output.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
-    try {
-      const parsed = JSON.parse(cleaned) as { dependencies?: Array<{ issueId: string; type: string; reason: string }> };
-      const deps = parsed.dependencies ?? [];
-
-      // Create the dependencies in the DB
-      const created: Array<{ id: string; type: string; issueId: string; reason: string }> = [];
-      for (const dep of deps) {
-        if (!dep.issueId || !dep.type) continue;
-        const validTypes: DependencyType[] = ["depends_on", "blocked_by", "related_to", "parent_of", "child_of"];
-        if (!validTypes.includes(dep.type as DependencyType)) continue;
-        if (dep.issueId === body.issueId) continue;
-
-        try {
-          const id = randomUUID();
-          await database.insert(issueDependencies).values({
-            id,
-            issueId: body.issueId,
-            dependsOnId: dep.issueId,
-            type: dep.type as DependencyType,
-            createdAt: new Date().toISOString(),
-          });
-          created.push({ id, type: dep.type, issueId: dep.issueId, reason: dep.reason ?? "" });
-        } catch (err: any) {
-          if (err.message?.includes("UNIQUE constraint")) continue; // skip duplicates
-          console.error("[analyze-deps] failed to create dependency:", err.message);
-        }
-      }
-
-      if (created.length > 0) {
-        options?.boardEvents?.broadcast(body.projectId, "dependency_added");
-      }
-
-      return c.json({ dependencies: created, total: created.length });
-    } catch {
-      console.error("[analyze-deps] failed to parse claude output:", output);
-      return c.json({ error: "Failed to parse AI response", raw: output }, 500);
     }
   });
 
