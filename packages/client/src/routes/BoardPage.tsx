@@ -167,7 +167,7 @@ function MonitorPopover({ status, onClose, onOpenWorkspace, columns, onRunNow, a
   const [now, setNow] = useState(Date.now());
   const [running, setRunning] = useState(false);
   const popoverRef = useRef<HTMLDivElement>(null);
-  const [popoverPos, setPopoverPos] = useState<{ top: number; right: number } | null>(null);
+  const [popoverPos, setPopoverPos] = useState<{ top: number; left?: number; right?: number } | null>(null);
 
   async function handleRunNow() {
     setRunning(true);
@@ -181,12 +181,22 @@ function MonitorPopover({ status, onClose, onOpenWorkspace, columns, onRunNow, a
   }, []);
 
   useEffect(() => {
-    if (!anchorRef.current) return;
-    const rect = anchorRef.current.getBoundingClientRect();
-    const popoverWidth = 320;
-    const right = Math.max(8, window.innerWidth - rect.right);
-    const top = rect.bottom + 6;
-    setPopoverPos({ top, right });
+    const frame = requestAnimationFrame(() => {
+      if (!anchorRef.current) return;
+      const rect = anchorRef.current.getBoundingClientRect();
+      const popoverWidth = 320;
+      const top = rect.bottom + 6;
+      // Prefer aligning popover's right edge with anchor's right edge.
+      // But if that would push the popover off-screen left, align left edge with anchor left.
+      const rightFromViewport = window.innerWidth - rect.right;
+      const wouldOverflowLeft = rect.right - popoverWidth < 8;
+      if (wouldOverflowLeft) {
+        setPopoverPos({ top, left: Math.max(8, rect.left) });
+      } else {
+        setPopoverPos({ top, right: Math.max(8, rightFromViewport) });
+      }
+    });
+    return () => cancelAnimationFrame(frame);
   }, [anchorRef]);
 
   useEffect(() => {
@@ -239,7 +249,9 @@ function MonitorPopover({ status, onClose, onOpenWorkspace, columns, onRunNow, a
         className="fixed z-50 w-80 bg-white border border-gray-200 rounded-xl shadow-xl text-xs flex flex-col"
         style={{
           top: popoverPos ? `${popoverPos.top}px` : "2.5rem",
-          right: popoverPos ? `${popoverPos.right}px` : "0.5rem",
+          ...(popoverPos?.left !== undefined
+            ? { left: `${popoverPos.left}px` }
+            : { right: `${popoverPos?.right ?? 8}px` }),
           maxHeight: popoverPos
             ? `min(600px, calc(100dvh - ${popoverPos.top + 8}px))`
             : "min(600px, calc(100dvh - 3rem))",
