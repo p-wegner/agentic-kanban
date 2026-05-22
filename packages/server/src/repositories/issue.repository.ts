@@ -1,5 +1,6 @@
-import { issues, workspaces, sessions, sessionMessages } from "@agentic-kanban/shared/schema";
-import { eq, inArray, desc } from "drizzle-orm";
+import { issues, workspaces, sessions, sessionMessages, projectStatuses } from "@agentic-kanban/shared/schema";
+import { eq, inArray, desc, sql } from "drizzle-orm";
+import { randomUUID } from "node:crypto";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { parseSessionSummary, formatDurationStr } from "../services/session-summary.js";
@@ -31,6 +32,71 @@ export interface IssueSummaryResult {
   model: string | null;
   status?: string;
   summary?: null;
+}
+
+const DEFAULT_STATUSES = [
+  { name: "Backlog", sortOrder: -1, isDefault: false },
+  { name: "Todo", sortOrder: 0, isDefault: true },
+  { name: "In Progress", sortOrder: 1, isDefault: false },
+  { name: "In Review", sortOrder: 2, isDefault: false },
+  { name: "AI Reviewed", sortOrder: 3, isDefault: false },
+  { name: "Done", sortOrder: 4, isDefault: false },
+  { name: "Cancelled", sortOrder: 5, isDefault: false },
+];
+
+export async function initializeProjectStatuses(
+  projectId: string,
+  now: string,
+  database: Database = db,
+): Promise<void> {
+  for (const status of DEFAULT_STATUSES) {
+    await database.insert(projectStatuses).values({
+      id: randomUUID(),
+      projectId,
+      name: status.name,
+      sortOrder: status.sortOrder,
+      isDefault: status.isDefault,
+      createdAt: now,
+    });
+  }
+}
+
+/**
+ * Returns the next issue number for the project and the default statusId.
+ * Throws if no statuses are configured for the project.
+ */
+export async function resolveNewIssueDefaults(
+  projectId: string,
+  providedStatusId: string | undefined,
+  database: Database = db,
+): Promise<{ issueNumber: number; statusId: string }> {
+  const [maxResult, statusRows] = await Promise.all([
+    database
+      .select({ maxNum: sql<number | null>`max(${issues.issueNumber})` })
+      .from(issues)
+      .where(eq(issues.projectId, projectId)),
+    providedStatusId
+      ? Promise.resolve(null)
+      : database
+          .select({ id: projectStatuses.id })
+          .from(projectStatuses)
+          .where(eq(projectStatuses.projectId, projectId))
+          .limit(1),
+  ]);
+
+  const issueNumber = (maxResult[0]?.maxNum ?? 0) + 1;
+
+  if (providedStatusId) {
+    return { issueNumber, statusId: providedStatusId };
+  }
+
+  if (!statusRows || statusRows.length === 0) {
+    const err = new Error("No statuses found for project") as any;
+    err.statusCode = 400;
+    throw err;
+  }
+
+  return { issueNumber, statusId: statusRows[0].id };
 }
 
 export async function getIssueSummary(
