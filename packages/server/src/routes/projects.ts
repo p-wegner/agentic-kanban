@@ -471,7 +471,7 @@ export function createProjectsRoute(database: Database = db) {
       .where(eq(issues.projectId, projectId))
       .groupBy(projectStatuses.name);
     const issueCounts: Record<string, number> = {};
-    for (const row of issueRows) issueCounts[row.statusName] = Number(row.count);
+    for (const row of issueRows) if (row.statusName != null) issueCounts[row.statusName] = Number(row.count);
 
     return c.json({ commitCount, recentCommits, issueCounts });
   });
