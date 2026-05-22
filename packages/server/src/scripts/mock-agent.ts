@@ -6,6 +6,7 @@
  *   minimal    - Fast: init + text + result
  *   multi-turn - Stdin-based: first turn + wait for JSONL on stdin + respond per turn
  *   error      - Failure: init + error result, exits with code 1
+ *   rate-limit - Rate limiting: init + rate_limit_event(rejected) + text + rate_limit_event(allowed) + result
  *
  * Configuration:
  *   --session-id <uuid>   / MOCK_SESSION_ID     - Deterministic session UUID
@@ -100,6 +101,22 @@ function buildAssistantTextMsg(text: string, id?: string) {
       stop_sequence: null,
       usage: { input_tokens: 150, output_tokens: 42 },
     },
+  };
+}
+
+function buildRateLimitMsg(sessionId: string, status: "allowed" | "rejected" = "allowed") {
+  return {
+    type: "rate_limit_event",
+    rate_limit_info: {
+      status,
+      rateLimitType: "five_hour",
+      resetsAt: Math.floor(Date.now() / 1000) + 3600,
+      overageStatus: status === "rejected" ? "rejected" : undefined,
+      overageDisabledReason: status === "rejected" ? "org_level_disabled" : undefined,
+      isUsingOverage: false,
+    },
+    uuid: randomUUID(),
+    session_id: sessionId,
   };
 }
 
@@ -226,6 +243,31 @@ async function runMultiTurn(sessionId: string, delayMs: number) {
   }
 }
 
+async function runRateLimit(sessionId: string, delayMs: number) {
+  const startTime = Date.now();
+
+  emit(buildInitMsg(sessionId));
+  await sleep(delayMs);
+
+  emit(buildRateLimitMsg(sessionId, "rejected"));
+  await sleep(delayMs);
+
+  emit(buildAssistantTextMsg("Rate limit encountered. Continuing after pause."));
+  await sleep(delayMs);
+
+  emit(buildRateLimitMsg(sessionId, "allowed"));
+  await sleep(delayMs);
+
+  emit(
+    buildResultMsg(
+      sessionId,
+      "Mock agent completed the task after rate limit.",
+      startTime,
+      1,
+    ),
+  );
+}
+
 async function runError(sessionId: string, delayMs: number) {
   const startTime = Date.now();
 
@@ -269,6 +311,9 @@ async function main() {
       break;
     case "error":
       await runError(sessionId, delayMs);
+      break;
+    case "rate-limit":
+      await runRateLimit(sessionId, delayMs);
       break;
     case "standard":
     default:
