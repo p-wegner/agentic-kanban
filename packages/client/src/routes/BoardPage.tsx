@@ -134,6 +134,7 @@ const ACTION_LABELS: Record<MonitorAction["action"], { label: string; color: str
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 function MonitorPopover({ status, onClose, onOpenWorkspace, columns }: { status: MonitorStatus | null; onClose: () => void; onOpenWorkspace: (workspaceId: string, issueId: string) => void; columns: StatusWithIssues[] }) {
   const [now, setNow] = useState(Date.now());
 <<<<<<< HEAD
@@ -159,8 +160,13 @@ function MonitorPopover({ status, onClose, onOpenWorkspace, columns, onRunNow }:
 =======
 function MonitorPopover({ status, onClose, onOpenWorkspace, columns, onRunNow, autoMonitor, onToggle, interval, onIntervalChange, nudgeAutoStart, onNudgeAutoStartChange, nudgeWipLimit, onNudgeWipLimitChange }: { status: MonitorStatus | null; onClose: () => void; onOpenWorkspace: (workspaceId: string, issueId: string) => void; columns: StatusWithIssues[]; onRunNow: () => Promise<void>; autoMonitor: boolean; onToggle: () => void; interval: string; onIntervalChange: (v: string) => void; nudgeAutoStart: boolean; onNudgeAutoStartChange: (v: boolean) => void; nudgeWipLimit: string; onNudgeWipLimitChange: (v: string) => void }) {
 >>>>>>> 693fe5c (feat: move monitor toggle and settings to board view popover)
+=======
+function MonitorPopover({ status, onClose, onOpenWorkspace, columns, onRunNow, autoMonitor, onToggle, interval, onIntervalChange, nudgeAutoStart, onNudgeAutoStartChange, nudgeWipLimit, onNudgeWipLimitChange, anchorRef }: { status: MonitorStatus | null; onClose: () => void; onOpenWorkspace: (workspaceId: string, issueId: string) => void; columns: StatusWithIssues[]; onRunNow: () => Promise<void>; autoMonitor: boolean; onToggle: () => void; interval: string; onIntervalChange: (v: string) => void; nudgeAutoStart: boolean; onNudgeAutoStartChange: (v: boolean) => void; nudgeWipLimit: string; onNudgeWipLimitChange: (v: string) => void; anchorRef: React.RefObject<HTMLElement | null> }) {
+>>>>>>> 7a1bfb9 (fix: board monitor popover stays within viewport, scrollable content)
   const [now, setNow] = useState(Date.now());
   const [running, setRunning] = useState(false);
+  const [pos, setPos] = useState<{ top: number; left: number; maxHeight: number; above: boolean } | null>(null);
+  const popoverRef = useRef<HTMLDivElement>(null);
 
   async function handleRunNow() {
     setRunning(true);
@@ -174,13 +180,38 @@ function MonitorPopover({ status, onClose, onOpenWorkspace, columns, onRunNow, a
   }, []);
 
   useEffect(() => {
+    function reposition() {
+      const anchor = anchorRef.current;
+      if (!anchor) return;
+      const rect = anchor.getBoundingClientRect();
+      const popoverWidth = 352; // 22rem
+      const margin = 8;
+      const spaceBelow = window.innerHeight - rect.bottom - margin;
+      const spaceAbove = rect.top - margin;
+      const maxContentHeight = 520;
+      const above = spaceBelow < Math.min(maxContentHeight, 300) && spaceAbove > spaceBelow;
+      const maxHeight = above ? Math.min(spaceAbove - margin, maxContentHeight) : Math.min(spaceBelow - margin, maxContentHeight);
+      // Align right edge of popover to right edge of anchor, clamped so left edge stays on-screen
+      let left = rect.right - popoverWidth;
+      left = Math.max(margin, Math.min(left, window.innerWidth - popoverWidth - margin));
+      const top = above ? rect.top - maxHeight - margin : rect.bottom + margin;
+      setPos({ top, left, maxHeight, above });
+    }
+    reposition();
+    window.addEventListener("resize", reposition);
+    window.addEventListener("scroll", reposition, true);
+    return () => { window.removeEventListener("resize", reposition); window.removeEventListener("scroll", reposition, true); };
+  }, [anchorRef]);
+
+  useEffect(() => {
     function handler(e: MouseEvent) {
-      const el = document.getElementById("monitor-popover");
-      if (el && !el.contains(e.target as Node)) onClose();
+      const popEl = popoverRef.current;
+      const anchor = anchorRef.current;
+      if (popEl && !popEl.contains(e.target as Node) && anchor && !anchor.contains(e.target as Node)) onClose();
     }
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
-  }, [onClose]);
+  }, [onClose, anchorRef]);
 
   function formatCountdown(isoStr: string) {
     const ms = new Date(isoStr).getTime() - now;
@@ -207,9 +238,10 @@ function MonitorPopover({ status, onClose, onOpenWorkspace, columns, onRunNow, a
 
   return (
     <div
+      ref={popoverRef}
       id="monitor-popover"
-      className="absolute right-0 top-full mt-1.5 z-50 w-88 bg-white border border-gray-200 rounded-lg shadow-xl text-xs flex flex-col"
-      style={{ maxHeight: "calc(100vh - 4rem)", width: "22rem" }}
+      className="fixed z-50 bg-white border border-gray-200 rounded-lg shadow-xl text-xs flex flex-col"
+      style={pos ? { top: pos.top, left: pos.left, width: "22rem", maxHeight: pos.maxHeight } : { visibility: "hidden", top: 0, left: 0, width: "22rem", maxHeight: 520 }}
     >
       {/* Fixed header */}
       <div className="px-3 py-2.5 border-b border-gray-100 flex items-center justify-between shrink-0">
@@ -622,6 +654,7 @@ export function BoardPage() {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
   const [autoReview, setAutoReview] = useState(true);
   const [autoMerge, setAutoMerge] = useState(true);
@@ -631,6 +664,9 @@ export function BoardPage() {
 =======
 >>>>>>> 52ef66c (fix: repair pre-existing build errors (smart quotes in cli.ts, truncated TableView/BoardPage from bad merge))
 =======
+=======
+  const monitorAnchorRef = useRef<HTMLDivElement>(null);
+>>>>>>> 7a1bfb9 (fix: board monitor popover stays within viewport, scrollable content)
   const [monitorRunning, setMonitorRunning] = useState(false);
 <<<<<<< HEAD
 >>>>>>> 77d9d10 (feat: add Run Now button to board toolbar next to Monitor button)
@@ -1669,6 +1705,7 @@ export function BoardPage() {
           </button>
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
           {autoMonitor && (
             <div className="relative shrink-0">
               <button
@@ -1731,6 +1768,9 @@ export function BoardPage() {
 =======
           <div className="relative shrink-0 flex items-center gap-0.5">
 >>>>>>> 77d9d10 (feat: add Run Now button to board toolbar next to Monitor button)
+=======
+          <div ref={monitorAnchorRef} className="relative shrink-0 flex items-center gap-0.5">
+>>>>>>> 7a1bfb9 (fix: board monitor popover stays within viewport, scrollable content)
             <button
               onClick={() => setShowMonitorPopover(v => !v)}
               className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium border transition-colors ${autoMonitor ? "bg-green-50 border-green-200 text-green-700 hover:bg-green-100" : "bg-white border-gray-200 text-gray-500 hover:bg-gray-50"}`}
@@ -1750,7 +1790,7 @@ export function BoardPage() {
                 : <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path strokeLinecap="round" strokeLinejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 010 1.972l-11.54 6.347a1.125 1.125 0 01-1.667-.986V5.653z"/></svg>
               }
             </button>
-            {showMonitorPopover && <MonitorPopover status={monitorStatus} onClose={() => setShowMonitorPopover(false)} onOpenWorkspace={(workspaceId, issueId) => { const issue = columns.flatMap(c => c.issues).find(i => i.id === issueId); if (issue) setWorkspaceIssue(issue); setWorkspaceInitial({ workspaceId, sessionId: "" }); }} columns={columns} onRunNow={handleMonitorRunNow} autoMonitor={autoMonitor} onToggle={toggleAutoMonitor} interval={autoMonitorInterval} onIntervalChange={handleIntervalChange} nudgeAutoStart={nudgeAutoStart} onNudgeAutoStartChange={handleNudgeAutoStartChange} nudgeWipLimit={nudgeWipLimit} onNudgeWipLimitChange={handleNudgeWipLimitChange} />}
+            {showMonitorPopover && <MonitorPopover status={monitorStatus} onClose={() => setShowMonitorPopover(false)} onOpenWorkspace={(workspaceId, issueId) => { const issue = columns.flatMap(c => c.issues).find(i => i.id === issueId); if (issue) setWorkspaceIssue(issue); setWorkspaceInitial({ workspaceId, sessionId: "" }); }} columns={columns} onRunNow={handleMonitorRunNow} autoMonitor={autoMonitor} onToggle={toggleAutoMonitor} interval={autoMonitorInterval} onIntervalChange={handleIntervalChange} nudgeAutoStart={nudgeAutoStart} onNudgeAutoStartChange={handleNudgeAutoStartChange} nudgeWipLimit={nudgeWipLimit} onNudgeWipLimitChange={handleNudgeWipLimitChange} anchorRef={monitorAnchorRef} />}
           </div>
 >>>>>>> 693fe5c (feat: move monitor toggle and settings to board view popover)
           <div className="flex items-center gap-1 border border-gray-200 rounded-md p-0.5 bg-white shrink-0">
