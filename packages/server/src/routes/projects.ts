@@ -888,7 +888,7 @@ ${contextParts.join("\n")}`;
           workspaceSummaryMap.set(row.issueId, summary);
         }
         summary.total += row.count;
-        if (row.status === "active" || row.status === "reviewing") {
+        if (row.status === "active" || row.status === "reviewing" || row.status === "fixing") {
           summary.active += row.count;
         } else if (row.status === "closed") {
           summary.closed += row.count;
@@ -928,7 +928,7 @@ ${contextParts.join("\n")}`;
       const CONFLICT_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
       const DIFF_STAT_CACHE_TTL_MS = 30 * 1000; // 30 seconds
       const mainWorkspaceMap = new Map<string, { id: string; branch: string; status: string; updatedAt: string; claudeProfile: string | null; agentCommand: string | null; workingDir: string | null; baseBranch: string | null; isDirect: boolean; conflictCacheCheckedAt: string | null; conflictCacheHasConflicts: boolean | null; conflictCacheFiles: string | null; readyForMerge: boolean; diffStatCacheCheckedAt: string | null; diffStatCacheFilesChanged: number | null; diffStatCacheInsertions: number | null; diffStatCacheDeletions: number | null }>();
-      const statusPriority = (s: string) => s === "active" || s === "reviewing" ? 0 : s === "idle" ? 1 : 2;
+      const statusPriority = (s: string) => s === "active" || s === "reviewing" || s === "fixing" ? 0 : s === "idle" ? 1 : 2;
       for (const row of wsDetailRows) {
         const existing = mainWorkspaceMap.get(row.issueId);
         if (!existing) {
@@ -948,7 +948,7 @@ ${contextParts.join("\n")}`;
       for (const [issueId, summary] of workspaceSummaryMap) {
         const mainWs = mainWorkspaceMap.get(issueId);
         if (mainWs) {
-          summary.main = { id: mainWs.id, branch: mainWs.branch, status: mainWs.status as "active" | "reviewing" | "idle" | "closed", claudeProfile: mainWs.claudeProfile, agentCommand: mainWs.agentCommand, readyForMerge: mainWs.readyForMerge };
+          summary.main = { id: mainWs.id, branch: mainWs.branch, status: mainWs.status as "active" | "reviewing" | "fixing" | "idle" | "closed", claudeProfile: mainWs.claudeProfile, agentCommand: mainWs.agentCommand, readyForMerge: mainWs.readyForMerge };
 
           if (mainWs.workingDir && mainWs.status !== "closed") {
             const diffRef = mainWs.isDirect ? "HEAD" : (mainWs.baseBranch || defaultBranch);
