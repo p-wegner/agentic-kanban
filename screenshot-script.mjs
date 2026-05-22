@@ -1,0 +1,11 @@
+﻿import { chromium } from "@playwright/test";
+const browser = await chromium.launch({ headless: true });
+const page = await browser.newPage();
+await page.goto("http://localhost:5173");
+await page.waitForTimeout(3000);
+await page.screenshot({ path: "board2.png" });
+const cards = page.locator(".cursor-pointer").first();
+await cards.click();
+await page.waitForTimeout(1000);
+await page.screenshot({ path: "workspace-panel.png" });
+await browser.close();
