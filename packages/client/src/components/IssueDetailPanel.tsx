@@ -699,6 +699,7 @@ export function IssueDetailPanel({
                         issue.workspaceSummary.main.status === "active" ? "bg-green-500" :
                         issue.workspaceSummary.main.status === "reviewing" ? "bg-purple-500 animate-pulse" :
                         issue.workspaceSummary.main.status === "fixing" ? "bg-orange-500 animate-pulse" :
+                        issue.workspaceSummary.main.conflicts?.hasConflicts ? "bg-red-500" :
                         issue.workspaceSummary.main.status === "idle" ? "bg-amber-500" :
                         "bg-gray-400"
                       }`} />
@@ -707,16 +708,18 @@ export function IssueDetailPanel({
                         issue.workspaceSummary.main.status === "active" ? "bg-green-100 text-green-700" :
                         issue.workspaceSummary.main.status === "reviewing" ? "bg-purple-100 text-purple-700" :
                         issue.workspaceSummary.main.status === "fixing" ? "bg-orange-100 text-orange-700" :
+                        issue.workspaceSummary.main.conflicts?.hasConflicts ? "bg-red-100 text-red-700" :
                         issue.workspaceSummary.main.status === "idle" ? "bg-amber-100 text-amber-700" :
                         "bg-gray-100 text-gray-500"
                       }`}>
                         {issue.workspaceSummary.main.status === "reviewing" ? "AI Reviewing" :
                          issue.workspaceSummary.main.status === "fixing" ? "Fixing Conflicts" :
+                         issue.workspaceSummary.main.conflicts?.hasConflicts ? "Merge Conflicts" :
                          issue.workspaceSummary.main.status}
                       </span>
-                      {issue.workspaceSummary.main.conflicts?.hasConflicts && (
+                      {issue.workspaceSummary.main.conflicts?.hasConflicts && issue.workspaceSummary.main.status !== "fixing" && (
                         <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-red-100 text-red-700 text-[10px] font-medium shrink-0">
-                          {issue.workspaceSummary.main.conflicts.conflictingFiles.length} conflict{issue.workspaceSummary.main.conflicts.conflictingFiles.length !== 1 ? "s" : ""}
+                          {issue.workspaceSummary.main.conflicts.conflictingFiles.length} file{issue.workspaceSummary.main.conflicts.conflictingFiles.length !== 1 ? "s" : ""}
                         </span>
                       )}
                       {issue.workspaceSummary!.total > 1 && (
