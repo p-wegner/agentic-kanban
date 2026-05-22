@@ -120,8 +120,8 @@ function MonitorPopover({ status, onClose, onOpenWorkspace, columns, onRunNow, a
       <div
         ref={popoverRef}
         id="monitor-popover"
-        className="fixed top-0 right-0 z-50 h-screen w-80 bg-white border-l border-gray-200 shadow-2xl text-xs flex flex-col"
-        style={{ maxHeight: "100dvh" }}
+        className="fixed top-0 right-0 z-50 w-80 bg-white border-l border-gray-200 shadow-2xl text-xs flex flex-col overflow-hidden"
+        style={{ height: "100dvh", maxHeight: "100dvh" }}
       >
         {/* Header */}
         <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between shrink-0 bg-gray-50">
