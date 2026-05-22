@@ -152,7 +152,9 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
       {ws && ws.main && (
         <div
           className={`flex items-center gap-1.5 mt-1.5 text-xs cursor-pointer rounded px-1 py-0.5 -mx-1 transition-colors ${
-            ws.main.status === "reviewing" ? "bg-purple-50 hover:bg-purple-100" : "hover:bg-gray-50"
+            ws.main.status === "reviewing" ? "bg-purple-50 hover:bg-purple-100" :
+            ws.main.status === "fixing" ? "bg-orange-50 hover:bg-orange-100" :
+            "hover:bg-gray-50"
           }`}
           title={`Workspace: ${ws.main.branch} (${ws.main.status})`}
           onClick={(e) => { e.stopPropagation(); onWorkspaceClick?.(issue, ws.main?.id); }}
@@ -161,6 +163,11 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
             <>
               <span className="inline-block w-2 h-2 rounded-full shrink-0 bg-purple-500 animate-pulse" />
               <span className="font-medium text-purple-700">AI Reviewing</span>
+            </>
+          ) : ws.main.status === "fixing" ? (
+            <>
+              <span className="inline-block w-2 h-2 rounded-full shrink-0 bg-orange-500 animate-pulse" />
+              <span className="font-medium text-orange-700">AI Fixing</span>
             </>
           ) : (
             <>
@@ -183,7 +190,7 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
                 <span className="text-gray-400">{ws.main.diffStats.filesChanged}f</span>
               </>
             )}
-            {ws.main.lastSessionAt && ws.main.status !== "active" && ws.main.status !== "reviewing" && (
+            {ws.main.lastSessionAt && ws.main.status !== "active" && ws.main.status !== "reviewing" && ws.main.status !== "fixing" && (
               <span className="text-gray-400">{ws.main.diffStats ? "· " : ""}{relativeTime(ws.main.lastSessionAt)}</span>
             )}
           </span>

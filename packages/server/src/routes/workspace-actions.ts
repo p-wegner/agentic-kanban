@@ -742,7 +742,7 @@ Base branch: ${baseBranch}`;
       const sessionId = await getSessionManager().startSession(id, prompt, agentCommand, agentArgs, undefined, claudeProfile, true);
 
       const now = new Date().toISOString();
-      await database.update(workspaces).set({ status: "active", updatedAt: now }).where(eq(workspaces.id, id));
+      await database.update(workspaces).set({ status: "fixing", updatedAt: now }).where(eq(workspaces.id, id));
 
       const projectId = await resolveProjectId(id, database);
       if (projectId) options?.boardEvents?.broadcast(projectId, "session_launched");

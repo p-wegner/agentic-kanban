@@ -59,7 +59,7 @@ export interface UpdateIssueRequest {
 export interface MainWorkspaceInfo {
   id: string;
   branch: string;
-  status: "active" | "reviewing" | "idle" | "closed";
+  status: "active" | "reviewing" | "fixing" | "idle" | "closed";
   readyForMerge?: boolean;
   claudeProfile?: string | null;
   agentCommand?: string | null;
@@ -118,7 +118,7 @@ export interface CreateWorkspaceRequest {
 }
 
 export interface UpdateWorkspaceRequest {
-  status?: "active" | "reviewing" | "idle" | "closed";
+  status?: "active" | "reviewing" | "fixing" | "idle" | "closed";
   workingDir?: string;
 }
 
