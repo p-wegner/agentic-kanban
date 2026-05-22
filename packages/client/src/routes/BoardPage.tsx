@@ -1157,7 +1157,7 @@ export function BoardPage() {
         </div>
       )}
       <div className="flex flex-col gap-3 p-4 h-full overflow-hidden">
-        <div className="flex items-center gap-2 flex-wrap">
+        <div className="flex items-start gap-2 flex-wrap">
           <BoardStats
             activeColumns={activeColumns}
             archiveColumns={archiveColumns}
