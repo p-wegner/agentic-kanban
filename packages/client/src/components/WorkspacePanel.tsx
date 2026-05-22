@@ -1044,40 +1044,61 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                       </div>
                     )}
 
-                    {ws.status !== "closed" && !isRunning && ws.workingDir && (
+                    {ws.status !== "closed" && !isRunning && ws.workingDir && (() => {
+                      const lastReview = completedSessions.filter(s => s.triggerType === "review").at(-1);
+                      return (
                       <div className="space-y-1 pt-1">
                         <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide">Quick Actions</div>
-                        <div className="flex flex-wrap gap-1.5">
-                          <button
-                            onClick={(e) => { e.stopPropagation(); handleReview(ws.id); }}
-                            disabled={actionLoading}
-                            className="text-[10px] font-medium px-2 py-0.5 rounded bg-violet-100 text-violet-700 hover:bg-violet-200 disabled:opacity-50"
-                            title="Trigger AI code review"
-                          >
-                            AI Review
-                          </button>
-                          <button
-                            onClick={(e) => { e.stopPropagation(); handleMerge(ws.id); }}
-                            disabled={actionLoading}
-                            className="text-[10px] font-medium px-2 py-0.5 rounded bg-emerald-100 text-emerald-700 hover:bg-emerald-200 disabled:opacity-50"
-                            title="Merge this workspace"
-                          >
-                            {ws.isDirect ? "Close" : "AI Merge"}
-                          </button>
-                          {availableSkills.map((skill) => (
+                        <div className="flex flex-wrap gap-x-3 gap-y-1.5">
+                          <div className="flex flex-col gap-0.5">
                             <button
-                              key={skill.id}
-                              onClick={(e) => { e.stopPropagation(); handleSkillQuickLaunch(skill.id); }}
+                              onClick={(e) => { e.stopPropagation(); handleReview(ws.id); }}
                               disabled={actionLoading}
-                              className="text-[10px] font-medium px-2 py-0.5 rounded bg-purple-100 text-purple-700 hover:bg-purple-200 disabled:opacity-50"
-                              title={skill.description}
+                              className="text-[10px] font-medium px-2 py-0.5 rounded bg-violet-100 text-violet-700 hover:bg-violet-200 disabled:opacity-50"
+                              title="Trigger AI code review"
                             >
-                              ✨ {humanizeSkillName(skill.name)}
+                              AI Review
                             </button>
-                          ))}
+                            {lastReview && (
+                              <span className={`text-[9px] px-1 ${lastReview.status === "completed" ? "text-green-600" : "text-yellow-600"}`}>
+                                {lastReview.status === "completed" ? "✓" : "✗"} {formatRelativeTime(lastReview.endedAt ?? lastReview.startedAt)}
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex flex-col gap-0.5">
+                            <button
+                              onClick={(e) => { e.stopPropagation(); handleMerge(ws.id); }}
+                              disabled={actionLoading}
+                              className="text-[10px] font-medium px-2 py-0.5 rounded bg-emerald-100 text-emerald-700 hover:bg-emerald-200 disabled:opacity-50"
+                              title="Merge this workspace"
+                            >
+                              {ws.isDirect ? "Close" : "AI Merge"}
+                            </button>
+                          </div>
+                          {availableSkills.map((skill) => {
+                            const lastSkill = completedSessions.filter(s => s.triggerType === `skill:${skill.name}`).at(-1);
+                            return (
+                              <div key={skill.id} className="flex flex-col gap-0.5">
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); handleSkillQuickLaunch(skill.id); }}
+                                  disabled={actionLoading}
+                                  className="text-[10px] font-medium px-2 py-0.5 rounded bg-purple-100 text-purple-700 hover:bg-purple-200 disabled:opacity-50"
+                                  title={skill.description}
+                                >
+                                  ✨ {humanizeSkillName(skill.name)}
+                                </button>
+                                {lastSkill && (
+                                  <span className={`text-[9px] px-1 ${lastSkill.status === "completed" ? "text-green-600" : "text-yellow-600"}`}>
+                                    {lastSkill.status === "completed" ? "✓" : "✗"} {formatRelativeTime(lastSkill.endedAt ?? lastSkill.startedAt)}
+                                  </span>
+                                )}
+                              </div>
+                            );
+                          })}
                         </div>
                       </div>
-                    )}
+                      );
+                    })()}
 
                     {(selectedHistoryId ? historyMessages : (activeSession || completedMessages.length > 0)) && (
                       <div className="flex border-b border-gray-200">
