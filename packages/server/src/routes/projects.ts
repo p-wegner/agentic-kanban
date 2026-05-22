@@ -1436,16 +1436,18 @@ ${contextParts.join("\n")}`;
             if (sess) {
               summary.main.lastSessionAt = sess.status === "running" ? sess.startedAt : sess.endedAt;
               summary.main.lastSessionTriggerType = sess.triggerType;
-              if (sess.stats) {
-                try {
-                  const p = JSON.parse(sess.stats) as Record<string, unknown>;
-                  const inputTokens = (p.inputTokens as number) ?? 0;
-                  const cachedTokens = (p.cacheReadTokens as number) ?? 0;
-                  summary.main.contextTokens = inputTokens + cachedTokens || null;
-                } catch { /* ignore */ }
+              if (sess.status === "running") {
+                if (sess.stats) {
+                  try {
+                    const p = JSON.parse(sess.stats) as Record<string, unknown>;
+                    const inputTokens = (p.inputTokens as number) ?? 0;
+                    const cachedTokens = (p.cacheReadTokens as number) ?? 0;
+                    summary.main.contextTokens = inputTokens + cachedTokens || null;
+                  } catch { /* ignore */ }
+                }
+                summary.main.lastTool = lastToolBySession.get(sess.id) ?? null;
+                summary.main.lastAssistantMessage = lastAssistantMsgBySession.get(sess.id) ?? null;
               }
-              summary.main.lastTool = lastToolBySession.get(sess.id) ?? null;
-              summary.main.lastAssistantMessage = lastAssistantMsgBySession.get(sess.id) ?? null;
             }
           }
         }
