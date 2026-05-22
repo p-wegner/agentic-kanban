@@ -81,6 +81,7 @@ export function IssueDetailPanel({
   const [dragPos, setDragPos] = useState<{ x: number; y: number } | null>(null);
   const [snapZone, setSnapZone] = useState<"left" | "right" | null>(null);
   const dragStartRef = useRef<{ mouseX: number; mouseY: number; panelX: number; panelY: number } | null>(null);
+  const wasDraggingRef = useRef(false);
   const [title, setTitle] = useState(issue.title);
   const [description, setDescription] = useState(issue.description ?? "");
   const [pastedImages, setPastedImages] = useState<string[]>([]);
@@ -312,22 +313,26 @@ export function IssueDetailPanel({
     const rect = panel.getBoundingClientRect();
     dragStartRef.current = { mouseX: e.clientX, mouseY: e.clientY, panelX: rect.left, panelY: rect.top };
 
-    const EDGE_SNAP_THRESHOLD = 80; // px from right edge to snap back to sidebar
+    // Snap thresholds based on mouse position (not panel edge)
+    const EDGE_SNAP_THRESHOLD = 100; // px from screen edge where mouse triggers snap
+    const MODAL_WIDTH = Math.min(800, window.innerWidth * 0.96);
     // Track current drag mode via ref to avoid stale closure issues
     let currentDragMode: "sidebar" | "modal" | "fullscreen" = panelMode;
     let cleanup: (() => void) | null = null;
 
     // If starting drag from sidebar, immediately switch to modal mode
     if (currentDragMode === "sidebar") {
-      const isLeftSidebar = sidebarSide === "left";
-      const modalX = isLeftSidebar
-        ? Math.min(window.innerWidth - 820, 200)
-        : Math.max(0, dragStartRef.current.panelX - 200);
-      const modalY = Math.max(0, dragStartRef.current.panelY + 40);
+      const modalWidth = Math.min(800, window.innerWidth * 0.96);
+      // Position modal so the grab offset relative to panel left is preserved
+      const grabOffsetX = e.clientX - rect.left;
+      const idealModalX = e.clientX - Math.min(grabOffsetX, modalWidth - 80);
+      const modalX = Math.max(0, Math.min(window.innerWidth - modalWidth, idealModalX));
+      const modalY = Math.max(0, window.innerHeight * 0.05);
       currentDragMode = "modal";
       setPanelMode("modal");
       setDragPos({ x: modalX, y: modalY });
-      dragStartRef.current = { ...dragStartRef.current, panelX: modalX, panelY: modalY };
+      // Reset drag origin to current mouse + modal position so subsequent moves are relative to now
+      dragStartRef.current = { mouseX: e.clientX, mouseY: e.clientY, panelX: modalX, panelY: modalY };
     }
 
     const onMove = (ev: MouseEvent) => {
@@ -337,10 +342,10 @@ export function IssueDetailPanel({
       const newX = dragStartRef.current.panelX + dx;
       const newY = dragStartRef.current.panelY + dy;
       if (currentDragMode === "modal") {
-        const panelRect = panel.getBoundingClientRect();
-        const nearRightEdge = newX + panelRect.width >= window.innerWidth - EDGE_SNAP_THRESHOLD;
-        const nearLeftEdge = newX <= EDGE_SNAP_THRESHOLD;
-        if (nearRightEdge) {
+        // Snap based on mouse position relative to screen edges
+        const mouseNearRightEdge = ev.clientX >= window.innerWidth - EDGE_SNAP_THRESHOLD;
+        const mouseNearLeftEdge = ev.clientX <= EDGE_SNAP_THRESHOLD;
+        if (mouseNearRightEdge) {
           currentDragMode = "sidebar";
           setPanelMode("sidebar");
           setSidebarSide("right");
@@ -350,7 +355,7 @@ export function IssueDetailPanel({
           cleanup?.();
           return;
         }
-        if (nearLeftEdge) {
+        if (mouseNearLeftEdge) {
           currentDragMode = "sidebar";
           setPanelMode("sidebar");
           setSidebarSide("left");
@@ -360,18 +365,21 @@ export function IssueDetailPanel({
           cleanup?.();
           return;
         }
-        // Show snap zone preview when approaching edges
-        const SNAP_PREVIEW_THRESHOLD = EDGE_SNAP_THRESHOLD + 60;
-        const approachingRight = newX + panelRect.width >= window.innerWidth - SNAP_PREVIEW_THRESHOLD;
-        const approachingLeft = newX <= SNAP_PREVIEW_THRESHOLD;
+        // Show snap zone preview when mouse approaches edges
+        const SNAP_PREVIEW_THRESHOLD = EDGE_SNAP_THRESHOLD + 80;
+        const approachingRight = ev.clientX >= window.innerWidth - SNAP_PREVIEW_THRESHOLD;
+        const approachingLeft = ev.clientX <= SNAP_PREVIEW_THRESHOLD;
         setSnapZone(approachingRight ? "right" : approachingLeft ? "left" : null);
         setDragPos({ x: newX, y: newY });
       }
     };
     const onUp = () => {
       dragStartRef.current = null;
+      wasDraggingRef.current = true;
       setSnapZone(null);
       cleanup?.();
+      // Reset drag flag after current event cycle so backdrop onClick is suppressed
+      setTimeout(() => { wasDraggingRef.current = false; }, 0);
     };
     cleanup = () => {
       window.removeEventListener("mousemove", onMove);
@@ -382,6 +390,7 @@ export function IssueDetailPanel({
   }
 
   function handleBackdropClick() {
+    if (wasDraggingRef.current) return;
     if (editing && hasChanges) {
       if (!window.confirm("You have unsaved changes. Discard?")) return;
     }
@@ -411,7 +420,7 @@ export function IssueDetailPanel({
           panelMode === "fullscreen"
             ? "inset-0"
             : panelMode === "modal"
-            ? "top-[5vh] left-1/2 -translate-x-1/2 w-[min(800px,96vw)] h-[90vh] rounded-lg border border-gray-200"
+            ? `w-[min(800px,96vw)] h-[90vh] rounded-lg border border-gray-200${dragPos ? "" : " top-[5vh] left-1/2 -translate-x-1/2"}`
             : sidebarSide === "left"
             ? "left-0 top-0 h-full border-r border-gray-200 w-[min(384px,100vw)]"
             : "right-0 top-0 h-full border-l border-gray-200 w-[min(384px,100vw)]"
