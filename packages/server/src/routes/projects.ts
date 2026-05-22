@@ -110,8 +110,12 @@ import { existsSync, mkdirSync, readdirSync, writeFileSync, rmSync } from "node:
 >>>>>>> f903991 (feat: conditionally show AI Reviewed column and fix stats colors)
 =======
 import { existsSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+<<<<<<< HEAD
 >>>>>>> 925a9d6 (refactor: extract setup/teardown script AI generation to project-setup.service)
 import { detectRepoInfo } from "../services/git-info.service.js";
+=======
+import { detectRepoInfo, getProjectGitStats } from "../services/git-info.service.js";
+>>>>>>> ebfff2c (refactor: extract getIssueSummary to issue repository, getProjectGitStats to git-info service)
 import { listBranches, listWorktrees, getDiffShortstat, removeWorktree } from "../services/git.service.js";
 import type { Database } from "../db/index.js";
 import { resolve, sep, join } from "node:path";
@@ -855,17 +859,7 @@ export function createProjectsRoute(database: Database = db) {
     if (projectRows.length === 0) return c.json({ error: "Project not found" }, 404);
     const { repoPath, defaultBranch } = projectRows[0];
 
-    let commitCount = 0;
-    let recentCommits: { hash: string; message: string; date: string }[] = [];
-    try {
-      const countOut = execSync(`git rev-list --count ${defaultBranch}`, { cwd: repoPath, timeout: 5000 }).toString().trim();
-      commitCount = parseInt(countOut, 10) || 0;
-      const logOut = execSync(`git log ${defaultBranch} --oneline --format="%H|%s|%cr" -10`, { cwd: repoPath, timeout: 5000 }).toString().trim();
-      recentCommits = logOut.split("\n").filter(Boolean).map((line) => {
-        const [hash, message, date] = line.split("|");
-        return { hash: hash?.slice(0, 7) ?? "", message: message ?? "", date: date ?? "" };
-      });
-    } catch { /* git unavailable or no commits */ }
+    const { commitCount, recentCommits } = getProjectGitStats(repoPath, defaultBranch);
 
     // Issue counts by status name
     const issueRows = await database
