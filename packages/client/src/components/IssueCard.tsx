@@ -185,7 +185,7 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
           ) : ws.main.status === "fixing" ? (
             <>
               <span className="inline-block w-2 h-2 rounded-full shrink-0 bg-orange-500 animate-pulse" />
-              <span className="font-medium text-orange-700">Fixing Conflicts</span>
+              <span className="font-medium text-orange-700">AI Fixing</span>
             </>
           ) : ws.main.conflicts?.hasConflicts ? (
             <>
