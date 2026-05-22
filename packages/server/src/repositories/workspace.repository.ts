@@ -1,5 +1,5 @@
-import { workspaces, issues, projects } from "@agentic-kanban/shared/schema";
-import { eq } from "drizzle-orm";
+import { workspaces, issues, projects, sessions, sessionMessages, diffComments } from "@agentic-kanban/shared/schema";
+import { eq, inArray } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 
@@ -50,4 +50,22 @@ export async function resolveProjectId(
   if (issueRows.length === 0) return null;
 
   return issueRows[0].projectId;
+}
+
+/** Cascade delete a workspace: diff comments → session messages → sessions → workspace record. */
+export async function deleteWorkspaceCascade(
+  workspaceId: string,
+  database: Database = db,
+): Promise<void> {
+  const wsSessions = await database
+    .select({ id: sessions.id })
+    .from(sessions)
+    .where(eq(sessions.workspaceId, workspaceId));
+
+  await database.delete(diffComments).where(eq(diffComments.workspaceId, workspaceId));
+  if (wsSessions.length > 0) {
+    await database.delete(sessionMessages).where(inArray(sessionMessages.sessionId, wsSessions.map(s => s.id)));
+  }
+  await database.delete(sessions).where(eq(sessions.workspaceId, workspaceId));
+  await database.delete(workspaces).where(eq(workspaces.id, workspaceId));
 }
