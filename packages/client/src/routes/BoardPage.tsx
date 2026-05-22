@@ -199,13 +199,27 @@ function MonitorPopover({ status, onClose, onOpenWorkspace, columns, onRunNow, a
     return `${Math.floor(m / 60)}h ago`;
   }
 
+  const activeWs = columns.flatMap(c => c.issues).filter(iss =>
+    iss.workspaceSummary?.main &&
+    (iss.workspaceSummary.main.status === "active" || iss.workspaceSummary.main.status === "reviewing" || iss.workspaceSummary.main.status === "fixing") &&
+    iss.workspaceSummary.main.lastAssistantMessage
+  );
+
   return (
     <div
       id="monitor-popover"
-      className="absolute right-0 top-full mt-1.5 z-50 w-80 bg-white border border-gray-200 rounded-lg shadow-lg text-xs"
+      className="absolute right-0 top-full mt-1.5 z-50 w-88 bg-white border border-gray-200 rounded-lg shadow-xl text-xs flex flex-col"
+      style={{ maxHeight: "calc(100vh - 4rem)", width: "22rem" }}
     >
-      <div className="px-3 py-2.5 border-b border-gray-100 flex items-center justify-between">
-        <span className="font-semibold text-gray-700">Board Monitor</span>
+      {/* Fixed header */}
+      <div className="px-3 py-2.5 border-b border-gray-100 flex items-center justify-between shrink-0">
+        <div className="flex items-center gap-2">
+          {autoMonitor && <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />}
+          <span className="font-semibold text-gray-700">Board Monitor</span>
+          {autoMonitor && status?.nextRunAt && (
+            <span className="text-gray-400 font-normal">· next {formatCountdown(status.nextRunAt)}</span>
+          )}
+        </div>
         <div className="flex items-center gap-2">
           <button
             onClick={handleRunNow}
@@ -230,74 +244,48 @@ function MonitorPopover({ status, onClose, onOpenWorkspace, columns, onRunNow, a
         </div>
       </div>
 
-      <div className="px-3 py-2 border-b border-gray-100 space-y-2">
-        <div className="flex items-center gap-2">
-          <label className="text-gray-500 whitespace-nowrap">Check every</label>
-          <input
-            type="number"
-            min={1}
-            max={60}
-            value={interval}
-            onChange={(e) => onIntervalChange(e.target.value)}
-            disabled={!autoMonitor}
-            className="w-14 border border-gray-300 rounded px-2 py-0.5 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-40"
-          />
-          <span className="text-gray-500">minutes</span>
-        </div>
-        <div className="flex items-center justify-between">
-          <span className={`${!autoMonitor ? "opacity-40" : ""}`}>Auto-start unblocked Todo items</span>
-          <button
-            onClick={() => onNudgeAutoStartChange(!nudgeAutoStart)}
-            disabled={!autoMonitor}
-            className={`relative inline-flex h-4 w-7 items-center rounded-full transition-colors focus:outline-none disabled:opacity-40 ${nudgeAutoStart && autoMonitor ? "bg-green-500" : "bg-gray-300"}`}
-          >
-            <span className={`inline-block h-3 w-3 transform rounded-full bg-white shadow transition-transform ${nudgeAutoStart ? "translate-x-3.5" : "translate-x-0.5"}`} />
-          </button>
-        </div>
-        {nudgeAutoStart && autoMonitor && (
-          <div className="flex items-center gap-2 pl-2">
-            <label className="text-gray-500 whitespace-nowrap">In Progress WIP limit</label>
+      {/* Scrollable content */}
+      <div className="overflow-y-auto flex-1 min-h-0">
+        <div className="px-3 py-2 border-b border-gray-100 space-y-2">
+          <div className="flex items-center gap-2">
+            <label className="text-gray-500 whitespace-nowrap">Check every</label>
             <input
               type="number"
               min={1}
-              max={20}
-              value={nudgeWipLimit}
-              onChange={(e) => onNudgeWipLimitChange(e.target.value)}
-              className="w-14 border border-gray-300 rounded px-2 py-0.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              max={60}
+              value={interval}
+              onChange={(e) => onIntervalChange(e.target.value)}
+              disabled={!autoMonitor}
+              className="w-14 border border-gray-300 rounded px-2 py-0.5 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-40"
             />
+            <span className="text-gray-500">minutes</span>
           </div>
-        )}
-      </div>
-
-      {autoMonitor && (
-        <>
-          <div className="px-3 py-2 border-b border-gray-100 space-y-1.5">
-            {status?.lastRun ? (
-              <div className="flex justify-between text-gray-500">
-                <span>Last run</span>
-                <span className="text-gray-700">{formatAge(status.lastRun.at)} — {new Date(status.lastRun.at).toLocaleTimeString()}</span>
-              </div>
-            ) : (
-              <div className="text-gray-400">No runs yet this session</div>
-            )}
-            {status?.nextRunAt && (
-              <div className="flex justify-between text-gray-500">
-                <span>Next run</span>
-                <span className="font-medium text-gray-700">{formatCountdown(status.nextRunAt)}</span>
-              </div>
-            )}
-            {status?.lastRun && (
-              <div className="flex gap-3 pt-0.5">
-                {status.lastRun.relaunched > 0 && <span className="text-blue-600">{status.lastRun.relaunched} relaunched</span>}
-                {status.lastRun.merged > 0 && <span className="text-purple-600">{status.lastRun.merged} merged</span>}
-                {status.lastRun.nudged > 0 && <span className="text-amber-600">{status.lastRun.nudged} nudged</span>}
-                {status.lastRun.relaunched === 0 && status.lastRun.merged === 0 && status.lastRun.nudged === 0 && (
-                  <span className="text-gray-400">No actions needed</span>
-                )}
-              </div>
-            )}
+          <div className="flex items-center justify-between">
+            <span className={`${!autoMonitor ? "opacity-40" : ""}`}>Auto-start unblocked Todo items</span>
+            <button
+              onClick={() => onNudgeAutoStartChange(!nudgeAutoStart)}
+              disabled={!autoMonitor}
+              className={`relative inline-flex h-4 w-7 items-center rounded-full transition-colors focus:outline-none disabled:opacity-40 ${nudgeAutoStart && autoMonitor ? "bg-green-500" : "bg-gray-300"}`}
+            >
+              <span className={`inline-block h-3 w-3 transform rounded-full bg-white shadow transition-transform ${nudgeAutoStart ? "translate-x-3.5" : "translate-x-0.5"}`} />
+            </button>
           </div>
+          {nudgeAutoStart && autoMonitor && (
+            <div className="flex items-center gap-2 pl-2">
+              <label className="text-gray-500 whitespace-nowrap">In Progress WIP limit</label>
+              <input
+                type="number"
+                min={1}
+                max={20}
+                value={nudgeWipLimit}
+                onChange={(e) => onNudgeWipLimitChange(e.target.value)}
+                className="w-14 border border-gray-300 rounded px-2 py-0.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              />
+            </div>
+          )}
+        </div>
 
+<<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
       {status?.recentActions && status.recentActions.length > 0 ? (
@@ -397,23 +385,54 @@ function MonitorPopover({ status, onClose, onOpenWorkspace, columns, onRunNow, a
             );
             if (activeWs.length === 0) return null;
             return (
+=======
+        {autoMonitor && (
+          <>
+            {/* Last run summary */}
+            <div className="px-3 py-2 border-b border-gray-100 space-y-1.5">
+              {status?.lastRun ? (
+                <>
+                  <div className="flex justify-between text-gray-500">
+                    <span>Last run</span>
+                    <span className="text-gray-700">{formatAge(status.lastRun.at)}</span>
+                  </div>
+                  <div className="flex gap-3">
+                    {status.lastRun.relaunched > 0 && <span className="text-blue-600">{status.lastRun.relaunched} relaunched</span>}
+                    {status.lastRun.merged > 0 && <span className="text-purple-600">{status.lastRun.merged} merged</span>}
+                    {status.lastRun.nudged > 0 && <span className="text-amber-600">{status.lastRun.nudged} nudged</span>}
+                    {status.lastRun.relaunched === 0 && status.lastRun.merged === 0 && status.lastRun.nudged === 0 && (
+                      <span className="text-gray-400">No actions needed</span>
+                    )}
+                  </div>
+                </>
+              ) : (
+                <div className="text-gray-400">No runs yet this session</div>
+              )}
+            </div>
+
+            {/* Active agents */}
+            {activeWs.length > 0 && (
+>>>>>>> 1327c16 (fix: board monitor popover stays within viewport, scrollable content)
               <div className="px-3 py-2 border-b border-gray-100">
-                <div className="text-gray-400 font-medium uppercase tracking-wide mb-1.5" style={{ fontSize: "10px" }}>Active agents</div>
-                <div className="space-y-1.5 max-h-36 overflow-y-auto">
+                <div className="text-gray-400 font-medium uppercase tracking-wide mb-1.5" style={{ fontSize: "10px" }}>
+                  Active agents ({activeWs.length})
+                </div>
+                <div className="space-y-1.5">
                   {activeWs.map(iss => (
-                    <div key={iss.id} className="cursor-pointer hover:bg-gray-50 rounded px-1 -mx-1 py-0.5" onClick={() => { onOpenWorkspace(iss.workspaceSummary!.main!.id, iss.id); onClose(); }}>
+                    <div key={iss.id} className="cursor-pointer hover:bg-gray-50 rounded px-1.5 -mx-1.5 py-1" onClick={() => { onOpenWorkspace(iss.workspaceSummary!.main!.id, iss.id); onClose(); }}>
                       <div className="flex items-center gap-1.5 mb-0.5">
+                        <span className="w-1.5 h-1.5 rounded-full bg-green-400 shrink-0" />
                         <span className="font-medium text-gray-600">#{iss.issueNumber}</span>
                         <span className="text-gray-400 truncate" style={{ fontSize: "10px" }}>{iss.title}</span>
                       </div>
-                      <p className="text-gray-500 leading-snug line-clamp-2" style={{ fontSize: "10px" }}>{iss.workspaceSummary!.main!.lastAssistantMessage}</p>
+                      <p className="text-gray-500 leading-snug line-clamp-2 pl-3" style={{ fontSize: "10px" }}>{iss.workspaceSummary!.main!.lastAssistantMessage}</p>
                     </div>
                   ))}
                 </div>
               </div>
-            );
-          })()}
+            )}
 
+<<<<<<< HEAD
 >>>>>>> 87bce6d (feat: show last assistant message for active agents in board monitor view)
           {status?.recentActions && status.recentActions.length > 0 ? (
             <div className="px-3 py-2">
@@ -442,6 +461,36 @@ function MonitorPopover({ status, onClose, onOpenWorkspace, columns, onRunNow, a
         </>
 >>>>>>> 693fe5c (feat: move monitor toggle and settings to board view popover)
       )}
+=======
+            {/* Recent actions */}
+            {status?.recentActions && status.recentActions.length > 0 ? (
+              <div className="px-3 py-2">
+                <div className="text-gray-400 font-medium uppercase tracking-wide mb-1.5" style={{ fontSize: "10px" }}>Recent actions</div>
+                <div className="space-y-1">
+                  {status.recentActions.map((a, i) => {
+                    const meta = ACTION_LABELS[a.action];
+                    const issue = columns.flatMap(c => c.issues).find(iss => iss.id === a.issueId);
+                    return (
+                      <div
+                        key={i}
+                        className="flex items-center justify-between gap-2 cursor-pointer hover:bg-gray-50 rounded px-1.5 -mx-1.5 py-0.5"
+                        onClick={() => { onOpenWorkspace(a.workspaceId, a.issueId); onClose(); }}
+                      >
+                        <span className={`${meta.color} font-medium truncate`}>{meta.label}</span>
+                        {issue && <span className="text-gray-500 truncate shrink" style={{ fontSize: "10px" }}>#{issue.issueNumber}</span>}
+                        <span className="text-gray-400 shrink-0">{formatAge(a.at)}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : (
+              <div className="px-3 py-2 text-gray-400">No actions recorded yet</div>
+            )}
+          </>
+        )}
+      </div>
+>>>>>>> 1327c16 (fix: board monitor popover stays within viewport, scrollable content)
     </div>
   );
 }
