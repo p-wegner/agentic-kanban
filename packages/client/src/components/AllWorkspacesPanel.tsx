@@ -575,7 +575,8 @@ export function AllWorkspacesPanel({ columns, onClose, onIssueClick, onRefresh }
                             learning: { label: "Learning", className: "bg-teal-100 text-teal-700" },
                             "auto-start": { label: "Auto-start", className: "bg-gray-100 text-gray-600" },
                           };
-                          const badge = map[main.lastSessionTriggerType] ?? (main.lastSessionTriggerType.startsWith("skill:") ? { label: main.lastSessionTriggerType.slice(6), className: "bg-purple-100 text-purple-700" } : null);
+                          const humanize = (n: string) => n.replace(/[-_]/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+                          const badge = map[main.lastSessionTriggerType] ?? (main.lastSessionTriggerType.startsWith("skill:") ? { label: `✨ ${humanize(main.lastSessionTriggerType.slice(6))}`, className: "bg-purple-100 text-purple-700" } : null);
                           return badge ? <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${badge.className}`}>{badge.label}</span> : null;
                         })()}
 
