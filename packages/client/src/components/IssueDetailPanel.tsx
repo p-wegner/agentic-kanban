@@ -713,7 +713,7 @@ export function IssueDetailPanel({
                         "bg-gray-100 text-gray-500"
                       }`}>
                         {issue.workspaceSummary.main.status === "reviewing" ? "AI Reviewing" :
-                         issue.workspaceSummary.main.status === "fixing" ? "AI Fixing" :
+                         issue.workspaceSummary.main.status === "fixing" ? "AI Fixing Conflicts" :
                          issue.workspaceSummary.main.conflicts?.hasConflicts ? "Merge Conflicts" :
                          issue.workspaceSummary.main.status}
                       </span>
