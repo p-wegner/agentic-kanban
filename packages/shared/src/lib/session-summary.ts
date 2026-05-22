@@ -79,8 +79,11 @@ export function parseSessionSummary(
         for (const block of content) {
           if (block.type === "text") {
             const text = (block.text as string) || "";
-            if (text && keyExcerpts.length < 10) {
-              keyExcerpts.push(text.length > 300 ? text.slice(0, 300) + "..." : text);
+            if (text) {
+              if (keyExcerpts.length < 10) {
+                keyExcerpts.push(text.length > 300 ? text.slice(0, 300) + "..." : text);
+              }
+              agentSummaryParts.push(text);
             }
           } else if (block.type === "tool_use") {
             const toolUseId = (block.id as string) || "";
