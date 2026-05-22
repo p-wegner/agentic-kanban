@@ -15,7 +15,7 @@ import { writeFileSync } from "node:fs";
 import { spawn, spawnSync } from "node:child_process";
 import { resolveProjectRepo, resolveProjectId } from "../repositories/workspace.repository.js";
 import { loadAgentSettings, resolveAgentSettings, MOCK_AGENT_COMMAND } from "../services/agent-settings.service.js";
-import { PREF_MOCK_AGENT, PREF_AGENT_COMMAND, PREF_AGENT_ARGS, PREF_SKIP_PERMISSIONS, PREF_CLAUDE_PROFILE, PREF_LEARNING_STEP_BEFORE_MERGE, PREF_AUTO_START_FOLLOWUP } from "../constants/preference-keys.js";
+import { PREF_LEARNING_STEP_BEFORE_MERGE, PREF_AUTO_START_FOLLOWUP } from "../constants/preference-keys.js";
 
 export function createWorkspaceActionsRoute(
   getSessionManager: () => SessionManager,
@@ -83,17 +83,9 @@ export function createWorkspaceActionsRoute(
     }
 
     try {
-      const prefRows = await database.select().from(preferences);
-      const prefMap = new Map(prefRows.map(r => [r.key, r.value]));
-
-      const agentCommand = prefMap.get("agent_command") || "claude";
-      const skipPerms = prefMap.get("skip_permissions") === "true";
-      const baseArgs = prefMap.get("agent_args") || "";
-      const agentArgs = skipPerms
-        ? (baseArgs ? baseArgs + " --dangerously-skip-permissions" : "--dangerously-skip-permissions")
-        : baseArgs;
-
-      const fullCommand = agentArgs ? `${agentCommand} ${agentArgs}` : agentCommand;
+      const { agentCommand, agentArgs } = await loadAgentSettings(database);
+      const resolvedCommand = agentCommand || "claude";
+      const fullCommand = agentArgs ? `${resolvedCommand} ${agentArgs}` : resolvedCommand;
 
       if (process.platform === "win32") {
         // Write a temp batch file to avoid quoting/escaping issues with nested cmd.exe
