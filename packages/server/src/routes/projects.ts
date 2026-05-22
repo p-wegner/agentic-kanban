@@ -39,6 +39,7 @@ import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:
 =======
 =======
 import { execSync } from "node:child_process";
+<<<<<<< HEAD
 >>>>>>> 4cc53ff (refactor: extract Claude CLI invocation into claude-cli.service.ts)
 import { existsSync, mkdirSync, readdirSync, writeFileSync, rmSync } from "node:fs";
 >>>>>>> 9e9ee57 (fix: add missing fs imports and unify projects_base_path key name)
@@ -107,12 +108,15 @@ import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:
 =======
 import { existsSync, mkdirSync, readdirSync, writeFileSync, rmSync } from "node:fs";
 >>>>>>> f903991 (feat: conditionally show AI Reviewed column and fix stats colors)
+=======
+import { existsSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+>>>>>>> 925a9d6 (refactor: extract setup/teardown script AI generation to project-setup.service)
 import { detectRepoInfo } from "../services/git-info.service.js";
 import { listBranches, listWorktrees, getDiffShortstat, removeWorktree } from "../services/git.service.js";
 import type { Database } from "../db/index.js";
 import { resolve, sep, join } from "node:path";
-import { invokeClaudePrompt } from "../services/claude-cli.service.js";
 import { buildWorkspaceSummaryMap, buildBlockedMap, buildTagMap } from "../services/board-aggregation.service.js";
+import { generateSetupScript, generateTeardownScript } from "../services/project-setup.service.js";
 
 const GITIGNORE_TEMPLATES: Record<string, string> = {
   node: `node_modules/
@@ -195,21 +199,6 @@ const DEFAULT_STATUSES = [
   { name: "Cancelled", sortOrder: 5, isDefault: false },
 ];
 
-const PROJECT_MARKER_FILES = [
-  "package.json", "pnpm-lock.yaml", "yarn.lock", "bun.lockb", "bun.lock",
-  "Cargo.toml", "go.mod", "requirements.txt", "Pipfile", "pyproject.toml",
-  "pom.xml", "build.gradle", "build.gradle.kts", "Gemfile", "mix.exs",
-  "Makefile", "justfile", "Taskfile.yml",
-];
-
-function detectProjectMarkers(repoPath: string): string[] {
-  try {
-    const files = readdirSync(repoPath);
-    return files.filter(f => PROJECT_MARKER_FILES.includes(f));
-  } catch {
-    return [];
-  }
-}
 
 export function createProjectsRoute(database: Database = db) {
   const router = new Hono();
@@ -733,33 +722,11 @@ export function createProjectsRoute(database: Database = db) {
       return c.json({ error: "projectId is required" }, 400);
     }
 
-    const projectRows = await database
-      .select({ repoPath: projects.repoPath, repoName: projects.repoName })
-      .from(projects)
-      .where(eq(projects.id, body.projectId))
-      .limit(1);
-    if (projectRows.length === 0) {
-      return c.json({ error: "Project not found" }, 404);
-    }
-
-    const { repoPath, repoName } = projectRows[0];
-
-    const detected = detectProjectMarkers(repoPath);
-
-    const prompt = `You are analyzing a software project to determine the correct setup command(s) to run after cloning the repository into a fresh git worktree.
-Based on the files detected in the project root, suggest the appropriate setup command(s) for the project "${repoName}".
-
-IMPORTANT: Respond ONLY with the raw shell command(s) to run. No explanation, no markdown, no code fences.
-If multiple commands are needed, chain them with &&.
-Use platform-neutral syntax (e.g., "pnpm install" not "npm i", prefer the package manager indicated by lock files).
-If no setup is needed, respond with an empty string.
-
-Detected files: ${detected.length > 0 ? detected.join(", ") : "none"}`;
-
     let setupScript: string;
     try {
-      setupScript = (await invokeClaudePrompt(prompt, { timeout: 30000, database })).trim();
+      setupScript = await generateSetupScript(body.projectId, database);
     } catch (err: any) {
+      if (err.statusCode === 404) return c.json({ error: "Project not found" }, 404);
       const parts: string[] = [];
       if (err.message) parts.push(err.message);
       if (err.stderr) parts.push(String(err.stderr).trim());
@@ -782,42 +749,11 @@ Detected files: ${detected.length > 0 ? detected.join(", ") : "none"}`;
       return c.json({ error: "projectId is required" }, 400);
     }
 
-    const projectRows = await database
-      .select({ repoPath: projects.repoPath, repoName: projects.repoName, setupScript: projects.setupScript })
-      .from(projects)
-      .where(eq(projects.id, body.projectId))
-      .limit(1);
-    if (projectRows.length === 0) {
-      return c.json({ error: "Project not found" }, 404);
-    }
-
-    const { repoPath, repoName, setupScript } = projectRows[0];
-
-    const detected = detectProjectMarkers(repoPath);
-
-    const contextParts: string[] = [];
-    if (detected.length > 0) contextParts.push(`Detected files: ${detected.join(", ")}`);
-    if (setupScript) contextParts.push(`Current setup script: ${setupScript}`);
-
-    const prompt = `You are analyzing a software project to determine the correct teardown/cleanup command(s) to run before removing a git worktree.
-Based on the project context, suggest appropriate teardown command(s) for the project "${repoName}".
-
-The teardown runs in the worktree directory before the worktree is removed after merging. It should clean up:
-- Background processes/servers started during setup or by the agent (e.g. dev servers, watchers)
-- Large generated directories (e.g. node_modules, build artifacts) to free disk space
-- Any temp files or lock files specific to the worktree
-
-IMPORTANT: Respond ONLY with the raw shell command(s) to run. No explanation, no markdown, no code fences.
-If multiple commands are needed, chain them with &&.
-Use || true for commands that may fail (e.g. "pkill -f dev-server || true").
-If no teardown is needed, respond with an empty string.
-
-${contextParts.join("\n")}`;
-
     let teardownScript: string;
     try {
-      teardownScript = (await invokeClaudePrompt(prompt, { timeout: 30000, database })).trim();
+      teardownScript = await generateTeardownScript(body.projectId, database);
     } catch (err: any) {
+      if (err.statusCode === 404) return c.json({ error: "Project not found" }, 404);
       const parts: string[] = [];
       if (err.message) parts.push(err.message);
       if (err.stderr) parts.push(String(err.stderr).trim());
