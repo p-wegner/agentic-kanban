@@ -56,7 +56,7 @@ export function WorkspaceDiffPanel({ diff, diffComments, workspaceId, onClose, o
           Close
         </button>
       </div>
-      <div className="max-h-[60vh] overflow-y-auto">
+      <div className="max-h-[500px] overflow-y-auto">
       <DiffViewer
         diff={diff.diff}
         stats={diff.stats}
