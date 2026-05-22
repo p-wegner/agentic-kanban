@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { db } from "../db/index.js";
-import { projects, projectStatuses, issues, workspaces, sessions, sessionMessages, diffComments, issueDependencies, preferences, tags, issueTags } from "@agentic-kanban/shared/schema";
+import { projects, projectStatuses, issues, workspaces, issueDependencies, preferences, tags, issueTags } from "@agentic-kanban/shared/schema";
 import { eq, inArray, sql, and } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 <<<<<<< HEAD
@@ -116,6 +116,7 @@ import { listBranches, listWorktrees, getDiffShortstat, removeWorktree } from ".
 import type { Database } from "../db/index.js";
 import { resolve, sep, join } from "node:path";
 import { buildWorkspaceSummaryMap, buildBlockedMap, buildTagMap } from "../services/board-aggregation.service.js";
+import { deleteWorkspaceCascade } from "../repositories/workspace.repository.js";
 import { generateSetupScript, generateTeardownScript } from "../services/project-setup.service.js";
 
 const GITIGNORE_TEMPLATES: Record<string, string> = {
@@ -1010,18 +1011,7 @@ export function createProjectsRoute(database: Database = db) {
       if (ws.workingDir) removedPath = ws.workingDir;
 
       // Cascade delete: diff comments → session messages → sessions → workspace
-      const wsSessions = await database
-        .select({ id: sessions.id })
-        .from(sessions)
-        .where(eq(sessions.workspaceId, ws.id));
-
-      await database.delete(diffComments).where(eq(diffComments.workspaceId, ws.id));
-      if (wsSessions.length > 0) {
-        const sessionIds = wsSessions.map(s => s.id);
-        await database.delete(sessionMessages).where(inArray(sessionMessages.sessionId, sessionIds));
-      }
-      await database.delete(sessions).where(eq(sessions.workspaceId, ws.id));
-      await database.delete(workspaces).where(eq(workspaces.id, ws.id));
+      await deleteWorkspaceCascade(ws.id, database);
     }
 
     // Remove git worktree

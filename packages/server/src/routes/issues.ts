@@ -8,6 +8,7 @@ import type { Database } from "../db/index.js";
 import type { BoardEvents } from "../services/board-events.js";
 import { parseSessionSummary, formatDurationStr } from "../services/session-summary.js";
 import { analyzeDependencies, enhanceIssue } from "../services/issue-ai.service.js";
+import { deleteWorkspaceCascade } from "../repositories/workspace.repository.js";
 
 export function createIssuesRoute(database: Database = db, options?: { boardEvents?: BoardEvents }) {
   const router = new Hono();
@@ -318,13 +319,7 @@ export function createIssuesRoute(database: Database = db, options?: { boardEven
 
     // Cascade delete each workspace's diff comments, session messages, sessions
     for (const ws of wsRows) {
-      const wsSessions = await database.select({ id: sessions.id }).from(sessions).where(eq(sessions.workspaceId, ws.id));
-      await database.delete(diffComments).where(eq(diffComments.workspaceId, ws.id));
-      if (wsSessions.length > 0) {
-        await database.delete(sessionMessages).where(inArray(sessionMessages.sessionId, wsSessions.map(s => s.id)));
-      }
-      await database.delete(sessions).where(eq(sessions.workspaceId, ws.id));
-      await database.delete(workspaces).where(eq(workspaces.id, ws.id));
+      await deleteWorkspaceCascade(ws.id, database);
     }
 
     // Delete issue tags and the issue itself
