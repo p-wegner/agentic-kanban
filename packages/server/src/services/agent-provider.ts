@@ -78,6 +78,12 @@ export interface ParsedStreamEvent {
   };
   /** Set on TodoWrite or equivalent task-tracking events. */
   todos?: Array<{ subject: string; status: string }>;
+  /** Set on rate_limit_event events. */
+  rateLimitInfo?: {
+    status: string;
+    rateLimitType: string;
+    resetsAt?: number;
+  };
 }
 
 export interface AgentProvider {
@@ -279,6 +285,16 @@ export class ClaudeProvider implements AgentProvider {
       }
     }
 
+    // Rate limit event
+    if (obj.type === "rate_limit_event" && obj.rate_limit_info) {
+      const rli = obj.rate_limit_info as Record<string, unknown>;
+      result.rateLimitInfo = {
+        status: (rli.status as string) ?? "",
+        rateLimitType: (rli.rateLimitType as string) ?? "",
+        resetsAt: rli.resetsAt as number | undefined,
+      };
+    }
+
     // Return undefined if nothing was extracted
     if (
       result.providerSessionId === undefined &&
@@ -287,7 +303,8 @@ export class ClaudeProvider implements AgentProvider {
       result.liveStats === undefined &&
       result.toolActivity === undefined &&
       result.toolResult === undefined &&
-      result.todos === undefined
+      result.todos === undefined &&
+      result.rateLimitInfo === undefined
     ) {
       return undefined;
     }
