@@ -7,8 +7,7 @@ import { randomUUID } from "node:crypto";
 import type { Database } from "../db/index.js";
 import type { BoardEvents } from "../services/board-events.js";
 import { parseSessionSummary, formatDurationStr } from "../services/session-summary.js";
-import { invokeClaudePrompt } from "../services/claude-cli.service.js";
-import { analyzeDependencies } from "../services/issue-ai.service.js";
+import { analyzeDependencies, enhanceIssue } from "../services/issue-ai.service.js";
 
 export function createIssuesRoute(database: Database = db, options?: { boardEvents?: BoardEvents }) {
   const router = new Hono();
@@ -62,39 +61,20 @@ export function createIssuesRoute(database: Database = db, options?: { boardEven
       return c.json({ error: "title is required" }, 400);
     }
 
-    const prompt = `You are helping enhance a kanban issue ticket for an AI coding agent.
-Given a title and optional description, return an improved version that is clear, actionable, and well-structured.
-Keep the title concise (under 80 chars). Expand the description with context, acceptance criteria, and agent instructions if helpful.
-Respond ONLY with valid JSON — no markdown, no explanation:
-{"title": "...", "description": "..."}
-
-Current title: ${body.title}
-Current description: ${body.description?.trim() || "(none)"}`;
-
-    let stdout: string;
     try {
-      stdout = await invokeClaudePrompt(prompt, { database });
+      const result = await enhanceIssue(body.title, body.description, database);
+      return c.json(result);
     } catch (err: any) {
+      if (err.message?.includes("JSON") || err instanceof SyntaxError) {
+        console.error("[enhance] failed to parse claude output:", err.message);
+        return c.json({ error: "Failed to parse AI response" }, 500);
+      }
       const parts: string[] = [];
       if (err.message) parts.push(err.message);
       if (err.stderr) parts.push(String(err.stderr).trim());
       const msg = parts.length > 0 ? parts.join(" | ") : "claude CLI failed";
       console.error("[enhance] claude error:", msg);
       return c.json({ error: "AI enhancement failed", detail: msg }, 500);
-    }
-
-    const output = stdout.trim();
-    // Strip markdown code fences if present
-    const cleaned = output.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
-    try {
-      const enhanced = JSON.parse(cleaned) as { title?: string; description?: string };
-      return c.json({
-        title: enhanced.title?.trim() || body.title,
-        description: enhanced.description?.trim() ?? body.description ?? "",
-      });
-    } catch {
-      console.error("[enhance] failed to parse claude output:", output);
-      return c.json({ error: "Failed to parse AI response", raw: output }, 500);
     }
   });
 
