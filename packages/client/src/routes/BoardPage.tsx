@@ -379,6 +379,34 @@ export function BoardPage() {
       `/api/projects/${pid}/board`,
     );
     setColumns(board);
+    // Clear stale live data for issues whose agent is no longer running
+    const inactiveIssueIds = new Set<string>();
+    for (const col of board) {
+      for (const issue of col.issues) {
+        const ws = issue.workspaceSummary?.main;
+        if (!ws || (ws.status !== "active" && ws.status !== "fixing")) {
+          inactiveIssueIds.add(issue.id);
+        }
+      }
+    }
+    if (inactiveIssueIds.size > 0) {
+      setLiveStats((prev) => {
+        const next = { ...prev };
+        let changed = false;
+        for (const id of inactiveIssueIds) {
+          if (id in next) { delete next[id]; changed = true; }
+        }
+        return changed ? next : prev;
+      });
+      setSessionActivityRaw((prev) => {
+        const next = { ...prev };
+        let changed = false;
+        for (const id of inactiveIssueIds) {
+          if (id in next) { delete next[id]; changed = true; }
+        }
+        return changed ? next : prev;
+      });
+    }
     return board;
   }, [activeProjectId]);
 
