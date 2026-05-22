@@ -8,7 +8,7 @@ import type { Database } from "../db/index.js";
 import type { BoardEvents } from "../services/board-events.js";
 import { parseSessionSummary, formatDurationStr } from "../services/session-summary.js";
 import { analyzeDependencies, enhanceIssue } from "../services/issue-ai.service.js";
-import { wouldCreateCycle } from "../services/board-aggregation.service.js";
+import { wouldCreateCycle, enrichWorkspacesWithSessionData } from "../services/board-aggregation.service.js";
 import { deleteWorkspaceCascade } from "../repositories/workspace.repository.js";
 
 export function createIssuesRoute(database: Database = db, options?: { boardEvents?: BoardEvents }) {
@@ -363,61 +363,7 @@ export function createIssuesRoute(database: Database = db, options?: { boardEven
       .where(eq(workspaces.issueId, issueId));
 
     const wsIds = wsRows.map(w => w.id);
-    const contextTokensMap = new Map<string, number>();
-    const lastToolMap = new Map<string, string>();
-
-    if (wsIds.length > 0) {
-      const sessRows = await database
-        .select({ id: sessions.id, workspaceId: sessions.workspaceId, stats: sessions.stats })
-        .from(sessions)
-        .where(inArray(sessions.workspaceId, wsIds))
-        .orderBy(sessions.startedAt);
-
-      const latestByWs = new Map<string, { id: string; stats: string | null }>();
-      for (const s of sessRows) {
-        latestByWs.set(s.workspaceId, { id: s.id, stats: s.stats });
-      }
-
-      const sessIds = [...latestByWs.values()].map(s => s.id);
-
-      for (const [wsId, sess] of latestByWs) {
-        if (sess.stats) {
-          try {
-            const p = JSON.parse(sess.stats) as Record<string, unknown>;
-            const tokens = ((p.inputTokens as number) ?? 0) + ((p.cacheReadTokens as number) ?? 0);
-            if (tokens) contextTokensMap.set(wsId, tokens);
-          } catch { /* ignore */ }
-        }
-      }
-
-      if (sessIds.length > 0) {
-        const msgRows = await database
-          .select({ sessionId: sessionMessages.sessionId, data: sessionMessages.data })
-          .from(sessionMessages)
-          .where(inArray(sessionMessages.sessionId, sessIds))
-          .orderBy(desc(sessionMessages.id));
-
-        const sessionToWs = new Map<string, string>();
-        for (const [wsId, sess] of latestByWs) sessionToWs.set(sess.id, wsId);
-
-        for (const msg of msgRows) {
-          const wsId = sessionToWs.get(msg.sessionId);
-          if (!wsId || lastToolMap.has(wsId) || !msg.data) continue;
-          try {
-            const obj = JSON.parse(msg.data) as Record<string, unknown>;
-            if (obj.type === "assistant") {
-              const content = (obj.message as { content?: unknown[] })?.content ?? [];
-              for (const block of content as { type: string; name?: string }[]) {
-                if (block.type === "tool_use" && block.name) {
-                  lastToolMap.set(wsId, block.name);
-                  break;
-                }
-              }
-            }
-          } catch { /* ignore */ }
-        }
-      }
-    }
+    const { contextTokensMap, lastToolMap } = await enrichWorkspacesWithSessionData(wsIds, database);
 
     const result = wsRows.map(w => ({
       ...w,
