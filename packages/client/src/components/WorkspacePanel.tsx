@@ -1292,11 +1292,12 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                           {ws.isDirect ? "Close" : "Merge"}
                         </button>
                         )}
-                        <span className="border-l border-gray-300 self-stretch" />
+                        <span className="w-px bg-gray-300 self-stretch mx-2" aria-hidden="true" />
                         <button
                           onClick={() => handleDeleteWorkspace(ws.id)}
                           disabled={actionLoading}
-                          className="text-sm text-red-600 px-3 py-1.5 rounded hover:bg-red-50 disabled:opacity-50 border border-red-300"
+                          className="text-sm text-red-600 px-3 py-1.5 rounded hover:bg-red-50 disabled:opacity-50 border border-red-300 font-medium"
+                          title="Delete this workspace permanently"
                         >
                           Delete
                         </button>
