@@ -77,6 +77,7 @@ export function IssueDetailPanel({
   const [editing, setEditing] = useState(false);
   const [descriptionMode, setDescriptionMode] = useState<"edit" | "preview">("edit");
   const [panelMode, setPanelMode] = useState<"sidebar" | "modal" | "fullscreen">("sidebar");
+  const [sidebarSide, setSidebarSide] = useState<"left" | "right">("right");
   const [dragPos, setDragPos] = useState<{ x: number; y: number } | null>(null);
   const dragStartRef = useRef<{ mouseX: number; mouseY: number; panelX: number; panelY: number } | null>(null);
   const [title, setTitle] = useState(issue.title);
@@ -317,7 +318,10 @@ export function IssueDetailPanel({
 
     // If starting drag from sidebar, immediately switch to modal mode
     if (currentDragMode === "sidebar") {
-      const modalX = Math.max(0, dragStartRef.current.panelX - 200);
+      const isLeftSidebar = sidebarSide === "left";
+      const modalX = isLeftSidebar
+        ? Math.min(window.innerWidth - 820, 200)
+        : Math.max(0, dragStartRef.current.panelX - 200);
       const modalY = Math.max(0, dragStartRef.current.panelY + 40);
       currentDragMode = "modal";
       setPanelMode("modal");
@@ -332,12 +336,22 @@ export function IssueDetailPanel({
       const newX = dragStartRef.current.panelX + dx;
       const newY = dragStartRef.current.panelY + dy;
       if (currentDragMode === "modal") {
-        // Snap to sidebar when dragged close to the right edge
         const panelRect = panel.getBoundingClientRect();
         const nearRightEdge = newX + panelRect.width >= window.innerWidth - EDGE_SNAP_THRESHOLD;
+        const nearLeftEdge = newX <= EDGE_SNAP_THRESHOLD;
         if (nearRightEdge) {
           currentDragMode = "sidebar";
           setPanelMode("sidebar");
+          setSidebarSide("right");
+          setDragPos(null);
+          dragStartRef.current = null;
+          cleanup?.();
+          return;
+        }
+        if (nearLeftEdge) {
+          currentDragMode = "sidebar";
+          setPanelMode("sidebar");
+          setSidebarSide("left");
           setDragPos(null);
           dragStartRef.current = null;
           cleanup?.();
@@ -382,6 +396,8 @@ export function IssueDetailPanel({
             ? "inset-0"
             : panelMode === "modal"
             ? "top-[5vh] left-1/2 -translate-x-1/2 w-[min(800px,96vw)] h-[90vh] rounded-lg border border-gray-200"
+            : sidebarSide === "left"
+            ? "left-0 top-0 h-full border-r border-gray-200 w-[min(384px,100vw)]"
             : "right-0 top-0 h-full border-l border-gray-200 w-[min(384px,100vw)]"
         }`}
         style={
@@ -408,7 +424,10 @@ export function IssueDetailPanel({
           <div className="flex items-center gap-1">
             <button
               onClick={() => {
-                setPanelMode((m) => m === "sidebar" ? "modal" : m === "modal" ? "fullscreen" : "sidebar");
+                setPanelMode((m) => {
+                  if (m === "fullscreen") setSidebarSide("right");
+                  return m === "sidebar" ? "modal" : m === "modal" ? "fullscreen" : "sidebar";
+                });
                 setDragPos(null);
               }}
               title={panelMode === "sidebar" ? "Expand to modal" : panelMode === "modal" ? "Expand to fullscreen" : "Collapse to sidebar"}
