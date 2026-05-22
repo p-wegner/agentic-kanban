@@ -83,12 +83,30 @@ export function BoardStats({
     }
   }, [total, prevTotal]);
 
+  const circumference = 2 * Math.PI * 14;
+  const dashOffset = circumference * (1 - completionPct / 100);
+
   return (
     <div data-testid="board-stats-bar" className="flex flex-col gap-2 w-full select-none">
       {/* Summary row */}
       <div className="flex items-center gap-2 flex-wrap">
-        {/* Total tickets pill */}
-        <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-gray-100 border border-gray-200">
+        {/* Completion ring + total */}
+        <div className="flex items-center gap-2 px-2.5 py-1 rounded-full bg-gray-100 border border-gray-200">
+          {total > 0 && (
+            <svg width="20" height="20" viewBox="0 0 32 32" className="shrink-0 -rotate-90">
+              <circle cx="16" cy="16" r="14" fill="none" stroke="#e5e7eb" strokeWidth="4" />
+              <circle
+                cx="16" cy="16" r="14"
+                fill="none"
+                stroke="#34d399"
+                strokeWidth="4"
+                strokeDasharray={circumference}
+                strokeDashoffset={dashOffset}
+                strokeLinecap="round"
+                style={{ transition: "stroke-dashoffset 0.5s ease" }}
+              />
+            </svg>
+          )}
           <span
             key={popKey}
             className={`inline-flex items-center justify-center min-w-[18px] h-4 px-1 rounded-full text-[10px] font-bold text-white ${
@@ -100,16 +118,18 @@ export function BoardStats({
           <span className="text-xs font-medium text-gray-600">
             {isFiltered ? "filtered" : "tickets"}
           </span>
+          {total > 0 && (
+            <span className="text-xs font-semibold text-emerald-600">{completionPct}%</span>
+          )}
         </div>
 
-        {/* Completion badge */}
-        {total > 0 && (
+        {/* Done count badge */}
+        {doneCount > 0 && (
           <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-50 border border-emerald-200">
             <svg className="w-3 h-3 text-emerald-500" fill="none" viewBox="0 0 12 12" stroke="currentColor" strokeWidth={2}>
               <polyline points="2,6 5,9 10,3" />
             </svg>
-            <span className="text-xs font-semibold text-emerald-700">{completionPct}%</span>
-            <span className="text-xs text-emerald-600">{doneCount} done</span>
+            <span className="text-xs font-semibold text-emerald-700">{doneCount} done</span>
           </div>
         )}
 
@@ -163,10 +183,10 @@ export function BoardStats({
         )}
       </div>
 
-      {/* Segmented progress bar */}
+      {/* Segmented progress bar + status legend */}
       {total > 0 && (
         <div className="flex items-center gap-3">
-          <div className="flex h-2 rounded-full overflow-hidden gap-px flex-1 bg-gray-100">
+          <div className="flex h-3 rounded-full overflow-hidden gap-px flex-1 bg-gray-100 shadow-inner">
             {allColumns.map((col) => {
               if (col.issues.length === 0) return null;
               const pct = (col.issues.length / total) * 100;
@@ -174,23 +194,27 @@ export function BoardStats({
               return (
                 <div
                   key={col.id}
-                  className={`${cfg.bar} transition-all duration-300`}
+                  className={`${cfg.bar} transition-all duration-300 relative group`}
                   style={{ width: `${pct}%` }}
-                  title={`${col.name}: ${col.issues.length}`}
+                  title={`${col.name}: ${col.issues.length} (${Math.round(pct)}%)`}
                 />
               );
             })}
           </div>
-          {/* Legend dots */}
-          <div className="flex items-center gap-2 flex-wrap shrink-0">
+          {/* Status legend pills */}
+          <div className="flex items-center gap-1.5 flex-wrap shrink-0">
             {allColumns.map((col) => {
               const cfg = getConfig(col.name);
               const isActive = col.issues.length > 0;
+              if (!isActive) return null;
               return (
-                <div key={col.id} className="flex items-center gap-1">
-                  <span className={`w-1.5 h-1.5 rounded-full transition-colors ${isActive ? cfg.bar : cfg.dot}`} />
-                  <span className={`text-[11px] hidden sm:inline ${isActive ? cfg.text : "text-gray-300"}`}>{col.name}</span>
-                  <span className={`text-[11px] font-semibold ${isActive ? cfg.text : "text-gray-300"}`}>{col.issues.length}</span>
+                <div
+                  key={col.id}
+                  className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-medium ${cfg.text} ${cfg.bg} border border-gray-200`}
+                >
+                  <span className={`w-1.5 h-1.5 rounded-full ${cfg.bar} shrink-0`} />
+                  <span className="hidden sm:inline">{col.name}</span>
+                  <span className="font-bold">{col.issues.length}</span>
                 </div>
               );
             })}
