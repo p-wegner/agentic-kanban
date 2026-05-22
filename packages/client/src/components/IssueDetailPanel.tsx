@@ -315,27 +315,27 @@ export function IssueDetailPanel({
     let currentDragMode: "sidebar" | "modal" | "fullscreen" = panelMode;
     let cleanup: (() => void) | null = null;
 
+    // If starting drag from sidebar, immediately switch to modal mode
+    if (currentDragMode === "sidebar") {
+      const modalX = Math.max(0, dragStartRef.current.panelX - 200);
+      const modalY = Math.max(0, dragStartRef.current.panelY + 40);
+      currentDragMode = "modal";
+      setPanelMode("modal");
+      setDragPos({ x: modalX, y: modalY });
+      dragStartRef.current = { ...dragStartRef.current, panelX: modalX, panelY: modalY };
+    }
+
     const onMove = (ev: MouseEvent) => {
       if (!dragStartRef.current) return;
       const dx = ev.clientX - dragStartRef.current.mouseX;
       const dy = ev.clientY - dragStartRef.current.mouseY;
       const newX = dragStartRef.current.panelX + dx;
       const newY = dragStartRef.current.panelY + dy;
-      if (currentDragMode === "sidebar") {
-        // Switch to modal as soon as it's dragged away from the right edge
-        if (dx < -20) {
-          currentDragMode = "modal";
-          setPanelMode("modal");
-          setDragPos({ x: newX, y: newY });
-        }
-      } else if (currentDragMode === "modal") {
-        // Snap to sidebar when dragged close to any screen edge
+      if (currentDragMode === "modal") {
+        // Snap to sidebar when dragged close to the right edge
         const panelRect = panel.getBoundingClientRect();
         const nearRightEdge = newX + panelRect.width >= window.innerWidth - EDGE_SNAP_THRESHOLD;
-        const nearLeftEdge = newX <= EDGE_SNAP_THRESHOLD;
-        const nearTopEdge = newY <= EDGE_SNAP_THRESHOLD;
-        const nearBottomEdge = newY + panelRect.height >= window.innerHeight - EDGE_SNAP_THRESHOLD;
-        if (nearRightEdge || nearLeftEdge || nearTopEdge || nearBottomEdge) {
+        if (nearRightEdge) {
           currentDragMode = "sidebar";
           setPanelMode("sidebar");
           setDragPos(null);
