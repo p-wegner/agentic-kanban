@@ -309,14 +309,46 @@ export function IssueDetailPanel({
     if (!panel) return;
     const rect = panel.getBoundingClientRect();
     dragStartRef.current = { mouseX: e.clientX, mouseY: e.clientY, panelX: rect.left, panelY: rect.top };
+
+    const EDGE_SNAP_THRESHOLD = 80; // px from right edge to snap back to sidebar
+    // Track current drag mode via ref to avoid stale closure issues
+    let currentDragMode: "sidebar" | "modal" | "fullscreen" = panelMode;
+    let cleanup: (() => void) | null = null;
+
     const onMove = (ev: MouseEvent) => {
       if (!dragStartRef.current) return;
       const dx = ev.clientX - dragStartRef.current.mouseX;
       const dy = ev.clientY - dragStartRef.current.mouseY;
-      setDragPos({ x: dragStartRef.current.panelX + dx, y: dragStartRef.current.panelY + dy });
+      const newX = dragStartRef.current.panelX + dx;
+      const newY = dragStartRef.current.panelY + dy;
+      console.log("[drag]", currentDragMode, dx, dy);
+
+      if (currentDragMode === "sidebar") {
+        // Switch to modal as soon as it's dragged away from the right edge
+        if (dx < -20) {
+          currentDragMode = "modal";
+          setPanelMode("modal");
+          setDragPos({ x: newX, y: newY });
+        }
+      } else if (currentDragMode === "modal") {
+        // Snap back to sidebar when dragged close to the right edge
+        const panelWidth = panel.getBoundingClientRect().width;
+        if (newX + panelWidth >= window.innerWidth - EDGE_SNAP_THRESHOLD) {
+          currentDragMode = "sidebar";
+          setPanelMode("sidebar");
+          setDragPos(null);
+          dragStartRef.current = null;
+          cleanup?.();
+          return;
+        }
+        setDragPos({ x: newX, y: newY });
+      }
     };
     const onUp = () => {
       dragStartRef.current = null;
+      cleanup?.();
+    };
+    cleanup = () => {
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
     };
@@ -350,11 +382,17 @@ export function IssueDetailPanel({
             ? "top-[5vh] left-1/2 -translate-x-1/2 w-[min(800px,96vw)] h-[90vh] rounded-lg border border-gray-200"
             : "right-0 top-0 h-full border-l border-gray-200 w-[min(384px,100vw)]"
         }`}
-        style={panelMode === "sidebar" && dragPos ? { right: "auto", left: dragPos.x, top: dragPos.y, height: "min(90vh, 100vh)" } : undefined}
+        style={
+          dragPos && panelMode === "modal"
+            ? { position: "fixed", left: dragPos.x, top: dragPos.y, transform: "none" }
+            : panelMode === "sidebar" && dragPos
+            ? { right: "auto", left: dragPos.x, top: dragPos.y, height: "min(90vh, 100vh)" }
+            : undefined
+        }
       >
         <div
-          className={`flex items-center justify-between px-4 py-3 border-b border-gray-200 ${panelMode === "sidebar" ? "cursor-grab active:cursor-grabbing" : ""} ${panelMode === "modal" ? "rounded-t-lg" : ""}`}
-          onMouseDown={panelMode === "sidebar" ? handleHeaderMouseDown : undefined}
+          className={`flex items-center justify-between px-4 py-3 border-b border-gray-200 ${panelMode === "sidebar" || panelMode === "modal" ? "cursor-grab active:cursor-grabbing" : ""} ${panelMode === "modal" ? "rounded-t-lg" : ""}`}
+          onMouseDown={panelMode === "sidebar" || panelMode === "modal" ? handleHeaderMouseDown : undefined}
         >
           <h2 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
             {issue.issueNumber != null && (
@@ -657,16 +695,22 @@ export function IssueDetailPanel({
                     <div className="flex items-center gap-2 w-full">
                       <span className={`inline-block w-2 h-2 rounded-full shrink-0 ${
                         issue.workspaceSummary.main.status === "active" ? "bg-green-500" :
+                        issue.workspaceSummary.main.status === "reviewing" ? "bg-purple-500 animate-pulse" :
+                        issue.workspaceSummary.main.status === "fixing" ? "bg-orange-500 animate-pulse" :
                         issue.workspaceSummary.main.status === "idle" ? "bg-amber-500" :
                         "bg-gray-400"
                       }`} />
                       <span className="text-sm font-mono text-gray-700 truncate">{issue.workspaceSummary.main.branch}</span>
                       <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded shrink-0 ${
                         issue.workspaceSummary.main.status === "active" ? "bg-green-100 text-green-700" :
+                        issue.workspaceSummary.main.status === "reviewing" ? "bg-purple-100 text-purple-700" :
+                        issue.workspaceSummary.main.status === "fixing" ? "bg-orange-100 text-orange-700" :
                         issue.workspaceSummary.main.status === "idle" ? "bg-amber-100 text-amber-700" :
                         "bg-gray-100 text-gray-500"
                       }`}>
-                        {issue.workspaceSummary.main.status}
+                        {issue.workspaceSummary.main.status === "reviewing" ? "AI Reviewing" :
+                         issue.workspaceSummary.main.status === "fixing" ? "Fixing Conflicts" :
+                         issue.workspaceSummary.main.status}
                       </span>
                       {issue.workspaceSummary.main.conflicts?.hasConflicts && (
                         <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-red-100 text-red-700 text-[10px] font-medium shrink-0">
@@ -677,7 +721,7 @@ export function IssueDetailPanel({
                         <span className="text-xs text-gray-400 ml-auto">+{issue.workspaceSummary!.total - 1}</span>
                       )}
                     </div>
-                    {(issue.workspaceSummary.main.contextTokens || issue.workspaceSummary.main.lastTool) && (
+                    {(issue.workspaceSummary.main.status === "active" || issue.workspaceSummary.main.status === "fixing") && (issue.workspaceSummary.main.contextTokens || issue.workspaceSummary.main.lastTool) && (
                       <div className="flex items-center gap-2 pl-4">
                         {issue.workspaceSummary.main.contextTokens ? (
                           <span className="text-[10px] text-gray-400">
