@@ -776,6 +776,13 @@ export function BoardPage() {
       if (Object.keys(sessions).length === 0) {
         const next = { ...prev };
         delete next[issueId];
+        // Also clear liveStats since the agent has finished its turn
+        setLiveStats((prev) => {
+          if (!(issueId in prev)) return prev;
+          const next = { ...prev };
+          delete next[issueId];
+          return next;
+        });
         return next;
       }
       return { ...prev, [issueId]: sessions };
