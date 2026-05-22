@@ -25,7 +25,10 @@ function getLastSessionBadge(triggerType: string | null | undefined): { label: s
     "auto-start": { label: "Auto-start", className: "bg-gray-100 text-gray-600" },
   };
   if (map[triggerType]) return map[triggerType];
-  if (triggerType.startsWith("skill:")) return { label: triggerType.slice(6), className: "bg-purple-100 text-purple-700" };
+  if (triggerType.startsWith("skill:")) {
+    const name = triggerType.slice(6).replace(/[-_]/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+    return { label: `✨ ${name}`, className: "bg-purple-100 text-purple-700" };
+  }
   return null;
 }
 
