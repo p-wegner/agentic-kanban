@@ -228,13 +228,13 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
           )}
         </div>
       )}
-      {ws?.main?.status === "active" && liveActivity && liveActivity !== "Delegating to agent" && (
+      {(ws?.main?.status === "active" || ws?.main?.status === "fixing") && liveActivity && liveActivity !== "Delegating to agent" && (
         <div className="flex items-center gap-1.5 mt-1 text-xs text-gray-400 px-1">
-          <span className="inline-block w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse shrink-0" />
+          <span className={`inline-block w-1.5 h-1.5 rounded-full animate-pulse shrink-0 ${ws.main.status === "fixing" ? "bg-orange-400" : "bg-green-400"}`} />
           <span className="truncate">{liveActivity}</span>
         </div>
       )}
-      {ws?.main?.status === "active" && liveStats && (
+      {(ws?.main?.status === "active" || ws?.main?.status === "fixing") && liveStats && (
         <div className="flex items-center gap-2 mt-0.5 text-[10px] text-gray-400 px-1">
           {liveStats.model && <span className="font-mono">{liveStats.model}</span>}
           {liveStats.contextTokens > 0 && (
