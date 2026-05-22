@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Layout } from "../components/Layout.js";
 import { GraphView } from "../components/GraphView.js";
 import { TableView } from "../components/TableView.js";
@@ -188,19 +189,20 @@ function MonitorPopover({ status, onClose, onOpenWorkspace, columns, onRunNow, a
       const margin = 8;
       const spaceBelow = window.innerHeight - rect.bottom - margin;
       const spaceAbove = rect.top - margin;
-      const maxContentHeight = 520;
+      const maxContentHeight = Math.min(window.innerHeight * 0.8, 560);
       const above = spaceBelow < Math.min(maxContentHeight, 300) && spaceAbove > spaceBelow;
       const maxHeight = above ? Math.min(spaceAbove - margin, maxContentHeight) : Math.min(spaceBelow - margin, maxContentHeight);
-      // Align right edge of popover to right edge of anchor, clamped so left edge stays on-screen
+      // Align right edge of popover to right edge of anchor, clamped so both edges stay on-screen
       let left = rect.right - popoverWidth;
       left = Math.max(margin, Math.min(left, window.innerWidth - popoverWidth - margin));
       const top = above ? rect.top - maxHeight - margin : rect.bottom + margin;
       setPos({ top, left, maxHeight, above });
     }
-    reposition();
+    // Defer first position calculation to after paint so getBoundingClientRect is accurate
+    const raf = requestAnimationFrame(reposition);
     window.addEventListener("resize", reposition);
     window.addEventListener("scroll", reposition, true);
-    return () => { window.removeEventListener("resize", reposition); window.removeEventListener("scroll", reposition, true); };
+    return () => { cancelAnimationFrame(raf); window.removeEventListener("resize", reposition); window.removeEventListener("scroll", reposition, true); };
   }, [anchorRef]);
 
   useEffect(() => {
@@ -236,7 +238,7 @@ function MonitorPopover({ status, onClose, onOpenWorkspace, columns, onRunNow, a
     iss.workspaceSummary.main.lastAssistantMessage
   );
 
-  return (
+  return createPortal(
     <div
       ref={popoverRef}
       id="monitor-popover"
@@ -522,8 +524,13 @@ function MonitorPopover({ status, onClose, onOpenWorkspace, columns, onRunNow, a
           </>
         )}
       </div>
+<<<<<<< HEAD
 >>>>>>> 1327c16 (fix: board monitor popover stays within viewport, scrollable content)
     </div>
+=======
+    </div>,
+    document.body
+>>>>>>> 9218c26 (fix: render MonitorPopover via portal to escape overflow-hidden clipping)
   );
 }
 
