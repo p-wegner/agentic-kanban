@@ -3,6 +3,29 @@ import { eq, inArray } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 
+type Workspace = typeof workspaces.$inferSelect;
+
+export async function getWorkspaceById(
+  workspaceId: string,
+  database: Database = db,
+): Promise<Workspace | null> {
+  const rows = await database.select().from(workspaces).where(eq(workspaces.id, workspaceId)).limit(1);
+  return rows[0] ?? null;
+}
+
+export async function updateWorkspaceStatus(
+  workspaceId: string,
+  status: string,
+  extra: Partial<Omit<Workspace, "id" | "status">> = {},
+  database: Database = db,
+): Promise<void> {
+  const now = new Date().toISOString();
+  await database
+    .update(workspaces)
+    .set({ status, updatedAt: now, ...extra } as Partial<Workspace>)
+    .where(eq(workspaces.id, workspaceId));
+}
+
 export async function resolveProjectRepo(
   workspaceId: string,
   database: Database = db,
