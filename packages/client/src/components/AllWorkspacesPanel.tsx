@@ -213,7 +213,7 @@ export function AllWorkspacesPanel({ columns, onClose, onIssueClick, onRefresh }
 
                         {/* Workspace status */}
                         <span
-                          className={`text-xs px-1.5 py-0.5 rounded ${main.conflicts?.hasConflicts && main.status !== "fixing" ? "bg-red-100 text-red-700" : WS_STATUS_COLORS[main.status] ?? "bg-gray-100 text-gray-600"}`}
+                          className={`text-xs px-1.5 py-0.5 rounded ${main.conflicts?.hasConflicts && main.status !== "fixing" ? "bg-red-100 text-red-700" : main.status === "closed" && main.lastSessionTriggerType === "fix-conflicts" ? "bg-orange-100 text-orange-700" : WS_STATUS_COLORS[main.status] ?? "bg-gray-100 text-gray-600"}`}
                         >
                           {main.status === "reviewing" ? "AI Reviewing" : main.status === "fixing" ? "AI Fixing Conflicts" : main.conflicts?.hasConflicts ? "Merge Conflicts" : main.status === "closed" && main.lastSessionTriggerType === "fix-conflicts" ? "merged conflicts" : main.status}
                         </span>

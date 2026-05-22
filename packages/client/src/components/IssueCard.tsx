@@ -208,7 +208,7 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
           )}
           {ws.main.status === "closed" && (
             ws.main.lastSessionTriggerType === "fix-conflicts" ? (
-              <span className="text-orange-600 font-medium shrink-0">merged conflicts</span>
+              <span className="inline-flex items-center gap-1 font-medium shrink-0 text-orange-700"><span className="inline-block w-2 h-2 rounded-full shrink-0 bg-orange-400" />merged conflicts</span>
             ) : (
               <span className="text-green-600 font-medium shrink-0">merged</span>
             )

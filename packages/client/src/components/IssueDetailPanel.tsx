@@ -729,6 +729,7 @@ export function IssueDetailPanel({
                         issue.workspaceSummary.main.status === "fixing" ? "bg-orange-100 text-orange-700" :
                         issue.workspaceSummary.main.conflicts?.hasConflicts ? "bg-red-100 text-red-700" :
                         issue.workspaceSummary.main.status === "idle" ? "bg-amber-100 text-amber-700" :
+                        issue.workspaceSummary.main.status === "closed" && issue.workspaceSummary.main.lastSessionTriggerType === "fix-conflicts" ? "bg-orange-100 text-orange-700" :
                         "bg-gray-100 text-gray-500"
                       }`}>
                         {issue.workspaceSummary.main.status === "reviewing" ? "AI Reviewing" :
