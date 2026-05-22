@@ -17,6 +17,7 @@ import { resolveProjectRepo, resolveProjectId } from "../repositories/workspace.
 import { loadAgentSettings, resolveAgentSettings } from "../services/agent-settings.service.js";
 import { PREF_LEARNING_STEP_BEFORE_MERGE, PREF_AUTO_START_FOLLOWUP } from "../constants/preference-keys.js";
 import { autoStartFollowups } from "../services/followup-workspace.service.js";
+import { parseDiffStats } from "../services/board-aggregation.service.js";
 
 export function createWorkspaceActionsRoute(
   getSessionManager: () => SessionManager,
@@ -798,24 +799,4 @@ Base branch: ${baseBranch}`;
   });
 
   return router;
-}
-
-
-/** Parse basic stats from unified diff output. */
-function parseDiffStats(diff: string): { filesChanged: number; insertions: number; deletions: number } {
-  let filesChanged = 0;
-  let insertions = 0;
-  let deletions = 0;
-
-  for (const line of diff.split("\n")) {
-    if (line.startsWith("+++ ") && !line.startsWith("+++ /dev/null")) {
-      filesChanged++;
-    } else if (line.startsWith("+") && !line.startsWith("+++")) {
-      insertions++;
-    } else if (line.startsWith("-") && !line.startsWith("---")) {
-      deletions++;
-    }
-  }
-
-  return { filesChanged, insertions, deletions };
 }
