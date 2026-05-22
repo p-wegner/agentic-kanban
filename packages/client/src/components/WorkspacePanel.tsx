@@ -900,7 +900,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
 
                 {isSelected && (
                   <div className="space-y-2 pt-2 border-t border-gray-200" onClick={(e) => e.stopPropagation()}>
-                    {completedSessions.length > 0 && !isRunning && (
+                    {completedSessions.length > 0 && (
                       <div className="space-y-0.5">
                         {completedSessions.map((session) => {
                           const sessionBadge = SESSION_STATUS_COLORS[session.status] ?? "bg-gray-100 text-gray-500";
