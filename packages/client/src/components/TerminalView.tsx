@@ -810,6 +810,30 @@ function renderParsedEvent(event: DisplayEvent, key: number, ctx: RenderContext)
         >
           <pre className="whitespace-pre-wrap">{event.output}</pre>
         </div>
+        {event.images && event.images.length > 0 && (
+          <div className="mt-1 flex flex-wrap gap-2">
+            {event.images.map((img, i) => (
+              <img
+                key={i}
+                src={`data:${img.mediaType};base64,${img.data}`}
+                alt={`Tool result image ${i + 1}`}
+                className="max-w-full max-h-96 rounded border border-gray-600 object-contain"
+              />
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  if (event.kind === "image") {
+    return (
+      <div key={key} data-event-idx={key} className="mb-1 ml-2">
+        <img
+          src={`data:${event.mediaType};base64,${event.data}`}
+          alt="Image from agent"
+          className="max-w-full max-h-96 rounded border border-gray-600 object-contain"
+        />
       </div>
     );
   }
