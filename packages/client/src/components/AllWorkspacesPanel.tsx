@@ -10,7 +10,7 @@ interface AllWorkspacesPanelProps {
   onRefresh?: () => void;
 }
 
-type WsStatusFilter = "all" | "active" | "running" | "idle" | "reviewing" | "closed";
+type WsStatusFilter = "all" | "active" | "running" | "idle" | "reviewing" | "fixing" | "closed";
 
 const FILTER_CHIPS: { label: string; value: WsStatusFilter }[] = [
   { label: "All", value: "all" },
@@ -18,12 +18,14 @@ const FILTER_CHIPS: { label: string; value: WsStatusFilter }[] = [
   { label: "Running", value: "running" },
   { label: "Idle", value: "idle" },
   { label: "Reviewing", value: "reviewing" },
+  { label: "Fixing", value: "fixing" },
   { label: "Closed", value: "closed" },
 ];
 
 const WS_STATUS_COLORS: Record<string, string> = {
   active: "bg-green-100 text-green-700",
   reviewing: "bg-purple-100 text-purple-700",
+  fixing: "bg-orange-100 text-orange-700",
   idle: "bg-yellow-100 text-yellow-700",
   closed: "bg-gray-100 text-gray-500",
 };
@@ -47,7 +49,7 @@ export function AllWorkspacesPanel({ columns, onClose, onIssueClick, onRefresh }
     .filter((issue) => issue.workspaceSummary && issue.workspaceSummary.total > 0);
 
   const activeCount = issuesWithWorkspaces.filter(
-    (i) => i.workspaceSummary?.main?.status === "active" || i.workspaceSummary?.main?.status === "reviewing"
+    (i) => ["active", "reviewing", "fixing"].includes(i.workspaceSummary?.main?.status ?? "")
   ).length;
 
   const idleWorkspaceIds = issuesWithWorkspaces
@@ -78,7 +80,7 @@ export function AllWorkspacesPanel({ columns, onClose, onIssueClick, onRefresh }
 
     if (statusFilter !== "all") {
       if (statusFilter === "active") {
-        if (mainStatus !== "active" && mainStatus !== "reviewing") return false;
+        if (!["active", "reviewing", "fixing"].includes(mainStatus)) return false;
       } else if (mainStatus !== statusFilter) {
         return false;
       }
@@ -213,7 +215,7 @@ export function AllWorkspacesPanel({ columns, onClose, onIssueClick, onRefresh }
                         <span
                           className={`text-xs px-1.5 py-0.5 rounded ${WS_STATUS_COLORS[main.status] ?? "bg-gray-100 text-gray-600"}`}
                         >
-                          {main.status}
+                          {main.status === "reviewing" ? "AI Reviewing" : main.status === "fixing" ? "AI Fixing" : main.status}
                         </span>
 
                         {/* Ready to merge */}
@@ -239,6 +241,19 @@ export function AllWorkspacesPanel({ columns, onClose, onIssueClick, onRefresh }
                             {main.conflicts.conflictingFiles.length} conflict{main.conflicts.conflictingFiles.length !== 1 ? "s" : ""}
                           </span>
                         )}
+
+                        {/* Last session trigger */}
+                        {main.lastSessionTriggerType && (() => {
+                          const map: Record<string, { label: string; className: string }> = {
+                            review: { label: "AI Review", className: "bg-violet-100 text-violet-700" },
+                            merge: { label: "AI Merge", className: "bg-emerald-100 text-emerald-700" },
+                            "fix-conflicts": { label: "Fix Conflicts", className: "bg-orange-100 text-orange-700" },
+                            learning: { label: "Learning", className: "bg-teal-100 text-teal-700" },
+                            "auto-start": { label: "Auto-start", className: "bg-gray-100 text-gray-600" },
+                          };
+                          const badge = map[main.lastSessionTriggerType] ?? (main.lastSessionTriggerType.startsWith("skill:") ? { label: main.lastSessionTriggerType.slice(6), className: "bg-purple-100 text-purple-700" } : null);
+                          return badge ? <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${badge.className}`}>{badge.label}</span> : null;
+                        })()}
 
                         {/* Last session */}
                         {main.lastSessionAt && (
