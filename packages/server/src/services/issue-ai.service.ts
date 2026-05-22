@@ -5,6 +5,35 @@ import type { DependencyType } from "@agentic-kanban/shared/schema";
 import type { Database } from "../db/index.js";
 import { invokeClaudePrompt } from "./claude-cli.service.js";
 
+export interface EnhanceIssueResult {
+  title: string;
+  description: string;
+}
+
+export async function enhanceIssue(
+  title: string,
+  description: string | undefined,
+  database: Database,
+): Promise<EnhanceIssueResult> {
+  const prompt = `You are helping enhance a kanban issue ticket for an AI coding agent.
+Given a title and optional description, return an improved version that is clear, actionable, and well-structured.
+Keep the title concise (under 80 chars). Expand the description with context, acceptance criteria, and agent instructions if helpful.
+Respond ONLY with valid JSON — no markdown, no explanation:
+{"title": "...", "description": "..."}
+
+Current title: ${title}
+Current description: ${description?.trim() || "(none)"}`;
+
+  const stdout = await invokeClaudePrompt(prompt, { database });
+  const output = stdout.trim();
+  const cleaned = output.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
+  const enhanced = JSON.parse(cleaned) as { title?: string; description?: string };
+  return {
+    title: enhanced.title?.trim() || title,
+    description: enhanced.description?.trim() ?? description ?? "",
+  };
+}
+
 export interface AnalyzeDependenciesResult {
   dependencies: Array<{ id: string; type: string; issueId: string; reason: string }>;
   total: number;
