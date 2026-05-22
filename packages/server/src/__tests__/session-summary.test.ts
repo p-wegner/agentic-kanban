@@ -447,6 +447,42 @@ describe("Session Summary API", () => {
     expect(body.keyExcerpts[0]).toContain("...");
   });
 
+  it("extracts rate_limit_event entries", async () => {
+    const { sessionId } = await createSessionWithData(testApp.db);
+
+    await testApp.db.insert(schema.sessionMessages).values([
+      {
+        sessionId,
+        type: "stdout",
+        data: JSON.stringify({
+          type: "rate_limit_event",
+          rate_limit_info: {
+            status: "allowed",
+            resetsAt: 1779492000,
+            rateLimitType: "five_hour",
+            overageStatus: "rejected",
+            overageDisabledReason: "org_level_disabled",
+            isUsingOverage: false,
+          },
+          uuid: "a64f60d7-08b9-4205-9a86-9fb0836be447",
+          session_id: "594ffd37-ba74-490e-bad1-e03d3121a992",
+        }),
+      },
+    ]);
+
+    const res = await testApp.app.request(`/api/sessions/${sessionId}/summary`);
+    expect(res.status).toBe(200);
+
+    const body = await res.json();
+    expect(body.rateLimits).toHaveLength(1);
+    expect(body.rateLimits[0]).toMatchObject({
+      rateLimitType: "five_hour",
+      status: "allowed",
+      resetsAt: 1779492000,
+      overageStatus: "rejected",
+    });
+  });
+
   it("skips stderr messages", async () => {
     const { sessionId } = await createSessionWithData(testApp.db);
 
