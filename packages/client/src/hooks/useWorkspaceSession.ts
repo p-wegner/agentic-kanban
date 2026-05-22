@@ -12,7 +12,9 @@ interface SessionInfo {
   exitCode: string | null;
   stats: string | null;
   providerSessionId: string | null;
+  resumeFromId: string | null;
   triggerType: string | null;
+  skillName: string | null;
 }
 
 interface UseWorkspaceSessionParams {
