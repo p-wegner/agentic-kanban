@@ -82,6 +82,16 @@ const TRIGGER_TYPE_LABELS: Record<string, { label: string; className: string }> 
   "auto-start": { label: "Auto-start", className: "bg-gray-100 text-gray-600" },
 };
 
+function getTriggerTypeLabel(triggerType: string | null): { label: string; className: string } | null {
+  if (!triggerType) return null;
+  if (TRIGGER_TYPE_LABELS[triggerType]) return TRIGGER_TYPE_LABELS[triggerType];
+  if (triggerType.startsWith("skill:")) {
+    const name = triggerType.slice(6);
+    return { label: `Skill: ${name}`, className: "bg-purple-100 text-purple-700" };
+  }
+  return null;
+}
+
 function formatDuration(start: string, end: string | null): string {
   if (!end) return "running";
   const diffMs = new Date(end).getTime() - new Date(start).getTime();
@@ -908,11 +918,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                                 <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${sessionBadge}`}>
                                   {session.status}
                                 </span>
-                                {session.triggerType && TRIGGER_TYPE_LABELS[session.triggerType] && (
-                                  <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${TRIGGER_TYPE_LABELS[session.triggerType].className}`}>
-                                    {TRIGGER_TYPE_LABELS[session.triggerType].label}
-                                  </span>
-                                )}
+                                {(() => { const tl = getTriggerTypeLabel(session.triggerType); return tl ? <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${tl.className}`}>{tl.label}</span> : null; })()}
                                 <span className="text-xs text-gray-600">
                                   {formatRelativeTime(session.startedAt)}
                                 </span>
