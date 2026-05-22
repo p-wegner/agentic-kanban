@@ -1,7 +1,7 @@
 import { workspaces, sessions, sessionMessages, issues, projectStatuses, issueDependencies, tags, issueTags } from "@agentic-kanban/shared/schema";
 import { eq, inArray, sql, desc } from "drizzle-orm";
-import { getDiffShortstat, detectConflicts } from "./git.service.js";
 import type { Database } from "../db/index.js";
+import { getDiffShortstat, detectConflicts } from "./git.service.js";
 
 // Limit concurrent background git operations to avoid hammering the filesystem
 let _bgGitRunning = 0;
@@ -348,6 +348,71 @@ export async function buildTagMap(
   }
 
   return tagMap;
+}
+
+export type GraphEdge = {
+  id: string;
+  issueId: string;
+  dependsOnId: string;
+  type: string;
+  issueTitle: string;
+  issueStatusName: string;
+  issueNumber: number | null;
+};
+
+/** Fetch all dependency edges for a set of issue IDs. */
+export async function buildGraphEdges(issueIds: string[], database: Database): Promise<GraphEdge[]> {
+  if (issueIds.length === 0) return [];
+  return database
+    .select({
+      id: issueDependencies.id,
+      issueId: issueDependencies.issueId,
+      dependsOnId: issueDependencies.dependsOnId,
+      type: issueDependencies.type,
+      issueTitle: issues.title,
+      issueStatusName: projectStatuses.name,
+      issueNumber: issues.issueNumber,
+    })
+    .from(issueDependencies)
+    .innerJoin(issues, eq(issueDependencies.issueId, issues.id))
+    .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
+    .where(inArray(issueDependencies.issueId, issueIds));
+}
+
+/**
+ * DFS cycle check. Returns true if adding the edge issueId->dependsOnId would
+ * create a cycle in the project dependency graph.
+ */
+export async function wouldCreateCycle(database: Database, issueId: string, dependsOnId: string, projectId: string): Promise<boolean> {
+  const allDeps = await database
+    .select({
+      depIssueId: issueDependencies.issueId,
+      depDependsOnId: issueDependencies.dependsOnId,
+    })
+    .from(issueDependencies)
+    .innerJoin(issues, eq(issueDependencies.issueId, issues.id))
+    .where(eq(issues.projectId, projectId));
+
+  const adj = new Map<string, Set<string>>();
+  for (const dep of allDeps) {
+    let set = adj.get(dep.depIssueId);
+    if (!set) { set = new Set(); adj.set(dep.depIssueId, set); }
+    set.add(dep.depDependsOnId);
+  }
+
+  const visited = new Set<string>();
+  const stack = [dependsOnId];
+  while (stack.length > 0) {
+    const current = stack.pop()!;
+    if (current === issueId) return true;
+    if (visited.has(current)) continue;
+    visited.add(current);
+    const neighbors = adj.get(current);
+    if (neighbors) {
+      for (const n of neighbors) stack.push(n);
+    }
+  }
+  return false;
 }
 
 /** Parse basic stats from unified diff output. */
