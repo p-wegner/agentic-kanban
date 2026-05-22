@@ -58,6 +58,13 @@ export interface ParsedToolResultEvent {
   toolUseId: string;
   output: string;
   isError: boolean;
+  images?: { mediaType: string; data: string }[];
+}
+
+export interface ParsedImageEvent {
+  kind: "image";
+  mediaType: string;
+  data: string;
 }
 
 export interface ParsedTaskStartedEvent {
@@ -82,6 +89,7 @@ export type ParsedEvent =
   | ParsedResultEvent
   | ParsedToolUseEvent
   | ParsedToolResultEvent
+  | ParsedImageEvent
   | ParsedTaskStartedEvent
   | ParsedNotificationEvent;
 
@@ -212,6 +220,12 @@ export class ClaudeOutputParser {
           if (text) {
             events.push({ kind: "assistant", text, model });
           }
+        } else if (blockType === "image") {
+          const source = block.source as Record<string, unknown> | undefined;
+          if (source?.type === "base64" && typeof source.data === "string") {
+            const mediaType = (source.media_type as string) || "image/png";
+            events.push({ kind: "image", mediaType, data: source.data as string });
+          }
         } else if (blockType === "tool_use") {
           const toolUseId = (block.id as string) || "";
           const toolName = (block.name as string) || "unknown";
@@ -242,14 +256,25 @@ export class ClaudeOutputParser {
         if (block.type === "tool_result") {
           const rawContent = block.content;
           let output: string;
+          let images: { mediaType: string; data: string }[] | undefined;
           if (typeof rawContent === "string") {
             output = rawContent;
           } else if (Array.isArray(rawContent)) {
-            // Content blocks array: extract text parts
-            const textParts = (rawContent as Array<Record<string, unknown>>)
+            const contentBlocks = rawContent as Array<Record<string, unknown>>;
+            const textParts = contentBlocks
               .filter((b) => b.type === "text" && typeof b.text === "string")
               .map((b) => b.text as string);
-            output = textParts.length > 0 ? textParts.join("\n") : JSON.stringify(rawContent);
+            const imageParts = contentBlocks
+              .filter((b) => b.type === "image")
+              .map((b) => {
+                const src = b.source as Record<string, unknown> | undefined;
+                return src?.type === "base64" && typeof src.data === "string"
+                  ? { mediaType: (src.media_type as string) || "image/png", data: src.data as string }
+                  : null;
+              })
+              .filter((x): x is { mediaType: string; data: string } => x !== null);
+            output = textParts.length > 0 ? textParts.join("\n") : (imageParts.length > 0 ? "" : JSON.stringify(rawContent));
+            if (imageParts.length > 0) images = imageParts;
           } else {
             output = JSON.stringify(rawContent);
           }
@@ -263,6 +288,7 @@ export class ClaudeOutputParser {
             toolUseId,
             output,
             isError: (block.is_error as boolean) || false,
+            ...(images ? { images } : {}),
           });
         }
       }
