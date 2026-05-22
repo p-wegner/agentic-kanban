@@ -11,7 +11,7 @@ export async function killProcessesInDir(dir: string): Promise<number> {
         "process", "where",
         `ExecutablePath is not null and CommandLine is not null`,
         "get", "ProcessId,CommandLine", "/format:list",
-      ], { timeout: 10000 });
+      ], { timeout: 10000, windowsHide: true });
 
       const dirNormalized = dir.replace(/\\/g, "/");
       const pidRegex = /ProcessId=(\d+)/;
@@ -39,7 +39,7 @@ export async function killProcessesInDir(dir: string): Promise<number> {
         const cmdNormalized = proc.cmd.replace(/\\/g, "/");
         if (cmdNormalized.includes(dirNormalized)) {
           try {
-            await execFileAsync("taskkill", ["/pid", proc.pid, "/T", "/F"], { timeout: 5000 });
+            await execFileAsync("taskkill", ["/pid", proc.pid, "/T", "/F"], { timeout: 5000, windowsHide: true });
             console.log(`[process-cleanup] killed PID ${proc.pid} (CWD match: ${dir})`);
             killed++;
           } catch {
