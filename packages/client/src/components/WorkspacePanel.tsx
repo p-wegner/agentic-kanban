@@ -85,8 +85,11 @@ const TRIGGER_TYPE_LABELS: Record<string, { label: string; className: string }> 
   "auto-start": { label: "Auto-start", className: "bg-gray-100 text-gray-600" },
 };
 
+const SKILL_NAME_ACRONYMS = new Set(["ui", "ai", "api", "llm", "url", "http", "id"]);
 function humanizeSkillName(name: string): string {
-  return name.replace(/[-_]/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+  return name.replace(/[-_]/g, " ").replace(/\b\w+/g, w =>
+    SKILL_NAME_ACRONYMS.has(w.toLowerCase()) ? w.toUpperCase() : w.charAt(0).toUpperCase() + w.slice(1)
+  );
 }
 
 function getTriggerTypeLabel(triggerType: string | null, skillName?: string | null): { label: string; className: string } | null {
@@ -172,6 +175,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
   const [prefs, setPrefs] = useState<Record<string, string>>({});
   const [availableProfiles, setAvailableProfiles] = useState<string[]>([]);
   const [selectedProfile, setSelectedProfile] = useState<string>("");
+  const [availableSkills, setAvailableSkills] = useState<{ id: string; name: string; description: string }[]>([]);
   const [lastPrompt, setLastPrompt] = useState<string>(
     initialSessionId ? `${issue.title}${issue.description ? `\n\n${issue.description}` : ""}` : ""
   );
@@ -294,6 +298,10 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
     apiFetch<{ profiles: string[] }>("/api/preferences/claude-profiles")
       .then((data) => setAvailableProfiles(data.profiles))
       .catch(() => {});
+    const skillsUrl = project ? `/api/agent-skills?projectId=${project.id}` : "/api/agent-skills";
+    apiFetch<{ id: string; name: string; description: string }[]>(skillsUrl)
+      .then(setAvailableSkills)
+      .catch(() => {});
   }, [issue.id]);
 
   useEffect(() => {
@@ -332,6 +340,40 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
         requiresReview,
         planMode: withPlanMode,
         branch: suggestion,
+      };
+      if (selectedProfile) body.claudeProfile = selectedProfile;
+      const result = await apiFetch<WorkspaceResponse & { sessionId?: string }>("/api/workspaces", {
+        method: "POST",
+        body: JSON.stringify(body),
+      });
+      setShowCreate(false);
+      if (result.sessionId) {
+        setSelectedWorkspace(result.id);
+        setActiveSession(result.sessionId);
+        setLastPrompt(`${issue.title}${issue.description ? `\n\n${issue.description}` : ""}`);
+      }
+      await fetchWorkspaces();
+      onWorkspaceChange?.();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to create workspace");
+    } finally {
+      setActionLoading(false);
+    }
+  }
+
+  async function handleSkillQuickLaunch(skillId: string) {
+    setActionLoading(true);
+    setError(null);
+    setCompletedMessages([]);
+    setQuickDropdownOpen(false);
+    try {
+      const body: Record<string, unknown> = {
+        issueId: issue.id,
+        isDirect: false,
+        requiresReview,
+        planMode: false,
+        branch: suggestion,
+        skillId,
       };
       if (selectedProfile) body.claudeProfile = selectedProfile;
       const result = await apiFetch<WorkspaceResponse & { sessionId?: string }>("/api/workspaces", {
@@ -735,7 +777,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-4 space-y-4">
+        <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-4">
           {error && (
             <div className="p-2 bg-red-50 border border-red-200 rounded text-sm text-red-700">
               {error}
@@ -809,6 +851,23 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                     >
                       New Workspace with Plan Mode
                     </button>
+                    {availableSkills.length > 0 && (
+                      <>
+                        <div className="border-t border-gray-100" />
+                        <div className="px-3 py-1 text-[10px] font-medium text-gray-400 uppercase tracking-wide">Skills</div>
+                        {availableSkills.map((skill) => (
+                          <button
+                            key={skill.id}
+                            onClick={() => handleSkillQuickLaunch(skill.id)}
+                            className="w-full text-left text-sm px-3 py-2 hover:bg-gray-50 flex items-center gap-2"
+                            title={skill.description}
+                          >
+                            <span className="text-purple-500">✨</span>
+                            {humanizeSkillName(skill.name)}
+                          </button>
+                        ))}
+                      </>
+                    )}
                     <div className="border-t border-gray-100" />
                     <button
                       onClick={() => {
@@ -1466,6 +1525,23 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                   >
                     New Workspace with Plan Mode
                   </button>
+                  {availableSkills.length > 0 && (
+                    <>
+                      <div className="border-t border-gray-100" />
+                      <div className="px-3 py-1 text-[10px] font-medium text-gray-400 uppercase tracking-wide">Skills</div>
+                      {availableSkills.map((skill) => (
+                        <button
+                          key={skill.id}
+                          onClick={() => handleSkillQuickLaunch(skill.id)}
+                          className="w-full text-left text-sm px-3 py-2 hover:bg-gray-50 flex items-center gap-2"
+                          title={skill.description}
+                        >
+                          <span className="text-purple-500">✨</span>
+                          {humanizeSkillName(skill.name)}
+                        </button>
+                      ))}
+                    </>
+                  )}
                   <div className="border-t border-gray-100" />
                   <button
                     onClick={() => { setQuickDropdownOpen(false); setShowCreate(true); }}
