@@ -12,9 +12,9 @@ test.describe("Session History UI", () => {
   const createdIssueIds: string[] = [];
 
   test.beforeAll(async ({ request }) => {
-    const projectsRes = await request.get(`${SERVER_URL}/api/projects`);
-    const projects = await projectsRes.json();
-    projectId = projects[0].id;
+    const activeRes = await request.get(`${SERVER_URL}/api/preferences/active-project`);
+    const { projectId: activeId } = await activeRes.json();
+    projectId = activeId;
 
     const statusesRes = await request.get(
       `${SERVER_URL}/api/projects/${projectId}/statuses`,
