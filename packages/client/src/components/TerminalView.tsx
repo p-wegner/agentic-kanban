@@ -342,6 +342,7 @@ export function TerminalView({ messages, connectionState, parseOutput = "true", 
         case "init": color = "bg-cyan-400"; break;
         case "task_started": color = "bg-blue-500"; break;
         case "notification": color = "bg-orange-500"; break;
+        case "rate_limit": color = "bg-yellow-500"; break;
         default: color = "bg-gray-600";
       }
 
@@ -881,6 +882,25 @@ function renderParsedEvent(event: DisplayEvent, key: number, ctx: RenderContext)
         </span>
         {isRunning && <span className="text-blue-500 text-[10px] animate-pulse">running</span>}
         {event.taskType && !isRunning && <span className="text-gray-600 text-[10px] ml-1">{event.taskType}</span>}
+      </div>
+    );
+  }
+
+  if (event.kind === "rate_limit") {
+    const inSubagent = isInsideSubagent && !isSubagentStart;
+    const resetsAt = event.resetsAt ? new Date(event.resetsAt * 1000).toLocaleTimeString() : null;
+    if (isMinimal) {
+      return (
+        <div key={key} data-event-idx={key} className={`mb-0.5 text-[11px] ${inSubagent ? "ml-6" : "ml-1"}`}>
+          <span className="text-yellow-500">Rate limit ({event.rateLimitType}): {event.status}</span>
+          {resetsAt && <span className="text-gray-500"> — resets {resetsAt}</span>}
+        </div>
+      );
+    }
+    return (
+      <div key={key} data-event-idx={key} className={`mb-1 ${inSubagent ? "ml-6" : "ml-2"} pl-2 border-l-2 border-yellow-600`}>
+        <span className="text-yellow-400">Rate limit: {event.status}</span>
+        <div className="text-gray-500 text-[10px]">{event.rateLimitType}{resetsAt ? ` | resets ${resetsAt}` : ""}</div>
       </div>
     );
   }

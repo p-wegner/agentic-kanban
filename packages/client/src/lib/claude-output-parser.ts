@@ -82,6 +82,13 @@ export interface ParsedNotificationEvent {
   priority: string;
 }
 
+export interface ParsedRateLimitEvent {
+  kind: "rate_limit";
+  status: string;
+  resetsAt: number;
+  rateLimitType: string;
+}
+
 export type ParsedEvent =
   | ParsedInitEvent
   | ParsedAssistantEvent
@@ -91,7 +98,8 @@ export type ParsedEvent =
   | ParsedToolResultEvent
   | ParsedImageEvent
   | ParsedTaskStartedEvent
-  | ParsedNotificationEvent;
+  | ParsedNotificationEvent
+  | ParsedRateLimitEvent;
 
 export interface RawTextEvent {
   kind: "raw";
@@ -294,6 +302,16 @@ export class ClaudeOutputParser {
       }
 
       return events.length > 0 ? events : [];
+    }
+
+    if (type === "rate_limit_event") {
+      const info = obj.rate_limit_info as Record<string, unknown> | undefined;
+      return [{
+        kind: "rate_limit",
+        status: (info?.status as string) || "",
+        resetsAt: (info?.resetsAt as number) || 0,
+        rateLimitType: (info?.rateLimitType as string) || "",
+      }];
     }
 
     if (type === "result") {
