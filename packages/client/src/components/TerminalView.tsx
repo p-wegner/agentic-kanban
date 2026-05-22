@@ -889,10 +889,12 @@ function renderParsedEvent(event: DisplayEvent, key: number, ctx: RenderContext)
   if (event.kind === "rate_limit") {
     const inSubagent = isInsideSubagent && !isSubagentStart;
     const resetsAt = event.resetsAt ? new Date(event.resetsAt * 1000).toLocaleTimeString() : null;
+    const overageRejected = event.overageStatus === "rejected";
     if (isMinimal) {
       return (
         <div key={key} data-event-idx={key} className={`mb-0.5 text-[11px] ${inSubagent ? "ml-6" : "ml-1"}`}>
           <span className="text-yellow-500">Rate limit ({event.rateLimitType}): {event.status}</span>
+          {overageRejected && <span className="text-orange-400"> — overage rejected</span>}
           {resetsAt && <span className="text-gray-500"> — resets {resetsAt}</span>}
         </div>
       );
@@ -900,7 +902,9 @@ function renderParsedEvent(event: DisplayEvent, key: number, ctx: RenderContext)
     return (
       <div key={key} data-event-idx={key} className={`mb-1 ${inSubagent ? "ml-6" : "ml-2"} pl-2 border-l-2 border-yellow-600`}>
         <span className="text-yellow-400">Rate limit: {event.status}</span>
-        <div className="text-gray-500 text-[10px]">{event.rateLimitType}{resetsAt ? ` | resets ${resetsAt}` : ""}</div>
+        <div className="text-gray-500 text-[10px]">
+          {event.rateLimitType}{overageRejected ? " | overage rejected" : ""}{resetsAt ? ` | resets ${resetsAt}` : ""}
+        </div>
       </div>
     );
   }
