@@ -913,6 +913,10 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
             const badgeColor = STATUS_COLORS[ws.status] ?? "bg-gray-100 text-gray-500";
             const sessions = workspaceSessions[ws.id] ?? [];
             const completedSessions = sessions.filter((s) => s.status !== "running");
+            const runningSession = sessions.find((s) => s.status === "running");
+            const runningTriggerLabel = runningSession
+              ? getTriggerTypeLabel(runningSession.triggerType, runningSession.skillName)
+              : null;
 
             return (
               <div
