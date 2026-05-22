@@ -21,6 +21,7 @@ import { ShortcutHelp } from "../components/ShortcutHelp.js";
 import { apiFetch } from "../lib/api.js";
 import { useBoardEvents, type LiveSessionStats, type TodoItem, type ApprovalRequest } from "../lib/useBoardEvents.js";
 import { ApprovalDialog } from "../components/ApprovalDialog.js";
+import { MoveToDoneDialog } from "../components/MoveToDoneDialog.js";
 import { sendDesktopNotification } from "../lib/desktop.js";
 import { registerAction } from "../lib/actions.js";
 import { QuickTasksPanel } from "../components/QuickTasksPanel.js";
@@ -301,6 +302,7 @@ export function BoardPage() {
   const [monitorStatus, setMonitorStatus] = useState<MonitorStatus | null>(null);
   const [showMonitorPopover, setShowMonitorPopover] = useState(false);
   const [monitorRunning, setMonitorRunning] = useState(false);
+  const [moveToDonePending, setMoveToDonePending] = useState<{ issue: IssueWithStatus; confirm: () => Promise<void> } | null>(null);
 
   const refetchBoard = useCallback(async (projectId?: string) => {
     const pid = projectId || activeProjectId;
@@ -645,6 +647,27 @@ export function BoardPage() {
 
       if (!issueId) return;
       if (sourceStatusId === targetStatusId && sortOrder === undefined) return;
+
+      const targetColumn = columns.find((col) => col.id === targetStatusId);
+      const isArchiveTarget = targetColumn && ARCHIVE_STATUS_NAMES.has(targetColumn.name);
+
+      if (isArchiveTarget) {
+        const issue = columns.flatMap((c) => c.issues).find((i) => i.id === issueId);
+        const ws = issue?.workspaceSummary?.main;
+        if (issue && ws && ws.status !== "closed") {
+          setMoveToDonePending({
+            issue,
+            confirm: async () => {
+              const body: UpdateIssueRequest = { statusId: targetStatusId };
+              if (sortOrder !== undefined) body.sortOrder = sortOrder;
+              await apiFetch(`/api/issues/${issueId}`, { method: "PATCH", body: JSON.stringify(body) });
+              await refetchBoard();
+              setMoveToDonePending(null);
+            },
+          });
+          return;
+        }
+      }
 
       const body: UpdateIssueRequest = { statusId: targetStatusId };
       if (sortOrder !== undefined) body.sortOrder = sortOrder;
@@ -1347,6 +1370,13 @@ export function BoardPage() {
         requests={approvalRequests}
         onResolve={(id) => setApprovalRequests((prev) => prev.filter((r) => r.id !== id))}
       />
+      {moveToDonePending && (
+        <MoveToDoneDialog
+          issue={moveToDonePending.issue}
+          onConfirm={moveToDonePending.confirm}
+          onCancel={() => setMoveToDonePending(null)}
+        />
+      )}
       <ToastContainer />
       {showSettings && (
         <SettingsPanel onClose={() => {
