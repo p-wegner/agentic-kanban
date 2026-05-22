@@ -136,6 +136,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
   const [conflictState, setConflictState] = useState<{ hasConflicts: boolean; conflictingFiles: string[] } | null>(null);
   const [mergeError, setMergeError] = useState<{ wsId: string; message: string } | null>(null);
 
+  const [monitorRunning, setMonitorRunning] = useState(false);
   const [requiresReview, setRequiresReview] = useState(false);
   const [prompt, setPrompt] = useState("");
   const [prefs, setPrefs] = useState<Record<string, string>>({});
@@ -503,6 +504,15 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
     }
   }
 
+  async function handleMonitorRunNow() {
+    setMonitorRunning(true);
+    try {
+      await apiFetch("/api/internal/monitor-run", { method: "POST" });
+    } finally {
+      setMonitorRunning(false);
+    }
+  }
+
   async function handleAbortRebase(wsId: string) {
     setActionLoading(true);
     setError(null);
@@ -674,12 +684,25 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
           <h2 className="text-sm font-semibold text-gray-900">
             Workspaces -- {issue.title}
           </h2>
-          <button
-            onClick={onClose}
-            className="text-gray-400 hover:text-gray-600 text-lg leading-none"
-          >
-            &times;
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleMonitorRunNow}
+              disabled={monitorRunning}
+              className="flex items-center justify-center w-6 h-6 rounded border border-gray-200 bg-white text-gray-500 hover:bg-gray-50 hover:text-gray-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              title="Run monitor now and reset timer"
+            >
+              {monitorRunning
+                ? <svg className="w-3 h-3 animate-spin" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>
+                : <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path strokeLinecap="round" strokeLinejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 010 1.972l-11.54 6.347a1.125 1.125 0 01-1.667-.986V5.653z"/></svg>
+              }
+            </button>
+            <button
+              onClick={onClose}
+              className="text-gray-400 hover:text-gray-600 text-lg leading-none"
+            >
+              &times;
+            </button>
+          </div>
         </div>
 
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
