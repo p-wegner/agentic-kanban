@@ -2,12 +2,12 @@ import { Hono } from "hono";
 import { db } from "../db/index.js";
 import { issues, projectStatuses, workspaces, tags, issueTags, diffComments, issueDependencies, agentSkills, issueArtifacts } from "@agentic-kanban/shared/schema";
 import type { DependencyType } from "@agentic-kanban/shared/schema";
-import { eq, and, sql, inArray } from "drizzle-orm";
+import { eq, and, inArray } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import type { Database } from "../db/index.js";
 import type { BoardEvents } from "../services/board-events.js";
 import { analyzeDependencies, enhanceIssue } from "../services/issue-ai.service.js";
-import { getIssueSummary } from "../repositories/issue.repository.js";
+import { getIssueSummary, resolveNewIssueDefaults } from "../repositories/issue.repository.js";
 import { wouldCreateCycle, enrichWorkspacesWithSessionData } from "../services/board-aggregation.service.js";
 import { deleteWorkspaceCascade } from "../repositories/workspace.repository.js";
 
@@ -119,25 +119,13 @@ export function createIssuesRoute(database: Database = db, options?: { boardEven
     const now = new Date().toISOString();
     const id = randomUUID();
 
-    // Auto-assign issue number per project
-    const maxResult = await database
-      .select({ maxNum: sql<number | null>`max(${issues.issueNumber})` })
-      .from(issues)
-      .where(eq(issues.projectId, body.projectId));
-    const issueNumber = (maxResult[0]?.maxNum ?? 0) + 1;
-
-    // Default statusId to the first status for the project if not provided
-    let statusId = body.statusId;
-    if (!statusId) {
-      const statuses = await database
-        .select({ id: projectStatuses.id })
-        .from(projectStatuses)
-        .where(eq(projectStatuses.projectId, body.projectId))
-        .limit(1);
-      if (statuses.length === 0) {
-        return c.json({ error: "No statuses found for project" }, 400);
-      }
-      statusId = statuses[0].id;
+    let issueNumber: number;
+    let statusId: string;
+    try {
+      ({ issueNumber, statusId } = await resolveNewIssueDefaults(body.projectId, body.statusId, database));
+    } catch (err: any) {
+      if (err.statusCode === 400) return c.json({ error: err.message }, 400);
+      throw err;
     }
 
     await database.insert(issues).values({
