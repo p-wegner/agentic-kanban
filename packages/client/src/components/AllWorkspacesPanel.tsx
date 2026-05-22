@@ -263,7 +263,7 @@ export function AllWorkspacesPanel({ columns, onClose, onIssueClick, onRefresh }
                         )}
 
                         {/* Context usage */}
-                        {main.contextTokens ? (
+                        {(main.status === "active" || main.status === "fixing") && main.contextTokens ? (
                           <span className="text-xs text-gray-400" title={`${main.contextTokens.toLocaleString()} context tokens`}>
                             {main.contextTokens >= 1000
                               ? `${Math.round(main.contextTokens / 1000)}k ctx`
@@ -272,7 +272,7 @@ export function AllWorkspacesPanel({ columns, onClose, onIssueClick, onRefresh }
                         ) : null}
 
                         {/* Last tool */}
-                        {main.lastTool ? (
+                        {(main.status === "active" || main.status === "fixing") && main.lastTool ? (
                           <span className="text-xs text-gray-400 truncate max-w-[160px]" title={`Last tool: ${main.lastTool}`}>
                             <span className="font-medium text-gray-500">tool:</span> {main.lastTool}
                           </span>
