@@ -1,0 +1,10 @@
+export const PREF_MOCK_AGENT = "mock_agent";
+export const PREF_AGENT_COMMAND = "agent_command";
+export const PREF_AGENT_ARGS = "agent_args";
+export const PREF_SKIP_PERMISSIONS = "skip_permissions";
+export const PREF_CLAUDE_PROFILE = "claude_profile";
+export const PREF_RESUME_WITH_NEW_MODEL = "resume_with_new_model";
+export const PREF_PERMISSION_PROMPT_TOOL = "permission_prompt_tool";
+export const PREF_LEARNING_STEP_BEFORE_MERGE = "learning_step_before_merge";
+export const PREF_AUTO_START_FOLLOWUP = "auto_start_followup";
+export const PREF_PROJECTS_BASE_PATH = "projects_base_path";
