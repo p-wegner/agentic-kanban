@@ -644,7 +644,15 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
 
                   <div className="pt-3 border-t border-gray-200">
                     <div className="flex items-center justify-between mb-3">
-                      <div className="text-xs font-semibold text-gray-700 uppercase tracking-wide">Board Monitor</div>
+                      <div className="flex items-center gap-2">
+                        <div className="text-xs font-semibold text-gray-700 uppercase tracking-wide">Board Monitor</div>
+                        {monitorStatus && (
+                          <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium ${monitorStatus.active ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-500"}`}>
+                            <span className={`w-1.5 h-1.5 rounded-full ${monitorStatus.active ? "bg-green-500 animate-pulse" : "bg-gray-400"}`} />
+                            {monitorStatus.active ? "Active" : "Idle"}
+                          </span>
+                        )}
+                      </div>
                       <button
                         onClick={handleMonitorRunNow}
                         disabled={monitorRunning}
@@ -659,50 +667,52 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                         {monitorRunning ? "Running…" : "Run now"}
                       </button>
                     </div>
-                    <Toggle
-                      checked={settings.auto_monitor === "true"}
-                      onChange={setBool("auto_monitor")}
-                      label="Auto-monitor"
-                      hint="Periodically checks workspaces and relaunches idle agents, triggers merges, and auto-starts unblocked issues."
-                    />
+                    <div className="flex items-center gap-4">
+                      <Toggle
+                        checked={settings.auto_monitor === "true"}
+                        onChange={setBool("auto_monitor")}
+                        label="Auto-monitor"
+                        hint="Periodically checks workspaces and relaunches idle agents, triggers merges, and auto-starts unblocked issues."
+                      />
+                    </div>
                     {settings.auto_monitor === "true" && (
-                      <div className="mt-2 pl-5">
-                        <label className="block text-xs text-gray-600 mb-1">Interval (minutes)</label>
+                      <div className="mt-2 pl-5 flex items-center gap-2">
+                        <label className="text-xs text-gray-600">Interval</label>
                         <input
                           type="number"
                           min="1"
                           max="60"
                           value={settings.auto_monitor_interval || "4"}
                           onChange={(e) => set("auto_monitor_interval")(e.target.value)}
-                          className="w-20 px-2 py-1 text-xs border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                          className="w-16 px-2 py-1 text-xs border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
                         />
+                        <span className="text-xs text-gray-500">min</span>
                       </div>
                     )}
                     {monitorStatus && (
-                      <div className="mt-3 bg-gray-50 border border-gray-200 rounded-lg p-3 space-y-2">
-                        <div className="flex items-center gap-3 text-xs text-gray-600">
-                          <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-medium ${monitorStatus.active ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-500"}`}>
-                            <span className={`w-1.5 h-1.5 rounded-full ${monitorStatus.active ? "bg-green-500" : "bg-gray-400"}`} />
-                            {monitorStatus.active ? "Active" : "Inactive"}
-                          </span>
-                          {monitorStatus.lastRun && (
-                            <span>Last run: {new Date(monitorStatus.lastRun).toLocaleTimeString()}</span>
-                          )}
-                          {monitorStatus.nextRunAt && (
-                            <span>Next: {new Date(monitorStatus.nextRunAt).toLocaleTimeString()}</span>
+                      <div className="mt-3 rounded-lg border border-gray-200 overflow-hidden">
+                        <div className="flex items-center justify-between px-3 py-2 bg-gray-50 border-b border-gray-200">
+                          <span className="text-[11px] font-medium text-gray-500 uppercase tracking-wide">Last cycle</span>
+                          <div className="flex items-center gap-3 text-[11px] text-gray-500">
+                            {monitorStatus.lastRun && (
+                              <span title={new Date(monitorStatus.lastRun).toLocaleString()}>{new Date(monitorStatus.lastRun).toLocaleTimeString()}</span>
+                            )}
+                            {monitorStatus.nextRunAt && (
+                              <span className="text-blue-500" title="Next scheduled run">→ {new Date(monitorStatus.nextRunAt).toLocaleTimeString()}</span>
+                            )}
+                          </div>
+                        </div>
+                        <div className="max-h-32 overflow-y-auto">
+                          {monitorStatus.recentActions.length > 0 ? (
+                            <ul className="divide-y divide-gray-100">
+                              {monitorStatus.recentActions.slice(0, 10).map((action, i) => (
+                                <li key={i} className="px-3 py-1.5 text-[11px] text-gray-600 leading-snug">{action}</li>
+                              ))}
+                            </ul>
+                          ) : (
+                            <div className="px-3 py-2.5 text-[11px] text-gray-400 italic">No actions taken in last cycle</div>
                           )}
                         </div>
-                        {monitorStatus.recentActions.length > 0 && (
-                          <div className="space-y-0.5">
-                            <div className="text-[11px] font-medium text-gray-500">Recent actions</div>
-                            {monitorStatus.recentActions.slice(0, 5).map((action, i) => (
-                              <div key={i} className="text-[11px] text-gray-600 truncate">{action}</div>
-                            ))}
-                          </div>
-                        )}
-                        {monitorStatus.recentActions.length === 0 && monitorStatus.lastRun && (
-                          <div className="text-[11px] text-gray-400">No actions taken in last cycle</div>
-                        )}
                       </div>
                     )}
                   </div>
