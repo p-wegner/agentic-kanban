@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { db } from "../db/index.js";
-import { projects, projectStatuses, issues, workspaces, issueDependencies, preferences, tags, issueTags } from "@agentic-kanban/shared/schema";
-import { eq, inArray, sql, and } from "drizzle-orm";
+import { projects, projectStatuses, issues, workspaces, preferences, tags, issueTags } from "@agentic-kanban/shared/schema";
+import { eq, sql, and } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { execSync } from "node:child_process";
 import { existsSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
@@ -9,7 +9,7 @@ import { detectRepoInfo } from "../services/git-info.service.js";
 import { listBranches, listWorktrees, getDiffShortstat, removeWorktree } from "../services/git.service.js";
 import type { Database } from "../db/index.js";
 import { resolve, sep, join } from "node:path";
-import { buildWorkspaceSummaryMap, buildBlockedMap, buildTagMap } from "../services/board-aggregation.service.js";
+import { buildWorkspaceSummaryMap, buildBlockedMap, buildTagMap, buildGraphEdges } from "../services/board-aggregation.service.js";
 import { deleteWorkspaceCascade } from "../repositories/workspace.repository.js";
 import { generateSetupScript, generateTeardownScript } from "../services/project-setup.service.js";
 
@@ -753,26 +753,8 @@ export function createProjectsRoute(database: Database = db) {
       .orderBy(issues.sortOrder);
 
     const issueIds = projectIssues.map((i) => i.id);
-    let edges: Array<{ id: string; issueId: string; dependsOnId: string; type: string; issueTitle: string; issueStatusName: string; issueNumber: number | null }> = [];
+    const edges = await buildGraphEdges(issueIds, database);
 
-    if (issueIds.length > 0) {
-      edges = await database
-        .select({
-          id: issueDependencies.id,
-          issueId: issueDependencies.issueId,
-          dependsOnId: issueDependencies.dependsOnId,
-          type: issueDependencies.type,
-          issueTitle: issues.title,
-          issueStatusName: projectStatuses.name,
-          issueNumber: issues.issueNumber,
-        })
-        .from(issueDependencies)
-        .innerJoin(issues, eq(issueDependencies.issueId, issues.id))
-        .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
-        .where(inArray(issueDependencies.issueId, issueIds));
-    }
-
-    // Compute isBlocked
     const blockedIds = new Set(
       edges
         .filter((e) => e.type === "depends_on" || e.type === "blocked_by")
