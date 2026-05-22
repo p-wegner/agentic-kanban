@@ -36,6 +36,7 @@ interface SessionInfo {
   exitCode: string | null;
   stats: string | null;
   providerSessionId: string | null;
+  triggerType: string | null;
 }
 
 interface SessionStats {
@@ -70,6 +71,15 @@ const SESSION_STATUS_COLORS: Record<string, string> = {
   running: "bg-blue-100 text-blue-700",
   completed: "bg-green-100 text-green-700",
   stopped: "bg-yellow-100 text-yellow-700",
+};
+
+const TRIGGER_TYPE_LABELS: Record<string, { label: string; className: string }> = {
+  agent: { label: "Agent", className: "bg-blue-50 text-blue-600" },
+  chat: { label: "Chat", className: "bg-indigo-50 text-indigo-600" },
+  review: { label: "AI Review", className: "bg-violet-100 text-violet-700" },
+  "fix-conflicts": { label: "Fix Conflicts", className: "bg-orange-100 text-orange-700" },
+  learning: { label: "Learning", className: "bg-teal-100 text-teal-700" },
+  "auto-start": { label: "Auto-start", className: "bg-gray-100 text-gray-600" },
 };
 
 function formatDuration(start: string, end: string | null): string {
@@ -898,6 +908,11 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                                 <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${sessionBadge}`}>
                                   {session.status}
                                 </span>
+                                {session.triggerType && TRIGGER_TYPE_LABELS[session.triggerType] && (
+                                  <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${TRIGGER_TYPE_LABELS[session.triggerType].className}`}>
+                                    {TRIGGER_TYPE_LABELS[session.triggerType].label}
+                                  </span>
+                                )}
                                 <span className="text-xs text-gray-600">
                                   {formatRelativeTime(session.startedAt)}
                                 </span>

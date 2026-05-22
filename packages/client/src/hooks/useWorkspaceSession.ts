@@ -12,6 +12,7 @@ interface SessionInfo {
   exitCode: string | null;
   stats: string | null;
   providerSessionId: string | null;
+  triggerType: string | null;
 }
 
 interface UseWorkspaceSessionParams {
