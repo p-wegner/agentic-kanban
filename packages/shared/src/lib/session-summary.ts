@@ -17,6 +17,7 @@ export interface SessionSummary {
   commandsRun: string[];
   model: string;
   tasks: TaskSummaryItem[];
+  rateLimits: Array<{ rateLimitType: string; status: string; resetsAt?: number; overageStatus?: string }>;
 }
 
 export function formatDurationStr(diffMs: number): string {
@@ -46,6 +47,7 @@ export function parseSessionSummary(
   const agentSummaryParts: string[] = [];
   let taskCounter = 0;
   const tasksMap = new Map<string, TaskSummaryItem>();
+  const rateLimits: SessionSummary["rateLimits"] = [];
 
   for (const row of rows) {
     if (row.type !== "stdout" || !row.data) continue;
@@ -148,6 +150,19 @@ export function parseSessionSummary(
         if (resultText) agentSummaryParts.push(resultText);
         continue;
       }
+
+      if (type === "rate_limit_event") {
+        const rli = obj.rate_limit_info as Record<string, unknown> | undefined;
+        if (rli) {
+          rateLimits.push({
+            rateLimitType: (rli.rateLimitType as string) || "unknown",
+            status: (rli.status as string) || "unknown",
+            resetsAt: rli.resetsAt as number | undefined,
+            overageStatus: rli.overageStatus as string | undefined,
+          });
+        }
+        continue;
+      }
     }
   }
 
@@ -179,5 +194,6 @@ export function parseSessionSummary(
     commandsRun,
     model,
     tasks: [...tasksMap.values()],
+    rateLimits,
   };
 }
