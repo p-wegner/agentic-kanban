@@ -45,6 +45,9 @@ interface BoardColumnProps {
   sessionTodos?: Record<string, TodoItem[]>;
   children?: React.ReactNode;
   style?: React.CSSProperties;
+  width?: number;
+  onResizeStart?: (e: React.MouseEvent) => void;
+  onResizeReset?: () => void;
 }
 
 export function BoardColumn({
@@ -64,6 +67,9 @@ export function BoardColumn({
   sessionTodos,
   children,
   style,
+  width,
+  onResizeStart,
+  onResizeReset,
 }: BoardColumnProps) {
   const [dragOver, setDragOver] = useState(false);
   const dragCounterRef = useRef(0);
@@ -143,9 +149,15 @@ export function BoardColumn({
   const isCreating = creatingInColumn === column.id;
   const displayedIssues = sortIssues(column.issues, sortMode);
 
+  const columnStyle: React.CSSProperties = width != null
+    ? { width, minWidth: 160, maxWidth: 800, flexShrink: 0, ...style }
+    : style ?? {};
+
   return (
+    <div style={{ display: "contents" }}>
     <div
       id={`column-${column.id}`}
+<<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
@@ -183,9 +195,12 @@ export function BoardColumn({
 =======
       className={`w-[calc(100vw-2rem)] sm:w-72 shrink-0 bg-gray-100 rounded-xl p-2 flex flex-col transition-all relative ${
 >>>>>>> 210a4d4 (feat: make kanban board truly responsive)
+=======
+      className={`${width != null ? "" : "w-[calc(100vw-2rem)] sm:w-72 shrink-0"} bg-gray-100 rounded-xl p-2 flex flex-col transition-all relative ${
+>>>>>>> 39947f0 (feat: resizable board columns with drag handles and localStorage persistence)
         dragOver ? "ring-2 ring-blue-400 ring-offset-1" : ""
       }`}
-      style={style}
+      style={columnStyle}
       onDragEnter={handleDragEnter}
       onDragLeave={handleDragLeave}
       onDragOver={handleDragOver}
@@ -273,6 +288,17 @@ export function BoardColumn({
           <div className="absolute bottom-0 left-0 right-0 h-6 bg-gradient-to-t from-gray-100 to-transparent z-10 pointer-events-none rounded-b-lg" />
         )}
       </div>
+    </div>
+    {onResizeStart && (
+      <div
+        className="hidden sm:flex w-2 shrink-0 cursor-col-resize items-center justify-center group self-stretch"
+        onMouseDown={onResizeStart}
+        onDoubleClick={onResizeReset}
+        title="Drag to resize · Double-click to reset"
+      >
+        <div className="w-0.5 h-8 rounded-full bg-gray-300 group-hover:bg-blue-400 transition-colors" />
+      </div>
+    )}
     </div>
   );
 }
