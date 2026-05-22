@@ -253,14 +253,14 @@ export async function startServer(port?: number) {
         try {
           if (workspace.isDirect) {
             hasCommittedChanges = await new Promise<boolean>((resolve) => {
-              execFile("git", ["diff", "--quiet", "HEAD"], { cwd: workspace.workingDir! }, (err: Error | null) => {
+              execFile("git", ["diff", "--quiet", "HEAD"], { cwd: workspace.workingDir!, windowsHide: true }, (err: Error | null) => {
                 resolve(!!err);
               });
             });
           } else {
             const baseBranch = workspace.baseBranch || defaultBranch;
             hasCommittedChanges = await new Promise<boolean>((resolve) => {
-              execFile("git", ["diff", "--quiet", baseBranch], { cwd: workspace.workingDir! }, (err: Error | null) => {
+              execFile("git", ["diff", "--quiet", baseBranch], { cwd: workspace.workingDir!, windowsHide: true }, (err: Error | null) => {
                 resolve(!!err);
               });
             });
