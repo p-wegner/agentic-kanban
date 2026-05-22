@@ -87,6 +87,9 @@ export interface ParsedRateLimitEvent {
   status: string;
   resetsAt: number;
   rateLimitType: string;
+  overageStatus?: string;
+  overageDisabledReason?: string;
+  isUsingOverage?: boolean;
 }
 
 export type ParsedEvent =
@@ -311,6 +314,9 @@ export class ClaudeOutputParser {
         status: (info?.status as string) || "",
         resetsAt: (info?.resetsAt as number) || 0,
         rateLimitType: (info?.rateLimitType as string) || "",
+        overageStatus: info?.overageStatus as string | undefined,
+        overageDisabledReason: info?.overageDisabledReason as string | undefined,
+        isUsingOverage: info?.isUsingOverage as boolean | undefined,
       }];
     }
 
