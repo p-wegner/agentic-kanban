@@ -210,7 +210,7 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
             <span className="text-green-600 font-medium shrink-0">merged</span>
           )}
           <span className="inline-flex items-center gap-1 text-[10px] font-mono shrink-0 ml-auto">
-            {ws.main.diffStats && (
+            {ws.main.diffStats && (liveActivity || liveStats) && (
               <>
                 <span className="text-green-600">+{ws.main.diffStats.insertions}</span>
                 <span className="text-red-500">-{ws.main.diffStats.deletions}</span>
@@ -226,10 +226,10 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
               {ws.main.conflicts.conflictingFiles.length} file{ws.main.conflicts.conflictingFiles.length !== 1 ? "s" : ""}
             </span>
           )}
-          {ws.main.claudeProfile && (
+          {ws.main.claudeProfile && (liveActivity || liveStats) && (
             <span className="inline-flex items-center px-1 rounded bg-indigo-50 text-indigo-600 font-medium shrink-0">{ws.main.claudeProfile}</span>
           )}
-          {!ws.main.claudeProfile && ws.main.agentCommand && ws.main.agentCommand !== "claude" && (
+          {!ws.main.claudeProfile && ws.main.agentCommand && ws.main.agentCommand !== "claude" && (liveActivity || liveStats) && (
             <span className="inline-flex items-center px-1 rounded bg-gray-100 text-gray-500 font-mono text-[10px] shrink-0">{ws.main.agentCommand}</span>
           )}
           {ws.total > 1 && (
