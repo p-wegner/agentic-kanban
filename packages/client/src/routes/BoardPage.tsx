@@ -199,7 +199,7 @@ function MonitorPopover({ status, onClose, onOpenWorkspace, columns, onRunNow, a
           {(() => {
             const activeWs = columns.flatMap(c => c.issues).filter(iss =>
               iss.workspaceSummary?.main &&
-              (iss.workspaceSummary.main.status === "active" || iss.workspaceSummary.main.status === "reviewing") &&
+              (iss.workspaceSummary.main.status === "active" || iss.workspaceSummary.main.status === "reviewing" || iss.workspaceSummary.main.status === "fixing") &&
               iss.workspaceSummary.main.lastAssistantMessage
             );
             if (activeWs.length === 0) return null;
@@ -293,6 +293,36 @@ export function BoardPage() {
   const [expandedCreatePanel, setExpandedCreatePanel] = useState<{ statusId: string; statusName: string; state: Partial<CreateIssueFormState> } | null>(null);
   const [viewMode, setViewMode] = useState<"kanban" | "graph" | "table">("kanban");
   const [dynamicColumnScaling, setDynamicColumnScaling] = useState(false);
+  const [columnWidths, setColumnWidths] = useState<Record<string, number>>(() => {
+    try { return JSON.parse(localStorage.getItem("kanban-column-widths") ?? "{}"); } catch { return {}; }
+  });
+  const resizingRef = useRef<{ colId: string; startX: number; startWidth: number } | null>(null);
+
+  const handleColumnResizeStart = useCallback((colId: string, e: React.MouseEvent) => {
+    e.preventDefault();
+    const colEl = document.getElementById(`column-${colId}`);
+    const startWidth = colEl ? colEl.getBoundingClientRect().width : (columnWidths[colId] ?? 288);
+    resizingRef.current = { colId, startX: e.clientX, startWidth };
+
+    const onMouseMove = (ev: MouseEvent) => {
+      if (!resizingRef.current) return;
+      const delta = ev.clientX - resizingRef.current.startX;
+      const newWidth = Math.max(160, Math.min(800, resizingRef.current.startWidth + delta));
+      setColumnWidths((prev) => ({ ...prev, [resizingRef.current!.colId]: newWidth }));
+    };
+    const onMouseUp = () => {
+      setColumnWidths((prev) => {
+        try { localStorage.setItem("kanban-column-widths", JSON.stringify(prev)); } catch {}
+        return prev;
+      });
+      resizingRef.current = null;
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+    };
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
+  }, [columnWidths]);
+
   const [autoReview, setAutoReview] = useState(true);
   const [autoMerge, setAutoMerge] = useState(true);
   const [autoMonitor, setAutoMonitor] = useState(false);
@@ -1278,12 +1308,20 @@ export function BoardPage() {
             ))}
           </div>
         )}
-        {viewMode === "kanban" && <div className="flex gap-4 flex-1 min-h-0 overflow-x-auto board-columns-scroll">
-          {activeColumns.map((col) => (
+        {viewMode === "kanban" && <div className="flex gap-0 flex-1 min-h-0 overflow-x-auto board-columns-scroll">
+          {activeColumns.map((col, colIdx) => (
             <BoardColumn
               key={col.id}
               column={col}
-              style={dynamicColumnScaling ? { flexGrow: Math.max(1, col.issues.length) } : undefined}
+              style={dynamicColumnScaling && !columnWidths[col.id] ? { flexGrow: Math.max(1, col.issues.length) } : undefined}
+              width={columnWidths[col.id]}
+              onResizeStart={colIdx < activeColumns.length - 1 ? (e) => handleColumnResizeStart(col.id, e) : undefined}
+              onResizeReset={colIdx < activeColumns.length - 1 ? () => setColumnWidths((prev) => {
+                const next = { ...prev };
+                delete next[col.id];
+                try { localStorage.setItem("kanban-column-widths", JSON.stringify(next)); } catch {}
+                return next;
+              }) : undefined}
               projectId={activeProjectId}
               creatingInColumn={creatingInColumnId}
               onCreateClick={setCreatingInColumnId}
