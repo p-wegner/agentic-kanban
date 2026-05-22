@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { db } from "../db/index.js";
-import { workspaces, sessions, issues, projects, preferences, diffComments, projectStatuses, agentSkills } from "@agentic-kanban/shared/schema";
+import { workspaces, sessions, issues, projects, preferences, diffComments, agentSkills } from "@agentic-kanban/shared/schema";
 import { eq, and } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import * as gitService from "../services/git.service.js";
@@ -13,7 +13,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { writeFileSync } from "node:fs";
 import { spawn, spawnSync } from "node:child_process";
-import { resolveProjectRepo, resolveProjectId } from "../repositories/workspace.repository.js";
+import { resolveProjectRepo, resolveProjectId, moveIssueToDone } from "../repositories/workspace.repository.js";
 import { loadAgentSettings, resolveAgentSettings } from "../services/agent-settings.service.js";
 import { PREF_LEARNING_STEP_BEFORE_MERGE, PREF_AUTO_START_FOLLOWUP } from "../constants/preference-keys.js";
 import { autoStartFollowups } from "../services/followup-workspace.service.js";
@@ -363,19 +363,7 @@ export function createWorkspaceActionsRoute(
           .set({ status: "closed", closedAt: now, updatedAt: now })
           .where(eq(workspaces.id, id));
 
-        // Move issue to Done — work is complete after merge
-        try {
-          const projectId = await resolveProjectId(id, database);
-          if (projectId) {
-            const statuses = await database.select().from(projectStatuses).where(eq(projectStatuses.projectId, projectId));
-            const doneStatus = statuses.find(s => s.name === "Done") ?? statuses.find(s => s.name === "AI Reviewed");
-            if (doneStatus) {
-              await database.update(issues).set({ statusId: doneStatus.id, updatedAt: now, statusChangedAt: now }).where(eq(issues.id, workspace.issueId));
-            }
-          }
-        } catch (err) {
-          console.warn("[workspaces] Failed to move issue to Done:", err);
-        }
+        await moveIssueToDone(id, workspace.issueId, now, database, true);
 
         const projectId = await resolveProjectId(id, database);
         if (projectId) options?.boardEvents?.broadcast(projectId, "workspace_merged");
@@ -464,19 +452,7 @@ export function createWorkspaceActionsRoute(
         .set({ status: "closed", workingDir: null, closedAt: now, updatedAt: now })
         .where(eq(workspaces.id, id));
 
-      // Auto-move issue to "Done"
-      try {
-        const projectId = await resolveProjectId(id, database);
-        if (projectId) {
-          const statuses = await database.select().from(projectStatuses).where(eq(projectStatuses.projectId, projectId));
-          const doneStatus = statuses.find(s => s.name === "Done");
-          if (doneStatus) {
-            await database.update(issues).set({ statusId: doneStatus.id, updatedAt: now, statusChangedAt: now }).where(eq(issues.id, workspace.issueId));
-          }
-        }
-      } catch (err) {
-        console.warn("[workspaces] Failed to move issue to Done:", err);
-      }
+      await moveIssueToDone(id, workspace.issueId, now, database);
 
       // Broadcast board event
       const projectId = await resolveProjectId(id, database);
