@@ -4,7 +4,7 @@ import { join, dirname, sep } from "node:path";
 
 function execGit(args: string[], cwd: string): Promise<string> {
   return new Promise((resolve, reject) => {
-    execFile("git", args, { cwd, maxBuffer: 10 * 1024 * 1024, windowsHide: true }, (err, stdout, stderr) => {
+    execFile("git", args, { cwd, maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
       if (err) {
         reject(new Error(`git ${args.join(" ")} failed: ${stderr || err.message}`));
       } else {
@@ -424,7 +424,7 @@ export async function detectConflicts(
     execFile(
       "git",
       ["merge-tree", "--write-tree", "--no-messages", "HEAD", baseBranch],
-      { cwd: worktreePath, maxBuffer: 10 * 1024 * 1024, windowsHide: true },
+      { cwd: worktreePath, maxBuffer: 10 * 1024 * 1024 },
       (_err, stdout) => {
         const lines = stdout.toString().trim().split("\n").slice(1).filter(Boolean);
         // Lines with stage 1/2/3 indicate conflicting files: "<mode> <sha> <stage>\t<file>"
