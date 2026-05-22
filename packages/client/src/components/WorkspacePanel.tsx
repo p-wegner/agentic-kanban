@@ -85,12 +85,19 @@ const TRIGGER_TYPE_LABELS: Record<string, { label: string; className: string }> 
   "auto-start": { label: "Auto-start", className: "bg-gray-100 text-gray-600" },
 };
 
-function getTriggerTypeLabel(triggerType: string | null): { label: string; className: string } | null {
-  if (!triggerType) return null;
+function humanizeSkillName(name: string): string {
+  return name.replace(/[-_]/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+}
+
+function getTriggerTypeLabel(triggerType: string | null, skillName?: string | null): { label: string; className: string } | null {
+  if (!triggerType) {
+    if (skillName) return { label: `✨ ${humanizeSkillName(skillName)}`, className: "bg-purple-100 text-purple-700" };
+    return null;
+  }
   if (TRIGGER_TYPE_LABELS[triggerType]) return TRIGGER_TYPE_LABELS[triggerType];
   if (triggerType.startsWith("skill:")) {
     const name = triggerType.slice(6);
-    return { label: `Skill: ${name}`, className: "bg-purple-100 text-purple-700" };
+    return { label: `✨ ${humanizeSkillName(name)}`, className: "bg-purple-100 text-purple-700" };
   }
   return null;
 }
@@ -926,10 +933,8 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                                   {session.status}
                                 </span>
                                 {(() => {
-                                  const tl = getTriggerTypeLabel(session.triggerType);
-                                  if (tl) return <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${tl.className}`}>{tl.label}</span>;
-                                  if (session.skillName) return <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-purple-100 text-purple-700">{`Skill: ${session.skillName}`}</span>;
-                                  return null;
+                                  const tl = getTriggerTypeLabel(session.triggerType, session.skillName);
+                                  return tl ? <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${tl.className}`}>{tl.label}</span> : null;
                                 })()}
                                 <span className="text-xs text-gray-600">
                                   {formatRelativeTime(session.startedAt)}
