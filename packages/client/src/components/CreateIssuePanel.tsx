@@ -1,15 +1,22 @@
 import { useEffect, useRef, useState } from "react";
+import ReactMarkdown from "react-markdown";
 import type { CreateIssueRequest } from "@agentic-kanban/shared";
 import type { CreateIssueFormState } from "./CreateIssueForm.js";
 import { apiFetch } from "../lib/api.js";
 import { showToast } from "./Toast.js";
+
+interface Skill {
+  id: string;
+  name: string;
+  description: string | null;
+}
 
 interface CreateIssuePanelProps {
   projectId: string;
   statusId: string;
   statusName?: string;
   initialState?: Partial<CreateIssueFormState>;
-  onSubmit: (data: CreateIssueRequest & { startWorkspace?: boolean; planMode?: boolean; skipAutoReview?: boolean; claudeProfile?: string; isDirect?: boolean }) => Promise<void>;
+  onSubmit: (data: CreateIssueRequest & { startWorkspace?: boolean; planMode?: boolean; skipAutoReview?: boolean; claudeProfile?: string; isDirect?: boolean; skillId?: string }) => Promise<void>;
   onClose: () => void;
   canStartWorkspace?: boolean;
 }
@@ -31,6 +38,9 @@ export function CreateIssuePanel({
   const [skipAutoReview, setSkipAutoReview] = useState(initialState?.skipAutoReview ?? false);
   const [claudeProfile, setClaudeProfile] = useState("");
   const [isDirect, setIsDirect] = useState(false);
+  const [skillId, setSkillId] = useState<string>(initialState?.skillId ?? "");
+  const [skills, setSkills] = useState<Skill[]>([]);
+  const [descriptionMode, setDescriptionMode] = useState<"edit" | "preview">("edit");
   const [submitting, setSubmitting] = useState(false);
   const [enhancing, setEnhancing] = useState(false);
   const [preEnhanceSnapshot, setPreEnhanceSnapshot] = useState<{ title: string; description: string } | null>(null);
@@ -67,6 +77,13 @@ export function CreateIssuePanel({
   }, []);
 
   useEffect(() => {
+    if (!startWorkspace || !projectId) return;
+    apiFetch<Skill[]>(`/api/agent-skills?projectId=${projectId}`)
+      .then(setSkills)
+      .catch(() => {});
+  }, [startWorkspace, projectId]);
+
+  useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
       if (e.key === "Escape") onClose();
     }
@@ -90,6 +107,7 @@ export function CreateIssuePanel({
         skipAutoReview: (startWorkspace && skipAutoReview) || undefined,
         claudeProfile: (startWorkspace && claudeProfile.trim()) ? claudeProfile.trim() : undefined,
         isDirect: (startWorkspace && isDirect) || undefined,
+        skillId: (startWorkspace && skillId) || undefined,
       });
     } finally {
       setSubmitting(false);
@@ -132,13 +150,41 @@ export function CreateIssuePanel({
           </div>
 
           <div className="flex flex-col gap-1.5 flex-1">
-            <label className="text-xs font-medium text-gray-600">Description</label>
-            <textarea
-              placeholder="Describe the issue, agent instructions, acceptance criteria…"
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              className="w-full flex-1 min-h-[200px] text-sm border border-gray-300 rounded px-3 py-2 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none"
-            />
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-medium text-gray-600">Description</label>
+              <div className="flex border border-gray-300 rounded overflow-hidden">
+                <button
+                  type="button"
+                  onClick={() => setDescriptionMode("edit")}
+                  className={`text-xs px-2 py-0.5 ${descriptionMode === "edit" ? "bg-blue-500 text-white" : "bg-white text-gray-600 hover:bg-gray-50"}`}
+                >
+                  Edit
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDescriptionMode("preview")}
+                  className={`text-xs px-2 py-0.5 border-l border-gray-300 ${descriptionMode === "preview" ? "bg-blue-500 text-white" : "bg-white text-gray-600 hover:bg-gray-50"}`}
+                >
+                  Preview
+                </button>
+              </div>
+            </div>
+            {descriptionMode === "preview" ? (
+              description ? (
+                <div className="markdown-body flex-1 min-h-[200px] border border-gray-200 rounded px-3 py-2">
+                  <ReactMarkdown>{description}</ReactMarkdown>
+                </div>
+              ) : (
+                <p className="text-sm text-gray-400 italic flex-1 min-h-[200px] border border-gray-200 rounded px-3 py-2">Nothing to preview.</p>
+              )
+            ) : (
+              <textarea
+                placeholder="Describe the issue, agent instructions, acceptance criteria…"
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                className="w-full flex-1 min-h-[200px] text-sm border border-gray-300 rounded px-3 py-2 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none"
+              />
+            )}
           </div>
 
           <div className="flex flex-col gap-1.5">
@@ -205,6 +251,21 @@ export function CreateIssuePanel({
                     />
                     Work directly on master (no worktree)
                   </label>
+                  {skills.length > 0 && (
+                    <div className="flex items-center gap-2">
+                      <label className="text-sm text-gray-600 whitespace-nowrap">Skill</label>
+                      <select
+                        value={skillId}
+                        onChange={(e) => setSkillId(e.target.value)}
+                        className="flex-1 text-sm border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                      >
+                        <option value="">None</option>
+                        {skills.map((s) => (
+                          <option key={s.id} value={s.id}>{s.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
                 </div>
               )}
             </div>

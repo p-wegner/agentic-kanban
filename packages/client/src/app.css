@@ -85,3 +85,72 @@ html, body {
 .board-columns-scroll > * {
   scroll-snap-align: start;
 }
+
+/* On sm+ (640px), disable forced snap so multiple columns can be seen */
+@media (min-width: 640px) {
+  .board-columns-scroll {
+    scroll-snap-type: none;
+  }
+  .board-columns-scroll > * {
+    scroll-snap-align: none;
+  }
+}
+
+.markdown-body {
+  font-size: 0.875rem;
+  color: #374151;
+  line-height: 1.6;
+}
+.markdown-body h1, .markdown-body h2, .markdown-body h3,
+.markdown-body h4, .markdown-body h5, .markdown-body h6 {
+  font-weight: 600;
+  color: #1f2937;
+  margin-top: 1em;
+  margin-bottom: 0.25em;
+}
+.markdown-body h1 { font-size: 1.25rem; }
+.markdown-body h2 { font-size: 1.1rem; }
+.markdown-body h3 { font-size: 1rem; }
+.markdown-body p { margin-bottom: 0.5em; }
+.markdown-body ul, .markdown-body ol {
+  padding-left: 1.5em;
+  margin-bottom: 0.5em;
+}
+.markdown-body ul { list-style-type: disc; }
+.markdown-body ol { list-style-type: decimal; }
+.markdown-body li { margin-bottom: 0.15em; }
+.markdown-body code {
+  background: #f3f4f6;
+  border-radius: 3px;
+  padding: 0.1em 0.35em;
+  font-size: 0.85em;
+  font-family: ui-monospace, monospace;
+}
+.markdown-body pre {
+  background: #f3f4f6;
+  border-radius: 4px;
+  padding: 0.75em;
+  overflow-x: auto;
+  margin-bottom: 0.5em;
+}
+.markdown-body pre code {
+  background: none;
+  padding: 0;
+}
+.markdown-body a {
+  color: #2563eb;
+  text-decoration: underline;
+}
+.markdown-body blockquote {
+  border-left: 3px solid #d1d5db;
+  padding-left: 0.75em;
+  color: #6b7280;
+  margin-bottom: 0.5em;
+}
+.markdown-body hr {
+  border: none;
+  border-top: 1px solid #e5e7eb;
+  margin: 0.75em 0;
+}
+.markdown-body strong { font-weight: 600; }
+.markdown-body em { font-style: italic; }
