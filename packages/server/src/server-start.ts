@@ -19,10 +19,14 @@ import { workspaces, issues, projects, projectStatuses, preferences, sessions, a
 =======
 import { workspaces, issues, projects, projectStatuses, preferences, sessions, agentSkills, issueDependencies, scheduledRuns } from "@agentic-kanban/shared/schema";
 <<<<<<< HEAD
+<<<<<<< HEAD
 >>>>>>> a5eb7cd (fix: add missing scheduledRuns import in server-start.ts)
 =======
 import { getNextCronRun } from "@agentic-kanban/shared/lib/cron-utils.js";
 >>>>>>> 2ac8047 (feat: add cron expression support to scheduled runs)
+=======
+import { getNextCronRun } from "@agentic-kanban/shared/lib/cron-utils";
+>>>>>>> fb11b51 (fix: remove .js extension from cron-utils import in server-start)
 import { eq, sql, desc } from "drizzle-orm";
 import * as agentService from "./services/agent.service.js";
 import * as gitService from "./services/git.service.js";
