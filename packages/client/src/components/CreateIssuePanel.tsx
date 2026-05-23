@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import ReactMarkdown from "react-markdown";
 import type { CreateIssueRequest } from "@agentic-kanban/shared";
 import type { CreateIssueFormState } from "./CreateIssueForm.js";
 import { apiFetch } from "../lib/api.js";
 import { showToast } from "./Toast.js";
+import TicketMentionInput from "./TicketMentionInput.js";
+import TicketMentionRenderer from "./TicketMentionRenderer.js";
 
 interface Skill {
   id: string;
@@ -175,16 +176,16 @@ export function CreateIssuePanel({
             {descriptionMode === "preview" ? (
               description ? (
                 <div className="markdown-body flex-1 min-h-[200px] border border-gray-200 rounded px-3 py-2">
-                  <ReactMarkdown>{description}</ReactMarkdown>
+                  <TicketMentionRenderer>{description}</TicketMentionRenderer>
                 </div>
               ) : (
                 <p className="text-sm text-gray-400 italic flex-1 min-h-[200px] border border-gray-200 rounded px-3 py-2">Nothing to preview.</p>
               )
             ) : (
-              <textarea
-                placeholder="Describe the issue, agent instructions, acceptance criteria…"
+              <TicketMentionInput
                 value={description}
-                onChange={(e) => setDescription(e.target.value)}
+                onChange={setDescription}
+                placeholder="Describe the issue, agent instructions, acceptance criteria…"
                 className="w-full flex-1 min-h-[200px] text-sm border border-gray-300 rounded px-3 py-2 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none"
               />
             )}

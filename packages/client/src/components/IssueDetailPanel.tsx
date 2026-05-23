@@ -1,10 +1,11 @@
 import React, { useEffect, useRef, useState } from "react";
-import ReactMarkdown from "react-markdown";
 import type { IssueWithStatus, UpdateIssueRequest, DependencyInfo } from "@agentic-kanban/shared";
 import { apiFetch } from "../lib/api.js";
 import { formatRelativeTime } from "../lib/formatRelativeTime.js";
 import { showToast } from "./Toast.js";
 import { MoveToDoneDialog } from "./MoveToDoneDialog.js";
+import TicketMentionInput from "./TicketMentionInput.js";
+import TicketMentionRenderer from "./TicketMentionRenderer.js";
 
 interface StatusOption {
   id: string;
@@ -568,16 +569,16 @@ export function IssueDetailPanel({
               {descriptionMode === "preview" ? (
                 description ? (
                   <div className="markdown-body min-h-[6rem] border border-gray-200 rounded px-2 py-1.5">
-                    <ReactMarkdown>{description}</ReactMarkdown>
+                    <TicketMentionRenderer>{description}</TicketMentionRenderer>
                   </div>
                 ) : (
                   <p className="text-sm text-gray-400 italic min-h-[6rem] border border-gray-200 rounded px-2 py-1.5">Nothing to preview.</p>
                 )
               ) : (
               <>
-              <textarea
+              <TicketMentionInput
                 value={description}
-                onChange={(e) => setDescription(e.target.value)}
+                onChange={(val) => setDescription(val)}
                 rows={panelMode !== "sidebar" ? 16 : 4}
                 className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none"
                 placeholder="Add a description... (paste screenshots with Ctrl+V)"
@@ -619,7 +620,7 @@ export function IssueDetailPanel({
               </>
             ) : issue.description ? (
               <div className="markdown-body">
-                <ReactMarkdown>{issue.description}</ReactMarkdown>
+                <TicketMentionRenderer>{issue.description}</TicketMentionRenderer>
               </div>
             ) : (
               <p className="text-sm text-gray-400 italic">

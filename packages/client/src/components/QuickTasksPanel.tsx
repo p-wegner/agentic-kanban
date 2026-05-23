@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { apiFetch } from "../lib/api.js";
 import { showToast } from "./Toast.js";
+import TicketMentionInput from "./TicketMentionInput.js";
 
 interface Skill {
   id: string;
@@ -120,10 +121,10 @@ export function QuickTasksPanel({ projectId, onClose, onLaunched }: QuickTasksPa
           )}
           {showCustom ? (
             <div className="space-y-2">
-              <textarea
+              <TicketMentionInput
                 autoFocus
                 value={customPrompt}
-                onChange={(e) => setCustomPrompt(e.target.value)}
+                onChange={(val) => setCustomPrompt(val)}
                 placeholder="Describe the task for the agent..."
                 rows={3}
                 className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none"
