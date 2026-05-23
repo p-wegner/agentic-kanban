@@ -158,7 +158,7 @@ test.describe("Command Palette — workspace-scoped Review and Merge actions", (
 
     // Use mock agent so the workspace reaches "idle" quickly without real Claude
     await request.put(`${SERVER_URL}/api/preferences/settings`, {
-      data: { mock_agent: "true", auto_review: "false", auto_merge: "false" },
+      data: { claude_profile: "mock", auto_review: "false", auto_merge: "false" },
     });
 
     const issueRes = await request.post(`${SERVER_URL}/api/issues`, {
@@ -202,7 +202,7 @@ test.describe("Command Palette — workspace-scoped Review and Merge actions", (
     } catch { /* best-effort */ }
     try {
       await request.put(`${SERVER_URL}/api/preferences/settings`, {
-        data: { mock_agent: "false", auto_review: "true", auto_merge: "true" },
+        data: { claude_profile: "", auto_review: "true", auto_merge: "true" },
       });
     } catch { /* best-effort */ }
   });
