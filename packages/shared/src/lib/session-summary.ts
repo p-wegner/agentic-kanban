@@ -130,15 +130,19 @@ export function parseSessionSummary(
         const content = (message?.content as Array<Record<string, unknown>>) || [];
 
         for (const block of content) {
-          if (block.type === "tool_result" && (block.is_error as boolean)) {
+          if (block.type === "tool_result") {
             const toolUseId = (block.tool_use_id as string) || "";
             const toolName = toolUseId ? (toolNameMap.get(toolUseId) || "unknown") : "unknown";
             const rawContent = block.content;
             const output = typeof rawContent === "string"
               ? rawContent
               : JSON.stringify(rawContent);
-            if (errors.length < 10) {
-              errors.push(`${toolName}: ${output.length > 200 ? output.slice(0, 200) + "..." : output}`);
+            if (block.is_error as boolean) {
+              if (errors.length < 10) {
+                errors.push(`${toolName}: ${output.length > 200 ? output.slice(0, 200) + "..." : output}`);
+              }
+            } else if (toolName === "Agent" && output) {
+              agentSummaryParts.push(output);
             }
           }
         }
