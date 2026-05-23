@@ -2,6 +2,7 @@ import { useRef, useEffect, useState } from "react";
 import type { CreateIssueRequest } from "@agentic-kanban/shared";
 import { apiFetch } from "../lib/api.js";
 import { showToast } from "./Toast.js";
+import TicketMentionInput from "./TicketMentionInput.js";
 
 interface Skill {
   id: string;
@@ -162,11 +163,11 @@ export function CreateIssueForm({
         rows={1}
         className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none overflow-y-hidden"
       />
-      <textarea
-        ref={descRef}
+      <TicketMentionInput
+        inputRef={descRef}
         placeholder="Description (optional)"
         value={description}
-        onChange={(e) => setDescription(e.target.value)}
+        onChange={(val) => setDescription(val)}
         rows={2}
         className="w-full text-xs border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none overflow-y-hidden"
       />

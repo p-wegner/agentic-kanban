@@ -17,6 +17,7 @@ import { SettingsPanel } from "../components/SettingsPanel.js";
 import { SkeletonBoard } from "../components/SkeletonBoard.js";
 import { ToastContainer, showToast } from "../components/Toast.js";
 import { suggestBranchName } from "../lib/branch.js";
+import { MentionProvider } from "../lib/MentionContext.js";
 import { CommandPalette } from "../components/CommandPalette.js";
 import { ShortcutHelp } from "../components/ShortcutHelp.js";
 import { apiFetch } from "../lib/api.js";
@@ -1490,6 +1491,27 @@ export function BoardPage() {
 >>>>>>> 34c67d9 (feat: add E2E tests for board stats bar and Blocked filter)
   );
 
+  const allMentionIssues = useMemo(
+    () =>
+      columns
+        .flatMap((col) => col.issues)
+        .map((i) => ({ id: i.id, issueNumber: i.issueNumber, title: i.title })),
+    [columns],
+  );
+
+  const handleMentionClick = useCallback(
+    (issueId: string) => {
+      for (const col of columns) {
+        const found = col.issues.find((i) => i.id === issueId);
+        if (found) {
+          setSelectedIssue(found);
+          return;
+        }
+      }
+    },
+    [columns],
+  );
+
   // "AI Reviewed" = tickets needing human attention (manual merge).
   // Hide the column when no tickets are there AND the workflow won't produce them
   // (auto_review off, or auto_merge on means review goes straight to Done).
@@ -1877,6 +1899,7 @@ export function BoardPage() {
   const canStartWorkspace = !!activeProject?.repoPath;
 
   return (
+    <MentionProvider value={{ issues: allMentionIssues, onMentionClick: handleMentionClick }}>
     <Layout
       projects={projects}
       activeProjectId={activeProjectId}
@@ -2502,5 +2525,6 @@ export function BoardPage() {
         />
       )}
     </Layout>
+    </MentionProvider>
   );
 }

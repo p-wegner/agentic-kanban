@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { db } from "../db/index.js";
 import { issues, projectStatuses, workspaces, tags, issueTags, diffComments, issueDependencies, agentSkills, issueArtifacts } from "@agentic-kanban/shared/schema";
 import type { DependencyType } from "@agentic-kanban/shared/schema";
-import { eq, and, inArray } from "drizzle-orm";
+import { eq, and, inArray, or, like } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import type { Database } from "../db/index.js";
 import type { BoardEvents } from "../services/board-events.js";
@@ -14,7 +14,7 @@ import { deleteWorkspaceCascade } from "../repositories/workspace.repository.js"
 export function createIssuesRoute(database: Database = db, options?: { boardEvents?: BoardEvents }) {
   const router = new Hono();
 
-  // GET /api/issues?projectId=...&issueNumber=N
+  // GET /api/issues?projectId=...&issueNumber=N&search=term
   router.get("/", async (c) => {
     const projectId = c.req.query("projectId");
     if (!projectId) {
@@ -22,6 +22,35 @@ export function createIssuesRoute(database: Database = db, options?: { boardEven
     }
 
     const issueNumberParam = c.req.query("issueNumber");
+    const searchParam = c.req.query("search");
+
+    // Search mode: lightweight autocomplete response
+    if (searchParam !== undefined) {
+      const searchTerm = searchParam.trim();
+      const conditions = [eq(issues.projectId, projectId)];
+      if (searchTerm) {
+        const searchConditions = [like(issues.title, `%${searchTerm}%`)];
+        const asNum = Number(searchTerm);
+        if (Number.isInteger(asNum) && asNum > 0) {
+          searchConditions.push(eq(issues.issueNumber, asNum));
+        }
+        conditions.push(or(...searchConditions)!);
+      }
+      const result = await database
+        .select({
+          id: issues.id,
+          issueNumber: issues.issueNumber,
+          title: issues.title,
+          statusName: projectStatuses.name,
+        })
+        .from(issues)
+        .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
+        .where(and(...conditions))
+        .orderBy(issues.issueNumber)
+        .limit(10);
+      return c.json(result);
+    }
+
     const whereClause = issueNumberParam
       ? and(eq(issues.projectId, projectId), eq(issues.issueNumber, Number(issueNumberParam)))
       : eq(issues.projectId, projectId);
