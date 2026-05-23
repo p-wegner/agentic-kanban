@@ -8,6 +8,8 @@ import {
   PREF_AGENT_ARGS,
   PREF_SKIP_PERMISSIONS,
   PREF_CLAUDE_PROFILE,
+  PREF_CODEX_PROFILE,
+  PREF_PROVIDER,
   PREF_MOCK_AGENT_PROFILE,
   PREF_MOCK_AGENT_DELAY_MS,
   PREF_RESUME_WITH_NEW_MODEL,
@@ -92,10 +94,16 @@ export function resolveAgentSettings(
     ? "mcp__agentic-kanban__approve_tool_use"
     : (permPref && permPref !== "false" ? permPref : undefined);
 
-  const provider = (prefMap.get("provider") || "claude") as "claude" | "codex";
+  const provider = (prefMap.get(PREF_PROVIDER) || "claude") as "claude" | "codex";
 
   // Don't pass mock profile name to Claude Code — it's only used to select the mock agent command
   const resolvedProfile = isMockProfile(claudeProfile) ? undefined : claudeProfile;
-  const profile = resolvedProfile ? { provider, name: resolvedProfile } : undefined;
+
+  // For codex provider, use the codex-specific profile key
+  const effectiveProfileName = provider === "codex"
+    ? (prefMap.get(PREF_CODEX_PROFILE) || undefined)
+    : resolvedProfile;
+
+  const profile = effectiveProfileName ? { provider, name: effectiveProfileName } : undefined;
   return { agentCommand, agentArgs, claudeProfile: resolvedProfile, profile, provider, resumeWithNewModel, permissionPromptTool };
 }
