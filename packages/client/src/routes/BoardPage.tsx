@@ -1607,6 +1607,7 @@ export function BoardPage() {
       {showAllWorkspaces && (
         <AllWorkspacesPanel
           columns={columns}
+          activeProjectId={activeProjectId ?? null}
           onClose={() => setShowAllWorkspaces(false)}
           onIssueClick={(issue) => {
             setSelectedIssue(issue);
