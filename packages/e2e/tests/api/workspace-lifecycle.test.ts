@@ -44,7 +44,7 @@ test.describe("Workspace lifecycle API", () => {
   test.afterAll(async ({ request }) => {
     // Reset settings
     await request.put(`${SERVER_URL}/api/preferences/settings`, {
-      data: { mock_agent: "false" },
+      data: { claude_profile: "" },
     });
     for (const id of extraWorkspaceIds) {
       await request.delete(`${SERVER_URL}/api/workspaces/${id}`);
@@ -77,11 +77,11 @@ test.describe("Workspace lifecycle API", () => {
     expect(res.status()).toBeLessThan(600);
   });
 
-  test("POST /api/workspaces/:id/launch uses mock_agent preference", async ({
+  test("POST /api/workspaces/:id/launch uses mock profile", async ({
     request,
   }) => {
     await request.put(`${SERVER_URL}/api/preferences/settings`, {
-      data: { mock_agent: "true" },
+      data: { claude_profile: "mock" },
     });
 
     const mockSuffix = Date.now().toString(36);
@@ -103,7 +103,7 @@ test.describe("Workspace lifecycle API", () => {
     );
     if (setupRes.status() !== 200) {
       await request.put(`${SERVER_URL}/api/preferences/settings`, {
-        data: { mock_agent: "false" },
+        data: { claude_profile: "" },
       });
       test.skip();
       return;
@@ -111,7 +111,7 @@ test.describe("Workspace lifecycle API", () => {
 
     const launchRes = await request.post(
       `${SERVER_URL}/api/workspaces/${testWorkspaceId}/launch`,
-      { data: { prompt: "test with mock agent pref" } },
+      { data: { prompt: "test with mock profile" } },
     );
 
     expect(launchRes.status()).toBe(201);
@@ -134,7 +134,7 @@ test.describe("Workspace lifecycle API", () => {
     expect(["running", "completed", "stopped"]).toContain(session.status);
 
     await request.put(`${SERVER_URL}/api/preferences/settings`, {
-      data: { mock_agent: "false" },
+      data: { claude_profile: "" },
     });
   });
 
