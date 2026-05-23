@@ -56,6 +56,7 @@ interface IssueCardProps {
   liveActivity?: string;
   liveStats?: LiveSessionStats;
   todos?: TodoItem[];
+  isPendingWorkspace?: boolean;
 }
 
 function HighlightedText({ text, query }: { text: string; query: string }) {
@@ -78,7 +79,7 @@ function HighlightedText({ text, query }: { text: string; query: string }) {
   );
 }
 
-export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, onDragStart, tags, searchQuery, liveActivity, liveStats, todos }: IssueCardProps) {
+export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, onDragStart, tags, searchQuery, liveActivity, liveStats, todos, isPendingWorkspace }: IssueCardProps) {
   const badgeColor = priorityColors[issue.priority] ?? "bg-gray-200 text-gray-700";
   const ws = issue.workspaceSummary;
   const hasActiveWorkspace = ws?.main && ws.main.status !== "closed";
@@ -118,7 +119,7 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
       onDragLeave={() => setDepDragOver(false)}
       onDrop={handleDrop}
       onClick={() => onClick(issue)}
-      className={`group bg-white rounded-md shadow-sm p-2 border cursor-pointer hover:shadow-md transition-shadow relative ${depDragOver ? "border-purple-400 bg-purple-50 shadow-purple-200" : "border-gray-200 hover:border-gray-300"}`}
+      className={`group bg-white rounded-md shadow-sm p-2 border cursor-pointer hover:shadow-md transition-shadow relative ${depDragOver ? "border-purple-400 bg-purple-50 shadow-purple-200" : isPendingWorkspace ? "border-blue-300 shadow-blue-100 shadow-md" : "border-gray-200 hover:border-gray-300"}`}
     >
       <div className="flex items-start justify-between gap-2">
         <p className="text-sm text-gray-900">
@@ -127,6 +128,12 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
           )}
           <HighlightedText text={issue.title} query={searchQuery ?? ""} />
         </p>
+        {isPendingWorkspace && (
+          <svg className="w-3.5 h-3.5 shrink-0 text-blue-500 animate-spin mt-0.5" fill="none" viewBox="0 0 24 24">
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+          </svg>
+        )}
       </div>
       {issue.description && (
         <p className="text-xs text-gray-500 mt-1 line-clamp-2">
