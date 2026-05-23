@@ -529,24 +529,35 @@ export async function startServer(port?: number) {
     try {
       const { execSync: _execSync } = await import("node:child_process");
       const wmic = _execSync(
-        `wmic process where "name='node.exe'" get ProcessId,CommandLine /format:list`,
+        `wmic process where "name='node.exe'" get ProcessId,ParentProcessId,CommandLine /format:list`,
         { encoding: "utf8", stdio: ["pipe", "pipe", "pipe"], windowsHide: true, timeout: 8000 },
       );
       const myPid = process.pid;
-      const myPpid = process.ppid; // tsx watch parent — must not be killed
       const lines = wmic.split(/\r?\n/);
-      const procs: { pid: number; cmd: string }[] = [];
+      const procs: { pid: number; ppid: number; cmd: string }[] = [];
       let curCmd = "";
       let curPid = 0;
+      let curPpid = 0;
       for (const line of lines) {
         const trimmed = line.trim();
         if (trimmed.startsWith("CommandLine=")) curCmd = trimmed.slice("CommandLine=".length);
+        if (trimmed.startsWith("ParentProcessId=")) curPpid = parseInt(trimmed.slice("ParentProcessId=".length), 10);
         if (trimmed.startsWith("ProcessId=")) curPid = parseInt(trimmed.slice("ProcessId=".length), 10);
-        if (curCmd && curPid) { procs.push({ pid: curPid, cmd: curCmd }); curCmd = ""; curPid = 0; }
+        if (curCmd && curPid) { procs.push({ pid: curPid, ppid: curPpid, cmd: curCmd }); curCmd = ""; curPid = 0; curPpid = 0; }
+      }
+      // Build a map for ancestor lookup, then collect the full ancestor chain of our process.
+      const ppidMap = new Map(procs.map(p => [p.pid, p.ppid]));
+      const ancestors = new Set<number>();
+      let ancestor = myPid;
+      for (let i = 0; i < 10; i++) {
+        const parent = ppidMap.get(ancestor);
+        if (!parent || parent === 0 || parent === ancestor) break;
+        ancestors.add(parent);
+        ancestor = parent;
       }
       let killed = 0;
       for (const p of procs) {
-        if (p.pid === myPid || p.pid === myPpid) continue;
+        if (p.pid === myPid || ancestors.has(p.pid)) continue;
         const cmd = p.cmd.replace(/\\/g, "/");
         // Match tsx-based server processes (hot-reload survivors) for the main server entry point.
         // Avoid killing worktree-specific servers by requiring the cmd NOT to contain a worktree path marker.
