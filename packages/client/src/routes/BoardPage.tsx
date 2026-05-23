@@ -50,12 +50,12 @@ type MonitorAction = { at: string; action: "relaunch" | "merge" | "nudge" | "mar
 type MonitorStatus = { enabled: boolean; intervalMin: number; active: boolean; lastRun: { at: string; relaunched: number; merged: number; nudged: number } | null; nextRunAt: string | null; recentActions: MonitorAction[] };
 
 const ACTION_LABELS: Record<MonitorAction["action"], { label: string; color: string }> = {
-  relaunch:   { label: "Relaunched agent", color: "text-blue-600" },
-  merge:      { label: "Triggered merge",  color: "text-purple-600" },
-  nudge:      { label: "Nudged agent",     color: "text-amber-600" },
-  mark_idle:  { label: "Marked idle",      color: "text-gray-500" },
-  mark_dead:  { label: "Marked dead",      color: "text-red-500" },
-  auto_start: { label: "Auto-started",     color: "text-green-600" },
+  relaunch:   { label: "Relaunched agent",  color: "text-blue-600" },
+  merge:      { label: "Triggered merge",   color: "text-purple-600" },
+  nudge:      { label: "Nudged agent",      color: "text-amber-600" },
+  mark_idle:  { label: "Marked idle",       color: "text-gray-500" },
+  mark_dead:  { label: "Marked dead",       color: "text-red-500" },
+  auto_start: { label: "Auto-started issue", color: "text-green-600" },
 };
 
 function MonitorPopover({ status, onClose, onOpenWorkspace, columns, onRunNow, autoMonitor, onToggle, interval, onIntervalChange, nudgeAutoStart, onNudgeAutoStartChange, nudgeWipLimit, onNudgeWipLimitChange }: { status: MonitorStatus | null; onClose: () => void; onOpenWorkspace: (workspaceId: string, issueId: string) => void; columns: StatusWithIssues[]; onRunNow: () => Promise<void>; autoMonitor: boolean; onToggle: () => void; interval: string; onIntervalChange: (v: string) => void; nudgeAutoStart: boolean; onNudgeAutoStartChange: (v: boolean) => void; nudgeWipLimit: string; onNudgeWipLimitChange: (v: string) => void }) {
@@ -164,25 +164,27 @@ function MonitorPopover({ status, onClose, onOpenWorkspace, columns, onRunNow, a
                 <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-400">Active agents</span>
                 <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-emerald-100 text-emerald-700 text-[10px] font-bold">{activeWs.length}</span>
               </div>
-              {activeWs.map(iss => (
-                <div
-                  key={iss.id}
-                  className="cursor-pointer hover:bg-gray-50 px-3 py-2 transition-colors group"
-                  onClick={() => { onOpenWorkspace(iss.workspaceSummary!.main!.id, iss.id); onClose(); }}
-                >
-                  <div className="flex items-start gap-2">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0 animate-pulse mt-1.5" />
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-baseline gap-1 mb-0.5">
-                        <span className="font-semibold text-gray-600 shrink-0 text-[11px]">#{iss.issueNumber}</span>
-                        <span className="text-gray-700 truncate text-[11px] font-medium">{iss.title}</span>
+              <div className="overflow-y-auto" style={{ maxHeight: "11rem" }}>
+                {activeWs.map(iss => (
+                  <div
+                    key={iss.id}
+                    className="cursor-pointer hover:bg-gray-50 px-3 py-2 transition-colors border-t border-gray-50 first:border-t-0 group"
+                    onClick={() => { onOpenWorkspace(iss.workspaceSummary!.main!.id, iss.id); onClose(); }}
+                  >
+                    <div className="flex items-start gap-2">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0 animate-pulse mt-1.5" />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-baseline gap-1 mb-0.5">
+                          <span className="font-semibold text-gray-600 shrink-0 text-[11px]">#{iss.issueNumber}</span>
+                          <span className="text-gray-700 truncate text-[11px] font-medium">{iss.title}</span>
+                        </div>
+                        <p className="text-gray-400 leading-snug line-clamp-1 text-[10px]">{iss.workspaceSummary!.main!.lastAssistantMessage}</p>
                       </div>
-                      <p className="text-gray-400 leading-snug line-clamp-1 text-[10px]">{iss.workspaceSummary!.main!.lastAssistantMessage}</p>
+                      <svg className="w-3 h-3 text-gray-300 group-hover:text-gray-500 shrink-0 mt-1 transition-colors" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7"/></svg>
                     </div>
-                    <svg className="w-3 h-3 text-gray-300 group-hover:text-gray-500 shrink-0 mt-1 transition-colors" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7"/></svg>
                   </div>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
           )}
 
@@ -759,9 +761,7 @@ export function BoardPage() {
         body: JSON.stringify(data),
       });
       const board = await refetchBoard();
-      // Re-find updated issue in new columns to keep panel open (F1)
-      // refetchBoard now returns the board data
-      void board; // used below via columns state update
+      void board;
       showToast("Issue updated", "success");
     } catch (err) {
       showToast("Failed to update issue", "error");
@@ -799,7 +799,6 @@ export function BoardPage() {
       let issueId: string | undefined;
       let sourceStatusId: string | undefined;
 
-      // Read from dataTransfer wasn't stored, so we use a global bridge
       if (raw && typeof raw === "object") {
         const data = raw as { issueId: string; sourceStatusId: string };
         issueId = data.issueId;
@@ -888,7 +887,7 @@ export function BoardPage() {
     setWorkspaceOpenCreate(true);
   }
 
-  // Filter columns by search query and priority
+  // Filter columns by search query
   const filteredColumns = useMemo(
     () =>
       columns.map((col) => ({
@@ -970,7 +969,6 @@ export function BoardPage() {
         const input = document.getElementById("search-input") as HTMLInputElement | null;
         if (input) {
           input.focus();
-          // Clear any stray "/" that leaked through before focus shift
           requestAnimationFrame(() => {
             if (input.value === "/") {
               input.value = "";
@@ -1609,13 +1607,11 @@ export function BoardPage() {
       {showAllWorkspaces && (
         <AllWorkspacesPanel
           columns={columns}
-          activeProjectId={activeProjectId}
           onClose={() => setShowAllWorkspaces(false)}
           onIssueClick={(issue) => {
             setSelectedIssue(issue);
             setShowAllWorkspaces(false);
           }}
-          onProjectSwitch={handleProjectChange}
           onRefresh={() => refetchBoard()}
         />
       )}
