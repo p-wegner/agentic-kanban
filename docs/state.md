@@ -10,6 +10,13 @@
 - [x] Agent skills system — 3 built-in skills (board-navigator, dependency-analyzer, ticket-enhancer), custom skills via DB, CLI skill commands, MCP tools
 - [x] All features merged to master, visually verified
 
+### Recent Features (2026-05-23)
+- [x] Ready for Merge badge — `readyForMerge` field in workspace GET + board summary; green badge in WorkspacePanel and All Workspaces panel
+- [x] Copy issue reference — clipboard button in IssueDetailPanel header copies `#N Title` reference string
+- [x] IssueCard hover action row — dedicated compact action row (Resume, Start Workspace, Move to next status) that fades in on card hover, replacing the previous full-card overlay
+- [x] Mock Claude profile — built-in `mock` profile always appears in Claude Profile dropdown; separate Mock Agent toggle removed from Settings
+- [x] Priority-based column sort — issues within each board column sorted by priority
+
 ### Recent Features (2026-05-17)
 - [x] Active subagent count on issue cards — Agent tool_use events tracked per session, violet badge with person icon shows count, broadcast via session_stats WS channel
 - [x] TaskCreate/TaskUpdate detection — SDK task tools parsed alongside TodoWrite, unified todo list broadcast via session_todos, existing TodoProgress component reused
