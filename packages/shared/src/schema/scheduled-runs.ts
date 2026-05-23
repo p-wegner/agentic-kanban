@@ -10,6 +10,7 @@ export const scheduledRuns = sqliteTable("scheduled_runs", {
   prompt: text("prompt"),
   skillId: text("skill_id").references(() => agentSkills.id),
   intervalMinutes: integer("interval_minutes").notNull().default(60),
+  cronExpression: text("cron_expression"),
   enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
   systemIssueId: text("system_issue_id"),
   lastRunAt: text("last_run_at"),
