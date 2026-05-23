@@ -1055,6 +1055,57 @@ export function createProjectsRoute(database: Database = db) {
     return c.json({ success: true });
   });
 
+  // GET /api/projects/all/workspaces — cross-project workspace summary (all projects)
+  router.get("/all/workspaces", async (c) => {
+    const allProjects = await database.select().from(projects);
+
+    const results = await Promise.all(
+      allProjects.map(async (project) => {
+        const statuses = await database
+          .select()
+          .from(projectStatuses)
+          .where(eq(projectStatuses.projectId, project.id))
+          .orderBy(projectStatuses.sortOrder);
+
+        const projectIssues = await database
+          .select({
+            id: issues.id,
+            issueNumber: issues.issueNumber,
+            title: issues.title,
+            priority: issues.priority,
+            sortOrder: issues.sortOrder,
+            statusId: issues.statusId,
+            projectId: issues.projectId,
+            createdAt: issues.createdAt,
+            updatedAt: issues.updatedAt,
+            statusName: projectStatuses.name,
+          })
+          .from(issues)
+          .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
+          .where(eq(issues.projectId, project.id))
+          .orderBy(issues.sortOrder);
+
+        const issueIds = projectIssues.map((i) => i.id);
+        const workspaceSummaryMap = await buildWorkspaceSummaryMap(issueIds, project.defaultBranch, database);
+
+        const issuesWithWorkspaces = projectIssues
+          .map((issue) => {
+            const wsSummary = workspaceSummaryMap.get(issue.id);
+            return { ...issue, workspaceSummary: wsSummary };
+          })
+          .filter((i) => i.workspaceSummary && i.workspaceSummary.total > 0);
+
+        return {
+          projectId: project.id,
+          projectName: project.name,
+          issues: issuesWithWorkspaces,
+        };
+      })
+    );
+
+    return c.json(results);
+  });
+
   // GET /api/projects/:id/board
   router.get("/:id/board", async (c) => {
     const projectId = c.req.param("id");
