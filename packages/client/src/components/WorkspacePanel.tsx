@@ -1105,6 +1105,21 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                   <p className="text-xs text-gray-500 truncate">{ws.workingDir}</p>
                 )}
 
+                {(ws.baseBranch && ws.baseBranch !== project.defaultBranch || ws.skillName) && (
+                  <div className="flex flex-wrap gap-1.5 text-xs" data-testid="workspace-info">
+                    {ws.baseBranch && ws.baseBranch !== project.defaultBranch && (
+                      <span className="px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 font-medium" data-testid="workspace-base-branch">
+                        ↑ {ws.baseBranch}
+                      </span>
+                    )}
+                    {ws.skillName && (
+                      <span className="px-1.5 py-0.5 rounded bg-purple-100 text-purple-700 font-medium" data-testid="workspace-skill-name">
+                        ✨ {humanizeSkillName(ws.skillName)}
+                      </span>
+                    )}
+                  </div>
+                )}
+
                 <div className="flex gap-3 text-xs text-gray-400">
                   <span>Created {formatRelativeTime(ws.createdAt)}</span>
                   {ws.closedAt && <span>Closed {formatRelativeTime(ws.closedAt)}</span>}
