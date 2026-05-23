@@ -26,6 +26,21 @@ interface SessionManagerOptions {
   onTodos?: (projectId: string, issueId: string, todos: TodoItem[]) => void;
 }
 
+export interface StartSessionOptions {
+  workspaceId: string;
+  prompt: string;
+  agentCommand?: string;
+  agentArgs?: string;
+  resumeFromId?: string;
+  claudeProfile?: string;
+  multiTurn?: boolean;
+  permissionPromptTool?: string;
+  planMode?: boolean;
+  resumeWithNewModel?: boolean;
+  provider?: import("./agent-provider.js").ProviderId;
+  triggerType?: string;
+}
+
 function createSessionManager(
   upgradeWebSocket: (callback: (c: any) => any) => any,
   options?: SessionManagerOptions,
@@ -263,20 +278,21 @@ function createSessionManager(
   }
 
   /** Create a session DB row and launch the agent process. */
-  async function startSession(
-    workspaceId: string,
-    prompt: string,
-    agentCommand?: string,
-    agentArgs?: string,
-    resumeFromId?: string,
-    claudeProfile?: string,
-    multiTurn?: boolean,
-    permissionPromptTool?: string,
-    planMode?: boolean,
-    resumeWithNewModel?: boolean,
-    provider?: import("./agent-provider.js").ProviderId,
-    triggerType?: string,
-  ) {
+  async function startSession(opts: StartSessionOptions) {
+    const {
+      workspaceId,
+      prompt,
+      agentCommand,
+      agentArgs,
+      resumeFromId,
+      claudeProfile,
+      multiTurn,
+      permissionPromptTool,
+      planMode,
+      resumeWithNewModel,
+      provider,
+      triggerType,
+    } = opts;
     // Look up workspace to get workingDir
     const wsRows = await db
       .select()
@@ -379,20 +395,20 @@ function createSessionManager(
             if (resumeCount < 1) {
               workspaceAutoResumeCount.set(workspaceId, resumeCount + 1);
               console.log(`[session] auto-resuming after ExitPlanMode denial: workspaceId=${workspaceId} resumeFromId=${sessionId}`);
-              startSession(
+              startSession({
                 workspaceId,
-                "Your plan has been approved. Proceed with the implementation now.",
+                prompt: "Your plan has been approved. Proceed with the implementation now.",
                 agentCommand,
                 agentArgs,
-                sessionId, // resumeFromId — uses providerSessionId from this session
+                resumeFromId: sessionId, // uses providerSessionId from this session
                 claudeProfile,
-                undefined, // multiTurn
+                multiTurn: undefined,
                 permissionPromptTool,
-                false, // planMode — don't restrict to plan mode
-                undefined, // resumeWithNewModel
+                planMode: false, // don't restrict to plan mode
+                resumeWithNewModel: undefined,
                 provider,
-                "agent",
-              ).catch((err) => console.error(`[session] auto-resume failed: workspaceId=${workspaceId}`, err));
+                triggerType: "agent",
+              }).catch((err) => console.error(`[session] auto-resume failed: workspaceId=${workspaceId}`, err));
             } else {
               console.log(`[session] skipping auto-resume: workspaceId=${workspaceId} already auto-resumed ${resumeCount} time(s)`);
             }
