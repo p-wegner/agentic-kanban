@@ -1,6 +1,6 @@
 # PRD-01: Features Catalog
 
-<!-- last-synced: 2026-05-21T00:33:05+02:00 | commit: 2b1e622 -->
+<!-- last-synced: 2026-05-23T00:00:00+02:00 | commit: 512d944 -->
 
 Complete inventory of features, organized by category. Status reflects the current implementation (Stages 0–14 complete).
 
@@ -241,14 +241,15 @@ Complete inventory of features, organized by category. Status reflects the curre
 - **Status: DONE**
 
 ### F-UI-09: Settings Panel
-- Tabbed modal (gear icon in header), 8 tabs:
+- Tabbed modal (gear icon in header), 9 tabs:
   - **Agent**: agent command/binary, Claude profile (--settings flag), additional CLI args
-  - **Workflow**: pipeline visualization (Agent runs → Learning step → AI Review → Auto-fix → Auto-merge → Merge); auto code review, auto-fix, auto-merge toggles
+  - **Workflow**: pipeline visualization (Agent runs → AI Review → Auto-fix → Auto-merge → Merge); auto code review, auto-fix, auto-merge toggles; "Use new profile on resume" toggle — starts a fresh session with the current Claude profile instead of resuming the previous session
   - **Skills**: list of global + project-scoped skills with install status; Edit buttons
   - **MCP Tools**: MCP server configuration and tool list
   - **UI**: output parsing mode (Minimal/Full), Dynamic column scaling toggle, Persistent agent (warm pool) toggle
   - **Project**: projects base directory, setup script (textarea + AI-generate button)
   - **Tags**: manage tags (rename, delete, merge); Add new tag
+  - **Schedule**: configure recurring agent runs — name, prompt, interval in minutes; list of scheduled runs; empty state text
   - **Advanced**: Skip Permissions (--dangerously-skip-permissions), Permission Prompt Tool
 - **Status: DONE**
 
@@ -264,6 +265,7 @@ Complete inventory of features, organized by category. Status reflects the curre
 - Commits on main branch counter (e.g. "640 commits")
 - Blocked filter toggle — hides all non-blocked issues
 - Tasks button — opens Quick Tasks panel (skill launcher)
+- **Active profile badge** (e.g. "anth 12"): shows current Claude profile name and count of active sessions using it; also appears inline next to the workspace branch on issue cards when that profile is active
 - **Status: DONE**
 
 ### F-UI-12: Quick Tasks Panel
@@ -271,6 +273,20 @@ Complete inventory of features, organized by category. Status reflects the curre
 - Each skill shows name, description, and model badge (if haiku/non-default)
 - Custom task prompt input (free-form agent prompt)
 - Context button to attach board context
+- **Status: DONE**
+
+### F-UI-13: Scheduled Runs (Settings → Schedule tab)
+- Configure recurring agent runs
+- Each scheduled run creates a direct workspace on its system issue at the configured interval
+- Form fields: Name (e.g. "Daily standup update"), Prompt for the agent, Interval (minutes, default 60)
+- Empty state: "No scheduled runs configured yet."
+- **Status: DONE**
+
+### F-UI-14: All Workspaces Panel
+- Slide-in panel (header "All Workspaces" icon) listing workspaces across all active issues
+- Search input: filter by title or branch name
+- Status filter tabs: All, Active, Running, Idle, Reviewing, Fixing, Closed
+- Empty state with helpful prompt
 - **Status: DONE**
 
 ## Category: Infrastructure
