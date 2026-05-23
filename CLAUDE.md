@@ -5,6 +5,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Project Status
 Stage 13 complete + Tauri desktop (Stages 0-13 done). Tech stack: TypeScript monorepo — Hono + Drizzle + React + MCP SDK + Tauri v2. Current progress: `docs/state.md`. Feature catalog visually verified: 2026-05-23.
 
+## Active Project
+The board has two registered projects pointing at the same repo: "server" (packages/server) and "agentic-kanban" (repo root). **The active project is "agentic-kanban"** (`24c4b3f2-bab8-478c-9ce9-5f87478e20b6`) — always use this for board monitor cycles, workspace operations, and MCP tools. The "server" project is a leftover from early dev and should not be used.
+
 ## What This Is
 Cleanroom reimplementation of [vibe-kanban](https://github.com/BloopAI/vibe-kanban) — a kanban board for managing AI-driven coding tasks. Personal use only, single user, local-first.
 
