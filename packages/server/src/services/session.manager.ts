@@ -57,6 +57,10 @@ function createSessionManager(
   const sessionTasks = new Map<string, Map<string, { subject: string; status: string }>>();
   // Track whether a TodoWrite has been seen for each session (takes precedence over TaskCreate/TaskUpdate)
   const sessionHasTodoWrite = new Set<string>();
+  // Track sessions where ExitPlanMode was denied (non-interactive agents can't confirm plan exit)
+  const sessionExitPlanModeDenied = new Set<string>();
+  // Guard against infinite auto-resume loops (max 1 per workspace)
+  const workspaceAutoResumeCount = new Map<string, number>();
 
   function broadcast(sessionId: string, message: AgentOutputMessage) {
     // Buffer the message for late subscribers
@@ -95,6 +99,12 @@ function createSessionManager(
             .set({ providerSessionId: evt.providerSessionId })
             .where(eq(sessions.id, sessionId))
             .catch((err) => console.error("Failed to update providerSessionId:", err));
+        }
+
+        // Track ExitPlanMode denial for auto-resume
+        if (evt.exitPlanModeDenied) {
+          sessionExitPlanModeDenied.add(sessionId);
+          console.log(`[session] ExitPlanMode denied: sessionId=${sessionId} — will auto-resume if planMode=false`);
         }
 
         // Turn completion in multi-turn mode
@@ -239,6 +249,7 @@ function createSessionManager(
       sessionLastTool.delete(sessionId);
       sessionAgentToolUseIds.delete(sessionId);
       sessionTextParts.delete(sessionId);
+      sessionExitPlanModeDenied.delete(sessionId);
     }
 
     const subs = subscribers.get(sessionId);
@@ -343,6 +354,7 @@ function createSessionManager(
           // Always clean up in-memory state regardless of DB result
           sessionContexts.delete(sessionId);
           turnStates.delete(sessionId);
+          const hadExitPlanModeDenied = sessionExitPlanModeDenied.delete(sessionId);
 
           // Skip DB update if user explicitly stopped — stopSession already wrote "stopped"
           if (stoppedByUser.has(sessionId)) {
@@ -359,6 +371,32 @@ function createSessionManager(
             .catch((err) => console.error("Failed to update session:", err));
           // Always fire the workflow callback — don't gate it on the DB update
           options?.onSessionExit?.(workspaceId, sessionId, exitCode);
+
+          // Auto-resume: if ExitPlanMode was denied and workspace wasn't in plan-only mode,
+          // start a new session with --resume and a "proceed" prompt
+          if (hadExitPlanModeDenied && !planMode) {
+            const resumeCount = workspaceAutoResumeCount.get(workspaceId) ?? 0;
+            if (resumeCount < 1) {
+              workspaceAutoResumeCount.set(workspaceId, resumeCount + 1);
+              console.log(`[session] auto-resuming after ExitPlanMode denial: workspaceId=${workspaceId} resumeFromId=${sessionId}`);
+              startSession(
+                workspaceId,
+                "Your plan has been approved. Proceed with the implementation now.",
+                agentCommand,
+                agentArgs,
+                sessionId, // resumeFromId — uses providerSessionId from this session
+                claudeProfile,
+                undefined, // multiTurn
+                permissionPromptTool,
+                false, // planMode — don't restrict to plan mode
+                undefined, // resumeWithNewModel
+                provider,
+                "agent",
+              ).catch((err) => console.error(`[session] auto-resume failed: workspaceId=${workspaceId}`, err));
+            } else {
+              console.log(`[session] skipping auto-resume: workspaceId=${workspaceId} already auto-resumed ${resumeCount} time(s)`);
+            }
+          }
         }
       // When resumeWithNewModel is true, omit --resume so the new profile/provider is used instead
       }, resumeWithNewModel ? undefined : providerSessionId, agentCommand, claudeProfile, multiTurn, permissionPromptTool, planMode, provider);
