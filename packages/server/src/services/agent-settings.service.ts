@@ -23,7 +23,10 @@ export const MOCK_AGENT_COMMAND = `node --import ${TSX_URL} "${MOCK_AGENT_PATH}"
 export interface AgentSettings {
   agentCommand: string | undefined;
   agentArgs: string | undefined;
+  /** @deprecated Use profile instead */
   claudeProfile: string | undefined;
+  /** Provider-tagged profile selection. Mapped from claude_profile preference as { provider: "claude", name }. */
+  profile: { provider: "claude"; name: string } | undefined;
   resumeWithNewModel: boolean;
   permissionPromptTool: string | undefined;
 }
@@ -90,5 +93,6 @@ export function resolveAgentSettings(
 
   // Don't pass mock profile name to Claude Code — it's only used to select the mock agent command
   const resolvedProfile = isMockProfile(claudeProfile) ? undefined : claudeProfile;
-  return { agentCommand, agentArgs, claudeProfile: resolvedProfile, resumeWithNewModel, permissionPromptTool };
+  const profile = resolvedProfile ? { provider: "claude" as const, name: resolvedProfile } : undefined;
+  return { agentCommand, agentArgs, claudeProfile: resolvedProfile, profile, resumeWithNewModel, permissionPromptTool };
 }
