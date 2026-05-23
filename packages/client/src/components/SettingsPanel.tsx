@@ -1674,11 +1674,12 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                               type="checkbox"
                               checked={run.enabled}
                               onChange={async (e) => {
+                                const enabled = e.target.checked;
                                 await apiFetch(`/api/scheduled-runs/${run.id}`, {
                                   method: "PUT",
-                                  body: JSON.stringify({ enabled: e.target.checked }),
+                                  body: JSON.stringify({ enabled }),
                                 });
-                                setScheduledRunsList((r) => r.map((x) => x.id === run.id ? { ...x, enabled: e.target.checked } : x));
+                                setScheduledRunsList((r) => r.map((x) => x.id === run.id ? { ...x, enabled } : x));
                               }}
                               className="rounded border-gray-300"
                             />

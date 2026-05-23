@@ -25,11 +25,15 @@ export default defineConfig({
   globalTeardown: "./global-teardown.ts",
   use: {
 <<<<<<< HEAD
+<<<<<<< HEAD
     baseURL: `http://localhost:${clientPort}`,
 <<<<<<< HEAD
 =======
     baseURL: `http://127.0.0.1:${clientPort}`,
 >>>>>>> 17677a2 (fix: update E2E test with port helpers and badge fixes)
+=======
+    baseURL: `http://127.0.0.1:${clientPort}`,
+>>>>>>> 66b0d97 (test: add E2E tests for Settings Schedule tab (scheduled runs UI))
     channel: "chrome",
 =======
     ...(executablePath ? { launchOptions: { executablePath } } : {}),
@@ -38,13 +42,13 @@ export default defineConfig({
   webServer: [
     {
       command: "pnpm --filter agentic-kanban dev",
-      port: serverPort,
+      url: `http://127.0.0.1:${serverPort}/health`,
       reuseExistingServer: true,
       cwd: "../..",
     },
     {
       command: "pnpm --filter @agentic-kanban/client dev",
-      port: clientPort,
+      url: `http://127.0.0.1:${clientPort}`,
       reuseExistingServer: true,
       cwd: "../..",
     },
