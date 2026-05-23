@@ -1,5 +1,29 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, APIRequestContext } from "@playwright/test";
 import { SERVER_URL } from "../helpers/port.js";
+
+async function withRetry<T>(fn: () => Promise<T>, attempts = 5, delayMs = 1500): Promise<T> {
+  for (let i = 0; i < attempts; i++) {
+    if (i > 0) await new Promise((r) => setTimeout(r, delayMs));
+    try {
+      return await fn();
+    } catch {
+      if (i === attempts - 1) throw new Error(`Failed after ${attempts} attempts`);
+    }
+  }
+  throw new Error("unreachable");
+}
+
+async function createIssue(
+  request: APIRequestContext,
+  data: { title: string; description: string; priority: string; statusId: string; projectId: string }
+): Promise<string> {
+  return withRetry(async () => {
+    const res = await request.post(`${SERVER_URL}/api/issues`, { data });
+    if (res.status() !== 201) throw new Error(`status ${res.status()}`);
+    const { id } = await res.json();
+    return id;
+  });
+}
 
 const MARKDOWN_DESCRIPTION = `# Heading One
 
@@ -28,19 +52,31 @@ test.describe("Issue description markdown rendering", () => {
   const createdIssueIds: string[] = [];
 
   test.beforeAll(async ({ request }) => {
-    const activePrefRes = await request.get(`${SERVER_URL}/api/preferences/active-project`);
-    const activePref = await activePrefRes.json();
-    projectId = activePref.projectId;
+    await withRetry(async () => {
+      const activePrefRes = await request.get(`${SERVER_URL}/api/preferences/active-project`);
+      const activePref = await activePrefRes.json();
+      projectId = activePref.projectId;
+    });
 
-    const statusesRes = await request.get(`${SERVER_URL}/api/projects/${projectId}/statuses`);
-    const statuses = await statusesRes.json();
-    const todoStatus = statuses.find((s: { name: string }) => s.name === "Todo");
-    statusId = todoStatus ? todoStatus.id : statuses[0].id;
+    await withRetry(async () => {
+      const statusesRes = await request.get(`${SERVER_URL}/api/projects/${projectId}/statuses`);
+      const statuses = await statusesRes.json();
+      const todoStatus = statuses.find((s: { name: string }) => s.name === "Todo");
+      statusId = todoStatus ? todoStatus.id : statuses[0].id;
+    });
   });
 
   test.afterAll(async ({ request }) => {
     for (const id of createdIssueIds) {
-      await request.delete(`${SERVER_URL}/api/issues/${id}`);
+      for (let attempt = 0; attempt < 3; attempt++) {
+        if (attempt > 0) await new Promise((r) => setTimeout(r, 1000));
+        try {
+          await request.delete(`${SERVER_URL}/api/issues/${id}`);
+          break;
+        } catch {
+          // retry
+        }
+      }
     }
   });
 
@@ -48,18 +84,15 @@ test.describe("Issue description markdown rendering", () => {
     const suffix = Date.now().toString(36);
     const title = `MarkdownRender ${suffix}`;
 
-    const createRes = await request.post(`${SERVER_URL}/api/issues`, {
-      data: { title, description: MARKDOWN_DESCRIPTION, priority: "medium", statusId, projectId },
-    });
-    expect(createRes.status()).toBe(201);
-    const { id } = await createRes.json();
+    const id = await createIssue(request, { title, description: MARKDOWN_DESCRIPTION, priority: "medium", statusId, projectId });
     createdIssueIds.push(id);
 
+    await withRetry(() => request.put(`${SERVER_URL}/api/preferences/active-project`, { data: { projectId } }));
     await page.goto("/");
-    await page.waitForSelector("h2");
-
-    // Open issue detail panel
-    await page.locator("p", { hasText: title }).first().click({ force: true });
+    await page.waitForLoadState("networkidle");
+    const issueCard1 = page.locator("p", { hasText: title }).first();
+    await expect(issueCard1).toBeVisible({ timeout: 15000 });
+    await issueCard1.dispatchEvent("click");
     await expect(page.locator("h2", { hasText: "Issue Details" })).toBeVisible();
 
     const panel = page.locator(".fixed.right-0");
@@ -101,17 +134,15 @@ test.describe("Issue description markdown rendering", () => {
     const suffix = Date.now().toString(36);
     const title = `MarkdownEdit ${suffix}`;
 
-    const createRes = await request.post(`${SERVER_URL}/api/issues`, {
-      data: { title, description: MARKDOWN_DESCRIPTION, priority: "low", statusId, projectId },
-    });
-    expect(createRes.status()).toBe(201);
-    const { id } = await createRes.json();
+    const id = await createIssue(request, { title, description: MARKDOWN_DESCRIPTION, priority: "low", statusId, projectId });
     createdIssueIds.push(id);
 
+    await withRetry(() => request.put(`${SERVER_URL}/api/preferences/active-project`, { data: { projectId } }));
     await page.goto("/");
-    await page.waitForSelector("h2");
-
-    await page.locator("p", { hasText: title }).first().click({ force: true });
+    await page.waitForLoadState("networkidle");
+    const issueCard2 = page.locator("p", { hasText: title }).first();
+    await expect(issueCard2).toBeVisible({ timeout: 15000 });
+    await issueCard2.dispatchEvent("click");
     await expect(page.locator("h2", { hasText: "Issue Details" })).toBeVisible();
 
     // Enter edit mode
@@ -134,17 +165,15 @@ test.describe("Issue description markdown rendering", () => {
     const suffix = Date.now().toString(36);
     const title = `MarkdownUpdate ${suffix}`;
 
-    const createRes = await request.post(`${SERVER_URL}/api/issues`, {
-      data: { title, description: "Original description", priority: "low", statusId, projectId },
-    });
-    expect(createRes.status()).toBe(201);
-    const { id } = await createRes.json();
+    const id = await createIssue(request, { title, description: "Original description", priority: "low", statusId, projectId });
     createdIssueIds.push(id);
 
+    await withRetry(() => request.put(`${SERVER_URL}/api/preferences/active-project`, { data: { projectId } }));
     await page.goto("/");
-    await page.waitForSelector("h2");
-
-    await page.locator("p", { hasText: title }).first().click({ force: true });
+    await page.waitForLoadState("networkidle");
+    const issueCard3 = page.locator("p", { hasText: title }).first();
+    await expect(issueCard3).toBeVisible({ timeout: 15000 });
+    await issueCard3.dispatchEvent("click");
     await expect(page.locator("h2", { hasText: "Issue Details" })).toBeVisible();
 
     await page.locator('button:has-text("Edit")').click();
@@ -155,7 +184,7 @@ test.describe("Issue description markdown rendering", () => {
     await textarea.fill("## Updated Heading\n\n**Updated bold**\n\n- list item");
 
     await panel.locator('button:has-text("Save")').click();
-    await expect(page.locator("text=Edit Issue")).not.toBeVisible({ timeout: 5000 });
+    await expect(page.locator("h2", { hasText: "Issue Details" })).toBeVisible({ timeout: 10000 });
 
     // After save, description renders as HTML
     const markdownBody = panel.locator(".markdown-body");

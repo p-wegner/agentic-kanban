@@ -570,7 +570,16 @@ export async function startServer(port?: number) {
     }
   }
 
-  await migrate(db, { migrationsFolder: getMigrationsFolder() });
+  try {
+    await migrate(db, { migrationsFolder: getMigrationsFolder() });
+  } catch (err: unknown) {
+    // libsql@0.4.7 + Node.js 26 bug: CREATE TABLE IF NOT EXISTS on existing table returns
+    // SQLITE_OK (0) which libsql misinterprets as an error. Safe to ignore when DB is already migrated.
+    const isSpuriousLibsqlBug = err instanceof Error && err.message.includes("not an error") &&
+      (err as NodeJS.ErrnoException).code === "SQLITE_OK";
+    if (!isSpuriousLibsqlBug) throw err;
+    console.warn("[startup] Ignoring known libsql SQLITE_OK false-error during migrate — DB already up to date");
+  }
 
   // Disable auto_monitor on every startup — prevents mass agent spawns from idle workspaces
   {
