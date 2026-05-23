@@ -11,7 +11,7 @@ import { createSessionManager } from "./services/session.manager.js";
 import type { ProviderId } from "./services/agent-provider.js";
 import { createBoardEvents } from "./services/board-events.js";
 import { workspaces, issues, projects, projectStatuses, preferences, sessions, agentSkills, issueDependencies, scheduledRuns } from "@agentic-kanban/shared/schema";
-import { getNextCronRun } from "@agentic-kanban/shared/lib/cron-utils.js";
+import { getNextCronRun } from "@agentic-kanban/shared/lib/cron-utils";
 import { eq, sql, desc } from "drizzle-orm";
 import * as agentService from "./services/agent.service.js";
 import * as gitService from "./services/git.service.js";
