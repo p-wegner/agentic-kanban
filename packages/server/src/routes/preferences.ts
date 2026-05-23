@@ -63,6 +63,7 @@ export function createPreferencesRoute(database: Database = db) {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 >>>>>>> 4ffa36b (fix: restore projects_base_path key name in preferences allowlist)
     const keys = ["agent_command", "agent_args", "output_parser", "mock_agent", "skip_permissions", "claude_profile", "permission_prompt_tool", "auto_review", "auto_merge", "resume_with_new_model", "review_auto_fix", "disabled_mcp_tools", "auto_start_followup", "require_manual_approval", "dynamic_column_scaling", "persistent_agent", "learning_step_before_merge", "auto_monitor", "auto_monitor_interval", "projects_base_path"];
@@ -142,6 +143,9 @@ export function createPreferencesRoute(database: Database = db) {
 =======
     const keys = ["agent_command", "agent_args", "output_parser", "mock_agent", "skip_permissions", "claude_profile", "permission_prompt_tool", "auto_review", "auto_merge", "resume_with_new_model", "review_auto_fix", "disabled_mcp_tools", "auto_start_followup", "require_manual_approval", "dynamic_column_scaling", "persistent_agent", "learning_step_after_agent", "learning_step_after_review", "learning_step_before_merge", "auto_monitor", "auto_monitor_interval", "nudge_auto_start", "projects_base_path"];
 >>>>>>> 3dd19d7 (fix: add nudge_auto_start to preferences whitelist and DEFAULT_SETTINGS)
+=======
+    const keys = ["agent_command", "agent_args", "output_parser", "mock_agent", "mock_agent_profile", "skip_permissions", "claude_profile", "permission_prompt_tool", "auto_review", "auto_merge", "resume_with_new_model", "review_auto_fix", "disabled_mcp_tools", "auto_start_followup", "require_manual_approval", "dynamic_column_scaling", "persistent_agent", "learning_step_after_agent", "learning_step_after_review", "learning_step_before_merge", "auto_monitor", "auto_monitor_interval", "nudge_auto_start", "projects_base_path"];
+>>>>>>> d4d13ec (test: E2E coverage for agent task progress bar on issue cards)
     const rows = await database
       .select()
       .from(preferences);
@@ -160,6 +164,7 @@ export function createPreferencesRoute(database: Database = db) {
   router.put("/settings", async (c) => {
     const body = await c.req.json() as Record<string, string>;
     const now = new Date().toISOString();
+<<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
@@ -255,6 +260,9 @@ export function createPreferencesRoute(database: Database = db) {
 =======
     const allowedKeys = ["agent_command", "agent_args", "output_parser", "mock_agent", "skip_permissions", "claude_profile", "permission_prompt_tool", "auto_review", "auto_merge", "resume_with_new_model", "review_auto_fix", "disabled_mcp_tools", "auto_start_followup", "require_manual_approval", "dynamic_column_scaling", "persistent_agent", "learning_step_after_agent", "learning_step_after_review", "learning_step_before_merge", "auto_monitor", "auto_monitor_interval", "nudge_auto_start", "projects_base_path"];
 >>>>>>> 3dd19d7 (fix: add nudge_auto_start to preferences whitelist and DEFAULT_SETTINGS)
+=======
+    const allowedKeys = ["agent_command", "agent_args", "output_parser", "mock_agent", "mock_agent_profile", "skip_permissions", "claude_profile", "permission_prompt_tool", "auto_review", "auto_merge", "resume_with_new_model", "review_auto_fix", "disabled_mcp_tools", "auto_start_followup", "require_manual_approval", "dynamic_column_scaling", "persistent_agent", "learning_step_after_agent", "learning_step_after_review", "learning_step_before_merge", "auto_monitor", "auto_monitor_interval", "nudge_auto_start", "projects_base_path"];
+>>>>>>> d4d13ec (test: E2E coverage for agent task progress bar on issue cards)
 
     for (const [key, value] of Object.entries(body)) {
       if (!allowedKeys.includes(key)) continue;
