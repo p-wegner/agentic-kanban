@@ -41,7 +41,9 @@ export function BoardStats({
   const total = totalActive + totalArchive;
 
   const doneCount = archiveColumns.find((c) => c.name === "Done")?.issues.length ?? 0;
-  const completionPct = total > 0 ? Math.round((doneCount / total) * 100) : 0;
+  const cancelledCount = archiveColumns.find((c) => c.name === "Cancelled")?.issues.length ?? 0;
+  const nonCancelledTotal = total - cancelledCount;
+  const completionPct = nonCancelledTotal > 0 ? Math.round((doneCount / nonCancelledTotal) * 100) : 0;
 
   // Active workspace counts
   const activeWorkspaces = activeColumns.reduce((sum, col) => {
@@ -182,6 +184,19 @@ export function BoardStats({
           </button>
         )}
       </div>
+
+      {/* Done / total progress bar */}
+      {total > 0 && (
+        <div
+          className="h-1.5 w-full rounded-full overflow-hidden bg-gray-200"
+          title={`${doneCount} / ${nonCancelledTotal} non-cancelled issues done (${completionPct}%)`}
+        >
+          <div
+            className="h-full bg-emerald-500 rounded-full transition-all duration-500"
+            style={{ width: `${completionPct}%` }}
+          />
+        </div>
+      )}
 
       {/* Segmented progress bar + status legend */}
       {total > 0 && (
