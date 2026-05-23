@@ -37,16 +37,24 @@ test.describe("Live session stats on issue cards", () => {
     for (const id of createdIssueIds) {
       await request.delete(`${SERVER_URL}/api/issues/${id}`);
     }
-    // Restore mock_agent setting
+    // Restore mock_agent settings
     await request.put(`${SERVER_URL}/api/preferences/settings`, {
-      data: { mock_agent: "false" },
+      data: { mock_agent: "false", mock_agent_delay_ms: "" },
     });
   });
 
-  /** Enable mock agent globally so workspace creation auto-launches mock agent. */
-  async function enableMockAgent(request: Parameters<Parameters<typeof test>[1]>[0]["request"]) {
+  /** Enable mock agent with a long per-event delay so the session stays active long enough
+   *  for live-stats badges to appear on the board before the agent exits. */
+  async function enableMockAgent(request: Parameters<Parameters<typeof test>[1]>[0]["request"], delayMs = 60000) {
     await request.put(`${SERVER_URL}/api/preferences/settings`, {
-      data: { mock_agent: "true" },
+      data: { mock_agent: "true", mock_agent_delay_ms: String(delayMs) },
+    });
+  }
+
+  /** Enable mock agent with no extra delay — for tests that wait for session exit. */
+  async function enableMockAgentFast(request: Parameters<Parameters<typeof test>[1]>[0]["request"]) {
+    await request.put(`${SERVER_URL}/api/preferences/settings`, {
+      data: { mock_agent: "true", mock_agent_delay_ms: "" },
     });
   }
 
@@ -187,7 +195,7 @@ test.describe("Live session stats on issue cards", () => {
   }) => {
     test.setTimeout(120_000);
 
-    await enableMockAgent(request);
+    await enableMockAgentFast(request);
 
     const suffix = `end-${Date.now().toString(36)}`;
     const issueTitle = `Session stats test ${suffix}`;
