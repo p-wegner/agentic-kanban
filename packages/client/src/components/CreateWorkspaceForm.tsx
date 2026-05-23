@@ -20,9 +20,10 @@ interface CreateWorkspaceFormProps {
   actionLoading: boolean;
   onCreated: (result: { id: string; sessionId?: string }) => void;
   onCancel: () => void;
+  onSubmitting?: () => void;
 }
 
-export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCreated, onCancel }: CreateWorkspaceFormProps) {
+export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCreated, onCancel, onSubmitting }: CreateWorkspaceFormProps) {
   const suggestion = suggestBranchName(issue);
 
   const [branchName, setBranchName] = useState(suggestion);
@@ -63,6 +64,7 @@ const [planMode, setPlanMode] = useState(false);
     if (!isDirect && !branchName.trim()) return;
     setLocalLoading(true);
     setLocalError(null);
+    onSubmitting?.();
     try {
       const body: Record<string, unknown> = { issueId: issue.id, isDirect, requiresReview, planMode, skipSetup };
       if (selectedSkillId) body.skillId = selectedSkillId;

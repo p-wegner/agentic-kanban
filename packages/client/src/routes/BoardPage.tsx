@@ -377,6 +377,7 @@ export function BoardPage() {
   const [showMonitorPopover, setShowMonitorPopover] = useState(false);
   const [monitorRunning, setMonitorRunning] = useState(false);
   const [moveToDonePending, setMoveToDonePending] = useState<{ issue: IssueWithStatus; confirm: () => Promise<void> } | null>(null);
+  const [pendingWorkspaceIssueIds, setPendingWorkspaceIssueIds] = useState<Set<string>>(new Set());
 
   const refetchBoard = useCallback(async (projectId?: string) => {
     const pid = projectId || activeProjectId;
@@ -396,6 +397,18 @@ export function BoardPage() {
         }
       }
     }
+    // Clear pending workspace indicator for issues that now have an active workspace
+    setPendingWorkspaceIssueIds((prev) => {
+      if (prev.size === 0) return prev;
+      const next = new Set(prev);
+      for (const col of board) {
+        for (const issue of col.issues) {
+          const ws = issue.workspaceSummary?.main;
+          if (ws && ws.status !== "closed") next.delete(issue.id);
+        }
+      }
+      return next.size === prev.size ? prev : next;
+    });
     if (inactiveIssueIds.size > 0) {
       setLiveStats((prev) => {
         const next = { ...prev };
@@ -668,6 +681,19 @@ export function BoardPage() {
     showToast(`Created "${result.name}"`, "success");
   }
 
+  async function handleUnregisterProject(id: string) {
+    const project = projects.find((p) => p.id === id);
+    await apiFetch(`/api/projects/${id}`, { method: "DELETE" });
+    const remaining = projects.filter((p) => p.id !== id);
+    if (remaining.length > 0) {
+      await handleProjectChange(remaining[0].id);
+    } else {
+      setActiveProjectId(null);
+    }
+    await loadProjects();
+    showToast(`Removed "${project?.name ?? "project"}"`, "success");
+  }
+
   async function handleCreateIssue(data: CreateIssueRequest & { startWorkspace?: boolean; planMode?: boolean; claudeProfile?: string; isDirect?: boolean; skillId?: string }) {
     setMutating(true);
     setError(null);
@@ -817,6 +843,31 @@ export function BoardPage() {
     }
   }
 
+  async function handleMoveToNext(issue: IssueWithStatus, nextStatusId: string) {
+    try {
+      const targetColumn = columns.find((col) => col.id === nextStatusId);
+      const isArchiveTarget = targetColumn && ARCHIVE_STATUS_NAMES.has(targetColumn.name);
+      if (isArchiveTarget) {
+        const ws = issue.workspaceSummary?.main;
+        if (ws && ws.status !== "closed") {
+          setMoveToDonePending({
+            issue,
+            confirm: async () => {
+              await apiFetch(`/api/issues/${issue.id}`, { method: "PATCH", body: JSON.stringify({ statusId: nextStatusId }) });
+              await refetchBoard();
+              setMoveToDonePending(null);
+            },
+          });
+          return;
+        }
+      }
+      await apiFetch(`/api/issues/${issue.id}`, { method: "PATCH", body: JSON.stringify({ statusId: nextStatusId }) });
+      await refetchBoard();
+    } catch {
+      showToast("Failed to move issue", "error");
+    }
+  }
+
   function handleIssueClick(issue: IssueWithStatus) {
     setSelectedIssue(issue);
   }
@@ -946,6 +997,10 @@ export function BoardPage() {
           setShowShortcutHelp(false);
           return;
         }
+        if (showQuickTasks) {
+          setShowQuickTasks(false);
+          return;
+        }
         if (searchQuery) {
           setSearchQuery("");
           document.getElementById("search-input")?.blur();
@@ -1021,7 +1076,7 @@ export function BoardPage() {
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [searchQuery, showCommandPalette, showAllWorkspaces, showWorktreeOverview, showShortcutHelp, filteredColumns, columns, setViewMode, setShowQuickTasks, setShowSettings]);
+  }, [searchQuery, showCommandPalette, showAllWorkspaces, showWorktreeOverview, showShortcutHelp, showQuickTasks, filteredColumns, columns, setViewMode, setShowQuickTasks, setShowSettings]);
 
   // Register command palette actions
   useEffect(() => {
@@ -1246,6 +1301,7 @@ export function BoardPage() {
       projects={projects}
       activeProjectId={activeProjectId}
       onProjectChange={handleProjectChange}
+      onUnregisterProject={handleUnregisterProject}
       searchQuery={searchQuery}
       onSearchChange={setSearchQuery}
       onRegisterProject={handleRegisterProject}
@@ -1442,10 +1498,13 @@ export function BoardPage() {
                 handleDragStart(e, issue);
               }}
               onDrop={handleDrop}
+              onMoveToNext={handleMoveToNext}
+              allColumns={columns}
               searchQuery={searchQuery}
               sessionActivity={sessionActivity}
               liveStats={liveStats}
               sessionTodos={sessionTodos}
+              pendingWorkspaceIssueIds={pendingWorkspaceIssueIds}
             >
               <CreateIssueForm
                 projectId={activeProjectId}
@@ -1504,6 +1563,7 @@ export function BoardPage() {
           project={activeProject ?? null}
           onClose={() => { setWorkspaceIssue(null); setWorkspaceInitial(null); setWorkspaceOpenCreate(false); }}
           onWorkspaceChange={() => refetchBoard()}
+          onWorkspaceCreating={(issueId) => setPendingWorkspaceIssueIds((prev) => new Set([...prev, issueId]))}
           initialWorkspaceId={workspaceInitial?.workspaceId}
           initialSessionId={workspaceInitial?.sessionId}
           initialShowCreate={workspaceOpenCreate}
