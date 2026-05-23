@@ -14,6 +14,8 @@ interface Settings {
   output_parser?: string;
   skip_permissions?: string;
   claude_profile?: string;
+  codex_profile?: string;
+  provider?: string;
   permission_prompt_tool?: string;
   auto_review?: string;
   auto_merge?: string;
@@ -40,6 +42,8 @@ const DEFAULT_SETTINGS: Settings = {
   output_parser: "true",
   skip_permissions: "false",
   claude_profile: "",
+  codex_profile: "",
+  provider: "claude",
   permission_prompt_tool: "true",
   auto_review: "true",
   auto_merge: "true",
@@ -335,6 +339,7 @@ function describeCronExpression(expr: string): string {
 export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) {
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [profiles, setProfiles] = useState<string[]>([]);
+  const [codexProfiles, setCodexProfiles] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [tab, setTab] = useState<Tab>("agent");
@@ -408,14 +413,16 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
   useEffect(() => {
     async function load() {
       try {
-        const [data, profileData, skillsData, tagsData] = await Promise.all([
+        const [data, profileData, codexProfileData, skillsData, tagsData] = await Promise.all([
           apiFetch<Record<string, string>>("/api/preferences/settings"),
           apiFetch<{ profiles: string[] }>("/api/preferences/claude-profiles"),
+          apiFetch<{ profiles: string[] }>("/api/preferences/codex-profiles"),
           apiFetch<{ id: string; name: string; description: string; prompt: string; model: string | null; projectId: string | null; isBuiltin: boolean }[]>("/api/agent-skills"),
           apiFetch<{ id: string; name: string; color: string | null }[]>("/api/tags"),
         ]);
         setSettings({ ...DEFAULT_SETTINGS, ...data });
         setProfiles(profileData.profiles);
+        setCodexProfiles(codexProfileData.profiles);
         setSkills(skillsData);
         setTagsList(tagsData);
 
@@ -584,16 +591,37 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                       className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
                     />
                   </Field>
-                  <Field label="Claude Profile" hint={`Passes --settings to Claude Code pointing to ~/.claude/settings_*.json`}>
+                  <Field label="Agent Profile" hint="Selects agent profile and provider. Claude: ~/.claude/settings_*.json — Codex: ~/.codex/<name>.config.toml (rename legacy config_<name>.toml → <name>.config.toml)">
                     <select
-                      value={settings.claude_profile || ""}
-                      onChange={(e) => set("claude_profile")(e.target.value)}
+                      value={`${settings.provider || "claude"}:${settings.provider === "codex" ? (settings.codex_profile || "") : (settings.claude_profile || "")}`}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        if (val === "") {
+                          setSettings((s) => ({ ...s, provider: "claude", claude_profile: "", codex_profile: s.codex_profile }));
+                        } else {
+                          const [prov, name] = val.split(":");
+                          if (prov === "codex") {
+                            setSettings((s) => ({ ...s, provider: "codex", codex_profile: name, claude_profile: s.claude_profile }));
+                          } else {
+                            setSettings((s) => ({ ...s, provider: "claude", claude_profile: name, codex_profile: s.codex_profile }));
+                          }
+                        }
+                      }}
                       className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
                     >
                       <option value="">Default (no profile)</option>
-                      {profiles.map((p) => (
-                        <option key={p} value={p}>{p}</option>
-                      ))}
+                      <optgroup label="Claude">
+                        {profiles.map((p) => (
+                          <option key={`claude:${p}`} value={`claude:${p}`}>{p}</option>
+                        ))}
+                      </optgroup>
+                      {codexProfiles.length > 0 && (
+                        <optgroup label="Codex">
+                          {codexProfiles.map((p) => (
+                            <option key={`codex:${p}`} value={`codex:${p}`}>{p}</option>
+                          ))}
+                        </optgroup>
+                      )}
                     </select>
                   </Field>
                   <Field label="Additional Arguments" hint="Extra CLI arguments passed to the agent command. Arguments are shell-split (supports quoting).">
