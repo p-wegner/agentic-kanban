@@ -204,6 +204,11 @@ function createSessionManager(
         if (evt.toolResult) {
           const agentIds = sessionAgentToolUseIds.get(sessionId);
           if (agentIds && agentIds.has(evt.toolResult.toolUseId)) {
+            // Accumulate subagent response text
+            if (evt.toolResult.agentResultText) {
+              if (!sessionTextParts.has(sessionId)) sessionTextParts.set(sessionId, []);
+              sessionTextParts.get(sessionId)!.push(evt.toolResult.agentResultText);
+            }
             agentIds.delete(evt.toolResult.toolUseId);
             const newCount = Math.max(0, (sessionSubagents.get(sessionId) ?? 1) - 1);
             sessionSubagents.set(sessionId, newCount);
