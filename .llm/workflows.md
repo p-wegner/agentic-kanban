@@ -467,3 +467,26 @@ Or type `pause cron` and Claude will cancel it.
 ### Note on `claude_profile=zai`
 
 The `zai` profile maps to a non-Claude model (glm-5.1) that exits after 13–101s with `exitCode: null`. These sessions never produce output. The monitoring loop works around this by re-launching repeatedly, but the reliable fix is to implement features directly or switch to a Claude profile for agent work.
+
+---
+
+## Codex Profile Naming Convention
+
+`codex exec --profile-v2 <name>` looks for `<name>.config.toml` in `~/.codex/`.
+
+**Legacy files** use the pattern `config_<name>.toml` and need a one-time rename:
+
+| Before (legacy) | After (new convention) |
+|---|---|
+| `config_andrena-azure.toml` | `andrena-azure.config.toml` |
+| `config_orig.toml` | `orig.config.toml` |
+| `config.toml` | `config.toml` (base config, **do NOT rename**) |
+
+To rename:
+
+```powershell
+Rename-Item "$env:USERPROFILE\.codex\config_andrena-azure.toml" "andrena-azure.config.toml"
+Rename-Item "$env:USERPROFILE\.codex\config_orig.toml" "orig.config.toml"
+```
+
+The board discovers both naming conventions and shows them in the profile dropdown (Settings → Agent → Agent Profile, under the "Codex" optgroup). The hint text in the UI also documents the convention.
