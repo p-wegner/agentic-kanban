@@ -234,7 +234,7 @@ export async function startServer(port?: number) {
             const agentCmdLearn = isMockProfile(profileLearn) ? MOCK_AGENT_COMMAND : (prefMap.get("agent_command") || undefined);
             const agentArgsLearn = prefMap.get("agent_args") || undefined;
             const claudeProfileLearn = isMockProfile(profileLearn) ? undefined : profileLearn;
-            const profileSelectionLearn = claudeProfileLearn ? { provider: "claude" as const, name: claudeProfileLearn } : undefined;
+            const profileSelectionLearn = claudeProfileLearn ? { provider: ((prefMap.get("provider") || "claude") as "claude" | "codex"), name: claudeProfileLearn } : undefined;
             const learningPrompt = `/learning-step\n\nRun the learning step skill to extract insights from recent session transcripts and update docs/hooks.`;
             const learnSessId = await sessionManager.startSession({ workspaceId: workspace.id, prompt: learningPrompt, agentCommand: agentCmdLearn, agentArgs: agentArgsLearn, claudeProfile: claudeProfileLearn, triggerType: "learning", profile: profileSelectionLearn });
             learningSessionIds.add(learnSessId);
@@ -314,7 +314,7 @@ export async function startServer(port?: number) {
             const agentCmdLearn = isMockProfile(profileLearn) ? MOCK_AGENT_COMMAND : (prefMap.get("agent_command") || undefined);
             const agentArgsLearn = prefMap.get("agent_args") || undefined;
             const claudeProfileLearn = isMockProfile(profileLearn) ? undefined : profileLearn;
-            const profileSelectionLearn = claudeProfileLearn ? { provider: "claude" as const, name: claudeProfileLearn } : undefined;
+            const profileSelectionLearn = claudeProfileLearn ? { provider: ((prefMap.get("provider") || "claude") as "claude" | "codex"), name: claudeProfileLearn } : undefined;
             const learningPrompt = `/learning-step\n\nRun the learning step skill to extract insights from recent session transcripts and update docs/hooks.`;
             const learnSessId = await sessionManager.startSession({ workspaceId: workspace.id, prompt: learningPrompt, agentCommand: agentCmdLearn, agentArgs: agentArgsLearn, claudeProfile: claudeProfileLearn, triggerType: "learning", profile: profileSelectionLearn });
             learningSessionIds.add(learnSessId);
@@ -328,7 +328,7 @@ export async function startServer(port?: number) {
           const reviewProfile = prefMap.get("claude_profile") || undefined;
           const agentCommand = isMockProfile(reviewProfile) ? MOCK_AGENT_COMMAND : (prefMap.get("agent_command") || undefined);
           const claudeProfile = isMockProfile(reviewProfile) ? undefined : reviewProfile;
-          const profileSelection = claudeProfile ? { provider: "claude" as const, name: claudeProfile } : undefined;
+          const profileSelection = claudeProfile ? { provider: ((prefMap.get("provider") || "claude") as "claude" | "codex"), name: claudeProfile } : undefined;
           const reviewArgs = buildReviewArgs(prefMap);
           const autoFix = prefMap.get("review_auto_fix") !== "false";
           const provider = (prefMap.get("provider") || undefined) as ProviderId | undefined;
