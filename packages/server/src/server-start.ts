@@ -10,23 +10,8 @@ import { db } from "./db/index.js";
 import { createSessionManager } from "./services/session.manager.js";
 import type { ProviderId } from "./services/agent-provider.js";
 import { createBoardEvents } from "./services/board-events.js";
-<<<<<<< HEAD
-<<<<<<< HEAD
-import { workspaces, issues, projects, projectStatuses, preferences, sessions, agentSkills, issueDependencies } from "@agentic-kanban/shared/schema";
-=======
-import { workspaces, issues, projects, projectStatuses, preferences, sessions, agentSkills, sessionMessages } from "@agentic-kanban/shared/schema";
->>>>>>> eab49ce (feat: check last agent output before re-nudging to avoid interrupting active work)
-=======
 import { workspaces, issues, projects, projectStatuses, preferences, sessions, agentSkills, issueDependencies, scheduledRuns } from "@agentic-kanban/shared/schema";
-<<<<<<< HEAD
-<<<<<<< HEAD
->>>>>>> a5eb7cd (fix: add missing scheduledRuns import in server-start.ts)
-=======
-import { getNextCronRun } from "@agentic-kanban/shared/lib/cron-utils.js";
->>>>>>> 2ac8047 (feat: add cron expression support to scheduled runs)
-=======
 import { getNextCronRun } from "@agentic-kanban/shared/lib/cron-utils";
->>>>>>> fb11b51 (fix: remove .js extension from cron-utils import in server-start)
 import { eq, sql, desc } from "drizzle-orm";
 import * as agentService from "./services/agent.service.js";
 import * as gitService from "./services/git.service.js";
@@ -403,12 +388,6 @@ export async function startServer(port?: number) {
           learningSessionIds.add(learningSessId);
           console.log(`[workflow] learning step started: session=${learningSessId}`);
           await new Promise<void>((resolve) => {
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
             let poll: NodeJS.Timeout;
             const timeout = setTimeout(() => {
               clearInterval(poll);
@@ -416,51 +395,6 @@ export async function startServer(port?: number) {
               resolve();
             }, 3 * 60 * 1000);
             poll = setInterval(async () => {
-=======
-=======
-            let poll: NodeJS.Timeout;
->>>>>>> cc239db (fix: correct projects_base_path key name and learning step poll TDZ)
-            const timeout = setTimeout(() => {
-              clearInterval(poll);
-              console.log("[workflow] learning step timed out after 3m, proceeding with merge");
-              resolve();
-            }, 3 * 60 * 1000);
-<<<<<<< HEAD
-            const poll = setInterval(async () => {
->>>>>>> 4a89f99 (feat: wire learning step into auto-merge workflow)
-=======
-            poll = setInterval(async () => {
->>>>>>> cc239db (fix: correct projects_base_path key name and learning step poll TDZ)
-=======
-=======
-            let poll: NodeJS.Timeout;
->>>>>>> c8742c0 (fix: correct projects_base_path key name and learning step poll TDZ)
-            const timeout = setTimeout(() => {
-              clearInterval(poll);
-              console.log("[workflow] learning step timed out after 3m, proceeding with merge");
-              resolve();
-            }, 3 * 60 * 1000);
-<<<<<<< HEAD
-            const poll = setInterval(async () => {
->>>>>>> 3e19310 (feat: wire learning step into auto-merge workflow)
-=======
-            poll = setInterval(async () => {
->>>>>>> c8742c0 (fix: correct projects_base_path key name and learning step poll TDZ)
-=======
-=======
-            let poll: NodeJS.Timeout;
->>>>>>> dedc21e (fix: correct projects_base_path key name and learning step poll TDZ)
-            const timeout = setTimeout(() => {
-              clearInterval(poll);
-              console.log("[workflow] learning step timed out after 3m, proceeding with merge");
-              resolve();
-            }, 3 * 60 * 1000);
-<<<<<<< HEAD
-            const poll = setInterval(async () => {
->>>>>>> 1e1ede9 (feat: wire learning step into auto-merge workflow)
-=======
-            poll = setInterval(async () => {
->>>>>>> dedc21e (fix: correct projects_base_path key name and learning step poll TDZ)
               const sessRows = await db.select({ status: sessions.status }).from(sessions).where(eq(sessions.id, learningSessId)).limit(1);
               if (sessRows.length > 0 && sessRows[0].status !== "running") {
                 clearInterval(poll);
@@ -661,14 +595,6 @@ export async function startServer(port?: number) {
 
   try {
     await migrate(db, { migrationsFolder: getMigrationsFolder() });
-<<<<<<< HEAD
-  } catch (err) {
-    // libsql@0.4.7 sometimes throws SQLITE_OK ("not an error") even when migration succeeds.
-    // Ignore this specific false-positive; re-throw real errors.
-    const msg = err instanceof Error ? err.message : String(err);
-    if (!msg.includes("SQLITE_OK")) throw err;
-    console.warn("[startup] migration threw SQLITE_OK false-positive — continuing");
-=======
   } catch (err: unknown) {
     // libsql@0.4.7 + Node.js 26 bug: CREATE TABLE IF NOT EXISTS on existing table returns
     // SQLITE_OK (0) which libsql misinterprets as an error. Safe to ignore when DB is already migrated.
@@ -676,7 +602,6 @@ export async function startServer(port?: number) {
       (err as NodeJS.ErrnoException).code === "SQLITE_OK";
     if (!isSpuriousLibsqlBug) throw err;
     console.warn("[startup] Ignoring known libsql SQLITE_OK false-error during migrate — DB already up to date");
->>>>>>> e890d6c (fix: resolve E2E test failures for markdown rendering)
   }
 
   // Disable auto_monitor on every startup — prevents mass agent spawns from idle workspaces
@@ -788,43 +713,12 @@ export async function startServer(port?: number) {
   let monitorTimer: ReturnType<typeof setTimeout> | null = null;
   let monitorNextRunAt: string | null = null;
   let monitorLastRun: { at: string; relaunched: number; merged: number; nudged: number } | null = null;
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-  type MonitorAction = { at: string; action: "relaunch" | "merge" | "nudge" | "mark_idle" | "mark_dead"; workspaceId: string; issueId: string };
-=======
-=======
   let monitorCurrentIntervalMin: number | null = null;
->>>>>>> a4489dd (fix: restart monitor immediately when interval preference changes)
   type MonitorAction = { at: string; action: "relaunch" | "merge" | "nudge" | "mark_idle" | "mark_dead" | "auto_start"; workspaceId: string; issueId: string };
->>>>>>> badbfcc (feat: add nudge auto-start setting to monitor for unblocked Todo items)
   const monitorRecentActions: MonitorAction[] = [];
 
   function logMonitorAction(action: MonitorAction["action"], workspaceId: string, issueId: string) {
     monitorRecentActions.unshift({ at: new Date().toISOString(), action, workspaceId, issueId });
-=======
-=======
->>>>>>> 1407a7f (feat: add board monitor visualization panel)
-=======
->>>>>>> bf9db15 (feat: add board monitor visualization panel)
-  type MonitorAction = { at: string; action: "relaunch" | "merge" | "nudge" | "mark_idle" | "mark_dead"; workspaceId: string };
-  const monitorRecentActions: MonitorAction[] = [];
-
-  function logMonitorAction(action: MonitorAction["action"], workspaceId: string) {
-    monitorRecentActions.unshift({ at: new Date().toISOString(), action, workspaceId });
-<<<<<<< HEAD
-<<<<<<< HEAD
->>>>>>> 01516bd (feat: add board monitor visualization panel)
-=======
-  type MonitorAction = { at: string; action: "relaunch" | "merge" | "nudge" | "mark_idle" | "mark_dead"; workspaceId: string; issueId: string };
-  const monitorRecentActions: MonitorAction[] = [];
-
-  function logMonitorAction(action: MonitorAction["action"], workspaceId: string, issueId: string) {
-    monitorRecentActions.unshift({ at: new Date().toISOString(), action, workspaceId, issueId });
->>>>>>> 47c4344 (feat: make monitor action log entries clickable workspace links)
     if (monitorRecentActions.length > 30) monitorRecentActions.splice(30);
   }
 
@@ -876,14 +770,6 @@ export async function startServer(port?: number) {
     const hasActive = activeSignals.some(s => combined.includes(s));
     return hasActive; // skip if clearly active
   }
-=======
-    if (monitorRecentActions.length > 30) monitorRecentActions.splice(30);
-  }
->>>>>>> 1407a7f (feat: add board monitor visualization panel)
-=======
-    if (monitorRecentActions.length > 30) monitorRecentActions.splice(30);
-  }
->>>>>>> bf9db15 (feat: add board monitor visualization panel)
 
   async function runMonitorCycle(force = false) {
     const cycleStats = { relaunched: 0, merged: 0, nudged: 0 };
@@ -970,23 +856,7 @@ export async function startServer(port?: number) {
             const baseUrl = `http://localhost:${serverPort}`;
             await fetch(`${baseUrl}/api/workspaces/${ws.wsId}/launch`, { method: "POST" }).catch(() => {});
             cycleStats.relaunched++;
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
             logMonitorAction("relaunch", ws.wsId, ws.issueId);
-=======
-            logMonitorAction("relaunch", ws.wsId);
->>>>>>> 01516bd (feat: add board monitor visualization panel)
-=======
-            logMonitorAction("relaunch", ws.wsId, ws.issueId);
->>>>>>> 47c4344 (feat: make monitor action log entries clickable workspace links)
-=======
-            logMonitorAction("relaunch", ws.wsId);
->>>>>>> 1407a7f (feat: add board monitor visualization panel)
-=======
-            logMonitorAction("relaunch", ws.wsId);
->>>>>>> bf9db15 (feat: add board monitor visualization panel)
             console.log(`[monitor] Relaunched idle workspace ${ws.wsId}`);
             boardEvents.broadcast(ws.projectId, "board_changed");
             }
@@ -1012,23 +882,7 @@ export async function startServer(port?: number) {
             const baseUrl = `http://localhost:${serverPort}`;
             await fetch(`${baseUrl}/api/workspaces/${ws.wsId}/merge`, { method: "POST" }).catch(() => {});
             cycleStats.merged++;
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
             logMonitorAction("merge", ws.wsId, ws.issueId);
-=======
-            logMonitorAction("merge", ws.wsId);
->>>>>>> 01516bd (feat: add board monitor visualization panel)
-=======
-            logMonitorAction("merge", ws.wsId, ws.issueId);
->>>>>>> 47c4344 (feat: make monitor action log entries clickable workspace links)
-=======
-            logMonitorAction("merge", ws.wsId);
->>>>>>> 1407a7f (feat: add board monitor visualization panel)
-=======
-            logMonitorAction("merge", ws.wsId);
->>>>>>> bf9db15 (feat: add board monitor visualization panel)
             console.log(`[monitor] Triggered merge for reviewing workspace ${ws.wsId}`);
             boardEvents.broadcast(ws.projectId, "board_changed");
             }
@@ -1048,23 +902,7 @@ export async function startServer(port?: number) {
             } else {
             // Mark workspace as idle so the next cycle will relaunch it.
             await db.update(workspaces).set({ status: "idle" }).where(eq(workspaces.id, ws.wsId)).catch(() => {});
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
             logMonitorAction("mark_idle", ws.wsId, ws.issueId);
-=======
-            logMonitorAction("mark_idle", ws.wsId);
->>>>>>> 01516bd (feat: add board monitor visualization panel)
-=======
-            logMonitorAction("mark_idle", ws.wsId, ws.issueId);
->>>>>>> 47c4344 (feat: make monitor action log entries clickable workspace links)
-=======
-            logMonitorAction("mark_idle", ws.wsId);
->>>>>>> 1407a7f (feat: add board monitor visualization panel)
-=======
-            logMonitorAction("mark_idle", ws.wsId);
->>>>>>> bf9db15 (feat: add board monitor visualization panel)
             console.log(`[monitor] Active workspace ${ws.wsId} has stopped session — marking idle for relaunch`);
             }
             boardEvents.broadcast(ws.projectId, "board_changed");
@@ -1075,31 +913,13 @@ export async function startServer(port?: number) {
               // Process died without updating DB — treat as stopped
               await db.update(workspaces).set({ status: "idle" }).where(eq(workspaces.id, ws.wsId)).catch(() => {});
               await db.update(sessions).set({ status: "stopped", endedAt: new Date().toISOString() }).where(eq(sessions.id, sess.id)).catch(() => {});
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
               logMonitorAction("mark_dead", ws.wsId, ws.issueId);
-=======
-              logMonitorAction("mark_dead", ws.wsId);
->>>>>>> 01516bd (feat: add board monitor visualization panel)
-=======
-              logMonitorAction("mark_dead", ws.wsId, ws.issueId);
->>>>>>> 47c4344 (feat: make monitor action log entries clickable workspace links)
-=======
-              logMonitorAction("mark_dead", ws.wsId);
->>>>>>> 1407a7f (feat: add board monitor visualization panel)
-=======
-              logMonitorAction("mark_dead", ws.wsId);
->>>>>>> bf9db15 (feat: add board monitor visualization panel)
               console.log(`[monitor] Workspace ${ws.wsId} process dead — marking idle`);
               boardEvents.broadcast(ws.projectId, "board_changed");
             } else {
               // Check if agent is waiting for input (running > 5min without activity)
               const runningMs = Date.now() - new Date(sess.startedAt).getTime();
               if (runningMs > 5 * 60 * 1000) {
-<<<<<<< HEAD
-<<<<<<< HEAD
                 // Check if we've already nudged this workspace before (repeat nudge scenario)
                 const previousNudge = monitorRecentActions.find(
                   a => a.action === "nudge" && a.workspaceId === ws.wsId
@@ -1117,42 +937,7 @@ export async function startServer(port?: number) {
                   }
                 }
 
-<<<<<<< HEAD
-=======
->>>>>>> 83a0a31 (feat: make nudge message a proper agent skill (monitor-nudge))
-=======
->>>>>>> a071876 (feat: make nudge message a proper agent skill (monitor-nudge))
-                const nudgeSkill = await db.select({ prompt: agentSkills.prompt }).from(agentSkills)
-                  .where(sql`${agentSkills.name} = 'monitor-nudge'`)
-                  .limit(1);
-                const nudgeMessage = nudgeSkill[0]?.prompt ?? "Please continue with the task. If you are waiting for input, proceed with your best judgment.";
-                const baseUrl = `http://localhost:${serverPort}`;
-                await fetch(`${baseUrl}/api/workspaces/${ws.wsId}/turn`, {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ message: nudgeMessage }),
-                }).catch(() => {});
-                cycleStats.nudged++;
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-                logMonitorAction("nudge", ws.wsId, ws.issueId);
-=======
-                logMonitorAction("nudge", ws.wsId);
->>>>>>> 01516bd (feat: add board monitor visualization panel)
-=======
-                logMonitorAction("nudge", ws.wsId, ws.issueId);
->>>>>>> 47c4344 (feat: make monitor action log entries clickable workspace links)
-=======
-                logMonitorAction("nudge", ws.wsId);
->>>>>>> 1407a7f (feat: add board monitor visualization panel)
-=======
 
->>>>>>> f7a87fc (feat: make monitor action log entries clickable workspace links)
-=======
-                logMonitorAction("nudge", ws.wsId);
->>>>>>> bf9db15 (feat: add board monitor visualization panel)
                 console.log(`[monitor] Nudged long-running agent in workspace ${ws.wsId}`);
               }
             }

@@ -196,77 +196,11 @@ Current prompt: ${body.prompt?.trim() || "(none)"}`;
     const repoPath = await getActiveProjectRepoPath(database);
     if (!repoPath) return c.json({ error: "No active project found" }, 400);
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> a19889f (fix: resolve preference key mismatch, path traversal in skill names, and cleanup bugs)
-=======
->>>>>>> 9bd4ac7 (fix: resolve preference key mismatch, path traversal in skill names, and cleanup bugs)
-=======
->>>>>>> 89b6a74 (fix: resolve preference key mismatch, path traversal in skill names, and cleanup bugs)
-=======
->>>>>>> f716420 (fix: resolve preference key mismatch, path traversal in skill names, and cleanup bugs)
-=======
->>>>>>> f6b75e2 (feat: install kanban skills to project .claude/skills/ from Settings UI)
-=======
-=======
->>>>>>> a19889f (fix: resolve preference key mismatch, path traversal in skill names, and cleanup bugs)
->>>>>>> ea9ffef (fix: resolve preference key mismatch, path traversal in skill names, and cleanup bugs)
-=======
->>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
     try {
       await writeAgentSkillFile(repoPath, rows[0]);
     } catch (err) {
       return c.json({ error: `Failed to install skill: ${err instanceof Error ? err.message : String(err)}` }, 500);
     }
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> ea9ffef (fix: resolve preference key mismatch, path traversal in skill names, and cleanup bugs)
-=======
-    await writeAgentSkillFile(repoPath, rows[0]);
->>>>>>> 9e48722 (feat: install kanban skills to project .claude/skills/ from Settings UI)
-=======
->>>>>>> a19889f (fix: resolve preference key mismatch, path traversal in skill names, and cleanup bugs)
-<<<<<<< HEAD
-=======
-    await writeAgentSkillFile(repoPath, rows[0]);
->>>>>>> e23b7a0 (feat: install kanban skills to project .claude/skills/ from Settings UI)
-=======
->>>>>>> 9bd4ac7 (fix: resolve preference key mismatch, path traversal in skill names, and cleanup bugs)
-=======
-    await writeAgentSkillFile(repoPath, rows[0]);
->>>>>>> ad9bf6a (feat: install kanban skills to project .claude/skills/ from Settings UI)
-=======
->>>>>>> 89b6a74 (fix: resolve preference key mismatch, path traversal in skill names, and cleanup bugs)
-=======
-    await writeAgentSkillFile(repoPath, rows[0]);
->>>>>>> 74c8daf (feat: install kanban skills to project .claude/skills/ from Settings UI)
-=======
->>>>>>> f716420 (fix: resolve preference key mismatch, path traversal in skill names, and cleanup bugs)
-=======
-=======
-    await writeAgentSkillFile(repoPath, rows[0]);
->>>>>>> 9e48722 (feat: install kanban skills to project .claude/skills/ from Settings UI)
->>>>>>> f6b75e2 (feat: install kanban skills to project .claude/skills/ from Settings UI)
-=======
->>>>>>> ea9ffef (fix: resolve preference key mismatch, path traversal in skill names, and cleanup bugs)
-=======
->>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
     return c.json({ installed: true, repoPath });
   });
 
