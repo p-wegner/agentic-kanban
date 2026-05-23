@@ -174,6 +174,8 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
   const [conflictState, setConflictState] = useState<{ hasConflicts: boolean; conflictingFiles: string[] } | null>(null);
   const [mergeError, setMergeError] = useState<{ wsId: string; message: string } | null>(null);
 
+  const [latestCommits, setLatestCommits] = useState<Record<string, { sha: string; message: string } | null>>({});
+
   const [monitorRunning, setMonitorRunning] = useState(false);
   const [requiresReview, setRequiresReview] = useState(false);
   const [prompt, setPrompt] = useState("");
@@ -284,6 +286,20 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
           setSelectedWorkspace(targetId);
         }
       }
+      const commits: Record<string, { sha: string; message: string } | null> = {};
+      await Promise.all(
+        data.filter(ws => ws.workingDir).map(async (ws) => {
+          try {
+            const result = await apiFetch<{ sha: string | null; message: string | null }>(
+              `/api/workspaces/${ws.id}/latest-commit`,
+            );
+            commits[ws.id] = result.sha ? { sha: result.sha, message: result.message! } : null;
+          } catch {
+            commits[ws.id] = null;
+          }
+        }),
+      );
+      setLatestCommits(commits);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load workspaces");
     } finally {
@@ -1091,6 +1107,21 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                   <span>Created {formatRelativeTime(ws.createdAt)}</span>
                   {ws.closedAt && <span>Closed {formatRelativeTime(ws.closedAt)}</span>}
                 </div>
+
+                {ws.workingDir && (
+                  <div className="text-xs text-gray-500 font-mono truncate">
+                    {latestCommits[ws.id] === undefined
+                      ? null
+                      : latestCommits[ws.id] === null
+                      ? <span className="text-gray-400 font-sans">No commits</span>
+                      : <span title={latestCommits[ws.id]!.message}>
+                          <span className="text-gray-400">{latestCommits[ws.id]!.sha}</span>
+                          {" "}
+                          <span className="text-gray-600">{latestCommits[ws.id]!.message}</span>
+                        </span>
+                    }
+                  </div>
+                )}
 
                 {isThisRunning && (ws.contextTokens || ws.lastTool) && (
                   <div className="flex items-center gap-2 text-[10px] text-gray-400">
