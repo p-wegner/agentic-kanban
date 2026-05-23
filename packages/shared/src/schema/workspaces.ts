@@ -17,6 +17,7 @@ export const workspaces = sqliteTable("workspaces", {
   status: text("status").notNull().default("active"),
   claudeProfile: text("claude_profile"),
   agentCommand: text("agent_command"),
+  provider: text("provider"),
   skillId: text("skill_id").references(() => agentSkills.id),
   includeVisualProof: integer("include_visual_proof", { mode: "boolean" }).notNull().default(false),
   createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),

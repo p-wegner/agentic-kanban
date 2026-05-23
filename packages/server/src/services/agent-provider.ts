@@ -477,18 +477,6 @@ export function getProvider(name?: string): AgentProvider {
   return provider;
 }
 
-/**
- * Resolve the provider to use based on an agent command string.
- * Returns "codex" if the command is the codex CLI, "claude" otherwise.
- */
-export function getProviderForCommand(agentCommand?: string): AgentProvider {
-  const cmd = agentCommand?.trim().toLowerCase() ?? "";
-  if (cmd === "codex" || cmd.endsWith("/codex") || cmd.endsWith("\\codex") || cmd.endsWith("\\codex.exe") || cmd.endsWith("/codex.exe")) {
-    return getProvider("codex");
-  }
-  return getProvider("claude");
-}
-
 export function setDefaultProvider(name: string): void {
   if (!providers.has(name)) throw new Error(`Unknown agent provider: ${name}`);
   defaultProviderName = name;

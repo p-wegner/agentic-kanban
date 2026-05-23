@@ -8,7 +8,7 @@ import { runSetupScript } from "../services/setup-script.js";
 import type { SessionManager } from "../services/session.manager.js";
 import type { BoardEvents } from "../services/board-events.js";
 import type { Database } from "../db/index.js";
-import type { ProviderId } from "../services/agent-provider.js";
+
 import { writeAgentSkillFile, readLocalSkillPrompt } from "@agentic-kanban/shared/lib/agent-skill-files";
 import { resolveAgentSettings } from "../services/agent-settings.service.js";
 
@@ -39,6 +39,7 @@ export function createWorkspacesRoute(
     let branch: string = body.branch;
     let claudeProfile: string | undefined;
     let agentCommand: string | undefined;
+    let resolvedProvider: "claude" | "codex" = "claude";
 
     try {
       // Resolve issue → project to get repoPath and defaultBranch
@@ -154,12 +155,12 @@ export function createWorkspacesRoute(
       const profileOverride = (body.claudeProfile as string | undefined) || undefined;
       if (profileOverride) prefMap.set("claude_profile", profileOverride);
 
-      const { agentCommand: resolvedCommand, agentArgs, claudeProfile: resolvedProfile, profile: resolvedProfileSelection, permissionPromptTool } = resolveAgentSettings(prefMap);
+      const { agentCommand: resolvedCommand, agentArgs, claudeProfile: resolvedProfile, profile: resolvedProfileSelection, provider, permissionPromptTool } = resolveAgentSettings(prefMap);
+      resolvedProvider = provider;
       agentCommand = resolvedCommand;
       // Keep the raw profile name (including "mock") on the workspace record for display, but pass
       // undefined to the session when it's the mock profile (resolvedProfile is already sanitized)
       claudeProfile = profileOverride || prefMap.get("claude_profile") || undefined;
-      const provider = (prefMap.get("provider") || undefined) as ProviderId | undefined;
 
       // Insert DB record with workingDir and baseBranch
       await database.insert(workspaces).values({
@@ -177,6 +178,7 @@ export function createWorkspacesRoute(
         status: "active",
         claudeProfile: claudeProfile ?? null,
         agentCommand: agentCommand ?? null,
+        provider: resolvedProvider,
         createdAt: now,
         updatedAt: now,
       });
@@ -202,7 +204,7 @@ export function createWorkspacesRoute(
       if (getSessionManager) {
         const truncatedPrompt = agentPrompt.length > 80 ? agentPrompt.slice(0, 80) + "..." : agentPrompt;
         console.log(`[workspaces] auto-launch: workspaceId=${id} branch=${branch} isDirect=${isDirect} prompt="${truncatedPrompt}" agentCommand=${agentCommand ?? "default"}`);
-        sessionId = await getSessionManager().startSession({ workspaceId: id, prompt: agentPrompt, agentCommand, agentArgs, claudeProfile: resolvedProfile, permissionPromptTool, planMode, provider, triggerType: skillName ? `skill:${skillName}` : "agent", profile: resolvedProfileSelection });
+        sessionId = await getSessionManager().startSession({ workspaceId: id, prompt: agentPrompt, agentCommand, agentArgs, claudeProfile: resolvedProfile, permissionPromptTool, planMode, provider: resolvedProvider, triggerType: skillName ? `skill:${skillName}` : "agent", profile: resolvedProfileSelection });
       }
 
       // Broadcast board event
@@ -220,6 +222,7 @@ export function createWorkspacesRoute(
           isDirect,
           planMode,
           status: "active",
+          provider: resolvedProvider,
           sessionId,
           createdAt: now,
           updatedAt: now,
@@ -247,6 +250,7 @@ export function createWorkspacesRoute(
           status: "active",
           claudeProfile: claudeProfile ?? null,
           agentCommand: agentCommand ?? null,
+          provider: resolvedProvider,
           createdAt: now,
           updatedAt: now,
         });
