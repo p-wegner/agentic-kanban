@@ -5,7 +5,6 @@ const BUILTIN_SKILLS = [
   "board-navigator",
   "code-review",
   "dependency-analyzer",
-  "monitor-nudge",
   "ticket-enhancer",
 ];
 
