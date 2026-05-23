@@ -24,8 +24,12 @@ export default defineConfig({
   globalSetup: "./global-setup.ts",
   globalTeardown: "./global-teardown.ts",
   use: {
+<<<<<<< HEAD
     baseURL: `http://localhost:${clientPort}`,
 <<<<<<< HEAD
+=======
+    baseURL: `http://127.0.0.1:${clientPort}`,
+>>>>>>> 17677a2 (fix: update E2E test with port helpers and badge fixes)
     channel: "chrome",
 =======
     ...(executablePath ? { launchOptions: { executablePath } } : {}),
