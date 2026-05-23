@@ -1,7 +1,7 @@
 /**
  * E2E tests for live session stats displayed on issue cards.
  *
- * Strategy: enable mock_agent preference before each test so workspace auto-launch
+ * Strategy: set claude_profile=mock before each test so workspace auto-launch
  * uses the mock agent. The page is loaded first, then the session launch is triggered,
  * and the board receives live stats via WebSocket in real-time.
  */
@@ -37,16 +37,16 @@ test.describe("Live session stats on issue cards", () => {
     for (const id of createdIssueIds) {
       await request.delete(`${SERVER_URL}/api/issues/${id}`);
     }
-    // Restore mock_agent setting
+    // Restore mock profile setting
     await request.put(`${SERVER_URL}/api/preferences/settings`, {
-      data: { mock_agent: "false" },
+      data: { claude_profile: "" },
     });
   });
 
-  /** Enable mock agent globally so workspace creation auto-launches mock agent. */
+  /** Enable mock profile globally so workspace creation auto-launches mock agent. */
   async function enableMockAgent(request: Parameters<Parameters<typeof test>[1]>[0]["request"]) {
     await request.put(`${SERVER_URL}/api/preferences/settings`, {
-      data: { mock_agent: "true" },
+      data: { claude_profile: "mock" },
     });
   }
 
@@ -68,7 +68,7 @@ test.describe("Live session stats on issue cards", () => {
     return issueId;
   }
 
-  /** Create a workspace which auto-launches the mock agent (mock_agent must be enabled). */
+  /** Create a workspace which auto-launches the mock agent (mock profile must be enabled). */
   async function createWorkspace(
     issueId: string,
     branchSuffix: string,

@@ -1,13 +1,23 @@
 import { request } from "@playwright/test";
 import { resolve } from "node:path";
+import { execSync } from "node:child_process";
 
 const serverPort = Number(process.env.SERVER_PORT) || 3001;
 
 async function globalSetup() {
-  const apiContext = await request.newContext({ baseURL: `http://localhost:${serverPort}` });
+  const apiContext = await request.newContext({ baseURL: `http://127.0.0.1:${serverPort}` });
 
-  // Resolve the actual monorepo root (e2e package is at packages/e2e)
-  const repoPath = resolve(import.meta.dirname, "..", "..");
+  // Resolve the actual monorepo root. For worktrees nested inside packages/.worktrees/,
+  // the git common-dir points back to the main repo's .git — use it to find the main root.
+  let repoPath: string;
+  try {
+    const commonDir = execSync("git rev-parse --git-common-dir", { cwd: import.meta.dirname, encoding: "utf8" }).trim();
+    // commonDir is either ".git" (main checkout) or an absolute path to main .git (worktree)
+    const gitRoot = resolve(import.meta.dirname, commonDir).replace(/[/\\]\.git$/, "");
+    repoPath = gitRoot;
+  } catch {
+    repoPath = resolve(import.meta.dirname, "..", "..");
+  }
 
   // Check if a project with the correct path already exists
   const res = await apiContext.get("/api/projects");
