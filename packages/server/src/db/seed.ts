@@ -143,7 +143,8 @@ Format the description with clear sections:
 - What needs to be done
 - Why it matters (context)
 - Acceptance criteria (if inferable)
-- Relevant files or areas (if inferable from the title/context)`,
+- Relevant files or areas (if inferable from the title/context)
+- Open Questions (unresolved decisions, assumptions, or clarifications needed before work begins — use \`- [ ]\` checkboxes)`,
         model: "haiku",
       },
       {
