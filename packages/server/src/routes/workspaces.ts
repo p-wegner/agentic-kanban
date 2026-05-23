@@ -161,7 +161,9 @@ export function createWorkspacesRoute(
       const useMock = prefMap.get("mock_agent") === "true" || process.env.MOCK_AGENT === "1";
       if (useMock) {
         const mockProfile = prefMap.get("mock_agent_profile");
-        agentCommand = mockProfile ? `${MOCK_AGENT_COMMAND} --profile ${mockProfile}` : MOCK_AGENT_COMMAND;
+        const mockDelayMs = prefMap.get("mock_agent_delay_ms");
+        const mockCmd = mockProfile ? `${MOCK_AGENT_COMMAND} --profile ${mockProfile}` : MOCK_AGENT_COMMAND;
+        agentCommand = mockDelayMs ? `${mockCmd} --delay-ms ${mockDelayMs}` : mockCmd;
       } else {
         agentCommand = prefMap.get("agent_command") || undefined;
       }
@@ -291,6 +293,7 @@ export function createWorkspacesRoute(
         isDirect: workspaces.isDirect,
         planMode: workspaces.planMode,
         includeVisualProof: workspaces.includeVisualProof,
+        readyForMerge: workspaces.readyForMerge,
         status: workspaces.status,
         createdAt: workspaces.createdAt,
         updatedAt: workspaces.updatedAt,
@@ -315,6 +318,7 @@ export function createWorkspacesRoute(
       isDirect: row.isDirect,
       planMode: row.planMode,
       includeVisualProof: row.includeVisualProof,
+      readyForMerge: row.readyForMerge,
       status: row.status,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
