@@ -30,7 +30,10 @@ export interface ProviderLaunchOptions {
   agentArgs?: string;
   providerSessionId?: string;
   agentCommand?: string;
+  /** @deprecated Use profile instead — kept for back-compat during migration */
   claudeProfile?: string;
+  /** Provider-tagged profile selection (replaces bare claudeProfile string). */
+  profile?: { provider: "claude" | "codex"; name: string };
   keepAlive?: boolean;
   permissionPromptTool?: string;
   planMode?: boolean;
@@ -115,10 +118,14 @@ export class ClaudeProvider implements AgentProvider {
       providerSessionId,
       agentCommand,
       claudeProfile,
+      profile,
       keepAlive,
       permissionPromptTool,
       planMode,
     } = options;
+
+    // Resolve effective profile name: new `profile` field takes priority, fall back to legacy `claudeProfile`
+    const effectiveProfileName = profile?.name ?? claudeProfile;
 
     const isMockAgent = !!process.env.AGENT_COMMAND || (agentCommand?.includes("mock-agent") ?? false);
     let command = process.env.AGENT_COMMAND || agentCommand || "claude";
@@ -153,8 +160,8 @@ export class ClaudeProvider implements AgentProvider {
       if (agentArgs) {
         args.push(...splitArgs(agentArgs));
       }
-      if (claudeProfile) {
-        const settingsPath = join(homedir(), ".claude", `settings_${claudeProfile}.json`);
+      if (effectiveProfileName) {
+        const settingsPath = join(homedir(), ".claude", `settings_${effectiveProfileName}.json`);
         if (existsSync(settingsPath)) {
           args.push("--settings", settingsPath);
         }
@@ -177,7 +184,7 @@ export class ClaudeProvider implements AgentProvider {
       args,
       useShell: isWindows && (isMockAgent || !!agentCommand),
       isMockAgent,
-      env: buildSpawnEnv(claudeProfile),
+      env: buildSpawnEnv(effectiveProfileName),
       keepStdinOpen,
     };
   }

@@ -133,7 +133,7 @@ export function createWorkspaceActionsRoute(
     }
 
     try {
-      const { agentCommand, agentArgs, claudeProfile, resumeWithNewModel, permissionPromptTool } =
+      const { agentCommand, agentArgs, claudeProfile, profile: agentProfile, resumeWithNewModel, permissionPromptTool } =
         await loadAgentSettings(database, body.agentCommand as string | undefined);
 
       const promptStr = body.prompt as string;
@@ -143,7 +143,7 @@ export function createWorkspaceActionsRoute(
       const planMode = ws0.planMode ?? false;
 
       const resumeFromId = typeof body.resumeFromId === "string" ? body.resumeFromId : undefined;
-      const sessionId = await getSessionManager().startSession({ workspaceId: id, prompt: promptStr, agentCommand, agentArgs, resumeFromId, claudeProfile, multiTurn: false, permissionPromptTool, planMode, resumeWithNewModel, triggerType: "chat" });
+      const sessionId = await getSessionManager().startSession({ workspaceId: id, prompt: promptStr, agentCommand, agentArgs, resumeFromId, claudeProfile, multiTurn: false, permissionPromptTool, planMode, resumeWithNewModel, triggerType: "chat", profile: agentProfile });
 
       await updateWorkspaceStatus(id, "active", { claudeProfile: claudeProfile ?? null, agentCommand: agentCommand ?? null }, database);
 
