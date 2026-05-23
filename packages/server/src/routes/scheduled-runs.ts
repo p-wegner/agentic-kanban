@@ -4,7 +4,7 @@ import { scheduledRuns, issues, projectStatuses, agentSkills } from "@agentic-ka
 import { eq, and, max } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import type { Database } from "../db/index.js";
-import { validateCronExpression } from "@agentic-kanban/shared/lib/cron-utils.js";
+import { validateCronExpression } from "@agentic-kanban/shared/lib/cron-utils";
 
 export function createScheduledRunsRoute(database: Database = db, serverPort?: number) {
   const router = new Hono();
