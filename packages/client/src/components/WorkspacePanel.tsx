@@ -1091,6 +1091,11 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                         {runningTriggerLabel.label}
                       </span>
                     )}
+                    {ws.readyForMerge && (
+                      <span className="text-xs font-medium px-1.5 py-0.5 rounded bg-green-100 text-green-700">
+                        Ready to merge
+                      </span>
+                    )}
                     <span className={`text-xs font-medium px-1.5 py-0.5 rounded ${
                       isThisRunning ? "bg-green-100 text-green-700 animate-pulse" :
                       isLaunching ? "bg-blue-100 text-blue-700 animate-pulse" :
