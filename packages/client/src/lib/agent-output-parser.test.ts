@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createAgentOutputParser, getOutputFormatForAgent, RawOutputParser } from "./agent-output-parser.js";
+import { createAgentOutputParser, getOutputFormatForAgent, getOutputFormatForProvider, RawOutputParser } from "./agent-output-parser.js";
 
 describe("agent output parser factory", () => {
   it("creates the Claude stream-json parser by default", () => {
@@ -57,5 +57,26 @@ describe("getOutputFormatForAgent", () => {
     expect(getOutputFormatForAgent("aider")).toBe("raw");
     expect(getOutputFormatForAgent("custom-agent")).toBe("raw");
     expect(getOutputFormatForAgent("/usr/bin/python3 agent.py")).toBe("raw");
+  });
+});
+
+describe("getOutputFormatForProvider", () => {
+  it("returns claude-stream-json for undefined/null (default)", () => {
+    expect(getOutputFormatForProvider()).toBe("claude-stream-json");
+    expect(getOutputFormatForProvider(null)).toBe("claude-stream-json");
+    expect(getOutputFormatForProvider(undefined)).toBe("claude-stream-json");
+  });
+
+  it("returns claude-stream-json for claude provider", () => {
+    expect(getOutputFormatForProvider("claude")).toBe("claude-stream-json");
+  });
+
+  it("returns codex-jsonl for codex provider", () => {
+    expect(getOutputFormatForProvider("codex")).toBe("codex-jsonl");
+  });
+
+  it("returns raw for unknown providers", () => {
+    expect(getOutputFormatForProvider("aider")).toBe("raw");
+    expect(getOutputFormatForProvider("custom")).toBe("raw");
   });
 });
