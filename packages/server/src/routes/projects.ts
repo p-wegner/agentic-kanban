@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { db } from "../db/index.js";
-import { projects, projectStatuses, issues, workspaces, preferences, tags, issueTags } from "@agentic-kanban/shared/schema";
+import { projects, projectStatuses, issues, workspaces, preferences, tags, issueTags, scheduledRuns } from "@agentic-kanban/shared/schema";
 import { eq, sql, and, inArray } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { execSync } from "node:child_process";
@@ -300,6 +300,7 @@ export function createProjectsRoute(database: Database = db) {
       await database.delete(issues).where(inArray(issues.id, issueIds));
     }
 
+    await database.delete(scheduledRuns).where(eq(scheduledRuns.projectId, projectId));
     await database.delete(projectStatuses).where(eq(projectStatuses.projectId, projectId));
     // Clear active-project preference if it points to this project
     await database.delete(preferences).where(and(eq(preferences.key, "activeProjectId"), eq(preferences.value, projectId)));
