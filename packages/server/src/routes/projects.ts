@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { db } from "../db/index.js";
-import { projects, projectStatuses, issues, workspaces, preferences, tags, issueTags } from "@agentic-kanban/shared/schema";
-import { eq, sql, and } from "drizzle-orm";
+import { projects, projectStatuses, issues, workspaces, preferences, tags, issueTags, scheduledRuns, agentSkills, repos } from "@agentic-kanban/shared/schema";
+import { eq, sql, and, inArray } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { execSync } from "node:child_process";
 import { existsSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
@@ -278,6 +278,37 @@ export function createProjectsRoute(database: Database = db) {
 
     await database.update(projects).set(updates).where(eq(projects.id, id));
     return c.json({ id });
+  });
+
+  // DELETE /api/projects/:id — unregister a project (cascade deletes all associated data)
+  router.delete("/:id", async (c) => {
+    const projectId = c.req.param("id");
+
+    const projectRows = await database.select({ id: projects.id }).from(projects).where(eq(projects.id, projectId));
+    if (projectRows.length === 0) {
+      return c.json({ error: "Project not found" }, 404);
+    }
+
+    const projectIssues = await database.select({ id: issues.id }).from(issues).where(eq(issues.projectId, projectId));
+    if (projectIssues.length > 0) {
+      const issueIds = projectIssues.map((i) => i.id);
+      await database.delete(issueTags).where(inArray(issueTags.issueId, issueIds));
+      const wsRows = await database.select({ id: workspaces.id }).from(workspaces).where(inArray(workspaces.issueId, issueIds));
+      for (const ws of wsRows) {
+        await deleteWorkspaceCascade(ws.id, database);
+      }
+      await database.delete(issues).where(inArray(issues.id, issueIds));
+    }
+
+    await database.delete(scheduledRuns).where(eq(scheduledRuns.projectId, projectId));
+    await database.delete(agentSkills).where(eq(agentSkills.projectId, projectId));
+    await database.delete(repos).where(eq(repos.projectId, projectId));
+    await database.delete(projectStatuses).where(eq(projectStatuses.projectId, projectId));
+    // Clear active-project preference if it points to this project
+    await database.delete(preferences).where(and(eq(preferences.key, "activeProjectId"), eq(preferences.value, projectId)));
+    await database.delete(projects).where(eq(projects.id, projectId));
+
+    return c.json({ success: true });
   });
 
   // POST /api/projects/generate-setup-script — AI-generate a setup script for a project
