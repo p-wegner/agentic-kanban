@@ -1,42 +1,4 @@
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-import { useState } from "react";
-=======
->>>>>>> b4a5c74 (feat: add All Workspaces aggregate panel (#101))
-=======
->>>>>>> ed04713 (feat: add All Workspaces aggregate panel (#101))
-=======
-import { useState } from "react";
->>>>>>> 1bb4b1b (feat: add status filter and text search to All Workspaces panel)
-=======
->>>>>>> f4516a3 (feat: add All Workspaces aggregate panel (#101))
-=======
-import { useState } from "react";
->>>>>>> 6b5ede9 (feat: add status filter and text search to All Workspaces panel)
-=======
->>>>>>> e633a5a (feat: add All Workspaces aggregate panel (#101))
-=======
-import { useState } from "react";
->>>>>>> 8baaf16 (feat: add status filter and text search to All Workspaces panel)
-=======
-import { useState } from "react";
-=======
->>>>>>> b4a5c74 (feat: add All Workspaces aggregate panel (#101))
->>>>>>> 862c38b (feat: add All Workspaces aggregate panel (#101))
-=======
-import { useState } from "react";
->>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
-=======
 import { useState, useEffect } from "react";
->>>>>>> 5e17728 (feat: implement cross-project filter in All Workspaces panel)
 import { formatRelativeTime } from "../lib/formatRelativeTime.js";
 import { apiFetch } from "../lib/api.js";
 import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
@@ -70,30 +32,7 @@ interface AllWorkspacesPanelProps {
   onRefresh?: () => void;
 }
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> 1bb4b1b (feat: add status filter and text search to All Workspaces panel)
-=======
->>>>>>> 6b5ede9 (feat: add status filter and text search to All Workspaces panel)
-=======
->>>>>>> 8baaf16 (feat: add status filter and text search to All Workspaces panel)
-=======
->>>>>>> 862c38b (feat: add All Workspaces aggregate panel (#101))
-=======
->>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
-type WsStatusFilter = "all" | "active" | "running" | "idle" | "reviewing" | "closed";
-=======
 type WsStatusFilter = "all" | "active" | "running" | "idle" | "reviewing" | "fixing" | "closed";
->>>>>>> 6117824 (feat: show trigger type badges for skills, AI Review, and AI Merge in session history and board cards)
 
 const FILTER_CHIPS: { label: string; value: WsStatusFilter }[] = [
   { label: "All", value: "all" },
@@ -105,31 +44,6 @@ const FILTER_CHIPS: { label: string; value: WsStatusFilter }[] = [
   { label: "Closed", value: "closed" },
 ];
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> b4a5c74 (feat: add All Workspaces aggregate panel (#101))
-=======
->>>>>>> ed04713 (feat: add All Workspaces aggregate panel (#101))
-=======
->>>>>>> 1bb4b1b (feat: add status filter and text search to All Workspaces panel)
-=======
->>>>>>> f4516a3 (feat: add All Workspaces aggregate panel (#101))
-=======
->>>>>>> 6b5ede9 (feat: add status filter and text search to All Workspaces panel)
-=======
->>>>>>> e633a5a (feat: add All Workspaces aggregate panel (#101))
-=======
->>>>>>> 8baaf16 (feat: add status filter and text search to All Workspaces panel)
-=======
-=======
->>>>>>> b4a5c74 (feat: add All Workspaces aggregate panel (#101))
->>>>>>> 862c38b (feat: add All Workspaces aggregate panel (#101))
-=======
->>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
 const WS_STATUS_COLORS: Record<string, string> = {
   active: "bg-green-100 text-green-700",
   reviewing: "bg-purple-100 text-purple-700",
@@ -147,26 +61,7 @@ const ISSUE_STATUS_COLORS: Record<string, string> = {
   "Cancelled": "bg-red-100 text-red-500",
 };
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-export function AllWorkspacesPanel({ columns, onClose, onIssueClick }: AllWorkspacesPanelProps) {
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> 862c38b (feat: add All Workspaces aggregate panel (#101))
-=======
-export function AllWorkspacesPanel({ columns, onClose, onIssueClick, onRefresh }: AllWorkspacesPanelProps) {
->>>>>>> f8e9393 (feat: add Close idle workspaces bulk action to All Workspaces panel)
-=======
 export function AllWorkspacesPanel({ columns, activeProjectId, onClose, onIssueClick, onProjectSwitch, onRefresh }: AllWorkspacesPanelProps) {
->>>>>>> 5e17728 (feat: implement cross-project filter in All Workspaces panel)
   const [statusFilter, setStatusFilter] = useState<WsStatusFilter>("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [closingIdle, setClosingIdle] = useState(false);
@@ -175,42 +70,6 @@ export function AllWorkspacesPanel({ columns, activeProjectId, onClose, onIssueC
   const [crossProjectData, setCrossProjectData] = useState<CrossProjectGroup[] | null>(null);
   const [crossProjectLoading, setCrossProjectLoading] = useState(false);
 
-<<<<<<< HEAD
-=======
->>>>>>> b4a5c74 (feat: add All Workspaces aggregate panel (#101))
-<<<<<<< HEAD
-=======
->>>>>>> ed04713 (feat: add All Workspaces aggregate panel (#101))
-=======
-  const [statusFilter, setStatusFilter] = useState<WsStatusFilter>("all");
-  const [searchQuery, setSearchQuery] = useState("");
-
->>>>>>> 1bb4b1b (feat: add status filter and text search to All Workspaces panel)
-=======
->>>>>>> f4516a3 (feat: add All Workspaces aggregate panel (#101))
-=======
-  const [statusFilter, setStatusFilter] = useState<WsStatusFilter>("all");
-  const [searchQuery, setSearchQuery] = useState("");
-
->>>>>>> 6b5ede9 (feat: add status filter and text search to All Workspaces panel)
-=======
->>>>>>> e633a5a (feat: add All Workspaces aggregate panel (#101))
-=======
-  const [statusFilter, setStatusFilter] = useState<WsStatusFilter>("all");
-  const [searchQuery, setSearchQuery] = useState("");
-
->>>>>>> 8baaf16 (feat: add status filter and text search to All Workspaces panel)
-=======
->>>>>>> 862c38b (feat: add All Workspaces aggregate panel (#101))
-=======
-  const [statusFilter, setStatusFilter] = useState<WsStatusFilter>("all");
-  const [searchQuery, setSearchQuery] = useState("");
-
->>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
-  const issuesWithWorkspaces: IssueWithStatus[] = columns
-    .flatMap((col) => col.issues)
-    .filter((issue) => issue.workspaceSummary && issue.workspaceSummary.total > 0);
-=======
   // Fetch list of projects for the dropdown
   useEffect(() => {
     apiFetch<Project[]>("/api/projects")
@@ -240,33 +99,11 @@ export function AllWorkspacesPanel({ columns, activeProjectId, onClose, onIssueC
       : columns
           .flatMap((col) => col.issues)
           .filter((issue) => issue.workspaceSummary && issue.workspaceSummary.total > 0);
->>>>>>> 5e17728 (feat: implement cross-project filter in All Workspaces panel)
 
   const activeCount = issuesWithWorkspaces.filter(
     (i) => ["active", "reviewing", "fixing"].includes(i.workspaceSummary?.main?.status ?? "")
   ).length;
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> 1bb4b1b (feat: add status filter and text search to All Workspaces panel)
-=======
->>>>>>> 6b5ede9 (feat: add status filter and text search to All Workspaces panel)
-=======
->>>>>>> 8baaf16 (feat: add status filter and text search to All Workspaces panel)
-=======
->>>>>>> 862c38b (feat: add All Workspaces aggregate panel (#101))
-=======
->>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
-=======
   const idleWorkspaceIds = issuesWithWorkspaces
     .filter((i) => i.workspaceSummary?.main?.status === "idle")
     .map((i) => i.workspaceSummary!.main!.id);
@@ -289,7 +126,6 @@ export function AllWorkspacesPanel({ columns, activeProjectId, onClose, onIssueC
     setClosingIdle(false);
   }
 
->>>>>>> f8e9393 (feat: add Close idle workspaces bulk action to All Workspaces panel)
   const filtered = issuesWithWorkspaces.filter((issue) => {
     const ws = issue.workspaceSummary!;
     const mainStatus = ws.main?.status ?? "";
@@ -313,36 +149,8 @@ export function AllWorkspacesPanel({ columns, activeProjectId, onClose, onIssueC
     return true;
   });
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> b4a5c74 (feat: add All Workspaces aggregate panel (#101))
-=======
->>>>>>> ed04713 (feat: add All Workspaces aggregate panel (#101))
-=======
->>>>>>> 1bb4b1b (feat: add status filter and text search to All Workspaces panel)
-=======
->>>>>>> f4516a3 (feat: add All Workspaces aggregate panel (#101))
-=======
->>>>>>> 6b5ede9 (feat: add status filter and text search to All Workspaces panel)
-=======
->>>>>>> e633a5a (feat: add All Workspaces aggregate panel (#101))
-=======
->>>>>>> 8baaf16 (feat: add status filter and text search to All Workspaces panel)
-=======
-=======
->>>>>>> b4a5c74 (feat: add All Workspaces aggregate panel (#101))
->>>>>>> 862c38b (feat: add All Workspaces aggregate panel (#101))
-=======
->>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
-=======
   const showingCrossProject = projectFilter === "all";
 
->>>>>>> 5e17728 (feat: implement cross-project filter in All Workspaces panel)
   return (
     <div className="fixed inset-0 z-50 flex justify-end">
       <div className="absolute inset-0 bg-black/20" onClick={onClose} />
@@ -357,25 +165,6 @@ export function AllWorkspacesPanel({ columns, activeProjectId, onClose, onIssueC
               <rect x="14" y="14" width="7" height="7" rx="1" />
             </svg>
             <h2 className="text-lg font-semibold text-gray-900">All Workspaces</h2>
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> 1bb4b1b (feat: add status filter and text search to All Workspaces panel)
-=======
->>>>>>> 6b5ede9 (feat: add status filter and text search to All Workspaces panel)
-=======
->>>>>>> 8baaf16 (feat: add status filter and text search to All Workspaces panel)
-=======
->>>>>>> 862c38b (feat: add All Workspaces aggregate panel (#101))
-=======
->>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
             <span className="text-sm text-gray-500">
               {crossProjectLoading
                 ? "…"
@@ -383,36 +172,6 @@ export function AllWorkspacesPanel({ columns, activeProjectId, onClose, onIssueC
                   ? `(${issuesWithWorkspaces.length})`
                   : `${filtered.length} of ${issuesWithWorkspaces.length}`}
             </span>
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
-            <span className="text-sm text-gray-500">({issuesWithWorkspaces.length})</span>
->>>>>>> b4a5c74 (feat: add All Workspaces aggregate panel (#101))
-=======
-            <span className="text-sm text-gray-500">({issuesWithWorkspaces.length})</span>
->>>>>>> ed04713 (feat: add All Workspaces aggregate panel (#101))
-=======
->>>>>>> 1bb4b1b (feat: add status filter and text search to All Workspaces panel)
-=======
-            <span className="text-sm text-gray-500">({issuesWithWorkspaces.length})</span>
->>>>>>> f4516a3 (feat: add All Workspaces aggregate panel (#101))
-=======
->>>>>>> 6b5ede9 (feat: add status filter and text search to All Workspaces panel)
-=======
-            <span className="text-sm text-gray-500">({issuesWithWorkspaces.length})</span>
->>>>>>> e633a5a (feat: add All Workspaces aggregate panel (#101))
-=======
->>>>>>> 8baaf16 (feat: add status filter and text search to All Workspaces panel)
-=======
-=======
-            <span className="text-sm text-gray-500">({issuesWithWorkspaces.length})</span>
->>>>>>> b4a5c74 (feat: add All Workspaces aggregate panel (#101))
->>>>>>> 862c38b (feat: add All Workspaces aggregate panel (#101))
-=======
->>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
             {activeCount > 0 && (
               <span className="text-xs bg-green-100 text-green-700 px-1.5 py-0.5 rounded-full font-medium">
                 {activeCount} active
@@ -438,25 +197,6 @@ export function AllWorkspacesPanel({ columns, activeProjectId, onClose, onIssueC
           </div>
         </div>
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> 1bb4b1b (feat: add status filter and text search to All Workspaces panel)
-=======
->>>>>>> 6b5ede9 (feat: add status filter and text search to All Workspaces panel)
-=======
->>>>>>> 8baaf16 (feat: add status filter and text search to All Workspaces panel)
-=======
->>>>>>> 862c38b (feat: add All Workspaces aggregate panel (#101))
-=======
->>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
         {/* Filters */}
         <div className="px-4 py-2 border-b border-gray-100 space-y-2">
           {/* Project filter */}
@@ -499,9 +239,6 @@ export function AllWorkspacesPanel({ columns, activeProjectId, onClose, onIssueC
           </div>
         </div>
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
         {/* Content */}
         <div className="flex-1 overflow-y-auto">
           {crossProjectLoading ? (
@@ -515,84 +252,6 @@ export function AllWorkspacesPanel({ columns, activeProjectId, onClose, onIssueC
           ) : (
             <div className="divide-y divide-gray-100">
               {filtered.map((issue) => {
-<<<<<<< HEAD
-=======
-<<<<<<< HEAD
-=======
->>>>>>> ed04713 (feat: add All Workspaces aggregate panel (#101))
-=======
->>>>>>> 1bb4b1b (feat: add status filter and text search to All Workspaces panel)
-        {/* Content */}
-        <div className="flex-1 overflow-y-auto">
-          {filtered.length === 0 ? (
-            <div className="px-4 py-12 text-center text-sm text-gray-500">
-              {issuesWithWorkspaces.length === 0
-                ? "No workspaces yet. Create a workspace from an issue to get started."
-                : "No workspaces match the current filter."}
-            </div>
-          ) : (
-            <div className="divide-y divide-gray-100">
-<<<<<<< HEAD
-              {issuesWithWorkspaces.map((issue) => {
-<<<<<<< HEAD
->>>>>>> b4a5c74 (feat: add All Workspaces aggregate panel (#101))
-=======
->>>>>>> ed04713 (feat: add All Workspaces aggregate panel (#101))
-=======
-              {filtered.map((issue) => {
->>>>>>> 1bb4b1b (feat: add status filter and text search to All Workspaces panel)
-=======
-=======
->>>>>>> 6b5ede9 (feat: add status filter and text search to All Workspaces panel)
-        {/* Content */}
-        <div className="flex-1 overflow-y-auto">
-          {filtered.length === 0 ? (
-            <div className="px-4 py-12 text-center text-sm text-gray-500">
-              {issuesWithWorkspaces.length === 0
-                ? "No workspaces yet. Create a workspace from an issue to get started."
-                : "No workspaces match the current filter."}
-            </div>
-          ) : (
-            <div className="divide-y divide-gray-100">
-<<<<<<< HEAD
-              {issuesWithWorkspaces.map((issue) => {
->>>>>>> f4516a3 (feat: add All Workspaces aggregate panel (#101))
-=======
-              {filtered.map((issue) => {
->>>>>>> 6b5ede9 (feat: add status filter and text search to All Workspaces panel)
-=======
-=======
->>>>>>> 8baaf16 (feat: add status filter and text search to All Workspaces panel)
-        {/* Content */}
-        <div className="flex-1 overflow-y-auto">
-          {filtered.length === 0 ? (
-            <div className="px-4 py-12 text-center text-sm text-gray-500">
-              {issuesWithWorkspaces.length === 0
-                ? "No workspaces yet. Create a workspace from an issue to get started."
-                : "No workspaces match the current filter."}
-            </div>
-          ) : (
-            <div className="divide-y divide-gray-100">
-<<<<<<< HEAD
-              {issuesWithWorkspaces.map((issue) => {
->>>>>>> e633a5a (feat: add All Workspaces aggregate panel (#101))
-=======
-              {filtered.map((issue) => {
->>>>>>> 8baaf16 (feat: add status filter and text search to All Workspaces panel)
-=======
-        {/* Content */}
-        <div className="flex-1 overflow-y-auto">
-          {issuesWithWorkspaces.length === 0 ? (
-            <div className="px-4 py-12 text-center text-sm text-gray-500">
-              No workspaces yet. Create a workspace from an issue to get started.
-            </div>
-          ) : (
-            <div className="divide-y divide-gray-100">
-              {issuesWithWorkspaces.map((issue) => {
->>>>>>> b4a5c74 (feat: add All Workspaces aggregate panel (#101))
->>>>>>> 862c38b (feat: add All Workspaces aggregate panel (#101))
-=======
->>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
                 const ws = issue.workspaceSummary!;
                 const main = ws.main;
                 const projectName = "projectName" in issue ? issue.projectName : undefined;

@@ -41,89 +41,7 @@ Examples:
   $ agentic-kanban workspace create <issue-id>       # create a worktree for an issue
   $ agentic-kanban status                            # show board overview
   $ agentic-kanban skill list                        # list agent skills
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> b794815 (feat: add cli create subcommand and preferences set/get)
-=======
->>>>>>> 89f4fdb (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
-=======
->>>>>>> 7effda9 (fix: align projects_base_dir -> projects_base_path across cli.ts and SettingsPanel.tsx)
-=======
->>>>>>> dbea783 (fix: add missing fs imports and unify projects_base_path key name)
-  $ agentic-kanban preferences set projects_base_dir /path/to/projects
-=======
-  $ agentic-kanban preferences set projects_base_folder /path/to/projects
->>>>>>> 4ff54fb (feat: add cli create subcommand and preferences set/get)
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
-  $ agentic-kanban preferences set projects_base_dir /path/to/projects
->>>>>>> f6d1a48 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
-=======
   $ agentic-kanban preferences set projects_base_path /path/to/projects
->>>>>>> a5e9504 (fix: align projects_base_dir -> projects_base_path across cli.ts and SettingsPanel.tsx)
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
-  $ agentic-kanban preferences set projects_base_path /path/to/projects
->>>>>>> 9e9ee57 (fix: add missing fs imports and unify projects_base_path key name)
-=======
-  $ agentic-kanban preferences set projects_base_folder /path/to/projects
->>>>>>> a9ef19b (feat: add cli create subcommand and preferences set/get)
-=======
-  $ agentic-kanban preferences set projects_base_dir /path/to/projects
->>>>>>> c6fd8a4 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
-=======
-  $ agentic-kanban preferences set projects_base_path /path/to/projects
->>>>>>> 9196ac9 (fix: align projects_base_dir -> projects_base_path across cli.ts and SettingsPanel.tsx)
-=======
-  $ agentic-kanban preferences set projects_base_folder /path/to/projects
->>>>>>> c3f1926 (feat: add cli create subcommand and preferences set/get)
-=======
-  $ agentic-kanban preferences set projects_base_dir /path/to/projects
->>>>>>> 5ffc0d0 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
-=======
-  $ agentic-kanban preferences set projects_base_path /path/to/projects
->>>>>>> d7a5078 (fix: align projects_base_dir -> projects_base_path across cli.ts and SettingsPanel.tsx)
-=======
-  $ agentic-kanban preferences set projects_base_folder /path/to/projects
->>>>>>> dd3f860 (feat: add cli create subcommand and preferences set/get)
-=======
-  $ agentic-kanban preferences set projects_base_dir /path/to/projects
->>>>>>> 63066d9 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
-=======
->>>>>>> b794815 (feat: add cli create subcommand and preferences set/get)
-=======
-=======
-  $ agentic-kanban preferences set projects_base_dir /path/to/projects
->>>>>>> f6d1a48 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
->>>>>>> 89f4fdb (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
-=======
->>>>>>> 7effda9 (fix: align projects_base_dir -> projects_base_path across cli.ts and SettingsPanel.tsx)
-=======
-=======
-  $ agentic-kanban preferences set projects_base_path /path/to/projects
->>>>>>> 9e9ee57 (fix: add missing fs imports and unify projects_base_path key name)
->>>>>>> dbea783 (fix: add missing fs imports and unify projects_base_path key name)
-=======
-  $ agentic-kanban preferences set projects_base_path /path/to/projects
->>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
 `);
 
 program
@@ -211,691 +129,38 @@ Examples:
 
 program
   .command("create")
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> b794815 (feat: add cli create subcommand and preferences set/get)
-=======
->>>>>>> 89f4fdb (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
-=======
->>>>>>> 7effda9 (fix: align projects_base_dir -> projects_base_path across cli.ts and SettingsPanel.tsx)
-=======
->>>>>>> dbea783 (fix: add missing fs imports and unify projects_base_path key name)
-  .description("Create a new git repo and register it as a project.\n\nCreates a directory under the configured projects_base_dir preference (or --path), runs 'git init', and registers the repo.\n\nUse 'pnpm cli -- register <path>' to register an existing repo instead.")
-  .argument("<folder-name>", "Name of the new project folder to create")
-  .option("--path <base-path>", "Base directory to create the folder in (overrides projects_base_dir preference)")
-=======
-  .description("Create a new git repo and register it as a project.\n\nCreates a directory under the configured projects_base_folder preference (or --path), runs 'git init', and registers the repo.\n\nUse 'pnpm cli -- register <path>' to register an existing repo instead.")
-  .argument("<folder-name>", "Name of the new project folder to create")
-  .option("--path <base-path>", "Base directory to create the folder in (overrides projects_base_folder preference)")
->>>>>>> 4ff54fb (feat: add cli create subcommand and preferences set/get)
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> 89f4fdb (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
-=======
-  .description("Create a new git repo and register it as a project.\n\nCreates a directory under the configured projects_base_dir preference (or --path), runs 'git init', and registers the repo.\n\nUse 'pnpm cli -- register <path>' to register an existing repo instead.")
-  .argument("<folder-name>", "Name of the new project folder to create")
-  .option("--path <base-path>", "Base directory to create the folder in (overrides projects_base_dir preference)")
->>>>>>> f6d1a48 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> 7effda9 (fix: align projects_base_dir -> projects_base_path across cli.ts and SettingsPanel.tsx)
-=======
   .description("Create a new git repo and register it as a project.\n\nCreates a directory under the configured projects_base_path preference (or --path), runs 'git init', and registers the repo.\n\nUse 'pnpm cli -- register <path>' to register an existing repo instead.")
   .argument("<folder-name>", "Name of the new project folder to create")
   .option("--path <base-path>", "Base directory to create the folder in (overrides projects_base_path preference)")
->>>>>>> a5e9504 (fix: align projects_base_dir -> projects_base_path across cli.ts and SettingsPanel.tsx)
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> dbea783 (fix: add missing fs imports and unify projects_base_path key name)
-=======
-  .description("Create a new git repo and register it as a project.\n\nCreates a directory under the configured projects_base_path preference (or --path), runs 'git init', and registers the repo.\n\nUse 'pnpm cli -- register <path>' to register an existing repo instead.")
-  .argument("<folder-name>", "Name of the new project folder to create")
-  .option("--path <base-path>", "Base directory to create the folder in (overrides projects_base_path preference)")
->>>>>>> 9e9ee57 (fix: add missing fs imports and unify projects_base_path key name)
-<<<<<<< HEAD
-=======
-  .description("Create a new git repo and register it as a project.\n\nCreates a directory under the configured projects_base_folder preference (or --path), runs 'git init', and registers the repo.\n\nUse 'pnpm cli -- register <path>' to register an existing repo instead.")
-  .argument("<folder-name>", "Name of the new project folder to create")
-  .option("--path <base-path>", "Base directory to create the folder in (overrides projects_base_folder preference)")
->>>>>>> a9ef19b (feat: add cli create subcommand and preferences set/get)
-=======
-  .description("Create a new git repo and register it as a project.\n\nCreates a directory under the configured projects_base_dir preference (or --path), runs 'git init', and registers the repo.\n\nUse 'pnpm cli -- register <path>' to register an existing repo instead.")
-  .argument("<folder-name>", "Name of the new project folder to create")
-  .option("--path <base-path>", "Base directory to create the folder in (overrides projects_base_dir preference)")
->>>>>>> c6fd8a4 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
-=======
-  .description("Create a new git repo and register it as a project.\n\nCreates a directory under the configured projects_base_path preference (or --path), runs 'git init', and registers the repo.\n\nUse 'pnpm cli -- register <path>' to register an existing repo instead.")
-  .argument("<folder-name>", "Name of the new project folder to create")
-  .option("--path <base-path>", "Base directory to create the folder in (overrides projects_base_path preference)")
->>>>>>> 9196ac9 (fix: align projects_base_dir -> projects_base_path across cli.ts and SettingsPanel.tsx)
-=======
-  .description("Create a new git repo and register it as a project.\n\nCreates a directory under the configured projects_base_folder preference (or --path), runs 'git init', and registers the repo.\n\nUse 'pnpm cli -- register <path>' to register an existing repo instead.")
-  .argument("<folder-name>", "Name of the new project folder to create")
-  .option("--path <base-path>", "Base directory to create the folder in (overrides projects_base_folder preference)")
->>>>>>> c3f1926 (feat: add cli create subcommand and preferences set/get)
-=======
-  .description("Create a new git repo and register it as a project.\n\nCreates a directory under the configured projects_base_dir preference (or --path), runs 'git init', and registers the repo.\n\nUse 'pnpm cli -- register <path>' to register an existing repo instead.")
-  .argument("<folder-name>", "Name of the new project folder to create")
-  .option("--path <base-path>", "Base directory to create the folder in (overrides projects_base_dir preference)")
->>>>>>> 5ffc0d0 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
-=======
-  .description("Create a new git repo and register it as a project.\n\nCreates a directory under the configured projects_base_path preference (or --path), runs 'git init', and registers the repo.\n\nUse 'pnpm cli -- register <path>' to register an existing repo instead.")
-  .argument("<folder-name>", "Name of the new project folder to create")
-  .option("--path <base-path>", "Base directory to create the folder in (overrides projects_base_path preference)")
->>>>>>> d7a5078 (fix: align projects_base_dir -> projects_base_path across cli.ts and SettingsPanel.tsx)
-=======
-  .description("Create a new git repo and register it as a project.\n\nCreates a directory under the configured projects_base_folder preference (or --path), runs 'git init', and registers the repo.\n\nUse 'pnpm cli -- register <path>' to register an existing repo instead.")
-  .argument("<folder-name>", "Name of the new project folder to create")
-  .option("--path <base-path>", "Base directory to create the folder in (overrides projects_base_folder preference)")
->>>>>>> dd3f860 (feat: add cli create subcommand and preferences set/get)
-=======
-  .description("Create a new git repo and register it as a project.\n\nCreates a directory under the configured projects_base_dir preference (or --path), runs 'git init', and registers the repo.\n\nUse 'pnpm cli -- register <path>' to register an existing repo instead.")
-  .argument("<folder-name>", "Name of the new project folder to create")
-  .option("--path <base-path>", "Base directory to create the folder in (overrides projects_base_dir preference)")
->>>>>>> 63066d9 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
-=======
->>>>>>> b794815 (feat: add cli create subcommand and preferences set/get)
-=======
->>>>>>> 89f4fdb (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
-=======
->>>>>>> 7effda9 (fix: align projects_base_dir -> projects_base_path across cli.ts and SettingsPanel.tsx)
-=======
->>>>>>> dbea783 (fix: add missing fs imports and unify projects_base_path key name)
-=======
-  .description("Create a new git repo and register it as a project.\n\nCreates a directory under the configured projects_base_path preference (or --path), runs 'git init', and registers the repo.\n\nUse 'pnpm cli -- register <path>' to register an existing repo instead.")
-  .argument("<folder-name>", "Name of the new project folder to create")
-  .option("--path <base-path>", "Base directory to create the folder in (overrides projects_base_path preference)")
->>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
   .option("-n, --name <name>", "Custom project name (defaults to folder name)")
   .option("-b, --branch <branch>", "Initial branch name (default: main)")
   .addHelpText("after", `
 Examples:
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> b794815 (feat: add cli create subcommand and preferences set/get)
-=======
->>>>>>> 89f4fdb (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
-=======
->>>>>>> 7effda9 (fix: align projects_base_dir -> projects_base_path across cli.ts and SettingsPanel.tsx)
-=======
->>>>>>> dbea783 (fix: add missing fs imports and unify projects_base_path key name)
-  $ agentic-kanban create my-app                        # uses projects_base_dir preference
-=======
-  $ agentic-kanban create my-app                        # uses projects_base_folder preference
->>>>>>> 4ff54fb (feat: add cli create subcommand and preferences set/get)
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
-  $ agentic-kanban create my-app                        # uses projects_base_dir preference
->>>>>>> f6d1a48 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
-=======
   $ agentic-kanban create my-app                        # uses projects_base_path preference
->>>>>>> a5e9504 (fix: align projects_base_dir -> projects_base_path across cli.ts and SettingsPanel.tsx)
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
-  $ agentic-kanban create my-app                        # uses projects_base_path preference
->>>>>>> 9e9ee57 (fix: add missing fs imports and unify projects_base_path key name)
-=======
-  $ agentic-kanban create my-app                        # uses projects_base_folder preference
->>>>>>> a9ef19b (feat: add cli create subcommand and preferences set/get)
-=======
-  $ agentic-kanban create my-app                        # uses projects_base_dir preference
->>>>>>> c6fd8a4 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
-=======
-  $ agentic-kanban create my-app                        # uses projects_base_path preference
->>>>>>> 9196ac9 (fix: align projects_base_dir -> projects_base_path across cli.ts and SettingsPanel.tsx)
-=======
-  $ agentic-kanban create my-app                        # uses projects_base_folder preference
->>>>>>> c3f1926 (feat: add cli create subcommand and preferences set/get)
-=======
-  $ agentic-kanban create my-app                        # uses projects_base_dir preference
->>>>>>> 5ffc0d0 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
-=======
-  $ agentic-kanban create my-app                        # uses projects_base_path preference
->>>>>>> d7a5078 (fix: align projects_base_dir -> projects_base_path across cli.ts and SettingsPanel.tsx)
-=======
-  $ agentic-kanban create my-app                        # uses projects_base_folder preference
->>>>>>> dd3f860 (feat: add cli create subcommand and preferences set/get)
-=======
-  $ agentic-kanban create my-app                        # uses projects_base_dir preference
->>>>>>> 63066d9 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
-=======
->>>>>>> b794815 (feat: add cli create subcommand and preferences set/get)
-=======
-=======
-  $ agentic-kanban create my-app                        # uses projects_base_dir preference
->>>>>>> f6d1a48 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
->>>>>>> 89f4fdb (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
-=======
->>>>>>> 7effda9 (fix: align projects_base_dir -> projects_base_path across cli.ts and SettingsPanel.tsx)
-=======
-=======
-  $ agentic-kanban create my-app                        # uses projects_base_path preference
->>>>>>> 9e9ee57 (fix: add missing fs imports and unify projects_base_path key name)
->>>>>>> dbea783 (fix: add missing fs imports and unify projects_base_path key name)
-=======
-  $ agentic-kanban create my-app                        # uses projects_base_path preference
->>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
   $ agentic-kanban create my-app --path /projects       # create in /projects/my-app
   $ agentic-kanban create my-app -n "My Application"   # custom project name
   $ agentic-kanban create my-app -b master              # use 'master' as initial branch
 
 Setup:
   Set the base folder preference first:
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> b794815 (feat: add cli create subcommand and preferences set/get)
-=======
->>>>>>> 89f4fdb (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
-=======
->>>>>>> 7effda9 (fix: align projects_base_dir -> projects_base_path across cli.ts and SettingsPanel.tsx)
-=======
->>>>>>> dbea783 (fix: add missing fs imports and unify projects_base_path key name)
-  $ agentic-kanban preferences set projects_base_dir /path/to/projects
-=======
-  $ agentic-kanban preferences set projects_base_folder /path/to/projects
->>>>>>> 4ff54fb (feat: add cli create subcommand and preferences set/get)
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
-  $ agentic-kanban preferences set projects_base_dir /path/to/projects
->>>>>>> f6d1a48 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
-=======
-  $ agentic-kanban preferences set projects_base_path /path/to/projects
->>>>>>> a5e9504 (fix: align projects_base_dir -> projects_base_path across cli.ts and SettingsPanel.tsx)
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
-  $ agentic-kanban preferences set projects_base_path /path/to/projects
->>>>>>> 9e9ee57 (fix: add missing fs imports and unify projects_base_path key name)
-=======
-  $ agentic-kanban preferences set projects_base_path /path/to/projects
->>>>>>> 9196ac9 (fix: align projects_base_dir -> projects_base_path across cli.ts and SettingsPanel.tsx)
-=======
-  $ agentic-kanban preferences set projects_base_path /path/to/projects
->>>>>>> d7a5078 (fix: align projects_base_dir -> projects_base_path across cli.ts and SettingsPanel.tsx)
-=======
->>>>>>> b794815 (feat: add cli create subcommand and preferences set/get)
-=======
-=======
-  $ agentic-kanban preferences set projects_base_dir /path/to/projects
->>>>>>> f6d1a48 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
->>>>>>> 89f4fdb (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
-=======
->>>>>>> 7effda9 (fix: align projects_base_dir -> projects_base_path across cli.ts and SettingsPanel.tsx)
-=======
-=======
-  $ agentic-kanban preferences set projects_base_path /path/to/projects
->>>>>>> 9e9ee57 (fix: add missing fs imports and unify projects_base_path key name)
->>>>>>> dbea783 (fix: add missing fs imports and unify projects_base_path key name)
-`)
-  .action(async (folderName: string, options: { path?: string; name?: string; branch?: string }) => {
-    let dirCreated = false;
-    let repoPath = “”;
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let rmFn: any;
-
-    const cleanupDir = async () => {
-      if (dirCreated && repoPath && rmFn) {
-        try { await rmFn(repoPath, { recursive: true, force: true }); } catch { /* best-effort */ }
-      }
-    };
-
-=======
-  $ agentic-kanban preferences set projects_base_folder /path/to/projects
-=======
-  $ agentic-kanban preferences set projects_base_dir /path/to/projects
->>>>>>> c6fd8a4 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
-`)
-  .action(async (folderName: string, options: { path?: string; name?: string; branch?: string }) => {
->>>>>>> a9ef19b (feat: add cli create subcommand and preferences set/get)
-=======
-    let rm: ((path: string, opts: { recursive: boolean; force: boolean }) => Promise<void>) | undefined;
-=======
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let rmFn: any;
->>>>>>> 2274a29 (fix: add missing rmSync/writeFileSync imports in projects.ts; fix cleanupDir scope in cli create command)
-
-    const cleanupDir = async () => {
-      if (dirCreated && repoPath && rmFn) {
-        try { await rmFn(repoPath, { recursive: true, force: true }); } catch { /* best-effort */ }
-      }
-    };
-
->>>>>>> 14dd44c (WIP: add rmSync and writeFileSync imports to projects.ts)
-=======
-  $ agentic-kanban preferences set projects_base_folder /path/to/projects
-=======
-  $ agentic-kanban preferences set projects_base_dir /path/to/projects
->>>>>>> 5ffc0d0 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
-`)
-  .action(async (folderName: string, options: { path?: string; name?: string; branch?: string }) => {
->>>>>>> c3f1926 (feat: add cli create subcommand and preferences set/get)
-=======
-    let rm: ((path: string, opts: { recursive: boolean; force: boolean }) => Promise<void>) | undefined;
-=======
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let rmFn: any;
->>>>>>> 856937b (fix: add missing rmSync/writeFileSync imports in projects.ts; fix cleanupDir scope in cli create command)
-
-    const cleanupDir = async () => {
-      if (dirCreated && repoPath && rmFn) {
-        try { await rmFn(repoPath, { recursive: true, force: true }); } catch { /* best-effort */ }
-      }
-    };
-
->>>>>>> 59386e6 (WIP: add rmSync and writeFileSync imports to projects.ts)
-=======
-  $ agentic-kanban preferences set projects_base_folder /path/to/projects
-=======
-  $ agentic-kanban preferences set projects_base_dir /path/to/projects
->>>>>>> 63066d9 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
-`)
-  .action(async (folderName: string, options: { path?: string; name?: string; branch?: string }) => {
->>>>>>> dd3f860 (feat: add cli create subcommand and preferences set/get)
-=======
-    let rm: ((path: string, opts: { recursive: boolean; force: boolean }) => Promise<void>) | undefined;
-=======
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let rmFn: any;
->>>>>>> ea92e79 (fix: add missing rmSync/writeFileSync imports in projects.ts; fix cleanupDir scope in cli create command)
-
-    const cleanupDir = async () => {
-      if (dirCreated && repoPath && rmFn) {
-        try { await rmFn(repoPath, { recursive: true, force: true }); } catch { /* best-effort */ }
-      }
-    };
-
->>>>>>> 088856d (WIP: add rmSync and writeFileSync imports to projects.ts)
-=======
   $ agentic-kanban preferences set projects_base_path /path/to/projects
 `)
   .action(async (folderName: string, options: { path?: string; name?: string; branch?: string }) => {
->>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
     try {
       await runMigrations();
 
       // Resolve base folder: --path flag takes precedence over preference
       let baseFolder = options.path;
       if (!baseFolder) {
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> b794815 (feat: add cli create subcommand and preferences set/get)
-=======
->>>>>>> 89f4fdb (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
-=======
->>>>>>> 088856d (WIP: add rmSync and writeFileSync imports to projects.ts)
-=======
->>>>>>> 7effda9 (fix: align projects_base_dir -> projects_base_path across cli.ts and SettingsPanel.tsx)
-=======
->>>>>>> dbea783 (fix: add missing fs imports and unify projects_base_path key name)
-        const pref = await db.select().from(preferences).where(eq(preferences.key, "projects_base_dir")).limit(1);
-=======
-        const pref = await db.select().from(preferences).where(eq(preferences.key, "projects_base_folder")).limit(1);
->>>>>>> 4ff54fb (feat: add cli create subcommand and preferences set/get)
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
-        const pref = await db.select().from(preferences).where(eq(preferences.key, "projects_base_dir")).limit(1);
->>>>>>> f6d1a48 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
-=======
-        const pref = await db.select().from(preferences).where(eq(preferences.key, “projects_base_dir”)).limit(1);
->>>>>>> 088aead (WIP: add rmSync and writeFileSync imports to projects.ts)
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
-        const pref = await db.select().from(preferences).where(eq(preferences.key, “projects_base_path”)).limit(1);
->>>>>>> a5e9504 (fix: align projects_base_dir -> projects_base_path across cli.ts and SettingsPanel.tsx)
-=======
         const pref = await db.select().from(preferences).where(eq(preferences.key, "projects_base_path")).limit(1);
->>>>>>> 9e9ee57 (fix: add missing fs imports and unify projects_base_path key name)
-<<<<<<< HEAD
-=======
-        const pref = await db.select().from(preferences).where(eq(preferences.key, "projects_base_folder")).limit(1);
->>>>>>> a9ef19b (feat: add cli create subcommand and preferences set/get)
-=======
-        const pref = await db.select().from(preferences).where(eq(preferences.key, "projects_base_dir")).limit(1);
->>>>>>> c6fd8a4 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
-=======
-        const pref = await db.select().from(preferences).where(eq(preferences.key, “projects_base_dir”)).limit(1);
->>>>>>> 14dd44c (WIP: add rmSync and writeFileSync imports to projects.ts)
-=======
-        const pref = await db.select().from(preferences).where(eq(preferences.key, “projects_base_path”)).limit(1);
->>>>>>> 9196ac9 (fix: align projects_base_dir -> projects_base_path across cli.ts and SettingsPanel.tsx)
-=======
-        const pref = await db.select().from(preferences).where(eq(preferences.key, "projects_base_path")).limit(1);
->>>>>>> c9887d7 (fix: fix encoding issues in cli.ts (smart quotes and unicode symbols))
-=======
-        const pref = await db.select().from(preferences).where(eq(preferences.key, "projects_base_folder")).limit(1);
->>>>>>> c3f1926 (feat: add cli create subcommand and preferences set/get)
-=======
-        const pref = await db.select().from(preferences).where(eq(preferences.key, "projects_base_dir")).limit(1);
->>>>>>> 5ffc0d0 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
-=======
-        const pref = await db.select().from(preferences).where(eq(preferences.key, “projects_base_dir”)).limit(1);
->>>>>>> 59386e6 (WIP: add rmSync and writeFileSync imports to projects.ts)
-=======
-        const pref = await db.select().from(preferences).where(eq(preferences.key, “projects_base_path”)).limit(1);
->>>>>>> d7a5078 (fix: align projects_base_dir -> projects_base_path across cli.ts and SettingsPanel.tsx)
-=======
-        const pref = await db.select().from(preferences).where(eq(preferences.key, "projects_base_folder")).limit(1);
->>>>>>> dd3f860 (feat: add cli create subcommand and preferences set/get)
-=======
-        const pref = await db.select().from(preferences).where(eq(preferences.key, "projects_base_dir")).limit(1);
->>>>>>> 63066d9 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
-=======
->>>>>>> b794815 (feat: add cli create subcommand and preferences set/get)
-=======
-=======
-        const pref = await db.select().from(preferences).where(eq(preferences.key, "projects_base_dir")).limit(1);
->>>>>>> f6d1a48 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
->>>>>>> 89f4fdb (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
-=======
->>>>>>> 088856d (WIP: add rmSync and writeFileSync imports to projects.ts)
-=======
-=======
-        const pref = await db.select().from(preferences).where(eq(preferences.key, “projects_base_path”)).limit(1);
->>>>>>> a5e9504 (fix: align projects_base_dir -> projects_base_path across cli.ts and SettingsPanel.tsx)
->>>>>>> 7effda9 (fix: align projects_base_dir -> projects_base_path across cli.ts and SettingsPanel.tsx)
-=======
->>>>>>> dbea783 (fix: add missing fs imports and unify projects_base_path key name)
-=======
-        const pref = await db.select().from(preferences).where(eq(preferences.key, “projects_base_path”)).limit(1);
->>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
-=======
-        const pref = await db.select().from(preferences).where(eq(preferences.key, "projects_base_path")).limit(1);
->>>>>>> b3ad77e (fix: replace smart quotes with straight quotes in cli.ts (esbuild parse error))
-=======
-        const pref = await db.select().from(preferences).where(eq(preferences.key, "projects_base_path")).limit(1);
->>>>>>> 52ef66c (fix: repair pre-existing build errors (smart quotes in cli.ts, truncated TableView/BoardPage from bad merge))
-=======
-        const pref = await db.select().from(preferences).where(eq(preferences.key, "projects_base_path")).limit(1);
->>>>>>> 0feb213 (fix: replace smart quotes with ASCII quotes in cli.ts)
         if (pref.length > 0 && pref[0].value) {
           baseFolder = pref[0].value;
         }
       }
 
       if (!baseFolder) {
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> b794815 (feat: add cli create subcommand and preferences set/get)
-=======
->>>>>>> 89f4fdb (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
-=======
->>>>>>> 088856d (WIP: add rmSync and writeFileSync imports to projects.ts)
-=======
->>>>>>> 7effda9 (fix: align projects_base_dir -> projects_base_path across cli.ts and SettingsPanel.tsx)
-=======
->>>>>>> dbea783 (fix: add missing fs imports and unify projects_base_path key name)
-        console.error("No base folder configured. Use --path <base-path> or set the projects_base_dir preference:");
-        console.error("  pnpm cli -- preferences set projects_base_dir /path/to/projects");
-=======
         console.error("No base folder configured. Use --path <base-path> or set the projects_base_path preference:");
         console.error("  pnpm cli -- preferences set projects_base_path /path/to/projects");
->>>>>>> 9e9ee57 (fix: add missing fs imports and unify projects_base_path key name)
-<<<<<<< HEAD
-=======
-        console.error("No base folder configured. Use --path <base-path> or set the projects_base_path preference:");
-        console.error("  pnpm cli -- preferences set projects_base_path /path/to/projects");
->>>>>>> c9887d7 (fix: fix encoding issues in cli.ts (smart quotes and unicode symbols))
-        process.exit(1);
-      }
-
-      const { mkdir, access, rm } = await import("node:fs/promises");
-      const { join, resolve: resolvePath, sep } = await import("node:path");
-<<<<<<< HEAD
-=======
-        console.error("No base folder configured. Use --path <base-path> or set the projects_base_folder preference:");
-        console.error("  pnpm cli -- preferences set projects_base_folder /path/to/projects");
-=======
-        console.error("No base folder configured. Use --path <base-path> or set the projects_base_dir preference:");
-        console.error("  pnpm cli -- preferences set projects_base_dir /path/to/projects");
->>>>>>> f6d1a48 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
-        process.exit(1);
-      }
-
-      const { mkdir, access, rm } = await import("node:fs/promises");
-<<<<<<< HEAD
-      const { join, resolve: resolvePath } = await import("node:path");
->>>>>>> 4ff54fb (feat: add cli create subcommand and preferences set/get)
-=======
-      const { join, resolve: resolvePath, sep } = await import("node:path");
->>>>>>> 76d53ab (fix: guard against path traversal in cli create command)
-      const { execFile } = await import("node:child_process");
-      const { promisify } = await import("node:util");
-=======
-        console.error(“No base folder configured. Use --path <base-path> or set the projects_base_dir preference:”);
-        console.error(“  pnpm cli -- preferences set projects_base_dir /path/to/projects”);
-=======
-        console.error(“No base folder configured. Use --path <base-path> or set the projects_base_path preference:”);
-        console.error(“  pnpm cli -- preferences set projects_base_path /path/to/projects”);
->>>>>>> a5e9504 (fix: align projects_base_dir -> projects_base_path across cli.ts and SettingsPanel.tsx)
-        process.exit(1);
-      }
-
-      const { mkdir, access, rm: rmFs } = await import(“node:fs/promises”);
-      rmFn = rmFs;
-      const { join, resolve: resolvePath, sep } = await import(“node:path”);
-      const { execFile } = await import(“node:child_process”);
-      const { promisify } = await import(“node:util”);
->>>>>>> 088aead (WIP: add rmSync and writeFileSync imports to projects.ts)
-=======
-      const { execFile } = await import("node:child_process");
-      const { promisify } = await import("node:util");
->>>>>>> c9887d7 (fix: fix encoding issues in cli.ts (smart quotes and unicode symbols))
-      const execFileAsync = promisify(execFile);
-
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> 76d53ab (fix: guard against path traversal in cli create command)
-      const resolvedBase = resolvePath(baseFolder);
-      repoPath = resolvePath(join(resolvedBase, folderName));
-
-      // Guard against path traversal (e.g. folderName = "../../etc")
-      if (!repoPath.startsWith(resolvedBase + sep) && repoPath !== resolvedBase) {
-        console.error(`Invalid folder name: "${folderName}" escapes the base directory.`);
-        process.exit(1);
-      }
-<<<<<<< HEAD
-=======
-      const repoPath = resolvePath(join(baseFolder, folderName));
->>>>>>> 4ff54fb (feat: add cli create subcommand and preferences set/get)
-=======
->>>>>>> 76d53ab (fix: guard against path traversal in cli create command)
-=======
-        console.error("No base folder configured. Use --path <base-path> or set the projects_base_folder preference:");
-        console.error("  pnpm cli -- preferences set projects_base_folder /path/to/projects");
-=======
-        console.error("No base folder configured. Use --path <base-path> or set the projects_base_dir preference:");
-        console.error("  pnpm cli -- preferences set projects_base_dir /path/to/projects");
->>>>>>> c6fd8a4 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
-=======
-        console.error(“No base folder configured. Use --path <base-path> or set the projects_base_dir preference:”);
-        console.error(“  pnpm cli -- preferences set projects_base_dir /path/to/projects”);
->>>>>>> 14dd44c (WIP: add rmSync and writeFileSync imports to projects.ts)
-=======
-        console.error(“No base folder configured. Use --path <base-path> or set the projects_base_path preference:”);
-        console.error(“  pnpm cli -- preferences set projects_base_path /path/to/projects”);
->>>>>>> 9196ac9 (fix: align projects_base_dir -> projects_base_path across cli.ts and SettingsPanel.tsx)
-=======
-        console.error(“No base folder configured. Use --path <base-path> or set the projects_base_path preference:”);
-        console.error(“  pnpm cli -- preferences set projects_base_path /path/to/projects”);
->>>>>>> d7a5078 (fix: align projects_base_dir -> projects_base_path across cli.ts and SettingsPanel.tsx)
-        process.exit(1);
-      }
-
-      const { mkdir, access, rm: rmFs } = await import(“node:fs/promises”);
-      rmFn = rmFs;
-      const { join, resolve: resolvePath, sep } = await import(“node:path”);
-      const { execFile } = await import(“node:child_process”);
-      const { promisify } = await import(“node:util”);
-      const execFileAsync = promisify(execFile);
-
-<<<<<<< HEAD
-      const repoPath = resolvePath(join(baseFolder, folderName));
->>>>>>> a9ef19b (feat: add cli create subcommand and preferences set/get)
-=======
-      const resolvedBase = resolvePath(baseFolder);
-      repoPath = resolvePath(join(resolvedBase, folderName));
-
-      // Guard against path traversal (e.g. folderName = “../../etc”)
-      if (!repoPath.startsWith(resolvedBase + sep) && repoPath !== resolvedBase) {
-        console.error(`Invalid folder name: “${folderName}” escapes the base directory.`);
-        process.exit(1);
-      }
->>>>>>> 58ee052 (fix: guard against path traversal in cli create command)
-=======
-        console.error("No base folder configured. Use --path <base-path> or set the projects_base_folder preference:");
-        console.error("  pnpm cli -- preferences set projects_base_folder /path/to/projects");
-=======
-        console.error("No base folder configured. Use --path <base-path> or set the projects_base_dir preference:");
-        console.error("  pnpm cli -- preferences set projects_base_dir /path/to/projects");
->>>>>>> 5ffc0d0 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
-=======
-        console.error(“No base folder configured. Use --path <base-path> or set the projects_base_dir preference:”);
-        console.error(“  pnpm cli -- preferences set projects_base_dir /path/to/projects”);
->>>>>>> 59386e6 (WIP: add rmSync and writeFileSync imports to projects.ts)
-        process.exit(1);
-      }
-
-      const { mkdir, access, rm: rmFs } = await import(“node:fs/promises”);
-      rmFn = rmFs;
-      const { join, resolve: resolvePath, sep } = await import(“node:path”);
-      const { execFile } = await import(“node:child_process”);
-      const { promisify } = await import(“node:util”);
-      const execFileAsync = promisify(execFile);
-
-<<<<<<< HEAD
-      const repoPath = resolvePath(join(baseFolder, folderName));
->>>>>>> c3f1926 (feat: add cli create subcommand and preferences set/get)
-=======
-      const resolvedBase = resolvePath(baseFolder);
-      repoPath = resolvePath(join(resolvedBase, folderName));
-
-      // Guard against path traversal (e.g. folderName = “../../etc”)
-      if (!repoPath.startsWith(resolvedBase + sep) && repoPath !== resolvedBase) {
-        console.error(`Invalid folder name: “${folderName}” escapes the base directory.`);
-        process.exit(1);
-      }
->>>>>>> ab358eb (fix: guard against path traversal in cli create command)
-=======
-        console.error("No base folder configured. Use --path <base-path> or set the projects_base_folder preference:");
-        console.error("  pnpm cli -- preferences set projects_base_folder /path/to/projects");
-=======
-        console.error("No base folder configured. Use --path <base-path> or set the projects_base_dir preference:");
-        console.error("  pnpm cli -- preferences set projects_base_dir /path/to/projects");
->>>>>>> 63066d9 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
-=======
->>>>>>> dbea783 (fix: add missing fs imports and unify projects_base_path key name)
-=======
-        console.error("No base folder configured. Use --path <base-path> or set the projects_base_path preference:");
-        console.error("  pnpm cli -- preferences set projects_base_path /path/to/projects");
->>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
         process.exit(1);
       }
 
@@ -905,21 +170,6 @@ Setup:
       const { promisify } = await import("node:util");
       const execFileAsync = promisify(execFile);
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-      const repoPath = resolvePath(join(baseFolder, folderName));
->>>>>>> dd3f860 (feat: add cli create subcommand and preferences set/get)
-=======
-=======
->>>>>>> b794815 (feat: add cli create subcommand and preferences set/get)
-=======
-=======
->>>>>>> 76d53ab (fix: guard against path traversal in cli create command)
->>>>>>> 09277d7 (fix: guard against path traversal in cli create command)
-=======
->>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
       const resolvedBase = resolvePath(baseFolder);
       const repoPath = resolvePath(join(resolvedBase, folderName));
 
@@ -928,24 +178,6 @@ Setup:
         console.error(`Invalid folder name: "${folderName}" escapes the base directory.`);
         process.exit(1);
       }
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
->>>>>>> a1f5d7d (fix: guard against path traversal in cli create command)
-=======
-=======
-      const repoPath = resolvePath(join(baseFolder, folderName));
->>>>>>> 4ff54fb (feat: add cli create subcommand and preferences set/get)
->>>>>>> b794815 (feat: add cli create subcommand and preferences set/get)
-=======
-=======
-      const repoPath = resolvePath(join(baseFolder, folderName));
->>>>>>> 4ff54fb (feat: add cli create subcommand and preferences set/get)
-=======
->>>>>>> 76d53ab (fix: guard against path traversal in cli create command)
->>>>>>> 09277d7 (fix: guard against path traversal in cli create command)
-=======
->>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
 
       // Check if directory already exists
       try {
@@ -956,144 +188,7 @@ Setup:
         // Expected: directory doesn't exist yet
       }
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> b794815 (feat: add cli create subcommand and preferences set/get)
-=======
->>>>>>> 09fa7b4 (fix: clean up created directory if git init/commit fails in cli create command)
-=======
->>>>>>> 89f4fdb (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
-=======
->>>>>>> 088856d (WIP: add rmSync and writeFileSync imports to projects.ts)
-      // Create directory â€” track so we can clean up on failure
-=======
-      // Create directory — track so we can clean up on failure
->>>>>>> 088aead (WIP: add rmSync and writeFileSync imports to projects.ts)
-<<<<<<< HEAD
-      await mkdir(repoPath, { recursive: true });
-      dirCreated = true;
-
-<<<<<<< HEAD
-      if (false) { // placeholder to keep block structure identical
-        }
-      };
-=======
-      // Create directory
-      await mkdir(repoPath, { recursive: true });
->>>>>>> 4ff54fb (feat: add cli create subcommand and preferences set/get)
-=======
-      // Create directory — track so we can clean up on failure
-=======
-      // Create directory â€” track so we can clean up on failure
->>>>>>> f6d1a48 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
-=======
       // Create directory -- track so we can clean up on failure
->>>>>>> c9887d7 (fix: fix encoding issues in cli.ts (smart quotes and unicode symbols))
-      await mkdir(repoPath, { recursive: true });
-      let dirCreated = true;
-
-      const cleanupDir = async () => {
-        if (dirCreated) {
-          try { await rm(repoPath, { recursive: true, force: true }); } catch { /* best-effort */ }
-        }
-      };
->>>>>>> 907d84b (fix: clean up created directory if git init/commit fails in cli create command)
-
-=======
->>>>>>> 2d6d43c (fix: add missing rmSync/writeFileSync imports in projects.ts; fix cleanupDir scope in cli create command)
-=======
-      // Create directory
-=======
-      // Create directory — track so we can clean up on failure
->>>>>>> 7d3e5ad (fix: clean up created directory if git init/commit fails in cli create command)
-=======
-      // Create directory â€” track so we can clean up on failure
->>>>>>> c6fd8a4 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
-=======
-      // Create directory — track so we can clean up on failure
->>>>>>> 14dd44c (WIP: add rmSync and writeFileSync imports to projects.ts)
-      await mkdir(repoPath, { recursive: true });
-      dirCreated = true;
-
-<<<<<<< HEAD
-      if (false) { // placeholder to keep block structure identical
-        }
-      };
-
->>>>>>> a9ef19b (feat: add cli create subcommand and preferences set/get)
-=======
->>>>>>> 2274a29 (fix: add missing rmSync/writeFileSync imports in projects.ts; fix cleanupDir scope in cli create command)
-=======
-      // Create directory
-=======
-      // Create directory — track so we can clean up on failure
->>>>>>> c6268ea (fix: clean up created directory if git init/commit fails in cli create command)
-=======
-      // Create directory â€” track so we can clean up on failure
->>>>>>> 5ffc0d0 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
-=======
-      // Create directory — track so we can clean up on failure
->>>>>>> 59386e6 (WIP: add rmSync and writeFileSync imports to projects.ts)
-      await mkdir(repoPath, { recursive: true });
-      dirCreated = true;
-
-<<<<<<< HEAD
-      if (false) { // placeholder to keep block structure identical
-        }
-      };
-
->>>>>>> c3f1926 (feat: add cli create subcommand and preferences set/get)
-=======
->>>>>>> 856937b (fix: add missing rmSync/writeFileSync imports in projects.ts; fix cleanupDir scope in cli create command)
-=======
-      // Create directory
-=======
-      // Create directory — track so we can clean up on failure
->>>>>>> 5643a0f (fix: clean up created directory if git init/commit fails in cli create command)
-=======
-      // Create directory â€” track so we can clean up on failure
->>>>>>> 63066d9 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
-=======
->>>>>>> 088856d (WIP: add rmSync and writeFileSync imports to projects.ts)
-      await mkdir(repoPath, { recursive: true });
-      dirCreated = true;
-
-<<<<<<< HEAD
-      if (false) { // placeholder to keep block structure identical
-        }
-      };
-=======
-      // Create directory
-      await mkdir(repoPath, { recursive: true });
->>>>>>> 4ff54fb (feat: add cli create subcommand and preferences set/get)
-=======
-      // Create directory — track so we can clean up on failure
-=======
-      // Create directory â€” track so we can clean up on failure
->>>>>>> f6d1a48 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
-=======
-      // Create directory -- track so we can clean up on failure
->>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
       await mkdir(repoPath, { recursive: true });
       let dirCreated = true;
 
@@ -1103,15 +198,6 @@ Setup:
         }
       };
 
-<<<<<<< HEAD
-<<<<<<< HEAD
->>>>>>> dd3f860 (feat: add cli create subcommand and preferences set/get)
-=======
-=======
->>>>>>> 2d6d43c (fix: add missing rmSync/writeFileSync imports in projects.ts; fix cleanupDir scope in cli create command)
->>>>>>> ea92e79 (fix: add missing rmSync/writeFileSync imports in projects.ts; fix cleanupDir scope in cli create command)
-=======
->>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
       // Run git init
       const branch = options.branch ?? "main";
       try {
@@ -1126,33 +212,6 @@ Setup:
         }
       }
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> 907d84b (fix: clean up created directory if git init/commit fails in cli create command)
-=======
->>>>>>> 7d3e5ad (fix: clean up created directory if git init/commit fails in cli create command)
-=======
->>>>>>> c6268ea (fix: clean up created directory if git init/commit fails in cli create command)
-=======
->>>>>>> 5643a0f (fix: clean up created directory if git init/commit fails in cli create command)
-=======
->>>>>>> b794815 (feat: add cli create subcommand and preferences set/get)
-=======
-=======
->>>>>>> 907d84b (fix: clean up created directory if git init/commit fails in cli create command)
->>>>>>> 09fa7b4 (fix: clean up created directory if git init/commit fails in cli create command)
-=======
->>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
       // Create an initial empty commit so the repo has a HEAD.
       // git commit requires user.name/email to be configured; give a clear error if not.
       try {
@@ -1169,77 +228,6 @@ Setup:
         }
         process.exit(1);
       }
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> ea9ffef (fix: resolve preference key mismatch, path traversal in skill names, and cleanup bugs)
-=======
-      // Create an initial empty commit so the repo has a HEAD
-      await execFileAsync("git", ["-C", repoPath, "commit", "--allow-empty", "-m", "Initial commit"]);
-=======
-      dirCreated = false; // repo is now fully initialized; don't clean up on later errors
->>>>>>> 907d84b (fix: clean up created directory if git init/commit fails in cli create command)
-
->>>>>>> 4ff54fb (feat: add cli create subcommand and preferences set/get)
-=======
->>>>>>> a19889f (fix: resolve preference key mismatch, path traversal in skill names, and cleanup bugs)
-<<<<<<< HEAD
-=======
-      // Create an initial empty commit so the repo has a HEAD
-      await execFileAsync("git", ["-C", repoPath, "commit", "--allow-empty", "-m", "Initial commit"]);
-=======
-      dirCreated = false; // repo is now fully initialized; don't clean up on later errors
->>>>>>> 7d3e5ad (fix: clean up created directory if git init/commit fails in cli create command)
-
->>>>>>> a9ef19b (feat: add cli create subcommand and preferences set/get)
-=======
->>>>>>> 9bd4ac7 (fix: resolve preference key mismatch, path traversal in skill names, and cleanup bugs)
-=======
-      // Create an initial empty commit so the repo has a HEAD
-      await execFileAsync("git", ["-C", repoPath, "commit", "--allow-empty", "-m", "Initial commit"]);
-=======
-      dirCreated = false; // repo is now fully initialized; don't clean up on later errors
->>>>>>> c6268ea (fix: clean up created directory if git init/commit fails in cli create command)
-
->>>>>>> c3f1926 (feat: add cli create subcommand and preferences set/get)
-=======
->>>>>>> 89b6a74 (fix: resolve preference key mismatch, path traversal in skill names, and cleanup bugs)
-=======
-      // Create an initial empty commit so the repo has a HEAD
-      await execFileAsync("git", ["-C", repoPath, "commit", "--allow-empty", "-m", "Initial commit"]);
-=======
-      dirCreated = false; // repo is now fully initialized; don't clean up on later errors
->>>>>>> 5643a0f (fix: clean up created directory if git init/commit fails in cli create command)
-
->>>>>>> dd3f860 (feat: add cli create subcommand and preferences set/get)
-=======
->>>>>>> f716420 (fix: resolve preference key mismatch, path traversal in skill names, and cleanup bugs)
-=======
-=======
->>>>>>> 09fa7b4 (fix: clean up created directory if git init/commit fails in cli create command)
-=======
-      // Create an initial empty commit so the repo has a HEAD
-      await execFileAsync("git", ["-C", repoPath, "commit", "--allow-empty", "-m", "Initial commit"]);
-=======
-      dirCreated = false; // repo is now fully initialized; don't clean up on later errors
->>>>>>> 907d84b (fix: clean up created directory if git init/commit fails in cli create command)
-
->>>>>>> 4ff54fb (feat: add cli create subcommand and preferences set/get)
->>>>>>> b794815 (feat: add cli create subcommand and preferences set/get)
-=======
->>>>>>> ea9ffef (fix: resolve preference key mismatch, path traversal in skill names, and cleanup bugs)
-=======
->>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
       // Register the new repo
       const { detectRepoInfo: detectInfo } = await import("./services/git-info.service.js");
       const repoInfo = await detectInfo(repoPath);
@@ -1282,51 +270,7 @@ Setup:
         .values({ key: "activeProjectId", value: projectId, updatedAt: now })
         .onConflictDoUpdate({ target: preferences.key, set: { value: projectId, updatedAt: now } });
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> ea9ffef (fix: resolve preference key mismatch, path traversal in skill names, and cleanup bugs)
       dirCreated = false; // DB registration succeeded; keep the directory
-=======
->>>>>>> 4ff54fb (feat: add cli create subcommand and preferences set/get)
-=======
-      dirCreated = false; // DB registration succeeded; keep the directory
->>>>>>> a19889f (fix: resolve preference key mismatch, path traversal in skill names, and cleanup bugs)
-<<<<<<< HEAD
-=======
->>>>>>> a9ef19b (feat: add cli create subcommand and preferences set/get)
-=======
-      dirCreated = false; // DB registration succeeded; keep the directory
->>>>>>> 9bd4ac7 (fix: resolve preference key mismatch, path traversal in skill names, and cleanup bugs)
-=======
->>>>>>> c3f1926 (feat: add cli create subcommand and preferences set/get)
-=======
-      dirCreated = false; // DB registration succeeded; keep the directory
->>>>>>> 89b6a74 (fix: resolve preference key mismatch, path traversal in skill names, and cleanup bugs)
-=======
->>>>>>> dd3f860 (feat: add cli create subcommand and preferences set/get)
-=======
-      dirCreated = false; // DB registration succeeded; keep the directory
->>>>>>> f716420 (fix: resolve preference key mismatch, path traversal in skill names, and cleanup bugs)
-=======
-      dirCreated = false; // DB registration succeeded; keep the directory
-=======
->>>>>>> 4ff54fb (feat: add cli create subcommand and preferences set/get)
->>>>>>> b794815 (feat: add cli create subcommand and preferences set/get)
-=======
->>>>>>> ea9ffef (fix: resolve preference key mismatch, path traversal in skill names, and cleanup bugs)
-=======
-      dirCreated = false; // DB registration succeeded; keep the directory
->>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
       console.log(`Created and registered project "${projectName}"`);
       console.log(`  Path: ${repoInfo.repoPath}`);
       console.log(`  Branch: ${repoInfo.defaultBranch}`);
@@ -1334,51 +278,7 @@ Setup:
       console.log(`  Set as active project.`);
       process.exit(0);
     } catch (err) {
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> ea9ffef (fix: resolve preference key mismatch, path traversal in skill names, and cleanup bugs)
       await cleanupDir();
-=======
->>>>>>> 4ff54fb (feat: add cli create subcommand and preferences set/get)
-=======
-      await cleanupDir();
->>>>>>> a19889f (fix: resolve preference key mismatch, path traversal in skill names, and cleanup bugs)
-<<<<<<< HEAD
-=======
->>>>>>> a9ef19b (feat: add cli create subcommand and preferences set/get)
-=======
-      await cleanupDir();
->>>>>>> 9bd4ac7 (fix: resolve preference key mismatch, path traversal in skill names, and cleanup bugs)
-=======
->>>>>>> c3f1926 (feat: add cli create subcommand and preferences set/get)
-=======
-      await cleanupDir();
->>>>>>> 89b6a74 (fix: resolve preference key mismatch, path traversal in skill names, and cleanup bugs)
-=======
->>>>>>> dd3f860 (feat: add cli create subcommand and preferences set/get)
-=======
-      await cleanupDir();
->>>>>>> f716420 (fix: resolve preference key mismatch, path traversal in skill names, and cleanup bugs)
-=======
-      await cleanupDir();
-=======
->>>>>>> 4ff54fb (feat: add cli create subcommand and preferences set/get)
->>>>>>> b794815 (feat: add cli create subcommand and preferences set/get)
-=======
->>>>>>> ea9ffef (fix: resolve preference key mismatch, path traversal in skill names, and cleanup bugs)
-=======
-      await cleanupDir();
->>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
       console.error("Error:", err instanceof Error ? err.message : String(err));
       process.exit(1);
     }
@@ -1389,106 +289,8 @@ const prefCmd = program
   .description("Manage CLI preferences.\n\nSubcommands: get, set")
   .addHelpText("after", `
 Examples:
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> b794815 (feat: add cli create subcommand and preferences set/get)
-=======
->>>>>>> 89f4fdb (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
-=======
->>>>>>> 7effda9 (fix: align projects_base_dir -> projects_base_path across cli.ts and SettingsPanel.tsx)
-=======
->>>>>>> dbea783 (fix: add missing fs imports and unify projects_base_path key name)
-  $ agentic-kanban preferences get projects_base_dir
-  $ agentic-kanban preferences set projects_base_dir /path/to/projects
-=======
-  $ agentic-kanban preferences get projects_base_folder
-  $ agentic-kanban preferences set projects_base_folder /path/to/projects
->>>>>>> 4ff54fb (feat: add cli create subcommand and preferences set/get)
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> 89f4fdb (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
-=======
-  $ agentic-kanban preferences get projects_base_dir
-  $ agentic-kanban preferences set projects_base_dir /path/to/projects
->>>>>>> f6d1a48 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> 7effda9 (fix: align projects_base_dir -> projects_base_path across cli.ts and SettingsPanel.tsx)
-=======
   $ agentic-kanban preferences get projects_base_path
   $ agentic-kanban preferences set projects_base_path /path/to/projects
->>>>>>> a5e9504 (fix: align projects_base_dir -> projects_base_path across cli.ts and SettingsPanel.tsx)
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> dbea783 (fix: add missing fs imports and unify projects_base_path key name)
-=======
-  $ agentic-kanban preferences get projects_base_path
-  $ agentic-kanban preferences set projects_base_path /path/to/projects
->>>>>>> 9e9ee57 (fix: add missing fs imports and unify projects_base_path key name)
-<<<<<<< HEAD
-=======
-  $ agentic-kanban preferences get projects_base_folder
-  $ agentic-kanban preferences set projects_base_folder /path/to/projects
->>>>>>> a9ef19b (feat: add cli create subcommand and preferences set/get)
-=======
-  $ agentic-kanban preferences get projects_base_dir
-  $ agentic-kanban preferences set projects_base_dir /path/to/projects
->>>>>>> c6fd8a4 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
-=======
-  $ agentic-kanban preferences get projects_base_path
-  $ agentic-kanban preferences set projects_base_path /path/to/projects
->>>>>>> 9196ac9 (fix: align projects_base_dir -> projects_base_path across cli.ts and SettingsPanel.tsx)
-=======
-  $ agentic-kanban preferences get projects_base_folder
-  $ agentic-kanban preferences set projects_base_folder /path/to/projects
->>>>>>> c3f1926 (feat: add cli create subcommand and preferences set/get)
-=======
-  $ agentic-kanban preferences get projects_base_dir
-  $ agentic-kanban preferences set projects_base_dir /path/to/projects
->>>>>>> 5ffc0d0 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
-=======
-  $ agentic-kanban preferences get projects_base_path
-  $ agentic-kanban preferences set projects_base_path /path/to/projects
->>>>>>> d7a5078 (fix: align projects_base_dir -> projects_base_path across cli.ts and SettingsPanel.tsx)
-=======
-  $ agentic-kanban preferences get projects_base_folder
-  $ agentic-kanban preferences set projects_base_folder /path/to/projects
->>>>>>> dd3f860 (feat: add cli create subcommand and preferences set/get)
-=======
-  $ agentic-kanban preferences get projects_base_dir
-  $ agentic-kanban preferences set projects_base_dir /path/to/projects
->>>>>>> 63066d9 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
-=======
->>>>>>> b794815 (feat: add cli create subcommand and preferences set/get)
-=======
->>>>>>> 89f4fdb (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
-=======
->>>>>>> 7effda9 (fix: align projects_base_dir -> projects_base_path across cli.ts and SettingsPanel.tsx)
-=======
->>>>>>> dbea783 (fix: add missing fs imports and unify projects_base_path key name)
-=======
-  $ agentic-kanban preferences get projects_base_path
-  $ agentic-kanban preferences set projects_base_path /path/to/projects
->>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
 `);
 
 prefCmd
@@ -1654,19 +456,7 @@ Example:
 
 program
   .command("cleanup")
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
   .description("Show stale worktrees for closed workspaces.\n\nLists git worktrees belonging to closed/merged workspaces. These worktrees are no longer needed and can be removed manually with 'git worktree remove --force <path>'.\n\nThis command does NOT auto-remove worktrees -- it only reports them.")
-=======
-  .description("Show stale worktrees for closed workspaces.\n\nLists git worktrees belonging to closed/merged workspaces. These worktrees are no longer needed and can be removed manually with 'git worktree remove --force <path>'.\n\nThis command does NOT auto-remove worktrees â€” it only reports them.")
->>>>>>> 5ffc0d0 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
-=======
-  .description("Show stale worktrees for closed workspaces.\n\nLists git worktrees belonging to closed/merged workspaces. These worktrees are no longer needed and can be removed manually with 'git worktree remove --force <path>'.\n\nThis command does NOT auto-remove worktrees â€” it only reports them.")
->>>>>>> 63066d9 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
-=======
-  .description("Show stale worktrees for closed workspaces.\n\nLists git worktrees belonging to closed/merged workspaces. These worktrees are no longer needed and can be removed manually with 'git worktree remove --force <path>'.\n\nThis command does NOT auto-remove worktrees -- it only reports them.")
->>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
   .addHelpText("after", `
 Example:
   $ agentic-kanban cleanup
@@ -1691,19 +481,7 @@ Example:
 
       console.log(`Found ${withWorktrees.length} closed workspace(s) with worktrees:`);
       for (const ws of withWorktrees) {
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
         console.log(`  ${ws.branch} ->' ${ws.workingDir}`);
-=======
-        console.log(`  ${ws.branch} â†’ ${ws.workingDir}`);
->>>>>>> 5ffc0d0 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
-=======
-        console.log(`  ${ws.branch} â†’ ${ws.workingDir}`);
->>>>>>> 63066d9 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
-=======
-        console.log(`  ${ws.branch} ->' ${ws.workingDir}`);
->>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
       }
       console.log("\nThese worktrees can be removed manually with:");
       console.log("  git worktree remove --force <path>");
@@ -1741,19 +519,7 @@ Examples:
   $ agentic-kanban status -w -i 10              # auto-refresh every 10s
 
 Status indicators:
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
   * = active workspace   o = idle workspace   o = reviewing   . = no workspace
-=======
-  â— = active workspace   â—‹ = idle workspace   â—Ž = reviewing   Â· = no workspace
->>>>>>> 5ffc0d0 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
-=======
-  â— = active workspace   â—‹ = idle workspace   â—Ž = reviewing   Â· = no workspace
->>>>>>> 63066d9 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
-=======
-  * = active workspace   o = idle workspace   o = reviewing   . = no workspace
->>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
 `)
   .action(async (options: { project?: string; all?: boolean; json?: boolean; watch?: boolean; interval?: string }) => {
     try {
@@ -1784,19 +550,7 @@ Status indicators:
         for (const issue of status.issues) {
           const num = issue.issueNumber != null ? `#${issue.issueNumber}` : "???";
           const wsStatus = issue.workspace?.status ?? "no workspace";
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
           const marker = wsStatus === "active" ? "*" : wsStatus === "idle" ? "o" : wsStatus === "reviewing" ? "o" : ".";
-=======
-=======
->>>>>>> 63066d9 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
-          const marker = wsStatus === "active" ? "â—" : wsStatus === "idle" ? "â—‹" : wsStatus === "reviewing" ? "â—Ž" : "Â·";
-
->>>>>>> 5ffc0d0 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
-=======
-          const marker = wsStatus === "active" ? "*" : wsStatus === "idle" ? "o" : wsStatus === "reviewing" ? "o" : ".";
->>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
           console.log(`  ${marker} ${num.padEnd(4)} ${issue.title}`);
           console.log(`         [${issue.statusName}]  priority: ${issue.priority}  workspace: ${wsStatus}`);
 
@@ -1871,19 +625,7 @@ async function getActiveProjectId(): Promise<string> {
   return pref[0].value;
 }
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
 // ?? issue commands ??
-=======
-=======
->>>>>>> 63066d9 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
-// â”€â”€ issue commands â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-
->>>>>>> 5ffc0d0 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
-=======
-// ?? issue commands ??
->>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
 const issueCmd = program.command("issue").description("Manage issues on the board.\n\nSubcommands: list, create, move, summary, dependency");
 
 issueCmd
@@ -2299,19 +1041,7 @@ Examples:
     }
   });
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
 // ?? workspace commands ??
-=======
-=======
->>>>>>> 63066d9 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
-// â”€â”€ workspace commands â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-
->>>>>>> 5ffc0d0 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
-=======
-// ?? workspace commands ??
->>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
 const wsCmd = program.command("workspace").description("Manage workspaces (git worktrees linked to issues).\n\nWorkspaces create isolated git worktrees where agents can work on issues. Each workspace is tied to a single issue.\n\nSubcommands: list, create");
 
 wsCmd
@@ -2522,19 +1252,7 @@ Example:
     }
   });
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
 // ?? skill commands ??
-=======
-=======
->>>>>>> 63066d9 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
-// â”€â”€ skill commands â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-
->>>>>>> 5ffc0d0 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
-=======
-// ?? skill commands ??
->>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
 program
   .command("delete-status <status-id>")
   .description("Delete a project status (fails if issues are linked to it)")
@@ -2548,19 +1266,7 @@ program
       }
       const linked = await db.select({ id: issues.id }).from(issues).where(eq(issues.statusId, statusId)).limit(1);
       if (linked.length > 0) {
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
         console.error(`Cannot delete status "${rows[0].name}" -- it has linked issues. Move or delete those issues first.`);
-=======
-        console.error(`Cannot delete status "${rows[0].name}" â€” it has linked issues. Move or delete those issues first.`);
->>>>>>> 5ffc0d0 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
-=======
-        console.error(`Cannot delete status "${rows[0].name}" â€” it has linked issues. Move or delete those issues first.`);
->>>>>>> 63066d9 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
-=======
-        console.error(`Cannot delete status "${rows[0].name}" -- it has linked issues. Move or delete those issues first.`);
->>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
         process.exit(1);
       }
       await db.delete(projectStatuses).where(eq(projectStatuses.id, statusId));
@@ -2772,19 +1478,7 @@ Examples:
     }
   });
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
 // ?? dependency commands ??
-=======
-=======
->>>>>>> 63066d9 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
-// â”€â”€ dependency commands â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-
->>>>>>> 5ffc0d0 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
-=======
-// ?? dependency commands ??
->>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
 const depCmd = issueCmd.command("dependency").description("Manage issue dependencies.\n\nDependencies link issues together with typed relationships. Available types: depends_on, blocked_by, related_to, duplicates, parent_of, child_of.\n\nSubcommands: list, add, remove");
 
 depCmd
@@ -2982,36 +1676,12 @@ program
     }
   });
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
 // ?? sessions debug command ??
-=======
-=======
->>>>>>> 63066d9 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
-// â”€â”€ sessions debug command â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-
->>>>>>> 5ffc0d0 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
-=======
-// ?? sessions debug command ??
->>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
 const sessionDebugCmd = program
   .command("session-history [issue-number]")
   .alias("sh")
   .description(
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
     "Inspect Claude Code session transcript files from ~/.claude/projects/.\n\nParses JSONL session files for worktrees linked to this project's issues, showing what the agent did and why it stopped -- without loading entire large files."
-=======
-    "Inspect Claude Code session transcript files from ~/.claude/projects/.\n\nParses JSONL session files for worktrees linked to this project's issues, showing what the agent did and why it stopped â€” without loading entire large files."
->>>>>>> 5ffc0d0 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
-=======
-    "Inspect Claude Code session transcript files from ~/.claude/projects/.\n\nParses JSONL session files for worktrees linked to this project's issues, showing what the agent did and why it stopped â€” without loading entire large files."
->>>>>>> 63066d9 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
-=======
-    "Inspect Claude Code session transcript files from ~/.claude/projects/.\n\nParses JSONL session files for worktrees linked to this project's issues, showing what the agent did and why it stopped -- without loading entire large files."
->>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
   )
   .option("-t, --tail <lines>", "Number of tail lines to parse per session file (default: 60)", "60")
   .option("-a, --all", "Show all sessions for the issue, not just the latest", false)
@@ -3108,19 +1778,7 @@ Via pnpm (use -- to pass args):
         if (!options.all) jsonlFiles = jsonlFiles.slice(0, 1);
 
         for (const jf of jsonlFiles) {
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
           // Read only the tail -- avoid loading huge files
-=======
-          // Read only the tail â€” avoid loading huge files
->>>>>>> 5ffc0d0 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
-=======
-          // Read only the tail â€” avoid loading huge files
->>>>>>> 63066d9 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
-=======
-          // Read only the tail -- avoid loading huge files
->>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
           const raw = readFileSync(jf.path, "utf8");
           const allLines = raw.split("\n").filter(Boolean);
           const tailStart = Math.max(0, allLines.length - tailLines);
@@ -3168,19 +1826,7 @@ Via pnpm (use -- to pass args):
           results.push({
             issueNum: dir.issueNum,
             dir: dir.name,
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
             file: jf.name.replace(".jsonl", "").slice(0, 8) + "--",
-=======
-            file: jf.name.replace(".jsonl", "").slice(0, 8) + "â€¦",
->>>>>>> 5ffc0d0 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
-=======
-            file: jf.name.replace(".jsonl", "").slice(0, 8) + "â€¦",
->>>>>>> 63066d9 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
-=======
-            file: jf.name.replace(".jsonl", "").slice(0, 8) + "--",
->>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
             fileSizeBytes: jf.size,
             lastModified: jf.mtime.toISOString(),
             linesParsed: linesToParse.length,
@@ -3190,19 +1836,7 @@ Via pnpm (use -- to pass args):
             stopReason,
             sessionStarted,
             agentResponded,
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
             sessionId: sessionId ? (sessionId as string).slice(0, 8) + "--" : null,
-=======
-            sessionId: sessionId ? (sessionId as string).slice(0, 8) + "â€¦" : null,
->>>>>>> 5ffc0d0 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
-=======
-            sessionId: sessionId ? (sessionId as string).slice(0, 8) + "â€¦" : null,
->>>>>>> 63066d9 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
-=======
-            sessionId: sessionId ? (sessionId as string).slice(0, 8) + "--" : null,
->>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
           });
         }
       }
@@ -3219,35 +1853,11 @@ Via pnpm (use -- to pass args):
       for (const r of results) {
         if (r.issueNum !== currentIssue) {
           currentIssue = r.issueNum;
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
           console.log(`  -- #${r.issueNum ?? "?"} ----------------------------------`);
         }
         const size = r.fileSizeBytes < 1024 ? `${r.fileSizeBytes}B` : `${(r.fileSizeBytes / 1024).toFixed(0)}KB`;
         const age = timeSince(new Date(r.lastModified));
         const started = r.sessionStarted ? (r.agentResponded ? "OK responded" : "FAIL no response") : "FAIL no prompt";
-=======
-          console.log(`  â”€â”€ #${r.issueNum ?? "?"} â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€`);
-        }
-        const size = r.fileSizeBytes < 1024 ? `${r.fileSizeBytes}B` : `${(r.fileSizeBytes / 1024).toFixed(0)}KB`;
-        const age = timeSince(new Date(r.lastModified));
-        const started = r.sessionStarted ? (r.agentResponded ? "âœ“ responded" : "âœ— no response") : "âœ— no prompt";
->>>>>>> 5ffc0d0 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
-=======
-          console.log(`  â”€â”€ #${r.issueNum ?? "?"} â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€`);
-        }
-        const size = r.fileSizeBytes < 1024 ? `${r.fileSizeBytes}B` : `${(r.fileSizeBytes / 1024).toFixed(0)}KB`;
-        const age = timeSince(new Date(r.lastModified));
-        const started = r.sessionStarted ? (r.agentResponded ? "âœ“ responded" : "âœ— no response") : "âœ— no prompt";
->>>>>>> 63066d9 (fix: standardize preference key to projects_base_dir, fix validation logic inversion, add cleanup on git init failure)
-=======
-          console.log(`  -- #${r.issueNum ?? "?"} ----------------------------------`);
-        }
-        const size = r.fileSizeBytes < 1024 ? `${r.fileSizeBytes}B` : `${(r.fileSizeBytes / 1024).toFixed(0)}KB`;
-        const age = timeSince(new Date(r.lastModified));
-        const started = r.sessionStarted ? (r.agentResponded ? "OK responded" : "FAIL no response") : "FAIL no prompt";
->>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
         console.log(`  ${r.file}  ${size}  ${age} ago  [${started}]  turns:${r.turns}`);
         if (r.stopReason) console.log(`    stop_reason: ${r.stopReason}`);
         if (r.lastToolCall) console.log(`    last tool:   ${r.lastToolCall}`);

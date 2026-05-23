@@ -40,54 +40,15 @@ const MIGRATION_FILES = [
   "../../../shared/drizzle/0025_provider_session_id.sql",
   "../../../shared/drizzle/0026_ready_for_merge.sql",
   "../../../shared/drizzle/0027_estimate_field.sql",
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
   "../../../shared/drizzle/0028_perf_indexes_conflict_cache.sql",
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> b6a4ecf (feat: add estimate/sizing field to issues (XS/S/M/L/XL))
-=======
-  "../../../shared/drizzle/0028_perf_indexes_conflict_cache.sql",
->>>>>>> d778ce3 (perf: add DB indexes and stale-while-revalidate conflict cache for board load)
-=======
->>>>>>> 26ff491 (feat: add estimate/sizing field to issues (XS/S/M/L/XL))
-=======
-  "../../../shared/drizzle/0028_perf_indexes_conflict_cache.sql",
->>>>>>> d318021 (perf: add DB indexes and stale-while-revalidate conflict cache for board load)
-=======
->>>>>>> 43685f8 (feat: add estimate/sizing field to issues (XS/S/M/L/XL))
-=======
-  "../../../shared/drizzle/0028_perf_indexes_conflict_cache.sql",
->>>>>>> 59675e9 (perf: add DB indexes and stale-while-revalidate conflict cache for board load)
-=======
   "../../../shared/drizzle/0029_issue_artifacts.sql",
   "../../../shared/drizzle/0030_thorough_review.sql",
   "../../../shared/drizzle/0031_scheduled_runs.sql",
-<<<<<<< HEAD
->>>>>>> 35a39bb (feat: cherry-pick scheduled runs feature from #155 with conflict resolution)
-=======
-  "../../../shared/drizzle/0029_issue_artifacts.sql",
-  "../../../shared/drizzle/0030_thorough_review.sql",
-  "../../../shared/drizzle/0031_scheduled_runs.sql",
->>>>>>> ffa8d96 (fix: restore scheduled-runs feature and keyboard shortcuts lost in bad merge fix)
-=======
   "../../../shared/drizzle/0032_diff_stat_cache.sql",
   "../../../shared/drizzle/0033_backlog_status.sql",
   "../../../shared/drizzle/0034_session_pid.sql",
-<<<<<<< HEAD
->>>>>>> 1ea0691 (feat: prevent server hot-reload from killing agent processes (#222))
-=======
   "../../../shared/drizzle/0035_session_trigger.sql",
-<<<<<<< HEAD
->>>>>>> 437c42a (feat: add triggerType to sessions — show AI Review, Chat, Fix Conflicts badges in session history)
-=======
   "../../../shared/drizzle/0036_scheduled_runs_cron.sql",
->>>>>>> 2ac8047 (feat: add cron expression support to scheduled runs)
 ];
 
 function createTestApp() {
