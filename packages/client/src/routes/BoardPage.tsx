@@ -377,6 +377,7 @@ export function BoardPage() {
   const [showMonitorPopover, setShowMonitorPopover] = useState(false);
   const [monitorRunning, setMonitorRunning] = useState(false);
   const [moveToDonePending, setMoveToDonePending] = useState<{ issue: IssueWithStatus; confirm: () => Promise<void> } | null>(null);
+  const [pendingWorkspaceIssueIds, setPendingWorkspaceIssueIds] = useState<Set<string>>(new Set());
 
   const refetchBoard = useCallback(async (projectId?: string) => {
     const pid = projectId || activeProjectId;
@@ -396,6 +397,18 @@ export function BoardPage() {
         }
       }
     }
+    // Clear pending workspace indicator for issues that now have an active workspace
+    setPendingWorkspaceIssueIds((prev) => {
+      if (prev.size === 0) return prev;
+      const next = new Set(prev);
+      for (const col of board) {
+        for (const issue of col.issues) {
+          const ws = issue.workspaceSummary?.main;
+          if (ws && ws.status !== "closed") next.delete(issue.id);
+        }
+      }
+      return next.size === prev.size ? prev : next;
+    });
     if (inactiveIssueIds.size > 0) {
       setLiveStats((prev) => {
         const next = { ...prev };
@@ -1446,6 +1459,7 @@ export function BoardPage() {
               sessionActivity={sessionActivity}
               liveStats={liveStats}
               sessionTodos={sessionTodos}
+              pendingWorkspaceIssueIds={pendingWorkspaceIssueIds}
             >
               <CreateIssueForm
                 projectId={activeProjectId}
@@ -1504,6 +1518,7 @@ export function BoardPage() {
           project={activeProject ?? null}
           onClose={() => { setWorkspaceIssue(null); setWorkspaceInitial(null); setWorkspaceOpenCreate(false); }}
           onWorkspaceChange={() => refetchBoard()}
+          onWorkspaceCreating={(issueId) => setPendingWorkspaceIssueIds((prev) => new Set([...prev, issueId]))}
           initialWorkspaceId={workspaceInitial?.workspaceId}
           initialSessionId={workspaceInitial?.sessionId}
           initialShowCreate={workspaceOpenCreate}
