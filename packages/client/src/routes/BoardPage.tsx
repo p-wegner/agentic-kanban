@@ -817,6 +817,31 @@ export function BoardPage() {
     }
   }
 
+  async function handleMoveToNext(issue: IssueWithStatus, nextStatusId: string) {
+    try {
+      const targetColumn = columns.find((col) => col.id === nextStatusId);
+      const isArchiveTarget = targetColumn && ARCHIVE_STATUS_NAMES.has(targetColumn.name);
+      if (isArchiveTarget) {
+        const ws = issue.workspaceSummary?.main;
+        if (ws && ws.status !== "closed") {
+          setMoveToDonePending({
+            issue,
+            confirm: async () => {
+              await apiFetch(`/api/issues/${issue.id}`, { method: "PATCH", body: JSON.stringify({ statusId: nextStatusId }) });
+              await refetchBoard();
+              setMoveToDonePending(null);
+            },
+          });
+          return;
+        }
+      }
+      await apiFetch(`/api/issues/${issue.id}`, { method: "PATCH", body: JSON.stringify({ statusId: nextStatusId }) });
+      await refetchBoard();
+    } catch {
+      showToast("Failed to move issue", "error");
+    }
+  }
+
   function handleIssueClick(issue: IssueWithStatus) {
     setSelectedIssue(issue);
   }
@@ -1442,6 +1467,8 @@ export function BoardPage() {
                 handleDragStart(e, issue);
               }}
               onDrop={handleDrop}
+              onMoveToNext={handleMoveToNext}
+              allColumns={columns}
               searchQuery={searchQuery}
               sessionActivity={sessionActivity}
               liveStats={liveStats}
