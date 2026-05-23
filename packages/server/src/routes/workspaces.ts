@@ -154,7 +154,7 @@ export function createWorkspacesRoute(
       const profileOverride = (body.claudeProfile as string | undefined) || undefined;
       if (profileOverride) prefMap.set("claude_profile", profileOverride);
 
-      const { agentCommand: resolvedCommand, agentArgs, claudeProfile: resolvedProfile, permissionPromptTool } = resolveAgentSettings(prefMap);
+      const { agentCommand: resolvedCommand, agentArgs, claudeProfile: resolvedProfile, profile: resolvedProfileSelection, permissionPromptTool } = resolveAgentSettings(prefMap);
       agentCommand = resolvedCommand;
       // Keep the raw profile name (including "mock") on the workspace record for display, but pass
       // undefined to the session when it's the mock profile (resolvedProfile is already sanitized)
@@ -202,7 +202,7 @@ export function createWorkspacesRoute(
       if (getSessionManager) {
         const truncatedPrompt = agentPrompt.length > 80 ? agentPrompt.slice(0, 80) + "..." : agentPrompt;
         console.log(`[workspaces] auto-launch: workspaceId=${id} branch=${branch} isDirect=${isDirect} prompt="${truncatedPrompt}" agentCommand=${agentCommand ?? "default"}`);
-        sessionId = await getSessionManager().startSession(id, agentPrompt, agentCommand, agentArgs, undefined, resolvedProfile, undefined, permissionPromptTool, planMode, undefined, provider, skillName ? `skill:${skillName}` : "agent");
+        sessionId = await getSessionManager().startSession(id, agentPrompt, agentCommand, agentArgs, undefined, resolvedProfile, undefined, permissionPromptTool, planMode, undefined, provider, skillName ? `skill:${skillName}` : "agent", resolvedProfileSelection);
       }
 
       // Broadcast board event

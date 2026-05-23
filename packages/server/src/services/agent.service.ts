@@ -31,12 +31,14 @@ export function launch(
   permissionPromptTool?: string,
   planMode?: boolean,
   provider?: ProviderId,
+  profile?: { provider: "claude" | "codex"; name: string },
 ): ChildProcess {
   const launchConfig = buildAgentLaunchConfig({
     agentArgs,
     providerSessionId,
     agentCommand,
     claudeProfile,
+    profile,
     keepAlive,
     permissionPromptTool,
     planMode,
