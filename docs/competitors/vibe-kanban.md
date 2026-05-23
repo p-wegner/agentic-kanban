@@ -1,8 +1,8 @@
 # Vibe Kanban — Competitor Profile
 
-**Repository**: [github.com/BloopAI/vibe-kanban](https://github.com/BloopAI/vibe-kanban) (being sunset)
+**Repository**: [github.com/BloopAI/vibe-kanban](https://github.com/BloopAI/vibe-kanban) (**sunset — no longer maintained**)
 **License**: Proprietary
-**Last analyzed**: Pre-sunset source at `F:/projects/vibe-kanban`
+**Last analyzed**: 2026-05-23 (GitHub README + source at `F:/projects/vibe-kanban`)
 
 ## What It Is
 
@@ -147,6 +147,18 @@ The original AI-driven kanban board. Agentic Kanban is a cleanroom reimplementat
 Claude Code <-> MCP Server (stdio) <-> REST API <-> Axum Server <-> SQLite
 ```
 
+## Key Features (at sunset)
+
+- **10+ coding agents**: Claude Code, Gemini CLI, Codex, GitHub Copilot, Cursor, Amp, OpenCode, Droid, CCR, Qwen Code
+- **Integrated browser** with DevTools, inspect mode, and device emulation for live preview
+- **Pull request creation** with AI-generated descriptions
+- **GitHub review integration** — review and merge PRs without leaving the app
+- **Remote SSH deployment** via VSCode integration
+- **Docker self-hosting** and `npx vibe-kanban` one-liner install
+- **Inline diff commenting** and feedback loop
+- **Multi-tenant** with orgs, OAuth, billing (irrelevant for personal use)
+- **Relay/WebRTC tunnel** for remote connections
+
 ## Strengths
 
 1. **Rust performance** — compiled, memory-safe backend
@@ -155,6 +167,8 @@ Claude Code <-> MCP Server (stdio) <-> REST API <-> Axum Server <-> SQLite
 4. **ElectricSQL sync** — reactive DB sync for real-time updates
 5. **Full auth system** — SPAKE2 + Ed25519 + JWT
 6. **Cloud deployment** — PostgreSQL + ElectricSQL for remote hosting
+7. **Integrated browser** — live dev preview with DevTools inside the app
+8. **GitHub integration** — AI-generated PR descriptions, PR review, merge
 
 ## Weaknesses (Why We Reimplemented)
 
