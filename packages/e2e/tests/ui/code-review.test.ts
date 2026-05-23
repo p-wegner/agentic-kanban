@@ -20,11 +20,11 @@ test.describe("AI Code Review Flow", () => {
     const todoStatus = statuses.find((s: { name: string }) => s.name === "Todo");
     todoStatusId = todoStatus ? todoStatus.id : statuses[0].id;
 
-    // Enable mock_agent and disable auto_review/auto_merge so workspaces reach "idle"
+    // Enable mock profile and disable auto_review/auto_merge so workspaces reach "idle"
     // after the agent exits. Without this, the workflow goes active→reviewing→closed
     // and tests waiting for "idle" would time out.
     await request.put(`${SERVER_URL}/api/preferences/settings`, {
-      data: { mock_agent: "true", auto_review: "false", auto_merge: "false" },
+      data: { claude_profile: "mock", auto_review: "false", auto_merge: "false" },
     });
   });
 
@@ -36,7 +36,7 @@ test.describe("AI Code Review Flow", () => {
       await request.delete(`${SERVER_URL}/api/issues/${id}`);
     }
     await request.put(`${SERVER_URL}/api/preferences/settings`, {
-      data: { mock_agent: "false", auto_review: "true", auto_merge: "true" },
+      data: { claude_profile: "", auto_review: "true", auto_merge: "true" },
     });
   });
 
