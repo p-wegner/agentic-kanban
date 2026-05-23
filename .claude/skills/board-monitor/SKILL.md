@@ -104,9 +104,32 @@ $branch = "feature/ak-$($issue.issueNumber)-$slug"
 
 ## SECTION 5 — Summary
 
+Write a concise human-readable summary — imagine sending it to Slack. The goal is that someone without board access can immediately understand what's happening.
+
+**Format:**
 ```
-[monitor] {yyyy-MM-ddTHH:mm} — conflicts:{N} serverOk:{Y/N} frontendOk:{Y/N} relaunched:{N} merged:{N} nudged:{N}
+[monitor] {yyyy-MM-ddTHH:mm}
+🟢 Server OK  |  ✅ Merged: N  |  🚀 Started: N  |  🔁 Relaunched: N  |  ⚠️ Conflicts: N
+
+▶ Started:
+  • #N  <one-line title summary, max ~60 chars>
+  • #N  ...
+
+✅ Merged:
+  • #N  <one-line title summary>
+
+🔁 Relaunched / nudged:
+  • #N  <one-line title summary>  (reason: idle / stuck Xmin)
+
+⚠️ Needs attention:
+  • #N  <title>  — <what's wrong, e.g. "merge conflicts in Layout.tsx">
 ```
+
+Rules:
+- Always include ticket numbers AND a short title description (never numbers alone).
+- Omit sections that are empty.
+- Title summaries: strip "E2E: cover", "Add", "Show" boilerplate if it makes it shorter — keep the core noun phrase. E.g. "#253 Estimate badge on issue cards" not "#253 Show estimate badge on kanban issue cards".
+- Keep the whole summary under ~20 lines.
 
 ---
 
