@@ -1,5 +1,7 @@
 # Feature Matrix — All Tools Compared
 
+Last updated: 2026-05-23
+
 Side-by-side comparison of all four AI-driven kanban tools. See individual profiles for details:
 [vibe-kanban](vibe-kanban.md) | [Lanes](lanes.md) | [Cline Kanban](cline-kanban.md) | [Agentic Kanban](../../README.md)
 
@@ -9,8 +11,8 @@ Side-by-side comparison of all four AI-driven kanban tools. See individual profi
 
 | | **Vibe Kanban** | **Lanes** | **Cline Kanban** | **Agentic Kanban** |
 |---|---|---|---|---|
-| **Tagline** | AI kanban (sunset) | "Mission control for AI agents" | AI agent task manager | Kanban for AI-driven coding tasks |
-| **Status** | Sunset | Active, proprietary | Active, open source | Active, personal use |
+| **Tagline** | AI kanban (**sunset**) | "Mission control for AI agents" | AI agent task manager | Kanban for AI-driven coding tasks |
+| **Status** | **Sunset — no longer maintained** | Active, proprietary | Active, open source | Active, personal use |
 | **Platform** | macOS/Linux | macOS only | Cross-platform (Electron) | Cross-platform (Web + Tauri) |
 | **Backend** | Rust (Axum) | Tauri 2 native | Node.js (Express + tRPC) | Node.js (Hono) |
 | **Frontend** | React 18 | React 19 | React + Tailwind v4 + Radix | React + Tailwind |
@@ -29,13 +31,13 @@ Side-by-side comparison of all four AI-driven kanban tools. See individual profi
 | Drag-and-drop | Yes | Yes | Yes | Yes (HTML5 DnD) |
 | Multi-select | No | Yes (Shift/Cmd+Click, bulk ops) | No | No |
 | Right-click menus | No | Yes | No | No |
-| Issue numbers | Yes | Numeric IDs | Yes | Yes (auto-increment per project) |
+| Issue numbers | Yes | Numeric IDs | Yes | Yes (auto-increment per project, copy-to-clipboard reference) |
 | Tags/Labels | Yes | Yes (13 colors) | Yes | Yes (4 seed tags + CRUD, tag management tab in Settings) |
 | Priority levels | Yes | Yes | Yes | Yes (Urgent/High/Medium/Low) |
 | Estimate/sizing | No | No | No | Yes (XS/S/M/L/XL per issue) |
 | Search | Basic | By label, directory, step | Basic | Full-text with highlighting |
 | Filter | By status | By label, dir, step | Basic | By text, priority, status |
-| Task dependencies | No | Yes (cycle detection) | Yes (auto-chain) | No |
+| Task dependencies | No | Yes (cycle detection) | Yes (auto-chain) | Yes (6 types: depends_on, blocked_by, related_to, duplicates, parent_of, child_of) |
 | AI enhancement | No | No | No | Yes (Enhance with AI button) |
 | Board tabs | No | Yes (per project/worktree) | No | No (dropdown switcher) |
 | Project switcher | Yes | Yes | Yes | Yes (dropdown) |
@@ -46,7 +48,7 @@ Side-by-side comparison of all four AI-driven kanban tools. See individual profi
 
 | Feature | Vibe Kanban | Lanes | Cline Kanban | Agentic Kanban |
 |---------|-------------|-------|--------------|----------------|
-| **Agents supported** | 10+ (plugin executors) | Claude Code (+ Codex/Gemini planned) | Cline, Claude Code, Codex, Gemini CLI, Kiro, Factory Droid, OpenCode | Claude Code only |
+| **Agents supported** | 10+ (plugin executors): Claude Code, Gemini CLI, Codex, Copilot, Cursor, Amp, OpenCode, Droid, CCR, Qwen Code | Claude Code (+ Codex/Gemini planned) | Cline, Claude Code, Codex, Gemini CLI, Kiro, Factory Droid, OpenCode | Claude Code only (mock profile for testing) |
 | Session types | Single | Plan mode vs implement mode | Single | Single |
 | Terminal | xterm.js | PTY-backed real terminal | node-pty (real PTY) | WebSocket stream (parsed stdout) |
 | Chat-like interaction | No | Implied (terminal input) | No | Yes (persistent chat input, Send/Stop) |
@@ -58,9 +60,11 @@ Side-by-side comparison of all four AI-driven kanban tools. See individual profi
 | Subagent visibility | No | No | No | Yes (ID tracking, visual indentation) |
 | Plan mode | No | Yes (separate session type) | No | Yes (--permission-mode plan flag) |
 | Auto-commit/PR | No | No | Yes (commit or PR on completion) | No |
-| Auto-review | No | No | Yes | Yes (on agent exit, configurable) |
+| Auto-review | No | No | Yes | Yes (on agent exit, configurable; auto-fix option) |
 | Agent skills | No | Plugin marketplace | No | Yes (4 built-in + custom SKILL.md, install to project from Settings UI) |
-| Mock agent (testing) | No | No | No | Yes (toggle in settings) |
+| Mock agent (testing) | No | No | No | Yes (built-in mock Claude profile in settings) |
+| Scheduled runs | No | No | No | Yes (cron-based recurring agent runs) |
+| Ready-for-merge badge | No | No | No | Yes (visual badge on workspace when no conflicts) |
 
 ---
 
@@ -126,6 +130,9 @@ Side-by-side comparison of all four AI-driven kanban tools. See individual profi
 | Auto-updates | No | Yes | No | No |
 | Protocol handlers | No | No | Yes (deep linking) | No |
 | File browser/editor | No | Yes (Monaco) | No | No |
+| Integrated browser | Yes (DevTools, inspect mode, device emulation) | No | No | No |
+| GitHub PR creation | Yes (AI-generated descriptions) | No | No | No |
+| GitHub PR review | Yes (review + merge in-app) | No | No | No |
 | Process manager | No | Yes (CLI discovery, kill) | No | No |
 | Script shortcuts | No | No | Yes (per-project commands) | No |
 | CLI | No | No | No | Yes (register, create, issue, workspace, skill, status, preferences set/get) |
@@ -139,10 +146,10 @@ Side-by-side comparison of all four AI-driven kanban tools. See individual profi
 
 | Feature | Vibe Kanban | Lanes | Cline Kanban | Agentic Kanban |
 |---------|-------------|-------|--------------|----------------|
-| E2E test suite | Unknown | Not visible (proprietary) | Not visible | Yes (135 Playwright tests) |
+| E2E test suite | Unknown | Not visible (proprietary) | Not visible | Yes (101+ Playwright tests, growing) |
 | Unit tests | Unknown | Unknown | Unknown | Yes (Vitest) |
 | Mock agent | No | No | No | Yes (standalone script, toggle) |
-| DB migrations | Yes (SQLx) | Unknown | No (JSON storage) | Yes (Drizzle + journal, 28 migrations) |
+| DB migrations | Yes (SQLx) | Unknown | No (JSON storage) | Yes (Drizzle + journal, 20+ migrations) |
 | Worktree port strategy | No | No | No | Yes (deterministic per branch) |
 
 ---
@@ -157,6 +164,7 @@ Side-by-side comparison of all four AI-driven kanban tools. See individual profi
 | Slide-in panels | Yes | Yes | Yes | Yes (animated) |
 | Dark/light theme | Yes | Dark only | Dark only | Single theme |
 | Expandable create form | Yes | Yes | Yes | Yes (inline + full-screen panel) |
+| Hover quick-start on cards | No | No | No | Yes (action row on card hover: start workspace, move) |
 | Full-width issue detail | No | No | No | Yes (expand button on detail panel) |
 | All workspaces overview | No | No | No | Yes (aggregate panel across all issues) |
 | Settings panel | Yes | Yes | Yes | Yes (tabbed: Agent, Merge, Profile, Project, Tags) |
@@ -176,4 +184,4 @@ Side-by-side comparison of all four AI-driven kanban tools. See individual profi
 | Testing | Unknown | None visible | None visible | High (135+ E2E tests, mock agent) |
 | DX / CLI | Low | Low (brew only) | Low | High (full CLI, port strategy) |
 | MCP surface | 18 tools | 27 tools | Dynamic | 27 tools |
-| Autonomy | Low | Low | High (dependency chains, auto-commit) | Medium (auto-review, auto-merge setting) |
+| Autonomy | Low | Low | High (dependency chains, auto-commit) | Medium (auto-review, auto-merge, scheduled runs) |

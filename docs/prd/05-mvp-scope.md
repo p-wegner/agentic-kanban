@@ -20,6 +20,9 @@ A local web application where you can:
 | Drag-and-drop on board | DONE | HTML5 DnD between columns |
 | Workspace creation | DONE | Git worktree + branch, one-step create + auto-launch |
 | Workspace deletion | DONE | Delete with confirmation, cascade removes sessions/messages |
+| Ready for Merge badge | DONE | Mark workspace ready; green badge in workspace + all-workspaces panels |
+| Copy issue reference | DONE | Clipboard button in detail panel copies #N Title string |
+| IssueCard hover actions | DONE | Compact action row on hover: Resume, Start Workspace, Move to next status |
 | Direct workspaces | DONE | Work on main checkout without worktree |
 | Claude Code execution | DONE | Subprocess CLI with stream-json parsing |
 | Diff viewer | DONE | Unified + split view with inline comments |
@@ -158,7 +161,7 @@ Every stage ships with E2E tests. The test framework supports:
 
 ### Test Counts (Current)
 - **76 unit tests** (Vitest) — tags, preferences, issue numbers, API routes, git service
-- **101 E2E tests** (Playwright) — API endpoints, UI interactions, MCP tools, board events
+- **~120 E2E tests** (Playwright) — API endpoints, UI interactions, MCP tools, board events, ready-for-merge, copy-issue-reference, all-workspaces, scheduled-runs
 
 ### Test Categories
 | Category | Tool | Scope |
