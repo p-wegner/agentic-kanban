@@ -45,6 +45,8 @@ export interface ProviderLaunchOptions {
 export interface ParsedStreamEvent {
   /** Set when the provider emits its internal session/resume ID. */
   providerSessionId?: string;
+  /** Set when ExitPlanMode was denied in the result event (non-interactive mode). */
+  exitPlanModeDenied?: boolean;
   /** Set on result/final events with aggregate usage. */
   stats?: {
     durationMs: number;
@@ -211,6 +213,12 @@ export class ClaudeProvider implements AgentProvider {
         agentSummary,
       };
       result.turnComplete = true;
+
+      // Detect ExitPlanMode denial (non-interactive mode auto-denies plan exit confirmation)
+      const denials = obj.permission_denials as Array<Record<string, unknown>> | undefined;
+      if (denials?.some((d) => d.tool_name === "ExitPlanMode")) {
+        result.exitPlanModeDenied = true;
+      }
     }
 
     // Assistant event: model + context tokens
@@ -313,6 +321,7 @@ export class ClaudeProvider implements AgentProvider {
     // Return undefined if nothing was extracted
     if (
       result.providerSessionId === undefined &&
+      result.exitPlanModeDenied === undefined &&
       result.stats === undefined &&
       result.turnComplete === undefined &&
       result.liveStats === undefined &&
