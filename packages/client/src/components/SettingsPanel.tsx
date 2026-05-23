@@ -282,6 +282,7 @@ type ScheduledRun = {
   prompt: string | null; skillId: string | null; intervalMinutes: number;
   cronExpression: string | null;
   enabled: boolean; lastRunAt: string | null; lastRunStatus: string | null;
+  lastRunWorkspaceId: string | null;
 };
 
 function validateCronExpression(expr: string): { valid: boolean; error?: string } {
@@ -1469,10 +1470,32 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                               {run.prompt && (
                                 <p className="text-xs text-gray-500 pl-5 truncate">{run.prompt}</p>
                               )}
-                              {run.lastRunAt && (
-                                <p className="text-xs text-gray-400 pl-5">
-                                  Last run: {new Date(run.lastRunAt).toLocaleString()} — {run.lastRunStatus ?? "unknown"}
-                                </p>
+                              {run.lastRunAt ? (() => {
+                                const status = run.lastRunStatus ?? "unknown";
+                                const isRunning = status === "running";
+                                const isError = status === "error" || status === "failed";
+                                const isSuccess = status === "success" || status === "completed";
+                                const icon = isRunning ? "●" : isSuccess ? "✓" : "✗";
+                                const colorClass = isRunning ? "text-blue-500" : isSuccess ? "text-green-600" : "text-red-600";
+                                const timeStr = new Date(run.lastRunAt).toLocaleString();
+                                const content = (
+                                  <span className={`font-medium ${colorClass}`}>{icon} {status}</span>
+                                );
+                                return (
+                                  <p className="text-xs text-gray-400 pl-5" title={timeStr}>
+                                    Last run: {timeStr} — {run.lastRunWorkspaceId ? (
+                                      <button
+                                        className={`underline font-medium ${colorClass} hover:opacity-75`}
+                                        onClick={() => {
+                                          // Navigate to workspace output — emit a custom event the parent can handle
+                                          window.dispatchEvent(new CustomEvent("open-workspace", { detail: { workspaceId: run.lastRunWorkspaceId } }));
+                                        }}
+                                      >{icon} {status}</button>
+                                    ) : content}
+                                  </p>
+                                );
+                              })() : (
+                                <p className="text-xs text-gray-400 pl-5">Never run</p>
                               )}
                               {(() => {
                                 const nextMs = run.lastRunAt
