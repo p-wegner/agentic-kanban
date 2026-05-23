@@ -88,6 +88,13 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
   const [depDragOver, setDepDragOver] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
 
+  // Determine which action buttons to show in the action row
+  const showActionRow = issue.statusName !== "Done" && issue.statusName !== "Cancelled";
+  const showResume = showActionRow && hasActiveWorkspace && !!onWorkspaceClick;
+  const showStartWorkspace = showActionRow && !hasActiveWorkspace && !!onStartWorkspace;
+  const showMoveToNext = showActionRow && !!onMoveToNext && !!nextStatusName;
+  const hasAnyAction = showResume || showStartWorkspace || showMoveToNext;
+
   function handleDragOver(e: React.DragEvent) {
     const dragData = (window as unknown as Record<string, unknown>).__dragData as { issueId?: string; sourceStatusId?: string } | undefined;
     if (dragData?.issueId && dragData.issueId !== issue.id && e.shiftKey) {
@@ -125,19 +132,6 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
       onClick={() => onClick(issue)}
       className={`group bg-white rounded-md shadow-sm p-2 border cursor-pointer hover:shadow-md transition-shadow relative ${depDragOver ? "border-purple-400 bg-purple-50 shadow-purple-200" : isPendingWorkspace ? "border-blue-300 shadow-blue-100 shadow-md" : "border-gray-200 hover:border-gray-300"}`}
     >
-      {onMoveToNext && nextStatusName && !isDragging && (
-        <div className="absolute inset-0 rounded-md bg-white/80 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center z-10 pointer-events-none group-hover:pointer-events-auto">
-          <button
-            onClick={(e) => { e.stopPropagation(); onMoveToNext(issue); }}
-            className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-md bg-blue-600 text-white hover:bg-blue-700 shadow-sm transition-colors"
-          >
-            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" />
-            </svg>
-            Move to {nextStatusName}
-          </button>
-        </div>
-      )}
       <div className="flex items-start justify-between gap-2">
         <p className="text-sm text-gray-900">
           {issue.issueNumber != null && (
@@ -291,33 +285,47 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
         </div>
       )}
       {todos && todos.length > 0 && <TodoProgress todos={todos} />}
-      {issue.statusName !== "Done" && issue.statusName !== "Cancelled" && (
-        <>
-          {hasActiveWorkspace && onWorkspaceClick && (
+
+      {/* Action row: appears on hover, contains all card-level actions in one place */}
+      {hasAnyAction && !isDragging && (
+        <div className="mt-1.5 flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
+          {showResume && (
             <button
-              onClick={(e) => { e.stopPropagation(); onWorkspaceClick(issue, ws?.main?.id); }}
-              className="relative z-20 mt-1.5 w-full flex items-center justify-center gap-1 text-xs text-green-700 hover:text-white hover:bg-green-600 border border-green-200 hover:border-green-600 rounded px-2 py-1 transition-colors opacity-0 group-hover:opacity-100"
+              onClick={(e) => { e.stopPropagation(); onWorkspaceClick!(issue, ws?.main?.id); }}
+              className="flex-1 flex items-center justify-center gap-1 text-xs text-green-700 hover:text-white hover:bg-green-600 border border-green-200 hover:border-green-600 rounded px-2 py-1 transition-colors"
               title="Resume the active workspace"
             >
-              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <svg className="w-3 h-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 0 1 0 1.972l-11.54 6.347a1.125 1.125 0 0 1-1.667-.986V5.653Z" />
               </svg>
               Resume
             </button>
           )}
-          {!hasActiveWorkspace && onStartWorkspace && (
+          {showStartWorkspace && (
             <button
-              onClick={(e) => { e.stopPropagation(); onStartWorkspace(issue); }}
-              className="relative z-20 mt-1.5 w-full flex items-center justify-center gap-1 text-xs text-blue-600 hover:text-white hover:bg-blue-600 border border-blue-200 hover:border-blue-600 rounded px-2 py-1 transition-colors opacity-0 group-hover:opacity-100"
+              onClick={(e) => { e.stopPropagation(); onStartWorkspace!(issue); }}
+              className="flex-1 flex items-center justify-center gap-1 text-xs text-blue-600 hover:text-white hover:bg-blue-600 border border-blue-200 hover:border-blue-600 rounded px-2 py-1 transition-colors"
               title="Start a new workspace for this issue"
             >
-              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <svg className="w-3 h-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
               </svg>
               Start Workspace
             </button>
           )}
-        </>
+          {showMoveToNext && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onMoveToNext!(issue); }}
+              className="flex items-center gap-1 text-xs text-gray-500 hover:text-white hover:bg-blue-600 border border-gray-200 hover:border-blue-600 rounded px-2 py-1 transition-colors"
+              title={`Move to ${nextStatusName}`}
+            >
+              <svg className="w-3 h-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" />
+              </svg>
+              {nextStatusName}
+            </button>
+          )}
+        </div>
       )}
     </div>
   );
