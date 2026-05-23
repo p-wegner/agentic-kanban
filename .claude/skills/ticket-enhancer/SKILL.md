@@ -19,3 +19,4 @@ Format the description with clear sections:
 - Why it matters (context)
 - Acceptance criteria (if inferable)
 - Relevant files or areas (if inferable from the title/context)
+- Open Questions (unresolved decisions, assumptions, or clarifications needed before work begins — use `- [ ]` checkboxes)
