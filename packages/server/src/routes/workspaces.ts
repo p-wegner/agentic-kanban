@@ -202,7 +202,7 @@ export function createWorkspacesRoute(
       if (getSessionManager) {
         const truncatedPrompt = agentPrompt.length > 80 ? agentPrompt.slice(0, 80) + "..." : agentPrompt;
         console.log(`[workspaces] auto-launch: workspaceId=${id} branch=${branch} isDirect=${isDirect} prompt="${truncatedPrompt}" agentCommand=${agentCommand ?? "default"}`);
-        sessionId = await getSessionManager().startSession(id, agentPrompt, agentCommand, agentArgs, undefined, resolvedProfile, undefined, permissionPromptTool, planMode, undefined, provider, skillName ? `skill:${skillName}` : "agent");
+        sessionId = await getSessionManager().startSession({ workspaceId: id, prompt: agentPrompt, agentCommand, agentArgs, claudeProfile: resolvedProfile, permissionPromptTool, planMode, provider, triggerType: skillName ? `skill:${skillName}` : "agent" });
       }
 
       // Broadcast board event
