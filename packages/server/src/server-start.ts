@@ -535,6 +535,7 @@ export async function startServer(port?: number) {
         { encoding: "utf8", stdio: ["pipe", "pipe", "pipe"], windowsHide: true, timeout: 8000 },
       );
       const myPid = process.pid;
+      const myPpid = process.ppid; // tsx watch parent — must not be killed
       const lines = wmic.split(/\r?\n/);
       const procs: { pid: number; cmd: string }[] = [];
       let curCmd = "";
@@ -547,7 +548,7 @@ export async function startServer(port?: number) {
       }
       let killed = 0;
       for (const p of procs) {
-        if (p.pid === myPid) continue;
+        if (p.pid === myPid || p.pid === myPpid) continue;
         const cmd = p.cmd.replace(/\\/g, "/");
         // Match tsx-based server processes (hot-reload survivors) for the main server entry point.
         // Avoid killing worktree-specific servers by requiring the cmd NOT to contain a worktree path marker.
