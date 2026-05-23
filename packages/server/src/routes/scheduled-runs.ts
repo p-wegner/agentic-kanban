@@ -4,6 +4,7 @@ import { scheduledRuns, issues, projectStatuses, agentSkills } from "@agentic-ka
 import { eq, and, max } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import type { Database } from "../db/index.js";
+import { validateCronExpression } from "@agentic-kanban/shared/lib/cron-utils.js";
 
 export function createScheduledRunsRoute(database: Database = db, serverPort?: number) {
   const router = new Hono();
@@ -26,6 +27,13 @@ export function createScheduledRunsRoute(database: Database = db, serverPort?: n
     const body = await c.req.json();
     if (!body.name || !body.projectId) {
       return c.json({ error: "name and projectId are required" }, 400);
+    }
+
+    if (body.cronExpression) {
+      const validation = validateCronExpression(body.cronExpression);
+      if (!validation.valid) {
+        return c.json({ error: `Invalid cron expression: ${validation.error}` }, 400);
+      }
     }
 
     const now = new Date().toISOString();
@@ -74,6 +82,7 @@ export function createScheduledRunsRoute(database: Database = db, serverPort?: n
       prompt: body.prompt ?? null,
       skillId: body.skillId ?? null,
       intervalMinutes: body.intervalMinutes ?? 60,
+      cronExpression: body.cronExpression ?? null,
       enabled: body.enabled !== false,
       systemIssueId,
       createdAt: now,
@@ -102,12 +111,20 @@ export function createScheduledRunsRoute(database: Database = db, serverPort?: n
 
     if (existing.length === 0) return c.json({ error: "Not found" }, 404);
 
+    if (body.cronExpression) {
+      const validation = validateCronExpression(body.cronExpression);
+      if (!validation.valid) {
+        return c.json({ error: `Invalid cron expression: ${validation.error}` }, 400);
+      }
+    }
+
     await database.update(scheduledRuns).set({
       ...(body.name !== undefined && { name: body.name }),
       ...(body.description !== undefined && { description: body.description }),
       ...(body.prompt !== undefined && { prompt: body.prompt }),
       ...(body.skillId !== undefined && { skillId: body.skillId }),
       ...(body.intervalMinutes !== undefined && { intervalMinutes: body.intervalMinutes }),
+      ...(body.cronExpression !== undefined && { cronExpression: body.cronExpression || null }),
       ...(body.enabled !== undefined && { enabled: body.enabled }),
       updatedAt: now,
     }).where(eq(scheduledRuns.id, id));

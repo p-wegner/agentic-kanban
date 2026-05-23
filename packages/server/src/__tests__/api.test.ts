@@ -83,7 +83,11 @@ const MIGRATION_FILES = [
 >>>>>>> 1ea0691 (feat: prevent server hot-reload from killing agent processes (#222))
 =======
   "../../../shared/drizzle/0035_session_trigger.sql",
+<<<<<<< HEAD
 >>>>>>> 437c42a (feat: add triggerType to sessions — show AI Review, Chat, Fix Conflicts badges in session history)
+=======
+  "../../../shared/drizzle/0036_scheduled_runs_cron.sql",
+>>>>>>> 2ac8047 (feat: add cron expression support to scheduled runs)
 ];
 
 function createTestApp() {
