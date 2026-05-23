@@ -30,13 +30,13 @@ export default defineConfig({
   webServer: [
     {
       command: "pnpm --filter agentic-kanban dev",
-      port: serverPort,
+      url: `http://127.0.0.1:${serverPort}/health`,
       reuseExistingServer: true,
       cwd: "../..",
     },
     {
       command: "pnpm --filter @agentic-kanban/client dev",
-      port: clientPort,
+      url: `http://127.0.0.1:${clientPort}`,
       reuseExistingServer: true,
       cwd: "../..",
     },
