@@ -173,47 +173,7 @@ export function BoardColumn({
     <div style={{ display: "contents" }}>
     <div
       id={`column-${column.id}`}
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-      className={`w-[calc(100vw-2rem)] sm:w-72 shrink-0 bg-gray-100 rounded-xl p-2 flex flex-col transition-all relative ${
-=======
-      className={`w-[88vw] sm:w-64 lg:w-72 shrink-0 bg-gray-100 rounded-xl p-2 flex flex-col transition-all relative ${
->>>>>>> 65f7a08 (feat: make kanban board truly responsive for mobile)
-=======
-      className={`w-72 shrink-0 bg-gray-100 rounded-xl p-2 flex flex-col transition-all relative ${
->>>>>>> 5d43535 (revert: remove table view and revert mobile-responsive board styling)
-=======
-      className={`w-[calc(100vw-2rem)] sm:w-72 shrink-0 bg-gray-100 rounded-xl p-2 flex flex-col transition-all relative ${
->>>>>>> 2713ec4 (feat: make kanban board truly responsive)
-=======
-      className={`w-[88vw] sm:w-64 lg:w-72 shrink-0 bg-gray-100 rounded-xl p-2 flex flex-col transition-all relative ${
->>>>>>> e0c9cf4 (feat: make kanban board truly responsive for mobile)
-=======
-      className={`w-72 shrink-0 bg-gray-100 rounded-xl p-2 flex flex-col transition-all relative ${
->>>>>>> 8f2f90d (revert: remove table view and revert mobile-responsive board styling)
-=======
-      className={`w-[calc(100vw-2rem)] sm:w-72 shrink-0 bg-gray-100 rounded-xl p-2 flex flex-col transition-all relative ${
->>>>>>> c6d8504 (feat: make kanban board truly responsive)
-=======
-      className={`w-[88vw] sm:w-64 lg:w-72 shrink-0 bg-gray-100 rounded-xl p-2 flex flex-col transition-all relative ${
->>>>>>> f0547d3 (feat: make kanban board truly responsive for mobile)
-=======
-      className={`w-72 shrink-0 bg-gray-100 rounded-xl p-2 flex flex-col transition-all relative ${
->>>>>>> f2da112 (revert: remove table view and revert mobile-responsive board styling)
-=======
-      className={`w-[calc(100vw-2rem)] sm:w-72 shrink-0 bg-gray-100 rounded-xl p-2 flex flex-col transition-all relative ${
->>>>>>> 210a4d4 (feat: make kanban board truly responsive)
-=======
       className={`${width != null ? "" : "w-[calc(100vw-2rem)] sm:w-72 shrink-0"} bg-gray-100 rounded-xl p-2 flex flex-col transition-all relative ${
->>>>>>> 39947f0 (feat: resizable board columns with drag handles and localStorage persistence)
         dragOver ? "ring-2 ring-blue-400 ring-offset-1" : ""
       }`}
       style={columnStyle}

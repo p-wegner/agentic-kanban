@@ -41,10 +41,7 @@ export function CreateIssuePanel({
   const [isDirect, setIsDirect] = useState(false);
   const [skillId, setSkillId] = useState<string>(initialState?.skillId ?? "");
   const [skills, setSkills] = useState<Skill[]>([]);
-<<<<<<< HEAD
-=======
   const [descriptionMode, setDescriptionMode] = useState<"edit" | "preview">("edit");
->>>>>>> d93731e (feat: markdown rendering for ticket descriptions with edit/preview toggle)
   const [submitting, setSubmitting] = useState(false);
   const [enhancing, setEnhancing] = useState(false);
   const [preEnhanceSnapshot, setPreEnhanceSnapshot] = useState<{ title: string; description: string } | null>(null);
