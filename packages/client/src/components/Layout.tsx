@@ -3,6 +3,7 @@
 interface Project {
   id: string;
   name: string;
+  color?: string | null;
 }
 
 interface RegisterOptions {
@@ -126,20 +127,44 @@ export function Layout({
               Agentic Kanban
             </h1>
             {projects.length > 1 && (
-              <select
-                value={activeProjectId ?? ""}
-                onChange={(e) => onProjectChange?.(e.target.value)}
-                className="text-sm border border-gray-300 rounded-md px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500"
-              >
-                {projects.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                  </option>
-                ))}
-              </select>
+              <div className="flex items-center gap-2">
+                <select
+                  value={activeProjectId ?? ""}
+                  onChange={(e) => onProjectChange?.(e.target.value)}
+                  className="text-sm border border-gray-300 rounded-md px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                >
+                  {projects.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
+                  ))}
+                </select>
+                {(() => {
+                  const active = projects.find((p) => p.id === activeProjectId);
+                  if (active?.color) {
+                    return (
+                      <div
+                        className="w-3 h-3 rounded-full border border-gray-300"
+                        style={{ backgroundColor: active.color }}
+                        title={`Color: ${active.color}`}
+                      />
+                    );
+                  }
+                  return null;
+                })()}
+              </div>
             )}
             {projects.length === 1 && (
-              <span className="text-sm text-gray-500">{projects[0].name}</span>
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-gray-500">{projects[0].name}</span>
+                {projects[0].color && (
+                  <div
+                    className="w-3 h-3 rounded-full border border-gray-300"
+                    style={{ backgroundColor: projects[0].color }}
+                    title={`Color: ${projects[0].color}`}
+                  />
+                )}
+              </div>
             )}
             {projects.length > 0 && onUnregisterProject && (
               <button
