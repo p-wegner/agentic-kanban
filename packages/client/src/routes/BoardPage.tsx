@@ -1109,16 +1109,17 @@ export function BoardPage() {
       },
     }));
 
-    unregisters.push(registerAction({
-      id: "switch-project",
-      label: "Switch Project",
-      description: "Change the active project",
-      icon: "⇄",
-      category: "navigation",
-      handler: () => {
-        document.querySelector<HTMLButtonElement>("[data-project-switcher]")?.click();
-      },
-    }));
+    for (const project of projects) {
+      const isActive = project.id === activeProjectId;
+      unregisters.push(registerAction({
+        id: `switch-project-${project.id}`,
+        label: `Switch to: ${project.name}`,
+        description: isActive ? "Active project" : "Switch to this project",
+        icon: isActive ? "✓" : "⇄",
+        category: "navigation",
+        handler: () => handleProjectChange(project.id),
+      }));
+    }
 
     unregisters.push(registerAction({
       id: "open-settings",
@@ -1265,7 +1266,7 @@ export function BoardPage() {
     }
 
     return () => unregisters.forEach((fn) => fn());
-  }, [columns, filteredColumns]);
+  }, [columns, filteredColumns, projects, activeProjectId, handleProjectChange]);
 
   if (loading) {
     return (
