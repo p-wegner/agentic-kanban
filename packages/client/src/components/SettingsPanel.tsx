@@ -435,8 +435,56 @@ function ToolToggle({ name, description, disabled, onToggle }: {
 type ScheduledRun = {
   id: string; name: string; description: string | null; projectId: string;
   prompt: string | null; skillId: string | null; intervalMinutes: number;
+  cronExpression: string | null;
   enabled: boolean; lastRunAt: string | null; lastRunStatus: string | null;
 };
+
+function validateCronExpression(expr: string): { valid: boolean; error?: string } {
+  const parts = expr.trim().split(/\s+/);
+  if (parts.length !== 5) {
+    return { valid: false, error: "Must have exactly 5 fields: minute hour day month weekday" };
+  }
+  const ranges = [{ name: "minute", min: 0, max: 59 }, { name: "hour", min: 0, max: 23 }, { name: "day", min: 1, max: 31 }, { name: "month", min: 1, max: 12 }, { name: "weekday", min: 0, max: 6 }];
+  for (let i = 0; i < 5; i++) {
+    const field = parts[i];
+    try {
+      const vals: number[] = [];
+      for (const part of field.split(",")) {
+        if (part === "*") { for (let v = ranges[i].min; v <= ranges[i].max; v++) vals.push(v); }
+        else if (part.startsWith("*/")) { const s = parseInt(part.slice(2), 10); for (let v = ranges[i].min; v <= ranges[i].max; v += s) vals.push(v); }
+        else if (part.includes("-")) { const [lo, hi] = part.split("-").map(Number); for (let v = lo; v <= hi; v++) vals.push(v); }
+        else { vals.push(parseInt(part, 10)); }
+      }
+      const bad = vals.filter(v => isNaN(v) || v < ranges[i].min || v > ranges[i].max);
+      if (bad.length) return { valid: false, error: `${ranges[i].name} value ${bad[0]} out of range` };
+    } catch {
+      return { valid: false, error: `Invalid ${ranges[i].name} field: ${field}` };
+    }
+  }
+  return { valid: true };
+}
+
+function describeCronExpression(expr: string): string {
+  const parts = expr.trim().split(/\s+/);
+  if (parts.length !== 5) return expr;
+  const [mF, hF, domF, monF, dowF] = parts;
+  const pad = (n: string) => n.padStart(2, "0");
+  const DOW = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+  if (mF === "*" && hF === "*" && domF === "*" && monF === "*" && dowF === "*") return "Every minute";
+  if (mF.startsWith("*/") && hF === "*" && domF === "*" && monF === "*" && dowF === "*") return `Every ${mF.slice(2)} minutes`;
+  if (hF === "*" && domF === "*" && monF === "*" && dowF === "*") return `Every hour at minute ${mF}`;
+  const simpleTime = /^\d+$/.test(mF) && /^\d+$/.test(hF);
+  const timeStr = simpleTime ? `${pad(hF)}:${pad(mF)}` : null;
+  if (domF === "*" && monF === "*" && simpleTime) {
+    if (dowF === "*") return `Daily at ${timeStr}`;
+    if (dowF === "1-5") return `Weekdays at ${timeStr}`;
+    if (dowF === "6,0" || dowF === "0,6") return `Weekends at ${timeStr}`;
+    if (/^\d$/.test(dowF)) return `Every ${DOW[parseInt(dowF)]} at ${timeStr}`;
+    if (/^\d(,\d)+$/.test(dowF)) return `${dowF.split(",").map(d => DOW[parseInt(d)]).join(", ")} at ${timeStr}`;
+  }
+  if (domF !== "*" && monF === "*" && dowF === "*" && simpleTime && /^\d+$/.test(domF)) return `Monthly on day ${domF} at ${timeStr}`;
+  return expr;
+}
 
 export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) {
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
@@ -583,12 +631,16 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
   const [newRunName, setNewRunName] = useState("");
   const [newRunPrompt, setNewRunPrompt] = useState("");
   const [newRunInterval, setNewRunInterval] = useState(60);
+  const [newRunCron, setNewRunCron] = useState("");
+  const [newRunMode, setNewRunMode] = useState<"interval" | "cron">("interval");
   const [savingRun, setSavingRun] = useState(false);
   const [triggeringRun, setTriggeringRun] = useState<string | null>(null);
   const [editingRun, setEditingRun] = useState<string | null>(null);
   const [editRunName, setEditRunName] = useState("");
   const [editRunPrompt, setEditRunPrompt] = useState("");
   const [editRunInterval, setEditRunInterval] = useState(60);
+  const [editRunCron, setEditRunCron] = useState("");
+  const [editRunMode, setEditRunMode] = useState<"interval" | "cron">("interval");
   const [savingEditRun, setSavingEditRun] = useState(false);
   const [monitorRunning, setMonitorRunning] = useState(false);
   const [monitorStatus, setMonitorStatus] = useState<{
@@ -1691,44 +1743,83 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                                 rows={3}
                                 className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 font-mono"
                               />
-                              <div className="flex items-center gap-2">
-                                <label className="text-xs text-gray-600 whitespace-nowrap">Interval (minutes):</label>
-                                <input
-                                  type="number"
-                                  min={1}
-                                  value={editRunInterval}
-                                  onChange={(e) => setEditRunInterval(Number(e.target.value))}
-                                  className="w-24 text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                                />
-                                <button
-                                  disabled={!editRunName.trim() || savingEditRun}
-                                  onClick={async () => {
-                                    if (!editRunName.trim()) return;
-                                    setSavingEditRun(true);
-                                    try {
-                                      await apiFetch(`/api/scheduled-runs/${run.id}`, {
-                                        method: "PUT",
-                                        body: JSON.stringify({ name: editRunName.trim(), prompt: editRunPrompt.trim(), intervalMinutes: editRunInterval }),
-                                      });
-                                      setScheduledRunsList((r) => r.map((x) => x.id === run.id ? { ...x, name: editRunName.trim(), prompt: editRunPrompt.trim(), intervalMinutes: editRunInterval } : x));
-                                      setEditingRun(null);
-                                      showToast("Scheduled run updated", "success");
-                                    } catch {
-                                      showToast("Failed to update", "error");
-                                    } finally {
-                                      setSavingEditRun(false);
-                                    }
-                                  }}
-                                  className="text-xs px-3 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
-                                >
-                                  {savingEditRun ? "Saving…" : "Save"}
-                                </button>
-                                <button
-                                  onClick={() => setEditingRun(null)}
-                                  className="text-xs px-2 py-1 text-gray-600 hover:bg-gray-100 rounded"
-                                >
-                                  Cancel
-                                </button>
+                              <div className="space-y-2">
+                                <div className="flex items-center gap-2">
+                                  <label className="text-xs text-gray-600">Schedule:</label>
+                                  <select
+                                    value={editRunMode}
+                                    onChange={(e) => setEditRunMode(e.target.value as "interval" | "cron")}
+                                    className="text-xs border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                  >
+                                    <option value="interval">Interval (minutes)</option>
+                                    <option value="cron">Cron expression</option>
+                                  </select>
+                                </div>
+                                {editRunMode === "interval" ? (
+                                  <div className="flex items-center gap-2">
+                                    <label className="text-xs text-gray-600 whitespace-nowrap">Every</label>
+                                    <input
+                                      type="number"
+                                      min={1}
+                                      value={editRunInterval}
+                                      onChange={(e) => setEditRunInterval(Number(e.target.value))}
+                                      className="w-20 text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                    />
+                                    <span className="text-xs text-gray-600">minutes</span>
+                                  </div>
+                                ) : (
+                                  <div className="space-y-1">
+                                    <input
+                                      type="text"
+                                      value={editRunCron}
+                                      onChange={(e) => setEditRunCron(e.target.value)}
+                                      placeholder="e.g. 0 9 * * 1-5"
+                                      className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 font-mono"
+                                    />
+                                    {editRunCron.trim() && (() => {
+                                      const v = validateCronExpression(editRunCron);
+                                      return v.valid
+                                        ? <p className="text-xs text-green-600">{describeCronExpression(editRunCron)}</p>
+                                        : <p className="text-xs text-red-500">{v.error}</p>;
+                                    })()}
+                                  </div>
+                                )}
+                                <div className="flex items-center gap-2">
+                                  <button
+                                    disabled={!editRunName.trim() || savingEditRun || (editRunMode === "cron" && (!editRunCron.trim() || !validateCronExpression(editRunCron).valid))}
+                                    onClick={async () => {
+                                      if (!editRunName.trim()) return;
+                                      setSavingEditRun(true);
+                                      try {
+                                        const payload: Record<string, unknown> = { name: editRunName.trim(), prompt: editRunPrompt.trim() };
+                                        if (editRunMode === "cron") {
+                                          payload.cronExpression = editRunCron.trim();
+                                          payload.intervalMinutes = 60;
+                                        } else {
+                                          payload.intervalMinutes = editRunInterval;
+                                          payload.cronExpression = "";
+                                        }
+                                        await apiFetch(`/api/scheduled-runs/${run.id}`, { method: "PUT", body: JSON.stringify(payload) });
+                                        setScheduledRunsList((r) => r.map((x) => x.id === run.id ? { ...x, name: editRunName.trim(), prompt: editRunPrompt.trim(), intervalMinutes: editRunMode === "interval" ? editRunInterval : x.intervalMinutes, cronExpression: editRunMode === "cron" ? editRunCron.trim() : null } : x));
+                                        setEditingRun(null);
+                                        showToast("Scheduled run updated", "success");
+                                      } catch {
+                                        showToast("Failed to update", "error");
+                                      } finally {
+                                        setSavingEditRun(false);
+                                      }
+                                    }}
+                                    className="text-xs px-3 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
+                                  >
+                                    {savingEditRun ? "Saving…" : "Save"}
+                                  </button>
+                                  <button
+                                    onClick={() => setEditingRun(null)}
+                                    className="text-xs px-2 py-1 text-gray-600 hover:bg-gray-100 rounded"
+                                  >
+                                    Cancel
+                                  </button>
+                                </div>
                               </div>
                             </div>
                           ) : (
@@ -1752,9 +1843,9 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                                   className="rounded border-gray-300"
                                 />
                                 <span className="flex-1 text-sm font-medium text-gray-800">{run.name}</span>
-                                <span className="text-xs text-gray-400">every {run.intervalMinutes}m</span>
+                                <span className="text-xs text-gray-400">{run.cronExpression ? describeCronExpression(run.cronExpression) : `every ${run.intervalMinutes}m`}</span>
                                 <button
-                                  onClick={() => { setEditingRun(run.id); setEditRunName(run.name); setEditRunPrompt(run.prompt ?? ""); setEditRunInterval(run.intervalMinutes); }}
+                                  onClick={() => { setEditingRun(run.id); setEditRunName(run.name); setEditRunPrompt(run.prompt ?? ""); setEditRunInterval(run.intervalMinutes); setEditRunCron(run.cronExpression ?? ""); setEditRunMode(run.cronExpression ? "cron" : "interval"); }}
                                   className="text-xs text-gray-400 hover:text-blue-600"
                                 >
                                   Edit
@@ -1843,29 +1934,70 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                       rows={3}
                       className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 font-mono"
                     />
-                    <div className="flex items-center gap-2">
-                      <label className="text-xs text-gray-600 whitespace-nowrap">Interval (minutes):</label>
-                      <input
-                        type="number"
-                        min={1}
-                        value={newRunInterval}
-                        onChange={(e) => setNewRunInterval(Number(e.target.value))}
-                        className="w-24 text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                      />
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2">
+                        <label className="text-xs text-gray-600">Schedule:</label>
+                        <select
+                          value={newRunMode}
+                          onChange={(e) => setNewRunMode(e.target.value as "interval" | "cron")}
+                          className="text-xs border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                        >
+                          <option value="interval">Interval (minutes)</option>
+                          <option value="cron">Cron expression</option>
+                        </select>
+                      </div>
+                      {newRunMode === "interval" ? (
+                        <div className="flex items-center gap-2">
+                          <label className="text-xs text-gray-600 whitespace-nowrap">Every</label>
+                          <input
+                            type="number"
+                            min={1}
+                            value={newRunInterval}
+                            onChange={(e) => setNewRunInterval(Number(e.target.value))}
+                            className="w-20 text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                          />
+                          <span className="text-xs text-gray-600">minutes</span>
+                        </div>
+                      ) : (
+                        <div className="space-y-1">
+                          <input
+                            type="text"
+                            value={newRunCron}
+                            onChange={(e) => setNewRunCron(e.target.value)}
+                            placeholder="e.g. 0 9 * * 1-5  (weekdays at 09:00)"
+                            className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 font-mono"
+                          />
+                          {newRunCron.trim() && (() => {
+                            const v = validateCronExpression(newRunCron);
+                            return v.valid
+                              ? <p className="text-xs text-green-600">{describeCronExpression(newRunCron)}</p>
+                              : <p className="text-xs text-red-500">{v.error}</p>;
+                          })()}
+                        </div>
+                      )}
                       <button
-                        disabled={!newRunName.trim() || !newRunPrompt.trim() || savingRun || !activeProjectId}
+                        disabled={!newRunName.trim() || !newRunPrompt.trim() || savingRun || !activeProjectId || (newRunMode === "cron" && (!newRunCron.trim() || !validateCronExpression(newRunCron).valid))}
                         onClick={async () => {
                           if (!newRunName.trim() || !newRunPrompt.trim() || !activeProjectId) return;
                           setSavingRun(true);
                           try {
+                            const payload: Record<string, unknown> = { name: newRunName.trim(), prompt: newRunPrompt.trim(), projectId: activeProjectId };
+                            if (newRunMode === "cron") {
+                              payload.cronExpression = newRunCron.trim();
+                              payload.intervalMinutes = 60;
+                            } else {
+                              payload.intervalMinutes = newRunInterval;
+                            }
                             const created = await apiFetch<ScheduledRun>("/api/scheduled-runs", {
                               method: "POST",
-                              body: JSON.stringify({ name: newRunName.trim(), prompt: newRunPrompt.trim(), intervalMinutes: newRunInterval, projectId: activeProjectId }),
+                              body: JSON.stringify(payload),
                             });
                             setScheduledRunsList((r) => [...r, created]);
                             setNewRunName("");
                             setNewRunPrompt("");
                             setNewRunInterval(60);
+                            setNewRunCron("");
+                            setNewRunMode("interval");
                             showToast("Scheduled run created", "success");
                           } catch { showToast("Failed to create", "error"); }
                           finally { setSavingRun(false); }
