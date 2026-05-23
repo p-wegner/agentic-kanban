@@ -4,7 +4,6 @@ import { db } from "../db/index.js";
 import { preferences } from "@agentic-kanban/shared/schema";
 import type { Database } from "../db/index.js";
 import {
-  PREF_MOCK_AGENT,
   PREF_AGENT_COMMAND,
   PREF_AGENT_ARGS,
   PREF_SKIP_PERMISSIONS,
@@ -48,9 +47,7 @@ export function resolveAgentSettings(
   const claudeProfile = prefMap.get(PREF_CLAUDE_PROFILE) || undefined;
 
   if (!agentCommand) {
-    const useMock =
-      isMockProfile(claudeProfile) ||
-      prefMap.get(PREF_MOCK_AGENT) === "true";
+    const useMock = isMockProfile(claudeProfile);
     agentCommand = useMock ? MOCK_AGENT_COMMAND : (prefMap.get(PREF_AGENT_COMMAND) || undefined);
   }
 
