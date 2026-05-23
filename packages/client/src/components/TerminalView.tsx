@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import type { AgentOutputMessage } from "@agentic-kanban/shared";
+import { extractMeaningfulOutput } from "@agentic-kanban/shared";
 import { createAgentOutputParser, type AgentOutputFormat, type DisplayEvent } from "../lib/agent-output-parser.js";
 
 interface TerminalViewProps {
@@ -11,6 +12,7 @@ interface TerminalViewProps {
   title?: string;
   footer?: ReactNode;
   multiTurn?: boolean;
+  sessionId?: string;
 }
 
 interface SubagentGroup {
@@ -96,7 +98,7 @@ function summarizeToolCall(name: string, input: Record<string, unknown>): string
   }
 }
 
-export function TerminalView({ messages, connectionState, parseOutput = "true", outputFormat = "claude-stream-json", prompt, title, footer, multiTurn }: TerminalViewProps) {
+export function TerminalView({ messages, connectionState, parseOutput = "true", outputFormat = "claude-stream-json", prompt, title, footer, multiTurn, sessionId }: TerminalViewProps) {
   const [isMaximized, setIsMaximized] = useState(false);
   const preRef = useRef<HTMLPreElement>(null);
   const [displayEvents, setDisplayEvents] = useState<DisplayEvent[]>([]);
@@ -104,6 +106,18 @@ export function TerminalView({ messages, connectionState, parseOutput = "true", 
   const [isAtBottom, setIsAtBottom] = useState(true);
   const [showScrollButton, setShowScrollButton] = useState(false);
   const [markers, setMarkers] = useState<Array<{ idx: number; color: string; pct: number }>>([]);
+
+  const handleDownload = useCallback(() => {
+    const lines = extractMeaningfulOutput(messages, 10000);
+    const text = lines.join("\n");
+    const blob = new Blob([text], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = sessionId ? `session-${sessionId}.txt` : "session-output.txt";
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [messages, sessionId]);
 
   const toggleExpand = useCallback((idx: number) => {
     setExpandedSections((prev) => {
@@ -393,8 +407,17 @@ export function TerminalView({ messages, connectionState, parseOutput = "true", 
           <span className="text-sm text-gray-300">{title ?? "Agent Output"}</span>
           {isParsed && <span className="text-xs text-blue-400">{parseOutput === "minimal" ? "minimal" : "stream-json"}</span>}
           <button
-            onClick={toggleMaximize}
+            onClick={handleDownload}
             className="ml-auto p-1 text-gray-400 hover:text-white rounded hover:bg-gray-700"
+            title="Download session output"
+          >
+            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M12 15V3m0 12l-4-4m4 4l4-4M2 17l.621 2.485A2 2 0 0 0 4.561 21h14.878a2 2 0 0 0 1.94-1.515L22 17" />
+            </svg>
+          </button>
+          <button
+            onClick={toggleMaximize}
+            className="p-1 text-gray-400 hover:text-white rounded hover:bg-gray-700"
             title="Restore (Esc)"
           >
             <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -427,8 +450,17 @@ export function TerminalView({ messages, connectionState, parseOutput = "true", 
             <span className="text-xs text-blue-400 ml-auto">{parseOutput === "minimal" ? "minimal" : "stream-json"}</span>
           )}
           <button
-            onClick={toggleMaximize}
+            onClick={handleDownload}
             className={`${isParsed ? "" : "ml-auto"} p-0.5 text-gray-400 hover:text-white rounded hover:bg-gray-700`}
+            title="Download session output"
+          >
+            <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M12 15V3m0 12l-4-4m4 4l4-4M2 17l.621 2.485A2 2 0 0 0 4.561 21h14.878a2 2 0 0 0 1.94-1.515L22 17" />
+            </svg>
+          </button>
+          <button
+            onClick={toggleMaximize}
+            className="p-0.5 text-gray-400 hover:text-white rounded hover:bg-gray-700"
             title="Maximize"
           >
             <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
