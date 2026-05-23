@@ -366,9 +366,10 @@ export async function startServer(port?: number) {
       if (prefMapLearning.get("learning_step_before_merge") === "true" && workspace.workingDir) {
         try {
           const learningPrompt = `/learning-step\n\nRun the learning step skill to extract insights from recent session transcripts and update docs/hooks before this workspace is merged.`;
-          const agentCmd = prefMapLearning.get("agent_command") || undefined;
+          const learningProfile = prefMapLearning.get("claude_profile") || undefined;
+          const agentCmd = isMockProfile(learningProfile) ? MOCK_AGENT_COMMAND : (prefMapLearning.get("agent_command") || undefined);
           const agentArgs = prefMapLearning.get("agent_args") || undefined;
-          const claudeProfile = prefMapLearning.get("claude_profile") || undefined;
+          const claudeProfile = isMockProfile(learningProfile) ? undefined : learningProfile;
           const learningSessId = await sessionManager.startSession(workspace.id, learningPrompt, agentCmd, agentArgs ? agentArgs.split(" ") : undefined, undefined, claudeProfile, undefined, undefined, undefined, undefined, undefined, "learning");
           learningSessionIds.add(learningSessId);
           console.log(`[workflow] learning step started: session=${learningSessId}`);
