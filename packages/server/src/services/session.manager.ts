@@ -39,6 +39,7 @@ export interface StartSessionOptions {
   resumeWithNewModel?: boolean;
   provider?: import("./agent-provider.js").ProviderId;
   triggerType?: string;
+  profile?: { provider: "claude" | "codex"; name: string };
 }
 
 function createSessionManager(
@@ -292,6 +293,7 @@ function createSessionManager(
       resumeWithNewModel,
       provider,
       triggerType,
+      profile,
     } = opts;
     // Look up workspace to get workingDir
     const wsRows = await db
@@ -408,6 +410,7 @@ function createSessionManager(
                 resumeWithNewModel: undefined,
                 provider,
                 triggerType: "agent",
+                profile,
               }).catch((err) => console.error(`[session] auto-resume failed: workspaceId=${workspaceId}`, err));
             } else {
               console.log(`[session] skipping auto-resume: workspaceId=${workspaceId} already auto-resumed ${resumeCount} time(s)`);
@@ -415,7 +418,7 @@ function createSessionManager(
           }
         }
       // When resumeWithNewModel is true, omit --resume so the new profile/provider is used instead
-      }, resumeWithNewModel ? undefined : providerSessionId, agentCommand, claudeProfile, multiTurn, permissionPromptTool, planMode, provider);
+      }, resumeWithNewModel ? undefined : providerSessionId, agentCommand, claudeProfile, multiTurn, permissionPromptTool, planMode, provider, profile);
 
       // Persist PID so hot-reload can detect surviving processes
       if (proc.pid) {

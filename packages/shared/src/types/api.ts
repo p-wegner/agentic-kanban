@@ -1,5 +1,11 @@
 // API request/response types
 
+/** Tagged profile selection — provider-aware replacement for the bare claudeProfile string. */
+export interface ProfileSelection {
+  provider: "claude" | "codex";
+  name: string;
+}
+
 export interface CreateProjectRequest {
   name?: string;
   repoPath: string;
@@ -61,7 +67,9 @@ export interface MainWorkspaceInfo {
   branch: string;
   status: "active" | "reviewing" | "fixing" | "idle" | "closed";
   readyForMerge?: boolean;
+  /** @deprecated Use profile instead */
   claudeProfile?: string | null;
+  profile?: ProfileSelection | null;
   agentCommand?: string | null;
   diffStats?: { filesChanged: number; insertions: number; deletions: number } | null;
   conflicts?: { hasConflicts: boolean; conflictingFiles: string[] } | null;
