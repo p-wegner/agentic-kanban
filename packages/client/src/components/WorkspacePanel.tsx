@@ -56,6 +56,7 @@ interface WorkspacePanelProps {
   project: Project | null;
   onClose: () => void;
   onWorkspaceChange?: () => void;
+  onWorkspaceCreating?: (issueId: string) => void;
   initialWorkspaceId?: string;
   initialSessionId?: string;
   autoSelectId?: string;
@@ -155,7 +156,7 @@ function SessionStatsSummary({ stats }: { stats: string | null | undefined }) {
 
 import { suggestBranchName } from "../lib/branch.js";
 
-export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, initialWorkspaceId, initialSessionId, autoSelectId, initialShowCreate }: WorkspacePanelProps) {
+export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onWorkspaceCreating, initialWorkspaceId, initialSessionId, autoSelectId, initialShowCreate }: WorkspacePanelProps) {
   const [workspaces, setWorkspaces] = useState<WorkspaceResponse[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(initialShowCreate ?? false);
@@ -1037,6 +1038,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
               project={project}
               prefs={prefs}
               actionLoading={actionLoading}
+              onSubmitting={() => onWorkspaceCreating?.(issue.id)}
               onCreated={(result) => {
                 setShowCreate(false);
                 setCompletedMessages([]);
