@@ -8,6 +8,8 @@ import {
   PREF_AGENT_ARGS,
   PREF_SKIP_PERMISSIONS,
   PREF_CLAUDE_PROFILE,
+  PREF_MOCK_AGENT_PROFILE,
+  PREF_MOCK_AGENT_DELAY_MS,
   PREF_RESUME_WITH_NEW_MODEL,
   PREF_PERMISSION_PROMPT_TOOL,
 } from "../constants/preference-keys.js";
@@ -39,6 +41,24 @@ export function isMockProfile(profile: string | undefined): boolean {
   return profile === "mock" || process.env.MOCK_AGENT === "1";
 }
 
+/**
+ * Build the mock agent command, appending the configured behavior profile and
+ * inter-event delay as CLI flags. Values are sanitized because the mock command
+ * is spawned with shell:true on Windows (see agent.service.ts).
+ */
+function buildMockCommand(prefMap: Map<string, string>): string {
+  let cmd = MOCK_AGENT_COMMAND;
+  const profile = prefMap.get(PREF_MOCK_AGENT_PROFILE);
+  if (profile && /^[a-z-]+$/.test(profile)) {
+    cmd += ` --profile ${profile}`;
+  }
+  const delayMs = prefMap.get(PREF_MOCK_AGENT_DELAY_MS);
+  if (delayMs && /^\d+$/.test(delayMs)) {
+    cmd += ` --delay-ms ${delayMs}`;
+  }
+  return cmd;
+}
+
 export function resolveAgentSettings(
   prefMap: Map<string, string>,
   commandOverride?: string,
@@ -48,7 +68,11 @@ export function resolveAgentSettings(
 
   if (!agentCommand) {
     const useMock = isMockProfile(claudeProfile);
-    agentCommand = useMock ? MOCK_AGENT_COMMAND : (prefMap.get(PREF_AGENT_COMMAND) || undefined);
+    if (useMock) {
+      agentCommand = buildMockCommand(prefMap);
+    } else {
+      agentCommand = prefMap.get(PREF_AGENT_COMMAND) || undefined;
+    }
   }
 
   const skipPerms = prefMap.get(PREF_SKIP_PERMISSIONS) === "true";
