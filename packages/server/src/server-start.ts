@@ -524,6 +524,51 @@ export async function startServer(port?: number) {
   // Start server
   const serverPort = port || Number(process.env.PORT) || 3001;
 
+  // Kill orphaned tsx server processes from previous runs that may hold the SQLite DB locked.
+  // These accumulate when the server hot-reloads (tsx watch) but old processes don't die cleanly.
+  // We only kill processes that match our server's entry point pattern and are NOT us.
+  if (process.platform === "win32") {
+    try {
+      const { execSync: _execSync } = await import("node:child_process");
+      const wmic = _execSync(
+        `wmic process where "name='node.exe'" get ProcessId,CommandLine /format:list`,
+        { encoding: "utf8", stdio: ["pipe", "pipe", "pipe"], windowsHide: true, timeout: 8000 },
+      );
+      const myPid = process.pid;
+      const lines = wmic.split(/\r?\n/);
+      const procs: { pid: number; cmd: string }[] = [];
+      let curCmd = "";
+      let curPid = 0;
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (trimmed.startsWith("CommandLine=")) curCmd = trimmed.slice("CommandLine=".length);
+        if (trimmed.startsWith("ProcessId=")) curPid = parseInt(trimmed.slice("ProcessId=".length), 10);
+        if (curCmd && curPid) { procs.push({ pid: curPid, cmd: curCmd }); curCmd = ""; curPid = 0; }
+      }
+      let killed = 0;
+      for (const p of procs) {
+        if (p.pid === myPid) continue;
+        const cmd = p.cmd.replace(/\\/g, "/");
+        // Match tsx-based server processes (hot-reload survivors) for the main server entry point.
+        // Avoid killing worktree-specific servers by requiring the cmd NOT to contain a worktree path marker.
+        if ((cmd.includes("tsx") || cmd.includes("ts-node")) && cmd.includes("src/index") && !cmd.includes(".worktrees")) {
+          try {
+            _execSync(`taskkill /PID ${p.pid} /T /F`, { stdio: "pipe", windowsHide: true, timeout: 5000 });
+            console.log(`[startup] killed orphaned tsx server PID ${p.pid}`);
+            killed++;
+          } catch { /* already gone */ }
+        }
+      }
+      if (killed > 0) {
+        console.log(`[startup] killed ${killed} orphaned tsx server process(es) that may have held the DB locked`);
+        // Brief pause to let SQLite release the lock
+        await new Promise(r => setTimeout(r, 500));
+      }
+    } catch (err) {
+      console.warn("[startup] orphan cleanup failed (non-fatal):", err instanceof Error ? err.message : String(err));
+    }
+  }
+
   await migrate(db, { migrationsFolder: getMigrationsFolder() });
 
   // Disable auto_monitor on every startup — prevents mass agent spawns from idle workspaces
