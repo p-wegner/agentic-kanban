@@ -143,6 +143,7 @@ export interface WorkspaceResponse {
   closedAt?: string | null;
   contextTokens?: number | null;
   lastTool?: string | null;
+  latestCommit?: { sha: string; message: string } | null;
 }
 
 export interface IssueArtifact {

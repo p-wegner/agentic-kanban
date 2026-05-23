@@ -410,6 +410,22 @@ export async function getDiffShortstat(
   }
 }
 
+/** Get the latest commit SHA (short) and message on the current branch. Returns null when no commits exist. */
+export async function getLatestCommit(
+  worktreePath: string,
+): Promise<{ sha: string; message: string } | null> {
+  try {
+    const output = await execGit(["log", "-1", "--format=%h\t%s"], worktreePath);
+    const trimmed = output.trim();
+    if (!trimmed) return null;
+    const tabIdx = trimmed.indexOf("\t");
+    if (tabIdx === -1) return null;
+    return { sha: trimmed.slice(0, tabIdx), message: trimmed.slice(tabIdx + 1) };
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Detect merge conflicts between the current branch and the base branch.
  * Uses git merge-tree (read-only, no working tree changes) — safe for concurrent calls.
