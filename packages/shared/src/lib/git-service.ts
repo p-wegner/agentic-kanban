@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { existsSync } from "node:fs";
 import { mkdir, readFile, rm, stat } from "node:fs/promises";
 import { join, dirname, sep } from "node:path";
 
@@ -362,11 +363,17 @@ export async function prepareForReview(
   return { diffRef: rebaseSource, success: true };
 }
 
+/** Check if a directory is a valid git working tree (has .git file/dir). */
+function isGitWorkingTree(dir: string): boolean {
+  try { return existsSync(join(dir, ".git")); } catch { return false; }
+}
+
 /** Get lightweight diff stats using --shortstat (no full diff transfer). Includes untracked files. */
 export async function getDiffShortstat(
   worktreePath: string,
   baseBranch: string,
 ): Promise<{ filesChanged: number; insertions: number; deletions: number }> {
+  if (!isGitWorkingTree(worktreePath)) return { filesChanged: 0, insertions: 0, deletions: 0 };
   try {
     // For direct workspaces (baseBranch="HEAD"), compare working tree against HEAD
     // For feature branches, use three-dot to show changes since branching
