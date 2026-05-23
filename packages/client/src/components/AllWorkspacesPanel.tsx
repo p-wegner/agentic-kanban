@@ -10,7 +10,7 @@ interface Project {
 
 interface CrossProjectIssue {
   id: string;
-  issueNumber: number;
+  issueNumber: number | null;
   title: string;
   statusName: string;
   projectId: string;
