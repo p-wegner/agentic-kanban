@@ -253,6 +253,13 @@
       "when": 1780302000000,
       "tag": "0035_session_trigger",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "6",
+      "when": 1780388400000,
+      "tag": "0036_scheduled_runs_cron",
+      "breakpoints": true
     }
   ]
 }
