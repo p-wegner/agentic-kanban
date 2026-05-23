@@ -27,6 +27,7 @@ type WorkspaceSummary = {
     branch: string;
     status: "active" | "reviewing" | "fixing" | "idle" | "closed";
     claudeProfile: string | null;
+    profile?: { provider: "claude" | "codex"; name: string } | null;
     agentCommand: string | null;
     readyForMerge?: boolean;
     diffStats?: { filesChanged: number; insertions: number; deletions: number } | null;
@@ -127,6 +128,7 @@ export async function buildWorkspaceSummaryMap(
       branch: mainWs.branch,
       status: mainWs.status as "active" | "reviewing" | "fixing" | "idle" | "closed",
       claudeProfile: mainWs.claudeProfile,
+      profile: mainWs.claudeProfile ? { provider: "claude" as const, name: mainWs.claudeProfile } : null,
       agentCommand: mainWs.agentCommand,
       readyForMerge: mainWs.readyForMerge,
     };
