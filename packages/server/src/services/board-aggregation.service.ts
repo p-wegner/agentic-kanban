@@ -89,6 +89,7 @@ export async function buildWorkspaceSummaryMap(
       updatedAt: workspaces.updatedAt,
       claudeProfile: workspaces.claudeProfile,
       agentCommand: workspaces.agentCommand,
+      provider: workspaces.provider,
       workingDir: workspaces.workingDir,
       baseBranch: workspaces.baseBranch,
       isDirect: workspaces.isDirect,
@@ -128,7 +129,7 @@ export async function buildWorkspaceSummaryMap(
       branch: mainWs.branch,
       status: mainWs.status as "active" | "reviewing" | "fixing" | "idle" | "closed",
       claudeProfile: mainWs.claudeProfile,
-      profile: mainWs.claudeProfile ? { provider: "claude" as const, name: mainWs.claudeProfile } : null,
+      profile: mainWs.claudeProfile ? { provider: (mainWs.provider as "claude" | "codex") ?? "claude", name: mainWs.claudeProfile } : null,
       agentCommand: mainWs.agentCommand,
       readyForMerge: mainWs.readyForMerge,
     };
