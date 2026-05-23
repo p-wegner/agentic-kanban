@@ -1,12 +1,34 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { formatRelativeTime } from "../lib/formatRelativeTime.js";
 import { apiFetch } from "../lib/api.js";
 import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
 
+interface Project {
+  id: string;
+  name: string;
+}
+
+interface CrossProjectIssue {
+  id: string;
+  issueNumber: number;
+  title: string;
+  statusName: string;
+  projectId: string;
+  workspaceSummary?: IssueWithStatus["workspaceSummary"];
+}
+
+interface CrossProjectGroup {
+  projectId: string;
+  projectName: string;
+  issues: CrossProjectIssue[];
+}
+
 interface AllWorkspacesPanelProps {
   columns: StatusWithIssues[];
+  activeProjectId: string | null;
   onClose: () => void;
   onIssueClick: (issue: IssueWithStatus) => void;
+  onProjectSwitch?: (projectId: string) => Promise<void>;
   onRefresh?: () => void;
 }
 
@@ -39,14 +61,44 @@ const ISSUE_STATUS_COLORS: Record<string, string> = {
   "Cancelled": "bg-red-100 text-red-500",
 };
 
-export function AllWorkspacesPanel({ columns, onClose, onIssueClick, onRefresh }: AllWorkspacesPanelProps) {
+export function AllWorkspacesPanel({ columns, activeProjectId, onClose, onIssueClick, onProjectSwitch, onRefresh }: AllWorkspacesPanelProps) {
   const [statusFilter, setStatusFilter] = useState<WsStatusFilter>("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [closingIdle, setClosingIdle] = useState(false);
+  const [projectFilter, setProjectFilter] = useState<string>(activeProjectId ?? "all");
+  const [allProjects, setAllProjects] = useState<Project[]>([]);
+  const [crossProjectData, setCrossProjectData] = useState<CrossProjectGroup[] | null>(null);
+  const [crossProjectLoading, setCrossProjectLoading] = useState(false);
 
-  const issuesWithWorkspaces: IssueWithStatus[] = columns
-    .flatMap((col) => col.issues)
-    .filter((issue) => issue.workspaceSummary && issue.workspaceSummary.total > 0);
+  // Fetch list of projects for the dropdown
+  useEffect(() => {
+    apiFetch<Project[]>("/api/projects")
+      .then((data) => setAllProjects(data))
+      .catch(() => {});
+  }, []);
+
+  // Fetch cross-project data when "All projects" is selected
+  useEffect(() => {
+    if (projectFilter !== "all") {
+      setCrossProjectData(null);
+      return;
+    }
+    setCrossProjectLoading(true);
+    apiFetch<CrossProjectGroup[]>("/api/projects/all/workspaces")
+      .then((data) => setCrossProjectData(data))
+      .catch(() => setCrossProjectData([]))
+      .finally(() => setCrossProjectLoading(false));
+  }, [projectFilter]);
+
+  // Build the issues list depending on project filter
+  const issuesWithWorkspaces: (CrossProjectIssue & { projectName?: string })[] =
+    projectFilter === "all"
+      ? (crossProjectData ?? [] as CrossProjectGroup[]).flatMap((g: CrossProjectGroup) =>
+          g.issues.map((i: CrossProjectIssue) => ({ ...i, projectName: g.projectName }))
+        )
+      : columns
+          .flatMap((col) => col.issues)
+          .filter((issue) => issue.workspaceSummary && issue.workspaceSummary.total > 0);
 
   const activeCount = issuesWithWorkspaces.filter(
     (i) => ["active", "reviewing", "fixing"].includes(i.workspaceSummary?.main?.status ?? "")
@@ -69,8 +121,8 @@ export function AllWorkspacesPanel({ columns, onClose, onIssueClick, onRefresh }
       } catch {
         // non-fatal — continue with the rest
       }
-      onRefresh?.();
     }
+    onRefresh?.();
     setClosingIdle(false);
   }
 
@@ -90,11 +142,14 @@ export function AllWorkspacesPanel({ columns, onClose, onIssueClick, onRefresh }
       const q = searchQuery.trim().toLowerCase();
       const matchesTitle = issue.title.toLowerCase().includes(q);
       const matchesBranch = (ws.main?.branch ?? "").toLowerCase().includes(q);
-      if (!matchesTitle && !matchesBranch) return false;
+      const matchesProject = ("projectName" in issue ? (issue.projectName ?? "") : "").toLowerCase().includes(q);
+      if (!matchesTitle && !matchesBranch && !matchesProject) return false;
     }
 
     return true;
   });
+
+  const showingCrossProject = projectFilter === "all";
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end">
@@ -111,9 +166,11 @@ export function AllWorkspacesPanel({ columns, onClose, onIssueClick, onRefresh }
             </svg>
             <h2 className="text-lg font-semibold text-gray-900">All Workspaces</h2>
             <span className="text-sm text-gray-500">
-              {filtered.length === issuesWithWorkspaces.length
-                ? `(${issuesWithWorkspaces.length})`
-                : `${filtered.length} of ${issuesWithWorkspaces.length}`}
+              {crossProjectLoading
+                ? "…"
+                : filtered.length === issuesWithWorkspaces.length
+                  ? `(${issuesWithWorkspaces.length})`
+                  : `${filtered.length} of ${issuesWithWorkspaces.length}`}
             </span>
             {activeCount > 0 && (
               <span className="text-xs bg-green-100 text-green-700 px-1.5 py-0.5 rounded-full font-medium">
@@ -142,10 +199,24 @@ export function AllWorkspacesPanel({ columns, onClose, onIssueClick, onRefresh }
 
         {/* Filters */}
         <div className="px-4 py-2 border-b border-gray-100 space-y-2">
+          {/* Project filter */}
+          <select
+            value={projectFilter}
+            onChange={(e) => setProjectFilter(e.target.value)}
+            className="w-full text-sm px-3 py-1.5 border border-gray-200 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-400 bg-white"
+          >
+            <option value="all">All projects</option>
+            {allProjects.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+          </select>
+
           {/* Text search */}
           <input
             type="text"
-            placeholder="Search by title or branch…"
+            placeholder={showingCrossProject ? "Search by title, branch, or project…" : "Search by title or branch…"}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="w-full text-sm px-3 py-1.5 border border-gray-200 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-400"
@@ -170,7 +241,9 @@ export function AllWorkspacesPanel({ columns, onClose, onIssueClick, onRefresh }
 
         {/* Content */}
         <div className="flex-1 overflow-y-auto">
-          {filtered.length === 0 ? (
+          {crossProjectLoading ? (
+            <div className="px-4 py-12 text-center text-sm text-gray-400">Loading…</div>
+          ) : filtered.length === 0 ? (
             <div className="px-4 py-12 text-center text-sm text-gray-500">
               {issuesWithWorkspaces.length === 0
                 ? "No workspaces yet. Create a workspace from an issue to get started."
@@ -181,12 +254,18 @@ export function AllWorkspacesPanel({ columns, onClose, onIssueClick, onRefresh }
               {filtered.map((issue) => {
                 const ws = issue.workspaceSummary!;
                 const main = ws.main;
+                const projectName = "projectName" in issue ? issue.projectName : undefined;
 
                 return (
                   <div
                     key={issue.id}
                     className="px-4 py-3 hover:bg-gray-50 cursor-pointer"
-                    onClick={() => onIssueClick(issue)}
+                    onClick={async () => {
+                      if (showingCrossProject && issue.projectId !== activeProjectId && onProjectSwitch) {
+                        await onProjectSwitch(issue.projectId);
+                      }
+                      onIssueClick(issue as IssueWithStatus);
+                    }}
                   >
                     {/* Issue title + status */}
                     <div className="flex items-start gap-2 mb-1.5">
@@ -202,6 +281,15 @@ export function AllWorkspacesPanel({ columns, onClose, onIssueClick, onRefresh }
                         {issue.statusName}
                       </span>
                     </div>
+
+                    {/* Project name (cross-project mode only) */}
+                    {showingCrossProject && projectName && (
+                      <div className="ml-6 mb-1">
+                        <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-600">
+                          {projectName}
+                        </span>
+                      </div>
+                    )}
 
                     {/* Workspace details */}
                     {main && (
