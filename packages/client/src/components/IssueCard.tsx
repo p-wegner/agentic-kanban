@@ -186,13 +186,13 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
       </div>
       {ws && ws.main && (
         <div
-          className={`flex items-center gap-1.5 mt-1.5 text-xs cursor-pointer rounded px-1 py-0.5 -mx-1 transition-colors ${
-            ws.main.status === "reviewing" ? "bg-purple-50 hover:bg-purple-100" :
-            ws.main.status === "fixing" ? "bg-orange-50 hover:bg-orange-100" :
-            ws.main.conflicts?.hasConflicts ? "bg-red-50 hover:bg-red-100" :
-            "hover:bg-gray-50"
+          className={`group/ws flex items-center gap-1.5 mt-1.5 text-xs cursor-pointer rounded px-1 py-0.5 -mx-1 border-t transition-colors ${
+            ws.main.status === "reviewing" ? "border-purple-100 bg-purple-50 hover:bg-purple-100" :
+            ws.main.status === "fixing" ? "border-orange-100 bg-orange-50 hover:bg-orange-100" :
+            ws.main.conflicts?.hasConflicts ? "border-red-100 bg-red-50 hover:bg-red-100" :
+            "border-blue-100 bg-blue-50 hover:bg-blue-100 hover:border-blue-200"
           }`}
-          title={`Workspace: ${ws.main.branch} (${ws.main.status})`}
+          title="Open workspace"
           onClick={(e) => { e.stopPropagation(); onWorkspaceClick?.(issue, ws.main?.id); }}
         >
           {ws.main.status === "reviewing" ? (
@@ -257,6 +257,9 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
           {ws.total > 1 && (
             <span className="text-gray-400 shrink-0">+{ws.total - 1} more</span>
           )}
+          <svg className="w-3 h-3 shrink-0 text-gray-300 group-hover/ws:text-blue-400 transition-colors ml-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
+          </svg>
         </div>
       )}
       {(ws?.main?.status === "active" || ws?.main?.status === "fixing") && liveActivity && liveActivity !== "Delegating to agent" && (
