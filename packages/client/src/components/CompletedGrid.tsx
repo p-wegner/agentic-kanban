@@ -29,6 +29,12 @@ export function CompletedGrid({
     [columns],
   );
 
+  const breakdown = useMemo(() => {
+    const done = columns.find((c) => c.name === "Done")?.issues.length ?? 0;
+    const cancelled = columns.find((c) => c.name === "Cancelled")?.issues.length ?? 0;
+    return { done, cancelled };
+  }, [columns]);
+
   const allIssues = useMemo(() => {
     return columns
       .flatMap((col) => col.issues)
@@ -59,8 +65,19 @@ export function CompletedGrid({
           <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
         </svg>
         <span className="text-sm font-medium text-gray-600">Completed</span>
-        <span className="text-xs text-gray-400">
-          <span className="bg-gray-200 rounded-full px-1.5 py-0.5">{totalIssues}</span>
+        <span className="text-xs text-gray-400 flex items-center gap-1.5 min-w-0">
+          <span className="bg-gray-200 rounded-full px-1.5 py-0.5 shrink-0">{totalIssues}</span>
+          {breakdown.done > 0 && breakdown.cancelled > 0 && (
+            <span className="truncate">
+              ({breakdown.done} done · {breakdown.cancelled} cancelled)
+            </span>
+          )}
+          {breakdown.done > 0 && breakdown.cancelled === 0 && (
+            <span className="truncate">(all done)</span>
+          )}
+          {breakdown.cancelled > 0 && breakdown.done === 0 && (
+            <span className="truncate">(all cancelled)</span>
+          )}
         </span>
       </button>
     );
