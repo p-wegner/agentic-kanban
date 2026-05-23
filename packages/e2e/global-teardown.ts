@@ -1,17 +1,19 @@
 /**
- * Global E2E teardown — deletes any test-artifact issues that leaked into the active project.
+ * Global E2E teardown — deletes test-artifact issues and temporary projects.
  *
  * E2E tests track their created issues in `afterAll` hooks, but if a test crashes or times out
- * those hooks may not run. This teardown provides a safety net by identifying and removing
- * issues whose titles match known test-generated patterns.
+ * those hooks may not run. This teardown provides a safety net by identifying and removing:
  *
- * Patterns covered:
+ * Issues whose titles match known test-generated patterns:
  *  - "Session stats test ..."
  *  - "Task progress test ..."
  *  - "board-stats-..." (board-stats-bar.test.ts)
  *  - "RT create test ..." / "RT status test ..." (board-realtime.test.ts)
  *  - "⏰ e2e-..." (scheduled-run system issues whose parent run was deleted without cleanup)
  *  - Any title starting with "e2e-" followed by a random slug
+ *
+ * Projects created by individual tests (e.g. projects.test.ts registers "E2E Test Project <timestamp>").
+ * The base "E2E Test Project" created by global-setup is preserved for the next run.
  */
 
 import { request } from "@playwright/test";
@@ -73,6 +75,25 @@ async function globalTeardown() {
       );
       for (const issue of leaked) {
         await apiContext.delete(`/api/issues/${issue.id}`);
+      }
+    }
+
+    // Clean up temporary projects created by individual tests.
+    // The base "E2E Test Project" (created by global-setup) is preserved for reuse.
+    const projectsRes = await apiContext.get("/api/projects");
+    if (projectsRes.ok()) {
+      const projects: Array<{ id: string; name: string }> = await projectsRes.json();
+      const tempProjects = projects.filter(
+        (p) => p.name.startsWith("E2E Test Project ") || /^e2e-project-/.test(p.name),
+      );
+      if (tempProjects.length > 0) {
+        console.log(
+          `[global-teardown] Cleaning up ${tempProjects.length} temporary project(s):`,
+          tempProjects.map((p) => `"${p.name}"`).join(", "),
+        );
+        for (const project of tempProjects) {
+          await apiContext.delete(`/api/projects/${project.id}`);
+        }
       }
     }
   } catch (err) {
