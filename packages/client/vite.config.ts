@@ -13,6 +13,7 @@ export default defineConfig({
     conditions: ["default", "browser", "module", "import"],
   },
   server: {
+    host: "127.0.0.1",
     port: clientPort,
     strictPort: true,
     proxy: {
