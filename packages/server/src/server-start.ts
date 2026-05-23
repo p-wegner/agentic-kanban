@@ -169,6 +169,19 @@ export async function startServer(port?: number) {
       boardEvents.broadcast(projectId, "session_completed");
       boardEvents.broadcast(projectId, "workspace_idle");
 
+      // Update scheduled run status if this workspace was launched by one
+      try {
+        const runRows = await db.select({ id: scheduledRuns.id }).from(scheduledRuns)
+          .where(eq(scheduledRuns.lastRunWorkspaceId, workspaceId)).limit(1);
+        if (runRows.length > 0) {
+          const finalStatus = exitCode === 0 ? "success" : "error";
+          await db.update(scheduledRuns).set({ lastRunStatus: finalStatus, updatedAt: now })
+            .where(eq(scheduledRuns.id, runRows[0].id));
+        }
+      } catch (err) {
+        console.warn("[workflow] failed to update scheduled run status:", err);
+      }
+
       const statuses = await db.select().from(projectStatuses).where(eq(projectStatuses.projectId, projectId));
       const findStatus = (name: string) => statuses.find(s => s.name === name);
 
