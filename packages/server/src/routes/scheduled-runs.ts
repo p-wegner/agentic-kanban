@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { db } from "../db/index.js";
 import { scheduledRuns, issues, projectStatuses, agentSkills } from "@agentic-kanban/shared/schema";
-import { eq, and } from "drizzle-orm";
+import { eq, and, max } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import type { Database } from "../db/index.js";
 
@@ -42,7 +42,6 @@ export function createScheduledRunsRoute(database: Database = db, serverPort?: n
       if (todoStatus) {
         const issueId = randomUUID();
         // Get next issue number
-        const { sql, max } = await import("drizzle-orm");
         const numRows = await database
           .select({ maxNum: max(issues.issueNumber) })
           .from(issues)
@@ -180,7 +179,6 @@ export function createScheduledRunsRoute(database: Database = db, serverPort?: n
             .where(eq(projectStatuses.projectId, run.projectId));
           const todoStatus = statuses.find(s => s.name === "Todo") ?? statuses[0];
           if (todoStatus) {
-            const { max } = await import("drizzle-orm");
             const issueId = randomUUID();
             const numRows = await database
               .select({ maxNum: max(issues.issueNumber) })
