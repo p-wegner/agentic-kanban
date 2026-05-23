@@ -167,7 +167,7 @@ function MonitorPopover({ status, onClose, onOpenWorkspace, columns, onRunNow, a
   const [now, setNow] = useState(Date.now());
   const [running, setRunning] = useState(false);
   const popoverRef = useRef<HTMLDivElement>(null);
-  const [popoverPos, setPopoverPos] = useState<{ top?: number; bottom?: number; left?: number; right?: number } | null>(null);
+  const [popoverPos, setPopoverPos] = useState<{ top?: number; bottom?: number; left?: number; maxHeight?: number } | null>(null);
 
   async function handleRunNow() {
     setRunning(true);
@@ -185,31 +185,21 @@ function MonitorPopover({ status, onClose, onOpenWorkspace, columns, onRunNow, a
       if (!anchorRef.current) return;
       const rect = anchorRef.current.getBoundingClientRect();
       const popoverWidth = 320;
-      const spaceBelow = window.innerHeight - rect.bottom - 8;
-      const spaceAbove = rect.top - 8;
-      // Open upward if more space above than below (or not enough below)
+      const margin = 8;
+      const spaceBelow = window.innerHeight - rect.bottom - margin;
+      const spaceAbove = rect.top - margin;
       const openUp = spaceBelow < 200 && spaceAbove > spaceBelow;
-      // Prefer aligning popover's right edge to anchor's right edge (opens leftward).
-      // Fall back to left-aligning if that would overflow the left viewport edge.
-      const rightFromViewport = window.innerWidth - rect.right;
+
+      // Horizontal: prefer right-aligning with anchor, clamp to viewport
       const leftIfRightAligned = rect.right - popoverWidth;
-      const wouldOverflowLeft = leftIfRightAligned < 8;
-      const wouldOverflowRight = rect.left + popoverWidth > window.innerWidth - 8;
-      let hPos: { left?: number; right?: number };
-      if (wouldOverflowLeft && !wouldOverflowRight) {
-        // Left-align with anchor
-        hPos = { left: Math.max(8, rect.left) };
-      } else if (wouldOverflowLeft) {
-        // Center in viewport as last resort
-        hPos = { left: Math.max(8, Math.round((window.innerWidth - popoverWidth) / 2)) };
-      } else {
-        // Right-align with anchor (right edge of popover = right edge of anchor)
-        hPos = { right: Math.max(8, rightFromViewport) };
-      }
+      const clampedLeft = Math.max(margin, Math.min(leftIfRightAligned, window.innerWidth - popoverWidth - margin));
+
       if (openUp) {
-        setPopoverPos({ bottom: window.innerHeight - rect.top + 6, ...hPos });
+        const maxH = Math.min(560, spaceAbove);
+        setPopoverPos({ bottom: window.innerHeight - rect.top + 6, left: clampedLeft, maxHeight: maxH });
       } else {
-        setPopoverPos({ top: rect.bottom + 6, ...hPos });
+        const maxH = Math.min(560, spaceBelow);
+        setPopoverPos({ top: rect.bottom + 6, left: clampedLeft, maxHeight: maxH });
       }
     });
     return () => cancelAnimationFrame(frame);
@@ -264,19 +254,9 @@ function MonitorPopover({ status, onClose, onOpenWorkspace, columns, onRunNow, a
         id="monitor-popover"
         className="fixed z-50 w-80 bg-white border border-gray-200 rounded-xl shadow-xl text-xs flex flex-col"
         style={{
-          ...(popoverPos?.top !== undefined
-            ? { top: `${popoverPos.top}px` }
-            : popoverPos?.bottom !== undefined
-              ? { bottom: `${popoverPos.bottom}px` }
-              : { top: "2.5rem" }),
-          ...(popoverPos?.left !== undefined
-            ? { left: `${popoverPos.left}px` }
-            : { right: `${popoverPos?.right ?? 8}px` }),
-          maxHeight: popoverPos?.top !== undefined
-            ? `min(600px, calc(100dvh - ${popoverPos.top + 8}px))`
-            : popoverPos?.bottom !== undefined
-              ? `min(600px, calc(100dvh - ${popoverPos.bottom + 8}px))`
-              : "min(600px, calc(100dvh - 3rem))",
+          ...(popoverPos?.top !== undefined ? { top: `${popoverPos.top}px` } : popoverPos?.bottom !== undefined ? { bottom: `${popoverPos.bottom}px` } : { top: "2.5rem" }),
+          left: `${popoverPos?.left ?? 8}px`,
+          maxHeight: `${popoverPos?.maxHeight ?? 480}px`,
         }}
       >
         {/* Header */}
