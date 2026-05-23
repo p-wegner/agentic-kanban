@@ -1521,6 +1521,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                         prompt={selectedHistoryId ? undefined : lastPrompt}
                         title={issue.title}
                         multiTurn={isSessionAlive}
+                        sessionId={selectedHistoryId ?? activeSession ?? undefined}
                         footer={isRunning && ws.status !== "closed" ? (
                             <div className="flex gap-2">
                               <textarea
