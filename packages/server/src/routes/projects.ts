@@ -1,6 +1,10 @@
 import { Hono } from "hono";
 import { db } from "../db/index.js";
+<<<<<<< HEAD
 import { projects, projectStatuses, issues, workspaces, preferences, tags, issueTags } from "@agentic-kanban/shared/schema";
+=======
+import { projects, projectStatuses, issues, workspaces, preferences, tags, issueTags, scheduledRuns, agentSkills, repos } from "@agentic-kanban/shared/schema";
+>>>>>>> 8692301 (fix: delete agentSkills and repos rows when a project is deleted)
 import { eq, sql, and, inArray } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 <<<<<<< HEAD
@@ -708,6 +712,12 @@ export function createProjectsRoute(database: Database = db) {
       await database.delete(issues).where(inArray(issues.id, issueIds));
     }
 
+<<<<<<< HEAD
+=======
+    await database.delete(scheduledRuns).where(eq(scheduledRuns.projectId, projectId));
+    await database.delete(agentSkills).where(eq(agentSkills.projectId, projectId));
+    await database.delete(repos).where(eq(repos.projectId, projectId));
+>>>>>>> 8692301 (fix: delete agentSkills and repos rows when a project is deleted)
     await database.delete(projectStatuses).where(eq(projectStatuses.projectId, projectId));
     // Clear active-project preference if it points to this project
     await database.delete(preferences).where(and(eq(preferences.key, "activeProjectId"), eq(preferences.value, projectId)));
