@@ -28,6 +28,11 @@ test.describe("Issue card hover quick-start buttons", () => {
     const statuses = await statusesRes.json();
     const todoStatus = statuses.find((s: { name: string }) => s.name === "Todo");
     statusId = todoStatus ? todoStatus.id : statuses[0].id;
+
+    // Use mock agent so workspace creation doesn't launch a real Claude process
+    await request.put(`${SERVER_URL}/api/preferences/settings`, {
+      data: { mock_agent: "true", auto_review: "false", auto_merge: "false" },
+    });
   });
 
   test.afterAll(async ({ request }) => {
@@ -37,6 +42,9 @@ test.describe("Issue card hover quick-start buttons", () => {
     for (const id of createdIssueIds) {
       await request.delete(`${SERVER_URL}/api/issues/${id}`);
     }
+    await request.put(`${SERVER_URL}/api/preferences/settings`, {
+      data: { mock_agent: "false", auto_review: "true", auto_merge: "true" },
+    });
   });
 
   test("hovering card with no workspace shows Start Workspace button", async ({
@@ -88,9 +96,9 @@ test.describe("Issue card hover quick-start buttons", () => {
     await expect(btn).toBeVisible({ timeout: 5000 });
     await btn.click();
 
-    // WorkspacePanel with CreateWorkspaceForm should open — branch name field is present
+    // WorkspacePanel should open — its header h2 shows the issue title
     await expect(
-      page.locator("input[placeholder*='ranch']").first(),
+      page.locator("h2", { hasText: title }),
     ).toBeVisible({ timeout: 5000 });
   });
 
@@ -107,7 +115,7 @@ test.describe("Issue card hover quick-start buttons", () => {
     const { id: issueId } = await issueRes.json();
     createdIssueIds.push(issueId);
 
-    // Create workspace then PATCH it to idle (worktree creation may fail but DB record is created)
+    // Create workspace — mock agent is active so it exits quickly, leaving status="idle"
     const wsRes = await request.post(`${SERVER_URL}/api/workspaces`, {
       data: {
         issueId,
@@ -118,15 +126,22 @@ test.describe("Issue card hover quick-start buttons", () => {
     const workspaceId = ws.id;
     createdWorkspaceIds.push(workspaceId);
 
-    await request.patch(`${SERVER_URL}/api/workspaces/${workspaceId}`, {
-      data: { status: "idle" },
-    });
+    // Wait for mock agent to finish and workspace to reach idle
+    const deadline = Date.now() + 15000;
+    while (Date.now() < deadline) {
+      const res = await request.get(`${SERVER_URL}/api/workspaces/${workspaceId}`);
+      if (res.ok()) {
+        const w = await res.json();
+        if (w?.status === "idle") break;
+      }
+      await new Promise((r) => setTimeout(r, 500));
+    }
 
     await page.goto("/");
-    await page.waitForSelector("h2");
+    await page.waitForLoadState("networkidle");
 
     const card = page.locator("div[draggable]", { has: page.locator("p", { hasText: title }) }).first();
-    await expect(card).toBeVisible({ timeout: 10000 });
+    await expect(card).toBeVisible({ timeout: 15000 });
     await card.hover();
 
     const btn = card.locator("button", { hasText: "Resume" });
