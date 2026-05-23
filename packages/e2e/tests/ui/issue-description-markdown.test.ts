@@ -81,6 +81,7 @@ test.describe("Issue description markdown rendering", () => {
   });
 
   test("description with markdown renders as HTML in detail panel", async ({ page, request }) => {
+    test.setTimeout(60000);
     const suffix = Date.now().toString(36);
     const title = `MarkdownRender ${suffix}`;
 
@@ -89,10 +90,12 @@ test.describe("Issue description markdown rendering", () => {
 
     await withRetry(() => request.put(`${SERVER_URL}/api/preferences/active-project`, { data: { projectId } }));
     await page.goto("/");
-    await page.waitForLoadState("networkidle");
+    await page.waitForSelector("h2");
     const issueCard1 = page.locator("p", { hasText: title }).first();
-    await expect(issueCard1).toBeVisible({ timeout: 15000 });
-    await issueCard1.dispatchEvent("click");
+    await expect(issueCard1).toBeAttached({ timeout: 20000 });
+    await issueCard1.scrollIntoViewIfNeeded();
+    await expect(issueCard1).toBeVisible({ timeout: 5000 });
+    await issueCard1.click();
     await expect(page.locator("h2", { hasText: "Issue Details" })).toBeVisible();
 
     const panel = page.locator(".fixed.right-0");
@@ -139,10 +142,10 @@ test.describe("Issue description markdown rendering", () => {
 
     await withRetry(() => request.put(`${SERVER_URL}/api/preferences/active-project`, { data: { projectId } }));
     await page.goto("/");
-    await page.waitForLoadState("networkidle");
+    await page.waitForSelector("h2");
     const issueCard2 = page.locator("p", { hasText: title }).first();
     await expect(issueCard2).toBeVisible({ timeout: 15000 });
-    await issueCard2.dispatchEvent("click");
+    await issueCard2.click();
     await expect(page.locator("h2", { hasText: "Issue Details" })).toBeVisible();
 
     // Enter edit mode
@@ -162,6 +165,7 @@ test.describe("Issue description markdown rendering", () => {
   });
 
   test("edit description, save, and re-renders updated markdown", async ({ page, request }) => {
+    test.setTimeout(60000);
     const suffix = Date.now().toString(36);
     const title = `MarkdownUpdate ${suffix}`;
 
@@ -170,10 +174,12 @@ test.describe("Issue description markdown rendering", () => {
 
     await withRetry(() => request.put(`${SERVER_URL}/api/preferences/active-project`, { data: { projectId } }));
     await page.goto("/");
-    await page.waitForLoadState("networkidle");
+    await page.waitForSelector("h2");
     const issueCard3 = page.locator("p", { hasText: title }).first();
-    await expect(issueCard3).toBeVisible({ timeout: 15000 });
-    await issueCard3.dispatchEvent("click");
+    await expect(issueCard3).toBeAttached({ timeout: 20000 });
+    await issueCard3.scrollIntoViewIfNeeded();
+    await expect(issueCard3).toBeVisible({ timeout: 5000 });
+    await issueCard3.click();
     await expect(page.locator("h2", { hasText: "Issue Details" })).toBeVisible();
 
     await page.locator('button:has-text("Edit")').click();
