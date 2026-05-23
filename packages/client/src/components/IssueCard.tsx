@@ -51,6 +51,8 @@ interface IssueCardProps {
   onWorkspaceClick?: (issue: IssueWithStatus, workspaceId?: string) => void;
   onStartWorkspace?: (issue: IssueWithStatus) => void;
   onDragStart: (e: React.DragEvent, issue: IssueWithStatus) => void;
+  onMoveToNext?: (issue: IssueWithStatus) => void;
+  nextStatusName?: string;
   tags?: TagBadge[];
   searchQuery?: string;
   liveActivity?: string;
@@ -78,11 +80,12 @@ function HighlightedText({ text, query }: { text: string; query: string }) {
   );
 }
 
-export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, onDragStart, tags, searchQuery, liveActivity, liveStats, todos }: IssueCardProps) {
+export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, onDragStart, onMoveToNext, nextStatusName, tags, searchQuery, liveActivity, liveStats, todos }: IssueCardProps) {
   const badgeColor = priorityColors[issue.priority] ?? "bg-gray-200 text-gray-700";
   const ws = issue.workspaceSummary;
   const hasActiveWorkspace = ws?.main && ws.main.status !== "closed";
   const [depDragOver, setDepDragOver] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
 
   function handleDragOver(e: React.DragEvent) {
     const dragData = (window as unknown as Record<string, unknown>).__dragData as { issueId?: string; sourceStatusId?: string } | undefined;
@@ -113,13 +116,27 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
   return (
     <div
       draggable
-      onDragStart={(e) => onDragStart(e, issue)}
+      onDragStart={(e) => { setIsDragging(true); onDragStart(e, issue); }}
+      onDragEnd={() => setIsDragging(false)}
       onDragOver={handleDragOver}
       onDragLeave={() => setDepDragOver(false)}
       onDrop={handleDrop}
       onClick={() => onClick(issue)}
       className={`group bg-white rounded-md shadow-sm p-2 border cursor-pointer hover:shadow-md transition-shadow relative ${depDragOver ? "border-purple-400 bg-purple-50 shadow-purple-200" : "border-gray-200 hover:border-gray-300"}`}
     >
+      {onMoveToNext && nextStatusName && !isDragging && (
+        <div className="absolute inset-0 rounded-md bg-white/80 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center z-10 pointer-events-none group-hover:pointer-events-auto">
+          <button
+            onClick={(e) => { e.stopPropagation(); onMoveToNext(issue); }}
+            className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-md bg-blue-600 text-white hover:bg-blue-700 shadow-sm transition-colors"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" />
+            </svg>
+            Move to {nextStatusName}
+          </button>
+        </div>
+      )}
       <div className="flex items-start justify-between gap-2">
         <p className="text-sm text-gray-900">
           {issue.issueNumber != null && (
