@@ -557,6 +557,21 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
     }
   }
 
+  async function handleOpenEditor(wsId: string) {
+    setActionLoading(true);
+    setError(null);
+    try {
+      await apiFetch(`/api/workspaces/${wsId}/open-editor`, {
+        method: "POST",
+        body: JSON.stringify({}),
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "VS Code launch failed");
+    } finally {
+      setActionLoading(false);
+    }
+  }
+
   async function handleUpdateBase(wsId: string, mode: "rebase" | "merge") {
     setActionLoading(true);
     setError(null);
@@ -1595,6 +1610,16 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
                           title="Open terminal in workspace directory"
                         >
                           Terminal
+                        </button>
+                        )}
+                        {ws.workingDir && (
+                        <button
+                          onClick={() => handleOpenEditor(ws.id)}
+                          disabled={actionLoading}
+                          className="text-sm bg-gray-700 text-white px-3 py-1.5 rounded hover:bg-gray-800 disabled:opacity-50"
+                          title="Open workspace directory in VS Code"
+                        >
+                          VS Code
                         </button>
                         )}
                         {ws.workingDir && (
