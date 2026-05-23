@@ -2,11 +2,12 @@
  * Configurable mock agent that emits stream-json output matching Claude's format.
  *
  * Behavior profiles (via --profile or MOCK_AGENT_PROFILE env var):
- *   standard   - Default: init + tool_use(Read/Edit) + text + result (current behavior)
- *   minimal    - Fast: init + text + result
- *   multi-turn - Stdin-based: first turn + wait for JSONL on stdin + respond per turn
- *   error      - Failure: init + error result, exits with code 1
- *   rate-limit - Rate limiting: init + rate_limit_event(rejected) + text + rate_limit_event(allowed) + result
+ *   standard     - Default: init + tool_use(Read/Edit) + text + result (current behavior)
+ *   minimal      - Fast: init + text + result
+ *   multi-turn   - Stdin-based: first turn + wait for JSONL on stdin + respond per turn
+ *   error        - Failure: init + error result, exits with code 1
+ *   rate-limit   - Rate limiting: init + rate_limit_event(rejected) + text + rate_limit_event(allowed) + result
+ *   todo-progress - TodoWrite events: init + TodoWrite(pending tasks) + TodoWrite(one in_progress) + TodoWrite(all completed) + result
  *
  * Configuration:
  *   --session-id <uuid>   / MOCK_SESSION_ID     - Deterministic session UUID
@@ -243,6 +244,68 @@ async function runMultiTurn(sessionId: string, delayMs: number) {
   }
 }
 
+async function runTodoProgress(sessionId: string, delayMs: number) {
+  const startTime = Date.now();
+
+  emit(buildInitMsg(sessionId));
+  await sleep(delayMs);
+
+  // Emit initial TodoWrite with all tasks pending
+  emit(
+    buildToolUseMsg("TodoWrite", {
+      todos: [
+        { id: "1", content: "Analyze requirements", status: "pending", priority: "high" },
+        { id: "2", content: "Implement feature", status: "pending", priority: "high" },
+        { id: "3", content: "Write tests", status: "pending", priority: "medium" },
+      ],
+    }),
+  );
+  await sleep(delayMs);
+
+  // Update: first task in_progress
+  emit(
+    buildToolUseMsg("TodoWrite", {
+      todos: [
+        { id: "1", content: "Analyze requirements", status: "in_progress", priority: "high" },
+        { id: "2", content: "Implement feature", status: "pending", priority: "high" },
+        { id: "3", content: "Write tests", status: "pending", priority: "medium" },
+      ],
+    }),
+  );
+  await sleep(delayMs);
+
+  // Update: first task complete, second in_progress
+  emit(
+    buildToolUseMsg("TodoWrite", {
+      todos: [
+        { id: "1", content: "Analyze requirements", status: "completed", priority: "high" },
+        { id: "2", content: "Implement feature", status: "in_progress", priority: "high" },
+        { id: "3", content: "Write tests", status: "pending", priority: "medium" },
+      ],
+    }),
+  );
+  await sleep(delayMs);
+
+  // Update: all tasks completed
+  emit(
+    buildToolUseMsg("TodoWrite", {
+      todos: [
+        { id: "1", content: "Analyze requirements", status: "completed", priority: "high" },
+        { id: "2", content: "Implement feature", status: "completed", priority: "high" },
+        { id: "3", content: "Write tests", status: "completed", priority: "medium" },
+      ],
+    }),
+  );
+  await sleep(delayMs);
+
+  emit(buildAssistantTextMsg("Mock agent completed all tasks."));
+  await sleep(delayMs);
+
+  emit(
+    buildResultMsg(sessionId, "Mock agent completed all tasks.", startTime, 1),
+  );
+}
+
 async function runRateLimit(sessionId: string, delayMs: number) {
   const startTime = Date.now();
 
@@ -311,6 +374,9 @@ async function main() {
       break;
     case "error":
       await runError(sessionId, delayMs);
+      break;
+    case "todo-progress":
+      await runTodoProgress(sessionId, delayMs);
       break;
     case "rate-limit":
       await runRateLimit(sessionId, delayMs);
