@@ -570,7 +570,15 @@ export async function startServer(port?: number) {
     }
   }
 
-  await migrate(db, { migrationsFolder: getMigrationsFolder() });
+  try {
+    await migrate(db, { migrationsFolder: getMigrationsFolder() });
+  } catch (err) {
+    // libsql@0.4.7 sometimes throws SQLITE_OK ("not an error") even when migration succeeds.
+    // Ignore this specific false-positive; re-throw real errors.
+    const msg = err instanceof Error ? err.message : String(err);
+    if (!msg.includes("SQLITE_OK")) throw err;
+    console.warn("[startup] migration threw SQLITE_OK false-positive — continuing");
+  }
 
   // Disable auto_monitor on every startup — prevents mass agent spawns from idle workspaces
   {
