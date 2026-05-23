@@ -339,11 +339,12 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
   const [tab, setTab] = useState<Tab>("agent");
 
   // Project-specific settings
-  const [projectSettings, setProjectSettings] = useState<{ setupScript: string; setupBlocking: boolean; setupEnabled: boolean; teardownScript: string }>({
+  const [projectSettings, setProjectSettings] = useState<{ setupScript: string; setupBlocking: boolean; setupEnabled: boolean; teardownScript: string; color: string | null }>({
     setupScript: "",
     setupBlocking: true,
     setupEnabled: true,
     teardownScript: "",
+    color: null,
   });
   const [generatingScript, setGeneratingScript] = useState(false);
   const [generatingTeardown, setGeneratingTeardown] = useState(false);
@@ -441,7 +442,7 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
         // Load project-specific settings
         if (activeProjectId) {
           try {
-            const projects = await apiFetch<{ setupScript: string | null; setupBlocking: boolean }[]>(("/api/projects"));
+            const projects = await apiFetch<{ setupScript: string | null; setupBlocking: boolean; color: string | null }[]>(("/api/projects"));
             const project = projects.find((p: any) => p.id === activeProjectId);
             if (project) {
               setProjectSettings({
@@ -449,6 +450,7 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                 setupBlocking: project.setupBlocking !== false,
                 setupEnabled: (project as any).setupEnabled !== false,
                 teardownScript: (project as any).teardownScript || "",
+                color: project.color || null,
               });
             }
           } catch {
@@ -514,6 +516,7 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
               setupBlocking: projectSettings.setupBlocking,
               setupEnabled: projectSettings.setupEnabled,
               teardownScript: projectSettings.teardownScript || null,
+              color: projectSettings.color || null,
             }),
           }),
         );
@@ -959,6 +962,30 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                     <p className="text-sm text-gray-500">No active project selected.</p>
                   ) : (
                     <div className="space-y-3">
+                      <Field label="Project Color">
+                        <div className="flex items-center gap-3">
+                          <input
+                            type="color"
+                            value={projectSettings.color || "#6B7280"}
+                            onChange={(e) => setProjectSettings(s => ({ ...s, color: e.target.value }))}
+                            className="h-10 w-20 border border-gray-300 rounded cursor-pointer"
+                          />
+                          <div className="flex-1">
+                            <span className="text-sm font-mono text-gray-700">{projectSettings.color || "#6B7280"}</span>
+                            {projectSettings.color && (
+                              <button
+                                onClick={() => setProjectSettings(s => ({ ...s, color: null }))}
+                                className="text-xs text-gray-500 hover:text-gray-700 block mt-1"
+                              >
+                                Clear color
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                        <p className="text-xs text-gray-500 mt-2">
+                          The project color will be displayed in the project dropdown in the header.
+                        </p>
+                      </Field>
                       <CollapsibleSection
                         title="Setup Script"
                         configured={!!projectSettings.setupScript}
