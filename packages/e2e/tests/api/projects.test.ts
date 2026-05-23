@@ -52,8 +52,10 @@ test.describe("Projects API", () => {
     expect(body.name).toBeDefined();
     expect(body.repoPath).toBeDefined();
 
-    // Clean up: the project was created for testing; delete its statuses would be
-    // complex, so we leave it. The name has a timestamp to avoid collisions.
+    // Clean up the temporary project
+    if (body?.id) {
+      await request.delete(`${SERVER_URL}/api/projects/${body.id}`);
+    }
   });
 
   test("POST /api/projects rejects missing repoPath", async ({ request }) => {
