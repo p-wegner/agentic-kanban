@@ -850,7 +850,11 @@ export function BoardPage() {
 >>>>>>> 77d9d10 (feat: add Run Now button to board toolbar next to Monitor button)
 =======
   const [moveToDonePending, setMoveToDonePending] = useState<{ issue: IssueWithStatus; confirm: () => Promise<void> } | null>(null);
+<<<<<<< HEAD
 >>>>>>> 174c8c9 (feat: show MoveToDoneDialog when moving issue with active workspace to Done/Cancelled)
+=======
+  const [pendingWorkspaceIssueIds, setPendingWorkspaceIssueIds] = useState<Set<string>>(new Set());
+>>>>>>> f8bdde1 (feat: show workspace creation pending indicator on ticket card)
 
   const refetchBoard = useCallback(async (projectId?: string) => {
     const pid = projectId || activeProjectId;
@@ -870,6 +874,18 @@ export function BoardPage() {
         }
       }
     }
+    // Clear pending workspace indicator for issues that now have an active workspace
+    setPendingWorkspaceIssueIds((prev) => {
+      if (prev.size === 0) return prev;
+      const next = new Set(prev);
+      for (const col of board) {
+        for (const issue of col.issues) {
+          const ws = issue.workspaceSummary?.main;
+          if (ws && ws.status !== "closed") next.delete(issue.id);
+        }
+      }
+      return next.size === prev.size ? prev : next;
+    });
     if (inactiveIssueIds.size > 0) {
       setLiveStats((prev) => {
         const next = { ...prev };
@@ -2273,6 +2289,7 @@ export function BoardPage() {
               sessionActivity={sessionActivity}
               liveStats={liveStats}
               sessionTodos={sessionTodos}
+              pendingWorkspaceIssueIds={pendingWorkspaceIssueIds}
             >
               <CreateIssueForm
                 projectId={activeProjectId}
@@ -2331,6 +2348,7 @@ export function BoardPage() {
           project={activeProject ?? null}
           onClose={() => { setWorkspaceIssue(null); setWorkspaceInitial(null); setWorkspaceOpenCreate(false); }}
           onWorkspaceChange={() => refetchBoard()}
+          onWorkspaceCreating={(issueId) => setPendingWorkspaceIssueIds((prev) => new Set([...prev, issueId]))}
           initialWorkspaceId={workspaceInitial?.workspaceId}
           initialSessionId={workspaceInitial?.sessionId}
           initialShowCreate={workspaceOpenCreate}
