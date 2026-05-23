@@ -24,7 +24,7 @@ export default defineConfig({
   globalSetup: "./global-setup.ts",
   globalTeardown: "./global-teardown.ts",
   use: {
-    baseURL: `http://localhost:${clientPort}`,
+    baseURL: `http://127.0.0.1:${clientPort}`,
     channel: "chrome",
   },
   webServer: [
