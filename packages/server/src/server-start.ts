@@ -11,6 +11,7 @@ import { createSessionManager } from "./services/session.manager.js";
 import type { ProviderId } from "./services/agent-provider.js";
 import { createBoardEvents } from "./services/board-events.js";
 import { workspaces, issues, projects, projectStatuses, preferences, sessions, agentSkills, issueDependencies, scheduledRuns } from "@agentic-kanban/shared/schema";
+import { getNextCronRun } from "@agentic-kanban/shared/lib/cron-utils.js";
 import { eq, sql, desc } from "drizzle-orm";
 import * as agentService from "./services/agent.service.js";
 import * as gitService from "./services/git.service.js";
@@ -661,9 +662,17 @@ export async function startServer(port?: number) {
       const enabled = await db.select().from(scheduledRuns).where(eq(scheduledRuns.enabled, true));
       for (const run of enabled) {
         const lastRun = run.lastRunAt ? new Date(run.lastRunAt) : null;
-        const nextRun = lastRun
-          ? new Date(lastRun.getTime() + run.intervalMinutes * 60 * 1000)
-          : now; // first run immediately
+        let nextRun: Date;
+        if (run.cronExpression) {
+          const base = lastRun ?? new Date(now.getTime() - 60_000);
+          const next = getNextCronRun(run.cronExpression, base);
+          if (!next) continue;
+          nextRun = next;
+        } else {
+          nextRun = lastRun
+            ? new Date(lastRun.getTime() + run.intervalMinutes * 60 * 1000)
+            : now; // first run immediately
+        }
         if (now >= nextRun) {
           console.log(`[scheduler] triggering scheduled run "${run.name}" (${run.id})`);
           try {
