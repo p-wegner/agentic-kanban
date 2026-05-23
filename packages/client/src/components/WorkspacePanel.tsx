@@ -293,7 +293,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, ini
             const result = await apiFetch<{ sha: string | null; message: string | null }>(
               `/api/workspaces/${ws.id}/latest-commit`,
             );
-            commits[ws.id] = result.sha ? { sha: result.sha, message: result.message! } : null;
+            commits[ws.id] = result.sha && result.message ? { sha: result.sha, message: result.message } : null;
           } catch {
             commits[ws.id] = null;
           }
