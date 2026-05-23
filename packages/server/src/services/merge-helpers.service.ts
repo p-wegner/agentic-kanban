@@ -56,7 +56,7 @@ export async function runLearningStep(
     const learningPrompt = `/learning-step\n\nRun the learning step skill to extract insights from recent session transcripts and update docs/hooks before this workspace is merged.`;
     const { agentCommand: agentCmd, agentArgs, claudeProfile } = resolveAgentSettings(prefMap);
     const sm = getSessionManager();
-    const learningSessId = await sm.startSession(workspaceId, learningPrompt, agentCmd, agentArgs, undefined, claudeProfile, undefined, undefined, undefined, undefined, undefined, "learning");
+    const learningSessId = await sm.startSession({ workspaceId, prompt: learningPrompt, agentCommand: agentCmd, agentArgs, claudeProfile, triggerType: "learning" });
     console.log(`[merge-helpers] learning step started: session=${learningSessId}`);
 
     await new Promise<void>((resolve) => {
