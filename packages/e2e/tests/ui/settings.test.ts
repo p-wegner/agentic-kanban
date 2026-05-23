@@ -22,7 +22,7 @@ test.describe("Settings UI", () => {
     await expect(page.locator("label", { hasText: "Agent Command" })).toBeVisible();
     await expect(page.locator("label", { hasText: "Additional Arguments" })).toBeVisible();
     await expect(page.locator("label", { hasText: "Output Parsing" })).toBeVisible();
-    await expect(page.locator("label", { hasText: "Mock Agent" })).toBeVisible();
+    await expect(page.locator("label", { hasText: "Claude Profile" })).toBeVisible();
   });
 
   test("fill agent command and save", async ({ page }) => {
