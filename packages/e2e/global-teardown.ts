@@ -12,11 +12,13 @@
  *  - "⏰ e2e-..." (scheduled-run system issues whose parent run was deleted without cleanup)
  *  - Any title starting with "e2e-" followed by a random slug
  *
- * Projects created by individual tests (e.g. projects.test.ts registers "E2E Test Project <timestamp>").
- * The base "E2E Test Project" created by global-setup is preserved for the next run.
+ * All projects whose name starts with "E2E Test Project" or whose repoPath is under a temp directory.
+ * The global-setup recreates the project it needs on the next run.
  */
 
 import { request } from "@playwright/test";
+import { tmpdir } from "node:os";
+import { normalize, sep } from "node:path";
 
 const serverPort = Number(process.env.SERVER_PORT) || 3001;
 
@@ -78,13 +80,16 @@ async function globalTeardown() {
       }
     }
 
-    // Clean up temporary projects created by individual tests.
-    // The base "E2E Test Project" (created by global-setup) is preserved for reuse.
+    // Clean up all E2E test projects — global-setup recreates what it needs on the next run.
     const projectsRes = await apiContext.get("/api/projects");
     if (projectsRes.ok()) {
-      const projects: Array<{ id: string; name: string }> = await projectsRes.json();
+      const projects: Array<{ id: string; name: string; repoPath: string }> = await projectsRes.json();
+      const tempPrefix = normalize(tmpdir()) + sep;
       const tempProjects = projects.filter(
-        (p) => p.name.startsWith("E2E Test Project ") || /^e2e-project-/.test(p.name),
+        (p) =>
+          p.name.startsWith("E2E Test Project") ||
+          /^e2e-project-/.test(p.name) ||
+          normalize(p.repoPath).startsWith(tempPrefix),
       );
       if (tempProjects.length > 0) {
         console.log(
