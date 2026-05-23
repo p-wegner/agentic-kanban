@@ -9,16 +9,8 @@ import type { SessionManager } from "../services/session.manager.js";
 import type { BoardEvents } from "../services/board-events.js";
 import type { Database } from "../db/index.js";
 import type { ProviderId } from "../services/agent-provider.js";
-import { resolve, dirname, join } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
 import { writeAgentSkillFile, readLocalSkillPrompt } from "@agentic-kanban/shared/lib/agent-skill-files";
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const MOCK_AGENT_PATH = resolve(__dirname, "../scripts/mock-agent.ts");
-// Resolve tsx from server's node_modules so the mock agent works from any CWD (e.g. worktrees)
-const TSX_LOADER = resolve(__dirname, "../../node_modules/tsx/dist/loader.mjs");
-const TSX_URL = pathToFileURL(TSX_LOADER).href;
-const MOCK_AGENT_COMMAND = `node --import ${TSX_URL} "${MOCK_AGENT_PATH}"`;
+import { resolveAgentSettings } from "../services/agent-settings.service.js";
 
 export function createWorkspacesRoute(
   database: Database = db,
@@ -154,27 +146,19 @@ export function createWorkspacesRoute(
         }
       }
 
-      // Read agent settings from preferences
+      // Read agent settings from preferences, then allow body.claudeProfile to override
       const prefRows = await database.select().from(preferences);
       const prefMap = new Map(prefRows.map(r => [r.key, r.value]));
 
-      const useMock = prefMap.get("mock_agent") === "true" || process.env.MOCK_AGENT === "1";
-      if (useMock) {
-        const mockProfile = prefMap.get("mock_agent_profile");
-        agentCommand = mockProfile ? `${MOCK_AGENT_COMMAND} --profile ${mockProfile}` : MOCK_AGENT_COMMAND;
-      } else {
-        agentCommand = prefMap.get("agent_command") || undefined;
-      }
-      const skipPerms = prefMap.get("skip_permissions") === "true";
-      const baseArgs = prefMap.get("agent_args") || "";
-      const agentArgs = skipPerms
-        ? (baseArgs ? baseArgs + " --dangerously-skip-permissions" : "--dangerously-skip-permissions")
-        : (baseArgs || undefined);
-      claudeProfile = (body.claudeProfile as string | undefined) || prefMap.get("claude_profile") || undefined;
-      const permissionPromptToolPref = prefMap.get("permission_prompt_tool");
-      const permissionPromptTool = permissionPromptToolPref === "true"
-        ? "mcp__agentic-kanban__approve_tool_use"
-        : (permissionPromptToolPref && permissionPromptToolPref !== "false" ? permissionPromptToolPref : undefined);
+      // Per-workspace profile overrides the global preference
+      const profileOverride = (body.claudeProfile as string | undefined) || undefined;
+      if (profileOverride) prefMap.set("claude_profile", profileOverride);
+
+      const { agentCommand: resolvedCommand, agentArgs, claudeProfile: resolvedProfile, permissionPromptTool } = resolveAgentSettings(prefMap);
+      agentCommand = resolvedCommand;
+      // Keep the raw profile name (including "mock") on the workspace record for display, but pass
+      // undefined to the session when it's the mock profile (resolvedProfile is already sanitized)
+      claudeProfile = profileOverride || prefMap.get("claude_profile") || undefined;
       const provider = (prefMap.get("provider") || undefined) as ProviderId | undefined;
 
       // Insert DB record with workingDir and baseBranch
@@ -218,7 +202,7 @@ export function createWorkspacesRoute(
       if (getSessionManager) {
         const truncatedPrompt = agentPrompt.length > 80 ? agentPrompt.slice(0, 80) + "..." : agentPrompt;
         console.log(`[workspaces] auto-launch: workspaceId=${id} branch=${branch} isDirect=${isDirect} prompt="${truncatedPrompt}" agentCommand=${agentCommand ?? "default"}`);
-        sessionId = await getSessionManager().startSession(id, agentPrompt, agentCommand, agentArgs, undefined, claudeProfile, undefined, permissionPromptTool, planMode, undefined, provider, skillName ? `skill:${skillName}` : "agent");
+        sessionId = await getSessionManager().startSession(id, agentPrompt, agentCommand, agentArgs, undefined, resolvedProfile, undefined, permissionPromptTool, planMode, undefined, provider, skillName ? `skill:${skillName}` : "agent");
       }
 
       // Broadcast board event
@@ -291,6 +275,7 @@ export function createWorkspacesRoute(
         isDirect: workspaces.isDirect,
         planMode: workspaces.planMode,
         includeVisualProof: workspaces.includeVisualProof,
+        readyForMerge: workspaces.readyForMerge,
         status: workspaces.status,
         createdAt: workspaces.createdAt,
         updatedAt: workspaces.updatedAt,
@@ -315,6 +300,7 @@ export function createWorkspacesRoute(
       isDirect: row.isDirect,
       planMode: row.planMode,
       includeVisualProof: row.includeVisualProof,
+      readyForMerge: row.readyForMerge,
       status: row.status,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,

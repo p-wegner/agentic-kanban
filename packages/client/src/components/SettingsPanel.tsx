@@ -12,7 +12,6 @@ interface Settings {
   agent_command?: string;
   agent_args?: string;
   output_parser?: string;
-  mock_agent?: string;
   skip_permissions?: string;
   claude_profile?: string;
   permission_prompt_tool?: string;
@@ -39,7 +38,6 @@ const DEFAULT_SETTINGS: Settings = {
   agent_command: "",
   agent_args: "",
   output_parser: "true",
-  mock_agent: "false",
   skip_permissions: "false",
   claude_profile: "",
   permission_prompt_tool: "true",
@@ -546,12 +544,6 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                       className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
                     />
                   </Field>
-                  <Toggle
-                    checked={settings.mock_agent === "true"}
-                    onChange={setBool("mock_agent")}
-                    label="Mock Agent"
-                    hint="Use a mock agent that emits fake stream-json output instead of launching Claude Code. Useful for testing and development."
-                  />
                 </>
               )}
 
@@ -1239,11 +1231,12 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                               type="checkbox"
                               checked={run.enabled}
                               onChange={async (e) => {
+                                const enabled = e.target.checked;
                                 await apiFetch(`/api/scheduled-runs/${run.id}`, {
                                   method: "PUT",
-                                  body: JSON.stringify({ enabled: e.target.checked }),
+                                  body: JSON.stringify({ enabled }),
                                 });
-                                setScheduledRunsList((r) => r.map((x) => x.id === run.id ? { ...x, enabled: e.target.checked } : x));
+                                setScheduledRunsList((r) => r.map((x) => x.id === run.id ? { ...x, enabled } : x));
                               }}
                               className="rounded border-gray-300"
                             />

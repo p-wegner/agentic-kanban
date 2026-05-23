@@ -1,6 +1,6 @@
 # PRD-01: Features Catalog
 
-<!-- last-synced: 2026-05-23T00:00:00+02:00 | commit: 512d944 -->
+<!-- last-synced: 2026-05-23T16:00:00+02:00 | commit: d7cb8b6 -->
 
 Complete inventory of features, organized by category. Status reflects the current implementation (Stages 0–14 complete).
 
@@ -11,15 +11,19 @@ Complete inventory of features, organized by category. Status reflects the curre
 - Priorities: Urgent, High, Medium, Low
 - Auto-incrementing issue numbers per project (#1, #2, #3)
 - AI enhancement: "Enhance with AI" button spawns Claude CLI to improve title/description
+- **Copy issue reference**: clipboard button in detail panel header copies `#N Title` reference string
 - **Status: DONE**
 
 ### F-TASK-02: Kanban Board View
 - Visual board with columns (statuses) and draggable cards
 - Statuses are per-project (Todo, In Progress, In Review, Done, Cancelled)
+- **Backlog** is a special-purpose status: issues with Backlog status appear in the Backlog slide-in panel rather than a regular board column
 - HTML5 drag-and-drop between columns
 - Collapsible archive group for Done/Cancelled columns
 - Search result highlighting on cards
 - Panel slide-in animations
+- Priority-based column sort: issues within each column sorted by priority
+- **IssueCard hover action row**: compact action row fades in at card bottom on hover — Resume, Start Workspace, and Move to next status buttons; card body click still opens detail panel
 - **Status: DONE**
 
 ### F-TASK-03: Issue Filtering & Search
@@ -86,6 +90,12 @@ Complete inventory of features, organized by category. Status reflects the curre
 - Available for both active/idle and closed workspaces
 - **Status: DONE**
 
+### F-WS-09: Ready for Merge Badge
+- Mark a workspace as ready for merge via `POST /api/workspaces/:id/mark-ready`
+- `readyForMerge` field exposed on workspace GET and board endpoint workspace summary
+- Green "Ready to merge" badge shown in WorkspacePanel and All Workspaces panel
+- **Status: DONE**
+
 ### F-WS-06: Session Forking
 - Fork an existing agent session
 - **Status: NOT PLANNED** — multi-turn resume covers this need
@@ -150,7 +160,7 @@ Complete inventory of features, organized by category. Status reflects the curre
 ### F-MCP-03: Agent Configuration
 - Configurable agent command and args (Settings panel)
 - `claude_profile` setting for gateway auth
-- Mock agent toggle for testing
+- Mock agent: built-in `mock` Claude profile (appears in Claude Profile dropdown; no separate toggle)
 - `auto_merge` and `review_auto_fix` settings
 - **Status: DONE**
 
@@ -197,6 +207,7 @@ Complete inventory of features, organized by category. Status reflects the curre
 ### F-UI-01: Project/Board View
 - Multi-project support with dropdown switcher in header
 - Kanban board layout with collapsible column groups
+- Header contains an "Unregister project" button (trash/minus icon next to project dropdown); clicking it opens a confirmation dialog: "Remove [name] from the board? This does not delete the git repository."
 - **Status: DONE**
 
 ### F-UI-02: Workspace Detail View
@@ -243,7 +254,7 @@ Complete inventory of features, organized by category. Status reflects the curre
 ### F-UI-09: Settings Panel
 - Tabbed modal (gear icon in header), 9 tabs:
   - **Agent**: agent command/binary, Claude profile (--settings flag), additional CLI args
-  - **Workflow**: pipeline visualization (Agent runs → AI Review → Auto-fix → Auto-merge → Merge); auto code review, auto-fix, auto-merge toggles; "Use new profile on resume" toggle — starts a fresh session with the current Claude profile instead of resuming the previous session
+  - **Workflow**: pipeline visualization (Agent runs → AI Review → Auto-fix → Auto-merge → Merge); auto code review, auto-fix, auto-merge toggles; "Use new profile on resume" toggle — starts a fresh session with the current Claude profile instead of resuming the previous session; **Board Monitoring** feature also surfaces in the board header toolbar (next to Backlog/Tasks buttons) as a "Monitor" toggle button and a "Run monitor now and reset timer" play button
   - **Skills**: list of global + project-scoped skills with install status; Edit buttons
   - **MCP Tools**: MCP server configuration and tool list
   - **UI**: output parsing mode (Minimal/Full), Dynamic column scaling toggle, Persistent agent (warm pool) toggle
@@ -255,13 +266,15 @@ Complete inventory of features, organized by category. Status reflects the curre
 
 ### F-UI-10: Board Views
 - Three view modes: Board (kanban columns), Graph (dependency DAG), Table (flat sortable list)
-- Table view: sortable columns (#, Title, Status, Priority, Estimate, Created), status filter dropdown, row click opens detail panel
+- Table view: sortable columns (#, Title, Status, Priority, Estimate, Updated, Tags); **Active only** default filter (dropdown: Active only, All); row click opens detail panel
 - Graph view: nodes colored by status, dependency arrows, "Show completed" toggle, zoom controls (+/−/reset), status legend
 - View toggle buttons in board header
 - **Status: DONE**
 
 ### F-UI-11: Board Stats Bar
 - Ticket counts per status (Todo N, In Progress N, In Review N, AI Reviewed N, N done)
+- **Circular progress ring** showing total ticket count and percentage done (e.g. "207 tickets 93%")
+- **Horizontal proportional color bar** under the stats row showing relative counts per status (Todo/In Progress/In Review/Done/Cancelled colored segments)
 - Commits on main branch counter (e.g. "640 commits")
 - Blocked filter toggle — hides all non-blocked issues
 - Tasks button — opens Quick Tasks panel (skill launcher)
@@ -287,6 +300,13 @@ Complete inventory of features, organized by category. Status reflects the curre
 - Search input: filter by title or branch name
 - Status filter tabs: All, Active, Running, Idle, Reviewing, Fixing, Closed
 - Empty state with helpful prompt
+- **Status: DONE**
+
+### F-UI-15: Backlog Panel
+- Slide-in panel triggered by "Backlog N" count button in board toolbar
+- "Drop issues here to move to Backlog" drag-drop target area at the top of the panel
+- "Backlog is empty" empty state when no issues have Backlog status
+- Issues with Backlog status appear here; dragging an issue from the board drops it into the Backlog panel
 - **Status: DONE**
 
 ## Category: Infrastructure

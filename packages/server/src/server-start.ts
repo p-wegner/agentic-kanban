@@ -18,15 +18,12 @@ import { killProcessesInDir } from "./services/process-cleanup.js";
 import { runScript } from "./services/script-runner.js";
 import { execFile } from "node:child_process";
 import { resolve, dirname } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 import { existsSync } from "node:fs";
 import { getMigrationsFolder } from "./db/migrations.js";
+import { MOCK_AGENT_COMMAND, isMockProfile } from "./services/agent-settings.service.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const MOCK_AGENT_PATH = resolve(__dirname, "./scripts/mock-agent.ts");
-const TSX_LOADER = resolve(__dirname, "../node_modules/tsx/dist/loader.mjs");
-const TSX_URL = pathToFileURL(TSX_LOADER).href;
-const MOCK_AGENT_COMMAND = `node --import ${TSX_URL} "${MOCK_AGENT_PATH}"`;
 
 const DEFAULT_REVIEW_PROMPT = `You are an AI code reviewer. Review the changes on branch '{{branch}}'.
 
@@ -219,10 +216,10 @@ export async function startServer(port?: number) {
         let learningAfterReviewPromise: Promise<void> = Promise.resolve();
         if (prefMap.get("learning_step_after_review") === "true" && workspace.workingDir) {
           try {
-            const useMockLearn = prefMap.get("mock_agent") === "true" || process.env.MOCK_AGENT === "1";
-            const agentCmdLearn = useMockLearn ? MOCK_AGENT_COMMAND : (prefMap.get("agent_command") || undefined);
+            const profileLearn = prefMap.get("claude_profile") || undefined;
+            const agentCmdLearn = isMockProfile(profileLearn) ? MOCK_AGENT_COMMAND : (prefMap.get("agent_command") || undefined);
             const agentArgsLearn = prefMap.get("agent_args") || undefined;
-            const claudeProfileLearn = useMockLearn ? undefined : (prefMap.get("claude_profile") || undefined);
+            const claudeProfileLearn = isMockProfile(profileLearn) ? undefined : profileLearn;
             const learningPrompt = `/learning-step\n\nRun the learning step skill to extract insights from recent session transcripts and update docs/hooks.`;
             const learnSessId = await sessionManager.startSession(workspace.id, learningPrompt, agentCmdLearn, agentArgsLearn ? agentArgsLearn.split(" ") : undefined, undefined, claudeProfileLearn, undefined, undefined, undefined, undefined, undefined, "learning");
             learningSessionIds.add(learnSessId);
@@ -298,10 +295,10 @@ export async function startServer(port?: number) {
         // Optional learning step after agent (runs in parallel with review)
         if (prefMap.get("learning_step_after_agent") === "true" && workspace.workingDir) {
           try {
-            const useMockLearn = prefMap.get("mock_agent") === "true" || process.env.MOCK_AGENT === "1";
-            const agentCmdLearn = useMockLearn ? MOCK_AGENT_COMMAND : (prefMap.get("agent_command") || undefined);
+            const profileLearn = prefMap.get("claude_profile") || undefined;
+            const agentCmdLearn = isMockProfile(profileLearn) ? MOCK_AGENT_COMMAND : (prefMap.get("agent_command") || undefined);
             const agentArgsLearn = prefMap.get("agent_args") || undefined;
-            const claudeProfileLearn = useMockLearn ? undefined : (prefMap.get("claude_profile") || undefined);
+            const claudeProfileLearn = isMockProfile(profileLearn) ? undefined : profileLearn;
             const learningPrompt = `/learning-step\n\nRun the learning step skill to extract insights from recent session transcripts and update docs/hooks.`;
             const learnSessId = await sessionManager.startSession(workspace.id, learningPrompt, agentCmdLearn, agentArgsLearn ? agentArgsLearn.split(" ") : undefined, undefined, claudeProfileLearn, undefined, undefined, undefined, undefined, undefined, "learning");
             learningSessionIds.add(learnSessId);
@@ -312,9 +309,9 @@ export async function startServer(port?: number) {
         }
 
         if (autoReview) {
-          const useMock = prefMap.get("mock_agent") === "true" || process.env.MOCK_AGENT === "1";
-          const agentCommand = useMock ? MOCK_AGENT_COMMAND : (prefMap.get("agent_command") || undefined);
-          const claudeProfile = useMock ? undefined : (prefMap.get("claude_profile") || undefined);
+          const reviewProfile = prefMap.get("claude_profile") || undefined;
+          const agentCommand = isMockProfile(reviewProfile) ? MOCK_AGENT_COMMAND : (prefMap.get("agent_command") || undefined);
+          const claudeProfile = isMockProfile(reviewProfile) ? undefined : reviewProfile;
           const reviewArgs = buildReviewArgs(prefMap);
           const autoFix = prefMap.get("review_auto_fix") !== "false";
           const provider = (prefMap.get("provider") || undefined) as ProviderId | undefined;
@@ -369,9 +366,10 @@ export async function startServer(port?: number) {
       if (prefMapLearning.get("learning_step_before_merge") === "true" && workspace.workingDir) {
         try {
           const learningPrompt = `/learning-step\n\nRun the learning step skill to extract insights from recent session transcripts and update docs/hooks before this workspace is merged.`;
-          const agentCmd = prefMapLearning.get("agent_command") || undefined;
+          const learningProfile = prefMapLearning.get("claude_profile") || undefined;
+          const agentCmd = isMockProfile(learningProfile) ? MOCK_AGENT_COMMAND : (prefMapLearning.get("agent_command") || undefined);
           const agentArgs = prefMapLearning.get("agent_args") || undefined;
-          const claudeProfile = prefMapLearning.get("claude_profile") || undefined;
+          const claudeProfile = isMockProfile(learningProfile) ? undefined : learningProfile;
           const learningSessId = await sessionManager.startSession(workspace.id, learningPrompt, agentCmd, agentArgs ? agentArgs.split(" ") : undefined, undefined, claudeProfile, undefined, undefined, undefined, undefined, undefined, "learning");
           learningSessionIds.add(learningSessId);
           console.log(`[workflow] learning step started: session=${learningSessId}`);
@@ -464,9 +462,9 @@ export async function startServer(port?: number) {
 
       const prefRows = await db.select().from(preferences);
       const prefMap = new Map(prefRows.map(r => [r.key, r.value]));
-      const useMock = prefMap.get("mock_agent") === "true" || process.env.MOCK_AGENT === "1";
-      const agentCommand = useMock ? MOCK_AGENT_COMMAND : (prefMap.get("agent_command") || undefined);
-      const claudeProfile = useMock ? undefined : (prefMap.get("claude_profile") || undefined);
+      const manualProfile = prefMap.get("claude_profile") || undefined;
+      const agentCommand = isMockProfile(manualProfile) ? MOCK_AGENT_COMMAND : (prefMap.get("agent_command") || undefined);
+      const claudeProfile = isMockProfile(manualProfile) ? undefined : manualProfile;
       const reviewArgs = buildReviewArgs(prefMap);
       const autoFix = prefMap.get("review_auto_fix") !== "false";
       const provider = (prefMap.get("provider") || undefined) as ProviderId | undefined;
@@ -531,24 +529,35 @@ export async function startServer(port?: number) {
     try {
       const { execSync: _execSync } = await import("node:child_process");
       const wmic = _execSync(
-        `wmic process where "name='node.exe'" get ProcessId,CommandLine /format:list`,
+        `wmic process where "name='node.exe'" get ProcessId,ParentProcessId,CommandLine /format:list`,
         { encoding: "utf8", stdio: ["pipe", "pipe", "pipe"], windowsHide: true, timeout: 8000 },
       );
       const myPid = process.pid;
-      const myPpid = process.ppid; // tsx watch parent — must not be killed
       const lines = wmic.split(/\r?\n/);
-      const procs: { pid: number; cmd: string }[] = [];
+      const procs: { pid: number; ppid: number; cmd: string }[] = [];
       let curCmd = "";
       let curPid = 0;
+      let curPpid = 0;
       for (const line of lines) {
         const trimmed = line.trim();
         if (trimmed.startsWith("CommandLine=")) curCmd = trimmed.slice("CommandLine=".length);
+        if (trimmed.startsWith("ParentProcessId=")) curPpid = parseInt(trimmed.slice("ParentProcessId=".length), 10);
         if (trimmed.startsWith("ProcessId=")) curPid = parseInt(trimmed.slice("ProcessId=".length), 10);
-        if (curCmd && curPid) { procs.push({ pid: curPid, cmd: curCmd }); curCmd = ""; curPid = 0; }
+        if (curCmd && curPid) { procs.push({ pid: curPid, ppid: curPpid, cmd: curCmd }); curCmd = ""; curPid = 0; curPpid = 0; }
+      }
+      // Build a map for ancestor lookup, then collect the full ancestor chain of our process.
+      const ppidMap = new Map(procs.map(p => [p.pid, p.ppid]));
+      const ancestors = new Set<number>();
+      let ancestor = myPid;
+      for (let i = 0; i < 10; i++) {
+        const parent = ppidMap.get(ancestor);
+        if (!parent || parent === 0 || parent === ancestor) break;
+        ancestors.add(parent);
+        ancestor = parent;
       }
       let killed = 0;
       for (const p of procs) {
-        if (p.pid === myPid || p.pid === myPpid) continue;
+        if (p.pid === myPid || ancestors.has(p.pid)) continue;
         const cmd = p.cmd.replace(/\\/g, "/");
         // Match tsx-based server processes (hot-reload survivors) for the main server entry point.
         // Avoid killing worktree-specific servers by requiring the cmd NOT to contain a worktree path marker.
@@ -572,12 +581,13 @@ export async function startServer(port?: number) {
 
   try {
     await migrate(db, { migrationsFolder: getMigrationsFolder() });
-  } catch (err) {
-    // libsql@0.4.7 sometimes throws SQLITE_OK ("not an error") even when migration succeeds.
-    // Ignore this specific false-positive; re-throw real errors.
-    const msg = err instanceof Error ? err.message : String(err);
-    if (!msg.includes("SQLITE_OK")) throw err;
-    console.warn("[startup] migration threw SQLITE_OK false-positive — continuing");
+  } catch (err: unknown) {
+    // libsql@0.4.7 + Node.js 26 bug: CREATE TABLE IF NOT EXISTS on existing table returns
+    // SQLITE_OK (0) which libsql misinterprets as an error. Safe to ignore when DB is already migrated.
+    const isSpuriousLibsqlBug = err instanceof Error && err.message.includes("not an error") &&
+      (err as NodeJS.ErrnoException).code === "SQLITE_OK";
+    if (!isSpuriousLibsqlBug) throw err;
+    console.warn("[startup] Ignoring known libsql SQLITE_OK false-error during migrate — DB already up to date");
   }
 
   // Disable auto_monitor on every startup — prevents mass agent spawns from idle workspaces

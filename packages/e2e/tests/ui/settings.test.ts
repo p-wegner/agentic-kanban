@@ -22,7 +22,7 @@ test.describe("Settings UI", () => {
     await expect(page.locator("label", { hasText: "Agent Command" })).toBeVisible();
     await expect(page.locator("label", { hasText: "Additional Arguments" })).toBeVisible();
     await expect(page.locator("label", { hasText: "Output Parsing" })).toBeVisible();
-    await expect(page.locator("label", { hasText: "Mock Agent" })).toBeVisible();
+    await expect(page.locator("label", { hasText: "Claude Profile" })).toBeVisible();
   });
 
   test("fill agent command and save", async ({ page }) => {
@@ -66,18 +66,18 @@ test.describe("Settings UI", () => {
     await expect(inputAfter).toHaveValue("claude-persist-test");
   });
 
-  test("toggle mock agent checkbox", async ({ page }) => {
+  test("select mock profile from claude profile dropdown", async ({ page }) => {
     await page.locator('button[title="Settings"]').click();
     await expect(page.locator("h2", { hasText: "Settings" })).toBeVisible();
 
-    // Find the mock agent checkbox (scoped to its label to avoid strict mode)
-    const mockLabel = page.locator("label", { hasText: "Mock Agent" });
-    const mockCheckbox = mockLabel.locator('input[type="checkbox"]');
-    await expect(mockCheckbox).toBeVisible();
+    // The Claude Profile dropdown should include the built-in "mock" option
+    const profileSelect = page.locator('label', { hasText: "Claude Profile" }).locator('select');
+    await expect(profileSelect).toBeVisible();
+    await expect(profileSelect.locator('option[value="mock"]')).toHaveCount(1);
 
-    // Check it
-    await mockCheckbox.check();
-    await expect(mockCheckbox).toBeChecked();
+    // Select mock profile
+    await profileSelect.selectOption("mock");
+    await expect(profileSelect).toHaveValue("mock");
 
     // Save and reopen
     await page.locator('button:has-text("Save")').click();
@@ -86,10 +86,9 @@ test.describe("Settings UI", () => {
     await page.locator('button[title="Settings"]').click();
     await expect(page.locator("h2", { hasText: "Settings" })).toBeVisible();
 
-    // Should still be checked
-    const mockLabelAfter = page.locator("label", { hasText: "Mock Agent" });
-    const mockCheckboxAfter = mockLabelAfter.locator('input[type="checkbox"]');
-    await expect(mockCheckboxAfter).toBeChecked();
+    // Should still be selected
+    const profileSelectAfter = page.locator('label', { hasText: "Claude Profile" }).locator('select');
+    await expect(profileSelectAfter).toHaveValue("mock");
   });
 
   test("cancel closes panel without saving", async ({ page }) => {
@@ -118,7 +117,7 @@ test.afterAll(async ({ request }) => {
       agent_command: "",
       agent_args: "",
       output_parser: "true",
-      mock_agent: "false",
+      claude_profile: "",
     },
   });
 });
