@@ -197,18 +197,6 @@
       "when": 1779611200000,
       "tag": "0027_estimate_field",
       "breakpoints": true
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> d778ce3 (perf: add DB indexes and stale-while-revalidate conflict cache for board load)
-=======
->>>>>>> d318021 (perf: add DB indexes and stale-while-revalidate conflict cache for board load)
-=======
->>>>>>> 59675e9 (perf: add DB indexes and stale-while-revalidate conflict cache for board load)
     },
     {
       "idx": 28,
@@ -216,15 +204,6 @@
       "when": 1779697600000,
       "tag": "0028_perf_indexes_conflict_cache",
       "breakpoints": true
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> b6a4ecf (feat: add estimate/sizing field to issues (XS/S/M/L/XL))
-=======
->>>>>>> d778ce3 (perf: add DB indexes and stale-while-revalidate conflict cache for board load)
-=======
     },
     {
       "idx": 29,
@@ -232,9 +211,6 @@
       "when": 1779784000000,
       "tag": "0029_issue_artifacts",
       "breakpoints": true
-<<<<<<< HEAD
->>>>>>> 0b16b06 (feat: add issue artifacts schema and routes (from feature/ak-151))
-=======
     },
     {
       "idx": 30,
@@ -242,20 +218,6 @@
       "when": 1779870000000,
       "tag": "0030_thorough_review",
       "breakpoints": true
-<<<<<<< HEAD
-<<<<<<< HEAD
->>>>>>> 39e2791 (feat: add optional thorough code review using more capable model)
-=======
->>>>>>> 26ff491 (feat: add estimate/sizing field to issues (XS/S/M/L/XL))
-=======
->>>>>>> d318021 (perf: add DB indexes and stale-while-revalidate conflict cache for board load)
-=======
->>>>>>> 43685f8 (feat: add estimate/sizing field to issues (XS/S/M/L/XL))
-=======
->>>>>>> 59675e9 (perf: add DB indexes and stale-while-revalidate conflict cache for board load)
-=======
-=======
->>>>>>> ffa8d96 (fix: restore scheduled-runs feature and keyboard shortcuts lost in bad merge fix)
     },
     {
       "idx": 31,
@@ -263,12 +225,6 @@
       "when": 1779956400000,
       "tag": "0031_scheduled_runs",
       "breakpoints": true
-<<<<<<< HEAD
-<<<<<<< HEAD
->>>>>>> 35a39bb (feat: cherry-pick scheduled runs feature from #155 with conflict resolution)
-=======
->>>>>>> ffa8d96 (fix: restore scheduled-runs feature and keyboard shortcuts lost in bad merge fix)
-=======
     },
     {
       "idx": 32,
@@ -276,9 +232,6 @@
       "when": 1780042800000,
       "tag": "0032_diff_stat_cache",
       "breakpoints": true
-<<<<<<< HEAD
->>>>>>> 0099737 (perf: stale-while-revalidate for diff stats, cap background git concurrency)
-=======
     },
     {
       "idx": 33,
@@ -286,9 +239,6 @@
       "when": 1780129200000,
       "tag": "0033_backlog_status",
       "breakpoints": true
-<<<<<<< HEAD
->>>>>>> bc89428 (feat: add Backlog status as default project status with migration)
-=======
     },
     {
       "idx": 34,
@@ -296,9 +246,6 @@
       "when": 1780215600000,
       "tag": "0034_session_pid",
       "breakpoints": true
-<<<<<<< HEAD
->>>>>>> 1ea0691 (feat: prevent server hot-reload from killing agent processes (#222))
-=======
     },
     {
       "idx": 35,
@@ -306,9 +253,6 @@
       "when": 1780302000000,
       "tag": "0035_session_trigger",
       "breakpoints": true
-<<<<<<< HEAD
->>>>>>> 437c42a (feat: add triggerType to sessions — show AI Review, Chat, Fix Conflicts badges in session history)
-=======
     },
     {
       "idx": 36,
@@ -316,7 +260,6 @@
       "when": 1780388400000,
       "tag": "0036_scheduled_runs_cron",
       "breakpoints": true
->>>>>>> 2ac8047 (feat: add cron expression support to scheduled runs)
     }
   ]
 }

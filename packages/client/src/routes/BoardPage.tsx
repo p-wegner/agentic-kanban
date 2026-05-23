@@ -47,81 +47,7 @@ interface Project {
 const ARCHIVE_STATUS_NAMES = new Set(["Done", "Cancelled"]);
 const BACKLOG_STATUS_NAME = "Backlog";
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-type MonitorAction = { at: string; action: "relaunch" | "merge" | "nudge" | "mark_idle" | "mark_dead"; workspaceId: string; issueId: string };
-=======
-type MonitorAction = { at: string; action: "relaunch" | "merge" | "nudge" | "mark_idle" | "mark_dead"; workspaceId: string };
->>>>>>> 01516bd (feat: add board monitor visualization panel)
-=======
-type MonitorAction = { at: string; action: "relaunch" | "merge" | "nudge" | "mark_idle" | "mark_dead"; workspaceId: string; issueId: string };
->>>>>>> 47c4344 (feat: make monitor action log entries clickable workspace links)
-=======
 type MonitorAction = { at: string; action: "relaunch" | "merge" | "nudge" | "mark_idle" | "mark_dead" | "auto_start"; workspaceId: string; issueId: string };
->>>>>>> badbfcc (feat: add nudge auto-start setting to monitor for unblocked Todo items)
-type MonitorStatus = { enabled: boolean; intervalMin: number; active: boolean; lastRun: { at: string; relaunched: number; merged: number; nudged: number } | null; nextRunAt: string | null; recentActions: MonitorAction[] };
-
-const ACTION_LABELS: Record<MonitorAction["action"], { label: string; color: string }> = {
-  relaunch:   { label: "Relaunched agent",  color: "text-blue-600" },
-  merge:      { label: "Triggered merge",   color: "text-purple-600" },
-  nudge:      { label: "Nudged agent",      color: "text-amber-600" },
-  mark_idle:  { label: "Marked idle",       color: "text-gray-500" },
-  mark_dead:  { label: "Marked dead",       color: "text-red-500" },
-  auto_start: { label: "Auto-started issue", color: "text-green-600" },
-=======
-type MonitorAction = { at: string; action: "relaunch" | "merge" | "nudge" | "mark_idle" | "mark_dead" | "auto_start"; workspaceId: string; issueId: string };
-type MonitorStatus = { enabled: boolean; intervalMin: number; active: boolean; lastRun: { at: string; relaunched: number; merged: number; nudged: number } | null; nextRunAt: string | null; recentActions: MonitorAction[] };
-
-const ACTION_LABELS: Record<MonitorAction["action"], { label: string; color: string }> = {
-  relaunch:   { label: "Relaunched agent", color: "text-blue-600" },
-  merge:      { label: "Triggered merge",  color: "text-purple-600" },
-  nudge:      { label: "Nudged agent",     color: "text-amber-600" },
-  mark_idle:  { label: "Marked idle",      color: "text-gray-500" },
-  mark_dead:  { label: "Marked dead",      color: "text-red-500" },
-  auto_start: { label: "Auto-started",     color: "text-green-600" },
->>>>>>> 52ef66c (fix: repair pre-existing build errors (smart quotes in cli.ts, truncated TableView/BoardPage from bad merge))
-};
-
-<<<<<<< HEAD
-<<<<<<< HEAD
-function MonitorPopover({ status, onClose, onOpenWorkspace, columns }: { status: MonitorStatus | null; onClose: () => void; onOpenWorkspace: (workspaceId: string, issueId: string) => void; columns: StatusWithIssues[] }) {
-  const [now, setNow] = useState(Date.now());
-<<<<<<< HEAD
-  const issueMap = useMemo(() => {
-    const m = new Map<string, IssueWithStatus>();
-    for (const col of columns) for (const issue of col.issues) m.set(issue.id, issue);
-    return m;
-  }, [columns]);
-=======
-function MonitorPopover({ status, onClose }: { status: MonitorStatus | null; onClose: () => void }) {
-  const [now, setNow] = useState(Date.now());
->>>>>>> 01516bd (feat: add board monitor visualization panel)
-=======
-function MonitorPopover({ status, onClose, onOpenWorkspace, columns }: { status: MonitorStatus | null; onClose: () => void; onOpenWorkspace: (workspaceId: string, issueId: string) => void; columns: StatusWithIssues[] }) {
-  const [now, setNow] = useState(Date.now());
-  const issueMap = useMemo(() => {
-    const m = new Map<string, IssueWithStatus>();
-    for (const col of columns) for (const issue of col.issues) m.set(issue.id, issue);
-    return m;
-  }, [columns]);
->>>>>>> 47c4344 (feat: make monitor action log entries clickable workspace links)
-=======
-type MonitorAction = { at: string; action: "relaunch" | "merge" | "nudge" | "mark_idle" | "mark_dead"; workspaceId: string };
-=======
-type MonitorAction = { at: string; action: "relaunch" | "merge" | "nudge" | "mark_idle" | "mark_dead"; workspaceId: string; issueId: string };
->>>>>>> f7a87fc (feat: make monitor action log entries clickable workspace links)
-=======
-type MonitorAction = { at: string; action: "relaunch" | "merge" | "nudge" | "mark_idle" | "mark_dead"; workspaceId: string };
->>>>>>> bf9db15 (feat: add board monitor visualization panel)
-=======
-type MonitorAction = { at: string; action: "relaunch" | "merge" | "nudge" | "mark_idle" | "mark_dead" | "auto_start"; workspaceId: string; issueId: string };
->>>>>>> 0c15856 (fix: restore BoardPage.tsx from clean base and re-apply monitor enhancements with issueId/auto_start)
 type MonitorStatus = { enabled: boolean; intervalMin: number; active: boolean; lastRun: { at: string; relaunched: number; merged: number; nudged: number } | null; nextRunAt: string | null; recentActions: MonitorAction[] };
 
 const ACTION_LABELS: Record<MonitorAction["action"], { label: string; color: string }> = {
@@ -133,42 +59,7 @@ const ACTION_LABELS: Record<MonitorAction["action"], { label: string; color: str
   auto_start: { label: "Auto-started issue", color: "text-green-600" },
 };
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-function MonitorPopover({ status, onClose, onOpenWorkspace, columns }: { status: MonitorStatus | null; onClose: () => void; onOpenWorkspace: (workspaceId: string, issueId: string) => void; columns: StatusWithIssues[] }) {
-  const [now, setNow] = useState(Date.now());
-<<<<<<< HEAD
-<<<<<<< HEAD
->>>>>>> 1407a7f (feat: add board monitor visualization panel)
-=======
-  const issueMap = useMemo(() => {
-    const m = new Map<string, IssueWithStatus>();
-    for (const col of columns) for (const issue of col.issues) m.set(issue.id, issue);
-    return m;
-  }, [columns]);
->>>>>>> f7a87fc (feat: make monitor action log entries clickable workspace links)
-=======
-function MonitorPopover({ status, onClose }: { status: MonitorStatus | null; onClose: () => void }) {
-  const [now, setNow] = useState(Date.now());
->>>>>>> bf9db15 (feat: add board monitor visualization panel)
-=======
->>>>>>> 0c15856 (fix: restore BoardPage.tsx from clean base and re-apply monitor enhancements with issueId/auto_start)
-=======
->>>>>>> 52ef66c (fix: repair pre-existing build errors (smart quotes in cli.ts, truncated TableView/BoardPage from bad merge))
-=======
-function MonitorPopover({ status, onClose, onOpenWorkspace, columns, onRunNow }: { status: MonitorStatus | null; onClose: () => void; onOpenWorkspace: (workspaceId: string, issueId: string) => void; columns: StatusWithIssues[]; onRunNow: () => Promise<void> }) {
-=======
 function MonitorPopover({ status, onClose, onOpenWorkspace, columns, onRunNow, autoMonitor, onToggle, interval, onIntervalChange, nudgeAutoStart, onNudgeAutoStartChange, nudgeWipLimit, onNudgeWipLimitChange }: { status: MonitorStatus | null; onClose: () => void; onOpenWorkspace: (workspaceId: string, issueId: string) => void; columns: StatusWithIssues[]; onRunNow: () => Promise<void>; autoMonitor: boolean; onToggle: () => void; interval: string; onIntervalChange: (v: string) => void; nudgeAutoStart: boolean; onNudgeAutoStartChange: (v: boolean) => void; nudgeWipLimit: string; onNudgeWipLimitChange: (v: string) => void }) {
->>>>>>> 693fe5c (feat: move monitor toggle and settings to board view popover)
-=======
-function MonitorPopover({ status, onClose, onOpenWorkspace, columns, onRunNow, autoMonitor, onToggle, interval, onIntervalChange, nudgeAutoStart, onNudgeAutoStartChange, nudgeWipLimit, onNudgeWipLimitChange, anchorRef }: { status: MonitorStatus | null; onClose: () => void; onOpenWorkspace: (workspaceId: string, issueId: string) => void; columns: StatusWithIssues[]; onRunNow: () => Promise<void>; autoMonitor: boolean; onToggle: () => void; interval: string; onIntervalChange: (v: string) => void; nudgeAutoStart: boolean; onNudgeAutoStartChange: (v: boolean) => void; nudgeWipLimit: string; onNudgeWipLimitChange: (v: string) => void; anchorRef: React.RefObject<HTMLElement | null> }) {
->>>>>>> 7a1bfb9 (fix: board monitor popover stays within viewport, scrollable content)
-=======
-function MonitorPopover({ status, onClose, onOpenWorkspace, columns, onRunNow, autoMonitor, onToggle, interval, onIntervalChange, nudgeAutoStart, onNudgeAutoStartChange, nudgeWipLimit, onNudgeWipLimitChange }: { status: MonitorStatus | null; onClose: () => void; onOpenWorkspace: (workspaceId: string, issueId: string) => void; columns: StatusWithIssues[]; onRunNow: () => Promise<void>; autoMonitor: boolean; onToggle: () => void; interval: string; onIntervalChange: (v: string) => void; nudgeAutoStart: boolean; onNudgeAutoStartChange: (v: boolean) => void; nudgeWipLimit: string; onNudgeWipLimitChange: (v: string) => void }) {
->>>>>>> 05d3860 (fix: replace board monitor popover with fixed left-side panel to prevent viewport overflow)
   const [now, setNow] = useState(Date.now());
   const [running, setRunning] = useState(false);
 
@@ -176,7 +67,6 @@ function MonitorPopover({ status, onClose, onOpenWorkspace, columns, onRunNow, a
     setRunning(true);
     try { await onRunNow(); } finally { setRunning(false); }
   }
->>>>>>> 1adff89 (feat: add Run now button to monitor popover (#220))
 
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 1000);
@@ -275,226 +165,6 @@ function MonitorPopover({ status, onClose, onOpenWorkspace, columns, onRunNow, a
                 <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-400">Active agents</span>
                 <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-emerald-100 text-emerald-700 text-[10px] font-bold">{activeWs.length}</span>
               </div>
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-              <button
-                onClick={onToggle}
-                className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-green-400 focus:ring-offset-1 ${autoMonitor ? "bg-green-500" : "bg-gray-300"}`}
-                title={autoMonitor ? "Disable auto-monitor" : "Enable auto-monitor"}
-              >
-                <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${autoMonitor ? "translate-x-[1.125rem]" : "translate-x-0.5"}`} />
-              </button>
-            </div>
-            <button
-              onClick={handleRunNow}
-              disabled={running}
-              className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-green-600 text-white hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-              title="Run monitor cycle now and reset the timer"
-            >
-              {running ? (
-                <svg className="w-3 h-3 animate-spin" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>
-              ) : (
-                <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path strokeLinecap="round" strokeLinejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 010 1.972l-11.54 6.347a1.125 1.125 0 01-1.667-.986V5.653z"/></svg>
-              )}
-              {running ? "Running..." : "Run now"}
-            </button>
-          </div>
-
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-      {status?.recentActions && status.recentActions.length > 0 ? (
-        <div className="px-3 py-2">
-          <div className="text-gray-400 font-medium uppercase tracking-wide mb-1.5" style={{ fontSize: "10px" }}>Recent actions</div>
-          <div className="space-y-1 max-h-48 overflow-y-auto">
-            {status.recentActions.map((a, i) => {
-              const meta = ACTION_LABELS[a.action];
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-              const issue = issueMap.get(a.issueId);
-              const label = issue ? `#${issue.issueNumber} ${issue.title}` : a.workspaceId.slice(0, 8);
-              return (
-                <div key={i} className="flex items-center justify-between gap-2 min-w-0">
-                  <span className={`${meta.color} font-medium shrink-0`}>{meta.label}</span>
-                  <button
-                    className="text-blue-500 hover:text-blue-700 hover:underline truncate text-left min-w-0 flex-1"
-                    style={{ fontSize: "11px" }}
-                    onClick={() => { onOpenWorkspace(a.workspaceId, a.issueId); onClose(); }}
-                    title={issue ? issue.title : a.workspaceId}
-                  >{label}</button>
-=======
-=======
->>>>>>> 1407a7f (feat: add board monitor visualization panel)
-=======
->>>>>>> bf9db15 (feat: add board monitor visualization panel)
-              return (
-                <div key={i} className="flex items-center justify-between gap-2">
-                  <span className={`${meta.color} font-medium`}>{meta.label}</span>
-                  <span className="text-gray-400 shrink-0 font-mono" style={{ fontSize: "10px" }}>{a.workspaceId.slice(0, 8)}</span>
-<<<<<<< HEAD
-<<<<<<< HEAD
->>>>>>> 01516bd (feat: add board monitor visualization panel)
-=======
-              const issue = issueMap.get(a.issueId);
-              const label = issue ? `#${issue.issueNumber} ${issue.title}` : a.workspaceId.slice(0, 8);
-              return (
-=======
-              const issue = issueMap.get(a.issueId);
-              const label = issue ? `#${issue.issueNumber} ${issue.title}` : a.workspaceId.slice(0, 8);
-              return (
->>>>>>> f7a87fc (feat: make monitor action log entries clickable workspace links)
-                <div key={i} className="flex items-center justify-between gap-2 min-w-0">
-                  <span className={`${meta.color} font-medium shrink-0`}>{meta.label}</span>
-                  <button
-                    className="text-blue-500 hover:text-blue-700 hover:underline truncate text-left min-w-0 flex-1"
-                    style={{ fontSize: "11px" }}
-                    onClick={() => { onOpenWorkspace(a.workspaceId, a.issueId); onClose(); }}
-                    title={issue ? issue.title : a.workspaceId}
-                  >{label}</button>
-<<<<<<< HEAD
->>>>>>> 47c4344 (feat: make monitor action log entries clickable workspace links)
-=======
->>>>>>> 1407a7f (feat: add board monitor visualization panel)
-=======
->>>>>>> f7a87fc (feat: make monitor action log entries clickable workspace links)
-=======
->>>>>>> bf9db15 (feat: add board monitor visualization panel)
-=======
-              const issue = columns.flatMap(c => c.issues).find(iss => iss.id === a.issueId);
-              return (
-=======
-              const issue = columns.flatMap(c => c.issues).find(iss => iss.id === a.issueId);
-              return (
->>>>>>> 52ef66c (fix: repair pre-existing build errors (smart quotes in cli.ts, truncated TableView/BoardPage from bad merge))
-                <div
-                  key={i}
-                  className="flex items-center justify-between gap-2 cursor-pointer hover:bg-gray-50 rounded px-1 -mx-1 py-0.5"
-                  onClick={() => { onOpenWorkspace(a.workspaceId, a.issueId); onClose(); }}
-                >
-                  <span className={`${meta.color} font-medium truncate`}>{meta.label}</span>
-                  {issue && <span className="text-gray-500 truncate shrink" style={{ fontSize: "10px" }}>#{issue.issueNumber}</span>}
-<<<<<<< HEAD
->>>>>>> 0c15856 (fix: restore BoardPage.tsx from clean base and re-apply monitor enhancements with issueId/auto_start)
-=======
->>>>>>> 52ef66c (fix: repair pre-existing build errors (smart quotes in cli.ts, truncated TableView/BoardPage from bad merge))
-                  <span className="text-gray-400 shrink-0">{formatAge(a.at)}</span>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      ) : (
-        <div className="px-3 py-2 text-gray-400">No actions recorded yet</div>
-=======
-=======
-          {(() => {
-            const activeWs = columns.flatMap(c => c.issues).filter(iss =>
-              iss.workspaceSummary?.main &&
-              (iss.workspaceSummary.main.status === "active" || iss.workspaceSummary.main.status === "reviewing" || iss.workspaceSummary.main.status === "fixing") &&
-              iss.workspaceSummary.main.lastAssistantMessage
-            );
-            if (activeWs.length === 0) return null;
-            return (
-=======
-        {autoMonitor && (
-          <>
-            {/* Last run summary */}
-            <div className="px-3 py-2 border-b border-gray-100 space-y-1.5">
-              {status?.lastRun ? (
-                <>
-                  <div className="flex justify-between text-gray-500">
-                    <span>Last run</span>
-                    <span className="text-gray-700">{formatAge(status.lastRun.at)}</span>
-                  </div>
-                  <div className="flex gap-3">
-                    {status.lastRun.relaunched > 0 && <span className="text-blue-600">{status.lastRun.relaunched} relaunched</span>}
-                    {status.lastRun.merged > 0 && <span className="text-purple-600">{status.lastRun.merged} merged</span>}
-                    {status.lastRun.nudged > 0 && <span className="text-amber-600">{status.lastRun.nudged} nudged</span>}
-                    {status.lastRun.relaunched === 0 && status.lastRun.merged === 0 && status.lastRun.nudged === 0 && (
-                      <span className="text-gray-400">No actions needed</span>
-                    )}
-                  </div>
-                </>
-              ) : (
-                <div className="text-gray-400">No runs yet this session</div>
-              )}
-            </div>
-
-            {/* Active agents */}
-            {activeWs.length > 0 && (
->>>>>>> 1327c16 (fix: board monitor popover stays within viewport, scrollable content)
-              <div className="px-3 py-2 border-b border-gray-100">
-                <div className="text-gray-400 font-medium uppercase tracking-wide mb-1.5" style={{ fontSize: "10px" }}>
-                  Active agents ({activeWs.length})
-                </div>
-                <div className="space-y-1.5">
-                  {activeWs.map(iss => (
-                    <div key={iss.id} className="cursor-pointer hover:bg-gray-50 rounded px-1.5 -mx-1.5 py-1" onClick={() => { onOpenWorkspace(iss.workspaceSummary!.main!.id, iss.id); onClose(); }}>
-                      <div className="flex items-center gap-1.5 mb-0.5">
-                        <span className="w-1.5 h-1.5 rounded-full bg-green-400 shrink-0" />
-                        <span className="font-medium text-gray-600">#{iss.issueNumber}</span>
-                        <span className="text-gray-400 truncate" style={{ fontSize: "10px" }}>{iss.title}</span>
-                      </div>
-                      <p className="text-gray-500 leading-snug line-clamp-2 pl-3" style={{ fontSize: "10px" }}>{iss.workspaceSummary!.main!.lastAssistantMessage}</p>
-                    </div>
-                  ))}
-=======
-          {/* Settings */}
-          <div className="px-4 py-3 border-b border-gray-100 space-y-3">
-            <div className="text-[10px] font-semibold uppercase tracking-wider text-gray-400">Settings</div>
-            <div className="flex items-center gap-2">
-              <label className="text-gray-500 flex-1">Check interval</label>
-              <div className="flex items-center gap-1.5">
-                <input
-                  type="number"
-                  min={1}
-                  max={60}
-                  value={interval}
-                  onChange={(e) => onIntervalChange(e.target.value)}
-                  disabled={!autoMonitor}
-                  className="w-14 border border-gray-300 rounded-md px-2 py-1 text-center focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-40 disabled:bg-gray-50"
-                />
-                <span className="text-gray-500">min</span>
-              </div>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className={`text-gray-600 ${!autoMonitor ? "opacity-40" : ""}`}>Auto-start unblocked todos</span>
-              <button
-                onClick={() => onNudgeAutoStartChange(!nudgeAutoStart)}
-                disabled={!autoMonitor}
-                className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none disabled:opacity-40 ${nudgeAutoStart && autoMonitor ? "bg-green-500" : "bg-gray-300"}`}
-              >
-                <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${nudgeAutoStart ? "translate-x-[1.125rem]" : "translate-x-0.5"}`} />
-              </button>
-            </div>
-            {nudgeAutoStart && autoMonitor && (
-              <div className="flex items-center gap-2 pl-3 border-l-2 border-green-200">
-                <label className="text-gray-500 flex-1">WIP limit</label>
-                <div className="flex items-center gap-1.5">
-                  <input
-                    type="number"
-                    min={1}
-                    max={20}
-                    value={nudgeWipLimit}
-                    onChange={(e) => onNudgeWipLimitChange(e.target.value)}
-                    className="w-14 border border-gray-300 rounded-md px-2 py-1 text-center focus:outline-none focus:ring-1 focus:ring-blue-500"
-                  />
-                  <span className="text-gray-500">in progress</span>
->>>>>>> a8615f5 (fix: redesign board monitor as full-height side panel to prevent viewport overflow)
-                </div>
-              </div>
-            )}
-          </div>
-=======
-=======
->>>>>>> b35f589 (fix: resolve git conflict markers in all 7 client files)
               <div className="overflow-y-auto" style={{ maxHeight: "11rem" }}>
                 {activeWs.map(iss => (
                   <div
@@ -503,29 +173,6 @@ function MonitorPopover({ status, onClose, onOpenWorkspace, columns, onRunNow, a
                     onClick={() => { onOpenWorkspace(iss.workspaceSummary!.main!.id, iss.id); onClose(); }}
                   >
                     <div className="flex items-start gap-2">
-<<<<<<< HEAD
-                      <span className="w-1.5 h-1.5 rounded-full bg-green-400 shrink-0 animate-pulse mt-1" />
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-baseline gap-1 mb-0.5">
-                          <span className="font-semibold text-gray-700 shrink-0">#{iss.issueNumber}</span>
-                          <span className="text-gray-500 truncate text-[11px]">{iss.title}</span>
-                        </div>
-                        <p className="text-gray-400 leading-snug line-clamp-1 text-[11px]">{iss.workspaceSummary!.main!.lastAssistantMessage}</p>
-=======
-              {activeWs.map(iss => (
-                <div
-                  key={iss.id}
-                  className="cursor-pointer hover:bg-gray-50 px-3 py-2 transition-colors group"
-                  onClick={() => { onOpenWorkspace(iss.workspaceSummary!.main!.id, iss.id); onClose(); }}
-                >
-                  <div className="flex items-start gap-2">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0 animate-pulse mt-1.5" />
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-baseline gap-1 mb-0.5">
-                        <span className="font-semibold text-gray-600 shrink-0 text-[11px]">#{iss.issueNumber}</span>
-                        <span className="text-gray-700 truncate text-[11px] font-medium">{iss.title}</span>
->>>>>>> ade6d26 (fix: redesign board monitor as compact dropdown panel that stays within viewport)
-=======
                       <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0 animate-pulse mt-1.5" />
                       <div className="min-w-0 flex-1">
                         <div className="flex items-baseline gap-1 mb-0.5">
@@ -533,7 +180,6 @@ function MonitorPopover({ status, onClose, onOpenWorkspace, columns, onRunNow, a
                           <span className="text-gray-700 truncate text-[11px] font-medium">{iss.title}</span>
                         </div>
                         <p className="text-gray-400 leading-snug line-clamp-1 text-[10px]">{iss.workspaceSummary!.main!.lastAssistantMessage}</p>
->>>>>>> b35f589 (fix: resolve git conflict markers in all 7 client files)
                       </div>
                       <svg className="w-3 h-3 text-gray-300 group-hover:text-gray-500 shrink-0 mt-1 transition-colors" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7"/></svg>
                     </div>
@@ -542,60 +188,7 @@ function MonitorPopover({ status, onClose, onOpenWorkspace, columns, onRunNow, a
               </div>
             </div>
           )}
->>>>>>> eb24005 (fix: redesign board monitor panel for better viewport fit and UX)
 
-<<<<<<< HEAD
-<<<<<<< HEAD
->>>>>>> 87bce6d (feat: show last assistant message for active agents in board monitor view)
-          {status?.recentActions && status.recentActions.length > 0 ? (
-            <div className="px-3 py-2">
-              <div className="text-gray-400 font-medium uppercase tracking-wide mb-1.5" style={{ fontSize: "10px" }}>Recent actions</div>
-              <div className="space-y-1 max-h-48 overflow-y-auto">
-                {status.recentActions.map((a, i) => {
-                  const meta = ACTION_LABELS[a.action];
-                  const issue = columns.flatMap(c => c.issues).find(iss => iss.id === a.issueId);
-                  return (
-                    <div
-                      key={i}
-                      className="flex items-center justify-between gap-2 cursor-pointer hover:bg-gray-50 rounded px-1 -mx-1 py-0.5"
-                      onClick={() => { onOpenWorkspace(a.workspaceId, a.issueId); onClose(); }}
-                    >
-                      <span className={`${meta.color} font-medium truncate`}>{meta.label}</span>
-                      {issue && <span className="text-gray-500 truncate shrink" style={{ fontSize: "10px" }}>#{issue.issueNumber}</span>}
-                      <span className="text-gray-400 shrink-0">{formatAge(a.at)}</span>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          ) : (
-            <div className="px-3 py-2 text-gray-400">No actions recorded yet</div>
-          )}
-        </>
->>>>>>> 693fe5c (feat: move monitor toggle and settings to board view popover)
-      )}
-=======
-            {/* Recent actions */}
-            {status?.recentActions && status.recentActions.length > 0 ? (
-              <div className="px-3 py-2">
-                <div className="text-gray-400 font-medium uppercase tracking-wide mb-1.5" style={{ fontSize: "10px" }}>Recent actions</div>
-                <div className="space-y-1">
-                  {status.recentActions.map((a, i) => {
-                    const meta = ACTION_LABELS[a.action];
-                    const issue = columns.flatMap(c => c.issues).find(iss => iss.id === a.issueId);
-                    return (
-                      <div
-                        key={i}
-                        className="flex items-center justify-between gap-2 cursor-pointer hover:bg-gray-50 rounded px-1.5 -mx-1.5 py-0.5"
-                        onClick={() => { onOpenWorkspace(a.workspaceId, a.issueId); onClose(); }}
-                      >
-                        <span className={`${meta.color} font-medium truncate`}>{meta.label}</span>
-                        {issue && <span className="text-gray-500 truncate shrink" style={{ fontSize: "10px" }}>#{issue.issueNumber}</span>}
-                        <span className="text-gray-400 shrink-0">{formatAge(a.at)}</span>
-                      </div>
-                    );
-                  })}
-=======
           {/* Last run summary */}
           <div className="px-3 py-2.5 border-b border-gray-100">
             <div className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 mb-2">Last run</div>
@@ -621,7 +214,6 @@ function MonitorPopover({ status, onClose, onOpenWorkspace, columns, onRunNow, a
                   {status.lastRun.relaunched === 0 && status.lastRun.merged === 0 && status.lastRun.nudged === 0 && (
                     <span className="text-gray-400 text-[11px]">No actions needed</span>
                   )}
->>>>>>> a8615f5 (fix: redesign board monitor as full-height side panel to prevent viewport overflow)
                 </div>
               </div>
             ) : (
@@ -700,17 +292,8 @@ function MonitorPopover({ status, onClose, onOpenWorkspace, columns, onRunNow, a
           </div>
         </div>
       </div>
-<<<<<<< HEAD
-<<<<<<< HEAD
->>>>>>> 1327c16 (fix: board monitor popover stays within viewport, scrollable content)
-    </div>
-=======
-    </div>,
-=======
     </>,
->>>>>>> a8615f5 (fix: redesign board monitor as full-height side panel to prevent viewport overflow)
     document.body
->>>>>>> 9218c26 (fix: render MonitorPopover via portal to escape overflow-hidden clipping)
   );
 }
 
@@ -728,43 +311,7 @@ export function BoardPage() {
   const [workspaceInitial, setWorkspaceInitial] = useState<{ workspaceId: string; sessionId: string } | null>(null);
   const [workspaceOpenCreate, setWorkspaceOpenCreate] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-  const [blockedFilter, setBlockedFilter] = useState(false);
-=======
-  const [priorityFilter, setPriorityFilter] = useState("");
-<<<<<<< HEAD
-<<<<<<< HEAD
->>>>>>> 53a9dc5 (feat: remove blocked filter from board main page)
-=======
-  const [priorityFilter, setPriorityFilter] = useState("");
->>>>>>> 029ede6 (feat: remove blocked filter from board main page)
-=======
-  const [priorityFilter, setPriorityFilter] = useState("");
-<<<<<<< HEAD
-=======
-  const [blockedFilter, setBlockedFilter] = useState(false);
->>>>>>> 5651f2d (feat: remove priority filter from frontend UI)
-<<<<<<< HEAD
->>>>>>> 46e7ac8 (feat: remove priority filter from frontend UI)
-=======
-=======
->>>>>>> 4f0c0a0 (feat: remove blocked filter from board main page)
->>>>>>> 4a222f1 (feat: remove blocked filter from board main page)
-=======
->>>>>>> f903991 (feat: conditionally show AI Reviewed column and fix stats colors)
-=======
->>>>>>> 0c15856 (fix: restore BoardPage.tsx from clean base and re-apply monitor enhancements with issueId/auto_start)
-=======
->>>>>>> 52ef66c (fix: repair pre-existing build errors (smart quotes in cli.ts, truncated TableView/BoardPage from bad merge))
-=======
   const [showBlocked, setShowBlocked] = useState(false);
->>>>>>> 34c67d9 (feat: add E2E tests for board stats bar and Blocked filter)
   const [showSettings, setShowSettings] = useState(false);
   const [showQuickTasks, setShowQuickTasks] = useState(false);
   const [showWorktreeOverview, setShowWorktreeOverview] = useState(false);
@@ -788,16 +335,8 @@ export function BoardPage() {
   const [sessionTodos, setSessionTodos] = useState<Record<string, TodoItem[]>>({});
   const [approvalRequests, setApprovalRequests] = useState<ApprovalRequest[]>([]);
   const pendingBoardRefreshRef = useRef(false);
-<<<<<<< HEAD
-<<<<<<< HEAD
   const pendingGRef = useRef(false);
   const pendingGTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-=======
->>>>>>> 52ef66c (fix: repair pre-existing build errors (smart quotes in cli.ts, truncated TableView/BoardPage from bad merge))
-=======
-  const pendingGRef = useRef(false);
-  const pendingGTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
->>>>>>> ffa8d96 (fix: restore scheduled-runs feature and keyboard shortcuts lost in bad merge fix)
   const [expandedCreatePanel, setExpandedCreatePanel] = useState<{ statusId: string; statusName: string; state: Partial<CreateIssueFormState> } | null>(null);
   const [viewMode, setViewMode] = useState<"kanban" | "graph" | "table">("kanban");
   const [dynamicColumnScaling, setDynamicColumnScaling] = useState(false);
@@ -839,35 +378,9 @@ export function BoardPage() {
   const [nudgeWipLimit, setNudgeWipLimit] = useState("5");
   const [monitorStatus, setMonitorStatus] = useState<MonitorStatus | null>(null);
   const [showMonitorPopover, setShowMonitorPopover] = useState(false);
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
-  const [autoReview, setAutoReview] = useState(true);
-  const [autoMerge, setAutoMerge] = useState(true);
->>>>>>> 6de3bcc (fix: restore autoReview/autoMerge useState declarations lost during conflict resolution)
-=======
->>>>>>> 0c15856 (fix: restore BoardPage.tsx from clean base and re-apply monitor enhancements with issueId/auto_start)
-=======
->>>>>>> 52ef66c (fix: repair pre-existing build errors (smart quotes in cli.ts, truncated TableView/BoardPage from bad merge))
-=======
-=======
-  const monitorAnchorRef = useRef<HTMLDivElement>(null);
->>>>>>> 7a1bfb9 (fix: board monitor popover stays within viewport, scrollable content)
-=======
->>>>>>> 05d3860 (fix: replace board monitor popover with fixed left-side panel to prevent viewport overflow)
   const [monitorRunning, setMonitorRunning] = useState(false);
-<<<<<<< HEAD
->>>>>>> 77d9d10 (feat: add Run Now button to board toolbar next to Monitor button)
-=======
   const [moveToDonePending, setMoveToDonePending] = useState<{ issue: IssueWithStatus; confirm: () => Promise<void> } | null>(null);
-<<<<<<< HEAD
->>>>>>> 174c8c9 (feat: show MoveToDoneDialog when moving issue with active workspace to Done/Cancelled)
-=======
   const [pendingWorkspaceIssueIds, setPendingWorkspaceIssueIds] = useState<Set<string>>(new Set());
->>>>>>> f8bdde1 (feat: show workspace creation pending indicator on ticket card)
 
   const refetchBoard = useCallback(async (projectId?: string) => {
     const pid = projectId || activeProjectId;
@@ -1066,26 +579,8 @@ export function BoardPage() {
       try {
         const s = await apiFetch<Record<string, string>>("/api/preferences/settings");
         setDynamicColumnScaling(s.dynamic_column_scaling === "true");
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
         setAutoReview(s.auto_review !== "false");
         setAutoMerge(s.auto_merge !== "false");
-=======
->>>>>>> bf9db15 (feat: add board monitor visualization panel)
-=======
-        setAutoReview(s.auto_review !== "false");
-        setAutoMerge(s.auto_merge !== "false");
->>>>>>> f974211 (feat: conditionally show AI Reviewed column and fix stats colors)
-=======
-        setAutoReview(s.auto_review !== "false");
-        setAutoMerge(s.auto_merge !== "false");
->>>>>>> 0c15856 (fix: restore BoardPage.tsx from clean base and re-apply monitor enhancements with issueId/auto_start)
-=======
-        setAutoReview(s.auto_review !== "false");
-        setAutoMerge(s.auto_merge !== "false");
->>>>>>> 52ef66c (fix: repair pre-existing build errors (smart quotes in cli.ts, truncated TableView/BoardPage from bad merge))
         setAutoMonitor(s.auto_monitor === "true");
         setAutoMonitorInterval(s.auto_monitor_interval ?? "4");
         setNudgeAutoStart(s.nudge_auto_start === "true");
@@ -1393,66 +888,15 @@ export function BoardPage() {
     setWorkspaceOpenCreate(true);
   }
 
-<<<<<<< HEAD
-  // Filter columns by search query and priority
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
-
->>>>>>> 34777de (fix: restore filteredColumns useMemo lost during conflict resolution in BoardPage.tsx)
-=======
->>>>>>> 0c15856 (fix: restore BoardPage.tsx from clean base and re-apply monitor enhancements with issueId/auto_start)
-=======
->>>>>>> 52ef66c (fix: repair pre-existing build errors (smart quotes in cli.ts, truncated TableView/BoardPage from bad merge))
-=======
   // Filter columns by search query
->>>>>>> b35f589 (fix: resolve git conflict markers in all 7 client files)
   const filteredColumns = useMemo(
     () =>
       columns.map((col) => ({
         ...col,
         issues: col.issues.filter((issue) => {
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-          if (blockedFilter && !(issue as IssueWithStatus & { isBlocked?: boolean }).isBlocked) return false;
-=======
-          if (priorityFilter && issue.priority !== priorityFilter) return false;
->>>>>>> 53a9dc5 (feat: remove blocked filter from board main page)
-=======
-          if (priorityFilter && issue.priority !== priorityFilter) return false;
->>>>>>> 029ede6 (feat: remove blocked filter from board main page)
-=======
-          if (priorityFilter && issue.priority !== priorityFilter) return false;
-<<<<<<< HEAD
-=======
-          if (blockedFilter && !(issue as IssueWithStatus & { isBlocked?: boolean }).isBlocked) return false;
->>>>>>> 5651f2d (feat: remove priority filter from frontend UI)
-<<<<<<< HEAD
->>>>>>> 46e7ac8 (feat: remove priority filter from frontend UI)
-=======
-=======
->>>>>>> 4f0c0a0 (feat: remove blocked filter from board main page)
->>>>>>> 4a222f1 (feat: remove blocked filter from board main page)
-=======
->>>>>>> f903991 (feat: conditionally show AI Reviewed column and fix stats colors)
-=======
-          if (priorityFilter && issue.priority !== priorityFilter) return false;
->>>>>>> 34777de (fix: restore filteredColumns useMemo lost during conflict resolution in BoardPage.tsx)
-=======
->>>>>>> 0c15856 (fix: restore BoardPage.tsx from clean base and re-apply monitor enhancements with issueId/auto_start)
-=======
->>>>>>> 52ef66c (fix: repair pre-existing build errors (smart quotes in cli.ts, truncated TableView/BoardPage from bad merge))
-=======
           if (showBlocked && !(issue as IssueWithStatus & { isBlocked?: boolean }).isBlocked) {
             return false;
           }
->>>>>>> 34c67d9 (feat: add E2E tests for board stats bar and Blocked filter)
           if (searchQuery) {
             const q = searchQuery.toLowerCase();
             return (
@@ -1463,32 +907,7 @@ export function BoardPage() {
           return true;
         }),
       })),
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-    [columns, searchQuery],
-<<<<<<< HEAD
-  );
-
-  // "AI Reviewed" = tickets needing human attention (manual merge).
-  // Hide the column when no tickets are there AND the workflow won't produce them
-  // (auto_review off, or auto_merge on means review goes straight to Done).
-  const showAiReviewedColumn = useMemo(
-    () =>
-      columns.some((col) => col.name === "AI Reviewed" && col.issues.length > 0) ||
-      (autoReview && !autoMerge),
-    [columns, autoReview, autoMerge],
-=======
->>>>>>> 46e7ac8 (feat: remove priority filter from frontend UI)
-=======
-    [columns, searchQuery, priorityFilter],
->>>>>>> 34777de (fix: restore filteredColumns useMemo lost during conflict resolution in BoardPage.tsx)
-=======
-    [columns, searchQuery],
->>>>>>> 0c15856 (fix: restore BoardPage.tsx from clean base and re-apply monitor enhancements with issueId/auto_start)
-=======
     [columns, searchQuery, showBlocked],
->>>>>>> 34c67d9 (feat: add E2E tests for board stats bar and Blocked filter)
   );
 
   const allMentionIssues = useMemo(
@@ -1950,63 +1369,6 @@ export function BoardPage() {
           </div>
         </div>
       )}
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-      <div className="flex flex-col gap-3 p-4 h-full overflow-hidden">
-<<<<<<< HEAD
-=======
-      <div className="flex flex-col gap-2 sm:gap-3 p-2 sm:p-4 h-full overflow-hidden">
->>>>>>> 65f7a08 (feat: make kanban board truly responsive for mobile)
-        <div className="flex items-center gap-2 flex-wrap">
-=======
-      <div className="flex flex-col gap-3 p-4 h-full overflow-hidden">
-<<<<<<< HEAD
-        <div className="flex items-center gap-3">
->>>>>>> 5d43535 (revert: remove table view and revert mobile-responsive board styling)
-=======
-        <div className="flex items-center gap-2 flex-wrap">
->>>>>>> e318eb3 (feat: add table view as third board view alongside kanban and graph)
-=======
-      <div className="flex flex-col gap-2 sm:gap-3 p-2 sm:p-4 h-full overflow-hidden">
-        <div className="flex items-center gap-2 flex-wrap">
->>>>>>> e0c9cf4 (feat: make kanban board truly responsive for mobile)
-=======
-      <div className="flex flex-col gap-3 p-4 h-full overflow-hidden">
-<<<<<<< HEAD
-        <div className="flex items-center gap-3">
->>>>>>> 8f2f90d (revert: remove table view and revert mobile-responsive board styling)
-=======
-        <div className="flex items-center gap-2 flex-wrap">
->>>>>>> 9878a53 (feat: add table view as third board view alongside kanban and graph)
-=======
-      <div className="flex flex-col gap-2 sm:gap-3 p-2 sm:p-4 h-full overflow-hidden">
-        <div className="flex items-center gap-2 flex-wrap">
->>>>>>> f0547d3 (feat: make kanban board truly responsive for mobile)
-=======
-      <div className="flex flex-col gap-3 p-4 h-full overflow-hidden">
-<<<<<<< HEAD
-        <div className="flex items-center gap-3">
->>>>>>> f2da112 (revert: remove table view and revert mobile-responsive board styling)
-=======
-        <div className="flex items-center gap-2 flex-wrap">
->>>>>>> ab93bc6 (feat: add table view as third board view alongside kanban and graph)
-=======
-        <div className="flex items-start gap-2 flex-wrap">
->>>>>>> 9dd8920 (feat: redesign BoardStats with pills, progress bar, and status legend)
-          <BoardStats
-            activeColumns={activeColumns}
-            archiveColumns={archiveColumns}
-            searchQuery={searchQuery}
-            projectId={activeProjectId}
-            showBlocked={showBlocked}
-            onToggleBlocked={() => setShowBlocked((v) => !v)}
-          />
-=======
       <div className="flex flex-col gap-2 p-4 h-full overflow-hidden">
         <BoardStats
           activeColumns={activeColumns}
@@ -2017,7 +1379,6 @@ export function BoardPage() {
           onToggleBlocked={() => setShowBlocked((v) => !v)}
         />
         <div className="flex items-start gap-2 flex-wrap">
->>>>>>> a52a9fb (feat: move BoardStats to its own row and make progress bar full-width)
           {backlogColumn !== undefined && (
             <BacklogPanel
               backlogColumn={backlogColumn}
@@ -2037,78 +1398,7 @@ export function BoardPage() {
             </svg>
             Tasks
           </button>
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-          {autoMonitor && (
-            <div className="relative shrink-0">
-              <button
-                onClick={() => setShowMonitorPopover(v => !v)}
-                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium border transition-colors bg-green-50 border-green-200 text-green-700 hover:bg-green-100"
-                title="Board monitor active — click for details"
-              >
-                <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
-                Monitor
-              </button>
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> 47c4344 (feat: make monitor action log entries clickable workspace links)
-=======
->>>>>>> f7a87fc (feat: make monitor action log entries clickable workspace links)
-              {showMonitorPopover && <MonitorPopover
-                status={monitorStatus}
-                onClose={() => setShowMonitorPopover(false)}
-                columns={columns}
-                onOpenWorkspace={(workspaceId, issueId) => {
-                  const issue = columns.flatMap(c => c.issues).find(i => i.id === issueId);
-                  if (issue) handleManageWorkspaces(issue, workspaceId);
-                }}
-              />}
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
-              {showMonitorPopover && <MonitorPopover status={monitorStatus} onClose={() => setShowMonitorPopover(false)} />}
->>>>>>> 01516bd (feat: add board monitor visualization panel)
-=======
->>>>>>> 47c4344 (feat: make monitor action log entries clickable workspace links)
-=======
-              {showMonitorPopover && <MonitorPopover status={monitorStatus} onClose={() => setShowMonitorPopover(false)} />}
->>>>>>> 1407a7f (feat: add board monitor visualization panel)
-=======
->>>>>>> f7a87fc (feat: make monitor action log entries clickable workspace links)
-=======
-              {showMonitorPopover && <MonitorPopover status={monitorStatus} onClose={() => setShowMonitorPopover(false)} />}
->>>>>>> bf9db15 (feat: add board monitor visualization panel)
-=======
-              {showMonitorPopover && <MonitorPopover status={monitorStatus} onClose={() => setShowMonitorPopover(false)} onOpenWorkspace={(workspaceId, issueId) => { const issue = columns.flatMap(c => c.issues).find(i => i.id === issueId); if (issue) setWorkspaceIssue(issue); setWorkspaceInitial({ workspaceId, sessionId: "" }); }} columns={columns} />}
->>>>>>> 0c15856 (fix: restore BoardPage.tsx from clean base and re-apply monitor enhancements with issueId/auto_start)
-=======
-              {showMonitorPopover && <MonitorPopover status={monitorStatus} onClose={() => setShowMonitorPopover(false)} onOpenWorkspace={(workspaceId, issueId) => { const issue = columns.flatMap(c => c.issues).find(i => i.id === issueId); if (issue) setWorkspaceIssue(issue); setWorkspaceInitial({ workspaceId, sessionId: "" }); }} columns={columns} />}
->>>>>>> 52ef66c (fix: repair pre-existing build errors (smart quotes in cli.ts, truncated TableView/BoardPage from bad merge))
-=======
-              {showMonitorPopover && <MonitorPopover status={monitorStatus} onClose={() => setShowMonitorPopover(false)} onOpenWorkspace={(workspaceId, issueId) => { const issue = columns.flatMap(c => c.issues).find(i => i.id === issueId); if (issue) setWorkspaceIssue(issue); setWorkspaceInitial({ workspaceId, sessionId: "" }); }} columns={columns} onRunNow={async () => { await apiFetch("/api/internal/monitor-run", { method: "POST" }); const s = await apiFetch<MonitorStatus>("/api/internal/monitor-status"); setMonitorStatus(s); }} />}
->>>>>>> 1adff89 (feat: add Run now button to monitor popover (#220))
-            </div>
-          )}
-=======
-          <div className="relative shrink-0">
-=======
           <div className="relative shrink-0 flex items-center gap-0.5">
->>>>>>> 77d9d10 (feat: add Run Now button to board toolbar next to Monitor button)
-=======
-          <div ref={monitorAnchorRef} className="relative shrink-0 flex items-center gap-0.5">
->>>>>>> 7a1bfb9 (fix: board monitor popover stays within viewport, scrollable content)
-=======
-          <div className="relative shrink-0 flex items-center gap-0.5">
->>>>>>> 05d3860 (fix: replace board monitor popover with fixed left-side panel to prevent viewport overflow)
             <button
               onClick={() => setShowMonitorPopover(v => !v)}
               className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium border transition-colors ${autoMonitor ? "bg-green-50 border-green-200 text-green-700 hover:bg-green-100" : "bg-white border-gray-200 text-gray-500 hover:bg-gray-50"}`}
@@ -2130,7 +1420,6 @@ export function BoardPage() {
             </button>
             {showMonitorPopover && <MonitorPopover status={monitorStatus} onClose={() => setShowMonitorPopover(false)} onOpenWorkspace={(workspaceId, issueId) => { const issue = columns.flatMap(c => c.issues).find(i => i.id === issueId); if (issue) setWorkspaceIssue(issue); setWorkspaceInitial({ workspaceId, sessionId: "" }); }} columns={columns} onRunNow={handleMonitorRunNow} autoMonitor={autoMonitor} onToggle={toggleAutoMonitor} interval={autoMonitorInterval} onIntervalChange={handleIntervalChange} nudgeAutoStart={nudgeAutoStart} onNudgeAutoStartChange={handleNudgeAutoStartChange} nudgeWipLimit={nudgeWipLimit} onNudgeWipLimitChange={handleNudgeWipLimitChange} />}
           </div>
->>>>>>> 693fe5c (feat: move monitor toggle and settings to board view popover)
           <div className="flex items-center gap-1 border border-gray-200 rounded-md p-0.5 bg-white shrink-0">
             <button
               onClick={() => setViewMode("kanban")}
@@ -2157,78 +1446,16 @@ export function BoardPage() {
               </svg>
               Graph
             </button>
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> e318eb3 (feat: add table view as third board view alongside kanban and graph)
-=======
->>>>>>> 770082f (feat: add table view as third board view alongside board and graph)
-=======
->>>>>>> 9878a53 (feat: add table view as third board view alongside kanban and graph)
-=======
->>>>>>> b06ea29 (feat: add table view as third board view alongside board and graph)
-=======
->>>>>>> ab93bc6 (feat: add table view as third board view alongside kanban and graph)
             <button
               onClick={() => setViewMode("table")}
               className={`px-2.5 py-1 text-xs rounded flex items-center gap-1.5 transition-colors ${viewMode === "table" ? "bg-blue-600 text-white" : "text-gray-600 hover:bg-gray-100"}`}
               title="Table view"
             >
               <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-                <path d="M3 6h18M3 12h18M3 18h18M8 6v12" />
-=======
-                <rect x="3" y="3" width="18" height="18" rx="2" />
-                <path d="M3 9h18M3 15h18M9 3v18" />
->>>>>>> 7c9ead0 (feat: add table view as third board view alongside board and graph)
-              </svg>
-              Table
-            </button>
-=======
->>>>>>> 5d43535 (revert: remove table view and revert mobile-responsive board styling)
-=======
-=======
->>>>>>> 9878a53 (feat: add table view as third board view alongside kanban and graph)
-=======
->>>>>>> ab93bc6 (feat: add table view as third board view alongside kanban and graph)
                 <path d="M3 6h18M3 12h18M3 18h18M8 6v12" />
               </svg>
               Table
             </button>
-<<<<<<< HEAD
-<<<<<<< HEAD
->>>>>>> e318eb3 (feat: add table view as third board view alongside kanban and graph)
-=======
-=======
->>>>>>> b06ea29 (feat: add table view as third board view alongside board and graph)
-                <rect x="3" y="3" width="18" height="18" rx="2" />
-                <path d="M3 9h18M3 15h18M9 3v18" />
-              </svg>
-              Table
-            </button>
-<<<<<<< HEAD
->>>>>>> 770082f (feat: add table view as third board view alongside board and graph)
-=======
->>>>>>> 8f2f90d (revert: remove table view and revert mobile-responsive board styling)
-=======
->>>>>>> 9878a53 (feat: add table view as third board view alongside kanban and graph)
-=======
->>>>>>> b06ea29 (feat: add table view as third board view alongside board and graph)
-=======
->>>>>>> f2da112 (revert: remove table view and revert mobile-responsive board styling)
-=======
->>>>>>> ab93bc6 (feat: add table view as third board view alongside kanban and graph)
           </div>
         </div>
         {viewMode === "graph" && activeProjectId ? (
@@ -2241,24 +1468,6 @@ export function BoardPage() {
             />
           </div>
         ) : null}
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> e318eb3 (feat: add table view as third board view alongside kanban and graph)
-=======
->>>>>>> 770082f (feat: add table view as third board view alongside board and graph)
-=======
->>>>>>> 9878a53 (feat: add table view as third board view alongside kanban and graph)
-=======
->>>>>>> b06ea29 (feat: add table view as third board view alongside board and graph)
-=======
->>>>>>> ab93bc6 (feat: add table view as third board view alongside kanban and graph)
         {viewMode === "table" && (
           <TableView
             columns={columns}
@@ -2266,21 +1475,6 @@ export function BoardPage() {
             searchQuery={searchQuery}
           />
         )}
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> e318eb3 (feat: add table view as third board view alongside kanban and graph)
-=======
->>>>>>> 9878a53 (feat: add table view as third board view alongside kanban and graph)
-=======
->>>>>>> ab93bc6 (feat: add table view as third board view alongside kanban and graph)
         {viewMode === "kanban" && activeColumns.length > 1 && (
           <div className="flex sm:hidden gap-1 overflow-x-auto scrollbar-hide shrink-0">
             {activeColumns.map((col) => (
@@ -2297,46 +1491,8 @@ export function BoardPage() {
             ))}
           </div>
         )}
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> 7c9ead0 (feat: add table view as third board view alongside board and graph)
-=======
->>>>>>> e318eb3 (feat: add table view as third board view alongside kanban and graph)
-=======
->>>>>>> 770082f (feat: add table view as third board view alongside board and graph)
-=======
->>>>>>> 9878a53 (feat: add table view as third board view alongside kanban and graph)
-=======
->>>>>>> b06ea29 (feat: add table view as third board view alongside board and graph)
-=======
->>>>>>> ab93bc6 (feat: add table view as third board view alongside kanban and graph)
-        {viewMode === "kanban" && <div className="flex gap-4 flex-1 min-h-0 overflow-x-auto board-columns-scroll">
-=======
-        {viewMode === "kanban" && <div className="flex gap-2 sm:gap-4 flex-1 min-h-0 overflow-x-auto board-columns-scroll">
->>>>>>> 65f7a08 (feat: make kanban board truly responsive for mobile)
-=======
-        {viewMode === "kanban" && <div className="flex gap-4 flex-1 min-h-0 overflow-x-auto board-columns-scroll">
->>>>>>> 5d43535 (revert: remove table view and revert mobile-responsive board styling)
-=======
-        {viewMode === "kanban" && <div className="flex gap-2 sm:gap-4 flex-1 min-h-0 overflow-x-auto board-columns-scroll">
->>>>>>> e0c9cf4 (feat: make kanban board truly responsive for mobile)
-=======
-        {viewMode === "kanban" && <div className="flex gap-4 flex-1 min-h-0 overflow-x-auto board-columns-scroll">
->>>>>>> 8f2f90d (revert: remove table view and revert mobile-responsive board styling)
-=======
-        {viewMode === "kanban" && <div className="flex gap-2 sm:gap-4 flex-1 min-h-0 overflow-x-auto board-columns-scroll">
->>>>>>> f0547d3 (feat: make kanban board truly responsive for mobile)
-=======
-        {viewMode === "kanban" && <div className="flex gap-4 flex-1 min-h-0 overflow-x-auto board-columns-scroll">
->>>>>>> f2da112 (revert: remove table view and revert mobile-responsive board styling)
-          {activeColumns.map((col) => (
-=======
         {viewMode === "kanban" && <div className="flex gap-0 flex-1 min-h-0 overflow-x-auto board-columns-scroll">
           {activeColumns.map((col, colIdx) => (
->>>>>>> 39947f0 (feat: resizable board columns with drag handles and localStorage persistence)
             <BoardColumn
               key={col.id}
               column={col}
@@ -2452,16 +1608,8 @@ export function BoardPage() {
           setShowSettings(false);
           apiFetch<Record<string, string>>("/api/preferences/settings")
             .then(s => {
-<<<<<<< HEAD
-<<<<<<< HEAD
               setAutoReview(s.auto_review !== "false");
               setAutoMerge(s.auto_merge !== "false");
-=======
->>>>>>> bf9db15 (feat: add board monitor visualization panel)
-=======
-              setAutoReview(s.auto_review !== "false");
-              setAutoMerge(s.auto_merge !== "false");
->>>>>>> f974211 (feat: conditionally show AI Reviewed column and fix stats colors)
               setAutoMonitor(s.auto_monitor === "true");
               setAutoMonitorInterval(s.auto_monitor_interval ?? "4");
               setNudgeAutoStart(s.nudge_auto_start === "true");
@@ -2482,6 +1630,7 @@ export function BoardPage() {
       {showAllWorkspaces && (
         <AllWorkspacesPanel
           columns={columns}
+          activeProjectId={activeProjectId ?? null}
           onClose={() => setShowAllWorkspaces(false)}
           onIssueClick={(issue) => {
             setSelectedIssue(issue);

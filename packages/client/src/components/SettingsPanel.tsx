@@ -29,84 +29,9 @@ interface Settings {
   learning_step_before_merge?: string;
   auto_monitor?: string;
   auto_monitor_interval?: string;
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
   nudge_auto_start?: string;
   nudge_wip_limit?: string;
->>>>>>> badbfcc (feat: add nudge auto-start setting to monitor for unblocked Todo items)
   projects_base_path?: string;
-=======
-  projects_base_dir?: string;
->>>>>>> 73b13d2 (feat: implement create project flow (WIP - UI + backend route))
-=======
-  projects_base_folder?: string;
->>>>>>> 9a513e9 (WIP: uncommitted changes in SettingsPanel and register-project test)
-=======
-  projects_base_dir?: string;
->>>>>>> bda3153 (fix: unify projects_base_dir preference key across preferences route, projects route, and SettingsPanel)
-=======
-  projects_base_folder?: string;
->>>>>>> 6f16985 (WIP: uncommitted changes in SettingsPanel and register-project test)
-=======
-  projects_base_dir?: string;
->>>>>>> d4d0a21 (fix: unify projects_base_dir preference key across preferences route, projects route, and SettingsPanel)
-=======
-  projects_base_path?: string;
->>>>>>> 9196ac9 (fix: align projects_base_dir -> projects_base_path across cli.ts and SettingsPanel.tsx)
-=======
-  projects_base_dir?: string;
->>>>>>> e6a6ccb (feat: implement create project flow (WIP - UI + backend route))
-=======
-  projects_base_folder?: string;
->>>>>>> 6707bf7 (WIP: uncommitted changes in SettingsPanel and register-project test)
-=======
-  projects_base_dir?: string;
->>>>>>> 32bf0fc (fix: unify projects_base_dir preference key across preferences route, projects route, and SettingsPanel)
-=======
-  projects_base_folder?: string;
->>>>>>> da0cb52 (WIP: uncommitted changes in SettingsPanel and register-project test)
-=======
-  projects_base_dir?: string;
->>>>>>> 827c80a (fix: unify projects_base_dir preference key across preferences route, projects route, and SettingsPanel)
-=======
-  projects_base_path?: string;
->>>>>>> d7a5078 (fix: align projects_base_dir -> projects_base_path across cli.ts and SettingsPanel.tsx)
-=======
-  projects_base_dir?: string;
->>>>>>> ec12683 (feat: implement create project flow (WIP - UI + backend route))
-=======
-  projects_base_folder?: string;
->>>>>>> 93ce2f2 (WIP: uncommitted changes in SettingsPanel and register-project test)
-=======
-  projects_base_dir?: string;
->>>>>>> 91ff1d0 (fix: unify projects_base_dir preference key across preferences route, projects route, and SettingsPanel)
-=======
-  projects_base_folder?: string;
->>>>>>> 4f19939 (WIP: uncommitted changes in SettingsPanel and register-project test)
-=======
-  projects_base_dir?: string;
->>>>>>> c2a5870 (fix: unify projects_base_dir preference key across preferences route, projects route, and SettingsPanel)
-=======
-  projects_base_path?: string;
->>>>>>> 7effda9 (fix: align projects_base_dir -> projects_base_path across cli.ts and SettingsPanel.tsx)
 }
 
 const DEFAULT_SETTINGS: Settings = {
@@ -130,88 +55,8 @@ const DEFAULT_SETTINGS: Settings = {
   learning_step_before_merge: "false",
   auto_monitor: "false",
   auto_monitor_interval: "4",
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
   nudge_auto_start: "false",
-  nudge_wip_limit: "5",
->>>>>>> badbfcc (feat: add nudge auto-start setting to monitor for unblocked Todo items)
-=======
-  nudge_auto_start: "false",
->>>>>>> 3dd19d7 (fix: add nudge_auto_start to preferences whitelist and DEFAULT_SETTINGS)
   projects_base_path: "",
-=======
-  projects_base_dir: "",
->>>>>>> 73b13d2 (feat: implement create project flow (WIP - UI + backend route))
-=======
-  projects_base_folder: "",
->>>>>>> 9a513e9 (WIP: uncommitted changes in SettingsPanel and register-project test)
-=======
-  projects_base_dir: "",
->>>>>>> bda3153 (fix: unify projects_base_dir preference key across preferences route, projects route, and SettingsPanel)
-=======
-  projects_base_folder: "",
->>>>>>> 6f16985 (WIP: uncommitted changes in SettingsPanel and register-project test)
-=======
-  projects_base_dir: "",
->>>>>>> d4d0a21 (fix: unify projects_base_dir preference key across preferences route, projects route, and SettingsPanel)
-=======
-  projects_base_path: "",
->>>>>>> 9196ac9 (fix: align projects_base_dir -> projects_base_path across cli.ts and SettingsPanel.tsx)
-=======
-  projects_base_dir: "",
->>>>>>> e6a6ccb (feat: implement create project flow (WIP - UI + backend route))
-=======
-  projects_base_folder: "",
->>>>>>> 6707bf7 (WIP: uncommitted changes in SettingsPanel and register-project test)
-=======
-  projects_base_dir: "",
->>>>>>> 32bf0fc (fix: unify projects_base_dir preference key across preferences route, projects route, and SettingsPanel)
-=======
-  projects_base_folder: "",
->>>>>>> da0cb52 (WIP: uncommitted changes in SettingsPanel and register-project test)
-=======
-  projects_base_dir: "",
->>>>>>> 827c80a (fix: unify projects_base_dir preference key across preferences route, projects route, and SettingsPanel)
-=======
-  projects_base_path: "",
->>>>>>> d7a5078 (fix: align projects_base_dir -> projects_base_path across cli.ts and SettingsPanel.tsx)
-=======
-  projects_base_dir: "",
->>>>>>> ec12683 (feat: implement create project flow (WIP - UI + backend route))
-=======
-  projects_base_folder: "",
->>>>>>> 93ce2f2 (WIP: uncommitted changes in SettingsPanel and register-project test)
-=======
-  projects_base_dir: "",
->>>>>>> 91ff1d0 (fix: unify projects_base_dir preference key across preferences route, projects route, and SettingsPanel)
-=======
-  projects_base_folder: "",
->>>>>>> 4f19939 (WIP: uncommitted changes in SettingsPanel and register-project test)
-=======
-  projects_base_dir: "",
->>>>>>> c2a5870 (fix: unify projects_base_dir preference key across preferences route, projects route, and SettingsPanel)
-=======
-  projects_base_path: "",
->>>>>>> 7effda9 (fix: align projects_base_dir -> projects_base_path across cli.ts and SettingsPanel.tsx)
 };
 
 type Tab = "agent" | "workflow" | "skills" | "mcp" | "ui" | "project" | "tags" | "advanced" | "schedule";
@@ -511,12 +356,6 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
   const [newSkill, setNewSkill] = useState<{ name: string; description: string; prompt: string; model: string } | null>(null);
   const [installedSkills, setInstalledSkills] = useState<Record<string, boolean>>({});
   const [installingSkill, setInstallingSkill] = useState<string | null>(null);
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
 
   // Tags state
   const [tagsList, setTagsList] = useState<{ id: string; name: string; color: string | null }[]>([]);
@@ -528,105 +367,6 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
   const [selectedTagIds, setSelectedTagIds] = useState<Set<string>>(new Set());
   const [mergeTargetId, setMergeTargetId] = useState<string>("");
   const [mergingTags, setMergingTags] = useState(false);
-=======
->>>>>>> 9e48722 (feat: install kanban skills to project .claude/skills/ from Settings UI)
-
-  // Tags state
-  const [tagsList, setTagsList] = useState<{ id: string; name: string; color: string | null }[]>([]);
-  const [editingTag, setEditingTag] = useState<string | null>(null);
-  const [editTagName, setEditTagName] = useState("");
-  const [editTagColor, setEditTagColor] = useState("");
-  const [newTagName, setNewTagName] = useState("");
-  const [newTagColor, setNewTagColor] = useState("#6B7280");
-  const [selectedTagIds, setSelectedTagIds] = useState<Set<string>>(new Set());
-  const [mergeTargetId, setMergeTargetId] = useState<string>("");
-  const [mergingTags, setMergingTags] = useState(false);
-=======
->>>>>>> e23b7a0 (feat: install kanban skills to project .claude/skills/ from Settings UI)
-
-  // Tags state
-  const [tagsList, setTagsList] = useState<{ id: string; name: string; color: string | null }[]>([]);
-  const [editingTag, setEditingTag] = useState<string | null>(null);
-  const [editTagName, setEditTagName] = useState("");
-  const [editTagColor, setEditTagColor] = useState("");
-  const [newTagName, setNewTagName] = useState("");
-  const [newTagColor, setNewTagColor] = useState("#6B7280");
-  const [selectedTagIds, setSelectedTagIds] = useState<Set<string>>(new Set());
-  const [mergeTargetId, setMergeTargetId] = useState<string>("");
-  const [mergingTags, setMergingTags] = useState(false);
-
-  // Tags state
-  const [tagsList, setTagsList] = useState<{ id: string; name: string; color: string | null }[]>([]);
-  const [editingTag, setEditingTag] = useState<string | null>(null);
-  const [editTagName, setEditTagName] = useState("");
-  const [editTagColor, setEditTagColor] = useState("");
-  const [newTagName, setNewTagName] = useState("");
-  const [newTagColor, setNewTagColor] = useState("#6B7280");
-  const [selectedTagIds, setSelectedTagIds] = useState<Set<string>>(new Set());
-  const [mergeTargetId, setMergeTargetId] = useState<string>("");
-  const [mergingTags, setMergingTags] = useState(false);
-=======
->>>>>>> ad9bf6a (feat: install kanban skills to project .claude/skills/ from Settings UI)
-
-  // Tags state
-  const [tagsList, setTagsList] = useState<{ id: string; name: string; color: string | null }[]>([]);
-  const [editingTag, setEditingTag] = useState<string | null>(null);
-  const [editTagName, setEditTagName] = useState("");
-  const [editTagColor, setEditTagColor] = useState("");
-  const [newTagName, setNewTagName] = useState("");
-  const [newTagColor, setNewTagColor] = useState("#6B7280");
-  const [selectedTagIds, setSelectedTagIds] = useState<Set<string>>(new Set());
-  const [mergeTargetId, setMergeTargetId] = useState<string>("");
-  const [mergingTags, setMergingTags] = useState(false);
-
-  // Tags state
-  const [tagsList, setTagsList] = useState<{ id: string; name: string; color: string | null }[]>([]);
-  const [editingTag, setEditingTag] = useState<string | null>(null);
-  const [editTagName, setEditTagName] = useState("");
-  const [editTagColor, setEditTagColor] = useState("");
-  const [newTagName, setNewTagName] = useState("");
-  const [newTagColor, setNewTagColor] = useState("#6B7280");
-  const [selectedTagIds, setSelectedTagIds] = useState<Set<string>>(new Set());
-  const [mergeTargetId, setMergeTargetId] = useState<string>("");
-  const [mergingTags, setMergingTags] = useState(false);
-=======
->>>>>>> 74c8daf (feat: install kanban skills to project .claude/skills/ from Settings UI)
-=======
->>>>>>> f6b75e2 (feat: install kanban skills to project .claude/skills/ from Settings UI)
-
-  // Tags state
-  const [tagsList, setTagsList] = useState<{ id: string; name: string; color: string | null }[]>([]);
-  const [editingTag, setEditingTag] = useState<string | null>(null);
-  const [editTagName, setEditTagName] = useState("");
-  const [editTagColor, setEditTagColor] = useState("");
-  const [newTagName, setNewTagName] = useState("");
-  const [newTagColor, setNewTagColor] = useState("#6B7280");
-  const [selectedTagIds, setSelectedTagIds] = useState<Set<string>>(new Set());
-  const [mergeTargetId, setMergeTargetId] = useState<string>("");
-  const [mergingTags, setMergingTags] = useState(false);
-=======
->>>>>>> 9e48722 (feat: install kanban skills to project .claude/skills/ from Settings UI)
-=======
->>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
-
-  // Tags state
-  const [tagsList, setTagsList] = useState<{ id: string; name: string; color: string | null }[]>([]);
-  const [editingTag, setEditingTag] = useState<string | null>(null);
-  const [editTagName, setEditTagName] = useState("");
-  const [editTagColor, setEditTagColor] = useState("");
-  const [newTagName, setNewTagName] = useState("");
-  const [newTagColor, setNewTagColor] = useState("#6B7280");
-  const [selectedTagIds, setSelectedTagIds] = useState<Set<string>>(new Set());
-  const [mergeTargetId, setMergeTargetId] = useState<string>("");
-  const [mergingTags, setMergingTags] = useState(false);
-
-  // Scheduled runs state
-  const [scheduledRunsList, setScheduledRunsList] = useState<ScheduledRun[]>([]);
-  const [newRunName, setNewRunName] = useState("");
-  const [newRunPrompt, setNewRunPrompt] = useState("");
-  const [newRunInterval, setNewRunInterval] = useState(60);
-  const [savingRun, setSavingRun] = useState(false);
-  const [triggeringRun, setTriggeringRun] = useState<string | null>(null);
 
   // Scheduled runs state
   const [scheduledRunsList, setScheduledRunsList] = useState<ScheduledRun[]>([]);
@@ -678,12 +418,6 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
         setProfiles(profileData.profiles);
         setSkills(skillsData);
         setTagsList(tagsData);
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
 
         // Check install status for each skill
         const statusEntries = await Promise.all(
@@ -697,93 +431,6 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
           })
         );
         setInstalledSkills(Object.fromEntries(statusEntries));
-=======
->>>>>>> 0ab88a1 (feat: add Tags management tab to Settings panel)
-
-        // Check install status for each skill
-        const statusEntries = await Promise.all(
-          skillsData.map(async (skill) => {
-            try {
-              const s = await apiFetch<{ installed: boolean }>(`/api/agent-skills/${skill.id}/install-status`);
-              return [skill.id, s.installed] as const;
-            } catch {
-              return [skill.id, false] as const;
-            }
-          })
-        );
-        setInstalledSkills(Object.fromEntries(statusEntries));
-=======
->>>>>>> 1e9a6e9 (feat: add Tags management tab to Settings panel)
-
-        // Check install status for each skill
-        const statusEntries = await Promise.all(
-          skillsData.map(async (skill) => {
-            try {
-              const s = await apiFetch<{ installed: boolean }>(`/api/agent-skills/${skill.id}/install-status`);
-              return [skill.id, s.installed] as const;
-            } catch {
-              return [skill.id, false] as const;
-            }
-          })
-        );
-        setInstalledSkills(Object.fromEntries(statusEntries));
-=======
->>>>>>> bd81ec1 (feat: add Tags management tab to Settings panel)
-
-        // Check install status for each skill
-        const statusEntries = await Promise.all(
-          skillsData.map(async (skill) => {
-            try {
-              const s = await apiFetch<{ installed: boolean }>(`/api/agent-skills/${skill.id}/install-status`);
-              return [skill.id, s.installed] as const;
-            } catch {
-              return [skill.id, false] as const;
-            }
-          })
-        );
-        setInstalledSkills(Object.fromEntries(statusEntries));
-=======
->>>>>>> 0234410 (feat: add Tags management tab to Settings panel)
-=======
->>>>>>> 3d619ec (feat: add Tags management tab to Settings panel)
-
-        // Check install status for each skill
-        const statusEntries = await Promise.all(
-          skillsData.map(async (skill) => {
-            try {
-              const s = await apiFetch<{ installed: boolean }>(`/api/agent-skills/${skill.id}/install-status`);
-              return [skill.id, s.installed] as const;
-            } catch {
-              return [skill.id, false] as const;
-            }
-          })
-        );
-        setInstalledSkills(Object.fromEntries(statusEntries));
-=======
->>>>>>> 0ab88a1 (feat: add Tags management tab to Settings panel)
-=======
->>>>>>> 2d71bd2 (fix: resolve merge conflict markers by restoring stale files from master)
-
-        // Check install status for each skill
-        const statusEntries = await Promise.all(
-          skillsData.map(async (skill) => {
-            try {
-              const s = await apiFetch<{ installed: boolean }>(`/api/agent-skills/${skill.id}/install-status`);
-              return [skill.id, s.installed] as const;
-            } catch {
-              return [skill.id, false] as const;
-            }
-          })
-        );
-        setInstalledSkills(Object.fromEntries(statusEntries));
-
-        // Load scheduled runs
-        if (activeProjectId) {
-          try {
-            const runs = await apiFetch<ScheduledRun[]>(`/api/scheduled-runs?projectId=${activeProjectId}`);
-            setScheduledRunsList(runs);
-          } catch { /* non-fatal */ }
-        }
 
         // Load scheduled runs
         if (activeProjectId) {
@@ -1303,98 +950,8 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                     </label>
                     <input
                       type="text"
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
                       value={settings.projects_base_path ?? ""}
                       onChange={(e) => setSettings((s) => ({ ...s, projects_base_path: e.target.value }))}
-=======
-                      value={settings.projects_base_dir ?? ""}
-                      onChange={(e) => setSettings((s) => ({ ...s, projects_base_dir: e.target.value }))}
->>>>>>> 73b13d2 (feat: implement create project flow (WIP - UI + backend route))
-=======
-                      value={settings.projects_base_folder ?? ""}
-                      onChange={(e) => setSettings((s) => ({ ...s, projects_base_folder: e.target.value }))}
->>>>>>> 9a513e9 (WIP: uncommitted changes in SettingsPanel and register-project test)
-=======
-                      value={settings.projects_base_dir ?? ""}
-                      onChange={(e) => setSettings((s) => ({ ...s, projects_base_dir: e.target.value }))}
->>>>>>> bda3153 (fix: unify projects_base_dir preference key across preferences route, projects route, and SettingsPanel)
-=======
-                      value={settings.projects_base_folder ?? ""}
-                      onChange={(e) => setSettings((s) => ({ ...s, projects_base_folder: e.target.value }))}
->>>>>>> 6f16985 (WIP: uncommitted changes in SettingsPanel and register-project test)
-=======
-                      value={settings.projects_base_dir ?? ""}
-                      onChange={(e) => setSettings((s) => ({ ...s, projects_base_dir: e.target.value }))}
->>>>>>> d4d0a21 (fix: unify projects_base_dir preference key across preferences route, projects route, and SettingsPanel)
-=======
-                      value={settings.projects_base_path ?? ""}
-                      onChange={(e) => setSettings((s) => ({ ...s, projects_base_path: e.target.value }))}
->>>>>>> 9196ac9 (fix: align projects_base_dir -> projects_base_path across cli.ts and SettingsPanel.tsx)
-=======
-                      value={settings.projects_base_dir ?? ""}
-                      onChange={(e) => setSettings((s) => ({ ...s, projects_base_dir: e.target.value }))}
->>>>>>> e6a6ccb (feat: implement create project flow (WIP - UI + backend route))
-=======
-                      value={settings.projects_base_folder ?? ""}
-                      onChange={(e) => setSettings((s) => ({ ...s, projects_base_folder: e.target.value }))}
->>>>>>> 6707bf7 (WIP: uncommitted changes in SettingsPanel and register-project test)
-=======
-                      value={settings.projects_base_dir ?? ""}
-                      onChange={(e) => setSettings((s) => ({ ...s, projects_base_dir: e.target.value }))}
->>>>>>> 32bf0fc (fix: unify projects_base_dir preference key across preferences route, projects route, and SettingsPanel)
-=======
-                      value={settings.projects_base_folder ?? ""}
-                      onChange={(e) => setSettings((s) => ({ ...s, projects_base_folder: e.target.value }))}
->>>>>>> da0cb52 (WIP: uncommitted changes in SettingsPanel and register-project test)
-=======
-                      value={settings.projects_base_dir ?? ""}
-                      onChange={(e) => setSettings((s) => ({ ...s, projects_base_dir: e.target.value }))}
->>>>>>> 827c80a (fix: unify projects_base_dir preference key across preferences route, projects route, and SettingsPanel)
-=======
-                      value={settings.projects_base_path ?? ""}
-                      onChange={(e) => setSettings((s) => ({ ...s, projects_base_path: e.target.value }))}
->>>>>>> d7a5078 (fix: align projects_base_dir -> projects_base_path across cli.ts and SettingsPanel.tsx)
-=======
-                      value={settings.projects_base_dir ?? ""}
-                      onChange={(e) => setSettings((s) => ({ ...s, projects_base_dir: e.target.value }))}
->>>>>>> ec12683 (feat: implement create project flow (WIP - UI + backend route))
-=======
-                      value={settings.projects_base_folder ?? ""}
-                      onChange={(e) => setSettings((s) => ({ ...s, projects_base_folder: e.target.value }))}
->>>>>>> 93ce2f2 (WIP: uncommitted changes in SettingsPanel and register-project test)
-=======
-                      value={settings.projects_base_dir ?? ""}
-                      onChange={(e) => setSettings((s) => ({ ...s, projects_base_dir: e.target.value }))}
->>>>>>> 91ff1d0 (fix: unify projects_base_dir preference key across preferences route, projects route, and SettingsPanel)
-=======
-                      value={settings.projects_base_folder ?? ""}
-                      onChange={(e) => setSettings((s) => ({ ...s, projects_base_folder: e.target.value }))}
->>>>>>> 4f19939 (WIP: uncommitted changes in SettingsPanel and register-project test)
-=======
-                      value={settings.projects_base_dir ?? ""}
-                      onChange={(e) => setSettings((s) => ({ ...s, projects_base_dir: e.target.value }))}
->>>>>>> c2a5870 (fix: unify projects_base_dir preference key across preferences route, projects route, and SettingsPanel)
-=======
-                      value={settings.projects_base_path ?? ""}
-                      onChange={(e) => setSettings((s) => ({ ...s, projects_base_path: e.target.value }))}
->>>>>>> 7effda9 (fix: align projects_base_dir -> projects_base_path across cli.ts and SettingsPanel.tsx)
                       placeholder="C:/projects"
                       className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 font-mono"
                     />
