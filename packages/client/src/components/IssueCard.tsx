@@ -296,7 +296,7 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
           {hasActiveWorkspace && onWorkspaceClick && (
             <button
               onClick={(e) => { e.stopPropagation(); onWorkspaceClick(issue, ws?.main?.id); }}
-              className="mt-1.5 w-full flex items-center justify-center gap-1 text-xs text-green-700 hover:text-white hover:bg-green-600 border border-green-200 hover:border-green-600 rounded px-2 py-1 transition-colors opacity-0 group-hover:opacity-100"
+              className="relative z-20 mt-1.5 w-full flex items-center justify-center gap-1 text-xs text-green-700 hover:text-white hover:bg-green-600 border border-green-200 hover:border-green-600 rounded px-2 py-1 transition-colors opacity-0 group-hover:opacity-100"
               title="Resume the active workspace"
             >
               <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -308,7 +308,7 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
           {!hasActiveWorkspace && onStartWorkspace && (
             <button
               onClick={(e) => { e.stopPropagation(); onStartWorkspace(issue); }}
-              className="mt-1.5 w-full flex items-center justify-center gap-1 text-xs text-blue-600 hover:text-white hover:bg-blue-600 border border-blue-200 hover:border-blue-600 rounded px-2 py-1 transition-colors opacity-0 group-hover:opacity-100"
+              className="relative z-20 mt-1.5 w-full flex items-center justify-center gap-1 text-xs text-blue-600 hover:text-white hover:bg-blue-600 border border-blue-200 hover:border-blue-600 rounded px-2 py-1 transition-colors opacity-0 group-hover:opacity-100"
               title="Start a new workspace for this issue"
             >
               <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
