@@ -230,8 +230,9 @@ export class ClaudeProvider implements AgentProvider {
 
     // Assistant event: model + context tokens
     if (obj.type === "assistant" && obj.message) {
-      const usage = obj.message.usage as Record<string, unknown> | undefined;
-      const model = (obj.message.model as string) ?? "";
+      const message = obj.message as Record<string, unknown>;
+      const usage = message.usage as Record<string, unknown> | undefined;
+      const model = (message.model as string) ?? "";
       const cacheRead = (usage?.cache_read_input_tokens as number) ?? 0;
       const inputTokens = (usage?.input_tokens as number) ?? 0;
       const contextTokens = cacheRead + inputTokens;
@@ -240,7 +241,7 @@ export class ClaudeProvider implements AgentProvider {
       }
 
       // Text and tool_use blocks from assistant messages
-      const content = obj.message.content;
+      const content = message.content;
       if (Array.isArray(content)) {
         const textParts: string[] = [];
         for (const block of content) {
@@ -291,8 +292,8 @@ export class ClaudeProvider implements AgentProvider {
     }
 
     // User message with tool_result: check for Agent tool_use ID
-    if (obj.type === "user" && obj.message?.content) {
-      const content = obj.message.content;
+    if (obj.type === "user" && (obj.message as Record<string, unknown> | undefined)?.content) {
+      const content = (obj.message as Record<string, unknown>).content;
       if (Array.isArray(content)) {
         for (const block of content) {
           if (block.type === "tool_result" && block.tool_use_id) {
