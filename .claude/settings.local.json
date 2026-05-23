@@ -18,7 +18,9 @@
       "PowerShell($env:KANBAN_CLIENT_PORT)",
       "PowerShell($env:ANTHROPIC_API_KEY)",
       "PowerShell($env:CLAUDE_PROFILE)",
-      "PowerShell(Get-NetTCPConnection -ErrorAction SilentlyContinue | Where-Object { $_.LocalPort -in @\\(3001,3002,3003,3004,3005\\) -and $_.State -eq \"Listen\" } | Select-Object LocalPort, State, OwningProcess)"
+      "PowerShell(Get-NetTCPConnection -ErrorAction SilentlyContinue | Where-Object { $_.LocalPort -in @\\(3001,3002,3003,3004,3005\\) -and $_.State -eq \"Listen\" } | Select-Object LocalPort, State, OwningProcess)",
+      "Bash(scc)"
     ]
-  }
+  },
+  "spinnerTipsEnabled": true
 }
