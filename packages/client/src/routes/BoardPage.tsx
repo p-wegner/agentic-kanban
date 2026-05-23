@@ -959,6 +959,10 @@ export function BoardPage() {
           setShowShortcutHelp(false);
           return;
         }
+        if (showQuickTasks) {
+          setShowQuickTasks(false);
+          return;
+        }
         if (searchQuery) {
           setSearchQuery("");
           document.getElementById("search-input")?.blur();
@@ -1034,7 +1038,7 @@ export function BoardPage() {
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [searchQuery, showCommandPalette, showAllWorkspaces, showWorktreeOverview, showShortcutHelp, filteredColumns, columns, setViewMode, setShowQuickTasks, setShowSettings]);
+  }, [searchQuery, showCommandPalette, showAllWorkspaces, showWorktreeOverview, showShortcutHelp, showQuickTasks, filteredColumns, columns, setViewMode, setShowQuickTasks, setShowSettings]);
 
   // Register command palette actions
   useEffect(() => {

@@ -32,6 +32,14 @@ export function QuickTasksPanel({ projectId, onClose, onLaunched }: QuickTasksPa
       .finally(() => setLoading(false));
   }, [projectId]);
 
+  useEffect(() => {
+    function handler(e: KeyboardEvent) {
+      if (e.key === "Escape" && !showCustom && !showContext) onClose();
+    }
+    window.addEventListener("keydown", handler, { capture: true });
+    return () => window.removeEventListener("keydown", handler, { capture: true });
+  }, [onClose, showCustom, showContext]);
+
   async function launch(skillId: string | null, prompt: string) {
     if (!prompt.trim()) return;
     setLaunching(skillId ?? "custom");
