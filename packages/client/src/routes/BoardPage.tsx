@@ -681,6 +681,19 @@ export function BoardPage() {
     showToast(`Created "${result.name}"`, "success");
   }
 
+  async function handleUnregisterProject(id: string) {
+    const project = projects.find((p) => p.id === id);
+    await apiFetch(`/api/projects/${id}`, { method: "DELETE" });
+    const remaining = projects.filter((p) => p.id !== id);
+    if (remaining.length > 0) {
+      await handleProjectChange(remaining[0].id);
+    } else {
+      setActiveProjectId(null);
+    }
+    await loadProjects();
+    showToast(`Removed "${project?.name ?? "project"}"`, "success");
+  }
+
   async function handleCreateIssue(data: CreateIssueRequest & { startWorkspace?: boolean; planMode?: boolean; claudeProfile?: string; isDirect?: boolean; skillId?: string }) {
     setMutating(true);
     setError(null);
@@ -1263,6 +1276,7 @@ export function BoardPage() {
       projects={projects}
       activeProjectId={activeProjectId}
       onProjectChange={handleProjectChange}
+      onUnregisterProject={handleUnregisterProject}
       searchQuery={searchQuery}
       onSearchChange={setSearchQuery}
       onRegisterProject={handleRegisterProject}
