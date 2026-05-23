@@ -1,4 +1,3 @@
-export const PREF_MOCK_AGENT = "mock_agent";
 export const PREF_AGENT_COMMAND = "agent_command";
 export const PREF_AGENT_ARGS = "agent_args";
 export const PREF_SKIP_PERMISSIONS = "skip_permissions";
