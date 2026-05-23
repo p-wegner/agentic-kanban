@@ -30,6 +30,7 @@ function loadSortMode(columnId: string): SortMode {
 
 interface BoardColumnProps {
   column: StatusWithIssues;
+  allColumns?: StatusWithIssues[];
   projectId: string;
   creatingInColumn: string | null;
   onCreateClick: (statusId: string) => void;
@@ -39,10 +40,12 @@ interface BoardColumnProps {
   onStartWorkspace?: (issue: IssueWithStatus) => void;
   onDragStart: (e: React.DragEvent, issue: IssueWithStatus) => void;
   onDrop: (statusId: string, sortOrder?: number) => void;
+  onMoveToNext?: (issue: IssueWithStatus, nextStatusId: string) => void;
   searchQuery?: string;
   sessionActivity?: Record<string, string>;
   liveStats?: Record<string, LiveSessionStats>;
   sessionTodos?: Record<string, TodoItem[]>;
+  pendingWorkspaceIssueIds?: Set<string>;
   children?: React.ReactNode;
   style?: React.CSSProperties;
   width?: number;
@@ -50,8 +53,11 @@ interface BoardColumnProps {
   onResizeReset?: () => void;
 }
 
+const ARCHIVE_STATUS_NAMES = new Set(["Done", "Cancelled"]);
+
 export function BoardColumn({
   column,
+  allColumns,
   projectId,
   creatingInColumn,
   onCreateClick,
@@ -61,10 +67,12 @@ export function BoardColumn({
   onStartWorkspace,
   onDragStart,
   onDrop,
+  onMoveToNext,
   searchQuery,
   sessionActivity,
   liveStats,
   sessionTodos,
+  pendingWorkspaceIssueIds,
   children,
   style,
   width,
@@ -76,6 +84,14 @@ export function BoardColumn({
   const scrollRef = useRef<HTMLDivElement>(null);
   const [scrollState, setScrollState] = useState<"top" | "middle" | "bottom" | "none">("none");
   const [sortMode, setSortMode] = useState<SortMode>(() => loadSortMode(column.id));
+
+  const nextStatus = allColumns && !ARCHIVE_STATUS_NAMES.has(column.name)
+    ? (() => {
+        const sorted = [...allColumns].sort((a, b) => a.sortOrder - b.sortOrder);
+        const idx = sorted.findIndex((c) => c.id === column.id);
+        return idx >= 0 && idx < sorted.length - 1 ? sorted[idx + 1] : null;
+      })()
+    : null;
 
   const updateScrollState = useCallback(() => {
     const el = scrollRef.current;
@@ -223,10 +239,13 @@ export function BoardColumn({
                 onWorkspaceClick={onWorkspaceClick}
                 onStartWorkspace={onStartWorkspace}
                 onDragStart={onDragStart}
+                onMoveToNext={nextStatus && onMoveToNext ? (iss) => onMoveToNext(iss, nextStatus.id) : undefined}
+                nextStatusName={nextStatus?.name}
                 searchQuery={searchQuery}
                 liveActivity={sessionActivity?.[issue.id]}
                 liveStats={liveStats?.[issue.id]}
                 todos={sessionTodos?.[issue.id]}
+                isPendingWorkspace={pendingWorkspaceIssueIds?.has(issue.id)}
               />
             </div>
           ))}
