@@ -1,6 +1,6 @@
 # PRD-01: Features Catalog
 
-<!-- last-synced: 2026-05-23T14:00:00+02:00 | commit: 2993bda -->
+<!-- last-synced: 2026-05-23T16:00:00+02:00 | commit: d7cb8b6 -->
 
 Complete inventory of features, organized by category. Status reflects the current implementation (Stages 0–14 complete).
 
@@ -11,6 +11,7 @@ Complete inventory of features, organized by category. Status reflects the curre
 - Priorities: Urgent, High, Medium, Low
 - Auto-incrementing issue numbers per project (#1, #2, #3)
 - AI enhancement: "Enhance with AI" button spawns Claude CLI to improve title/description
+- **Copy issue reference**: clipboard button in detail panel header copies `#N Title` reference string
 - **Status: DONE**
 
 ### F-TASK-02: Kanban Board View
@@ -21,6 +22,8 @@ Complete inventory of features, organized by category. Status reflects the curre
 - Collapsible archive group for Done/Cancelled columns
 - Search result highlighting on cards
 - Panel slide-in animations
+- Priority-based column sort: issues within each column sorted by priority
+- **IssueCard hover action row**: compact action row fades in at card bottom on hover — Resume, Start Workspace, and Move to next status buttons; card body click still opens detail panel
 - **Status: DONE**
 
 ### F-TASK-03: Issue Filtering & Search
@@ -87,6 +90,12 @@ Complete inventory of features, organized by category. Status reflects the curre
 - Available for both active/idle and closed workspaces
 - **Status: DONE**
 
+### F-WS-09: Ready for Merge Badge
+- Mark a workspace as ready for merge via `POST /api/workspaces/:id/mark-ready`
+- `readyForMerge` field exposed on workspace GET and board endpoint workspace summary
+- Green "Ready to merge" badge shown in WorkspacePanel and All Workspaces panel
+- **Status: DONE**
+
 ### F-WS-06: Session Forking
 - Fork an existing agent session
 - **Status: NOT PLANNED** — multi-turn resume covers this need
@@ -151,7 +160,7 @@ Complete inventory of features, organized by category. Status reflects the curre
 ### F-MCP-03: Agent Configuration
 - Configurable agent command and args (Settings panel)
 - `claude_profile` setting for gateway auth
-- Mock agent toggle for testing
+- Mock agent: built-in `mock` Claude profile (appears in Claude Profile dropdown; no separate toggle)
 - `auto_merge` and `review_auto_fix` settings
 - **Status: DONE**
 
