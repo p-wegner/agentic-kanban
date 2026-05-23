@@ -5,7 +5,7 @@ import { execSync } from "node:child_process";
 const serverPort = Number(process.env.SERVER_PORT) || 3001;
 
 async function globalSetup() {
-  const apiContext = await request.newContext({ baseURL: `http://localhost:${serverPort}` });
+  const apiContext = await request.newContext({ baseURL: `http://127.0.0.1:${serverPort}` });
 
   // Resolve the actual monorepo root. For worktrees nested inside packages/.worktrees/,
   // the git common-dir points back to the main repo's .git — use it to find the main root.
