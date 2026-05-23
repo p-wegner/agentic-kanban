@@ -143,7 +143,7 @@ export function createWorkspaceActionsRoute(
       const planMode = ws0.planMode ?? false;
 
       const resumeFromId = typeof body.resumeFromId === "string" ? body.resumeFromId : undefined;
-      const sessionId = await getSessionManager().startSession(id, promptStr, agentCommand, agentArgs, resumeFromId, claudeProfile, false, permissionPromptTool, planMode, resumeWithNewModel, undefined, "chat");
+      const sessionId = await getSessionManager().startSession({ workspaceId: id, prompt: promptStr, agentCommand, agentArgs, resumeFromId, claudeProfile, multiTurn: false, permissionPromptTool, planMode, resumeWithNewModel, triggerType: "chat" });
 
       await updateWorkspaceStatus(id, "active", { claudeProfile: claudeProfile ?? null, agentCommand: agentCommand ?? null }, database);
 
@@ -194,20 +194,7 @@ export function createWorkspaceActionsRoute(
         const wsForTurn = await getWorkspaceById(id, database);
         const planMode = wsForTurn?.planMode ?? false;
 
-        const sessionId = await getSessionManager().startSession(
-          id,
-          body.content,
-          agentCommand,
-          agentArgs,
-          running.id,
-          claudeProfile,
-          false,
-          undefined,
-          planMode,
-          resumeWithNewModel,
-          undefined,
-          "chat",
-        );
+        const sessionId = await getSessionManager().startSession({ workspaceId: id, prompt: body.content, agentCommand, agentArgs, resumeFromId: running.id, claudeProfile, multiTurn: false, planMode, resumeWithNewModel, triggerType: "chat" });
         await updateWorkspaceStatus(id, "active", { claudeProfile: claudeProfile ?? null, agentCommand: agentCommand ?? null }, database);
         const projectId = await resolveProjectId(id, database);
         if (projectId) options?.boardEvents?.broadcast(projectId, "session_launched");
@@ -523,7 +510,7 @@ export function createWorkspaceActionsRoute(
 
       const { agentCommand, agentArgs, claudeProfile } = await loadAgentSettings(database);
 
-      const sessionId = await getSessionManager().startSession(id, prompt, agentCommand, agentArgs, undefined, claudeProfile, true, undefined, undefined, undefined, undefined, "fix-conflicts");
+      const sessionId = await getSessionManager().startSession({ workspaceId: id, prompt, agentCommand, agentArgs, claudeProfile, multiTurn: true, triggerType: "fix-conflicts" });
       options?.fixAndMergeSessionIds?.add(sessionId);
 
       await updateWorkspaceStatus(id, "fixing", {}, database);

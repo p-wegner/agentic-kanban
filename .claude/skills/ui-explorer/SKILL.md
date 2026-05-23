@@ -1,5 +1,10 @@
 ---
 name: ui-explorer
+description: Visual UI exploration: open headed browser, identify feature gaps, create tickets, wire up dependencies, verify in graph view
+---
+
+---
+name: ui-explorer
 description: Visual UI exploration: find feature gaps, create tickets, fix stale docs about the featureset. Sources of truth are CLAUDE.md (operational) and docs/prd/01-features-catalog.md (catalog).
 ---
 
