@@ -202,7 +202,7 @@ describe("Preferences API - settings", () => {
         agent_command: "claude",
         agent_args: "--verbose",
         output_parser: "stream-json",
-        mock_agent: "0",
+        claude_profile: "",
       }),
     });
     expect(res.status).toBe(200);
@@ -218,7 +218,7 @@ describe("Preferences API - settings", () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         agent_command: "my-agent",
-        mock_agent: "1",
+        claude_profile: "mock",
       }),
     });
 
@@ -226,7 +226,7 @@ describe("Preferences API - settings", () => {
     expect(res.status).toBe(200);
     const body = await res.json() as any;
     expect(body.agent_command).toBe("my-agent");
-    expect(body.mock_agent).toBe("1");
+    expect(body.claude_profile).toBe("mock");
     // agent_args and output_parser were not set
     expect(body.agent_args).toBeUndefined();
     expect(body.output_parser).toBeUndefined();
@@ -283,7 +283,7 @@ describe("Preferences API - settings", () => {
         agent_command: "custom-agent",
         agent_args: "--flag value",
         output_parser: "custom",
-        mock_agent: "1",
+        claude_profile: "mock",
       }),
     });
 
@@ -292,7 +292,7 @@ describe("Preferences API - settings", () => {
     expect(body.agent_command).toBe("custom-agent");
     expect(body.agent_args).toBe("--flag value");
     expect(body.output_parser).toBe("custom");
-    expect(body.mock_agent).toBe("1");
+    expect(body.claude_profile).toBe("mock");
   });
 });
 

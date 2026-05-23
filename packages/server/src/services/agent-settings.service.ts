@@ -36,13 +36,21 @@ export async function loadAgentSettings(
   return resolveAgentSettings(prefMap, commandOverride);
 }
 
+export function isMockProfile(profile: string | undefined): boolean {
+  return profile === "mock" || process.env.MOCK_AGENT === "1";
+}
+
 export function resolveAgentSettings(
   prefMap: Map<string, string>,
   commandOverride?: string,
 ): AgentSettings {
   let agentCommand: string | undefined = commandOverride || undefined;
+  const claudeProfile = prefMap.get(PREF_CLAUDE_PROFILE) || undefined;
+
   if (!agentCommand) {
-    const useMock = prefMap.get(PREF_MOCK_AGENT) === "true" || process.env.MOCK_AGENT === "1";
+    const useMock =
+      isMockProfile(claudeProfile) ||
+      prefMap.get(PREF_MOCK_AGENT) === "true";
     agentCommand = useMock ? MOCK_AGENT_COMMAND : (prefMap.get(PREF_AGENT_COMMAND) || undefined);
   }
 
@@ -52,7 +60,6 @@ export function resolveAgentSettings(
     ? (baseArgs ? baseArgs + " --dangerously-skip-permissions" : "--dangerously-skip-permissions")
     : (baseArgs || undefined);
 
-  const claudeProfile = prefMap.get(PREF_CLAUDE_PROFILE) || undefined;
   const resumeWithNewModel = prefMap.get(PREF_RESUME_WITH_NEW_MODEL) === "true";
 
   const permPref = prefMap.get(PREF_PERMISSION_PROMPT_TOOL);
@@ -60,5 +67,7 @@ export function resolveAgentSettings(
     ? "mcp__agentic-kanban__approve_tool_use"
     : (permPref && permPref !== "false" ? permPref : undefined);
 
-  return { agentCommand, agentArgs, claudeProfile, resumeWithNewModel, permissionPromptTool };
+  // Don't pass mock profile name to Claude Code — it's only used to select the mock agent command
+  const resolvedProfile = isMockProfile(claudeProfile) ? undefined : claudeProfile;
+  return { agentCommand, agentArgs, claudeProfile: resolvedProfile, resumeWithNewModel, permissionPromptTool };
 }
