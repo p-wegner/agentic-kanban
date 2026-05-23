@@ -16,6 +16,7 @@ interface LayoutProps {
   projects?: Project[];
   activeProjectId?: string | null;
   onProjectChange?: (id: string) => void;
+  onUnregisterProject?: (id: string) => Promise<void>;
   onRegisterProject?: (args: { repoPath: string; gitignoreTemplate: string; generateReadme: boolean }) => Promise<void>;
   onCreateProject?: (name: string, path: string, gitignoreTemplate: string, generateReadme: boolean) => Promise<void>;
   searchQuery?: string;
@@ -32,6 +33,7 @@ export function Layout({
   projects = [],
   activeProjectId,
   onProjectChange,
+  onUnregisterProject,
   onRegisterProject,
   onCreateProject,
   searchQuery = "",
@@ -43,6 +45,8 @@ export function Layout({
   onSettingsClick,
 }: LayoutProps) {
   const [showRegister, setShowRegister] = useState(false);
+  const [confirmUnregister, setConfirmUnregister] = useState<Project | null>(null);
+  const [unregistering, setUnregistering] = useState(false);
   const [modalTab, setModalTab] = useState<"import" | "create">("import");
   const [repoPath, setRepoPath] = useState("");
   const [gitignoreTemplate, setGitignoreTemplate] = useState("");
@@ -91,6 +95,17 @@ export function Layout({
     }
   }
 
+  async function handleConfirmUnregister() {
+    if (!confirmUnregister || !onUnregisterProject) return;
+    setUnregistering(true);
+    try {
+      await onUnregisterProject(confirmUnregister.id);
+    } finally {
+      setUnregistering(false);
+      setConfirmUnregister(null);
+    }
+  }
+
   function openRegister() {
     setRegisterError(null);
     setCreateError(null);
@@ -125,6 +140,20 @@ export function Layout({
             )}
             {projects.length === 1 && (
               <span className="text-sm text-gray-500">{projects[0].name}</span>
+            )}
+            {projects.length > 0 && onUnregisterProject && (
+              <button
+                onClick={() => {
+                  const active = projects.find((p) => p.id === activeProjectId) ?? projects[0];
+                  setConfirmUnregister(active);
+                }}
+                className="p-1 text-gray-400 hover:text-red-500 rounded-md hover:bg-gray-100"
+                title="Unregister project"
+              >
+                <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                </svg>
+              </button>
             )}
             <button
               onClick={openRegister}
@@ -203,6 +232,33 @@ export function Layout({
         </div>
       </header>
       <main className="flex-1 min-h-0 overflow-hidden">{children}</main>
+
+      {confirmUnregister && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-sm mx-4 p-6">
+            <h2 className="text-lg font-semibold text-gray-900 mb-2">Remove project?</h2>
+            <p className="text-sm text-gray-600 mb-6">
+              Remove <span className="font-medium">{confirmUnregister.name}</span> from the board? This does not delete the git repository.
+            </p>
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={() => setConfirmUnregister(null)}
+                disabled={unregistering}
+                className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirmUnregister}
+                disabled={unregistering}
+                className="px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-md hover:bg-red-700 disabled:opacity-50"
+              >
+                {unregistering ? "Removing..." : "Remove"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {showRegister && (
         <div
