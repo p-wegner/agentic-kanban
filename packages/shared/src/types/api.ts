@@ -143,8 +143,8 @@ export interface WorkspaceResponse {
   includeVisualProof: boolean;
   readyForMerge: boolean;
   agentCommand?: string | null;
+  provider?: string | null;
   sessionId?: string;
-  skillId?: string | null;
   skillName?: string | null;
   createdAt: string;
   updatedAt: string;
