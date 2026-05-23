@@ -585,6 +585,11 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
   const [newRunInterval, setNewRunInterval] = useState(60);
   const [savingRun, setSavingRun] = useState(false);
   const [triggeringRun, setTriggeringRun] = useState<string | null>(null);
+  const [editingRun, setEditingRun] = useState<string | null>(null);
+  const [editRunName, setEditRunName] = useState("");
+  const [editRunPrompt, setEditRunPrompt] = useState("");
+  const [editRunInterval, setEditRunInterval] = useState(60);
+  const [savingEditRun, setSavingEditRun] = useState(false);
   const [monitorRunning, setMonitorRunning] = useState(false);
   const [monitorStatus, setMonitorStatus] = useState<{
     enabled: boolean;
@@ -1669,57 +1674,132 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                     <div className="space-y-2">
                       {scheduledRunsList.map((run) => (
                         <div key={run.id} className="border border-gray-200 rounded-md px-3 py-2 space-y-1">
-                          <div className="flex items-center gap-2">
-                            <input
-                              type="checkbox"
-                              checked={run.enabled}
-                              onChange={async (e) => {
-                                const enabled = e.target.checked;
-                                await apiFetch(`/api/scheduled-runs/${run.id}`, {
-                                  method: "PUT",
-                                  body: JSON.stringify({ enabled }),
-                                });
-                                setScheduledRunsList((r) => r.map((x) => x.id === run.id ? { ...x, enabled } : x));
-                              }}
-                              className="rounded border-gray-300"
-                            />
-                            <span className="flex-1 text-sm font-medium text-gray-800">{run.name}</span>
-                            <span className="text-xs text-gray-400">every {run.intervalMinutes}m</span>
-                            <button
-                              disabled={triggeringRun === run.id}
-                              onClick={async () => {
-                                setTriggeringRun(run.id);
-                                try {
-                                  await apiFetch(`/api/scheduled-runs/${run.id}/run`, { method: "POST" });
-                                  showToast("Run triggered", "success");
-                                  const runs = await apiFetch<ScheduledRun[]>(`/api/scheduled-runs?projectId=${activeProjectId}`);
-                                  setScheduledRunsList(runs);
-                                } catch { showToast("Trigger failed", "error"); }
-                                finally { setTriggeringRun(null); }
-                              }}
-                              className="text-xs px-2 py-1 text-blue-600 hover:bg-blue-50 rounded border border-blue-200"
-                            >
-                              {triggeringRun === run.id ? "Running…" : "Run now"}
-                            </button>
-                            <button
-                              onClick={async () => {
-                                if (!confirm(`Delete scheduled run "${run.name}"?`)) return;
-                                await apiFetch(`/api/scheduled-runs/${run.id}`, { method: "DELETE" });
-                                setScheduledRunsList((r) => r.filter((x) => x.id !== run.id));
-                                showToast("Deleted", "success");
-                              }}
-                              className="text-xs text-gray-400 hover:text-red-600"
-                            >
-                              Delete
-                            </button>
-                          </div>
-                          {run.prompt && (
-                            <p className="text-xs text-gray-500 pl-5 truncate">{run.prompt}</p>
-                          )}
-                          {run.lastRunAt && (
-                            <p className="text-xs text-gray-400 pl-5">
-                              Last run: {new Date(run.lastRunAt).toLocaleString()} — {run.lastRunStatus ?? "unknown"}
-                            </p>
+                          {editingRun === run.id ? (
+                            <div className="space-y-2">
+                              <input
+                                type="text"
+                                value={editRunName}
+                                onChange={(e) => setEditRunName(e.target.value)}
+                                placeholder="Name"
+                                className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                autoFocus
+                              />
+                              <textarea
+                                value={editRunPrompt}
+                                onChange={(e) => setEditRunPrompt(e.target.value)}
+                                placeholder="Prompt for the agent"
+                                rows={3}
+                                className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 font-mono"
+                              />
+                              <div className="flex items-center gap-2">
+                                <label className="text-xs text-gray-600 whitespace-nowrap">Interval (minutes):</label>
+                                <input
+                                  type="number"
+                                  min={1}
+                                  value={editRunInterval}
+                                  onChange={(e) => setEditRunInterval(Number(e.target.value))}
+                                  className="w-24 text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                />
+                                <button
+                                  disabled={!editRunName.trim() || savingEditRun}
+                                  onClick={async () => {
+                                    if (!editRunName.trim()) return;
+                                    setSavingEditRun(true);
+                                    try {
+                                      await apiFetch(`/api/scheduled-runs/${run.id}`, {
+                                        method: "PUT",
+                                        body: JSON.stringify({ name: editRunName.trim(), prompt: editRunPrompt.trim(), intervalMinutes: editRunInterval }),
+                                      });
+                                      setScheduledRunsList((r) => r.map((x) => x.id === run.id ? { ...x, name: editRunName.trim(), prompt: editRunPrompt.trim(), intervalMinutes: editRunInterval } : x));
+                                      setEditingRun(null);
+                                      showToast("Scheduled run updated", "success");
+                                    } catch {
+                                      showToast("Failed to update", "error");
+                                    } finally {
+                                      setSavingEditRun(false);
+                                    }
+                                  }}
+                                  className="text-xs px-3 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
+                                >
+                                  {savingEditRun ? "Saving…" : "Save"}
+                                </button>
+                                <button
+                                  onClick={() => setEditingRun(null)}
+                                  className="text-xs px-2 py-1 text-gray-600 hover:bg-gray-100 rounded"
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            <>
+                              <div className="flex items-center gap-2">
+                                <input
+                                  type="checkbox"
+                                  checked={run.enabled}
+                                  onChange={async (e) => {
+                                    const enabled = e.target.checked;
+                                    try {
+                                      await apiFetch(`/api/scheduled-runs/${run.id}`, {
+                                        method: "PUT",
+                                        body: JSON.stringify({ enabled }),
+                                      });
+                                      setScheduledRunsList((r) => r.map((x) => x.id === run.id ? { ...x, enabled } : x));
+                                    } catch {
+                                      showToast("Failed to update", "error");
+                                    }
+                                  }}
+                                  className="rounded border-gray-300"
+                                />
+                                <span className="flex-1 text-sm font-medium text-gray-800">{run.name}</span>
+                                <span className="text-xs text-gray-400">every {run.intervalMinutes}m</span>
+                                <button
+                                  onClick={() => { setEditingRun(run.id); setEditRunName(run.name); setEditRunPrompt(run.prompt ?? ""); setEditRunInterval(run.intervalMinutes); }}
+                                  className="text-xs text-gray-400 hover:text-blue-600"
+                                >
+                                  Edit
+                                </button>
+                                <button
+                                  disabled={triggeringRun === run.id}
+                                  onClick={async () => {
+                                    setTriggeringRun(run.id);
+                                    try {
+                                      await apiFetch(`/api/scheduled-runs/${run.id}/run`, { method: "POST" });
+                                      showToast("Run triggered", "success");
+                                      const runs = await apiFetch<ScheduledRun[]>(`/api/scheduled-runs?projectId=${activeProjectId}`);
+                                      setScheduledRunsList(runs);
+                                    } catch { showToast("Trigger failed", "error"); }
+                                    finally { setTriggeringRun(null); }
+                                  }}
+                                  className="text-xs px-2 py-1 text-blue-600 hover:bg-blue-50 rounded border border-blue-200"
+                                >
+                                  {triggeringRun === run.id ? "Running…" : "Run now"}
+                                </button>
+                                <button
+                                  onClick={async () => {
+                                    if (!confirm(`Delete scheduled run "${run.name}"?`)) return;
+                                    try {
+                                      await apiFetch(`/api/scheduled-runs/${run.id}`, { method: "DELETE" });
+                                      setScheduledRunsList((r) => r.filter((x) => x.id !== run.id));
+                                      showToast("Deleted", "success");
+                                    } catch {
+                                      showToast("Failed to delete", "error");
+                                    }
+                                  }}
+                                  className="text-xs text-gray-400 hover:text-red-600"
+                                >
+                                  Delete
+                                </button>
+                              </div>
+                              {run.prompt && (
+                                <p className="text-xs text-gray-500 pl-5 truncate">{run.prompt}</p>
+                              )}
+                              {run.lastRunAt && (
+                                <p className="text-xs text-gray-400 pl-5">
+                                  Last run: {new Date(run.lastRunAt).toLocaleString()} — {run.lastRunStatus ?? "unknown"}
+                                </p>
+                              )}
+                            </>
                           )}
                         </div>
                       ))}
