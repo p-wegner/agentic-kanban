@@ -31,7 +31,7 @@ test.describe("Issue card hover quick-start buttons", () => {
 
     // Use mock agent so workspace creation doesn't launch a real Claude process
     await request.put(`${SERVER_URL}/api/preferences/settings`, {
-      data: { mock_agent: "true", auto_review: "false", auto_merge: "false" },
+      data: { claude_profile: "mock", auto_review: "false", auto_merge: "false" },
     });
   });
 
@@ -43,7 +43,7 @@ test.describe("Issue card hover quick-start buttons", () => {
       await request.delete(`${SERVER_URL}/api/issues/${id}`);
     }
     await request.put(`${SERVER_URL}/api/preferences/settings`, {
-      data: { mock_agent: "false", auto_review: "true", auto_merge: "true" },
+      data: { claude_profile: "", auto_review: "true", auto_merge: "true" },
     });
   });
 

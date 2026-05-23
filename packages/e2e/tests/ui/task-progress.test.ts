@@ -38,7 +38,7 @@ test.describe("Agent task progress bar on issue cards", () => {
       await request.delete(`${SERVER_URL}/api/issues/${id}`);
     }
     await request.put(`${SERVER_URL}/api/preferences/settings`, {
-      data: { mock_agent: "false", mock_agent_profile: "" },
+      data: { claude_profile: "", mock_agent_profile: "" },
     });
   });
 
@@ -46,7 +46,7 @@ test.describe("Agent task progress bar on issue cards", () => {
     request: Parameters<Parameters<typeof test>[1]>[0]["request"],
   ) {
     await request.put(`${SERVER_URL}/api/preferences/settings`, {
-      data: { mock_agent: "true", mock_agent_profile: "todo-progress" },
+      data: { claude_profile: "mock", mock_agent_profile: "todo-progress" },
     });
   }
 
