@@ -11,10 +11,14 @@ import { createSessionManager } from "./services/session.manager.js";
 import type { ProviderId } from "./services/agent-provider.js";
 import { createBoardEvents } from "./services/board-events.js";
 <<<<<<< HEAD
+<<<<<<< HEAD
 import { workspaces, issues, projects, projectStatuses, preferences, sessions, agentSkills, issueDependencies } from "@agentic-kanban/shared/schema";
 =======
 import { workspaces, issues, projects, projectStatuses, preferences, sessions, agentSkills, sessionMessages } from "@agentic-kanban/shared/schema";
 >>>>>>> eab49ce (feat: check last agent output before re-nudging to avoid interrupting active work)
+=======
+import { workspaces, issues, projects, projectStatuses, preferences, sessions, agentSkills, issueDependencies, scheduledRuns } from "@agentic-kanban/shared/schema";
+>>>>>>> a5eb7cd (fix: add missing scheduledRuns import in server-start.ts)
 import { eq, sql, desc } from "drizzle-orm";
 import * as agentService from "./services/agent.service.js";
 import * as gitService from "./services/git.service.js";
