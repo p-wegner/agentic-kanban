@@ -1,7 +1,7 @@
 /**
  * Cron expression utilities — no external dependencies.
  * Supports standard 5-field cron: minute hour dom month dow
- * Fields: * | n | n-m | n/step | */step | comma-separated combinations
+ * Fields: * | n | n-m | n/step | star/step | comma-separated combinations
  */
 
 function parseCronField(field: string, min: number, max: number): number[] {
