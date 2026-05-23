@@ -183,6 +183,19 @@ export function BoardStats({
         )}
       </div>
 
+      {/* Done / total progress bar */}
+      {total > 0 && (
+        <div
+          className="h-1.5 w-full rounded-full overflow-hidden bg-gray-200"
+          title={`${doneCount} / ${total} issues done (${completionPct}%)`}
+        >
+          <div
+            className="h-full bg-emerald-500 rounded-full transition-all duration-500"
+            style={{ width: `${completionPct}%` }}
+          />
+        </div>
+      )}
+
       {/* Segmented progress bar + status legend */}
       {total > 0 && (
         <div className="flex items-center gap-3">
