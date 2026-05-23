@@ -302,6 +302,75 @@ test.describe("Board interactions", () => {
     expect(movedIssue).toBeDefined();
   });
 
+  test("expand button cycles panel through modal and fullscreen modes", async ({
+    page,
+    request,
+  }) => {
+    const suffix = Date.now().toString(36);
+    const title = `ExpandTest ${suffix}`;
+
+    const createRes = await request.post(`${SERVER_URL}/api/issues`, {
+      data: { title, statusId, projectId },
+    });
+    const { id } = await createRes.json();
+    createdIssueIds.push(id);
+
+    await page.goto("/");
+    await page.waitForSelector("h2");
+
+    // Open detail panel
+    await page.locator("p", { hasText: title }).first().click();
+    await expect(page.locator("h2", { hasText: "Issue Details" })).toBeVisible();
+
+    // Panel starts in sidebar mode — expand button title should say "Expand to modal"
+    const expandBtn = page.locator('button[title="Expand to modal"]');
+    await expect(expandBtn).toBeVisible();
+
+    // Click expand: sidebar → modal
+    await expandBtn.click();
+    await expect(page.locator('button[title="Expand to fullscreen"]')).toBeVisible();
+
+    // Click expand again: modal → fullscreen
+    await page.locator('button[title="Expand to fullscreen"]').click();
+    await expect(page.locator('button[title="Collapse to sidebar"]')).toBeVisible();
+
+    // Panel should now cover full viewport (inset-0)
+    const panel = page.locator("[data-panel]");
+    await expect(panel).toHaveClass(/inset-0/);
+  });
+
+  test("collapse button returns panel from fullscreen to sidebar", async ({
+    page,
+    request,
+  }) => {
+    const suffix = Date.now().toString(36);
+    const title = `CollapseTest ${suffix}`;
+
+    const createRes = await request.post(`${SERVER_URL}/api/issues`, {
+      data: { title, statusId, projectId },
+    });
+    const { id } = await createRes.json();
+    createdIssueIds.push(id);
+
+    await page.goto("/");
+    await page.waitForSelector("h2");
+
+    // Open detail panel and expand to fullscreen
+    await page.locator("p", { hasText: title }).first().click();
+    await expect(page.locator("h2", { hasText: "Issue Details" })).toBeVisible();
+    await page.locator('button[title="Expand to modal"]').click();
+    await page.locator('button[title="Expand to fullscreen"]').click();
+    await expect(page.locator('button[title="Collapse to sidebar"]')).toBeVisible();
+
+    // Click collapse: fullscreen → sidebar
+    await page.locator('button[title="Collapse to sidebar"]').click();
+
+    // Panel should be back in sidebar mode
+    await expect(page.locator('button[title="Expand to modal"]')).toBeVisible();
+    const panel = page.locator("[data-panel]");
+    await expect(panel).not.toHaveClass(/inset-0/);
+  });
+
   test("error banner on API failure", async ({ page }) => {
     await page.goto("/");
     await page.waitForSelector("h2");
