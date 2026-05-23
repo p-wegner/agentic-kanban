@@ -49,6 +49,7 @@ const MIGRATION_FILES = [
   "../../../shared/drizzle/0034_session_pid.sql",
   "../../../shared/drizzle/0035_session_trigger.sql",
   "../../../shared/drizzle/0036_scheduled_runs_cron.sql",
+  "../../../shared/drizzle/0037_workspace_provider.sql",
 ];
 
 function createTestApp() {

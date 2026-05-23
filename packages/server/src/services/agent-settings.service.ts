@@ -25,8 +25,9 @@ export interface AgentSettings {
   agentArgs: string | undefined;
   /** @deprecated Use profile instead */
   claudeProfile: string | undefined;
-  /** Provider-tagged profile selection. Mapped from claude_profile preference as { provider: "claude", name }. */
-  profile: { provider: "claude"; name: string } | undefined;
+  /** Provider-tagged profile selection. Derived from claude_profile + provider preferences. */
+  profile: { provider: "claude" | "codex"; name: string } | undefined;
+  provider: "claude" | "codex";
   resumeWithNewModel: boolean;
   permissionPromptTool: string | undefined;
 }
@@ -91,8 +92,10 @@ export function resolveAgentSettings(
     ? "mcp__agentic-kanban__approve_tool_use"
     : (permPref && permPref !== "false" ? permPref : undefined);
 
+  const provider = (prefMap.get("provider") || "claude") as "claude" | "codex";
+
   // Don't pass mock profile name to Claude Code — it's only used to select the mock agent command
   const resolvedProfile = isMockProfile(claudeProfile) ? undefined : claudeProfile;
-  const profile = resolvedProfile ? { provider: "claude" as const, name: resolvedProfile } : undefined;
-  return { agentCommand, agentArgs, claudeProfile: resolvedProfile, profile, resumeWithNewModel, permissionPromptTool };
+  const profile = resolvedProfile ? { provider, name: resolvedProfile } : undefined;
+  return { agentCommand, agentArgs, claudeProfile: resolvedProfile, profile, provider, resumeWithNewModel, permissionPromptTool };
 }
