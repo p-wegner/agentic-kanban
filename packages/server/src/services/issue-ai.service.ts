@@ -18,8 +18,11 @@ export async function enhanceIssue(
   const prompt = `You are helping enhance a kanban issue ticket for an AI coding agent.
 Given a title and optional description, return an improved version that is clear, actionable, and well-structured.
 Keep the title concise (under 80 chars). Expand the description with context, acceptance criteria, and agent instructions if helpful.
+Also identify any open questions — unresolved decisions, assumptions, or clarifications needed before work begins.
 Respond ONLY with valid JSON — no markdown, no explanation:
-{"title": "...", "description": "..."}
+{"title": "...", "description": "...", "openQuestions": ["question 1", "question 2"]}
+
+The openQuestions array should contain 1-5 concise questions as plain strings. Use an empty array if there are genuinely no ambiguities.
 
 Current title: ${title}
 Current description: ${description?.trim() || "(none)"}`;
@@ -27,10 +30,18 @@ Current description: ${description?.trim() || "(none)"}`;
   const stdout = await invokeClaudePrompt(prompt, { database });
   const output = stdout.trim();
   const cleaned = output.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
-  const enhanced = JSON.parse(cleaned) as { title?: string; description?: string };
+  const enhanced = JSON.parse(cleaned) as { title?: string; description?: string; openQuestions?: string[] };
+
+  let enhancedDescription = enhanced.description?.trim() ?? description ?? "";
+  const questions = Array.isArray(enhanced.openQuestions) ? enhanced.openQuestions.filter(q => typeof q === "string" && q.trim()) : [];
+  if (questions.length > 0) {
+    const questionsSection = "\n\n## Open Questions\n" + questions.map(q => `- [ ] ${q.trim()}`).join("\n");
+    enhancedDescription = enhancedDescription + questionsSection;
+  }
+
   return {
     title: enhanced.title?.trim() || title,
-    description: enhanced.description?.trim() ?? description ?? "",
+    description: enhancedDescription,
   };
 }
 
