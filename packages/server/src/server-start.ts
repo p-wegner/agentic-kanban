@@ -271,6 +271,20 @@ export async function startServer(port?: number) {
         }
       }
 
+      // Direct (master-branch) workspaces: close immediately on exit — no review/merge flow.
+      // The agent commits directly to master; there is no branch to merge and no review makes sense.
+      // Leaving the workspace idle would cause the monitor to relaunch it indefinitely.
+      if (workspace.isDirect) {
+        const doneStatus = findStatus("Done");
+        await db.update(workspaces).set({ status: "closed", workingDir: null, updatedAt: now }).where(eq(workspaces.id, workspaceId));
+        if (doneStatus) {
+          await db.update(issues).set({ statusId: doneStatus.id, updatedAt: now }).where(eq(issues.id, issueId));
+        }
+        boardEvents.broadcast(projectId, "workspace_merged");
+        console.log(`[workflow] direct workspace ${workspaceId} closed on agent exit — issue moved to Done`);
+        return;
+      }
+
       if (hasCommittedChanges) {
         console.log(`[workflow] agent session ${sessionId} completed with committed changes — moving to In Review`);
         const inReview = findStatus("In Review");
@@ -693,6 +707,7 @@ export async function startServer(port?: number) {
           wsId: workspaces.id,
           wsStatus: workspaces.status,
           workingDir: workspaces.workingDir,
+          isDirect: workspaces.isDirect,
           projectId: issues.projectId,
           issueId: issues.id,
           issueTitle: issues.title,
@@ -713,7 +728,44 @@ export async function startServer(port?: number) {
 
           const sess = lastSess[0];
 
+          // Count total sessions for this workspace to detect stuck workspaces
+          const sessionCountRows = await db
+            .select({ count: sql<number>`count(*)` })
+            .from(sessions)
+            .where(eq(sessions.workspaceId, ws.wsId));
+          const sessionCount = Number(sessionCountRows[0]?.count ?? 0);
+          const MAX_SESSIONS = 10;
+
           if (ws.wsStatus === "idle") {
+            // Direct (master-branch) workspaces should never be relaunched — they commit directly to master.
+            // If they're still idle here, runWorkflowOnExit didn't close them (e.g. pre-existing idle from before
+            // this fix). Close them now to stop the loop.
+            if (ws.isDirect) {
+              const now = new Date().toISOString();
+              await db.update(workspaces).set({ status: "closed", workingDir: null, updatedAt: now }).where(eq(workspaces.id, ws.wsId)).catch(() => {});
+              const doneStatusRow = await db.select({ id: projectStatuses.id }).from(projectStatuses)
+                .where(sql`${projectStatuses.name} = 'Done' AND ${projectStatuses.projectId} = ${ws.projectId}`).limit(1);
+              if (doneStatusRow.length > 0) {
+                await db.update(issues).set({ statusId: doneStatusRow[0].id, updatedAt: now }).where(eq(issues.id, ws.issueId)).catch(() => {});
+              }
+              logMonitorAction("merge", ws.wsId, ws.issueId);
+              console.log(`[monitor] Closed stale direct workspace ${ws.wsId} — issue moved to Done`);
+              boardEvents.broadcast(ws.projectId, "board_changed");
+            } else if (sessionCount >= MAX_SESSIONS) {
+              // Too many sessions — flag as needing human review instead of relaunching again
+              const needsReviewSt = await db.select({ id: projectStatuses.id }).from(projectStatuses)
+                .where(sql`${projectStatuses.name} = 'Needs Review' AND ${projectStatuses.projectId} = ${ws.projectId}`).limit(1);
+              const inReviewSt = await db.select({ id: projectStatuses.id }).from(projectStatuses)
+                .where(sql`${projectStatuses.name} = 'In Review' AND ${projectStatuses.projectId} = ${ws.projectId}`).limit(1);
+              const fallbackSt = needsReviewSt[0] ?? inReviewSt[0];
+              if (fallbackSt) {
+                await db.update(issues).set({ statusId: fallbackSt.id }).where(eq(issues.id, ws.issueId)).catch(() => {});
+              }
+              await db.update(workspaces).set({ status: "closed", updatedAt: new Date().toISOString() }).where(eq(workspaces.id, ws.wsId)).catch(() => {});
+              logMonitorAction("mark_idle", ws.wsId, ws.issueId);
+              console.log(`[monitor] Workspace ${ws.wsId} has ${sessionCount} sessions — flagged as stuck, closing`);
+              boardEvents.broadcast(ws.projectId, "board_changed");
+            } else {
             // Relaunch idle workspaces
             const baseUrl = `http://localhost:${serverPort}`;
             await fetch(`${baseUrl}/api/workspaces/${ws.wsId}/launch`, { method: "POST" }).catch(() => {});
@@ -721,6 +773,7 @@ export async function startServer(port?: number) {
             logMonitorAction("relaunch", ws.wsId, ws.issueId);
             console.log(`[monitor] Relaunched idle workspace ${ws.wsId}`);
             boardEvents.broadcast(ws.projectId, "board_changed");
+            }
           } else if (ws.wsStatus === "reviewing") {
             // Ghost workspace: workingDir is empty — branch/worktree is gone, merge will always fail
             if (!ws.workingDir) {
@@ -749,10 +802,23 @@ export async function startServer(port?: number) {
             }
           } else if (ws.wsStatus === "active" && sess && sess.status === "stopped") {
             // Active workspace but session has stopped — agent exited without transitioning workspace.
+            if (ws.isDirect) {
+              // Direct workspaces should not be relaunched — close immediately.
+              const now = new Date().toISOString();
+              await db.update(workspaces).set({ status: "closed", workingDir: null, updatedAt: now }).where(eq(workspaces.id, ws.wsId)).catch(() => {});
+              const doneStatusRow = await db.select({ id: projectStatuses.id }).from(projectStatuses)
+                .where(sql`${projectStatuses.name} = 'Done' AND ${projectStatuses.projectId} = ${ws.projectId}`).limit(1);
+              if (doneStatusRow.length > 0) {
+                await db.update(issues).set({ statusId: doneStatusRow[0].id, updatedAt: now }).where(eq(issues.id, ws.issueId)).catch(() => {});
+              }
+              logMonitorAction("merge", ws.wsId, ws.issueId);
+              console.log(`[monitor] Direct active workspace ${ws.wsId} has stopped session — closing`);
+            } else {
             // Mark workspace as idle so the next cycle will relaunch it.
             await db.update(workspaces).set({ status: "idle" }).where(eq(workspaces.id, ws.wsId)).catch(() => {});
             logMonitorAction("mark_idle", ws.wsId, ws.issueId);
             console.log(`[monitor] Active workspace ${ws.wsId} has stopped session — marking idle for relaunch`);
+            }
             boardEvents.broadcast(ws.projectId, "board_changed");
           } else if (ws.wsStatus === "active" && sess && sess.status === "running") {
             // Check if process is actually alive; if not, mark idle
