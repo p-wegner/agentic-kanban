@@ -2447,11 +2447,13 @@ export function BoardPage() {
       {showAllWorkspaces && (
         <AllWorkspacesPanel
           columns={columns}
+          activeProjectId={activeProjectId}
           onClose={() => setShowAllWorkspaces(false)}
           onIssueClick={(issue) => {
             setSelectedIssue(issue);
             setShowAllWorkspaces(false);
           }}
+          onProjectSwitch={handleProjectChange}
           onRefresh={() => refetchBoard()}
         />
       )}
