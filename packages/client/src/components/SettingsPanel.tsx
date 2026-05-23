@@ -1356,6 +1356,26 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                                   Last run: {new Date(run.lastRunAt).toLocaleString()} — {run.lastRunStatus ?? "unknown"}
                                 </p>
                               )}
+                              {(() => {
+                                const nextMs = run.lastRunAt
+                                  ? new Date(run.lastRunAt).getTime() + run.intervalMinutes * 60 * 1000
+                                  : null;
+                                if (!run.enabled) return null;
+                                if (nextMs === null) return (
+                                  <p className="text-xs text-blue-500 pl-5">Next run: pending (first run)</p>
+                                );
+                                const diffMin = Math.round((nextMs - Date.now()) / 60000);
+                                const label = diffMin <= 0
+                                  ? "overdue"
+                                  : diffMin < 60
+                                    ? `in ${diffMin}m`
+                                    : `at ${new Date(nextMs).toLocaleTimeString()}`;
+                                return (
+                                  <p className="text-xs text-blue-500 pl-5" title={new Date(nextMs).toLocaleString()}>
+                                    Next run: {label}
+                                  </p>
+                                );
+                              })()}
                             </>
                           )}
                         </div>
