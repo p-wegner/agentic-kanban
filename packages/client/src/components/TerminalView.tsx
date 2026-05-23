@@ -108,7 +108,7 @@ export function TerminalView({ messages, connectionState, parseOutput = "true", 
   const [markers, setMarkers] = useState<Array<{ idx: number; color: string; pct: number }>>([]);
 
   const handleDownload = useCallback(() => {
-    const lines = extractMeaningfulOutput(messages, 10000);
+    const lines = extractMeaningfulOutput(messages.map(m => ({ ...m, data: m.data ?? null })), 10000);
     const text = lines.join("\n");
     const blob = new Blob([text], { type: "text/plain" });
     const url = URL.createObjectURL(blob);
