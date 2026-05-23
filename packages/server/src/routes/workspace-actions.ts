@@ -247,6 +247,17 @@ export function createWorkspaceActionsRoute(
     return c.json({ stopped });
   });
 
+  // GET /api/workspaces/:id/latest-commit — get latest commit SHA and message
+  router.get("/:id/latest-commit", async (c) => {
+    const id = c.req.param("id");
+    const workspace = await getWorkspaceById(id, database);
+    if (!workspace) return c.json({ error: "Workspace not found" }, 404);
+    if (!workspace.workingDir) return c.json({ sha: null, message: null });
+    const commit = await gitService.getLatestCommit(workspace.workingDir);
+    if (!commit) return c.json({ sha: null, message: null });
+    return c.json(commit);
+  });
+
   // GET /api/workspaces/:id/diff — get git diff
   router.get("/:id/diff", async (c) => {
     const id = c.req.param("id");
