@@ -1038,8 +1038,8 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
               project={project}
               prefs={prefs}
               actionLoading={actionLoading}
+              onSubmitting={() => onWorkspaceCreating?.(issue.id)}
               onCreated={(result) => {
-                onWorkspaceCreating?.(issue.id);
                 setShowCreate(false);
                 setCompletedMessages([]);
                 setSelectedHistoryId(null);
