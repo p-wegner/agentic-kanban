@@ -19,7 +19,7 @@ test.describe("Settings API", () => {
         agent_command: "",
         agent_args: "",
         output_parser: "true",
-        mock_agent: "false",
+        claude_profile: "",
       },
     });
   });
@@ -37,7 +37,7 @@ test.describe("Settings API", () => {
         agent_command: "claude-test",
         agent_args: "--model opus",
         output_parser: "true",
-        mock_agent: "false",
+        claude_profile: "",
       },
     });
     expect(res.ok()).toBeTruthy();
@@ -51,7 +51,7 @@ test.describe("Settings API", () => {
         agent_command: "claude-verify",
         agent_args: "--verbose",
         output_parser: "false",
-        mock_agent: "true",
+        claude_profile: "mock",
       },
     });
 
@@ -61,7 +61,7 @@ test.describe("Settings API", () => {
     expect(body.agent_command).toBe("claude-verify");
     expect(body.agent_args).toBe("--verbose");
     expect(body.output_parser).toBe("false");
-    expect(body.mock_agent).toBe("true");
+    expect(body.claude_profile).toBe("mock");
   });
 
   test("PUT only persists allowed keys", async ({ request }) => {
@@ -82,7 +82,7 @@ test.describe("Settings API", () => {
     await request.put(`${SERVER_URL}/api/preferences/settings`, {
       data: {
         agent_command: 'node -e "console.log(\'pref-agent\')"',
-        mock_agent: "false",
+        claude_profile: "",
       },
     });
 

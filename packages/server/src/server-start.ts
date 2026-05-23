@@ -26,15 +26,12 @@ import { killProcessesInDir } from "./services/process-cleanup.js";
 import { runScript } from "./services/script-runner.js";
 import { execFile } from "node:child_process";
 import { resolve, dirname } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 import { existsSync } from "node:fs";
 import { getMigrationsFolder } from "./db/migrations.js";
+import { MOCK_AGENT_COMMAND, isMockProfile } from "./services/agent-settings.service.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const MOCK_AGENT_PATH = resolve(__dirname, "./scripts/mock-agent.ts");
-const TSX_LOADER = resolve(__dirname, "../node_modules/tsx/dist/loader.mjs");
-const TSX_URL = pathToFileURL(TSX_LOADER).href;
-const MOCK_AGENT_COMMAND = `node --import ${TSX_URL} "${MOCK_AGENT_PATH}"`;
 
 const DEFAULT_REVIEW_PROMPT = `You are an AI code reviewer. Review the changes on branch '{{branch}}'.
 
@@ -227,10 +224,10 @@ export async function startServer(port?: number) {
         let learningAfterReviewPromise: Promise<void> = Promise.resolve();
         if (prefMap.get("learning_step_after_review") === "true" && workspace.workingDir) {
           try {
-            const useMockLearn = prefMap.get("mock_agent") === "true" || process.env.MOCK_AGENT === "1";
-            const agentCmdLearn = useMockLearn ? MOCK_AGENT_COMMAND : (prefMap.get("agent_command") || undefined);
+            const profileLearn = prefMap.get("claude_profile") || undefined;
+            const agentCmdLearn = isMockProfile(profileLearn) ? MOCK_AGENT_COMMAND : (prefMap.get("agent_command") || undefined);
             const agentArgsLearn = prefMap.get("agent_args") || undefined;
-            const claudeProfileLearn = useMockLearn ? undefined : (prefMap.get("claude_profile") || undefined);
+            const claudeProfileLearn = isMockProfile(profileLearn) ? undefined : profileLearn;
             const learningPrompt = `/learning-step\n\nRun the learning step skill to extract insights from recent session transcripts and update docs/hooks.`;
             const learnSessId = await sessionManager.startSession(workspace.id, learningPrompt, agentCmdLearn, agentArgsLearn ? agentArgsLearn.split(" ") : undefined, undefined, claudeProfileLearn, undefined, undefined, undefined, undefined, undefined, "learning");
             learningSessionIds.add(learnSessId);
@@ -306,10 +303,10 @@ export async function startServer(port?: number) {
         // Optional learning step after agent (runs in parallel with review)
         if (prefMap.get("learning_step_after_agent") === "true" && workspace.workingDir) {
           try {
-            const useMockLearn = prefMap.get("mock_agent") === "true" || process.env.MOCK_AGENT === "1";
-            const agentCmdLearn = useMockLearn ? MOCK_AGENT_COMMAND : (prefMap.get("agent_command") || undefined);
+            const profileLearn = prefMap.get("claude_profile") || undefined;
+            const agentCmdLearn = isMockProfile(profileLearn) ? MOCK_AGENT_COMMAND : (prefMap.get("agent_command") || undefined);
             const agentArgsLearn = prefMap.get("agent_args") || undefined;
-            const claudeProfileLearn = useMockLearn ? undefined : (prefMap.get("claude_profile") || undefined);
+            const claudeProfileLearn = isMockProfile(profileLearn) ? undefined : profileLearn;
             const learningPrompt = `/learning-step\n\nRun the learning step skill to extract insights from recent session transcripts and update docs/hooks.`;
             const learnSessId = await sessionManager.startSession(workspace.id, learningPrompt, agentCmdLearn, agentArgsLearn ? agentArgsLearn.split(" ") : undefined, undefined, claudeProfileLearn, undefined, undefined, undefined, undefined, undefined, "learning");
             learningSessionIds.add(learnSessId);
@@ -320,9 +317,9 @@ export async function startServer(port?: number) {
         }
 
         if (autoReview) {
-          const useMock = prefMap.get("mock_agent") === "true" || process.env.MOCK_AGENT === "1";
-          const agentCommand = useMock ? MOCK_AGENT_COMMAND : (prefMap.get("agent_command") || undefined);
-          const claudeProfile = useMock ? undefined : (prefMap.get("claude_profile") || undefined);
+          const reviewProfile = prefMap.get("claude_profile") || undefined;
+          const agentCommand = isMockProfile(reviewProfile) ? MOCK_AGENT_COMMAND : (prefMap.get("agent_command") || undefined);
+          const claudeProfile = isMockProfile(reviewProfile) ? undefined : reviewProfile;
           const reviewArgs = buildReviewArgs(prefMap);
           const autoFix = prefMap.get("review_auto_fix") !== "false";
           const provider = (prefMap.get("provider") || undefined) as ProviderId | undefined;
@@ -523,9 +520,9 @@ export async function startServer(port?: number) {
 
       const prefRows = await db.select().from(preferences);
       const prefMap = new Map(prefRows.map(r => [r.key, r.value]));
-      const useMock = prefMap.get("mock_agent") === "true" || process.env.MOCK_AGENT === "1";
-      const agentCommand = useMock ? MOCK_AGENT_COMMAND : (prefMap.get("agent_command") || undefined);
-      const claudeProfile = useMock ? undefined : (prefMap.get("claude_profile") || undefined);
+      const manualProfile = prefMap.get("claude_profile") || undefined;
+      const agentCommand = isMockProfile(manualProfile) ? MOCK_AGENT_COMMAND : (prefMap.get("agent_command") || undefined);
+      const claudeProfile = isMockProfile(manualProfile) ? undefined : manualProfile;
       const reviewArgs = buildReviewArgs(prefMap);
       const autoFix = prefMap.get("review_auto_fix") !== "false";
       const provider = (prefMap.get("provider") || undefined) as ProviderId | undefined;
