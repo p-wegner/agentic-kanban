@@ -22,6 +22,7 @@ export default defineConfig({
   fullyParallel: false,
   retries: 0,
   globalSetup: "./global-setup.ts",
+  globalTeardown: "./global-teardown.ts",
   use: {
     baseURL: `http://localhost:${clientPort}`,
 <<<<<<< HEAD
