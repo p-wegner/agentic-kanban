@@ -75,6 +75,7 @@ export interface ParsedStreamEvent {
   toolResult?: {
     toolUseId: string;
     images?: Array<{ mediaType: string; data: string }>;
+    agentResultText?: string;
   };
   /** Set on assistant events that contain text content. */
   assistantText?: string;
@@ -288,7 +289,8 @@ export class ClaudeProvider implements AgentProvider {
                 }
               }
             }
-            result.toolResult = { toolUseId: block.tool_use_id, ...(images.length > 0 ? { images } : {}) };
+            const agentResultText = typeof block.content === "string" && block.content ? block.content : undefined;
+            result.toolResult = { toolUseId: block.tool_use_id, ...(images.length > 0 ? { images } : {}), ...(agentResultText !== undefined ? { agentResultText } : {}) };
             break;
           }
         }
