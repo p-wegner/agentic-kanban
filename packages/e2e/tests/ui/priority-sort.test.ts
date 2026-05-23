@@ -15,9 +15,9 @@ test.describe("Priority-based column sort", () => {
   const createdIssueIds: string[] = [];
 
   test.beforeAll(async ({ request }) => {
-    const projectsRes = await request.get(`${SERVER_URL}/api/projects`);
-    const projects = await projectsRes.json();
-    projectId = projects[0].id;
+    const prefRes = await request.get(`${SERVER_URL}/api/preferences/active-project`);
+    const pref = await prefRes.json();
+    projectId = pref.projectId;
 
     const statusesRes = await request.get(
       `${SERVER_URL}/api/projects/${projectId}/statuses`,
