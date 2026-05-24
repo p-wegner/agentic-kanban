@@ -24,6 +24,8 @@ export interface AgentLaunchConfig {
   env: Record<string, string>;
   /** If true, write prompt to stdin and keep it open for follow-up writes. */
   keepStdinOpen?: boolean;
+  /** Prepended to the stdin prompt (used for providers that lack a system-prompt flag, e.g. Codex plan mode). */
+  promptPrefix?: string;
 }
 
 export interface ProviderLaunchOptions {
@@ -351,13 +353,14 @@ export class CodexProvider implements AgentProvider {
   readonly name = "codex";
 
   buildLaunchConfig(options: ProviderLaunchOptions): AgentLaunchConfig {
-    const { agentArgs, providerSessionId, agentCommand, keepAlive, profile } = options;
+    const { agentArgs, providerSessionId, agentCommand, keepAlive, profile, planMode } = options;
     const isWindows = process.platform === "win32";
 
     const isMockAgent = !!process.env.AGENT_COMMAND || (agentCommand?.includes("mock-agent") ?? false);
     let command = process.env.AGENT_COMMAND || agentCommand || "codex";
 
     const args: string[] = [];
+    let promptPrefix: string | undefined;
 
     if (isMockAgent) {
       if (providerSessionId) {
@@ -367,11 +370,17 @@ export class CodexProvider implements AgentProvider {
         args.push("--profile", "multi-turn");
       }
     } else {
+      // Plan mode: run under Codex's read-only sandbox so the agent can read and explore
+      // but the sandbox physically blocks file writes and mutating commands — the native
+      // equivalent of Claude's plan mode. Otherwise bypass the sandbox for full runs.
+      const sandboxFlags = planMode
+        ? ["--sandbox", "read-only"]
+        : ["--dangerously-bypass-approvals-and-sandbox"];
       // Use `codex exec resume` when resuming a session, otherwise `codex exec`
       if (providerSessionId) {
-        args.push("exec", "resume", "--json", "--dangerously-bypass-approvals-and-sandbox", providerSessionId);
+        args.push("exec", "resume", "--json", ...sandboxFlags, providerSessionId);
       } else {
-        args.push("exec", "--json", "--dangerously-bypass-approvals-and-sandbox");
+        args.push("exec", "--json", ...sandboxFlags);
       }
       // Layer named config from $CODEX_HOME/<name>.config.toml on top of base config
       const profileName = profile?.provider === "codex" ? profile.name : undefined;
@@ -380,6 +389,11 @@ export class CodexProvider implements AgentProvider {
       }
       if (agentArgs) {
         args.push(...splitArgs(agentArgs));
+      }
+      // Codex has no --append-system-prompt; convey plan-only intent via the stdin prompt
+      // so the agent produces a plan directly instead of repeatedly hitting the sandbox.
+      if (planMode) {
+        promptPrefix = "IMPORTANT: This is a PLAN-ONLY session. Do NOT implement, write, edit, or modify any files. Do NOT run commands that make changes (git, npm, pip, etc.). Only read and explore the codebase, analyze the issue, and produce a detailed implementation plan. Output your plan and stop.";
       }
       // Prompt is passed via stdin (using `-` as the last argument)
       args.push("-");
@@ -395,6 +409,7 @@ export class CodexProvider implements AgentProvider {
       isMockAgent,
       env: { ...process.env as Record<string, string> },
       keepStdinOpen: false,
+      promptPrefix,
     };
   }
 

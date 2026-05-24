@@ -58,7 +58,8 @@ export function launch(
     provider,
     prompt,
   });
-  const { command, args, useShell, isMockAgent, env: spawnEnv } = launchConfig;
+  const { command, args, useShell, isMockAgent, env: spawnEnv, promptPrefix } = launchConfig;
+  const stdinPrompt = promptPrefix ? `${promptPrefix}\n\n${prompt}` : prompt;
 
   console.log(`[agent] launching: command=${command} provider=${provider ?? "auto"} worktree=${worktreePath} sessionId=${sessionId} resume=${providerSessionId ?? "none"}`);
 
@@ -94,10 +95,10 @@ export function launch(
   // In keepAlive (multi-turn) mode, keep stdin open so follow-ups can be sent via sendInput.
   // Otherwise close stdin immediately — on Windows, claude.exe buffers stdout until stdin closes.
   if (keepAlive) {
-    proc.stdin?.write(prompt + "\n");
+    proc.stdin?.write(stdinPrompt + "\n");
     stdinOpen.set(sessionId, true);
   } else {
-    proc.stdin?.end(prompt + "\n");
+    proc.stdin?.end(stdinPrompt + "\n");
   }
 
   activeProcesses.set(sessionId, proc);
