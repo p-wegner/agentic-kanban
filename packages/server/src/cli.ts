@@ -1381,6 +1381,85 @@ Examples:
   });
 
 wsCmd
+  .command("resume <issue-number>")
+  .description("Resume the latest workspace for an issue by launching a new agent session.\n\nLooks up the workspace by issue number and calls the launch API. Auto-builds the prompt from the issue title/description if not provided. Requires the kanban server to be running (pnpm dev).")
+  .option("--prompt <text>", "Prompt to send to the agent (default: issue title + description)")
+  .option("-p, --port <port>", "Server port (default: $KANBAN_SERVER_PORT or 3001)")
+  .addHelpText("after", `
+Examples:
+  $ agentic-kanban workspace resume 17
+  $ agentic-kanban workspace resume 17 --prompt "Continue fixing the setup script"
+`)
+  .action(async (issueNumberArg: string, options: { prompt?: string; port?: string }) => {
+    try {
+      await runMigrations();
+      const projectId = await getActiveProjectId();
+
+      const num = Number(issueNumberArg);
+      if (!Number.isInteger(num) || num <= 0) {
+        console.error(`Invalid issue number: ${issueNumberArg}`);
+        process.exit(1);
+      }
+
+      const issueRows = await db
+        .select({ id: issues.id })
+        .from(issues)
+        .where(and(eq(issues.issueNumber, num), eq(issues.projectId, projectId)))
+        .limit(1);
+
+      if (issueRows.length === 0) {
+        console.error(`Issue #${num} not found.`);
+        process.exit(1);
+      }
+
+      const wsRows = await db
+        .select()
+        .from(workspaces)
+        .where(eq(workspaces.issueId, issueRows[0].id))
+        .orderBy(desc(workspaces.updatedAt));
+
+      if (wsRows.length === 0) {
+        console.error(`No workspace found for issue #${num}. Create one first.`);
+        process.exit(1);
+      }
+
+      const ws = wsRows[0];
+      let prompt = options.prompt;
+      if (!prompt) {
+        const issueDetail = await db.select({ title: issues.title, description: issues.description }).from(issues).where(eq(issues.id, ws.issueId)).limit(1);
+        if (issueDetail.length > 0) {
+          prompt = issueDetail[0].description
+            ? `${issueDetail[0].title}\n\n${issueDetail[0].description}`
+            : issueDetail[0].title;
+        } else {
+          prompt = "Continue working on this issue.";
+        }
+      }
+
+      const port = options.port ?? process.env.KANBAN_SERVER_PORT ?? "3001";
+      const res = await fetch(`http://localhost:${port}/api/workspaces/${ws.id}/launch`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt }),
+      });
+      const data = await res.json() as Record<string, unknown>;
+
+      if (!res.ok) {
+        console.error(`Resume failed: ${data.error ?? res.statusText}`);
+        process.exit(1);
+      }
+
+      console.log(`Resumed #${num} (${ws.branch})`);
+      console.log(`  workspace: ${ws.id}`);
+      console.log(`  sessionId: ${data.sessionId}`);
+      process.exit(0);
+    } catch (err) {
+      console.error("Error:", err instanceof Error ? err.message : String(err));
+      process.exit(1);
+    }
+  });
+
+wsCmd
   .command("review <workspace-id>")
   .description("Trigger an AI code review for an idle workspace.\n\nRequires the kanban server to be running (pnpm dev). The workspace must be in 'idle' status.")
   .option("-p, --port <port>", "Server port (default: $KANBAN_SERVER_PORT or 3001)")
