@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { buildAgentLaunchConfig, type ProviderId } from "./agent-provider.js";
+import { buildAgentLaunchConfig, type ProviderId, type ProviderName } from "./agent-provider.js";
 
 export interface AgentOutputEvent {
   type: "stdout" | "stderr" | "exit";
@@ -44,7 +44,7 @@ export function launch(
   permissionPromptTool?: string,
   planMode?: boolean,
   provider?: ProviderId,
-  profile?: { provider: "claude" | "codex"; name: string },
+  profile?: { provider: ProviderName; name: string },
 ): ChildProcess {
   const launchConfig = buildAgentLaunchConfig({
     agentArgs,

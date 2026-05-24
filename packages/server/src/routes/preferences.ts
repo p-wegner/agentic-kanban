@@ -47,7 +47,7 @@ export function createPreferencesRoute(database: Database = db) {
 
   // GET /api/preferences/settings — get all agent settings
   router.get("/settings", async (c) => {
-    const keys = ["agent_command", "agent_args", "output_parser", "skip_permissions", "claude_profile", "codex_profile", "provider", "mock_agent_profile", "mock_agent_delay_ms", "permission_prompt_tool", "auto_review", "auto_merge", "resume_with_new_model", "review_auto_fix", "disabled_mcp_tools", "auto_start_followup", "require_manual_approval", "dynamic_column_scaling", "persistent_agent", "learning_step_after_agent", "learning_step_after_review", "learning_step_before_merge", "auto_monitor", "auto_monitor_interval", "nudge_auto_start", "projects_base_path", "plan_auto_continue"];
+    const keys = ["agent_command", "agent_args", "output_parser", "skip_permissions", "claude_profile", "codex_profile", "copilot_profile", "provider", "mock_agent_profile", "mock_agent_delay_ms", "permission_prompt_tool", "auto_review", "auto_merge", "resume_with_new_model", "review_auto_fix", "disabled_mcp_tools", "auto_start_followup", "require_manual_approval", "dynamic_column_scaling", "persistent_agent", "learning_step_after_agent", "learning_step_after_review", "learning_step_before_merge", "auto_monitor", "auto_monitor_interval", "nudge_auto_start", "projects_base_path", "plan_auto_continue"];
     const rows = await database
       .select()
       .from(preferences);
@@ -66,7 +66,7 @@ export function createPreferencesRoute(database: Database = db) {
   router.put("/settings", async (c) => {
     const body = await c.req.json() as Record<string, string>;
     const now = new Date().toISOString();
-    const allowedKeys = ["agent_command", "agent_args", "output_parser", "skip_permissions", "claude_profile", "codex_profile", "provider", "mock_agent_profile", "mock_agent_delay_ms", "permission_prompt_tool", "auto_review", "auto_merge", "resume_with_new_model", "review_auto_fix", "disabled_mcp_tools", "auto_start_followup", "require_manual_approval", "dynamic_column_scaling", "persistent_agent", "learning_step_after_agent", "learning_step_after_review", "learning_step_before_merge", "auto_monitor", "auto_monitor_interval", "nudge_auto_start", "projects_base_path", "plan_auto_continue"];
+    const allowedKeys = ["agent_command", "agent_args", "output_parser", "skip_permissions", "claude_profile", "codex_profile", "copilot_profile", "provider", "mock_agent_profile", "mock_agent_delay_ms", "permission_prompt_tool", "auto_review", "auto_merge", "resume_with_new_model", "review_auto_fix", "disabled_mcp_tools", "auto_start_followup", "require_manual_approval", "dynamic_column_scaling", "persistent_agent", "learning_step_after_agent", "learning_step_after_review", "learning_step_before_merge", "auto_monitor", "auto_monitor_interval", "nudge_auto_start", "projects_base_path", "plan_auto_continue"];
 
     for (const [key, value] of Object.entries(body)) {
       if (!allowedKeys.includes(key)) continue;
@@ -112,6 +112,11 @@ export function createPreferencesRoute(database: Database = db) {
       }
     } catch {}
     return c.json({ profiles: [...new Set(profiles)].sort() });
+  });
+
+  // GET /api/preferences/copilot-profiles — profile strings map to Copilot model/agent flags
+  router.get("/copilot-profiles", async (c) => {
+    return c.json({ profiles: [] });
   });
 
   return router;
