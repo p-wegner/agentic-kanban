@@ -1501,7 +1501,7 @@ export function BoardPage() {
                   ? undefined
                   : dynamicColumnScaling
                     ? { flexGrow: Math.max(1, col.issues.length) }
-                    : colIdx === activeColumns.length - 1
+                    : colIdx === activeColumns.length - 1 && Object.keys(columnWidths).length === 0
                       ? { flexGrow: 1 }
                       : undefined
               }
