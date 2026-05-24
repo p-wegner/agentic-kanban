@@ -114,10 +114,13 @@ When the user references `#N` (e.g., "review #70", "merge #65", "what's the stat
 
 **Use the CLI (`pnpm cli -- ...`) when MCP is unavailable:**
 - `pnpm cli -- issue list/create/move`
+- `pnpm cli -- issue status <N>` — single-issue deep dive: workspace state, session info, last agent message. Prefer over `issue get` for state checks.
 - `pnpm cli -- workspace list/create`
+- `pnpm cli -- workspace resume <N>` — relaunch agent on issue #N's workspace (looks up by issue number)
 - `pnpm cli -- skill list/get/create/export`
 - `pnpm cli -- status` — board overview with last agent message per issue
-- `pnpm cli -- issue status <N>` — single-issue deep dive: workspace state, session info, last agent message
+
+**Note:** `--json` flag doesn't work through `pnpm cli --` due to argument forwarding. Use REST API for JSON output.
 
 **Only fall back to REST API** when no MCP tool or CLI equivalent exists.
 
