@@ -253,10 +253,10 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
               Plan Mode
             </span>
           )}
-          {(ws.main.profile?.name ?? ws.main.claudeProfile) && (ws.main.status === "active" || ws.main.status === "fixing") && liveActivity && (
-            <span className="inline-flex items-center px-1 rounded bg-indigo-50 text-indigo-600 font-medium shrink-0">{ws.main.profile?.name ?? ws.main.claudeProfile}</span>
+          {(ws.main.profile?.name ?? ws.main.claudeProfile) && (
+            <span className="inline-flex items-center px-1 rounded bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 font-medium shrink-0">{ws.main.profile?.name ?? ws.main.claudeProfile}</span>
           )}
-          {!(ws.main.profile?.name ?? ws.main.claudeProfile) && ws.main.agentCommand && ws.main.agentCommand !== "claude" && (ws.main.status === "active" || ws.main.status === "fixing") && liveActivity && (
+          {!(ws.main.profile?.name ?? ws.main.claudeProfile) && ws.main.agentCommand && ws.main.agentCommand !== "claude" && (
             <span className="inline-flex items-center px-1 rounded bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 font-mono text-[10px] shrink-0">{ws.main.agentCommand}</span>
           )}
           {ws.total > 1 && (
