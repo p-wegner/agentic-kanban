@@ -80,9 +80,18 @@ The CLI `issue get` command works without knowing the project ID — it uses the
 
 When the user references `#N` (e.g., "review #70", "merge #65", "what's the status of #72"), this **always refers to a kanban board issue number**, never a GitHub pull request.
 
-- **"review #N"** → `POST /api/workspaces/:id/review`
-- **"merge #N"** → `mcp__agentic-kanban__merge_workspace` or `POST /api/workspaces/:id/merge`
-- **"status of #N"** → `get_board_status` or `get_issue` by `issueNumber`
+### Common tasks → exact commands
+
+| User says | CLI command | REST equivalent |
+|---|---|---|
+| "board state" / "what's happening" | `pnpm cli -- status` | `GET /api/projects/:id/board` |
+| "status of #N" / "what's #N doing" | `pnpm cli -- issue status <N>` | `GET /api/issues/:id/workspaces` + sessions |
+| "resume #N" / "restart #N" | `pnpm cli -- workspace resume <N>` | `POST /api/workspaces/:id/launch` |
+| "review #N" | — | `POST /api/workspaces/:id/review` |
+| "merge #N" | MCP `merge_workspace` | `POST /api/workspaces/:id/merge` |
+| "move #N to Done" | `pnpm cli -- issue move <N> Done` | MCP `move_issue` |
+
+**Important:** "resume #N" means relaunch the agent on issue #N's workspace. Use `pnpm cli -- workspace resume <N>`. Do NOT investigate the code yourself or spawn sub-agents to do the work.
 
 ### Use the board's built-in features
 
