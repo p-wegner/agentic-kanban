@@ -35,7 +35,9 @@ const [planMode, setPlanMode] = useState(false);
   const [branches, setBranches] = useState<{ local: string[]; remote: string[] } | null>(null);
   const [availableSkills, setAvailableSkills] = useState<{ id: string; name: string; description: string }[]>([]);
   const [selectedSkillId, setSelectedSkillId] = useState<string>("");
-  const [availableProfiles, setAvailableProfiles] = useState<string[]>([]);
+  const [claudeProfiles, setClaudeProfiles] = useState<string[]>([]);
+  const [codexProfiles, setCodexProfiles] = useState<string[]>([]);
+  // selectedProfile format: "<provider>:<name>" e.g. "claude:myprofile" or "codex:myprofile" or "" for default
   const [selectedProfile, setSelectedProfile] = useState<string>("");
   const [localLoading, setLocalLoading] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
@@ -46,14 +48,23 @@ const [planMode, setPlanMode] = useState(false);
         .then((data) => setBranches(data))
         .catch(() => setBranches(null));
     }
-    apiFetch<{ profiles: string[] }>("/api/preferences/claude-profiles")
-      .then((data) => {
-        setAvailableProfiles(data.profiles);
-        apiFetch<Record<string, string>>("/api/preferences/settings")
-          .then((s) => setSelectedProfile(s.claude_profile || ""))
-          .catch(() => {});
-      })
-      .catch(() => {});
+    Promise.all([
+      apiFetch<{ profiles: string[] }>("/api/preferences/claude-profiles").catch(() => ({ profiles: [] as string[] })),
+      apiFetch<{ profiles: string[] }>("/api/preferences/codex-profiles").catch(() => ({ profiles: [] as string[] })),
+      apiFetch<Record<string, string>>("/api/preferences/settings").catch(() => ({} as Record<string, string>)),
+    ]).then(([claudeData, codexData, settings]) => {
+      setClaudeProfiles(claudeData.profiles);
+      setCodexProfiles(codexData.profiles);
+      // Set default selection from global settings
+      const globalProvider = settings.provider || "claude";
+      if (globalProvider === "codex" && settings.codex_profile) {
+        setSelectedProfile(`codex:${settings.codex_profile}`);
+      } else if (settings.claude_profile) {
+        setSelectedProfile(`claude:${settings.claude_profile}`);
+      } else {
+        setSelectedProfile("");
+      }
+    });
     const url = project ? `/api/agent-skills?projectId=${project.id}` : "/api/agent-skills";
     apiFetch<{ id: string; name: string; description: string }[]>(url)
       .then(setAvailableSkills)
@@ -68,7 +79,14 @@ const [planMode, setPlanMode] = useState(false);
     try {
       const body: Record<string, unknown> = { issueId: issue.id, isDirect, requiresReview, planMode, skipSetup };
       if (selectedSkillId) body.skillId = selectedSkillId;
-      if (selectedProfile) body.claudeProfile = selectedProfile;
+      if (selectedProfile) {
+        const colonIdx = selectedProfile.indexOf(":");
+        if (colonIdx !== -1) {
+          const provider = selectedProfile.slice(0, colonIdx) as "claude" | "codex";
+          const name = selectedProfile.slice(colonIdx + 1);
+          if (name) body.profile = { provider, name };
+        }
+      }
       if (!isDirect) {
         body.branch = branchName.trim();
         if (baseBranch.trim()) {
@@ -209,7 +227,7 @@ const [planMode, setPlanMode] = useState(false);
           </select>
         </div>
       )}
-      {availableProfiles.length > 0 && (
+      {(claudeProfiles.length > 0 || codexProfiles.length > 0) && (
         <div>
           <label className="text-xs font-medium text-gray-600 mb-1 block">Profile</label>
           <select
@@ -217,10 +235,21 @@ const [planMode, setPlanMode] = useState(false);
             onChange={(e) => setSelectedProfile(e.target.value)}
             className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
           >
-            <option value="">Default ({prefs.claude_profile || "none"})</option>
-            {availableProfiles.map((p) => (
-              <option key={p} value={p}>{p}</option>
-            ))}
+            <option value="">Default ({prefs.provider === "codex" ? `codex:${prefs.codex_profile || "none"}` : `claude:${prefs.claude_profile || "none"}`})</option>
+            {claudeProfiles.length > 0 && (
+              <optgroup label="Claude">
+                {claudeProfiles.map((p) => (
+                  <option key={`claude:${p}`} value={`claude:${p}`}>{p}</option>
+                ))}
+              </optgroup>
+            )}
+            {codexProfiles.length > 0 && (
+              <optgroup label="Codex">
+                {codexProfiles.map((p) => (
+                  <option key={`codex:${p}`} value={`codex:${p}`}>{p}</option>
+                ))}
+              </optgroup>
+            )}
           </select>
         </div>
       )}

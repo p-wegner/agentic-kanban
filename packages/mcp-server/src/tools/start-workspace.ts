@@ -90,7 +90,10 @@ export function registerStartWorkspace(server: McpServer) {
         // Read agent settings to store on workspace
         const prefRows = await db.select().from(schema.preferences);
         const prefMap = new Map(prefRows.map(r => [r.key, r.value]));
-        const claudeProfile = prefMap.get("claude_profile") || null;
+        const provider = (prefMap.get("provider") || "claude") as string;
+        const profileName = provider === "codex"
+          ? (prefMap.get("codex_profile") || prefMap.get("claude_profile") || null)
+          : (prefMap.get("claude_profile") || null);
         const agentCommand = prefMap.get("agent_command") || null;
 
         await db.insert(schema.workspaces).values({
@@ -103,8 +106,9 @@ export function registerStartWorkspace(server: McpServer) {
           planMode: planMode ?? false,
           skillId: skillId ?? null,
           status: "active",
-          claudeProfile,
+          claudeProfile: profileName,
           agentCommand,
+          provider,
           createdAt: now,
           updatedAt: now,
         });

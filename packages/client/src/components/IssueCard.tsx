@@ -248,10 +248,10 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
               {ws.main.conflicts.conflictingFiles.length} file{ws.main.conflicts.conflictingFiles.length !== 1 ? "s" : ""}
             </span>
           )}
-          {ws.main.claudeProfile && (ws.main.status === "active" || ws.main.status === "fixing") && liveActivity && (
-            <span className="inline-flex items-center px-1 rounded bg-indigo-50 text-indigo-600 font-medium shrink-0">{ws.main.claudeProfile}</span>
+          {(ws.main.profile?.name ?? ws.main.claudeProfile) && (ws.main.status === "active" || ws.main.status === "fixing") && liveActivity && (
+            <span className="inline-flex items-center px-1 rounded bg-indigo-50 text-indigo-600 font-medium shrink-0">{ws.main.profile?.name ?? ws.main.claudeProfile}</span>
           )}
-          {!ws.main.claudeProfile && ws.main.agentCommand && ws.main.agentCommand !== "claude" && (ws.main.status === "active" || ws.main.status === "fixing") && liveActivity && (
+          {!(ws.main.profile?.name ?? ws.main.claudeProfile) && ws.main.agentCommand && ws.main.agentCommand !== "claude" && (ws.main.status === "active" || ws.main.status === "fixing") && liveActivity && (
             <span className="inline-flex items-center px-1 rounded bg-gray-100 text-gray-500 font-mono text-[10px] shrink-0">{ws.main.agentCommand}</span>
           )}
           {ws.total > 1 && (
