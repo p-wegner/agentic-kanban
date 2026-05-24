@@ -22,7 +22,15 @@ const DEFAULT_STATUSES = [
 ];
 
 async function runMigrations() {
-  await migrate(db, { migrationsFolder: getMigrationsFolder() });
+  try {
+    await migrate(db, { migrationsFolder: getMigrationsFolder() });
+  } catch (err: unknown) {
+    // libsql@0.4.7 + Node.js 26 bug: CREATE TABLE IF NOT EXISTS on existing table returns
+    // SQLITE_OK (0) which libsql misinterprets as an error. Safe to ignore when DB is already migrated.
+    const isSpuriousLibsqlBug = err instanceof Error && err.message.includes("not an error") &&
+      (err as NodeJS.ErrnoException).code === "SQLITE_OK";
+    if (!isSpuriousLibsqlBug) throw err;
+  }
 }
 
 const program = new Command();
