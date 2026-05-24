@@ -7,6 +7,17 @@
     }
   },
   "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|PowerShell",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node C:/andrena/agentic-kanban/.claude/hooks/smart-hooks-runner.js PreToolUse"
+          }
+        ]
+      }
+    ],
     "PostToolUse": [
       {
         "matcher": "Write|Edit|MultiEdit",
