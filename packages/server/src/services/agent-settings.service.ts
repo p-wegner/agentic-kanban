@@ -81,7 +81,12 @@ export function resolveAgentSettings(
     }
   }
 
-  const skipPerms = prefMap.get(PREF_SKIP_PERMISSIONS) === "true";
+  const provider = (prefMap.get(PREF_PROVIDER) || "claude") as "claude" | "codex";
+
+  // `--dangerously-skip-permissions` is Claude-specific. Codex gets its own
+  // `--dangerously-bypass-approvals-and-sandbox` flag in CodexProvider, and chokes
+  // on the Claude flag ("unexpected argument"), so only append it for Claude.
+  const skipPerms = prefMap.get(PREF_SKIP_PERMISSIONS) === "true" && provider !== "codex";
   const baseArgs = prefMap.get(PREF_AGENT_ARGS) || "";
   const agentArgs = skipPerms
     ? (baseArgs ? baseArgs + " --dangerously-skip-permissions" : "--dangerously-skip-permissions")
@@ -93,8 +98,6 @@ export function resolveAgentSettings(
   const permissionPromptTool = permPref === "true"
     ? "mcp__agentic-kanban__approve_tool_use"
     : (permPref && permPref !== "false" ? permPref : undefined);
-
-  const provider = (prefMap.get(PREF_PROVIDER) || "claude") as "claude" | "codex";
 
   // Don't pass mock profile name to Claude Code — it's only used to select the mock agent command
   const resolvedProfile = isMockProfile(claudeProfile) ? undefined : claudeProfile;
