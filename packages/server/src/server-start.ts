@@ -416,11 +416,33 @@ export async function startServer(port?: number) {
   await migrate(db, { migrationsFolder: getMigrationsFolder() });
 
   // Clean up stale sessions
-  const staleSessions = await db.select({ workspaceId: sessions.workspaceId }).from(sessions).where(eq(sessions.status, "running"));
+  const staleSessions = await db.select({ id: sessions.id, workspaceId: sessions.workspaceId, pid: sessions.pid }).from(sessions).where(eq(sessions.status, "running"));
   if (staleSessions.length > 0) {
     console.log(`[startup] Cleaning up ${staleSessions.length} stale session(s)`);
     const now = new Date().toISOString();
-    await db.update(sessions).set({ status: "stopped", endedAt: now }).where(eq(sessions.status, "running"));
+    const dead = [];
+    const alive = [];
+    for (const s of staleSessions) {
+      if (s.pid) {
+        try {
+          process.kill(s.pid, 0);
+          alive.push(s);
+        } catch {
+          dead.push(s);
+        }
+      } else {
+        dead.push(s);
+      }
+    }
+    for (const s of dead) {
+      await db.update(sessions).set({ status: "stopped", endedAt: now }).where(eq(sessions.id, s.id));
+    }
+    if (alive.length > 0) {
+      for (const s of alive) {
+        if (s.pid) agentService.registerPid(s.id, s.pid);
+      }
+      console.log(`[startup] ${alive.length} session(s) have surviving agent processes — leaving as running`);
+    }
     const workspaceIds = [...new Set(staleSessions.map(s => s.workspaceId))];
     for (const wsId of workspaceIds) {
       await db.update(workspaces).set({ status: "idle", updatedAt: now }).where(eq(workspaces.id, wsId));
