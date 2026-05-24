@@ -189,7 +189,7 @@ function createSessionManager(
           if (evt.toolActivity.name === "TodoWrite" && evt.todos) {
             sessionHasTodoWrite.add(sessionId);
             if (ctx) {
-              options?.onTodos?.(ctx.projectId, ctx.issueId, evt.todos as TodoItem[]);
+              options?.onTodos?.(ctx.projectId, ctx.issueId, evt.todos as unknown as TodoItem[]);
             }
           }
 

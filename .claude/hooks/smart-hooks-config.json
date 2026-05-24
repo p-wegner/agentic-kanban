@@ -1,6 +1,16 @@
 {
   "version": "1.0.0",
   "hooks": {
+    "PreToolUse": [
+      {
+        "name": "Validate command safety",
+        "command": "node .claude/hooks/validate-command-safety.js",
+        "enabled": true,
+        "blocking": true,
+        "timeout": 5,
+        "alwaysRun": true
+      }
+    ],
     "Stop": [
       {
         "name": "Vitest (server)",
