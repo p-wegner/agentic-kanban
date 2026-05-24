@@ -874,6 +874,174 @@ Tip: Use 'issue list' to find the issue ID and see available status names.
   });
 
 issueCmd
+  .command("status <issue-number>")
+  .description("Quick status check for an issue: workspace state, session info, and last agent message.\n\nResolves issue number to workspace(s) → latest session → last agent output. Useful for checking what an agent is doing or what it last said.")
+  .option("--json", "Output raw JSON")
+  .addHelpText("after", `
+Examples:
+  $ agentic-kanban issue status 17
+  $ agentic-kanban issue status 17 --json
+`)
+  .action(async (issueNumberArg: string, options: { json?: boolean }) => {
+    try {
+      await runMigrations();
+      const projectId = await getActiveProjectId();
+
+      const num = Number(issueNumberArg);
+      if (!Number.isInteger(num) || num <= 0) {
+        console.error(`Invalid issue number: ${issueNumberArg}`);
+        process.exit(1);
+      }
+
+      const issueRows = await db
+        .select({ id: issues.id, issueNumber: issues.issueNumber, title: issues.title, priority: issues.priority, statusName: projectStatuses.name })
+        .from(issues)
+        .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
+        .where(and(eq(issues.issueNumber, num), eq(issues.projectId, projectId)))
+        .limit(1);
+
+      if (issueRows.length === 0) {
+        console.error(`Issue #${num} not found.`);
+        process.exit(1);
+      }
+
+      const issue = issueRows[0];
+
+      const wsRows = await db
+        .select()
+        .from(workspaces)
+        .where(eq(workspaces.issueId, issue.id));
+
+      if (wsRows.length === 0) {
+        console.log(`#${num} ${issue.title}`);
+        console.log(`  Status: ${issue.statusName} · Priority: ${issue.priority}`);
+        console.log("  No workspace.");
+        process.exit(0);
+      }
+
+      const wsIds = wsRows.map(w => w.id);
+      const sessionRows = await db
+        .select()
+        .from(sessions)
+        .where(inArray(sessions.workspaceId, wsIds))
+        .orderBy(desc(sessions.startedAt));
+
+      const latestSession = sessionRows[0] ?? null;
+      const matchingWs = latestSession ? wsRows.find(w => w.id === latestSession.workspaceId) : wsRows[0];
+
+      let lastAgentMsg: string | null = null;
+      let fileChanges: { read: number; edited: number; written: number } | null = null;
+
+      if (latestSession) {
+        const msgRows = await db
+          .select()
+          .from(sessionMessages)
+          .where(eq(sessionMessages.sessionId, latestSession.id))
+          .orderBy(desc(sessionMessages.id));
+
+        for (const row of msgRows) {
+          if (row.type !== "stdout" || !row.data) continue;
+          const lines = row.data.split("\n");
+          for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed) continue;
+            try {
+              const obj = JSON.parse(trimmed);
+              // Claude stream: assistant message
+              if (obj.type === "assistant") {
+                const content = obj.message?.content as Array<Record<string, unknown>> | undefined;
+                if (content) {
+                  for (const block of [...content].reverse()) {
+                    if (block.type === "text" && typeof block.text === "string" && block.text.trim()) {
+                      lastAgentMsg = block.text;
+                    }
+                  }
+                }
+              }
+              // Codex stream: agent_message
+              if (obj.type === "item.completed" && obj.item?.type === "agent_message" && typeof obj.item.text === "string") {
+                lastAgentMsg = obj.item.text;
+              }
+            } catch { /* not JSON */ }
+          }
+          if (lastAgentMsg) break;
+        }
+
+        const summary = parseSessionSummary(msgRows);
+        fileChanges = { read: summary.filesRead.length, edited: summary.filesEdited.length, written: summary.filesWritten.length };
+      }
+
+      if (options.json) {
+        console.log(JSON.stringify({
+          issueNumber: issue.issueNumber,
+          title: issue.title,
+          status: issue.statusName,
+          priority: issue.priority,
+          workspace: matchingWs ? {
+            id: matchingWs.id,
+            branch: matchingWs.branch,
+            status: matchingWs.status,
+            isDirect: matchingWs.isDirect,
+            provider: matchingWs.provider,
+          } : null,
+          session: latestSession ? {
+            id: latestSession.id,
+            status: latestSession.status,
+            startedAt: latestSession.startedAt,
+            endedAt: latestSession.endedAt,
+          } : null,
+          lastAgentMessage: lastAgentMsg,
+          fileChanges,
+        }, null, 2));
+        process.exit(0);
+      }
+
+      console.log(`\n  #${num} ${issue.title}`);
+      console.log(`  Status: ${issue.statusName} · Priority: ${issue.priority}`);
+
+      if (matchingWs) {
+        const wsType = matchingWs.isDirect ? "direct" : "worktree";
+        const parts = [matchingWs.branch, wsType, matchingWs.status];
+        if (matchingWs.provider) parts.push(matchingWs.provider);
+        console.log(`  Workspace: ${matchingWs.id.slice(0, 8)} (${parts.join(", ")})`);
+      }
+
+      if (latestSession) {
+        const agoMs = Date.now() - new Date(latestSession.startedAt).getTime();
+        const ago = formatDurationStr(agoMs);
+        let duration = "?";
+        if (latestSession.endedAt && latestSession.startedAt) {
+          duration = formatDurationStr(new Date(latestSession.endedAt).getTime() - new Date(latestSession.startedAt).getTime());
+        }
+        console.log(`  Session:  ${latestSession.id.slice(0, 8)} (${latestSession.status}, ${ago} ago, lasted ${duration})`);
+      }
+
+      if (fileChanges && (fileChanges.read || fileChanges.edited || fileChanges.written)) {
+        const parts: string[] = [];
+        if (fileChanges.read) parts.push(`${fileChanges.read} read`);
+        if (fileChanges.edited) parts.push(`${fileChanges.edited} edited`);
+        if (fileChanges.written) parts.push(`${fileChanges.written} written`);
+        console.log(`  Files: ${parts.join(", ")}`);
+      } else {
+        console.log("  No file changes.");
+      }
+
+      if (lastAgentMsg) {
+        console.log(`\n  Last agent message:`);
+        const wrapped = lastAgentMsg.length > 200 ? lastAgentMsg.slice(0, 197) + "..." : lastAgentMsg;
+        for (const line of wrapped.split("\n")) {
+          console.log(`    ${line}`);
+        }
+      }
+      console.log("");
+      process.exit(0);
+    } catch (err) {
+      console.error("Error:", err instanceof Error ? err.message : String(err));
+      process.exit(1);
+    }
+  });
+
+issueCmd
   .command("summary <issue-number>")
   .description("Show a summary of the latest completed agent session for an issue.\n\nResolves issue number to workspace and session, then prints agent summary text, files touched, duration, and cost. Useful for quickly reviewing what an agent did.")
   .option("--json", "Output raw JSON instead of formatted text")
