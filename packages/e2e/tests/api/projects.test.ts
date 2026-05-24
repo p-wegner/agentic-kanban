@@ -4,15 +4,22 @@ import { execSync } from "node:child_process";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { SERVER_URL } from "../helpers/port.js";
+import { getE2EProjectId } from "../helpers/e2e-project.js";
 
 test.describe("Projects API", () => {
   let projectId: string;
+  const createdStatusIds: string[] = [];
 
   test.beforeAll(async ({ request }) => {
-    // Get the default project (created by global-setup)
-    const projectsRes = await request.get(`${SERVER_URL}/api/projects`);
-    const projects = await projectsRes.json();
-    projectId = projects[0].id;
+    // Use the dedicated E2E project set by global-setup (not projects[0] which may be a real project).
+    projectId = await getE2EProjectId(request);
+  });
+
+  test.afterAll(async ({ request }) => {
+    // Clean up any extra statuses created inline during tests.
+    for (const id of createdStatusIds) {
+      await request.delete(`${SERVER_URL}/api/projects/${projectId}/statuses/${id}`).catch(() => {});
+    }
   });
 
   test("GET /api/projects returns list", async ({ request }) => {
@@ -101,6 +108,10 @@ test.describe("Projects API", () => {
     expect(body.id).toBeDefined();
     expect(body.name).toBe(statusName);
     expect(body.projectId).toBe(projectId);
+
+    // Track for cleanup (the E2E project deletion in global-teardown will also cover this,
+    // but explicit cleanup ensures no leaks if teardown is skipped).
+    createdStatusIds.push(body.id);
 
     // Verify it appears in the list
     const listRes = await request.get(

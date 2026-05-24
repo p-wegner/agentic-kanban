@@ -1,14 +1,13 @@
 import { test, expect } from "@playwright/test";
 import { SERVER_URL } from "../helpers/port.js";
+import { getE2EProjectId } from "../helpers/e2e-project.js";
 
 test.describe("Preferences API", () => {
   let projectId: string;
 
   test.beforeAll(async ({ request }) => {
-    // Get the default project (created by global-setup)
-    const projectsRes = await request.get(`${SERVER_URL}/api/projects`);
-    const projects = await projectsRes.json();
-    projectId = projects[0].id;
+    // Use the dedicated E2E project set by global-setup (not projects[0] which may be a real project).
+    projectId = await getE2EProjectId(request);
   });
 
   test("GET /api/preferences/active-project returns current active project", async ({
@@ -64,16 +63,11 @@ test.describe("Preferences API", () => {
   });
 
   test.afterAll(async ({ request }) => {
-    // Restore the active project to the correct one
-    const projectsRes = await request.get(`${SERVER_URL}/api/projects`);
-    const projects = await projectsRes.json();
-    if (projects.length > 0) {
-      await request.put(
-        `${SERVER_URL}/api/preferences/active-project`,
-        {
-          data: { projectId: projects[0].id },
-        },
-      );
-    }
+    // Restore the active project to the E2E project captured before any test corrupted it.
+    try {
+      await request.put(`${SERVER_URL}/api/preferences/active-project`, {
+        data: { projectId },
+      });
+    } catch { /* best-effort */ }
   });
 });

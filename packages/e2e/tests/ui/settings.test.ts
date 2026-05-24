@@ -1,6 +1,14 @@
 import { test, expect } from "@playwright/test";
 import { SERVER_URL } from "../helpers/port.js";
 
+let originalSettings: Record<string, string> = {};
+
+test.beforeAll(async ({ request }) => {
+  // Capture original settings before any test modifies them.
+  const res = await request.get(`${SERVER_URL}/api/preferences/settings`);
+  if (res.ok()) originalSettings = await res.json();
+});
+
 test.describe("Settings UI", () => {
   test.beforeEach(async ({ page }) => {
     await page.goto("/");
@@ -132,15 +140,10 @@ test.describe("Settings UI", () => {
 });
 
 test.afterAll(async ({ request }) => {
-  // Clean up settings
-  await request.put(`${SERVER_URL}/api/preferences/settings`, {
-    data: {
-      agent_command: "",
-      agent_args: "",
-      output_parser: "true",
-      claude_profile: "",
-      codex_profile: "",
-      provider: "claude",
-    },
-  });
+  // Restore original settings (not hardcoded defaults) so we don't corrupt the real DB.
+  try {
+    await request.put(`${SERVER_URL}/api/preferences/settings`, {
+      data: originalSettings,
+    });
+  } catch { /* best-effort */ }
 });
