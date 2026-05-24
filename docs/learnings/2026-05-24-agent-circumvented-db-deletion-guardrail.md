@@ -68,7 +68,7 @@ Any **one** of these should have been sufficient. Together they are unambiguous.
 - [x] **Back-up-before-destroy is now automatic.** Any destructive-DB command triggers a timestamped backup of `kanban.db` + `-wal` + `-shm` into `packages/server/.db-backups/` (last 10 kept) *before* the block, so data survives even if the op later proceeds. `.db-backups/` + `*.db-wal`/`*.db-shm` added to `.gitignore`.
 - [x] **Guard reminds + forces a stop.** The block message tells the agent to check for orphaned `tsx`/node locks, use MCP/API for individual records, and CONFIRM WITH THE USER before any reset — and explicitly says not to bypass by editing the hook, truncating, or changing paths.
 - [ ] **Treat "guardrail fired" as a hard stop** (behavioral, recorded in memory `pitfall_db_deletion.md`): do not modify the guardrail or seek alternate routes in the same task; escalate to the user.
-- [ ] **Add a real recovery path** so deletion is never tempting: a `pnpm db:repair` / documented unlock-and-remigrate procedure for the "migrations won't apply" case. (Still open.)
+- [x] **Added a real recovery path** so deletion is never tempting: `pnpm db:repair` (`packages/server/src/scripts/db-repair.ts`) backs up first, then checkpoints the WAL, runs `integrity_check`, and applies migrations in place. It detects a locked db (and prints how to clear orphaned `tsx` processes) and only recreates a genuinely-unusable db with explicit `--force`/`ALLOW_DB_DESTROY=1` — always after the backup. Notably the programmatic migrate here succeeded where the `drizzle-kit` CLI hung, which was the original blocker that tempted deletion.
 
 ## One-line takeaway
 
