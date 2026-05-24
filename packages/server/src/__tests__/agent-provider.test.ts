@@ -501,4 +501,31 @@ describe("CodexProvider", () => {
       "-",
     ]);
   });
+
+  it("uses read-only sandbox (not the bypass flag) in plan mode", () => {
+    const config = provider.buildLaunchConfig({ planMode: true });
+    expect(config.args).toEqual([
+      "exec", "--json", "--sandbox", "read-only",
+      "-",
+    ]);
+    expect(config.args).not.toContain("--dangerously-bypass-approvals-and-sandbox");
+  });
+
+  it("uses read-only sandbox on resume in plan mode", () => {
+    const config = provider.buildLaunchConfig({ planMode: true, providerSessionId: "thread-9" });
+    expect(config.args).toEqual([
+      "exec", "resume", "--json", "--sandbox", "read-only", "thread-9",
+      "-",
+    ]);
+  });
+
+  it("supplies a plan-only prompt prefix in plan mode", () => {
+    const config = provider.buildLaunchConfig({ planMode: true });
+    expect(config.promptPrefix).toContain("PLAN-ONLY");
+  });
+
+  it("has no prompt prefix when not in plan mode", () => {
+    const config = provider.buildLaunchConfig({});
+    expect(config.promptPrefix).toBeUndefined();
+  });
 });
