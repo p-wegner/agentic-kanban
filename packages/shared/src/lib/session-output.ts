@@ -13,6 +13,15 @@ export function stripAnsi(str: string): string {
 interface ParsedLine {
   type?: string;
   subtype?: string;
+  data?: {
+    content?: string;
+    model?: string;
+    toolCallId?: string;
+    toolName?: string;
+    arguments?: Record<string, unknown>;
+    result?: { content?: string; detailedContent?: string } | string;
+    success?: boolean;
+  };
   message?: { content?: any[] };
   result?: string;
   is_error?: boolean;
@@ -49,6 +58,21 @@ export function extractMeaningfulOutput(
       const obj = parseJsonLine(trimmedLine);
 
       if (obj) {
+        if (obj.type === "assistant.message" && obj.data?.content?.trim()) {
+          const text = obj.data.content.trim().split("\n").pop() ?? "";
+          if (text) lines.push(text.slice(0, 200));
+        }
+
+        if (obj.type === "tool.execution_start" && obj.data?.toolName) {
+          lines.push(`[tool] ${obj.data.toolName}(${Object.keys(obj.data.arguments || {}).join(", ")})`);
+        }
+
+        if (obj.type === "tool.execution_complete" && obj.data?.success === false) {
+          const result = obj.data.result;
+          const output = typeof result === "string" ? result : result?.content ?? result?.detailedContent ?? "";
+          lines.push(`[tool_error] ${obj.data.toolName || obj.data.toolCallId || "tool"}${output ? `: ${output.slice(0, 160)}` : ""}`);
+        }
+
         if (obj.type === "assistant" && obj.message?.content) {
           const content = Array.isArray(obj.message.content) ? obj.message.content : [obj.message.content];
           for (const block of content) {

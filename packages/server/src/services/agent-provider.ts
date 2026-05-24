@@ -684,18 +684,20 @@ export class CopilotProvider implements AgentProvider {
     const result: ParsedStreamEvent = {};
     const type = typeof obj.type === "string" ? obj.type : "";
     const normalized = type.toLowerCase().replace(/-/g, "_");
+    const data = objectValue(obj.data);
+    const payload = Object.keys(data).length > 0 ? data : obj;
 
     const sessionId =
-      stringValue(obj.session_id) ??
-      stringValue(obj.sessionId) ??
-      stringValue((obj.session as Record<string, unknown> | undefined)?.id) ??
+      stringValue(payload.session_id) ??
+      stringValue(payload.sessionId) ??
+      stringValue((payload.session as Record<string, unknown> | undefined)?.id) ??
       (COPILOT_SESSION_ID_TYPES.has(normalized) ? stringValue(obj.id) : undefined);
     if (sessionId) {
       result.providerSessionId = sessionId;
     }
 
-    const model = stringValue(obj.model) ?? stringValue((obj.provider as Record<string, unknown> | undefined)?.model) ?? "";
-    const usage = obj.usage as Record<string, unknown> | undefined;
+    const model = stringValue(payload.model) ?? stringValue((payload.provider as Record<string, unknown> | undefined)?.model) ?? "";
+    const usage = (payload.usage ?? payload.stats) as Record<string, unknown> | undefined;
     const inputTokens = numberValue(usage?.input_tokens ?? usage?.inputTokens ?? usage?.prompt_tokens);
     const cachedTokens = numberValue(usage?.cached_input_tokens ?? usage?.cache_read_input_tokens ?? usage?.cachedInputTokens);
     const outputTokens = numberValue(usage?.output_tokens ?? usage?.outputTokens ?? usage?.completion_tokens);
@@ -706,25 +708,25 @@ export class CopilotProvider implements AgentProvider {
 
     if (type === "result" || type === "turn.completed" || type === "session.completed" || type === "completed") {
       result.stats = {
-        durationMs: numberValue(obj.duration_ms ?? obj.durationMs),
-        totalCostUsd: numberValue(obj.total_cost_usd ?? obj.cost_usd ?? obj.costUsd),
+        durationMs: numberValue(payload.duration_ms ?? payload.durationMs ?? usage?.sessionDurationMs),
+        totalCostUsd: numberValue(payload.total_cost_usd ?? payload.cost_usd ?? payload.costUsd),
         inputTokens,
         outputTokens,
         numTurns: numberValue(obj.num_turns ?? obj.numTurns) || 1,
         model,
-        success: obj.is_error !== true && obj.error === undefined,
-        agentSummary: stringValue(obj.result ?? obj.summary ?? obj.text),
+        success: payload.is_error !== true && payload.error === undefined && numberValue(payload.exitCode) === 0,
+        agentSummary: stringValue(payload.result ?? payload.summary ?? payload.text),
       };
       result.turnComplete = true;
     }
 
     const item = obj.item as Record<string, unknown> | undefined;
-    const toolName = stringValue(obj.tool_name ?? obj.toolName ?? item?.tool_name ?? item?.toolName ?? item?.name);
+    const toolName = stringValue(payload.tool_name ?? payload.toolName ?? item?.tool_name ?? item?.toolName ?? item?.name);
     if (toolName) {
       result.toolActivity = {
         name: toolName,
-        input: objectValue(obj.input ?? item?.input),
-        toolUseId: stringValue(obj.tool_use_id ?? obj.toolUseId ?? item?.id),
+        input: objectValue(payload.input ?? payload.arguments ?? item?.input),
+        toolUseId: stringValue(payload.tool_use_id ?? payload.toolUseId ?? payload.toolCallId ?? item?.id),
       };
     } else if (type.includes("command") || item?.type === "command_execution") {
       const command = stringValue(obj.command ?? item?.command);
@@ -737,8 +739,16 @@ export class CopilotProvider implements AgentProvider {
       }
     }
 
+    if (type === "tool.execution_start") {
+      result.toolActivity = {
+        name: stringValue(payload.toolName) ?? "copilot_tool",
+        input: objectValue(payload.arguments),
+        toolUseId: stringValue(payload.toolCallId),
+      };
+    }
+
     if (type.includes("tool") && (type.includes("completed") || type.includes("result"))) {
-      const toolUseId = stringValue(obj.tool_use_id ?? obj.toolUseId ?? obj.id ?? item?.id);
+      const toolUseId = stringValue(payload.tool_use_id ?? payload.toolUseId ?? payload.toolCallId ?? obj.id ?? item?.id);
       if (toolUseId) result.toolResult = { toolUseId };
     } else if (item?.type === "command_execution" && item.id && type.includes("completed")) {
       result.toolResult = { toolUseId: String(item.id) };
@@ -914,14 +924,17 @@ function objectValue(value: unknown): Record<string, unknown> {
 }
 
 function extractCopilotAssistantText(obj: Record<string, unknown>): string | undefined {
-  const direct = stringValue(obj.text ?? obj.message ?? obj.response ?? obj.result);
+  const data = objectValue(obj.data);
+  const payload = Object.keys(data).length > 0 ? data : obj;
+
+  const direct = stringValue(payload.text ?? payload.message ?? payload.response ?? payload.result);
   if (direct) return direct;
 
-  const item = obj.item as Record<string, unknown> | undefined;
+  const item = payload.item as Record<string, unknown> | undefined;
   const itemText = stringValue(item?.text ?? item?.message);
   if (itemText) return itemText;
 
-  const content = obj.content ?? item?.content;
+  const content = payload.content ?? item?.content;
   if (typeof content === "string" && content.length > 0) return content;
   if (Array.isArray(content)) {
     const textParts: string[] = [];

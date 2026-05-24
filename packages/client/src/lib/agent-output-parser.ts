@@ -3,7 +3,9 @@ import { CodexOutputParser } from "./codex-output-parser.js";
 import type {
   ParsedAssistantEvent,
   ParsedInitEvent,
+  ParsedNotificationEvent,
   ParsedResultEvent,
+  ParsedTaskStartedEvent,
   ParsedToolResultEvent,
   ParsedToolUseEvent,
 } from "./claude-output-parser.js";
@@ -89,17 +91,28 @@ export class CopilotOutputParser implements AgentOutputParser {
 
   private parseEvent(obj: Record<string, unknown>, rawLine: string): DisplayEvent[] {
     const type = normalizedType(obj);
+    const data = asRecord(obj.data);
 
     if (type && SESSION_START_TYPES.has(type)) {
+      const payload = data || obj;
       return [{
         kind: "init",
-        model: getString(obj, ["model", "modelId", "model_id"]) || "copilot",
-        sessionId: getString(obj, ["session_id", "sessionId", "sessionID", "id"]) || "",
-        cwd: getString(obj, ["cwd", "working_directory", "workingDirectory"]) || "",
-        tools: getStringArray(obj.tools),
+        model: getString(payload, ["model", "modelId", "model_id"]) || "copilot",
+        sessionId: getString(payload, ["session_id", "sessionId", "sessionID", "id"]) || getString(obj, ["id"]),
+        cwd: getString(payload, ["cwd", "working_directory", "workingDirectory"]) || "",
+        tools: getStringArray(payload.tools),
         mcpServers: [],
-        permissionMode: getString(obj, ["permissionMode", "permission_mode"]) || "",
+        permissionMode: getString(payload, ["permissionMode", "permission_mode"]) || "",
       } satisfies ParsedInitEvent];
+    }
+
+    if (type === "assistant.reasoning") {
+      const text = data ? getString(data, ["content", "text"]) : "";
+      return text ? [{ kind: "thinking", text } satisfies DisplayEvent] : [];
+    }
+
+    if (IGNORED_COPILOT_TYPES.has(type)) {
+      return [];
     }
 
     const assistantText = extractAssistantText(obj);
@@ -107,8 +120,41 @@ export class CopilotOutputParser implements AgentOutputParser {
       return [{
         kind: "assistant",
         text: assistantText,
-        model: getString(obj, ["model", "modelId", "model_id"]) || "",
+        model: getString(data || obj, ["model", "modelId", "model_id"]) || "",
       } satisfies ParsedAssistantEvent];
+    }
+    if (type === "assistant.message") return [];
+
+    if (type === "subagent.started" && data) {
+      return [{
+        kind: "task_started",
+        taskId: getString(obj, ["agentId"]) || getString(data, ["agentName"]) || getString(data, ["toolCallId"]),
+        toolUseId: getString(data, ["toolCallId"]),
+        description: getString(data, ["agentDisplayName", "agentDescription", "agentName"]),
+        taskType: getString(data, ["agentName"]),
+      } satisfies ParsedTaskStartedEvent];
+    }
+
+    if (type === "subagent.completed" && data) {
+      const toolUseId = getString(data, ["toolCallId"]);
+      return [{
+        kind: "tool_result",
+        toolName: toolUseId ? this.toolNameMap.get(toolUseId) || "Agent" : "Agent",
+        toolUseId,
+        output: `${getString(data, ["agentDisplayName", "agentName"]) || "Subagent"} completed`,
+        isError: false,
+      } satisfies ParsedToolResultEvent];
+    }
+
+    if (type === "system.notification" && data) {
+      const kind = asRecord(data.kind);
+      const text = getString(data, ["content"]).replace(/<\/?system_notification>/g, "").trim();
+      return [{
+        kind: "notification",
+        key: getString(kind || {}, ["type", "agentId"]) || "notification",
+        text,
+        priority: "",
+      } satisfies ParsedNotificationEvent];
     }
 
     const toolUse = extractToolUse(obj);
@@ -196,6 +242,20 @@ const SESSION_START_TYPES = new Set([
   "session.created",
 ]);
 
+const IGNORED_COPILOT_TYPES = new Set([
+  "assistant.message_start",
+  "assistant.message_delta",
+  "assistant.reasoning_delta",
+  "assistant.turn_start",
+  "assistant.turn_end",
+  "session.background_tasks_changed",
+  "session.mcp_servers_loaded",
+  "session.skills_loaded",
+  "session.warning",
+  "session.tools_updated",
+  "user.message",
+]);
+
 const TOOL_USE_TYPES = new Set([
   "tool_call",
   "tool_call_start",
@@ -230,7 +290,7 @@ const RESULT_TYPES = new Set([
 ]);
 
 function normalizedType(obj: Record<string, unknown>): string {
-  return String(obj.type || obj.event || obj.name || "").toLowerCase();
+  return String(obj.type || obj.event || obj.name || "").toLowerCase().replace(/-/g, "_");
 }
 
 function getString(obj: Record<string, unknown>, keys: string[]): string {
@@ -273,7 +333,14 @@ function contentToText(value: unknown): string {
 function extractAssistantText(obj: Record<string, unknown>): string {
   const type = normalizedType(obj);
   const role = String(obj.role || "").toLowerCase();
+  const data = asRecord(obj.data);
   const message = asRecord(obj.message);
+
+  if (type === "assistant.message" && data) {
+    return contentToText(data.content)
+      || getString(data, ["content", "text", "message"])
+      || "";
+  }
 
   if (type === "assistant" || type === "assistant_message" || role === "assistant") {
     return contentToText(obj.content)
@@ -295,16 +362,17 @@ function extractToolUse(obj: Record<string, unknown>): {
   inputParsed: Record<string, unknown>;
 } | null {
   const type = normalizedType(obj);
-  if (!TOOL_USE_TYPES.has(type)) return null;
+  if (!TOOL_USE_TYPES.has(type) && type !== "tool.execution_start") return null;
 
-  const tool = asRecord(obj.tool) || asRecord(obj.tool_call) || asRecord(obj.toolCall) || obj;
+  const data = asRecord(obj.data);
+  const tool = data || asRecord(obj.tool) || asRecord(obj.tool_call) || asRecord(obj.toolCall) || obj;
   const id = getString(tool, ["id", "tool_use_id", "toolUseId", "call_id", "callId"]);
   const name = getString(tool, ["name", "tool", "tool_name", "toolName", "kind"]) || "copilot_tool";
   const inputValue = tool.input ?? tool.arguments ?? tool.args ?? tool.parameters ?? tool.command ?? tool.path;
   const inputParsed = asRecord(inputValue) || {};
 
   return {
-    id,
+    id: id || getString(tool, ["toolCallId"]),
     name,
     input: stringifyValue(inputValue),
     inputParsed,
@@ -318,21 +386,23 @@ function extractToolResult(obj: Record<string, unknown>, toolNameMap: Map<string
   isError: boolean;
 } | null {
   const type = normalizedType(obj);
-  if (!TOOL_RESULT_TYPES.has(type)) return null;
+  if (!TOOL_RESULT_TYPES.has(type) && type !== "tool.execution_complete" && type !== "tool.execution_partial_result") return null;
 
-  const tool = asRecord(obj.tool) || asRecord(obj.tool_call) || asRecord(obj.toolCall) || obj;
-  const toolUseId = getString(tool, ["id", "tool_use_id", "toolUseId", "call_id", "callId"]);
+  const data = asRecord(obj.data);
+  const tool = data || asRecord(obj.tool) || asRecord(obj.tool_call) || asRecord(obj.toolCall) || obj;
+  const toolUseId = getString(tool, ["id", "tool_use_id", "toolUseId", "call_id", "callId", "toolCallId"]);
   const toolName = getString(tool, ["name", "tool", "tool_name", "toolName", "kind"])
     || (toolUseId ? toolNameMap.get(toolUseId) : "")
     || "copilot_tool";
-  const output = stringifyValue(tool.output ?? tool.result ?? tool.content ?? tool.message ?? tool.error);
+  const result = asRecord(tool.result);
+  const output = stringifyValue(result?.content ?? result?.detailedContent ?? tool.output ?? tool.result ?? tool.content ?? tool.message ?? tool.error);
   const status = String(tool.status || "").toLowerCase();
 
   return {
     toolName,
     toolUseId,
     output,
-    isError: Boolean(tool.is_error || tool.isError || tool.error) || status === "error" || status === "failed",
+    isError: tool.success === false || Boolean(tool.is_error || tool.isError || tool.error) || status === "error" || status === "failed",
   };
 }
 
@@ -347,14 +417,16 @@ function extractResult(obj: Record<string, unknown>): {
   const type = normalizedType(obj);
   if (!RESULT_TYPES.has(type)) return null;
 
-  const usage = asRecord(obj.usage) || asRecord(obj.stats) || obj;
-  const status = String(obj.status || obj.subtype || "").toLowerCase();
+  const data = asRecord(obj.data);
+  const payload = data || obj;
+  const usage = asRecord(payload.usage) || asRecord(payload.stats) || payload;
+  const status = String(payload.status || payload.subtype || "").toLowerCase();
   return {
-    success: !Boolean(obj.is_error || obj.isError || obj.error) && status !== "error" && status !== "failed",
-    durationMs: Number(obj.duration_ms ?? obj.durationMs ?? usage.duration_ms ?? usage.durationMs ?? 0) || 0,
-    result: getString(obj, ["result", "message", "summary"]) || stringifyValue(obj.error),
+    success: Number(payload.exitCode ?? 0) === 0 && !Boolean(payload.is_error || payload.isError || payload.error) && status !== "error" && status !== "failed",
+    durationMs: Number(payload.duration_ms ?? payload.durationMs ?? usage.sessionDurationMs ?? usage.duration_ms ?? usage.durationMs ?? 0) || 0,
+    result: getString(payload, ["result", "message", "summary"]) || stringifyValue(payload.error),
     inputTokens: Number(usage.input_tokens ?? usage.inputTokens ?? usage.prompt_tokens ?? usage.promptTokens ?? 0) || 0,
     outputTokens: Number(usage.output_tokens ?? usage.outputTokens ?? usage.completion_tokens ?? usage.completionTokens ?? 0) || 0,
-    model: getString(obj, ["model", "modelId", "model_id"]) || getString(usage, ["model", "modelId", "model_id"]),
+    model: getString(payload, ["model", "modelId", "model_id"]) || getString(usage, ["model", "modelId", "model_id"]),
   };
 }

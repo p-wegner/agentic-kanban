@@ -96,6 +96,73 @@ describe("CopilotOutputParser", () => {
       { kind: "raw", text: "Working" },
     ]);
   });
+
+  it("parses Copilot CLI nested JSONL events from a real workspace stream", () => {
+    const parser = new CopilotOutputParser();
+    const output = [
+      JSON.stringify({ type: "session.warning", data: { message: "policy warning" }, id: "event-1" }),
+      JSON.stringify({ type: "assistant.reasoning", data: { content: "I will inspect the E2E setup." } }),
+      JSON.stringify({
+        type: "assistant.message",
+        data: {
+          messageId: "msg-1",
+          model: "claude-sonnet-4.6",
+          content: "I found the isolated test project helper.",
+        },
+      }),
+      JSON.stringify({
+        type: "tool.execution_start",
+        data: {
+          toolCallId: "tool-read",
+          toolName: "view",
+          arguments: { path: "packages/e2e/global-setup.ts" },
+        },
+      }),
+      JSON.stringify({
+        type: "tool.execution_complete",
+        data: {
+          toolCallId: "tool-read",
+          success: true,
+          result: { content: "1. import { request } from \"@playwright/test\";" },
+        },
+      }),
+      JSON.stringify({
+        type: "result",
+        sessionId: "copilot-session-1",
+        exitCode: 0,
+        usage: { inputTokens: 10, outputTokens: 5, sessionDurationMs: 123 },
+      }),
+    ].join("\n") + "\n";
+
+    expect(parser.feed(output)).toEqual([
+      { kind: "thinking", text: "I will inspect the E2E setup." },
+      { kind: "assistant", text: "I found the isolated test project helper.", model: "claude-sonnet-4.6" },
+      {
+        kind: "tool_use",
+        id: "tool-read",
+        name: "view",
+        input: JSON.stringify({ path: "packages/e2e/global-setup.ts" }),
+        inputParsed: { path: "packages/e2e/global-setup.ts" },
+      },
+      {
+        kind: "tool_result",
+        toolName: "view",
+        toolUseId: "tool-read",
+        output: "1. import { request } from \"@playwright/test\";",
+        isError: false,
+      },
+      {
+        kind: "result",
+        success: true,
+        durationMs: 123,
+        result: "",
+        totalCostUsd: 0,
+        inputTokens: 10,
+        outputTokens: 5,
+        model: "",
+      },
+    ]);
+  });
 });
 
 describe("getOutputFormatForAgent", () => {

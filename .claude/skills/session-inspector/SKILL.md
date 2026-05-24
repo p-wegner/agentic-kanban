@@ -1,12 +1,12 @@
 ---
 name: session-inspector
-description: Inspect Claude Code agent session transcripts from ~/.claude/projects/ to debug why sessions stopped, what they did, and whether they produced output. Use when diagnosing stopped agents, "no response" sessions, or tracing what an agent actually did.
-argument-hint: [issue-number or keyword]
+description: Inspect agent session transcripts from ~/.claude/projects/ (Claude) or ~/.codex/sessions/ (Codex) to debug why sessions stopped, what they did, and whether they produced output. Use when diagnosing stopped agents, "no response" sessions, or tracing what an agent actually did.
+argument-hint: [issue-number, keyword, or --codex <path>]
 ---
 
 # Session Inspector — Debugging Agent Session Transcripts
 
-Claude Code stores full JSONL transcripts for every session under `~/.claude/projects/`, one directory per working directory path. This skill lets you parse those files efficiently without loading entire large files.
+Claude Code stores full JSONL transcripts for every session under `~/.claude/projects/`, one directory per working directory path. Codex CLI stores session files under `~/.codex/sessions/` organized by date (`YYYY/MM/DD/`). This skill lets you parse those files efficiently without loading entire large files.
 
 ## Directory naming convention
 
@@ -162,10 +162,93 @@ Get-ChildItem "$env:USERPROFILE\.claude\projects" -Recurse -Filter "*.jsonl" |
 | `max_tokens` | Hit context/output token limit |
 | *(absent)* | Session file has user prompt but no assistant entry — agent never responded |
 
+## Codex Sessions — Automated Analysis
+
+Use the built-in analysis script for Codex session files:
+
+```powershell
+# Analyze a specific session
+node scripts/analyze-codex-session.mjs "C:\Users\pwegner\.codex\sessions\2026\05\24\rollout-*.jsonl"
+
+# List all Codex sessions (most recent first)
+node scripts/analyze-codex-session.mjs --list
+
+# Analyze the most recent Codex session
+node scripts/analyze-codex-session.mjs --latest
+```
+
+The script produces a structured summary: model, duration, turns, tool usage, commands run, patches applied, web searches, and the last 5 agent messages.
+
+## Codex Sessions — Manual Inspection
+
+Codex session files are at `~/.codex/sessions/YYYY/MM/DD/`. Each file is a JSONL where every line is `{ timestamp, type, payload }`.
+
+### Event types
+
+| Type | Description |
+|------|-------------|
+| `session_meta` | Session initialization: id, cwd, model_provider, cli_version, base_instructions |
+| `event_msg` | Lifecycle events: `user_message`, `agent_message`, `task_started`, `task_complete`, `token_count`, `patch_apply_end`, `web_search_end`, `context_compacted`, `thread_rolled_back`, `thread_goal_updated` |
+| `response_item` | Model response items with subtypes: `message` (assistant text), `reasoning` (encrypted), `function_call`, `function_call_output`, `custom_tool_call`, `custom_tool_call_output`, `tool_search_call`, `web_search_call` |
+| `turn_context` | Turn metadata: model, cwd, approval_policy, sandbox_policy |
+| `compacted` | Context window compaction event |
+
+### List recent Codex sessions
+
+```powershell
+Get-ChildItem "$env:USERPROFILE\.codex\sessions" -Recurse -Filter "*.jsonl" |
+  Sort-Object LastWriteTime -Descending |
+  Select-Object -First 10 |
+  ForEach-Object {
+    $size = "$([math]::Round($_.Length/1KB))KB"
+    "  $($_.LastWriteTime.ToString('yyyy-MM-dd HH:mm'))  $size  $($_.Name.Substring(0,[math]::Min(60,$_.Name.Length)))"
+  }
+```
+
+### Parse Codex session tail
+
+```powershell
+$file = "PATH\TO\codex-session.jsonl"
+$tail = 60
+
+$lines = Get-Content $file -Tail $tail
+$agentMsgs = 0; $lastText = ""; $toolCalls = 0; $lastTool = ""
+
+foreach ($line in $lines) {
+  try { $obj = $line | ConvertFrom-Json } catch { continue }
+  if ($obj.type -eq "event_msg" -and $obj.payload.type -eq "agent_message") {
+    $lastText = $obj.payload.message
+    $agentMsgs++
+  }
+  if ($obj.type -eq "response_item" -and $obj.payload.type -eq "function_call") {
+    $toolCalls++
+    $lastTool = "$($obj.payload.name) $($obj.payload.arguments)".Substring(0, [math]::Min(100, "$($obj.payload.name) $($obj.payload.arguments)".Length))
+  }
+}
+
+Write-Output "Agent msgs (in tail): $agentMsgs"
+Write-Output "Tool calls (in tail): $toolCalls"
+Write-Output "Last tool: $lastTool"
+Write-Output "Last text: $lastText"
+```
+
+### Find user messages in a Codex session
+
+```powershell
+$file = "PATH\TO\codex-session.jsonl"
+Get-Content $file | ForEach-Object {
+  $obj = $_ | ConvertFrom-Json -ErrorAction SilentlyContinue
+  if ($obj.type -eq "event_msg" -and $obj.payload.type -eq "user_message") {
+    $text = $obj.payload.message
+    Write-Output "USER: $($text.Substring(0, [math]::Min(200, $text.Length)))"
+  }
+}
+```
+
 ## Tips
 
 - **Never `Get-Content` a large JSONL without `-Tail`** — some files are 1-2MB+ and will flood the terminal.
 - Each line is a self-contained JSON object; parse line-by-line with `ConvertFrom-Json -ErrorAction SilentlyContinue`.
-- The `sessionId` field is on most entries and matches the filename (minus `.jsonl`).
-- `ai-title`, `queue-operation`, `attachment` entries are metadata — only `user` and `assistant` entries carry content.
+- For **Claude sessions**: the `sessionId` field is on most entries and matches the filename (minus `.jsonl`). `ai-title`, `queue-operation`, `attachment` entries are metadata — only `user` and `assistant` entries carry content.
+- For **Codex sessions**: every line wraps in `{ timestamp, type, payload }`. Use the `analyze-codex-session.mjs` script for structured summaries.
 - Sessions with 8 lines and no `assistant` entry = the process started but exited before Claude responded. Check for auth errors or process kills.
