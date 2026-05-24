@@ -34,6 +34,7 @@ interface Settings {
   nudge_auto_start?: string;
   nudge_wip_limit?: string;
   projects_base_path?: string;
+  plan_auto_continue?: string;
 }
 
 const DEFAULT_SETTINGS: Settings = {
@@ -61,6 +62,7 @@ const DEFAULT_SETTINGS: Settings = {
   auto_monitor_interval: "4",
   nudge_auto_start: "false",
   projects_base_path: "",
+  plan_auto_continue: "true",
 };
 
 type Tab = "agent" | "workflow" | "skills" | "mcp" | "ui" | "project" | "tags" | "advanced" | "schedule";
@@ -664,6 +666,12 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                     </div>
                     <div className="text-xs text-gray-400 mt-1.5">Green steps are optional — toggle them below to add/remove from pipeline.</div>
                   </div>
+                  <Toggle
+                    checked={settings.plan_auto_continue !== "false"}
+                    onChange={setBool("plan_auto_continue")}
+                    label="Auto-continue after plan (Codex)"
+                    hint="When a Codex plan-mode run finishes, the plan is saved to PLAN.md. If on, an implementation turn starts automatically. If off, the workspace waits for you to review the plan and click Accept & Implement."
+                  />
                   <Toggle
                     checked={autoReviewOn}
                     onChange={setBool("auto_review")}
