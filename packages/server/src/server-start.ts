@@ -23,6 +23,7 @@ import { fileURLToPath } from "node:url";
 import { existsSync } from "node:fs";
 import { getMigrationsFolder } from "./db/migrations.js";
 import { MOCK_AGENT_COMMAND, isMockProfile } from "./services/agent-settings.service.js";
+import { PREF_CODEX_PROFILE } from "./constants/preference-keys.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -230,12 +231,15 @@ export async function startServer(port?: number) {
         let learningAfterReviewPromise: Promise<void> = Promise.resolve();
         if (prefMap.get("learning_step_after_review") === "true" && workspace.workingDir) {
           try {
+            const providerLearn = (prefMap.get("provider") || "claude") as "claude" | "codex";
             const profileLearn = prefMap.get("claude_profile") || undefined;
             const agentCmdLearn = isMockProfile(profileLearn) ? MOCK_AGENT_COMMAND : (prefMap.get("agent_command") || undefined);
             const agentArgsLearn = prefMap.get("agent_args") || undefined;
             const claudeProfileLearn = isMockProfile(profileLearn) ? undefined : profileLearn;
+            const effectiveProfileLearn = providerLearn === "codex" ? (prefMap.get(PREF_CODEX_PROFILE) || undefined) : claudeProfileLearn;
+            const profileSelectionLearn = effectiveProfileLearn ? { provider: providerLearn, name: effectiveProfileLearn } : undefined;
             const learningPrompt = `/learning-step\n\nRun the learning step skill to extract insights from recent session transcripts and update docs/hooks.`;
-            const learnSessId = await sessionManager.startSession(workspace.id, learningPrompt, agentCmdLearn, agentArgsLearn ? agentArgsLearn.split(" ") : undefined, undefined, claudeProfileLearn, undefined, undefined, undefined, undefined, undefined, "learning");
+            const learnSessId = await sessionManager.startSession({ workspaceId: workspace.id, prompt: learningPrompt, agentCommand: agentCmdLearn, agentArgs: agentArgsLearn, claudeProfile: effectiveProfileLearn, provider: providerLearn === "codex" ? "codex" : "claude-code", triggerType: "learning", profile: profileSelectionLearn });
             learningSessionIds.add(learnSessId);
             console.log(`[workflow] learning step (after review) started: session=${learnSessId}`);
             learningAfterReviewPromise = new Promise<void>((resolve) => {
@@ -309,12 +313,15 @@ export async function startServer(port?: number) {
         // Optional learning step after agent (runs in parallel with review)
         if (prefMap.get("learning_step_after_agent") === "true" && workspace.workingDir) {
           try {
+            const providerLearn = (prefMap.get("provider") || "claude") as "claude" | "codex";
             const profileLearn = prefMap.get("claude_profile") || undefined;
             const agentCmdLearn = isMockProfile(profileLearn) ? MOCK_AGENT_COMMAND : (prefMap.get("agent_command") || undefined);
             const agentArgsLearn = prefMap.get("agent_args") || undefined;
             const claudeProfileLearn = isMockProfile(profileLearn) ? undefined : profileLearn;
+            const effectiveProfileLearn = providerLearn === "codex" ? (prefMap.get(PREF_CODEX_PROFILE) || undefined) : claudeProfileLearn;
+            const profileSelectionLearn = effectiveProfileLearn ? { provider: providerLearn, name: effectiveProfileLearn } : undefined;
             const learningPrompt = `/learning-step\n\nRun the learning step skill to extract insights from recent session transcripts and update docs/hooks.`;
-            const learnSessId = await sessionManager.startSession(workspace.id, learningPrompt, agentCmdLearn, agentArgsLearn ? agentArgsLearn.split(" ") : undefined, undefined, claudeProfileLearn, undefined, undefined, undefined, undefined, undefined, "learning");
+            const learnSessId = await sessionManager.startSession({ workspaceId: workspace.id, prompt: learningPrompt, agentCommand: agentCmdLearn, agentArgs: agentArgsLearn, claudeProfile: effectiveProfileLearn, provider: providerLearn === "codex" ? "codex" : "claude-code", triggerType: "learning", profile: profileSelectionLearn });
             learningSessionIds.add(learnSessId);
             console.log(`[workflow] learning step (after agent) started: session=${learnSessId}`);
           } catch (err) {
@@ -323,13 +330,15 @@ export async function startServer(port?: number) {
         }
 
         if (autoReview) {
+          const reviewProvider = (prefMap.get("provider") || "claude") as "claude" | "codex";
           const reviewProfile = prefMap.get("claude_profile") || undefined;
           const agentCommand = isMockProfile(reviewProfile) ? MOCK_AGENT_COMMAND : (prefMap.get("agent_command") || undefined);
           const claudeProfile = isMockProfile(reviewProfile) ? undefined : reviewProfile;
+          const effectiveReviewProfile = reviewProvider === "codex" ? (prefMap.get(PREF_CODEX_PROFILE) || undefined) : claudeProfile;
+          const profileSelection = effectiveReviewProfile ? { provider: reviewProvider, name: effectiveReviewProfile } : undefined;
           const reviewArgs = buildReviewArgs(prefMap);
           const autoFix = prefMap.get("review_auto_fix") !== "false";
           const provider = (prefMap.get("provider") || undefined) as ProviderId | undefined;
-
           let diffRef = workspace.baseBranch || defaultBranch;
           let conflictingFiles: string[] | undefined;
           let uncommittedChanges: string[] | undefined;
@@ -351,7 +360,7 @@ export async function startServer(port?: number) {
             await db.update(workspaces).set({ status: "reviewing", updatedAt: now }).where(eq(workspaces.id, workspaceId));
             boardEvents.broadcast(projectId, "issue_updated");
 
-            const reviewSessionId = await sessionManager.startSession(workspaceId, reviewPromptText, agentCommand, reviewArgsWithModel, undefined, claudeProfile, undefined, undefined, undefined, undefined, provider, "review");
+            const reviewSessionId = await sessionManager.startSession({ workspaceId, prompt: reviewPromptText, agentCommand, agentArgs: reviewArgsWithModel, claudeProfile: effectiveReviewProfile, provider: reviewProvider === "codex" ? "codex" : "claude-code", triggerType: "review", profile: profileSelection });
             reviewSessionIds.add(reviewSessionId);
             console.log(`[workflow] launched ${reviewSkillName} session ${reviewSessionId} for workspace ${workspaceId}`);
           } catch (err) {
@@ -384,7 +393,10 @@ export async function startServer(port?: number) {
           const agentCmd = isMockProfile(learningProfile) ? MOCK_AGENT_COMMAND : (prefMapLearning.get("agent_command") || undefined);
           const agentArgs = prefMapLearning.get("agent_args") || undefined;
           const claudeProfile = isMockProfile(learningProfile) ? undefined : learningProfile;
-          const learningSessId = await sessionManager.startSession(workspace.id, learningPrompt, agentCmd, agentArgs ? agentArgs.split(" ") : undefined, undefined, claudeProfile, undefined, undefined, undefined, undefined, undefined, "learning");
+          const providerLearnMerge = (prefMapLearning.get("provider") || "claude") as "claude" | "codex";
+          const effectiveProfileLearnMerge = providerLearnMerge === "codex" ? (prefMapLearning.get(PREF_CODEX_PROFILE) || undefined) : claudeProfile;
+          const profileSelectionLearnMerge = effectiveProfileLearnMerge ? { provider: providerLearnMerge, name: effectiveProfileLearnMerge } : undefined;
+          const learningSessId = await sessionManager.startSession({ workspaceId: workspace.id, prompt: learningPrompt, agentCommand: agentCmd, agentArgs, claudeProfile, profile: profileSelectionLearnMerge, provider: providerLearnMerge === "codex" ? "codex" : "claude-code", triggerType: "learning" });
           learningSessionIds.add(learningSessId);
           console.log(`[workflow] learning step started: session=${learningSessId}`);
           await new Promise<void>((resolve) => {
@@ -479,9 +491,12 @@ export async function startServer(port?: number) {
       const manualProfile = prefMap.get("claude_profile") || undefined;
       const agentCommand = isMockProfile(manualProfile) ? MOCK_AGENT_COMMAND : (prefMap.get("agent_command") || undefined);
       const claudeProfile = isMockProfile(manualProfile) ? undefined : manualProfile;
+      const provider = ((prefMap.get("provider") || "claude") as "claude" | "codex");
+      const codexProfile = prefMap.get(PREF_CODEX_PROFILE) || undefined;
+      const effectiveProfileName = provider === "codex" ? codexProfile : claudeProfile;
+      const manualProfileSelection = effectiveProfileName ? { provider, name: effectiveProfileName } : undefined;
       const reviewArgs = buildReviewArgs(prefMap);
       const autoFix = prefMap.get("review_auto_fix") !== "false";
-      const provider = (prefMap.get("provider") || undefined) as ProviderId | undefined;
 
       const projectRows = await db.select({ defaultBranch: projects.defaultBranch }).from(projects).where(eq(projects.id, projectId)).limit(1);
       const defaultBranch = projectRows.length > 0 ? projectRows[0].defaultBranch : "main";
@@ -506,7 +521,7 @@ export async function startServer(port?: number) {
       await db.update(workspaces).set({ status: "reviewing", updatedAt: now }).where(eq(workspaces.id, workspaceId));
       boardEvents.broadcast(projectId, "issue_updated");
 
-      const reviewSessionId = await sessionManager.startSession(workspaceId, reviewPromptText, agentCommand, reviewArgsWithModel, undefined, claudeProfile, undefined, undefined, undefined, undefined, provider, "review");
+      const reviewSessionId = await sessionManager.startSession({ workspaceId, prompt: reviewPromptText, agentCommand, agentArgs: reviewArgsWithModel, claudeProfile, profile: manualProfileSelection, provider: provider === "codex" ? "codex" : "claude-code", triggerType: "review" });
       reviewSessionIds.add(reviewSessionId);
       console.log(`[workflow] manual review session ${reviewSessionId} for workspace ${workspaceId}`);
 

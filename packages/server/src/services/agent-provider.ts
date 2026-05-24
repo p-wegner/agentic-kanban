@@ -30,7 +30,10 @@ export interface ProviderLaunchOptions {
   agentArgs?: string;
   providerSessionId?: string;
   agentCommand?: string;
+  /** @deprecated Use profile instead — kept for back-compat during migration */
   claudeProfile?: string;
+  /** Provider-tagged profile selection (replaces bare claudeProfile string). */
+  profile?: { provider: "claude" | "codex"; name: string };
   keepAlive?: boolean;
   permissionPromptTool?: string;
   planMode?: boolean;
@@ -115,10 +118,14 @@ export class ClaudeProvider implements AgentProvider {
       providerSessionId,
       agentCommand,
       claudeProfile,
+      profile,
       keepAlive,
       permissionPromptTool,
       planMode,
     } = options;
+
+    // Resolve effective profile name: new `profile` field takes priority, fall back to legacy `claudeProfile`
+    const effectiveProfileName = profile?.name ?? claudeProfile;
 
     const isMockAgent = !!process.env.AGENT_COMMAND || (agentCommand?.includes("mock-agent") ?? false);
     let command = process.env.AGENT_COMMAND || agentCommand || "claude";
@@ -153,8 +160,8 @@ export class ClaudeProvider implements AgentProvider {
       if (agentArgs) {
         args.push(...splitArgs(agentArgs));
       }
-      if (claudeProfile) {
-        const settingsPath = join(homedir(), ".claude", `settings_${claudeProfile}.json`);
+      if (effectiveProfileName) {
+        const settingsPath = join(homedir(), ".claude", `settings_${effectiveProfileName}.json`);
         if (existsSync(settingsPath)) {
           args.push("--settings", settingsPath);
         }
@@ -177,7 +184,7 @@ export class ClaudeProvider implements AgentProvider {
       args,
       useShell: isWindows && (isMockAgent || !!agentCommand),
       isMockAgent,
-      env: buildSpawnEnv(claudeProfile),
+      env: buildSpawnEnv(effectiveProfileName),
       keepStdinOpen,
     };
   }
@@ -223,8 +230,9 @@ export class ClaudeProvider implements AgentProvider {
 
     // Assistant event: model + context tokens
     if (obj.type === "assistant" && obj.message) {
-      const usage = obj.message.usage as Record<string, unknown> | undefined;
-      const model = (obj.message.model as string) ?? "";
+      const message = obj.message as Record<string, unknown>;
+      const usage = message.usage as Record<string, unknown> | undefined;
+      const model = (message.model as string) ?? "";
       const cacheRead = (usage?.cache_read_input_tokens as number) ?? 0;
       const inputTokens = (usage?.input_tokens as number) ?? 0;
       const contextTokens = cacheRead + inputTokens;
@@ -233,7 +241,7 @@ export class ClaudeProvider implements AgentProvider {
       }
 
       // Text and tool_use blocks from assistant messages
-      const content = obj.message.content;
+      const content = message.content;
       if (Array.isArray(content)) {
         const textParts: string[] = [];
         for (const block of content) {
@@ -284,8 +292,8 @@ export class ClaudeProvider implements AgentProvider {
     }
 
     // User message with tool_result: check for Agent tool_use ID
-    if (obj.type === "user" && obj.message?.content) {
-      const content = obj.message.content;
+    if (obj.type === "user" && (obj.message as Record<string, unknown> | undefined)?.content) {
+      const content = (obj.message as Record<string, unknown>).content;
       if (Array.isArray(content)) {
         for (const block of content) {
           if (block.type === "tool_result" && block.tool_use_id) {
@@ -343,7 +351,7 @@ export class CodexProvider implements AgentProvider {
   readonly name = "codex";
 
   buildLaunchConfig(options: ProviderLaunchOptions): AgentLaunchConfig {
-    const { agentArgs, providerSessionId, agentCommand, keepAlive } = options;
+    const { agentArgs, providerSessionId, agentCommand, keepAlive, profile } = options;
     const isWindows = process.platform === "win32";
 
     const isMockAgent = !!process.env.AGENT_COMMAND || (agentCommand?.includes("mock-agent") ?? false);
@@ -364,6 +372,11 @@ export class CodexProvider implements AgentProvider {
         args.push("exec", "resume", "--json", "--dangerously-bypass-approvals-and-sandbox", providerSessionId);
       } else {
         args.push("exec", "--json", "--dangerously-bypass-approvals-and-sandbox");
+      }
+      // Layer named config from $CODEX_HOME/<name>.config.toml on top of base config
+      const profileName = profile?.provider === "codex" ? profile.name : undefined;
+      if (profileName) {
+        args.push("--profile-v2", profileName);
       }
       if (agentArgs) {
         args.push(...splitArgs(agentArgs));
@@ -465,21 +478,10 @@ function registerProvider(provider: AgentProvider): void {
 }
 
 export function getProvider(name?: string): AgentProvider {
-  const provider = providers.get(name ?? defaultProviderName);
-  if (!provider) throw new Error(`Unknown agent provider: ${name ?? defaultProviderName}`);
+  const key = name === "claude-code" ? "claude" : (name ?? defaultProviderName);
+  const provider = providers.get(key);
+  if (!provider) throw new Error(`Unknown agent provider: ${key}`);
   return provider;
-}
-
-/**
- * Resolve the provider to use based on an agent command string.
- * Returns "codex" if the command is the codex CLI, "claude" otherwise.
- */
-export function getProviderForCommand(agentCommand?: string): AgentProvider {
-  const cmd = agentCommand?.trim().toLowerCase() ?? "";
-  if (cmd === "codex" || cmd.endsWith("/codex") || cmd.endsWith("\\codex") || cmd.endsWith("\\codex.exe") || cmd.endsWith("/codex.exe")) {
-    return getProvider("codex");
-  }
-  return getProvider("claude");
 }
 
 export function setDefaultProvider(name: string): void {
@@ -496,7 +498,8 @@ registerProvider(new CodexProvider());
 export interface BuildAgentLaunchConfigOptions extends ProviderLaunchOptions {}
 
 export function buildAgentLaunchConfig(options: BuildAgentLaunchConfigOptions = {}): AgentLaunchConfig {
-  return getProvider().buildLaunchConfig(options);
+  const providerName = options.provider ?? undefined;
+  return getProvider(providerName).buildLaunchConfig(options);
 }
 
 // --- Internal helpers ---

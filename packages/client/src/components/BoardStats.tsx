@@ -56,7 +56,9 @@ export function BoardStats({
   const profileCounts = new Map<string, number>();
   for (const col of activeColumns) {
     for (const issue of col.issues) {
-      const profile = (issue as any).workspaceSummary?.main?.claudeProfile;
+      const wsMain = (issue as any).workspaceSummary?.main;
+      // Prefer tagged profile, fall back to legacy claudeProfile string
+      const profile = wsMain?.profile?.name ?? wsMain?.claudeProfile;
       if (profile) profileCounts.set(profile, (profileCounts.get(profile) ?? 0) + 1);
     }
   }
