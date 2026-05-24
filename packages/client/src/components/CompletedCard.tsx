@@ -41,13 +41,13 @@ export function CompletedCard({ issue, onClick, onDragStart, searchQuery }: Comp
         `hover:shadow-md transition-shadow ` +
         (isCancelled
           ? "bg-red-50/50 border-red-200/60 hover:border-red-300"
-          : "bg-white border-gray-200 hover:border-gray-300")
+          : "bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600")
       }
     >
       <div className="flex items-start justify-between gap-1.5">
-        <p className={`text-xs leading-snug min-w-0 ${isCancelled ? "line-through text-gray-400" : "text-gray-800"}`}>
+        <p className={`text-xs leading-snug min-w-0 ${isCancelled ? "line-through text-gray-400 dark:text-gray-500" : "text-gray-800 dark:text-gray-200"}`}>
           {issue.issueNumber != null && (
-            <span className="text-gray-400 font-mono mr-0.5">#{issue.issueNumber}</span>
+            <span className="text-gray-400 dark:text-gray-500 font-mono mr-0.5">#{issue.issueNumber}</span>
           )}
           <HighlightedText text={issue.title} query={searchQuery ?? ""} />
         </p>
@@ -58,24 +58,24 @@ export function CompletedCard({ issue, onClick, onDragStart, searchQuery }: Comp
         )}
       </div>
 
-      <div className="text-[10px] text-gray-400 mt-1">
+      <div className="text-[10px] text-gray-400 dark:text-gray-500 mt-1">
         {issue.statusChangedAt
           ? formatRelativeTime(issue.statusChangedAt)
           : formatRelativeTime(issue.updatedAt)}
       </div>
 
       {mainWs && (
-        <div className="flex items-center gap-1.5 mt-1.5 text-[10px] text-gray-500">
+        <div className="flex items-center gap-1.5 mt-1.5 text-[10px] text-gray-500 dark:text-gray-400">
           <span className="font-mono truncate">{mainWs.branch}</span>
           {mainWs.diffStats && (
             <span className="inline-flex items-center gap-0.5 font-mono shrink-0 ml-auto">
               <span className="text-green-600">+{mainWs.diffStats.insertions}</span>
               <span className="text-red-500">-{mainWs.diffStats.deletions}</span>
-              <span className="text-gray-400">{mainWs.diffStats.filesChanged}f</span>
+              <span className="text-gray-400 dark:text-gray-500">{mainWs.diffStats.filesChanged}f</span>
             </span>
           )}
           {ws && ws.total > 1 && (
-            <span className="text-gray-400 shrink-0">{ws.total} ws</span>
+            <span className="text-gray-400 dark:text-gray-500 shrink-0">{ws.total} ws</span>
           )}
         </div>
       )}
