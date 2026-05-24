@@ -6,7 +6,7 @@ import { randomUUID } from "node:crypto";
 import * as agentService from "./agent.service.js";
 import { getProvider } from "./agent-provider.js";
 import { extractPlan, writePlanFile, buildImplementPrompt } from "./plan-mode.service.js";
-import type { ParsedStreamEvent } from "./agent-provider.js";
+import type { ParsedStreamEvent, ProviderName } from "./agent-provider.js";
 import type { AgentOutputMessage } from "@agentic-kanban/shared";
 import type { TodoItem } from "./board-events.js";
 
@@ -40,7 +40,7 @@ export interface StartSessionOptions {
   resumeWithNewModel?: boolean;
   provider?: import("./agent-provider.js").ProviderId;
   triggerType?: string;
-  profile?: { provider: "claude" | "codex"; name: string };
+  profile?: { provider: ProviderName; name: string };
 }
 
 function createSessionManager(
@@ -433,10 +433,10 @@ function createSessionManager(
             }
           }
 
-          // Codex plan mode: a read-only plan run just finished. Persist the plan to PLAN.md,
+          // Codex/Copilot plan mode: a read-only plan run just finished. Persist the plan to PLAN.md,
           // leave plan mode, then either auto-continue into an implementation turn or park the
           // workspace awaiting human approval (pendingPlanPath), per the plan_auto_continue setting.
-          if (planMode && provider === "codex" && exitCode === 0 && workspace.workingDir && planText) {
+          if (planMode && (provider === "codex" || provider === "copilot") && exitCode === 0 && workspace.workingDir && planText) {
             void (async () => {
               try {
                 const plan = extractPlan(planText);

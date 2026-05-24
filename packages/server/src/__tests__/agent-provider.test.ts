@@ -13,7 +13,7 @@ vi.mock("node:fs", () => ({
   readFileSync: vi.fn(),
 }));
 
-import { ClaudeProvider, CodexProvider, getProvider, buildAgentLaunchConfig } from "../services/agent-provider.js";
+import { ClaudeProvider, CodexProvider, CopilotProvider, getProvider, buildAgentLaunchConfig } from "../services/agent-provider.js";
 import { execSync as execSyncMock } from "node:child_process";
 import { existsSync as existsSyncMock } from "node:fs";
 
@@ -402,6 +402,12 @@ describe("provider registry", () => {
     expect(p).toBeInstanceOf(CodexProvider);
   });
 
+  it("getProvider returns CopilotProvider for 'copilot'", () => {
+    const p = getProvider("copilot");
+    expect(p.name).toBe("copilot");
+    expect(p).toBeInstanceOf(CopilotProvider);
+  });
+
   it("getProvider maps 'claude-code' to ClaudeProvider", () => {
     const p = getProvider("claude-code");
     expect(p.name).toBe("claude");
@@ -447,6 +453,16 @@ describe("buildAgentLaunchConfig (backward compat)", () => {
     expect(config.args).toContain("--json");
     expect(config.args).toContain("--dangerously-bypass-approvals-and-sandbox");
     expect(config.args).not.toContain("--output-format");
+  });
+
+  it("routes to CopilotProvider when provider is 'copilot'", () => {
+    const config = buildAgentLaunchConfig({ provider: "copilot", prompt: "Fix it" });
+    expect(config.command).toBe("copilot");
+    expect(config.args).toContain("-p");
+    expect(config.args).toContain("Fix it");
+    expect(config.args).toContain("--output-format");
+    expect(config.args).toContain("json");
+    expect(config.args).not.toContain("--output-format stream-json");
   });
 
   it("routes to ClaudeProvider when provider is 'claude-code'", () => {
@@ -544,5 +560,117 @@ describe("CodexProvider", () => {
     }));
     expect(evt?.assistantText).toBeUndefined();
     expect(evt?.toolResult?.toolUseId).toBe("item_1");
+  });
+});
+
+describe("CopilotProvider", () => {
+  const provider = new CopilotProvider();
+
+  it("builds default Copilot launch config with verified non-interactive JSON streaming flags", () => {
+    const config = provider.buildLaunchConfig({ prompt: "Fix the bug" });
+    expect(config.command).toBe("copilot");
+    expect(config.args).toEqual(expect.arrayContaining([
+      "-p", "Fix the bug",
+      "--output-format", "json",
+      "--stream", "on",
+      "--no-ask-user",
+      "--disable-builtin-mcps",
+      "--allow-tool=read",
+      "--allow-tool=write",
+      "--allow-tool=shell",
+      "--allow-tool=agentic-kanban",
+    ]));
+    expect(config.args).not.toContain("--allow-all");
+    expect(config.args).not.toContain("--allow-all-tools");
+    expect(config.args).toContain("--additional-mcp-config");
+    expect(config.args.some((arg) => arg.startsWith("@") && arg.includes("agentic-kanban-mcp-config.json"))).toBe(true);
+    expect(config.isMockAgent).toBe(false);
+  });
+
+  it("uses --resume=<id> for Copilot resume", () => {
+    const config = provider.buildLaunchConfig({ prompt: "Continue", providerSessionId: "sess-123" });
+    expect(config.args).toContain("--resume=sess-123");
+  });
+
+  it("maps plain and model-prefixed Copilot profiles to --model", () => {
+    const plain = provider.buildLaunchConfig({
+      prompt: "Run",
+      profile: { provider: "copilot", name: "gpt-5.2" },
+    });
+    expect(plain.args).toContain("--model");
+    expect(plain.args).toContain("gpt-5.2");
+
+    const prefixed = provider.buildLaunchConfig({
+      prompt: "Run",
+      profile: { provider: "copilot", name: "model:gpt-5.2-codex" },
+    });
+    expect(prefixed.args).toContain("--model");
+    expect(prefixed.args).toContain("gpt-5.2-codex");
+  });
+
+  it("maps agent-prefixed Copilot profiles to --agent", () => {
+    const config = provider.buildLaunchConfig({
+      prompt: "Run",
+      profile: { provider: "copilot", name: "agent:reviewer" },
+    });
+    expect(config.args).toContain("--agent");
+    expect(config.args).toContain("reviewer");
+  });
+
+  it("does not apply non-Copilot profiles", () => {
+    const config = provider.buildLaunchConfig({
+      prompt: "Run",
+      profile: { provider: "codex", name: "fast" },
+    });
+    expect(config.args).not.toContain("--model");
+    expect(config.args).not.toContain("--agent");
+  });
+
+  it("adds conservative plan-mode flags and sentinel prompt prefix", () => {
+    const config = provider.buildLaunchConfig({ prompt: "Plan it", planMode: true });
+    expect(config.args).toContain("--plan");
+    expect(config.args).toContain("--available-tools=read,search,shell,agentic-kanban");
+    expect(config.args).toContain("--deny-tool=write");
+    expect(config.args).toContain("--deny-tool=shell(git commit)");
+    expect(config.promptPrefix).toContain("PLAN-ONLY");
+    expect(config.promptPrefix).toContain("===PLAN BEGIN===");
+  });
+
+  it("preserves user-supplied agent args after provider defaults", () => {
+    const config = provider.buildLaunchConfig({ prompt: "Run", agentArgs: '--model custom --allow-url github.com' });
+    expect(config.args.slice(-4)).toEqual(["--model", "custom", "--allow-url", "github.com"]);
+  });
+
+  it("parses session id, assistant text, tool activity, and completion stats from flexible JSON events", () => {
+    expect(provider.parseStreamEvent(JSON.stringify({ type: "session.started", id: "copilot-1" }))?.providerSessionId).toBe("copilot-1");
+    expect(provider.parseStreamEvent(JSON.stringify({ type: "assistant.message", text: "Done" }))?.assistantText).toBe("Done");
+
+    const toolEvt = provider.parseStreamEvent(JSON.stringify({
+      type: "tool.started",
+      tool_name: "shell",
+      tool_use_id: "tool-1",
+      input: { command: "git status" },
+    }));
+    expect(toolEvt?.toolActivity).toEqual({
+      name: "shell",
+      input: { command: "git status" },
+      toolUseId: "tool-1",
+    });
+
+    const doneEvt = provider.parseStreamEvent(JSON.stringify({
+      type: "session.completed",
+      model: "gpt-5.2",
+      usage: { input_tokens: 10, cached_input_tokens: 2, output_tokens: 4 },
+      summary: "Finished",
+    }));
+    expect(doneEvt?.turnComplete).toBe(true);
+    expect(doneEvt?.stats).toMatchObject({
+      inputTokens: 10,
+      outputTokens: 4,
+      model: "gpt-5.2",
+      success: true,
+      agentSummary: "Finished",
+    });
+    expect(doneEvt?.liveStats?.contextTokens).toBe(12);
   });
 });

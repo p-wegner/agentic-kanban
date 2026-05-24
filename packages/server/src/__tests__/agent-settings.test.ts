@@ -47,3 +47,64 @@ describe("resolveAgentSettings - mock profile wiring", () => {
     expect(agentCommand).not.toContain("echo");
   });
 });
+
+describe("resolveAgentSettings - provider/profile wiring", () => {
+  it("defaults to Claude and keeps legacy claudeProfile", () => {
+    const settings = resolveAgentSettings(prefs({ claude_profile: "work" }));
+    expect(settings.provider).toBe("claude");
+    expect(settings.claudeProfile).toBe("work");
+    expect(settings.profile).toEqual({ provider: "claude", name: "work" });
+  });
+
+  it("uses codex_profile for Codex provider", () => {
+    const settings = resolveAgentSettings(prefs({
+      provider: "codex",
+      claude_profile: "work",
+      codex_profile: "fast",
+    }));
+    expect(settings.provider).toBe("codex");
+    expect(settings.claudeProfile).toBe("work");
+    expect(settings.profile).toEqual({ provider: "codex", name: "fast" });
+  });
+
+  it("uses copilot_profile for Copilot provider", () => {
+    const settings = resolveAgentSettings(prefs({
+      provider: "copilot",
+      claude_profile: "work",
+      copilot_profile: "gpt-5.2",
+    }));
+    expect(settings.provider).toBe("copilot");
+    expect(settings.claudeProfile).toBe("work");
+    expect(settings.profile).toEqual({ provider: "copilot", name: "gpt-5.2" });
+  });
+
+  it("does not append Claude skip-permissions flag for Copilot", () => {
+    const settings = resolveAgentSettings(prefs({
+      provider: "copilot",
+      skip_permissions: "true",
+      agent_args: "--allow-url github.com",
+    }));
+    expect(settings.agentArgs).toBe("--allow-url github.com");
+  });
+
+  it("still appends Claude skip-permissions flag for Claude", () => {
+    const settings = resolveAgentSettings(prefs({
+      provider: "claude",
+      skip_permissions: "true",
+      agent_args: "--model sonnet",
+    }));
+    expect(settings.agentArgs).toBe("--model sonnet --dangerously-skip-permissions");
+  });
+
+  it("falls back to Claude for unknown provider values", () => {
+    const settings = resolveAgentSettings(prefs({ provider: "other", claude_profile: "work" }));
+    expect(settings.provider).toBe("claude");
+    expect(settings.profile).toEqual({ provider: "claude", name: "work" });
+  });
+
+  it("honors command overrides regardless of provider", () => {
+    const settings = resolveAgentSettings(prefs({ provider: "copilot", agent_command: "copilot" }), "custom-agent");
+    expect(settings.agentCommand).toBe("custom-agent");
+    expect(settings.provider).toBe("copilot");
+  });
+});

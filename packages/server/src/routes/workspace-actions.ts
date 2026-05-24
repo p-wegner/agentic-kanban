@@ -14,7 +14,7 @@ import { tmpdir } from "node:os";
 import { writeFileSync } from "node:fs";
 import { spawn, spawnSync } from "node:child_process";
 import { resolveProjectRepo, resolveProjectFull, resolveProjectId, moveIssueToDone, getWorkspaceById, updateWorkspaceStatus } from "../repositories/workspace.repository.js";
-import { loadAgentSettings } from "../services/agent-settings.service.js";
+import { loadAgentSettings, toExecutorProvider } from "../services/agent-settings.service.js";
 import { buildImplementPrompt } from "../services/plan-mode.service.js";
 import { PREF_AUTO_START_FOLLOWUP } from "../constants/preference-keys.js";
 import { autoStartFollowups } from "../services/followup-workspace.service.js";
@@ -144,7 +144,7 @@ export function createWorkspaceActionsRoute(
       const planMode = ws0.planMode ?? false;
 
       const resumeFromId = typeof body.resumeFromId === "string" ? body.resumeFromId : undefined;
-      const sessionId = await getSessionManager().startSession({ workspaceId: id, prompt: promptStr, agentCommand, agentArgs, resumeFromId, claudeProfile, provider: agentProvider === "codex" ? "codex" : "claude-code", multiTurn: false, permissionPromptTool, planMode, resumeWithNewModel, triggerType: "chat", profile: agentProfile });
+      const sessionId = await getSessionManager().startSession({ workspaceId: id, prompt: promptStr, agentCommand, agentArgs, resumeFromId, claudeProfile, provider: toExecutorProvider(agentProvider), multiTurn: false, permissionPromptTool, planMode, resumeWithNewModel, triggerType: "chat", profile: agentProfile });
 
       await updateWorkspaceStatus(id, "active", { claudeProfile: claudeProfile ?? null, agentCommand: agentCommand ?? null, provider: agentProvider }, database);
 
@@ -195,7 +195,7 @@ export function createWorkspaceActionsRoute(
         const wsForTurn = await getWorkspaceById(id, database);
         const planMode = wsForTurn?.planMode ?? false;
 
-        const sessionId = await getSessionManager().startSession({ workspaceId: id, prompt: body.content, agentCommand, agentArgs, resumeFromId: running.id, claudeProfile, profile, provider: provider === "codex" ? "codex" : "claude-code", multiTurn: false, planMode, resumeWithNewModel, triggerType: "chat" });
+        const sessionId = await getSessionManager().startSession({ workspaceId: id, prompt: body.content, agentCommand, agentArgs, resumeFromId: running.id, claudeProfile, profile, provider: toExecutorProvider(provider), multiTurn: false, planMode, resumeWithNewModel, triggerType: "chat" });
         await updateWorkspaceStatus(id, "active", { claudeProfile: claudeProfile ?? null, agentCommand: agentCommand ?? null, provider: provider }, database);
         const projectId = await resolveProjectId(id, database);
         if (projectId) options?.boardEvents?.broadcast(projectId, "session_launched");
@@ -252,7 +252,7 @@ export function createWorkspaceActionsRoute(
         agentCommand,
         agentArgs,
         claudeProfile,
-        provider: agentProvider === "codex" ? "codex" : "claude-code",
+        provider: toExecutorProvider(agentProvider),
         multiTurn: false,
         permissionPromptTool,
         planMode: false,
@@ -548,7 +548,7 @@ export function createWorkspaceActionsRoute(
 
       const { agentCommand, agentArgs, claudeProfile, profile, provider } = await loadAgentSettings(database);
 
-      const sessionId = await getSessionManager().startSession({ workspaceId: id, prompt, agentCommand, agentArgs, claudeProfile, profile, provider: provider === "codex" ? "codex" : "claude-code", multiTurn: true, triggerType: "fix-conflicts" });
+      const sessionId = await getSessionManager().startSession({ workspaceId: id, prompt, agentCommand, agentArgs, claudeProfile, profile, provider: toExecutorProvider(provider), multiTurn: true, triggerType: "fix-conflicts" });
       options?.fixAndMergeSessionIds?.add(sessionId);
 
       await updateWorkspaceStatus(id, "fixing", {}, database);
