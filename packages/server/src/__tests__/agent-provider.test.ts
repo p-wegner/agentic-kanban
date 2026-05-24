@@ -528,4 +528,21 @@ describe("CodexProvider", () => {
     const config = provider.buildLaunchConfig({});
     expect(config.promptPrefix).toBeUndefined();
   });
+
+  it("parses agent_message item text as assistantText", () => {
+    const evt = provider.parseStreamEvent(JSON.stringify({
+      type: "item.completed",
+      item: { id: "item_0", type: "agent_message", text: "Here is the plan" },
+    }));
+    expect(evt?.assistantText).toBe("Here is the plan");
+  });
+
+  it("does not treat command_execution completion as assistantText", () => {
+    const evt = provider.parseStreamEvent(JSON.stringify({
+      type: "item.completed",
+      item: { id: "item_1", type: "command_execution" },
+    }));
+    expect(evt?.assistantText).toBeUndefined();
+    expect(evt?.toolResult?.toolUseId).toBe("item_1");
+  });
 });

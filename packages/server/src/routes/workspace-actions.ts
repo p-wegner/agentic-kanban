@@ -15,6 +15,7 @@ import { writeFileSync } from "node:fs";
 import { spawn, spawnSync } from "node:child_process";
 import { resolveProjectRepo, resolveProjectFull, resolveProjectId, moveIssueToDone, getWorkspaceById, updateWorkspaceStatus } from "../repositories/workspace.repository.js";
 import { loadAgentSettings } from "../services/agent-settings.service.js";
+import { buildImplementPrompt } from "../services/plan-mode.service.js";
 import { PREF_AUTO_START_FOLLOWUP } from "../constants/preference-keys.js";
 import { autoStartFollowups } from "../services/followup-workspace.service.js";
 import { parseDiffStats } from "../services/board-aggregation.service.js";
@@ -232,6 +233,43 @@ export function createWorkspaceActionsRoute(
     if (projectId) options?.boardEvents?.broadcast(projectId, "session_stopped");
 
     return c.json({ stopped });
+  });
+
+  // POST /api/workspaces/:id/implement-plan — accept a pending plan and start implementation
+  router.post("/:id/implement-plan", async (c) => {
+    const id = c.req.param("id");
+    const ws0 = await getWorkspaceById(id, database);
+    if (!ws0) return c.json({ error: "Workspace not found" }, 404);
+    if (!ws0.pendingPlanPath) return c.json({ error: "No pending plan to implement" }, 409);
+
+    try {
+      const { agentCommand, agentArgs, claudeProfile, profile: agentProfile, provider: agentProvider, permissionPromptTool } =
+        await loadAgentSettings(database, undefined);
+
+      const sessionId = await getSessionManager().startSession({
+        workspaceId: id,
+        prompt: buildImplementPrompt(),
+        agentCommand,
+        agentArgs,
+        claudeProfile,
+        provider: agentProvider === "codex" ? "codex" : "claude-code",
+        multiTurn: false,
+        permissionPromptTool,
+        planMode: false,
+        triggerType: "plan-implement",
+        profile: agentProfile,
+      });
+
+      const now = new Date().toISOString();
+      await database.update(workspaces).set({ status: "active", pendingPlanPath: null, claudeProfile: claudeProfile ?? null, agentCommand: agentCommand ?? null, provider: agentProvider, updatedAt: now }).where(eq(workspaces.id, id));
+
+      const projectId = await resolveProjectId(id, database);
+      if (projectId) options?.boardEvents?.broadcast(projectId, "session_launched");
+
+      return c.json({ sessionId }, 201);
+    } catch (err) {
+      return c.json({ error: `Implement-plan failed: ${err instanceof Error ? err.message : String(err)}` }, 500);
+    }
   });
 
   // GET /api/workspaces/:id/latest-commit — get latest commit SHA and message

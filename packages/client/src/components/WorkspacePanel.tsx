@@ -765,6 +765,21 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
     }
   }
 
+  async function handleImplementPlan(wsId: string) {
+    setActionLoading(true);
+    setError(null);
+    try {
+      const result = await apiFetch<{ sessionId: string }>(`/api/workspaces/${wsId}/implement-plan`, { method: "POST" });
+      setActiveSession(result.sessionId);
+      setCompletedMessages([]);
+      await fetchWorkspaces();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to start implementation");
+    } finally {
+      setActionLoading(false);
+    }
+  }
+
   async function handleDeleteWorkspace(wsId: string) {
     const suffix = isRunning ? " The running agent will be stopped." : "";
     if (!window.confirm(`Delete this workspace? This removes the workspace record and all session data.${suffix}`)) return;
@@ -1643,6 +1658,16 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                             title="Start a new session (previous session has no resume ID)"
                           >
                             Restart
+                          </button>
+                        )}
+                        {ws.pendingPlanPath && ws.workingDir && ws.status !== "closed" && !isRunning && (
+                          <button
+                            onClick={() => handleImplementPlan(ws.id)}
+                            disabled={actionLoading}
+                            className="text-sm bg-green-600 text-white px-3 py-1.5 rounded hover:bg-green-700 disabled:opacity-50 font-medium"
+                            title={`A plan was written to ${ws.pendingPlanPath}. Review it in the diff, then accept to start implementation.`}
+                          >
+                            Accept &amp; Implement Plan
                           </button>
                         )}
                         {!ws.isDirect && ws.workingDir && ws.status !== "closed" && !isRunning && (

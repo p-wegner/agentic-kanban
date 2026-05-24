@@ -151,7 +151,7 @@ export async function startServer(port?: number) {
   const fixAndMergeSessionIds = new Set<string>();
   const learningSessionIds = new Set<string>();
 
-  async function runWorkflowOnExit(workspaceId: string, sessionId: string, exitCode: number | null) {
+  async function runWorkflowOnExit(workspaceId: string, sessionId: string, exitCode: number | null, wasPlanMode?: boolean) {
     try {
       const wsRows = await db.select().from(workspaces).where(eq(workspaces.id, workspaceId)).limit(1);
       if (wsRows.length === 0) return;
@@ -171,6 +171,15 @@ export async function startServer(port?: number) {
       boardEvents.broadcastActivity(projectId, { issueId, sessionId, activity: "" });
       boardEvents.broadcast(projectId, "session_completed");
       boardEvents.broadcast(projectId, "workspace_idle");
+
+      // A read-only plan run produces no new commits, but the branch may already differ from
+      // its base — which would otherwise trip the "committed changes → In Review → auto-review"
+      // path below. The plan→implement continuation is handled in session.manager, so skip the
+      // normal review/merge workflow here for plan-mode sessions.
+      if (wasPlanMode) {
+        console.log(`[workflow] plan-mode session ${sessionId} completed — skipping review/merge workflow`);
+        return;
+      }
 
       // Update scheduled run status if this workspace was launched by one
       try {
@@ -455,8 +464,8 @@ export async function startServer(port?: number) {
   }
 
   const sessionManager = createSessionManager(upgradeWebSocket, {
-    onSessionExit: (workspaceId, sessionId, exitCode) => {
-      runWorkflowOnExit(workspaceId, sessionId, exitCode).catch((err) => {
+    onSessionExit: (workspaceId, sessionId, exitCode, wasPlanMode) => {
+      runWorkflowOnExit(workspaceId, sessionId, exitCode, wasPlanMode).catch((err) => {
         console.error("[fatal] runWorkflowOnExit unhandled:", err);
       });
     },
