@@ -151,10 +151,10 @@ export function CommandPalette({ onClose }: CommandPaletteProps) {
   return (
     <>
       <div className="fixed inset-0 bg-black/40 z-50" onClick={onClose} />
-      <div className="fixed top-[15%] left-1/2 -translate-x-1/2 w-full max-w-lg bg-white rounded-xl shadow-2xl z-50 border border-gray-200 overflow-hidden">
+      <div className="fixed top-[15%] left-1/2 -translate-x-1/2 w-full max-w-lg bg-white dark:bg-gray-900 rounded-xl shadow-2xl z-50 border border-gray-200 dark:border-gray-700 overflow-hidden">
         {/* Header */}
-        <div className="flex items-center gap-2 px-4 py-3 border-b border-gray-100">
-          <svg className="w-4 h-4 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <div className="flex items-center gap-2 px-4 py-3 border-b border-gray-100 dark:border-gray-800">
+          <svg className="w-4 h-4 text-gray-400 dark:text-gray-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
           </svg>
           <input
@@ -164,17 +164,17 @@ export function CommandPalette({ onClose }: CommandPaletteProps) {
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder="Search actions..."
-            className="flex-1 text-sm outline-none placeholder:text-gray-400 text-gray-900"
+            className="flex-1 text-sm outline-none placeholder:text-gray-400 dark:placeholder:text-gray-500 text-gray-900 dark:text-gray-100 bg-transparent"
           />
           {query && (
             <button
               onClick={() => setQuery("")}
-              className="text-gray-400 hover:text-gray-600 text-xs px-1"
+              className="text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 text-xs px-1"
             >
               ✕
             </button>
           )}
-          <kbd className="hidden sm:inline-flex text-[10px] text-gray-400 px-1.5 py-0.5 bg-gray-100 rounded border border-gray-200 shrink-0">
+          <kbd className="hidden sm:inline-flex text-[10px] text-gray-400 dark:text-gray-500 px-1.5 py-0.5 bg-gray-100 dark:bg-gray-800 rounded border border-gray-200 dark:border-gray-700 shrink-0">
             Esc
           </kbd>
         </div>
@@ -182,14 +182,14 @@ export function CommandPalette({ onClose }: CommandPaletteProps) {
         {/* Results */}
         <div ref={listRef} className="max-h-80 overflow-y-auto py-1.5">
           {flatActions.length === 0 && (
-            <div className="px-4 py-8 text-sm text-gray-400 text-center">
+            <div className="px-4 py-8 text-sm text-gray-400 dark:text-gray-500 text-center">
               No matching actions for &ldquo;{query}&rdquo;
             </div>
           )}
           {displayGroups.map((group) => (
             <div key={group.category}>
               <div className="flex items-center gap-1.5 px-4 py-1 mt-0.5">
-                <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">
+                <span className="text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">
                   {group.category !== "recent" && (
                     <span className="mr-1">{CATEGORY_ICONS[group.category as ActionCategory]}</span>
                   )}
@@ -205,31 +205,31 @@ export function CommandPalette({ onClose }: CommandPaletteProps) {
                     data-selected={isSelected}
                     className={`flex items-center gap-3 px-4 py-2 cursor-pointer transition-colors ${
                       isSelected
-                        ? "bg-blue-50 border-l-2 border-blue-500"
-                        : "hover:bg-gray-50 border-l-2 border-transparent"
+                        ? "bg-blue-50 dark:bg-blue-900/30 border-l-2 border-blue-500"
+                        : "hover:bg-gray-50 dark:hover:bg-gray-800 border-l-2 border-transparent"
                     }`}
                     onClick={() => handleActionClick(action)}
                     onMouseEnter={() => setSelectedIndex(flatIndex)}
                   >
                     {/* Icon placeholder / category dot */}
                     <span className={`w-6 h-6 rounded flex items-center justify-center text-xs shrink-0 ${
-                      isSelected ? "bg-blue-100 text-blue-600" : "bg-gray-100 text-gray-500"
+                      isSelected ? "bg-blue-100 text-blue-600" : "bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400"
                     }`}>
                       {action.icon ?? CATEGORY_ICONS[action.category]}
                     </span>
 
                     <div className="flex-1 min-w-0">
-                      <div className="text-sm font-medium text-gray-900 truncate">
+                      <div className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
                         {action.label}
                       </div>
                       {action.description && (
-                        <div className="text-xs text-gray-500 truncate">{action.description}</div>
+                        <div className="text-xs text-gray-500 dark:text-gray-400 truncate">{action.description}</div>
                       )}
                     </div>
 
                     <div className="flex items-center gap-1.5 shrink-0">
                       {action.shortcut && (
-                        <kbd className="text-[10px] text-gray-400 px-1.5 py-0.5 bg-gray-100 rounded border border-gray-200 font-mono">
+                        <kbd className="text-[10px] text-gray-400 dark:text-gray-500 px-1.5 py-0.5 bg-gray-100 dark:bg-gray-800 rounded border border-gray-200 dark:border-gray-700 font-mono">
                           {action.shortcut}
                         </kbd>
                       )}
@@ -242,13 +242,13 @@ export function CommandPalette({ onClose }: CommandPaletteProps) {
         </div>
 
         {/* Footer hint */}
-        <div className="flex items-center justify-between px-4 py-2 border-t border-gray-100 bg-gray-50">
-          <div className="flex items-center gap-3 text-[10px] text-gray-400">
+        <div className="flex items-center justify-between px-4 py-2 border-t border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/50">
+          <div className="flex items-center gap-3 text-[10px] text-gray-400 dark:text-gray-500">
             <span><kbd className="font-mono">↑↓</kbd> navigate</span>
             <span><kbd className="font-mono">↵</kbd> select</span>
             <span><kbd className="font-mono">Esc</kbd> close</span>
           </div>
-          <span className="text-[10px] text-gray-300">
+          <span className="text-[10px] text-gray-300 dark:text-gray-600">
             {flatActions.length} action{flatActions.length !== 1 ? "s" : ""}
           </span>
         </div>

@@ -99,13 +99,13 @@ const [planMode, setPlanMode] = useState(false);
   const isLoading = actionLoading || localLoading;
 
   return (
-    <div className="border border-gray-200 rounded p-3 space-y-2">
+    <div className="border border-gray-200 dark:border-gray-700 rounded p-3 space-y-2">
       {localError && (
         <div className="p-2 bg-red-50 border border-red-200 rounded text-sm text-red-700">
           {localError}
         </div>
       )}
-      <label className="flex items-center gap-2 text-xs text-gray-600">
+      <label className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400">
         <input
           type="checkbox"
           checked={isDirect}
@@ -115,13 +115,13 @@ const [planMode, setPlanMode] = useState(false);
         <span>Work directly on main checkout</span>
       </label>
       {isDirect && (
-        <p className="text-xs text-gray-400">
+        <p className="text-xs text-gray-400 dark:text-gray-500">
           Agent will work on the current branch of the main repository (no worktree created).
         </p>
       )}
       {!isDirect && (
         <>
-          <label className="text-xs font-medium text-gray-600 block">
+          <label className="text-xs font-medium text-gray-600 dark:text-gray-400 block">
             Branch Name
           </label>
           <input
@@ -129,16 +129,16 @@ const [planMode, setPlanMode] = useState(false);
             value={branchName}
             onChange={(e) => setBranchName(sanitizeBranchName(e.target.value))}
             placeholder={suggestion}
-            className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:bg-gray-900 dark:text-gray-100"
           />
-          <label className="text-xs font-medium text-gray-600 block mt-2">
+          <label className="text-xs font-medium text-gray-600 dark:text-gray-400 block mt-2">
             Base Branch
           </label>
           {branches ? (
             <select
               value={baseBranch}
               onChange={(e) => setBaseBranch(e.target.value)}
-              className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:bg-gray-900 dark:text-gray-100"
             >
               <option value="">Default ({project?.defaultBranch || "main"})</option>
               {branches.local.map((b) => (
@@ -158,12 +158,12 @@ const [planMode, setPlanMode] = useState(false);
               value={baseBranch}
               onChange={(e) => setBaseBranch(e.target.value)}
               placeholder={project?.defaultBranch || "main"}
-              className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:bg-gray-900 dark:text-gray-100"
             />
           )}
         </>
       )}
-      <label className="flex items-center gap-2 text-xs text-gray-600">
+      <label className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400">
         <input
           type="checkbox"
           checked={requiresReview}
@@ -172,7 +172,7 @@ const [planMode, setPlanMode] = useState(false);
         />
         <span>Request code review before merge</span>
       </label>
-      <label className="flex items-center gap-2 text-xs text-gray-600">
+      <label className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400">
         <input
           type="checkbox"
           checked={planMode}
@@ -182,7 +182,7 @@ const [planMode, setPlanMode] = useState(false);
         <span>Plan mode (agent plans before implementing)</span>
       </label>
       {project?.setupScript && (
-        <label className="flex items-center gap-2 text-xs text-gray-600">
+        <label className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400">
           <input
             type="checkbox"
             checked={skipSetup}
@@ -194,13 +194,13 @@ const [planMode, setPlanMode] = useState(false);
       )}
       {availableSkills.length > 0 && (
         <div>
-          <label className="text-xs font-medium text-gray-600 block">
+          <label className="text-xs font-medium text-gray-600 dark:text-gray-400 block">
             Agent Skill
           </label>
           <select
             value={selectedSkillId}
             onChange={(e) => setSelectedSkillId(e.target.value)}
-            className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:bg-gray-900 dark:text-gray-100"
           >
             <option value="">None (default)</option>
             {availableSkills.map((s) => (
@@ -211,11 +211,11 @@ const [planMode, setPlanMode] = useState(false);
       )}
       {availableProfiles.length > 0 && (
         <div>
-          <label className="text-xs font-medium text-gray-600 mb-1 block">Profile</label>
+          <label className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-1 block">Profile</label>
           <select
             value={selectedProfile}
             onChange={(e) => setSelectedProfile(e.target.value)}
-            className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:bg-gray-900 dark:text-gray-100"
           >
             <option value="">Default ({prefs.claude_profile || "none"})</option>
             {availableProfiles.map((p) => (
@@ -234,7 +234,7 @@ const [planMode, setPlanMode] = useState(false);
         </button>
         <button
           onClick={handleCancel}
-          className="text-sm text-gray-500 px-3 py-1.5 hover:text-gray-700"
+          className="text-sm text-gray-500 dark:text-gray-400 px-3 py-1.5 hover:text-gray-700 dark:hover:text-gray-200"
         >
           Cancel
         </button>

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Layout } from "../components/Layout.js";
+import { useTheme } from "../hooks/useTheme.js";
 import { GraphView } from "../components/GraphView.js";
 import { TableView } from "../components/TableView.js";
 import { BoardColumn } from "../components/BoardColumn.js";
@@ -53,7 +54,7 @@ const ACTION_LABELS: Record<MonitorAction["action"], { label: string; color: str
   relaunch:   { label: "Relaunched agent",  color: "text-blue-600" },
   merge:      { label: "Triggered merge",   color: "text-purple-600" },
   nudge:      { label: "Nudged agent",      color: "text-amber-600" },
-  mark_idle:  { label: "Marked idle",       color: "text-gray-500" },
+  mark_idle:  { label: "Marked idle",       color: "text-gray-500 dark:text-gray-400" },
   mark_dead:  { label: "Marked dead",       color: "text-red-500" },
   auto_start: { label: "Auto-started issue", color: "text-green-600" },
 };
@@ -106,15 +107,15 @@ function MonitorPopover({ status, onClose, onOpenWorkspace, columns, onRunNow, a
       <div className="fixed inset-0 z-40" onClick={onClose} />
       <div
         id="monitor-popover"
-        className="fixed z-50 left-0 top-0 bottom-0 w-72 bg-white border-r border-gray-200 shadow-xl text-xs flex flex-col"
+        className="fixed z-50 left-0 top-0 bottom-0 w-72 bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-700 shadow-xl text-xs flex flex-col"
       >
         {/* Header */}
-        <div className="px-3 py-2.5 border-b border-gray-100 flex items-center justify-between shrink-0 rounded-t-xl bg-gray-50">
+        <div className="px-3 py-2.5 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between shrink-0 rounded-t-xl bg-gray-50 dark:bg-gray-950">
           <div className="flex items-center gap-2">
-            <div className={`w-2 h-2 rounded-full shrink-0 ${autoMonitor ? "bg-green-500 animate-pulse" : "bg-gray-300"}`} />
-            <span className="font-semibold text-gray-800 text-[13px]">Board Monitor</span>
+            <div className={`w-2 h-2 rounded-full shrink-0 ${autoMonitor ? "bg-green-500 animate-pulse" : "bg-gray-300 dark:bg-gray-600"}`} />
+            <span className="font-semibold text-gray-800 dark:text-gray-200 text-[13px]">Board Monitor</span>
             {autoMonitor && status?.nextRunAt && (
-              <span className="text-gray-400 text-[10px] font-mono">in {formatCountdown(status.nextRunAt)}</span>
+              <span className="text-gray-400 dark:text-gray-500 text-[10px] font-mono">in {formatCountdown(status.nextRunAt)}</span>
             )}
           </div>
           <div className="flex items-center gap-1.5">
@@ -131,7 +132,7 @@ function MonitorPopover({ status, onClose, onOpenWorkspace, columns, onRunNow, a
               )}
               {running ? "Running" : "Run now"}
             </button>
-            <button onClick={onClose} className="text-gray-400 hover:text-gray-600 transition-colors p-1 rounded-md hover:bg-gray-100" title="Close">
+            <button onClick={onClose} className="text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 transition-colors p-1 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700" title="Close">
               <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
             </button>
           </div>
@@ -141,16 +142,16 @@ function MonitorPopover({ status, onClose, onOpenWorkspace, columns, onRunNow, a
         <div className="overflow-y-auto flex-1 min-h-0">
 
           {/* Auto-monitor toggle row */}
-          <div className="px-3 py-2.5 border-b border-gray-100 flex items-center justify-between">
+          <div className="px-3 py-2.5 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <span className="font-medium text-gray-700">Auto-monitor</span>
+              <span className="font-medium text-gray-700 dark:text-gray-300">Auto-monitor</span>
               {autoMonitor && status?.active && (
                 <span className="px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 text-[10px] font-medium">running</span>
               )}
             </div>
             <button
               onClick={onToggle}
-              className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-emerald-400 focus:ring-offset-1 ${autoMonitor ? "bg-emerald-500" : "bg-gray-200"}`}
+              className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-emerald-400 focus:ring-offset-1 ${autoMonitor ? "bg-emerald-500" : "bg-gray-200 dark:bg-gray-600"}`}
               title={autoMonitor ? "Disable auto-monitor" : "Enable auto-monitor"}
             >
               <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${autoMonitor ? "translate-x-[1.125rem]" : "translate-x-0.5"}`} />
@@ -159,28 +160,28 @@ function MonitorPopover({ status, onClose, onOpenWorkspace, columns, onRunNow, a
 
           {/* Active agents */}
           {activeWs.length > 0 && (
-            <div className="border-b border-gray-100">
+            <div className="border-b border-gray-100 dark:border-gray-800">
               <div className="px-3 pt-2.5 pb-1 flex items-center gap-1.5">
-                <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-400">Active agents</span>
+                <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">Active agents</span>
                 <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-emerald-100 text-emerald-700 text-[10px] font-bold">{activeWs.length}</span>
               </div>
               <div className="overflow-y-auto" style={{ maxHeight: "11rem" }}>
                 {activeWs.map(iss => (
                   <div
                     key={iss.id}
-                    className="cursor-pointer hover:bg-gray-50 px-3 py-2 transition-colors border-t border-gray-50 first:border-t-0 group"
+                    className="cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 px-3 py-2 transition-colors border-t border-gray-50 dark:border-gray-800/50 first:border-t-0 group"
                     onClick={() => { onOpenWorkspace(iss.workspaceSummary!.main!.id, iss.id); onClose(); }}
                   >
                     <div className="flex items-start gap-2">
                       <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0 animate-pulse mt-1.5" />
                       <div className="min-w-0 flex-1">
                         <div className="flex items-baseline gap-1 mb-0.5">
-                          <span className="font-semibold text-gray-600 shrink-0 text-[11px]">#{iss.issueNumber}</span>
-                          <span className="text-gray-700 truncate text-[11px] font-medium">{iss.title}</span>
+                          <span className="font-semibold text-gray-600 dark:text-gray-400 shrink-0 text-[11px]">#{iss.issueNumber}</span>
+                          <span className="text-gray-700 dark:text-gray-300 truncate text-[11px] font-medium">{iss.title}</span>
                         </div>
-                        <p className="text-gray-400 leading-snug line-clamp-1 text-[10px]">{iss.workspaceSummary!.main!.lastAssistantMessage}</p>
+                        <p className="text-gray-400 dark:text-gray-500 leading-snug line-clamp-1 text-[10px]">{iss.workspaceSummary!.main!.lastAssistantMessage}</p>
                       </div>
-                      <svg className="w-3 h-3 text-gray-300 group-hover:text-gray-500 shrink-0 mt-1 transition-colors" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7"/></svg>
+                      <svg className="w-3 h-3 text-gray-300 dark:text-gray-600 group-hover:text-gray-500 dark:group-hover:text-gray-400 shrink-0 mt-1 transition-colors" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7"/></svg>
                     </div>
                   </div>
                 ))}
@@ -189,41 +190,41 @@ function MonitorPopover({ status, onClose, onOpenWorkspace, columns, onRunNow, a
           )}
 
           {/* Last run summary */}
-          <div className="px-3 py-2.5 border-b border-gray-100">
-            <div className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 mb-2">Last run</div>
+          <div className="px-3 py-2.5 border-b border-gray-100 dark:border-gray-800">
+            <div className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500 mb-2">Last run</div>
             {status?.lastRun ? (
               <div className="space-y-1.5">
-                <div className="text-gray-400 text-[11px]">{formatAge(status.lastRun.at)}</div>
+                <div className="text-gray-400 dark:text-gray-500 text-[11px]">{formatAge(status.lastRun.at)}</div>
                 <div className="flex flex-wrap gap-1">
                   {status.lastRun.relaunched > 0 && (
-                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-blue-50 text-blue-700 font-medium text-[11px]">
+                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-blue-50 dark:bg-blue-950 text-blue-700 font-medium text-[11px]">
                       <span className="w-1 h-1 rounded-full bg-blue-400 shrink-0" />{status.lastRun.relaunched} relaunched
                     </span>
                   )}
                   {status.lastRun.merged > 0 && (
-                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-purple-50 text-purple-700 font-medium text-[11px]">
+                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-purple-50 dark:bg-purple-950 text-purple-700 font-medium text-[11px]">
                       <span className="w-1 h-1 rounded-full bg-purple-400 shrink-0" />{status.lastRun.merged} merged
                     </span>
                   )}
                   {status.lastRun.nudged > 0 && (
-                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-700 font-medium text-[11px]">
+                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-amber-50 dark:bg-amber-950 text-amber-700 font-medium text-[11px]">
                       <span className="w-1 h-1 rounded-full bg-amber-400 shrink-0" />{status.lastRun.nudged} nudged
                     </span>
                   )}
                   {status.lastRun.relaunched === 0 && status.lastRun.merged === 0 && status.lastRun.nudged === 0 && (
-                    <span className="text-gray-400 text-[11px]">No actions needed</span>
+                    <span className="text-gray-400 dark:text-gray-500 text-[11px]">No actions needed</span>
                   )}
                 </div>
               </div>
             ) : (
-              <div className="text-gray-400 text-[11px]">No runs yet this session</div>
+              <div className="text-gray-400 dark:text-gray-500 text-[11px]">No runs yet this session</div>
             )}
           </div>
 
           {/* Recent actions */}
           {status?.recentActions && status.recentActions.length > 0 && (
-            <div className="px-3 py-2.5 border-b border-gray-100">
-              <div className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 mb-1.5">Recent actions</div>
+            <div className="px-3 py-2.5 border-b border-gray-100 dark:border-gray-800">
+              <div className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500 mb-1.5">Recent actions</div>
               <div className="space-y-0.5">
                 {status.recentActions.map((a, i) => {
                   const meta = ACTION_LABELS[a.action];
@@ -231,12 +232,12 @@ function MonitorPopover({ status, onClose, onOpenWorkspace, columns, onRunNow, a
                   return (
                     <div
                       key={i}
-                      className="flex items-center gap-2 cursor-pointer hover:bg-gray-50 rounded-md px-1.5 -mx-1.5 py-1 transition-colors"
+                      className="flex items-center gap-2 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-md px-1.5 -mx-1.5 py-1 transition-colors"
                       onClick={() => { onOpenWorkspace(a.workspaceId, a.issueId); onClose(); }}
                     >
                       <span className={`${meta.color} font-medium truncate flex-1 text-[11px]`}>{meta.label}</span>
-                      {issue && <span className="text-gray-500 shrink-0 text-[11px]">#{issue.issueNumber}</span>}
-                      <span className="text-gray-400 shrink-0 text-[10px] font-mono">{formatAge(a.at)}</span>
+                      {issue && <span className="text-gray-500 dark:text-gray-400 shrink-0 text-[11px]">#{issue.issueNumber}</span>}
+                      <span className="text-gray-400 dark:text-gray-500 shrink-0 text-[10px] font-mono">{formatAge(a.at)}</span>
                     </div>
                   );
                 })}
@@ -246,9 +247,9 @@ function MonitorPopover({ status, onClose, onOpenWorkspace, columns, onRunNow, a
 
           {/* Settings */}
           <div className="px-3 py-2.5 space-y-2.5 rounded-b-xl">
-            <div className="text-[10px] font-semibold uppercase tracking-wider text-gray-400">Settings</div>
+            <div className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">Settings</div>
             <div className="flex items-center gap-2">
-              <label className="text-gray-500 flex-1 text-[11px]">Check interval</label>
+              <label className="text-gray-500 dark:text-gray-400 flex-1 text-[11px]">Check interval</label>
               <div className="flex items-center gap-1.5">
                 <input
                   type="number"
@@ -257,24 +258,24 @@ function MonitorPopover({ status, onClose, onOpenWorkspace, columns, onRunNow, a
                   value={interval}
                   onChange={(e) => onIntervalChange(e.target.value)}
                   disabled={!autoMonitor}
-                  className="w-12 border border-gray-200 rounded-md px-2 py-1 text-center text-[11px] focus:outline-none focus:ring-1 focus:ring-emerald-400 disabled:opacity-40 disabled:bg-gray-50"
+                  className="w-12 border border-gray-200 dark:border-gray-700 rounded-md px-2 py-1 text-center text-[11px] focus:outline-none focus:ring-1 focus:ring-emerald-400 disabled:opacity-40 disabled:bg-gray-50 dark:disabled:bg-gray-800"
                 />
-                <span className="text-gray-500 text-[11px]">min</span>
+                <span className="text-gray-500 dark:text-gray-400 text-[11px]">min</span>
               </div>
             </div>
             <div className="flex items-center justify-between gap-2">
-              <span className={`text-gray-600 text-[11px] ${!autoMonitor ? "opacity-40" : ""}`}>Auto-start unblocked todos</span>
+              <span className={`text-gray-600 dark:text-gray-400 text-[11px] ${!autoMonitor ? "opacity-40" : ""}`}>Auto-start unblocked todos</span>
               <button
                 onClick={() => onNudgeAutoStartChange(!nudgeAutoStart)}
                 disabled={!autoMonitor}
-                className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors focus:outline-none disabled:opacity-40 ${nudgeAutoStart && autoMonitor ? "bg-emerald-500" : "bg-gray-200"}`}
+                className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors focus:outline-none disabled:opacity-40 ${nudgeAutoStart && autoMonitor ? "bg-emerald-500" : "bg-gray-200 dark:bg-gray-600"}`}
               >
                 <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${nudgeAutoStart ? "translate-x-[1.125rem]" : "translate-x-0.5"}`} />
               </button>
             </div>
             {nudgeAutoStart && autoMonitor && (
-              <div className="flex items-center gap-2 pl-2.5 border-l-2 border-emerald-200 ml-0.5">
-                <label className="text-gray-500 flex-1 text-[11px]">WIP limit</label>
+              <div className="flex items-center gap-2 pl-2.5 border-l-2 border-emerald-200 dark:border-green-800 ml-0.5">
+                <label className="text-gray-500 dark:text-gray-400 flex-1 text-[11px]">WIP limit</label>
                 <div className="flex items-center gap-1.5">
                   <input
                     type="number"
@@ -282,9 +283,9 @@ function MonitorPopover({ status, onClose, onOpenWorkspace, columns, onRunNow, a
                     max={20}
                     value={nudgeWipLimit}
                     onChange={(e) => onNudgeWipLimitChange(e.target.value)}
-                    className="w-12 border border-gray-200 rounded-md px-2 py-1 text-center text-[11px] focus:outline-none focus:ring-1 focus:ring-emerald-400"
+                    className="w-12 border border-gray-200 dark:border-gray-700 rounded-md px-2 py-1 text-center text-[11px] focus:outline-none focus:ring-1 focus:ring-emerald-400"
                   />
-                  <span className="text-gray-500 text-[11px]">in progress</span>
+                  <span className="text-gray-500 dark:text-gray-400 text-[11px]">in progress</span>
                 </div>
               </div>
             )}
@@ -297,6 +298,7 @@ function MonitorPopover({ status, onClose, onOpenWorkspace, columns, onRunNow, a
 }
 
 export function BoardPage() {
+  const { theme, setTheme, isDark } = useTheme();
   const [columns, setColumns] = useState<StatusWithIssues[]>([]);
   const columnsRef = useRef<StatusWithIssues[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1278,12 +1280,12 @@ export function BoardPage() {
   if (projects.length === 0 || !activeProjectId) {
     return (
       <Layout onRegisterProject={handleRegisterProject} onCreateProject={handleCreateProject}>
-        <div className="flex items-center justify-center h-96 text-gray-500">
+        <div className="flex items-center justify-center h-96 text-gray-500 dark:text-gray-400">
           <div className="text-center">
-            <p className="text-lg font-medium text-gray-700 mb-2">
+            <p className="text-lg font-medium text-gray-700 dark:text-gray-300 mb-2">
               No projects registered
             </p>
-            <p className="text-sm text-gray-500">
+            <p className="text-sm text-gray-500 dark:text-gray-400">
               Click the <strong>+</strong> button in the header to register a git repo as a project.
             </p>
           </div>
@@ -1308,13 +1310,15 @@ export function BoardPage() {
       onSettingsClick={() => setShowSettings(true)}
       onAllWorkspacesClick={() => setShowAllWorkspaces(true)}
       onWorktreeOverviewClick={() => setShowWorktreeOverview(true)}
+      isDark={isDark}
+      onThemeToggle={() => setTheme(isDark ? "light" : "dark")}
     >
       {error && (
         <div className="mx-6 mt-4 p-3 bg-red-50 border border-red-200 rounded-md flex items-center justify-between">
           <span className="text-sm text-red-700">{error}</span>
           <button
             onClick={() => setError(null)}
-            className="text-red-400 hover:text-red-600 text-sm"
+            className="text-red-400 dark:text-red-500 hover:text-red-600 text-sm"
           >
             Dismiss
           </button>
@@ -1368,7 +1372,7 @@ export function BoardPage() {
           <button
             onClick={() => setShowQuickTasks(true)}
             title="Quick Tasks — run a skill directly on the main branch (t)"
-            className="shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium border transition-colors bg-white border-gray-200 text-gray-600 hover:bg-gray-50"
+            className="shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium border transition-colors bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800"
           >
             <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
               <polygon points="5,3 19,12 5,21" />
@@ -1378,7 +1382,7 @@ export function BoardPage() {
           <div className="relative shrink-0 flex items-center gap-0.5">
             <button
               onClick={() => setShowMonitorPopover(v => !v)}
-              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium border transition-colors ${autoMonitor ? "bg-green-50 border-green-200 text-green-700 hover:bg-green-100" : "bg-white border-gray-200 text-gray-500 hover:bg-gray-50"}`}
+              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium border transition-colors ${autoMonitor ? "bg-green-50 dark:bg-green-950 border-green-200 dark:border-green-800 text-green-700 hover:bg-green-100 dark:hover:bg-green-900" : "bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800"}`}
               title={autoMonitor ? "Board monitor active — click for details" : "Board monitor — click to configure"}
             >
               {autoMonitor && <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />}
@@ -1387,7 +1391,7 @@ export function BoardPage() {
             <button
               onClick={handleMonitorRunNow}
               disabled={monitorRunning}
-              className="flex items-center justify-center w-6 h-6 rounded border border-gray-200 bg-white text-gray-500 hover:bg-gray-50 hover:text-gray-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              className="flex items-center justify-center w-6 h-6 rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800 hover:text-gray-700 dark:hover:text-gray-200 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
               title="Run monitor now and reset timer"
             >
               {monitorRunning
@@ -1397,10 +1401,10 @@ export function BoardPage() {
             </button>
             {showMonitorPopover && <MonitorPopover status={monitorStatus} onClose={() => setShowMonitorPopover(false)} onOpenWorkspace={(workspaceId, issueId) => { const issue = columns.flatMap(c => c.issues).find(i => i.id === issueId); if (issue) setWorkspaceIssue(issue); setWorkspaceInitial({ workspaceId, sessionId: "" }); }} columns={columns} onRunNow={handleMonitorRunNow} autoMonitor={autoMonitor} onToggle={toggleAutoMonitor} interval={autoMonitorInterval} onIntervalChange={handleIntervalChange} nudgeAutoStart={nudgeAutoStart} onNudgeAutoStartChange={handleNudgeAutoStartChange} nudgeWipLimit={nudgeWipLimit} onNudgeWipLimitChange={handleNudgeWipLimitChange} />}
           </div>
-          <div className="flex items-center gap-1 border border-gray-200 rounded-md p-0.5 bg-white shrink-0">
+          <div className="flex items-center gap-1 border border-gray-200 dark:border-gray-700 rounded-md p-0.5 bg-white dark:bg-gray-900 shrink-0">
             <button
               onClick={() => setViewMode("kanban")}
-              className={`px-2.5 py-1 text-xs rounded flex items-center gap-1.5 transition-colors ${viewMode === "kanban" ? "bg-blue-600 text-white" : "text-gray-600 hover:bg-gray-100"}`}
+              className={`px-2.5 py-1 text-xs rounded flex items-center gap-1.5 transition-colors ${viewMode === "kanban" ? "bg-blue-600 text-white" : "text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700"}`}
               title="Kanban view"
             >
               <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -1412,7 +1416,7 @@ export function BoardPage() {
             </button>
             <button
               onClick={() => setViewMode("graph")}
-              className={`px-2.5 py-1 text-xs rounded flex items-center gap-1.5 transition-colors ${viewMode === "graph" ? "bg-blue-600 text-white" : "text-gray-600 hover:bg-gray-100"}`}
+              className={`px-2.5 py-1 text-xs rounded flex items-center gap-1.5 transition-colors ${viewMode === "graph" ? "bg-blue-600 text-white" : "text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700"}`}
               title="Graph view"
             >
               <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -1425,7 +1429,7 @@ export function BoardPage() {
             </button>
             <button
               onClick={() => setViewMode("table")}
-              className={`px-2.5 py-1 text-xs rounded flex items-center gap-1.5 transition-colors ${viewMode === "table" ? "bg-blue-600 text-white" : "text-gray-600 hover:bg-gray-100"}`}
+              className={`px-2.5 py-1 text-xs rounded flex items-center gap-1.5 transition-colors ${viewMode === "table" ? "bg-blue-600 text-white" : "text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700"}`}
               title="Table view"
             >
               <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -1460,10 +1464,10 @@ export function BoardPage() {
                 onClick={() => {
                   document.getElementById(`column-${col.id}`)?.scrollIntoView({ behavior: "smooth", inline: "start", block: "nearest" });
                 }}
-                className="shrink-0 px-3 py-1 text-xs rounded-full border border-gray-200 bg-white text-gray-600 hover:bg-blue-50 hover:border-blue-300 hover:text-blue-700 transition-colors"
+                className="shrink-0 px-3 py-1 text-xs rounded-full border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-600 dark:text-gray-400 hover:bg-blue-50 dark:hover:bg-blue-950 hover:border-blue-300 hover:text-blue-700 transition-colors"
               >
                 {col.name}
-                <span className="ml-1 text-gray-400">{col.issues.length}</span>
+                <span className="ml-1 text-gray-400 dark:text-gray-500">{col.issues.length}</span>
               </button>
             ))}
           </div>
