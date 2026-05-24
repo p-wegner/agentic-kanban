@@ -9,12 +9,15 @@ import {
   PREF_SKIP_PERMISSIONS,
   PREF_CLAUDE_PROFILE,
   PREF_CODEX_PROFILE,
+  PREF_COPILOT_PROFILE,
   PREF_PROVIDER,
   PREF_MOCK_AGENT_PROFILE,
   PREF_MOCK_AGENT_DELAY_MS,
   PREF_RESUME_WITH_NEW_MODEL,
   PREF_PERMISSION_PROMPT_TOOL,
 } from "../constants/preference-keys.js";
+import type { ProviderName } from "./agent-provider.js";
+import type { ProviderId } from "./agent-provider.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const MOCK_AGENT_PATH = resolve(__dirname, "../scripts/mock-agent.ts");
@@ -28,8 +31,8 @@ export interface AgentSettings {
   /** @deprecated Use profile instead */
   claudeProfile: string | undefined;
   /** Provider-tagged profile selection. Derived from claude_profile + provider preferences. */
-  profile: { provider: "claude" | "codex"; name: string } | undefined;
-  provider: "claude" | "codex";
+  profile: { provider: ProviderName; name: string } | undefined;
+  provider: ProviderName;
   resumeWithNewModel: boolean;
   permissionPromptTool: string | undefined;
 }
@@ -45,6 +48,10 @@ export async function loadAgentSettings(
 
 export function isMockProfile(profile: string | undefined): boolean {
   return profile === "mock" || process.env.MOCK_AGENT === "1";
+}
+
+export function toExecutorProvider(provider: ProviderName): ProviderId {
+  return provider === "claude" ? "claude-code" : provider;
 }
 
 /**
@@ -81,12 +88,11 @@ export function resolveAgentSettings(
     }
   }
 
-  const provider = (prefMap.get(PREF_PROVIDER) || "claude") as "claude" | "codex";
+  const provider = parseProviderName(prefMap.get(PREF_PROVIDER));
 
-  // `--dangerously-skip-permissions` is Claude-specific. Codex gets its own
-  // `--dangerously-bypass-approvals-and-sandbox` flag in CodexProvider, and chokes
-  // on the Claude flag ("unexpected argument"), so only append it for Claude.
-  const skipPerms = prefMap.get(PREF_SKIP_PERMISSIONS) === "true" && provider !== "codex";
+  // `--dangerously-skip-permissions` is Claude-specific. Codex and Copilot get
+  // provider-native permission handling in their providers and reject Claude flags.
+  const skipPerms = prefMap.get(PREF_SKIP_PERMISSIONS) === "true" && provider === "claude";
   const baseArgs = prefMap.get(PREF_AGENT_ARGS) || "";
   const agentArgs = skipPerms
     ? (baseArgs ? baseArgs + " --dangerously-skip-permissions" : "--dangerously-skip-permissions")
@@ -102,11 +108,18 @@ export function resolveAgentSettings(
   // Don't pass mock profile name to Claude Code — it's only used to select the mock agent command
   const resolvedProfile = isMockProfile(claudeProfile) ? undefined : claudeProfile;
 
-  // For codex provider, use the codex-specific profile key
-  const effectiveProfileName = provider === "codex"
-    ? (prefMap.get(PREF_CODEX_PROFILE) || undefined)
-    : resolvedProfile;
+  const effectiveProfileName =
+    provider === "codex"
+      ? (prefMap.get(PREF_CODEX_PROFILE) || undefined)
+      : provider === "copilot"
+        ? (prefMap.get(PREF_COPILOT_PROFILE) || undefined)
+        : resolvedProfile;
 
   const profile = effectiveProfileName ? { provider, name: effectiveProfileName } : undefined;
   return { agentCommand, agentArgs, claudeProfile: resolvedProfile, profile, provider, resumeWithNewModel, permissionPromptTool };
+}
+
+function parseProviderName(provider: string | undefined): ProviderName {
+  if (provider === "codex" || provider === "copilot") return provider;
+  return "claude";
 }

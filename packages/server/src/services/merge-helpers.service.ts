@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 import { execFile } from "node:child_process";
 import type { Database } from "../db/index.js";
 import type { SessionManager } from "./session.manager.js";
-import { resolveAgentSettings } from "./agent-settings.service.js";
+import { resolveAgentSettings, toExecutorProvider } from "./agent-settings.service.js";
 import { PREF_LEARNING_STEP_BEFORE_MERGE } from "../constants/preference-keys.js";
 
 /** Returns conflicting file paths from an in-progress merge/rebase (git diff --name-only --diff-filter=U). */
@@ -56,7 +56,7 @@ export async function runLearningStep(
     const learningPrompt = `/learning-step\n\nRun the learning step skill to extract insights from recent session transcripts and update docs/hooks before this workspace is merged.`;
     const { agentCommand: agentCmd, agentArgs, claudeProfile, profile, provider } = resolveAgentSettings(prefMap);
     const sm = getSessionManager();
-    const learningSessId = await sm.startSession({ workspaceId, prompt: learningPrompt, agentCommand: agentCmd, agentArgs, claudeProfile, profile, provider: provider === "codex" ? "codex" : "claude-code", triggerType: "learning" });
+    const learningSessId = await sm.startSession({ workspaceId, prompt: learningPrompt, agentCommand: agentCmd, agentArgs, claudeProfile, profile, provider: toExecutorProvider(provider), triggerType: "learning" });
     console.log(`[merge-helpers] learning step started: session=${learningSessId}`);
 
     await new Promise<void>((resolve) => {
