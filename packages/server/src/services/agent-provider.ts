@@ -388,7 +388,10 @@ export class CodexProvider implements AgentProvider {
     return {
       command,
       args,
-      useShell: isWindows && (isMockAgent || !!agentCommand),
+      // On Windows `codex` is a `.cmd` shim — Node refuses to spawn it without a shell
+      // (EINVAL), and a bare "codex" without a shell is ENOENT. Always use a shell on
+      // Windows so the .cmd resolves via PATHEXT.
+      useShell: isWindows,
       isMockAgent,
       env: { ...process.env as Record<string, string> },
       keepStdinOpen: false,
