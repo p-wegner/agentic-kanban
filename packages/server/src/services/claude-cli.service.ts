@@ -21,13 +21,22 @@ export async function invokeClaudePrompt(
 
   let agentCommand = "claude";
   let claudeProfile: string | undefined;
+  let provider = "claude";
+  let codexProfile: string | undefined;
   const prefs = await database
     .select({ key: preferences.key, value: preferences.value })
     .from(preferences)
-    .where(inArray(preferences.key, ["agent_command", "claude_profile"]));
+    .where(inArray(preferences.key, ["agent_command", "claude_profile", "provider", "codex_profile"]));
   for (const p of prefs) {
     if (p.key === "agent_command" && p.value) agentCommand = p.value;
     if (p.key === "claude_profile" && p.value) claudeProfile = p.value;
+    if (p.key === "provider" && p.value) provider = p.value;
+    if (p.key === "codex_profile" && p.value) codexProfile = p.value;
+  }
+  const isCodex = provider === "codex";
+  if (isCodex) {
+    agentCommand = "codex";
+    claudeProfile = codexProfile;
   }
 
   if (process.platform === "win32" && agentCommand === "claude") {
@@ -38,7 +47,7 @@ export async function invokeClaudePrompt(
   }
 
   const args: string[] = ["--output-format", "text"];
-  if (claudeProfile) {
+  if (!isCodex && claudeProfile) {
     const settingsPath = join(homedir(), ".claude", `settings_${claudeProfile}.json`);
     if (existsSync(settingsPath)) {
       args.push("--settings", settingsPath);
