@@ -318,6 +318,7 @@ export interface BoardStatusIssue {
   conflicts: { hasConflicts: boolean; conflictingFiles: string[] } | null;
   lastActivity: string | null;
   lastOutput: string[];
+  lastAgentMessage: string | null;
 }
 
 export interface BoardStatusResponse {

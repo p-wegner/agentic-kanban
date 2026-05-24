@@ -563,44 +563,29 @@ Status indicators:
           const wsStatus = issue.workspace?.status ?? "no workspace";
           const marker = wsStatus === "active" ? "*" : wsStatus === "idle" ? "o" : wsStatus === "reviewing" ? "o" : ".";
           console.log(`  ${marker} ${num.padEnd(4)} ${issue.title}`);
-          console.log(`         [${issue.statusName}]  priority: ${issue.priority}  workspace: ${wsStatus}`);
+          console.log(`         [${issue.statusName}]  workspace: ${wsStatus}`);
 
           if (issue.workspace) {
-            console.log(`         branch: ${issue.workspace.branch}`);
+            const wsInfo: string[] = [issue.workspace.branch];
+            if (issue.workspace.isDirect) wsInfo.push("direct");
+            if (issue.diffStats && (issue.diffStats.filesChanged > 0 || issue.diffStats.insertions > 0 || issue.diffStats.deletions > 0)) {
+              wsInfo.push(`+${issue.diffStats.insertions}/-${issue.diffStats.deletions}`);
+            }
+            console.log(`         ${wsInfo.join(" · ")}`);
           }
 
           if (issue.session) {
-            console.log(`         session: ${issue.session.status}  started: ${issue.session.startedAt ? new Date(issue.session.startedAt).toLocaleTimeString() : "?"}`);
+            const sessionParts: string[] = [issue.session.status];
+            if (issue.lastActivity) sessionParts.push(`${timeSince(new Date(issue.lastActivity))} ago`);
+            if (issue.sessionStats?.durationMs) sessionParts.push(formatDurationStr(issue.sessionStats.durationMs));
+            console.log(`         session: ${sessionParts.join(" · ")}`);
           }
 
-          if (issue.diffStats && (issue.diffStats.filesChanged > 0 || issue.diffStats.insertions > 0 || issue.diffStats.deletions > 0)) {
-            console.log(`         diff: ${issue.diffStats.filesChanged} files  +${issue.diffStats.insertions} -${issue.diffStats.deletions}`);
-          }
-
-          if (issue.sessionStats) {
-            const s = issue.sessionStats;
-            const parts: string[] = [];
-            if (s.model) parts.push(`model: ${s.model}`);
-            if (s.numTurns > 0) parts.push(`turns: ${s.numTurns}`);
-            if (s.totalCostUsd > 0) parts.push(`cost: $${s.totalCostUsd.toFixed(2)}`);
-            if (s.durationMs > 0) parts.push(`duration: ${Math.round(s.durationMs / 1000)}s`);
-            if (parts.length > 0) console.log(`         ${parts.join("  ")}`);
-          }
-
-          if (issue.sessionStats?.agentSummary) {
-            const lines = issue.sessionStats.agentSummary.split("\n").slice(0, 8);
-            console.log(`         agent summary:`);
-            for (const line of lines) {
-              console.log(`           ${line}`);
-            }
-            if (issue.sessionStats.agentSummary.split("\n").length > 8) {
-              console.log(`           ...`);
-            }
+          if (issue.lastAgentMessage) {
+            const msg = issue.lastAgentMessage.length > 200 ? issue.lastAgentMessage.slice(0, 197) + "..." : issue.lastAgentMessage;
+            console.log(`         last: ${msg.split("\n")[0]}`);
           } else if (issue.lastOutput.length > 0) {
-            console.log(`         last output:`);
-            for (const line of issue.lastOutput) {
-              console.log(`           ${line}`);
-            }
+            console.log(`         last: ${issue.lastOutput[0]}`);
           }
 
           if (issue.lastActivity) {
