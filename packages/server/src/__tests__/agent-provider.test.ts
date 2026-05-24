@@ -609,6 +609,15 @@ describe("CopilotProvider", () => {
     expect(prefixed.args).toContain("gpt-5.2-codex");
   });
 
+  it("does not map the Copilot default profile to a --model flag", () => {
+    const config = provider.buildLaunchConfig({
+      prompt: "Run",
+      profile: { provider: "copilot", name: "default" },
+    });
+    expect(config.args).not.toContain("--model");
+    expect(config.args).not.toContain("default");
+  });
+
   it("maps agent-prefixed Copilot profiles to --agent", () => {
     const config = provider.buildLaunchConfig({
       prompt: "Run",
