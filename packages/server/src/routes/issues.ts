@@ -227,6 +227,7 @@ export function createIssuesRoute(database: Database = db, options?: { boardEven
         readyForMerge: workspaces.readyForMerge,
         status: workspaces.status,
         agentCommand: workspaces.agentCommand,
+        provider: workspaces.provider,
         skillId: workspaces.skillId,
         skillName: agentSkills.name,
         createdAt: workspaces.createdAt,

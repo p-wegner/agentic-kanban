@@ -8,6 +8,8 @@ import {
   PREF_AGENT_ARGS,
   PREF_SKIP_PERMISSIONS,
   PREF_CLAUDE_PROFILE,
+  PREF_CODEX_PROFILE,
+  PREF_PROVIDER,
   PREF_MOCK_AGENT_PROFILE,
   PREF_MOCK_AGENT_DELAY_MS,
   PREF_RESUME_WITH_NEW_MODEL,
@@ -23,7 +25,11 @@ export const MOCK_AGENT_COMMAND = `node --import ${TSX_URL} "${MOCK_AGENT_PATH}"
 export interface AgentSettings {
   agentCommand: string | undefined;
   agentArgs: string | undefined;
+  /** @deprecated Use profile instead */
   claudeProfile: string | undefined;
+  /** Provider-tagged profile selection. Derived from claude_profile + provider preferences. */
+  profile: { provider: "claude" | "codex"; name: string } | undefined;
+  provider: "claude" | "codex";
   resumeWithNewModel: boolean;
   permissionPromptTool: string | undefined;
 }
@@ -88,7 +94,16 @@ export function resolveAgentSettings(
     ? "mcp__agentic-kanban__approve_tool_use"
     : (permPref && permPref !== "false" ? permPref : undefined);
 
+  const provider = (prefMap.get(PREF_PROVIDER) || "claude") as "claude" | "codex";
+
   // Don't pass mock profile name to Claude Code — it's only used to select the mock agent command
   const resolvedProfile = isMockProfile(claudeProfile) ? undefined : claudeProfile;
-  return { agentCommand, agentArgs, claudeProfile: resolvedProfile, resumeWithNewModel, permissionPromptTool };
+
+  // For codex provider, use the codex-specific profile key
+  const effectiveProfileName = provider === "codex"
+    ? (prefMap.get(PREF_CODEX_PROFILE) || undefined)
+    : resolvedProfile;
+
+  const profile = effectiveProfileName ? { provider, name: effectiveProfileName } : undefined;
+  return { agentCommand, agentArgs, claudeProfile: resolvedProfile, profile, provider, resumeWithNewModel, permissionPromptTool };
 }
