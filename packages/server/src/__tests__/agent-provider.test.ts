@@ -13,7 +13,7 @@ vi.mock("node:fs", () => ({
   readFileSync: vi.fn(),
 }));
 
-import { ClaudeProvider, getProvider, buildAgentLaunchConfig } from "../services/agent-provider.js";
+import { ClaudeProvider, CodexProvider, getProvider, buildAgentLaunchConfig } from "../services/agent-provider.js";
 import { execSync as execSyncMock } from "node:child_process";
 import { existsSync as existsSyncMock } from "node:fs";
 
@@ -396,6 +396,18 @@ describe("provider registry", () => {
     expect(p).toBeInstanceOf(ClaudeProvider);
   });
 
+  it("getProvider returns CodexProvider for 'codex'", () => {
+    const p = getProvider("codex");
+    expect(p.name).toBe("codex");
+    expect(p).toBeInstanceOf(CodexProvider);
+  });
+
+  it("getProvider maps 'claude-code' to ClaudeProvider", () => {
+    const p = getProvider("claude-code");
+    expect(p.name).toBe("claude");
+    expect(p).toBeInstanceOf(ClaudeProvider);
+  });
+
   it("getProvider throws for unknown provider", () => {
     expect(() => getProvider("nonexistent")).toThrow("Unknown agent provider");
   });
@@ -427,5 +439,66 @@ describe("buildAgentLaunchConfig (backward compat)", () => {
     process.env.AGENT_COMMAND = "mock-agent";
     const config = buildAgentLaunchConfig({ providerSessionId: "sess-789" });
     expect(config.args).toContain("sess-789");
+  });
+
+  it("routes to CodexProvider when provider is 'codex'", () => {
+    const config = buildAgentLaunchConfig({ provider: "codex" });
+    expect(config.args).toContain("exec");
+    expect(config.args).toContain("--json");
+    expect(config.args).toContain("--dangerously-bypass-approvals-and-sandbox");
+    expect(config.args).not.toContain("--output-format");
+  });
+
+  it("routes to ClaudeProvider when provider is 'claude-code'", () => {
+    const config = buildAgentLaunchConfig({ provider: "claude-code" });
+    expect(config.args).toContain("--output-format");
+    expect(config.args).toContain("stream-json");
+  });
+});
+
+describe("CodexProvider", () => {
+  const provider = new CodexProvider();
+
+  it("appends --profile-v2 when codex profile is set", () => {
+    const config = provider.buildLaunchConfig({
+      profile: { provider: "codex", name: "my-config" },
+    });
+    expect(config.args).toContain("--profile-v2");
+    expect(config.args).toContain("my-config");
+  });
+
+  it("does not append --profile-v2 when no profile is set", () => {
+    const config = provider.buildLaunchConfig({});
+    expect(config.args).not.toContain("--profile-v2");
+  });
+
+  it("does not append --profile-v2 when profile is for claude", () => {
+    const config = provider.buildLaunchConfig({
+      profile: { provider: "claude", name: "sonnet" },
+    });
+    expect(config.args).not.toContain("--profile-v2");
+  });
+
+  it("uses codex exec with profile-v2 and resume", () => {
+    const config = provider.buildLaunchConfig({
+      profile: { provider: "codex", name: "fast" },
+      providerSessionId: "thread-123",
+    });
+    expect(config.args).toEqual([
+      "exec", "resume", "--json", "--dangerously-bypass-approvals-and-sandbox", "thread-123",
+      "--profile-v2", "fast",
+      "-",
+    ]);
+  });
+
+  it("uses codex exec without resume", () => {
+    const config = provider.buildLaunchConfig({
+      profile: { provider: "codex", name: "fast" },
+    });
+    expect(config.args).toEqual([
+      "exec", "--json", "--dangerously-bypass-approvals-and-sandbox",
+      "--profile-v2", "fast",
+      "-",
+    ]);
   });
 });

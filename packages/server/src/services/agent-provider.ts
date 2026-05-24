@@ -351,7 +351,7 @@ export class CodexProvider implements AgentProvider {
   readonly name = "codex";
 
   buildLaunchConfig(options: ProviderLaunchOptions): AgentLaunchConfig {
-    const { agentArgs, providerSessionId, agentCommand, keepAlive } = options;
+    const { agentArgs, providerSessionId, agentCommand, keepAlive, profile } = options;
     const isWindows = process.platform === "win32";
 
     const isMockAgent = !!process.env.AGENT_COMMAND || (agentCommand?.includes("mock-agent") ?? false);
@@ -372,6 +372,11 @@ export class CodexProvider implements AgentProvider {
         args.push("exec", "resume", "--json", "--dangerously-bypass-approvals-and-sandbox", providerSessionId);
       } else {
         args.push("exec", "--json", "--dangerously-bypass-approvals-and-sandbox");
+      }
+      // Layer named config from $CODEX_HOME/<name>.config.toml on top of base config
+      const profileName = profile?.provider === "codex" ? profile.name : undefined;
+      if (profileName) {
+        args.push("--profile-v2", profileName);
       }
       if (agentArgs) {
         args.push(...splitArgs(agentArgs));
@@ -473,8 +478,9 @@ function registerProvider(provider: AgentProvider): void {
 }
 
 export function getProvider(name?: string): AgentProvider {
-  const provider = providers.get(name ?? defaultProviderName);
-  if (!provider) throw new Error(`Unknown agent provider: ${name ?? defaultProviderName}`);
+  const key = name === "claude-code" ? "claude" : (name ?? defaultProviderName);
+  const provider = providers.get(key);
+  if (!provider) throw new Error(`Unknown agent provider: ${key}`);
   return provider;
 }
 
@@ -492,7 +498,8 @@ registerProvider(new CodexProvider());
 export interface BuildAgentLaunchConfigOptions extends ProviderLaunchOptions {}
 
 export function buildAgentLaunchConfig(options: BuildAgentLaunchConfigOptions = {}): AgentLaunchConfig {
-  return getProvider().buildLaunchConfig(options);
+  const providerName = options.provider ?? undefined;
+  return getProvider(providerName).buildLaunchConfig(options);
 }
 
 // --- Internal helpers ---
