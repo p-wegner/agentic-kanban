@@ -1,10 +1,11 @@
 import type { WSContext } from "hono/ws";
 import { db } from "../db/index.js";
-import { sessions, workspaces, sessionMessages, issues } from "@agentic-kanban/shared/schema";
+import { sessions, workspaces, sessionMessages, issues, preferences } from "@agentic-kanban/shared/schema";
 import { eq } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import * as agentService from "./agent.service.js";
 import { getProvider } from "./agent-provider.js";
+import { extractPlan, writePlanFile, buildImplementPrompt } from "./plan-mode.service.js";
 import type { ParsedStreamEvent } from "./agent-provider.js";
 import type { AgentOutputMessage } from "@agentic-kanban/shared";
 import type { TodoItem } from "./board-events.js";
@@ -20,7 +21,7 @@ interface SessionContext {
 }
 
 interface SessionManagerOptions {
-  onSessionExit?: (workspaceId: string, sessionId: string, exitCode: number | null) => void;
+  onSessionExit?: (workspaceId: string, sessionId: string, exitCode: number | null, wasPlanMode?: boolean) => void;
   onActivity?: (projectId: string, issueId: string, sessionId: string, activity: string) => void;
   onLiveStats?: (projectId: string, issueId: string, model: string, contextTokens: number, toolUses: number, subagentCount: number) => void;
   onTodos?: (projectId: string, issueId: string, todos: TodoItem[]) => void;
@@ -69,6 +70,9 @@ function createSessionManager(
   const sessionAgentToolUseIds = new Map<string, Set<string>>();
   // Track all assistant text responses per session for agentSummary
   const sessionTextParts = new Map<string, string[]>();
+  // Snapshot of joined assistant text captured at exit (before sessionTextParts is cleared),
+  // so the exit handler can extract a Codex plan from it.
+  const sessionFinalText = new Map<string, string>();
   // Track tasks from TaskCreate/TaskUpdate calls per session
   const sessionTasks = new Map<string, Map<string, { subject: string; status: string }>>();
   // Track whether a TodoWrite has been seen for each session (takes precedence over TaskCreate/TaskUpdate)
@@ -267,6 +271,7 @@ function createSessionManager(
       sessionContextTokens.delete(sessionId);
       sessionLastTool.delete(sessionId);
       sessionAgentToolUseIds.delete(sessionId);
+      sessionFinalText.set(sessionId, (sessionTextParts.get(sessionId) ?? []).join("\n\n"));
       sessionTextParts.delete(sessionId);
       sessionExitPlanModeDenied.delete(sessionId);
     }
@@ -382,9 +387,13 @@ function createSessionManager(
           // Skip DB update if user explicitly stopped — stopSession already wrote "stopped"
           if (stoppedByUser.has(sessionId)) {
             stoppedByUser.delete(sessionId);
-            options?.onSessionExit?.(workspaceId, sessionId, event.exitCode ?? null);
+            sessionFinalText.delete(sessionId);
+            options?.onSessionExit?.(workspaceId, sessionId, event.exitCode ?? null, planMode);
             return;
           }
+
+          const planText = sessionFinalText.get(sessionId);
+          sessionFinalText.delete(sessionId);
 
           const endNow = new Date().toISOString();
           const exitCode = event.exitCode ?? null;
@@ -392,8 +401,10 @@ function createSessionManager(
             .set({ status: "completed", endedAt: endNow, exitCode: String(exitCode ?? 0) })
             .where(eq(sessions.id, sessionId))
             .catch((err) => console.error("Failed to update session:", err));
-          // Always fire the workflow callback — don't gate it on the DB update
-          options?.onSessionExit?.(workspaceId, sessionId, exitCode);
+          // Always fire the workflow callback — don't gate it on the DB update.
+          // Pass planMode so the workflow skips review/merge for read-only plan runs
+          // (a plan run produces no new commits but the branch may still differ from base).
+          options?.onSessionExit?.(workspaceId, sessionId, exitCode, planMode);
 
           // Auto-resume: if ExitPlanMode was denied and workspace wasn't in plan-only mode,
           // start a new session with --resume and a "proceed" prompt
@@ -420,6 +431,47 @@ function createSessionManager(
             } else {
               console.log(`[session] skipping auto-resume: workspaceId=${workspaceId} already auto-resumed ${resumeCount} time(s)`);
             }
+          }
+
+          // Codex plan mode: a read-only plan run just finished. Persist the plan to PLAN.md,
+          // leave plan mode, then either auto-continue into an implementation turn or park the
+          // workspace awaiting human approval (pendingPlanPath), per the plan_auto_continue setting.
+          if (planMode && provider === "codex" && exitCode === 0 && workspace.workingDir && planText) {
+            void (async () => {
+              try {
+                const plan = extractPlan(planText);
+                if (!plan) {
+                  console.warn(`[session] plan-mode run produced no plan text: workspaceId=${workspaceId}`);
+                  return;
+                }
+                const planPath = writePlanFile(workspace.workingDir!, plan);
+                await db.update(workspaces).set({ planMode: false, updatedAt: new Date().toISOString() }).where(eq(workspaces.id, workspaceId));
+
+                const prefRows = await db.select().from(preferences).where(eq(preferences.key, "plan_auto_continue"));
+                const autoContinue = prefRows.length === 0 || prefRows[0].value !== "false";
+
+                if (autoContinue) {
+                  console.log(`[session] plan ready (${planPath}) — auto-continuing to implementation: workspaceId=${workspaceId}`);
+                  await startSession({
+                    workspaceId,
+                    prompt: buildImplementPrompt(),
+                    agentCommand,
+                    agentArgs,
+                    claudeProfile,
+                    permissionPromptTool,
+                    planMode: false,
+                    provider,
+                    triggerType: "plan-implement",
+                    profile,
+                  });
+                } else {
+                  console.log(`[session] plan ready (${planPath}) — awaiting human approval: workspaceId=${workspaceId}`);
+                  await db.update(workspaces).set({ pendingPlanPath: planPath, updatedAt: new Date().toISOString() }).where(eq(workspaces.id, workspaceId));
+                }
+              } catch (err) {
+                console.error(`[session] plan completion handling failed: workspaceId=${workspaceId}`, err);
+              }
+            })();
           }
         }
       // When resumeWithNewModel is true, omit --resume so the new profile/provider is used instead

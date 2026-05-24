@@ -1,0 +1,1 @@
+ALTER TABLE workspaces ADD COLUMN pending_plan_path TEXT;
