@@ -859,7 +859,11 @@ Tip: Use 'issue list' to find the issue ID and see available status names.
         process.exit(1);
       }
 
-      await db.update(issues).set({ statusId: target.id, updatedAt: new Date().toISOString() }).where(eq(issues.id, issueId));
+      const now = new Date().toISOString();
+      await db
+        .update(issues)
+        .set({ statusId: target.id, statusChangedAt: now, updatedAt: now })
+        .where(eq(issues.id, issueRows[0].id));
 
       console.log(`Moved issue to '${statusName}'`);
       process.exit(0);
