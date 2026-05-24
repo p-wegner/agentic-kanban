@@ -133,7 +133,7 @@ export function createWorkspaceActionsRoute(
     }
 
     try {
-      const { agentCommand, agentArgs, claudeProfile, resumeWithNewModel, permissionPromptTool } =
+      const { agentCommand, agentArgs, claudeProfile, profile: agentProfile, provider: agentProvider, resumeWithNewModel, permissionPromptTool } =
         await loadAgentSettings(database, body.agentCommand as string | undefined);
 
       const promptStr = body.prompt as string;
@@ -143,9 +143,9 @@ export function createWorkspaceActionsRoute(
       const planMode = ws0.planMode ?? false;
 
       const resumeFromId = typeof body.resumeFromId === "string" ? body.resumeFromId : undefined;
-      const sessionId = await getSessionManager().startSession(id, promptStr, agentCommand, agentArgs, resumeFromId, claudeProfile, false, permissionPromptTool, planMode, resumeWithNewModel, undefined, "chat");
+      const sessionId = await getSessionManager().startSession({ workspaceId: id, prompt: promptStr, agentCommand, agentArgs, resumeFromId, claudeProfile, multiTurn: false, permissionPromptTool, planMode, resumeWithNewModel, triggerType: "chat", profile: agentProfile });
 
-      await updateWorkspaceStatus(id, "active", { claudeProfile: claudeProfile ?? null, agentCommand: agentCommand ?? null }, database);
+      await updateWorkspaceStatus(id, "active", { claudeProfile: claudeProfile ?? null, agentCommand: agentCommand ?? null, provider: agentProvider }, database);
 
       // Broadcast board event
       const projectId = await resolveProjectId(id, database);
@@ -190,25 +190,12 @@ export function createWorkspaceActionsRoute(
     if (!result.ok) {
       if ((result as any).stale) {
         // Process is gone — launch a new session with --resume
-        const { agentCommand, agentArgs, claudeProfile, resumeWithNewModel } = await loadAgentSettings(database);
+        const { agentCommand, agentArgs, claudeProfile, profile, provider, resumeWithNewModel } = await loadAgentSettings(database);
         const wsForTurn = await getWorkspaceById(id, database);
         const planMode = wsForTurn?.planMode ?? false;
 
-        const sessionId = await getSessionManager().startSession(
-          id,
-          body.content,
-          agentCommand,
-          agentArgs,
-          running.id,
-          claudeProfile,
-          false,
-          undefined,
-          planMode,
-          resumeWithNewModel,
-          undefined,
-          "chat",
-        );
-        await updateWorkspaceStatus(id, "active", { claudeProfile: claudeProfile ?? null, agentCommand: agentCommand ?? null }, database);
+        const sessionId = await getSessionManager().startSession({ workspaceId: id, prompt: body.content, agentCommand, agentArgs, resumeFromId: running.id, claudeProfile, profile, provider: provider === "codex" ? "codex" : "claude-code", multiTurn: false, planMode, resumeWithNewModel, triggerType: "chat" });
+        await updateWorkspaceStatus(id, "active", { claudeProfile: claudeProfile ?? null, agentCommand: agentCommand ?? null, provider: provider }, database);
         const projectId = await resolveProjectId(id, database);
         if (projectId) options?.boardEvents?.broadcast(projectId, "session_launched");
         return c.json({ sessionId, resumed: true }, 201);
@@ -521,9 +508,9 @@ export function createWorkspaceActionsRoute(
 
       const prompt = buildConflictResolutionPrompt(conflictingFiles, baseBranch);
 
-      const { agentCommand, agentArgs, claudeProfile } = await loadAgentSettings(database);
+      const { agentCommand, agentArgs, claudeProfile, profile, provider } = await loadAgentSettings(database);
 
-      const sessionId = await getSessionManager().startSession(id, prompt, agentCommand, agentArgs, undefined, claudeProfile, true, undefined, undefined, undefined, undefined, "fix-conflicts");
+      const sessionId = await getSessionManager().startSession({ workspaceId: id, prompt, agentCommand, agentArgs, claudeProfile, profile, provider: provider === "codex" ? "codex" : "claude-code", multiTurn: true, triggerType: "fix-conflicts" });
       options?.fixAndMergeSessionIds?.add(sessionId);
 
       await updateWorkspaceStatus(id, "fixing", {}, database);

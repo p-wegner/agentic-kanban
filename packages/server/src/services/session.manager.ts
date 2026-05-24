@@ -26,6 +26,22 @@ interface SessionManagerOptions {
   onTodos?: (projectId: string, issueId: string, todos: TodoItem[]) => void;
 }
 
+export interface StartSessionOptions {
+  workspaceId: string;
+  prompt: string;
+  agentCommand?: string;
+  agentArgs?: string;
+  resumeFromId?: string;
+  claudeProfile?: string;
+  multiTurn?: boolean;
+  permissionPromptTool?: string;
+  planMode?: boolean;
+  resumeWithNewModel?: boolean;
+  provider?: import("./agent-provider.js").ProviderId;
+  triggerType?: string;
+  profile?: { provider: "claude" | "codex"; name: string };
+}
+
 function createSessionManager(
   upgradeWebSocket: (callback: (c: any) => any) => any,
   options?: SessionManagerOptions,
@@ -61,6 +77,8 @@ function createSessionManager(
   const sessionExitPlanModeDenied = new Set<string>();
   // Guard against infinite auto-resume loops (max 1 per workspace)
   const workspaceAutoResumeCount = new Map<string, number>();
+  // Track provider per session so broadcast uses the correct stream parser
+  const sessionProviders = new Map<string, string>();
 
   function broadcast(sessionId: string, message: AgentOutputMessage) {
     // Buffer the message for late subscribers
@@ -85,7 +103,8 @@ function createSessionManager(
 
     // Parse stdout data — may contain multiple JSONL lines in a single chunk
     if (message.type === "stdout" && message.data) {
-      const provider = getProvider();
+      const providerName = sessionProviders.get(sessionId);
+      const provider = getProvider(providerName);
       for (const line of message.data.split("\n")) {
         if (!line.trim()) continue;
         const evt = provider.parseStreamEvent(line);
@@ -263,20 +282,22 @@ function createSessionManager(
   }
 
   /** Create a session DB row and launch the agent process. */
-  async function startSession(
-    workspaceId: string,
-    prompt: string,
-    agentCommand?: string,
-    agentArgs?: string,
-    resumeFromId?: string,
-    claudeProfile?: string,
-    multiTurn?: boolean,
-    permissionPromptTool?: string,
-    planMode?: boolean,
-    resumeWithNewModel?: boolean,
-    provider?: import("./agent-provider.js").ProviderId,
-    triggerType?: string,
-  ) {
+  async function startSession(opts: StartSessionOptions) {
+    const {
+      workspaceId,
+      prompt,
+      agentCommand,
+      agentArgs,
+      resumeFromId,
+      claudeProfile,
+      multiTurn,
+      permissionPromptTool,
+      planMode,
+      resumeWithNewModel,
+      provider,
+      triggerType,
+      profile,
+    } = opts;
     // Look up workspace to get workingDir
     const wsRows = await db
       .select()
@@ -342,6 +363,7 @@ function createSessionManager(
       resumeFromId: resumeFromId ?? null,
       triggerType: triggerType ?? null,
     });
+    sessionProviders.set(sessionId, executor);
 
     try {
       const proc = agentService.launch(workspace.workingDir, sessionId, prompt, agentArgs, (event) => { // onOutput callback
@@ -354,6 +376,7 @@ function createSessionManager(
           // Always clean up in-memory state regardless of DB result
           sessionContexts.delete(sessionId);
           turnStates.delete(sessionId);
+          sessionProviders.delete(sessionId);
           const hadExitPlanModeDenied = sessionExitPlanModeDenied.delete(sessionId);
 
           // Skip DB update if user explicitly stopped — stopSession already wrote "stopped"
@@ -379,27 +402,28 @@ function createSessionManager(
             if (resumeCount < 1) {
               workspaceAutoResumeCount.set(workspaceId, resumeCount + 1);
               console.log(`[session] auto-resuming after ExitPlanMode denial: workspaceId=${workspaceId} resumeFromId=${sessionId}`);
-              startSession(
+              startSession({
                 workspaceId,
-                "Your plan has been approved. Proceed with the implementation now.",
+                prompt: "Your plan has been approved. Proceed with the implementation now.",
                 agentCommand,
                 agentArgs,
-                sessionId, // resumeFromId — uses providerSessionId from this session
+                resumeFromId: sessionId, // uses providerSessionId from this session
                 claudeProfile,
-                undefined, // multiTurn
+                multiTurn: undefined,
                 permissionPromptTool,
-                false, // planMode — don't restrict to plan mode
-                undefined, // resumeWithNewModel
+                planMode: false, // don't restrict to plan mode
+                resumeWithNewModel: undefined,
                 provider,
-                "agent",
-              ).catch((err) => console.error(`[session] auto-resume failed: workspaceId=${workspaceId}`, err));
+                triggerType: "agent",
+                profile,
+              }).catch((err) => console.error(`[session] auto-resume failed: workspaceId=${workspaceId}`, err));
             } else {
               console.log(`[session] skipping auto-resume: workspaceId=${workspaceId} already auto-resumed ${resumeCount} time(s)`);
             }
           }
         }
       // When resumeWithNewModel is true, omit --resume so the new profile/provider is used instead
-      }, resumeWithNewModel ? undefined : providerSessionId, agentCommand, claudeProfile, multiTurn, permissionPromptTool, planMode, provider);
+      }, resumeWithNewModel ? undefined : providerSessionId, agentCommand, claudeProfile, multiTurn, permissionPromptTool, planMode, provider, profile);
 
       // Persist PID so hot-reload can detect surviving processes
       if (proc.pid) {
