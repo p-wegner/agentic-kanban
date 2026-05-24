@@ -103,6 +103,13 @@ function profileOptionLabel(provider: AgentProvider, name: string): string {
   return `${providerLabel}: ${displayName}`;
 }
 
+function defaultHarnessLabel(settings: Settings): string {
+  const provider = (settings.provider || "claude") as AgentProvider;
+  if (provider === "codex") return "Codex";
+  if (provider === "copilot") return "Copilot";
+  return "Claude";
+}
+
 function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return (
     <div className="space-y-1">
@@ -640,7 +647,7 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                       }}
                       className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
                     >
-                      <option value="">Default (no profile)</option>
+                      <option value="">Default ({defaultHarnessLabel(settings)})</option>
                       <optgroup label="Claude">
                         {profiles.map((p) => (
                           <option key={`claude:${p}`} value={`claude:${p}`}>{profileOptionLabel("claude", p)}</option>
