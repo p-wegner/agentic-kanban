@@ -14,6 +14,8 @@
 import { execSync, spawn } from "node:child_process";
 import { createServer } from "node:net";
 import { resolve } from "node:path";
+import { pathToFileURL } from "node:url";
+import { classifyProcessExit } from "./dev-supervisor.mjs";
 
 const DEFAULT_SERVER_PORT = 3001;
 const DEFAULT_CLIENT_PORT = 5173;
@@ -50,30 +52,6 @@ function branchHash(branchName) {
   // Use range 101-1000 to avoid collisions with issue numbers 1-100
   return (hash % 900) + 101;
 }
-
-const { isWorktree, branch } = detectWorktree();
-let serverPort = DEFAULT_SERVER_PORT;
-let clientPort = DEFAULT_CLIENT_PORT;
-
-if (isWorktree && branch) {
-  const issueNum = getIssueNumber(branch);
-  const offset = issueNum !== null ? issueNum : branchHash(branch);
-  serverPort = DEFAULT_SERVER_PORT + offset;
-  clientPort = DEFAULT_CLIENT_PORT + offset;
-  if (serverPort > 60000) {
-    console.error(`[dev] ERROR: computed server port ${serverPort} exceeds 60000. Use a different branch name.`);
-    process.exit(1);
-  }
-  console.log(`[dev] Worktree detected (${branch}) — server:${serverPort} client:${clientPort}`);
-} else {
-  console.log(`[dev] Main checkout — server:${serverPort} client:${clientPort}`);
-}
-
-process.env.PORT = String(serverPort);
-process.env.VITE_PORT = String(clientPort);
-process.env.SERVER_PORT = String(serverPort);
-process.env.KANBAN_SERVER_PORT = String(serverPort);
-process.env.KANBAN_CLIENT_PORT = String(clientPort);
 
 function isPortFree(port) {
   return new Promise((resolve) => {
@@ -115,6 +93,34 @@ async function freePort(port, label) {
 const MAX_RESTARTS = 5;
 const RESTART_DELAY_MS = 1000;
 
+function configurePorts() {
+  const { isWorktree, branch } = detectWorktree();
+  let serverPort = DEFAULT_SERVER_PORT;
+  let clientPort = DEFAULT_CLIENT_PORT;
+
+  if (isWorktree && branch) {
+    const issueNum = getIssueNumber(branch);
+    const offset = issueNum !== null ? issueNum : branchHash(branch);
+    serverPort = DEFAULT_SERVER_PORT + offset;
+    clientPort = DEFAULT_CLIENT_PORT + offset;
+    if (serverPort > 60000) {
+      console.error(`[dev] ERROR: computed server port ${serverPort} exceeds 60000. Use a different branch name.`);
+      process.exit(1);
+    }
+    console.log(`[dev] Worktree detected (${branch}) — server:${serverPort} client:${clientPort}`);
+  } else {
+    console.log(`[dev] Main checkout — server:${serverPort} client:${clientPort}`);
+  }
+
+  process.env.PORT = String(serverPort);
+  process.env.VITE_PORT = String(clientPort);
+  process.env.SERVER_PORT = String(serverPort);
+  process.env.KANBAN_SERVER_PORT = String(serverPort);
+  process.env.KANBAN_CLIENT_PORT = String(clientPort);
+
+  return { serverPort, clientPort };
+}
+
 function spawnProcess(label, cmd, args, opts) {
   let restarts = 0;
 
@@ -122,9 +128,9 @@ function spawnProcess(label, cmd, args, opts) {
     const proc = spawn(cmd, args, { ...opts, stdio: "inherit", env: process.env });
 
     proc.on("exit", (code, signal) => {
-      if (signal === "SIGINT" || signal === "SIGTERM") return; // clean shutdown
-      if (code === 0) return; // intentional exit
-      if (code === 1) {
+      const exitType = classifyProcessExit(code, signal);
+      if (exitType === "clean") return;
+      if (exitType === "fatal") {
         console.error(`[dev] ${label} exited with fatal error (code=1) — not retrying`);
         return;
       }
@@ -143,31 +149,42 @@ function spawnProcess(label, cmd, args, opts) {
   return start();
 }
 
-await freePort(serverPort, "server");
-await freePort(clientPort, "client");
+async function main() {
+  const { serverPort, clientPort } = configurePorts();
 
-const serverProc = spawnProcess(
-  "server",
-  "pnpm",
-  ["--filter", "agentic-kanban", "dev"],
-  { shell: false }
-);
+  await freePort(serverPort, "server");
+  await freePort(clientPort, "client");
 
-const clientProc = spawnProcess(
-  "client",
-  "pnpm",
-  ["--filter", "client", "dev"],
-  { shell: false }
-);
+  const serverProc = spawnProcess(
+    "server",
+    "pnpm",
+    ["--filter", "agentic-kanban", "dev"],
+    { shell: false }
+  );
 
-function shutdown() {
-  serverProc.kill();
-  clientProc.kill();
-  process.exit(0);
+  const clientProc = spawnProcess(
+    "client",
+    "pnpm",
+    ["--filter", "client", "dev"],
+    { shell: false }
+  );
+
+  function shutdown() {
+    serverProc.kill();
+    clientProc.kill();
+    process.exit(0);
+  }
+
+  process.on("SIGINT", shutdown);
+  process.on("SIGTERM", shutdown);
 }
 
-process.on("SIGINT", shutdown);
-process.on("SIGTERM", shutdown);
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  await main();
+}
 
 // Keep the event loop alive so Ctrl+C works and children stay supervised.
 const keepAlive = setInterval(() => {}, 60_000);
+export function shutdownForTests() {
+  clearInterval(keepAlive);
+}
