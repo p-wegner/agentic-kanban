@@ -327,15 +327,19 @@ function createSessionManager(
       .limit(1);
     const projectId = issueRows.length > 0 ? issueRows[0].projectId : "";
 
-    // If resuming, look up the previous session's providerSessionId
+    const executor = provider ?? "claude-code";
+
+    // If resuming, look up the previous session's providerSessionId. Session
+    // IDs are provider-local, so never pass a Claude session ID to Copilot or
+    // vice versa.
     let providerSessionId: string | undefined;
     if (resumeFromId) {
       const prevRows = await db
-        .select({ providerSessionId: sessions.providerSessionId })
+        .select({ providerSessionId: sessions.providerSessionId, executor: sessions.executor })
         .from(sessions)
         .where(eq(sessions.id, resumeFromId))
         .limit(1);
-      if (prevRows.length > 0 && prevRows[0].providerSessionId) {
+      if (prevRows.length > 0 && prevRows[0].providerSessionId && prevRows[0].executor === executor) {
         // Skip mock agent session IDs (e.g. "mock-session-xxx") — they are not resumable
         const sid = prevRows[0].providerSessionId;
         if (!sid.startsWith("mock-session-")) {
@@ -344,6 +348,8 @@ function createSessionManager(
         } else {
           console.log(`[session] skipping resume: providerSessionId=${sid} is a mock session ID`);
         }
+      } else if (prevRows.length > 0 && prevRows[0].providerSessionId) {
+        console.log(`[session] skipping resume: previous executor=${prevRows[0].executor} current executor=${executor}`);
       }
     }
 
@@ -357,7 +363,6 @@ function createSessionManager(
       turnStates.set(sessionId, "processing");
     }
 
-    const executor = provider ?? "claude-code";
     await db.insert(sessions).values({
       id: sessionId,
       workspaceId,
