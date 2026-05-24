@@ -19,7 +19,9 @@ Cleanroom reimplementation of [vibe-kanban](https://github.com/BloopAI/vibe-kanb
 - **Server resilience**: Agent subprocess callbacks are wrapped in try/catch in `agent.service.ts`. `uncaughtException`/`unhandledRejection` handlers log with `[fatal]` prefix. Stale sessions cleaned up on startup in `index.ts` after migrations.
 - **PR creation is skipped** — manual merge only
 - **Always commit** — after finishing a task, commit without waiting to be asked
-- **Never use `pnpm db:reset`** — board contains vital dev entries. Delete individual issues/workspaces via MCP tools or API instead.
+- **Never delete or wipe `kanban.db`** (no `pnpm db:reset`, no `rm`/`Remove-Item`/truncate/`Out-File` on the db file, no alternate paths like `/mnt/c/...`). The board contains vital dev entries. Delete individual issues/workspaces via MCP tools or API instead.
+  - **Migrations won't apply / db locked / stale WAL?** Run **`pnpm db:repair`** (backs up, WAL-checkpoints, integrity-checks, then migrates in place). It is the correct first move — deletion never fixes those. The `drizzle-kit migrate` *CLI* can hang; the programmatic migrator in `db:repair` works.
+  - A **PreToolUse guard** (`.claude/hooks/validate-command-safety.js`) blocks destructive-db commands and auto-backs-up to `packages/server/.db-backups/`. **When it fires, STOP and ask the user — never weaken the hook, truncate the file, or route around it via a different path/verb.** See `docs/learnings/2026-05-24-agent-circumvented-db-deletion-guardrail.md`.
 - Use `uv` and `uv venv` for any Python work (never global site-packages)
 - Windows environment
 
