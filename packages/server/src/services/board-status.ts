@@ -158,6 +158,7 @@ export async function getBoardStatus(
       conflicts: null,
       lastActivity: null,
       lastOutput: [],
+      lastAgentMessage: null,
     };
 
     // For non-closed workspaces with a workingDir: compute diff stats + last output
@@ -203,7 +204,36 @@ export async function getBoardStatus(
             }
 
             // Messages are DESC, reverse for chronological order
-            entry.lastOutput = extractMeaningfulOutput(msgs.reverse(), tailLines);
+            const chronological = msgs.reverse();
+            entry.lastOutput = extractMeaningfulOutput(chronological, tailLines);
+
+            // Extract last agent message (handles both Claude and Codex formats)
+            for (const msg of msgs) { // msgs is still DESC (newest first)
+              if (msg.type !== "stdout" || !msg.data) continue;
+              for (const line of msg.data.split("\n")) {
+                const trimmed = line.trim();
+                if (!trimmed) continue;
+                try {
+                  const obj = JSON.parse(trimmed);
+                  // Claude stream: assistant text block
+                  if (obj.type === "assistant" && obj.message?.content) {
+                    const content = Array.isArray(obj.message.content) ? obj.message.content : [obj.message.content];
+                    for (const block of [...content].reverse()) {
+                      if (block.type === "text" && typeof block.text === "string" && block.text.trim()) {
+                        entry.lastAgentMessage = block.text.trim().slice(0, 300);
+                        break;
+                      }
+                    }
+                  }
+                  // Codex stream: agent_message item
+                  if (obj.type === "item.completed" && obj.item?.type === "agent_message" && typeof obj.item.text === "string" && obj.item.text.trim()) {
+                    entry.lastAgentMessage = obj.item.text.trim().slice(0, 300);
+                  }
+                } catch { /* not JSON */ }
+                if (entry.lastAgentMessage) break;
+              }
+              if (entry.lastAgentMessage) break;
+            }
           })(),
         );
       }
