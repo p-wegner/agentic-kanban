@@ -116,7 +116,8 @@ When the user references `#N` (e.g., "review #70", "merge #65", "what's the stat
 - `pnpm cli -- issue list/create/move`
 - `pnpm cli -- workspace list/create`
 - `pnpm cli -- skill list/get/create/export`
-- `pnpm cli -- status` — board overview
+- `pnpm cli -- status` — board overview with last agent message per issue
+- `pnpm cli -- issue status <N>` — single-issue deep dive: workspace state, session info, last agent message
 
 **Only fall back to REST API** when no MCP tool or CLI equivalent exists.
 
