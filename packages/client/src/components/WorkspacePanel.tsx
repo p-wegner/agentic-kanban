@@ -6,6 +6,7 @@ import { useWebSocket } from "../lib/useWebSocket.js";
 import { TerminalView } from "./TerminalView.js";
 import { CreateWorkspaceForm } from "./CreateWorkspaceForm.js";
 import { WorkspaceDiffPanel } from "./WorkspaceDiffPanel.js";
+import TicketMentionInput from "./TicketMentionInput.js";
 import { useWorkspaceSession } from "../hooks/useWorkspaceSession.js";
 import type {
   AgentOutputMessage,
