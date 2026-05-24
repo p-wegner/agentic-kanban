@@ -6,9 +6,11 @@ import { createRoutes } from "../routes/index.js";
 import type { SessionManager } from "../services/session.manager.js";
 import * as schema from "@agentic-kanban/shared/schema";
 import { randomUUID } from "node:crypto";
-import { readFileSync } from "node:fs";
-import { resolve, dirname } from "node:path";
+import { existsSync, mkdtempSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { resolve, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { execFileSync } from "node:child_process";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const MIGRATION_FILES = [
@@ -84,15 +86,24 @@ function createTestApp() {
 }
 
 // Helper: create a project directly in DB (bypassing git-info detection)
-async function createProjectDirectly(database: ReturnType<typeof drizzle<typeof schema>>, overrides: { name?: string } = {}) {
+async function createProjectDirectly(database: ReturnType<typeof drizzle<typeof schema>>, overrides: {
+  name?: string;
+  repoPath?: string;
+  setupScript?: string | null;
+  setupBlocking?: boolean;
+  setupEnabled?: boolean;
+} = {}) {
   const now = new Date().toISOString();
   const id = randomUUID();
   await database.insert(schema.projects).values({
     id,
     name: overrides.name || "Test Project",
-    repoPath: "/tmp/test-repo",
+    repoPath: overrides.repoPath || "/tmp/test-repo",
     repoName: "test-repo",
     defaultBranch: "main",
+    setupScript: overrides.setupScript,
+    setupBlocking: overrides.setupBlocking,
+    setupEnabled: overrides.setupEnabled,
     createdAt: now,
     updatedAt: now,
   });
@@ -385,6 +396,38 @@ describe("Workspaces API", () => {
       body: JSON.stringify({ issueId }),
     });
     expect(res.status).toBe(400);
+  });
+
+  it("POST /api/workspaces skips setup script for direct workspaces", async () => {
+    const repoPath = mkdtempSync(join(tmpdir(), "kanban-direct-setup-"));
+    execFileSync("git", ["init", "-b", "main"], { cwd: repoPath });
+    execFileSync("git", ["commit", "--allow-empty", "-m", "initial"], { cwd: repoPath });
+    const directProjectId = await createProjectDirectly(database, {
+      name: "Direct Setup Project",
+      repoPath,
+      setupScript: "echo setup-ran> setup-ran.txt",
+      setupBlocking: true,
+      setupEnabled: true,
+    });
+    const directStatusId = await createStatusDirectly(database, directProjectId, "Todo", 0);
+    const issueRes = await app.request("/api/issues", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "Direct setup test", statusId: directStatusId, projectId: directProjectId }),
+    });
+    const directIssueId = (await issueRes.json()).id;
+
+    const res = await app.request("/api/workspaces", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ issueId: directIssueId, isDirect: true }),
+    });
+
+    expect(res.status).toBe(201);
+    const body = await res.json() as any;
+    expect(body.isDirect).toBe(true);
+    expect(body.workingDir).toBe(repoPath);
+    expect(existsSync(join(repoPath, "setup-ran.txt"))).toBe(false);
   });
 
   it("GET /api/workspaces/:id returns workspace with issue info", async () => {
