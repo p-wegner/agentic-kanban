@@ -42,8 +42,10 @@ Do NOT move the issue to 'AI Reviewed' yourself — the system handles that on m
 Issue ID: {{issueId}}
 Workspace ID: {{workspaceId}}`;
 
-function buildReviewArgs(prefMap: Map<string, string>): string | undefined {
-  const skipPerms = prefMap.get("skip_permissions") === "true";
+function buildReviewArgs(prefMap: Map<string, string>, provider: "claude" | "codex"): string | undefined {
+  // `--dangerously-skip-permissions` is Claude-only; Codex aborts on it (it has its
+  // own bypass flag baked into CodexProvider). Only append it for Claude.
+  const skipPerms = prefMap.get("skip_permissions") === "true" && provider !== "codex";
   const baseArgs = prefMap.get("agent_args") || "";
   if (skipPerms) {
     return baseArgs ? baseArgs + " --dangerously-skip-permissions" : "--dangerously-skip-permissions";
@@ -336,7 +338,7 @@ export async function startServer(port?: number) {
           const claudeProfile = isMockProfile(reviewProfile) ? undefined : reviewProfile;
           const effectiveReviewProfile = reviewProvider === "codex" ? (prefMap.get(PREF_CODEX_PROFILE) || undefined) : claudeProfile;
           const profileSelection = effectiveReviewProfile ? { provider: reviewProvider, name: effectiveReviewProfile } : undefined;
-          const reviewArgs = buildReviewArgs(prefMap);
+          const reviewArgs = buildReviewArgs(prefMap, reviewProvider);
           const autoFix = prefMap.get("review_auto_fix") !== "false";
           const provider = (prefMap.get("provider") || undefined) as ProviderId | undefined;
           let diffRef = workspace.baseBranch || defaultBranch;
@@ -354,7 +356,9 @@ export async function startServer(port?: number) {
           }
           const reviewSkillName = workspace.thoroughReview ? "code-review-thorough" : "code-review";
           const { prompt: reviewPromptText, model: reviewModel } = await buildReviewPrompt(workspace.branch, diffRef, issueId, autoFix, projectId, conflictingFiles, uncommittedChanges, workspaceId, reviewSkillName);
-          const reviewArgsWithModel = reviewModel ? `${reviewArgs ?? ""} --model ${reviewModel}`.trim() : reviewArgs;
+          // `--model` carries a Claude model name and isn't a Codex `exec` flag; Codex
+          // selects its model via --profile-v2/config, so skip it for Codex.
+          const reviewArgsWithModel = (reviewModel && reviewProvider !== "codex") ? `${reviewArgs ?? ""} --model ${reviewModel}`.trim() : reviewArgs;
 
           try {
             await db.update(workspaces).set({ status: "reviewing", updatedAt: now }).where(eq(workspaces.id, workspaceId));
@@ -495,7 +499,7 @@ export async function startServer(port?: number) {
       const codexProfile = prefMap.get(PREF_CODEX_PROFILE) || undefined;
       const effectiveProfileName = provider === "codex" ? codexProfile : claudeProfile;
       const manualProfileSelection = effectiveProfileName ? { provider, name: effectiveProfileName } : undefined;
-      const reviewArgs = buildReviewArgs(prefMap);
+      const reviewArgs = buildReviewArgs(prefMap, provider);
       const autoFix = prefMap.get("review_auto_fix") !== "false";
 
       const projectRows = await db.select({ defaultBranch: projects.defaultBranch }).from(projects).where(eq(projects.id, projectId)).limit(1);
@@ -515,7 +519,8 @@ export async function startServer(port?: number) {
       }
       const manualSkillName = thoroughReview ? "code-review-thorough" : "code-review";
       const { prompt: reviewPromptText, model: reviewModel } = await buildReviewPrompt(workspace.branch, diffRef, issueId, autoFix, projectId, manualConflictingFiles, manualUncommittedChanges, workspaceId, manualSkillName);
-      const reviewArgsWithModel = reviewModel ? `${reviewArgs ?? ""} --model ${reviewModel}`.trim() : reviewArgs;
+      // `--model` is a Claude model name / flag, not a Codex `exec` flag; skip for Codex.
+      const reviewArgsWithModel = (reviewModel && provider !== "codex") ? `${reviewArgs ?? ""} --model ${reviewModel}`.trim() : reviewArgs;
 
       const now = new Date().toISOString();
       await db.update(workspaces).set({ status: "reviewing", updatedAt: now }).where(eq(workspaces.id, workspaceId));
