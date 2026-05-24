@@ -7,17 +7,17 @@
  */
 import { test, expect } from "@playwright/test";
 import { SERVER_URL } from "../helpers/port.js";
+import { getE2EProjectId } from "../helpers/e2e-project.js";
 
 test.describe("Live session stats on issue cards", () => {
   let projectId: string;
   let todoStatusId: string;
   const createdIssueIds: string[] = [];
   const createdWorkspaceIds: string[] = [];
+  let originalClaudeProfile = "";
 
   test.beforeAll(async ({ request }) => {
-    const projectsRes = await request.get(`${SERVER_URL}/api/projects`);
-    const projects = await projectsRes.json();
-    projectId = projects[0].id;
+    projectId = await getE2EProjectId(request);
 
     await request.put(`${SERVER_URL}/api/preferences/active-project`, {
       data: { projectId },
@@ -28,19 +28,28 @@ test.describe("Live session stats on issue cards", () => {
     );
     const statuses = await statusesRes.json();
     todoStatusId = statuses.find((s: { name: string }) => s.name === "Todo").id;
+
+    // Capture original claude_profile before any test changes it.
+    const settingsRes = await request.get(`${SERVER_URL}/api/preferences/settings`);
+    if (settingsRes.ok()) {
+      const s = await settingsRes.json();
+      originalClaudeProfile = s.claude_profile ?? "";
+    }
   });
 
   test.afterAll(async ({ request }) => {
     for (const id of createdWorkspaceIds) {
-      await request.delete(`${SERVER_URL}/api/workspaces/${id}`);
+      await request.delete(`${SERVER_URL}/api/workspaces/${id}`).catch(() => {});
     }
     for (const id of createdIssueIds) {
-      await request.delete(`${SERVER_URL}/api/issues/${id}`);
+      await request.delete(`${SERVER_URL}/api/issues/${id}`).catch(() => {});
     }
-    // Restore mock profile setting
-    await request.put(`${SERVER_URL}/api/preferences/settings`, {
-      data: { claude_profile: "" },
-    });
+    // Restore original claude_profile (not hardcoded "") to avoid corrupting real settings.
+    try {
+      await request.put(`${SERVER_URL}/api/preferences/settings`, {
+        data: { claude_profile: originalClaudeProfile },
+      });
+    } catch { /* best-effort */ }
   });
 
   /** Enable mock profile globally so workspace creation auto-launches mock agent. */

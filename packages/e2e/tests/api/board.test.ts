@@ -1,5 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { SERVER_URL } from "../helpers/port.js";
+import { getE2EProjectId } from "../helpers/e2e-project.js";
 
 test.describe("Board API", () => {
   let projectId: string;
@@ -9,9 +10,7 @@ test.describe("Board API", () => {
   const suffix = Date.now().toString(36);
 
   test.beforeAll(async ({ request }) => {
-    const projectsRes = await request.get(`${SERVER_URL}/api/projects`);
-    const projects = await projectsRes.json();
-    projectId = projects[0].id;
+    projectId = await getE2EProjectId(request);
 
     const todoRes = await request.post(
       `${SERVER_URL}/api/projects/${projectId}/statuses`,
@@ -38,10 +37,20 @@ test.describe("Board API", () => {
 
   test.afterAll(async ({ request }) => {
     for (const id of createdIssueIds) {
-      await request.delete(`${SERVER_URL}/api/issues/${id}`);
+      await request.delete(`${SERVER_URL}/api/issues/${id}`).catch(() => {});
     }
-    // Note: no DELETE endpoint for statuses — they accumulate but use unique suffixes
-    // so they don't interfere with tests. A future DELETE /statuses/:id endpoint would fix this.
+    // Delete the custom statuses created for this test (issues must be deleted first).
+    await request.delete(`${SERVER_URL}/api/projects/${projectId}/statuses/${todoStatusId}`).catch(() => {});
+    await request.delete(`${SERVER_URL}/api/projects/${projectId}/statuses/${doneStatusId}`).catch(() => {});
+    // Fetch and delete the third status created inline in the test
+    const boardRes = await request.get(`${SERVER_URL}/api/projects/${projectId}/board`).catch(() => null);
+    if (boardRes?.ok()) {
+      const board: Array<{ id: string; name: string }> = await boardRes.json();
+      const reviewCol = board.find((s) => s.name === `Review ${suffix}`);
+      if (reviewCol) {
+        await request.delete(`${SERVER_URL}/api/projects/${projectId}/statuses/${reviewCol.id}`).catch(() => {});
+      }
+    }
   });
 
   test("GET /api/projects/:id/board returns statuses with nested issues", async ({

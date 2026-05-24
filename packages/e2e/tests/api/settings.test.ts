@@ -1,27 +1,32 @@
 import { test, expect } from "@playwright/test";
 import { SERVER_URL } from "../helpers/port.js";
+import { getE2EProjectId } from "../helpers/e2e-project.js";
 
 test.describe("Settings API", () => {
   const createdIssueIds: string[] = [];
   const createdWorkspaceIds: string[] = [];
+  let originalSettings: Record<string, string> = {};
+
+  test.beforeAll(async ({ request }) => {
+    // Capture original settings so afterAll can restore them exactly.
+    const res = await request.get(`${SERVER_URL}/api/preferences/settings`);
+    if (res.ok()) originalSettings = await res.json();
+  });
 
   test.afterAll(async ({ request }) => {
     // Clean up issues/workspaces created during tests
     for (const id of createdWorkspaceIds) {
-      await request.delete(`${SERVER_URL}/api/workspaces/${id}`);
+      await request.delete(`${SERVER_URL}/api/workspaces/${id}`).catch(() => {});
     }
     for (const id of createdIssueIds) {
-      await request.delete(`${SERVER_URL}/api/issues/${id}`);
+      await request.delete(`${SERVER_URL}/api/issues/${id}`).catch(() => {});
     }
-    // Reset settings to defaults
-    await request.put(`${SERVER_URL}/api/preferences/settings`, {
-      data: {
-        agent_command: "",
-        agent_args: "",
-        output_parser: "true",
-        claude_profile: "",
-      },
-    });
+    // Restore original settings (not hardcoded defaults) so we don't corrupt the real DB.
+    try {
+      await request.put(`${SERVER_URL}/api/preferences/settings`, {
+        data: originalSettings,
+      });
+    } catch { /* best-effort */ }
   });
 
   test("GET /api/preferences/settings returns defaults", async ({ request }) => {
@@ -86,9 +91,7 @@ test.describe("Settings API", () => {
       },
     });
 
-    const projectsRes = await request.get(`${SERVER_URL}/api/projects`);
-    const projects = await projectsRes.json();
-    const projectId = projects[0].id;
+    const projectId = await getE2EProjectId(request);
 
     const statusesRes = await request.get(
       `${SERVER_URL}/api/projects/${projectId}/statuses`,
