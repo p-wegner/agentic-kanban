@@ -154,6 +154,9 @@ Setup:
   $ agentic-kanban preferences set projects_base_path /path/to/projects
 `)
   .action(async (folderName: string, options: { path?: string; name?: string; branch?: string }) => {
+    // Hoisted so the outer catch can clean up a half-created directory. Reassigned
+    // below once repoPath is known; until then it's a safe no-op.
+    let cleanup: () => Promise<void> = async () => {};
     try {
       await runMigrations();
 
@@ -200,7 +203,7 @@ Setup:
       await mkdir(repoPath, { recursive: true });
       let dirCreated = true;
 
-      const cleanupDir = async () => {
+      cleanup = async () => {
         if (dirCreated) {
           try { await rm(repoPath, { recursive: true, force: true }); } catch { /* best-effort */ }
         }
@@ -225,7 +228,7 @@ Setup:
       try {
         await execFileAsync("git", ["-C", repoPath, "commit", "--allow-empty", "-m", "Initial commit"]);
       } catch (commitErr) {
-        await cleanupDir();
+        await cleanup();
         const msg = commitErr instanceof Error ? commitErr.message : String(commitErr);
         if (msg.includes("Please tell me who you are") || msg.includes("user.email") || msg.includes("user.name")) {
           console.error("git commit failed: git user identity not configured.");
@@ -286,7 +289,7 @@ Setup:
       console.log(`  Set as active project.`);
       process.exit(0);
     } catch (err) {
-      await cleanupDir();
+      await cleanup();
       console.error("Error:", err instanceof Error ? err.message : String(err));
       process.exit(1);
     }
