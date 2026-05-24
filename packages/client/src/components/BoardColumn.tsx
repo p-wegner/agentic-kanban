@@ -173,7 +173,7 @@ export function BoardColumn({
     <div style={{ display: "contents" }}>
     <div
       id={`column-${column.id}`}
-      className={`${width != null ? "" : "w-[calc(100vw-2rem)] sm:w-72 shrink-0"} bg-gray-100 rounded-xl p-2 flex flex-col transition-all relative ${
+      className={`${width != null ? "" : "w-[calc(100vw-2rem)] sm:w-72 shrink-0"} bg-gray-100 dark:bg-gray-800 rounded-xl p-2 flex flex-col transition-all relative ${
         dragOver ? "ring-2 ring-blue-400 ring-offset-1" : ""
       }`}
       style={columnStyle}
@@ -184,9 +184,9 @@ export function BoardColumn({
     >
       <div className="flex items-center justify-between mb-2 px-1 shrink-0">
         <div className="flex flex-col gap-0.5">
-          <h2 className="font-semibold text-sm text-gray-700 flex items-center gap-2">
+          <h2 className="font-semibold text-sm text-gray-700 dark:text-gray-300 flex items-center gap-2">
             {column.name}
-            <span className="text-[11px] text-gray-400 bg-white/80 rounded-full px-2 py-0.5 font-medium shadow-sm">
+            <span className="text-[11px] text-gray-400 dark:text-gray-500 bg-white/80 dark:bg-gray-900/80 rounded-full px-2 py-0.5 font-medium shadow-sm">
               {column.issues.length}
             </span>
           </h2>
@@ -200,7 +200,7 @@ export function BoardColumn({
             className={`text-xs rounded-md px-1.5 py-0.5 transition-colors ${
               sortMode === "priority"
                 ? "bg-blue-100 text-blue-600 hover:bg-blue-200"
-                : "text-gray-400 hover:text-gray-600 hover:bg-white/60"
+                : "text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-white/60 dark:hover:bg-gray-800/60"
             }`}
             title={sortMode === "priority" ? "Sorted by priority — click for default" : "Sort by priority"}
           >
@@ -209,7 +209,7 @@ export function BoardColumn({
           {!isCreating && column.name === "Todo" && (
             <button
               onClick={() => onCreateClick(column.id)}
-              className="text-gray-400 hover:text-gray-600 hover:bg-white/60 rounded-md w-6 h-6 flex items-center justify-center text-lg leading-none transition-colors"
+              className="text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-white/60 dark:hover:bg-gray-800/60 rounded-md w-6 h-6 flex items-center justify-center text-lg leading-none transition-colors"
               title="Add issue"
             >
               +
@@ -220,7 +220,7 @@ export function BoardColumn({
 
       <div className="relative flex-1 min-h-0 overflow-hidden rounded-lg">
         {(scrollState === "top" || scrollState === "middle") && (
-          <div className="absolute top-0 left-0 right-0 h-6 bg-gradient-to-b from-gray-100 to-transparent z-10 pointer-events-none rounded-t-lg" />
+          <div className="absolute top-0 left-0 right-0 h-6 bg-gradient-to-b from-gray-100 dark:from-gray-800 to-transparent z-10 pointer-events-none rounded-t-lg" />
         )}
         <div
           ref={scrollRef}
@@ -260,11 +260,11 @@ export function BoardColumn({
           )}
           {isCreating && children}
           {column.issues.length === 0 && !isCreating && !dragOver && (
-            <p className="text-xs text-gray-400 text-center py-4">No issues</p>
+            <p className="text-xs text-gray-400 dark:text-gray-500 text-center py-4">No issues</p>
           )}
         </div>
         {(scrollState === "bottom" || scrollState === "middle") && (
-          <div className="absolute bottom-0 left-0 right-0 h-6 bg-gradient-to-t from-gray-100 to-transparent z-10 pointer-events-none rounded-b-lg" />
+          <div className="absolute bottom-0 left-0 right-0 h-6 bg-gradient-to-t from-gray-100 dark:from-gray-800 to-transparent z-10 pointer-events-none rounded-b-lg" />
         )}
       </div>
     </div>
@@ -275,7 +275,7 @@ export function BoardColumn({
         onDoubleClick={onResizeReset}
         title="Drag to resize · Double-click to reset"
       >
-        <div className="w-0.5 h-8 rounded-full bg-gray-300 group-hover:bg-blue-400 transition-colors" />
+        <div className="w-0.5 h-8 rounded-full bg-gray-300 dark:bg-gray-600 group-hover:bg-blue-400 transition-colors" />
       </div>
     )}
     </div>

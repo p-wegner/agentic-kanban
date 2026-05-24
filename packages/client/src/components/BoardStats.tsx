@@ -95,7 +95,7 @@ export function BoardStats({
       {/* Summary row */}
       <div className="flex items-center gap-2 flex-wrap">
         {/* Completion ring + total */}
-        <div className="flex items-center gap-2 px-2.5 py-1 rounded-full bg-gray-100 border border-gray-200">
+        <div className="flex items-center gap-2 px-2.5 py-1 rounded-full bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700">
           {total > 0 && (
             <svg width="20" height="20" viewBox="0 0 32 32" className="shrink-0 -rotate-90">
               <circle cx="16" cy="16" r="14" fill="none" stroke="#e5e7eb" strokeWidth="4" />
@@ -119,7 +119,7 @@ export function BoardStats({
           >
             {total}
           </span>
-          <span className="text-xs font-medium text-gray-600">
+          <span className="text-xs font-medium text-gray-600 dark:text-gray-400">
             {isFiltered ? "filtered" : "tickets"}
           </span>
           {total > 0 && (
@@ -151,11 +151,11 @@ export function BoardStats({
 
         {/* Commit count */}
         {commitCount !== null && (
-          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-gray-50 border border-gray-200" title="Commits on main branch">
-            <svg className="w-3 h-3 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-gray-50 dark:bg-gray-950 border border-gray-200 dark:border-gray-700" title="Commits on main branch">
+            <svg className="w-3 h-3 text-gray-400 dark:text-gray-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
               <circle cx="12" cy="12" r="3" /><line x1="12" y1="3" x2="12" y2="9" /><line x1="12" y1="15" x2="12" y2="21" />
             </svg>
-            <span className="text-xs text-gray-500">{commitCount.toLocaleString()} commits</span>
+            <span className="text-xs text-gray-500 dark:text-gray-400">{commitCount.toLocaleString()} commits</span>
           </div>
         )}
 
@@ -176,7 +176,7 @@ export function BoardStats({
             className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium transition-colors border ${
               showBlocked
                 ? "bg-amber-100 text-amber-700 border-amber-300"
-                : "bg-gray-50 text-gray-400 border-gray-200 hover:text-gray-600 hover:border-gray-300"
+                : "bg-gray-50 dark:bg-gray-950 text-gray-400 dark:text-gray-500 border-gray-200 dark:border-gray-700 hover:text-gray-600 dark:hover:text-gray-300 hover:border-gray-300 dark:hover:border-gray-600"
             }`}
           >
             <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 16 16">
@@ -190,7 +190,7 @@ export function BoardStats({
       {/* Done / total progress bar */}
       {total > 0 && (
         <div
-          className="h-1.5 w-full rounded-full overflow-hidden bg-gray-200"
+          className="h-1.5 w-full rounded-full overflow-hidden bg-gray-200 dark:bg-gray-700"
           title={`${doneCount} / ${nonCancelledTotal} non-cancelled issues done (${completionPct}%)`}
         >
           <div
@@ -203,7 +203,7 @@ export function BoardStats({
       {/* Segmented progress bar + status legend */}
       {total > 0 && (
         <div className="flex items-center gap-3">
-          <div className="flex h-3 rounded-full overflow-hidden gap-px flex-1 bg-gray-100 shadow-inner">
+          <div className="flex h-3 rounded-full overflow-hidden gap-px flex-1 bg-gray-100 dark:bg-gray-800 shadow-inner">
             {allColumns.map((col) => {
               if (col.issues.length === 0) return null;
               const pct = (col.issues.length / total) * 100;
@@ -227,7 +227,7 @@ export function BoardStats({
               return (
                 <div
                   key={col.id}
-                  className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-medium ${cfg.text} ${cfg.bg} border border-gray-200`}
+                  className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-medium ${cfg.text} ${cfg.bg} border border-gray-200 dark:border-gray-700`}
                 >
                   <span className={`w-1.5 h-1.5 rounded-full ${cfg.bar} shrink-0`} />
                   <span className="hidden sm:inline">{col.name}</span>

@@ -92,7 +92,7 @@ export function TableView({ columns, onIssueClick, searchQuery }: TableViewProps
   }
 
   function SortIcon({ col }: { col: SortKey }) {
-    if (sort.key !== col) return <span className="text-gray-300 ml-1">↕</span>;
+    if (sort.key !== col) return <span className="text-gray-300 dark:text-gray-600 ml-1">↕</span>;
     return <span className="text-blue-500 ml-1">{sort.dir === "asc" ? "↑" : "↓"}</span>;
   }
 
@@ -101,20 +101,20 @@ export function TableView({ columns, onIssueClick, searchQuery }: TableViewProps
   return (
     <div className="flex flex-col flex-1 min-h-0 px-4 pb-4">
       <div className="flex items-center gap-3 py-2 mb-2">
-        <span className="text-xs text-gray-500">{sorted.length} issue{sorted.length !== 1 ? "s" : ""}</span>
+        <span className="text-xs text-gray-500 dark:text-gray-400">{sorted.length} issue{sorted.length !== 1 ? "s" : ""}</span>
         <select
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value)}
-          className="text-xs border border-gray-200 rounded px-2 py-1 bg-white text-gray-700"
+          className="text-xs border border-gray-200 dark:border-gray-700 rounded px-2 py-1 bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-300"
         >
           <option value="active">Active only</option>
           <option value="all">All statuses</option>
           {statusNames.map((s) => <option key={s} value={s}>{s}</option>)}
         </select>
       </div>
-      <div className="flex-1 overflow-auto rounded-lg border border-gray-200 bg-white">
+      <div className="flex-1 overflow-auto rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900">
         <table className="w-full text-sm border-collapse">
-          <thead className="sticky top-0 bg-gray-50 z-10">
+          <thead className="sticky top-0 bg-gray-50 dark:bg-gray-800 z-10">
             <tr>
               {(
                 [
@@ -129,12 +129,12 @@ export function TableView({ columns, onIssueClick, searchQuery }: TableViewProps
                 <th
                   key={key}
                   onClick={() => toggleSort(key)}
-                  className="text-left text-xs font-medium text-gray-500 px-3 py-2 border-b border-gray-200 cursor-pointer select-none hover:text-gray-700 whitespace-nowrap"
+                  className="text-left text-xs font-medium text-gray-500 dark:text-gray-400 px-3 py-2 border-b border-gray-200 dark:border-gray-700 cursor-pointer select-none hover:text-gray-700 dark:hover:text-gray-200 whitespace-nowrap"
                 >
                   {label}<SortIcon col={key} />
                 </th>
               ))}
-              <th className="text-left text-xs font-medium text-gray-500 px-3 py-2 border-b border-gray-200 whitespace-nowrap">
+              <th className="text-left text-xs font-medium text-gray-500 dark:text-gray-400 px-3 py-2 border-b border-gray-200 dark:border-gray-700 whitespace-nowrap">
                 Tags
               </th>
             </tr>
@@ -142,20 +142,20 @@ export function TableView({ columns, onIssueClick, searchQuery }: TableViewProps
           <tbody>
             {sorted.length === 0 && (
               <tr>
-                <td colSpan={7} className="text-center text-gray-400 text-sm py-12">No issues found</td>
+                <td colSpan={7} className="text-center text-gray-400 dark:text-gray-500 text-sm py-12">No issues found</td>
               </tr>
             )}
             {sorted.map((issue) => (
               <tr
                 key={issue.id}
                 onClick={() => onIssueClick(issue)}
-                className="border-b border-gray-100 hover:bg-blue-50 cursor-pointer transition-colors"
+                className="border-b border-gray-100 dark:border-gray-800 hover:bg-blue-50 dark:hover:bg-blue-900/20 cursor-pointer transition-colors"
               >
-                <td className="px-3 py-1.5 text-gray-400 text-xs whitespace-nowrap">
+                <td className="px-3 py-1.5 text-gray-400 dark:text-gray-500 text-xs whitespace-nowrap">
                   #{issue.issueNumber ?? "—"}
                 </td>
                 <td className="px-3 py-1.5 max-w-xs">
-                  <span className="font-medium text-gray-900 truncate block">{issue.title}</span>
+                  <span className="font-medium text-gray-900 dark:text-gray-100 truncate block">{issue.title}</span>
                 </td>
                 <td className="px-3 py-1.5 whitespace-nowrap">
                   <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_CLASS[issue.statusName] ?? "text-gray-600 bg-gray-100"}`}>
@@ -167,12 +167,12 @@ export function TableView({ columns, onIssueClick, searchQuery }: TableViewProps
                     <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${PRIORITY_CLASS[issue.priority] ?? ""}`}>
                       {PRIORITY_LABEL[issue.priority] ?? issue.priority}
                     </span>
-                  ) : <span className="text-gray-300">—</span>}
+                  ) : <span className="text-gray-300 dark:text-gray-600">—</span>}
                 </td>
-                <td className="px-3 py-1.5 whitespace-nowrap text-xs text-gray-600">
-                  {issue.estimate ?? <span className="text-gray-300">—</span>}
+                <td className="px-3 py-1.5 whitespace-nowrap text-xs text-gray-600 dark:text-gray-400">
+                  {issue.estimate ?? <span className="text-gray-300 dark:text-gray-600">—</span>}
                 </td>
-                <td className="px-3 py-1.5 whitespace-nowrap text-xs text-gray-500">
+                <td className="px-3 py-1.5 whitespace-nowrap text-xs text-gray-500 dark:text-gray-400">
                   {formatDate(issue.updatedAt)}
                 </td>
                 <td className="px-3 py-1.5">

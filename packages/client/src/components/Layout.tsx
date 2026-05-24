@@ -1,4 +1,5 @@
 ﻿import { type ReactNode, useRef, useState } from "react";
+import { useTheme, type Theme } from "../hooks/useTheme.js";
 
 interface Project {
   id: string;
@@ -27,6 +28,8 @@ interface LayoutProps {
   onAllWorkspacesClick?: () => void;
   onWorktreeOverviewClick?: () => void;
   onSettingsClick?: () => void;
+  isDark?: boolean;
+  onThemeToggle?: () => void;
 }
 
 export function Layout({
@@ -44,6 +47,8 @@ export function Layout({
   onAllWorkspacesClick,
   onWorktreeOverviewClick,
   onSettingsClick,
+  isDark,
+  onThemeToggle,
 }: LayoutProps) {
   const [showRegister, setShowRegister] = useState(false);
   const [confirmUnregister, setConfirmUnregister] = useState<Project | null>(null);
@@ -119,11 +124,11 @@ export function Layout({
   }
 
   return (
-    <div className="h-screen flex flex-col bg-gray-50">
-      <header className="bg-white border-b border-gray-200 px-4 py-2 shrink-0">
+    <div className="h-screen flex flex-col bg-gray-50 dark:bg-gray-950">
+      <header className="bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 px-4 py-2 shrink-0">
         <div className="flex items-center justify-between gap-4 flex-wrap">
           <div className="flex items-center gap-2 min-w-0">
-            <h1 className="text-xl font-semibold text-gray-900 shrink-0">
+            <h1 className="text-xl font-semibold text-gray-900 dark:text-gray-100 shrink-0">
               Agentic Kanban
             </h1>
             {projects.length > 1 && (
@@ -131,7 +136,7 @@ export function Layout({
                 <select
                   value={activeProjectId ?? ""}
                   onChange={(e) => onProjectChange?.(e.target.value)}
-                  className="text-sm border border-gray-300 rounded-md px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  className="text-sm border border-gray-300 dark:border-gray-600 rounded-md px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500"
                 >
                   {projects.map((p) => (
                     <option key={p.id} value={p.id}>
@@ -144,7 +149,7 @@ export function Layout({
                   if (active?.color) {
                     return (
                       <div
-                        className="w-3 h-3 rounded-full border border-gray-300"
+                        className="w-3 h-3 rounded-full border border-gray-300 dark:border-gray-600"
                         style={{ backgroundColor: active.color }}
                         title={`Color: ${active.color}`}
                       />
@@ -156,10 +161,10 @@ export function Layout({
             )}
             {projects.length === 1 && (
               <div className="flex items-center gap-2">
-                <span className="text-sm text-gray-500">{projects[0].name}</span>
+                <span className="text-sm text-gray-500 dark:text-gray-400">{projects[0].name}</span>
                 {projects[0].color && (
                   <div
-                    className="w-3 h-3 rounded-full border border-gray-300"
+                    className="w-3 h-3 rounded-full border border-gray-300 dark:border-gray-600"
                     style={{ backgroundColor: projects[0].color }}
                     title={`Color: ${projects[0].color}`}
                   />
@@ -172,7 +177,7 @@ export function Layout({
                   const active = projects.find((p) => p.id === activeProjectId) ?? projects[0];
                   setConfirmUnregister(active);
                 }}
-                className="p-1 text-gray-400 hover:text-red-500 rounded-md hover:bg-gray-100"
+                className="p-1 text-gray-400 dark:text-gray-500 hover:text-red-500 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700"
                 title="Unregister project"
               >
                 <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -182,7 +187,7 @@ export function Layout({
             )}
             <button
               onClick={openRegister}
-              className="p-1 text-gray-400 hover:text-gray-600 rounded-md hover:bg-gray-100"
+              className="p-1 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700"
               title="Register project"
             >
               <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
@@ -193,7 +198,7 @@ export function Layout({
           <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
             <div className="relative">
               <svg
-                className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400"
+                className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 dark:text-gray-500"
                 viewBox="0 0 24 24"
                 fill="none"
                 stroke="currentColor"
@@ -208,12 +213,12 @@ export function Layout({
                 value={searchQuery}
                 onChange={(e) => onSearchChange?.(e.target.value)}
                 placeholder='Search issues... ("/")'
-                className="pl-8 pr-3 py-1.5 text-sm border border-gray-300 rounded-md w-32 sm:w-48 md:w-64 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                className="pl-8 pr-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-md w-32 sm:w-48 md:w-64 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
               />
               {searchQuery && (
                 <button
                   onClick={() => onSearchChange?.("")}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-xs"
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 text-xs"
                 >
                   &times;
                 </button>
@@ -221,7 +226,7 @@ export function Layout({
             </div>
             <button
               onClick={onAllWorkspacesClick}
-              className="p-1.5 text-gray-400 hover:text-gray-600 rounded-md hover:bg-gray-100"
+              className="p-1.5 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700"
               title="All Workspaces"
             >
               <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -233,7 +238,7 @@ export function Layout({
             </button>
             <button
               onClick={onWorktreeOverviewClick}
-              className="p-1.5 text-gray-400 hover:text-gray-600 rounded-md hover:bg-gray-100"
+              className="p-1.5 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700"
               title="Worktrees"
             >
               <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -244,8 +249,24 @@ export function Layout({
               </svg>
             </button>
             <button
+              onClick={onThemeToggle}
+              className="p-1.5 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700"
+              title={isDark ? "Switch to light mode" : "Switch to dark mode"}
+            >
+              {isDark ? (
+                <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <circle cx="12" cy="12" r="5" />
+                  <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" />
+                </svg>
+              ) : (
+                <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+                </svg>
+              )}
+            </button>
+            <button
               onClick={onSettingsClick}
-              className="p-1.5 text-gray-400 hover:text-gray-600 rounded-md hover:bg-gray-100"
+              className="p-1.5 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700"
               title="Settings"
             >
               <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -260,16 +281,16 @@ export function Layout({
 
       {confirmUnregister && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg shadow-xl w-full max-w-sm mx-4 p-6">
-            <h2 className="text-lg font-semibold text-gray-900 mb-2">Remove project?</h2>
-            <p className="text-sm text-gray-600 mb-6">
+          <div className="bg-white dark:bg-gray-900 rounded-lg shadow-xl w-full max-w-sm mx-4 p-6">
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">Remove project?</h2>
+            <p className="text-sm text-gray-600 dark:text-gray-300 mb-6">
               Remove <span className="font-medium">{confirmUnregister.name}</span> from the board? This does not delete the git repository.
             </p>
             <div className="flex justify-end gap-3">
               <button
                 onClick={() => setConfirmUnregister(null)}
                 disabled={unregistering}
-                className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50"
+                className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50"
               >
                 Cancel
               </button>
@@ -290,20 +311,20 @@ export function Layout({
           className="fixed inset-0 bg-black/40 flex items-center justify-center z-50"
           onClick={(e) => { if (e.target === e.currentTarget) setShowRegister(false); }}
         >
-          <div className="bg-white rounded-lg shadow-xl w-full max-w-md mx-4 p-6">
-            <h2 className="text-lg font-semibold text-gray-900 mb-4">Add Project</h2>
-            <div className="flex border-b border-gray-200 mb-4">
+          <div className="bg-white dark:bg-gray-900 rounded-lg shadow-xl w-full max-w-md mx-4 p-6">
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">Add Project</h2>
+            <div className="flex border-b border-gray-200 dark:border-gray-700 mb-4">
               <button
                 type="button"
                 onClick={() => setModalTab("import")}
-                className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px ${modalTab === "import" ? "border-blue-600 text-blue-600" : "border-transparent text-gray-500 hover:text-gray-700"}`}
+                className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px ${modalTab === "import" ? "border-blue-600 text-blue-600" : "border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"}`}
               >
                 Import existing
               </button>
               <button
                 type="button"
                 onClick={() => setModalTab("create")}
-                className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px ${modalTab === "create" ? "border-blue-600 text-blue-600" : "border-transparent text-gray-500 hover:text-gray-700"}`}
+                className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px ${modalTab === "create" ? "border-blue-600 text-blue-600" : "border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"}`}
               >
                 Create new
               </button>
@@ -312,7 +333,7 @@ export function Layout({
             {modalTab === "import" && (
               <form onSubmit={handleRegisterSubmit} className="space-y-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                     Repository path
                   </label>
                   <input
@@ -321,9 +342,9 @@ export function Layout({
                     value={repoPath}
                     onChange={(e) => setRepoPath(e.target.value)}
                     placeholder="C:/path/to/repo"
-                    className="w-full text-sm border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                    className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded-md px-3 py-2 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
                   />
-                  <p className="mt-1 text-xs text-gray-500">
+                  <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
                     Absolute path to a git repository. Branch and remote URL are auto-detected.
                   </p>
                 </div>
@@ -334,7 +355,7 @@ export function Layout({
                   <button
                     type="button"
                     onClick={() => setShowRegister(false)}
-                    className="px-3 py-1.5 text-sm text-gray-700 border border-gray-300 rounded-md hover:bg-gray-50"
+                    className="px-3 py-1.5 text-sm text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-50 dark:hover:bg-gray-800"
                   >
                     Cancel
                   </button>
@@ -352,7 +373,7 @@ export function Layout({
             {modalTab === "create" && (
               <form onSubmit={handleCreateSubmit} className="space-y-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                     Project name <span className="text-red-500">*</span>
                   </label>
                   <input
@@ -360,7 +381,7 @@ export function Layout({
                     value={createName}
                     onChange={(e) => setCreateName(e.target.value)}
                     placeholder="my-project"
-                    className={`w-full text-sm border rounded-md px-3 py-2 focus:outline-none focus:ring-1 ${createNameInvalid ? "border-red-400 focus:ring-red-400 focus:border-red-400" : "border-gray-300 focus:ring-blue-500 focus:border-blue-500"}`}
+                    className={`w-full text-sm border rounded-md px-3 py-2 focus:outline-none focus:ring-1 ${createNameInvalid ? "border-red-400 focus:ring-red-400 focus:border-red-400" : "border-gray-300 dark:border-gray-600 focus:ring-blue-500 focus:border-blue-500"}`}
                     autoFocus
                   />
                   {createNameInvalid && (
@@ -368,17 +389,17 @@ export function Layout({
                   )}
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Path <span className="text-gray-400 font-normal">(optional)</span>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    Path <span className="text-gray-400 dark:text-gray-500 font-normal">(optional)</span>
                   </label>
                   <input
                     type="text"
                     value={createPath}
                     onChange={(e) => setCreatePath(e.target.value)}
                     placeholder="Defaults to projects base directory / name"
-                    className="w-full text-sm border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                    className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded-md px-3 py-2 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
                   />
-                  <p className="mt-1 text-xs text-gray-500">
+                  <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
                     Leave blank to use the base directory from Settings › Project. A new folder and git repo will be created.
                   </p>
                 </div>
@@ -389,7 +410,7 @@ export function Layout({
                   <button
                     type="button"
                     onClick={() => setShowRegister(false)}
-                    className="px-3 py-1.5 text-sm text-gray-700 border border-gray-300 rounded-md hover:bg-gray-50"
+                    className="px-3 py-1.5 text-sm text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-50 dark:hover:bg-gray-800"
                   >
                     Cancel
                   </button>

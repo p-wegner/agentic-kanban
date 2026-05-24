@@ -22,7 +22,7 @@ function getLastSessionBadge(triggerType: string | null | undefined): { label: s
     merge: { label: "AI Merge", className: "bg-emerald-100 text-emerald-700" },
     "fix-conflicts": { label: "Fix Conflicts", className: "bg-orange-100 text-orange-700" },
     learning: { label: "Learning", className: "bg-teal-100 text-teal-700" },
-    "auto-start": { label: "Auto-start", className: "bg-gray-100 text-gray-600" },
+    "auto-start": { label: "Auto-start", className: "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400" },
   };
   if (map[triggerType]) return map[triggerType];
   if (triggerType.startsWith("skill:")) {
@@ -33,7 +33,7 @@ function getLastSessionBadge(triggerType: string | null | undefined): { label: s
 }
 
 const priorityColors: Record<string, string> = {
-  low: "bg-gray-200 text-gray-700",
+  low: "bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300",
   medium: "bg-blue-100 text-blue-700",
   high: "bg-orange-100 text-orange-700",
   critical: "bg-red-100 text-red-700",
@@ -82,7 +82,7 @@ function HighlightedText({ text, query }: { text: string; query: string }) {
 }
 
 export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, onDragStart, onMoveToNext, nextStatusName, tags, searchQuery, liveActivity, liveStats, todos, isPendingWorkspace }: IssueCardProps) {
-  const badgeColor = priorityColors[issue.priority] ?? "bg-gray-200 text-gray-700";
+  const badgeColor = priorityColors[issue.priority] ?? "bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300";
   const ws = issue.workspaceSummary;
   const hasActiveWorkspace = ws?.main && ws.main.status !== "closed";
   const [depDragOver, setDepDragOver] = useState(false);
@@ -130,12 +130,12 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
       onDragLeave={() => setDepDragOver(false)}
       onDrop={handleDrop}
       onClick={() => onClick(issue)}
-      className={`group bg-white rounded-md shadow-sm p-2 border cursor-pointer hover:shadow-md transition-shadow relative isolate ${depDragOver ? "border-purple-400 bg-purple-50 shadow-purple-200" : isPendingWorkspace ? "border-blue-300 shadow-blue-100 shadow-md" : "border-gray-200 hover:border-gray-300"}`}
+      className={`group bg-white dark:bg-gray-900 rounded-md shadow-sm p-2 border cursor-pointer hover:shadow-md transition-shadow relative isolate ${depDragOver ? "border-purple-400 bg-purple-50 shadow-purple-200" : isPendingWorkspace ? "border-blue-300 shadow-blue-100 shadow-md" : "border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600"}`}
     >
       <div className="flex items-start justify-between gap-2">
-        <p className="text-sm text-gray-900">
+        <p className="text-sm text-gray-900 dark:text-gray-100">
           {issue.issueNumber != null && (
-            <span className="text-gray-400 font-mono mr-1">#{issue.issueNumber}</span>
+            <span className="text-gray-400 dark:text-gray-500 font-mono mr-1">#{issue.issueNumber}</span>
           )}
           <HighlightedText text={issue.title} query={searchQuery ?? ""} />
         </p>
@@ -147,7 +147,7 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
         )}
       </div>
       {issue.description && (
-        <p className="text-xs text-gray-500 mt-1 line-clamp-2">
+        <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 line-clamp-2">
           <HighlightedText text={issue.description} query={searchQuery ?? ""} />
         </p>
       )}
@@ -177,7 +177,7 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
         {tags?.map((tag) => (
           <span
             key={tag.id}
-            className="inline-block text-xs px-1.5 py-0.5 rounded bg-gray-100 text-gray-600"
+            className="inline-block text-xs px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400"
             style={tag.color ? { backgroundColor: tag.color + "22", color: tag.color } : undefined}
           >
             {tag.name}
@@ -217,7 +217,7 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
                 ws.main.status === "idle" ? "bg-amber-500" :
                 "bg-gray-400"
               }`} />
-              <span className="font-mono text-gray-600 truncate">{ws.main.branch}</span>
+              <span className="font-mono text-gray-600 dark:text-gray-400 truncate">{ws.main.branch}</span>
               {ws.main.status === "idle" && liveActivity && (() => {
                 const badge = getLastSessionBadge(ws.main.lastSessionTriggerType);
                 return badge ? <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded shrink-0 ${badge.className}`}>{badge.label}</span> : null;
@@ -236,11 +236,11 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
               <>
                 <span className="text-green-600">+{ws.main.diffStats.insertions}</span>
                 <span className="text-red-500">-{ws.main.diffStats.deletions}</span>
-                <span className="text-gray-400">{ws.main.diffStats.filesChanged}f</span>
+                <span className="text-gray-400 dark:text-gray-500">{ws.main.diffStats.filesChanged}f</span>
               </>
             )}
             {ws.main.lastSessionAt && ws.main.status !== "active" && ws.main.status !== "reviewing" && ws.main.status !== "fixing" && (
-              <span className="text-gray-400">{ws.main.diffStats ? "· " : ""}{relativeTime(ws.main.lastSessionAt)}</span>
+              <span className="text-gray-400 dark:text-gray-500">{ws.main.diffStats ? "· " : ""}{relativeTime(ws.main.lastSessionAt)}</span>
             )}
           </span>
           {ws.main.conflicts?.hasConflicts && ws.main.status !== "fixing" && (
@@ -252,24 +252,24 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
             <span className="inline-flex items-center px-1 rounded bg-indigo-50 text-indigo-600 font-medium shrink-0">{ws.main.profile?.name ?? ws.main.claudeProfile}</span>
           )}
           {!(ws.main.profile?.name ?? ws.main.claudeProfile) && ws.main.agentCommand && ws.main.agentCommand !== "claude" && (ws.main.status === "active" || ws.main.status === "fixing") && liveActivity && (
-            <span className="inline-flex items-center px-1 rounded bg-gray-100 text-gray-500 font-mono text-[10px] shrink-0">{ws.main.agentCommand}</span>
+            <span className="inline-flex items-center px-1 rounded bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 font-mono text-[10px] shrink-0">{ws.main.agentCommand}</span>
           )}
           {ws.total > 1 && (
-            <span className="text-gray-400 shrink-0">+{ws.total - 1} more</span>
+            <span className="text-gray-400 dark:text-gray-500 shrink-0">+{ws.total - 1} more</span>
           )}
-          <svg className="w-3 h-3 shrink-0 text-gray-300 group-hover/ws:text-blue-400 transition-colors ml-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <svg className="w-3 h-3 shrink-0 text-gray-300 dark:text-gray-600 group-hover/ws:text-blue-400 transition-colors ml-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
           </svg>
         </div>
       )}
       {(ws?.main?.status === "active" || ws?.main?.status === "fixing") && liveActivity && liveActivity !== "Delegating to agent" && (
-        <div className="flex items-center gap-1.5 mt-1 text-xs text-gray-400 px-1">
+        <div className="flex items-center gap-1.5 mt-1 text-xs text-gray-400 dark:text-gray-500 px-1">
           <span className={`inline-block w-1.5 h-1.5 rounded-full animate-pulse shrink-0 ${ws.main.status === "fixing" ? "bg-orange-400" : "bg-green-400"}`} />
           <span className="truncate">{liveActivity}</span>
         </div>
       )}
       {(ws?.main?.status === "active" || ws?.main?.status === "fixing") && liveActivity && liveStats && (
-        <div className="flex items-center gap-2 mt-0.5 text-[10px] text-gray-400 px-1">
+        <div className="flex items-center gap-2 mt-0.5 text-[10px] text-gray-400 dark:text-gray-500 px-1">
           {liveStats.model && <span className="font-mono">{liveStats.model}</span>}
           {liveStats.contextTokens > 0 && (
             <span>{Math.round(liveStats.contextTokens / 1000)}k ctx</span>
@@ -319,7 +319,7 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
           {showMoveToNext && (
             <button
               onClick={(e) => { e.stopPropagation(); onMoveToNext!(issue); }}
-              className="flex items-center gap-1 text-xs text-gray-500 hover:text-white hover:bg-blue-600 border border-gray-200 hover:border-blue-600 rounded px-2 py-1 transition-colors"
+              className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400 hover:text-white hover:bg-blue-600 border border-gray-200 dark:border-gray-700 hover:border-blue-600 rounded px-2 py-1 transition-colors"
               title={`Move to ${nextStatusName}`}
             >
               <svg className="w-3 h-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
@@ -348,18 +348,18 @@ function TodoProgress({ todos }: { todos: TodoItem[] }) {
       >
         <div className="flex items-center gap-1.5 mb-0.5">
           <svg
-            className={`w-2.5 h-2.5 text-gray-400 shrink-0 transition-transform ${expanded ? "rotate-90" : ""}`}
+            className={`w-2.5 h-2.5 text-gray-400 dark:text-gray-500 shrink-0 transition-transform ${expanded ? "rotate-90" : ""}`}
             fill="currentColor" viewBox="0 0 16 16"
           >
             <path d="M6 12l4-4-4-4v8z" />
           </svg>
-          <span className="text-[10px] text-gray-400">{completed}/{total} tasks</span>
+          <span className="text-[10px] text-gray-400 dark:text-gray-500">{completed}/{total} tasks</span>
           {inProgress > 0 && (
             <span className="text-[10px] text-blue-500 font-medium">{inProgress} active</span>
           )}
         </div>
       </button>
-      <div className="h-1 bg-gray-200 rounded-full overflow-hidden flex ml-3">
+      <div className="h-1 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden flex ml-3">
         <div
           className="h-full bg-green-500 transition-all duration-300"
           style={{ width: `${(completed / total) * 100}%` }}
@@ -379,10 +379,10 @@ function TodoProgress({ todos }: { todos: TodoItem[] }) {
                 ) : t.status === "in_progress" ? (
                   <svg className="w-2.5 h-2.5 text-blue-500" fill="currentColor" viewBox="0 0 16 16"><path d="M8 1a2 2 0 012 2v4H6V3a2 2 0 012-2zm3 6V3a3 3 0 00-6 0v4a2 2 0 002 2v2.5a.5.5 0 001 0V9a2 2 0 002-2z"/></svg>
                 ) : (
-                  <svg className="w-2.5 h-2.5 text-gray-300" fill="currentColor" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6"/></svg>
+                  <svg className="w-2.5 h-2.5 text-gray-300 dark:text-gray-600" fill="currentColor" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6"/></svg>
                 )}
               </span>
-              <span className={t.status === "completed" ? "text-gray-400 line-through" : "text-gray-600"}>
+              <span className={t.status === "completed" ? "text-gray-400 dark:text-gray-500 line-through" : "text-gray-600 dark:text-gray-400"}>
                 {t.content}
               </span>
             </div>
