@@ -1,7 +1,7 @@
 import { execSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { basename, delimiter, dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -549,6 +549,31 @@ const COPILOT_DEFAULT_ALLOWED_TOOLS = [
   "agentic-kanban",
 ];
 
+function resolveCopilotNpmLoader(command: string): string | undefined {
+  if (process.platform !== "win32") return undefined;
+
+  const candidates: string[] = [];
+  const base = basename(command).toLowerCase();
+  if (base === "copilot" || base === "copilot.cmd" || base === "copilot.ps1") {
+    if (command.includes("\\") || command.includes("/")) {
+      candidates.push(command);
+    } else {
+      const extensions = ["", ".cmd", ".ps1"];
+      for (const dir of (process.env.PATH ?? "").split(delimiter).filter(Boolean)) {
+        for (const ext of extensions) {
+          candidates.push(join(dir, `copilot${ext}`));
+        }
+      }
+    }
+  }
+
+  for (const candidate of candidates) {
+    const loader = join(dirname(candidate), "node_modules", "@github", "copilot", "npm-loader.js");
+    if (existsSync(loader)) return loader;
+  }
+  return undefined;
+}
+
 export class CopilotProvider implements AgentProvider {
   readonly name = "copilot";
 
@@ -557,7 +582,9 @@ export class CopilotProvider implements AgentProvider {
     const isWindows = process.platform === "win32";
 
     const isMockAgent = !!process.env.AGENT_COMMAND || (agentCommand?.includes("mock-agent") ?? false);
-    const command = process.env.AGENT_COMMAND || agentCommand || "copilot";
+    let command = process.env.AGENT_COMMAND || agentCommand || "copilot";
+    let useShell = isWindows;
+    const argsPrefix: string[] = [];
 
     const args: string[] = [];
     let promptPrefix: string | undefined;
@@ -571,6 +598,13 @@ export class CopilotProvider implements AgentProvider {
         args.push("--profile", "multi-turn");
       }
     } else {
+      const loader = resolveCopilotNpmLoader(command);
+      if (loader) {
+        command = process.execPath;
+        argsPrefix.push(loader);
+        useShell = false;
+      }
+
       const effectivePrompt = planMode ? `${COPILOT_PLAN_PROMPT_PREFIX}\n\n${prompt ?? ""}` : (prompt ?? "");
       args.push("-p", effectivePrompt);
       suppressStdinPrompt = true;
@@ -616,10 +650,11 @@ export class CopilotProvider implements AgentProvider {
 
     return {
       command,
-      args,
-      // On Windows `copilot` is installed as a .cmd/.ps1 shim in common Node
-      // installs, so route through the shell while keeping the window hidden.
-      useShell: isWindows,
+      args: [...argsPrefix, ...args],
+      // On Windows, prefer the Copilot npm loader directly when discoverable.
+      // Falling back to the shim requires a shell, which is less reliable for
+      // multiline prompts but keeps non-standard installs usable.
+      useShell,
       isMockAgent,
       env: { ...process.env as Record<string, string> },
       keepStdinOpen: false,

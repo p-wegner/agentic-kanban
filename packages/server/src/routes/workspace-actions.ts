@@ -14,12 +14,33 @@ import { tmpdir } from "node:os";
 import { writeFileSync } from "node:fs";
 import { spawn, spawnSync } from "node:child_process";
 import { resolveProjectRepo, resolveProjectFull, resolveProjectId, moveIssueToDone, getWorkspaceById, updateWorkspaceStatus } from "../repositories/workspace.repository.js";
-import { loadAgentSettings, toExecutorProvider } from "../services/agent-settings.service.js";
+import { loadAgentSettings, toExecutorProvider, type AgentSettings } from "../services/agent-settings.service.js";
 import { buildImplementPrompt } from "../services/plan-mode.service.js";
 import { PREF_AUTO_START_FOLLOWUP } from "../constants/preference-keys.js";
 import { autoStartFollowups } from "../services/followup-workspace.service.js";
 import { parseDiffStats } from "../services/board-aggregation.service.js";
 import { getConflictingFiles, buildConflictResolutionPrompt, runLearningStep } from "../services/merge-helpers.service.js";
+import type { ProviderName } from "../services/agent-provider.js";
+
+function applyWorkspaceAgentSelection(settings: AgentSettings, workspace: typeof workspaces.$inferSelect): AgentSettings {
+  const provider = workspace.provider;
+  if (provider !== "claude" && provider !== "codex" && provider !== "copilot") return settings;
+
+  const profileName = workspace.claudeProfile || undefined;
+  const agentArgs = provider === "claude"
+    ? settings.agentArgs
+    : settings.agentArgs
+      ?.split(/\s+/)
+      .filter((arg) => arg && arg !== "--dangerously-skip-permissions")
+      .join(" ") || undefined;
+  return {
+    ...settings,
+    agentArgs,
+    provider,
+    claudeProfile: provider === "claude" ? profileName : undefined,
+    profile: profileName ? { provider: provider as ProviderName, name: profileName } : undefined,
+  };
+}
 
 export function createWorkspaceActionsRoute(
   getSessionManager: () => SessionManager,
@@ -135,7 +156,7 @@ export function createWorkspaceActionsRoute(
 
     try {
       const { agentCommand, agentArgs, claudeProfile, profile: agentProfile, provider: agentProvider, resumeWithNewModel, permissionPromptTool } =
-        await loadAgentSettings(database, body.agentCommand as string | undefined);
+        applyWorkspaceAgentSelection(await loadAgentSettings(database, body.agentCommand as string | undefined), ws0);
 
       const promptStr = body.prompt as string;
       const truncatedPrompt = promptStr.length > 80 ? promptStr.slice(0, 80) + "..." : promptStr;
@@ -191,9 +212,11 @@ export function createWorkspaceActionsRoute(
     if (!result.ok) {
       if ((result as any).stale) {
         // Process is gone — launch a new session with --resume
-        const { agentCommand, agentArgs, claudeProfile, profile, provider, resumeWithNewModel } = await loadAgentSettings(database);
         const wsForTurn = await getWorkspaceById(id, database);
+        if (!wsForTurn) return c.json({ error: "Workspace not found" }, 404);
         const planMode = wsForTurn?.planMode ?? false;
+        const { agentCommand, agentArgs, claudeProfile, profile, provider, resumeWithNewModel } =
+          applyWorkspaceAgentSelection(await loadAgentSettings(database), wsForTurn);
 
         const sessionId = await getSessionManager().startSession({ workspaceId: id, prompt: body.content, agentCommand, agentArgs, resumeFromId: running.id, claudeProfile, profile, provider: toExecutorProvider(provider), multiTurn: false, planMode, resumeWithNewModel, triggerType: "chat" });
         await updateWorkspaceStatus(id, "active", { claudeProfile: claudeProfile ?? null, agentCommand: agentCommand ?? null, provider: provider }, database);
@@ -244,7 +267,7 @@ export function createWorkspaceActionsRoute(
 
     try {
       const { agentCommand, agentArgs, claudeProfile, profile: agentProfile, provider: agentProvider, permissionPromptTool } =
-        await loadAgentSettings(database, undefined);
+        applyWorkspaceAgentSelection(await loadAgentSettings(database, undefined), ws0);
 
       const sessionId = await getSessionManager().startSession({
         workspaceId: id,
@@ -546,7 +569,8 @@ export function createWorkspaceActionsRoute(
 
       const prompt = buildConflictResolutionPrompt(conflictingFiles, baseBranch);
 
-      const { agentCommand, agentArgs, claudeProfile, profile, provider } = await loadAgentSettings(database);
+      const { agentCommand, agentArgs, claudeProfile, profile, provider } =
+        applyWorkspaceAgentSelection(await loadAgentSettings(database), workspace);
 
       const sessionId = await getSessionManager().startSession({ workspaceId: id, prompt, agentCommand, agentArgs, claudeProfile, profile, provider: toExecutorProvider(provider), multiTurn: true, triggerType: "fix-conflicts" });
       options?.fixAndMergeSessionIds?.add(sessionId);
