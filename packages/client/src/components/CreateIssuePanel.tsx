@@ -23,6 +23,21 @@ interface CreateIssuePanelProps {
   canStartWorkspace?: boolean;
 }
 
+type AgentProvider = ProfileSelection["provider"];
+
+const COPILOT_DEFAULT_PROFILE = "default";
+
+function uniqueProfiles(profiles: string[], fallback?: string): string[] {
+  const all = fallback ? [fallback, ...profiles] : profiles;
+  return [...new Set(all.filter(Boolean))];
+}
+
+function defaultProfileLabel(settings: Record<string, string>): string {
+  if (settings.provider === "codex") return `codex:${settings.codex_profile || "none"}`;
+  if (settings.provider === "copilot") return `copilot:${settings.copilot_profile || COPILOT_DEFAULT_PROFILE}`;
+  return `claude:${settings.claude_profile || "none"}`;
+}
+
 export function CreateIssuePanel({
   projectId,
   statusId,
@@ -42,6 +57,7 @@ export function CreateIssuePanel({
   const [settings, setSettings] = useState<Record<string, string>>({});
   const [claudeProfiles, setClaudeProfiles] = useState<string[]>([]);
   const [codexProfiles, setCodexProfiles] = useState<string[]>([]);
+  const [copilotProfiles, setCopilotProfiles] = useState<string[]>([COPILOT_DEFAULT_PROFILE]);
   const [isDirect, setIsDirect] = useState(false);
   const [skillId, setSkillId] = useState<string>(initialState?.skillId ?? "");
   const [skills, setSkills] = useState<Skill[]>([]);
@@ -88,11 +104,13 @@ export function CreateIssuePanel({
       apiFetch<Record<string, string>>("/api/preferences/settings").catch(() => ({} as Record<string, string>)),
       apiFetch<{ profiles: string[] }>("/api/preferences/claude-profiles").catch(() => ({ profiles: [] as string[] })),
       apiFetch<{ profiles: string[] }>("/api/preferences/codex-profiles").catch(() => ({ profiles: [] as string[] })),
-    ]).then(([skillsData, settingsData, claudeData, codexData]) => {
+      apiFetch<{ profiles: string[] }>("/api/preferences/copilot-profiles").catch(() => ({ profiles: [COPILOT_DEFAULT_PROFILE] })),
+    ]).then(([skillsData, settingsData, claudeData, codexData, copilotData]) => {
       setSkills(skillsData);
       setSettings(settingsData);
       setClaudeProfiles(claudeData.profiles);
       setCodexProfiles(codexData.profiles);
+      setCopilotProfiles(uniqueProfiles(copilotData.profiles, COPILOT_DEFAULT_PROFILE));
     });
   }, [startWorkspace, projectId]);
 
@@ -100,9 +118,9 @@ export function CreateIssuePanel({
     if (!selectedProfile) return undefined;
     const colonIdx = selectedProfile.indexOf(":");
     if (colonIdx === -1) return undefined;
-    const provider = selectedProfile.slice(0, colonIdx);
+    const provider = selectedProfile.slice(0, colonIdx) as AgentProvider;
     const name = selectedProfile.slice(colonIdx + 1);
-    if ((provider !== "claude" && provider !== "codex") || !name) return undefined;
+    if ((provider !== "claude" && provider !== "codex" && provider !== "copilot") || !name) return undefined;
     return { provider, name };
   }
 
@@ -255,7 +273,7 @@ export function CreateIssuePanel({
                     />
                     Skip auto AI code review
                   </label>
-                  {(claudeProfiles.length > 0 || codexProfiles.length > 0) && (
+                  {(claudeProfiles.length > 0 || codexProfiles.length > 0 || copilotProfiles.length > 0) && (
                     <div className="flex items-center gap-2">
                       <label className="text-sm text-gray-600 dark:text-gray-400 whitespace-nowrap">Profile override</label>
                       <select
@@ -263,7 +281,7 @@ export function CreateIssuePanel({
                         onChange={(e) => setSelectedProfile(e.target.value)}
                         className="flex-1 text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:bg-gray-900 dark:text-gray-100"
                       >
-                        <option value="">Default ({settings.provider === "codex" ? `codex:${settings.codex_profile || "none"}` : `claude:${settings.claude_profile || "none"}`})</option>
+                        <option value="">Default ({defaultProfileLabel(settings)})</option>
                         {claudeProfiles.length > 0 && (
                           <optgroup label="Claude">
                             {claudeProfiles.map((p) => (
@@ -278,6 +296,11 @@ export function CreateIssuePanel({
                             ))}
                           </optgroup>
                         )}
+                        <optgroup label="Copilot">
+                          {copilotProfiles.map((p) => (
+                            <option key={`copilot:${p}`} value={`copilot:${p}`}>{p === COPILOT_DEFAULT_PROFILE ? "Default" : p}</option>
+                          ))}
+                        </optgroup>
                       </select>
                     </div>
                   )}

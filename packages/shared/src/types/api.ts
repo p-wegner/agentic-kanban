@@ -145,6 +145,9 @@ export interface WorkspaceResponse {
   readyForMerge: boolean;
   agentCommand?: string | null;
   provider?: string | null;
+  /** @deprecated Use profile instead */
+  claudeProfile?: string | null;
+  profile?: ProfileSelection | null;
   pendingPlanPath?: string | null;
   sessionId?: string;
   skillName?: string | null;

@@ -108,6 +108,35 @@ test.describe("Claude profile override — expanded create panel", () => {
     await panel.locator("button[title='Close']").click();
   });
 
+  test("Profile override field exposes Copilot as a tagged provider option", async ({
+    page,
+  }) => {
+    await page.goto("/");
+    await page.waitForSelector("h2");
+
+    const firstColumn = page.locator(".bg-gray-100.rounded-xl").first();
+    await firstColumn.locator("button[title='Add issue']").click();
+    await page.locator("button[title='Expand form']").click();
+
+    const panel = page.locator(".fixed.right-0.top-0");
+    const startWsLabel = panel.locator("label", { hasText: "Start workspace" });
+    const canStartWorkspace = await startWsLabel.isVisible();
+    if (!canStartWorkspace) {
+      test.skip();
+      return;
+    }
+    await startWsLabel.locator("input[type='checkbox']").check();
+
+    const profileSelect = panel.locator("select").filter({
+      has: page.locator("option[value='copilot:default']"),
+    });
+    await expect(profileSelect).toBeVisible();
+    await profileSelect.selectOption("copilot:default");
+    await expect(profileSelect).toHaveValue("copilot:default");
+
+    await panel.locator("button[title='Close']").click();
+  });
+
   test("Workspace API stores claudeProfile when passed directly", async ({
     request,
   }) => {
@@ -196,20 +225,14 @@ test.describe("Claude profile override — workspace panel select", () => {
     request,
     page,
   }) => {
-    // Check if any profiles are available; the dropdown is only rendered when there are profiles
+    // Check if any Claude profiles are available; Copilot default is always present.
     const profilesRes = await request.get(
       `${SERVER_URL}/api/preferences/claude-profiles`,
     );
     expect(profilesRes.status()).toBe(200);
     const { profiles } = await profilesRes.json();
 
-    if (profiles.length === 0) {
-      // No profiles on this machine — just verify the API response shape
-      expect(Array.isArray(profiles)).toBe(true);
-      return;
-    }
-
-    // Profiles exist — create a workspace and open its panel
+    // Create a workspace and open its panel.
     const suffix = Date.now().toString(36);
     const issueRes = await request.post(`${SERVER_URL}/api/issues`, {
       data: {
@@ -268,9 +291,81 @@ test.describe("Claude profile override — workspace panel select", () => {
     });
     await expect(profileSelect).toBeVisible();
 
-    // Verify all discovered profiles appear as options
+    // Verify all discovered Claude profiles appear as tagged options.
     for (const p of profiles) {
-      await expect(profileSelect.locator(`option[value="${p}"]`)).toBeAttached();
+      await expect(profileSelect.locator(`option[value="claude:${p}"]`)).toBeAttached();
     }
+    await expect(profileSelect.locator('option[value="copilot:default"]')).toBeAttached();
+  });
+
+  test("Quick launch sends provider-tagged Copilot profile", async ({
+    request,
+    page,
+  }) => {
+    const suffix = Date.now().toString(36);
+    const issueRes = await request.post(`${SERVER_URL}/api/issues`, {
+      data: {
+        title: `Copilot quick launch ${suffix}`,
+        statusId,
+        projectId,
+        skipAutoReview: true,
+      },
+    });
+    expect(issueRes.status()).toBe(201);
+    const issue = await issueRes.json();
+    createdIssueIds.push(issue.id);
+
+    let workspacePayload: any = null;
+    await page.route("**/api/workspaces", async (route) => {
+      if (route.request().method() === "POST") {
+        workspacePayload = route.request().postDataJSON();
+        await route.fulfill({
+          status: 201,
+          contentType: "application/json",
+          body: JSON.stringify({
+            id: `mock-ws-${suffix}`,
+            issueId: issue.id,
+            branch: `feature/mock-${suffix}`,
+            status: "idle",
+            workingDir: null,
+            baseBranch: null,
+            isDirect: false,
+            planMode: false,
+            includeVisualProof: false,
+            readyForMerge: false,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          }),
+        });
+        return;
+      }
+      await route.continue();
+    });
+
+    await page.goto("/");
+    await page.waitForSelector("h2");
+
+    const issueCard = page.locator("p", { hasText: issue.title }).first();
+    await expect(issueCard).toBeVisible({ timeout: 5000 });
+    await issueCard.click();
+
+    const issuePanel = page.locator(".fixed.right-0.top-0");
+    await expect(issuePanel).toBeVisible({ timeout: 5000 });
+    await issuePanel.locator("button", { hasText: "Custom options..." }).click();
+
+    const wsPanel = page.locator(".fixed.right-0.top-0").last();
+    await expect(wsPanel.locator("text=No workspaces yet")).toBeVisible({ timeout: 5000 });
+    await wsPanel.locator("button[title='More options']").click();
+
+    const profileSelect = wsPanel.locator("select").filter({
+      has: page.locator("option[value='copilot:default']"),
+    });
+    await expect(profileSelect).toBeVisible();
+    await profileSelect.selectOption("copilot:default");
+    await wsPanel.locator("button", { hasText: /^New Workspace$/ }).last().click();
+
+    await expect.poll(() => workspacePayload).not.toBeNull();
+    expect(workspacePayload.profile).toEqual({ provider: "copilot", name: "default" });
+    expect(workspacePayload.claudeProfile).toBeUndefined();
   });
 });
