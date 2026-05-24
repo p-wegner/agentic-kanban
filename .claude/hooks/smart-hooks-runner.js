@@ -104,6 +104,40 @@ function runCheck(check, inputData, editedFiles) {
   }
 }
 
+// --- PreToolUse: prevent destructive operations before execution ---
+
+function handlePreToolUse(input) {
+  const toolName = input.tool_name;
+  const toolInput = input.tool_input;
+
+  // Only validate Bash and PowerShell commands
+  if (toolName !== "Bash" && toolName !== "PowerShell") {
+    process.exit(0);
+  }
+
+  const command = toolInput?.command || toolInput?.Command || "";
+  const config = loadConfig();
+  const checks = config.hooks?.PreToolUse || [];
+
+  for (const check of checks) {
+    if (!check.enabled) continue;
+
+    const result = runCheck({ ...check }, { command }, []);
+
+    if (!result.success) {
+      console.error(`[smart-hooks] ${check.name}: PREVENTED`);
+      if (result.output) console.error(result.output);
+      process.stdout.write(
+        JSON.stringify({
+          decision: "block",
+          reason: `${check.name}:\n\n${result.output}`,
+        }) + "\n"
+      );
+      process.exit(2);
+    }
+  }
+}
+
 // --- PostToolUse: track edited files + run per-file checks ---
 
 function handlePostToolUse(input) {
@@ -215,7 +249,8 @@ async function main() {
   }
 
   const hookType = process.argv[2];
-  if (hookType === "PostToolUse") handlePostToolUse(input);
+  if (hookType === "PreToolUse") handlePreToolUse(input);
+  else if (hookType === "PostToolUse") handlePostToolUse(input);
   else if (hookType === "Stop") handleStop(input);
 
   process.exit(0);
