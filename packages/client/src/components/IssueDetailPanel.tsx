@@ -98,6 +98,8 @@ export function IssueDetailPanel({
   const [enhancing, setEnhancing] = useState(false);
   const [preEnhanceSnapshot, setPreEnhanceSnapshot] = useState<{ title: string; description: string } | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [actionsOpen, setActionsOpen] = useState(false);
+  const actionsRef = useRef<HTMLDivElement>(null);
   const [moveToDonePending, setMoveToDonePending] = useState<{ confirm: () => Promise<void> } | null>(null);
   const [workspaceCount, setWorkspaceCount] = useState(0);
   const [issueTags, setIssueTags] = useState<{ id: string; name: string; color: string | null }[]>([]);
@@ -164,6 +166,19 @@ export function IssueDetailPanel({
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [editing, hasChanges, issue, onClose]);
+
+  // Close actions dropdown on outside click
+  useEffect(() => {
+    if (!actionsOpen) return;
+    function handleClick(e: MouseEvent) {
+      if (actionsRef.current && !actionsRef.current.contains(e.target as Node)) {
+        setActionsOpen(false);
+        setConfirmDelete(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [actionsOpen]);
 
   function handleCancelEdit() {
     if (hasChanges) {
@@ -447,6 +462,46 @@ export function IssueDetailPanel({
             {editing ? "Edit Issue" : "Issue Details"}
           </h2>
           <div className="flex items-center gap-1">
+            {!editing && (
+              <div ref={actionsRef} className="relative">
+                <button
+                  onClick={() => { setActionsOpen((o) => !o); setConfirmDelete(false); }}
+                  title="Actions"
+                  className="text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 p-0.5 rounded"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z" />
+                  </svg>
+                </button>
+                {actionsOpen && (
+                  <div className="absolute right-0 top-full mt-1 w-40 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-50 py-1">
+                    <button
+                      onClick={() => { setEditing(true); setActionsOpen(false); }}
+                      className="w-full text-left px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                      </svg>
+                      Edit
+                    </button>
+                    <button
+                      onClick={() => handleDelete()}
+                      disabled={saving}
+                      className={`w-full text-left px-3 py-2 text-sm disabled:opacity-50 flex items-center gap-2 ${
+                        confirmDelete
+                          ? "text-red-600 bg-red-50 dark:bg-red-950 hover:bg-red-100 dark:hover:bg-red-900"
+                          : "text-red-600 hover:bg-red-50 dark:hover:bg-red-950"
+                      }`}
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                      </svg>
+                      {confirmDelete ? "Confirm Delete" : "Delete"}
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
             <button
               onClick={() => {
                 setPanelMode((m) => {
@@ -1172,77 +1227,56 @@ export function IssueDetailPanel({
           </div>
         </div>
 
-        <div className="px-4 py-3 border-t border-gray-200 dark:border-gray-700 flex gap-2">
-          {editing ? (
-            <>
-              <button
-                onClick={handleSave}
-                disabled={saving || !title.trim()}
-                className="text-sm bg-blue-600 text-white px-4 py-1.5 rounded hover:bg-blue-700 disabled:opacity-50"
-              >
-                {saving ? "Saving..." : "Save"}
-              </button>
-              <button
-                onClick={handleCancelEdit}
-                className="text-sm text-gray-500 dark:text-gray-400 px-4 py-1.5 hover:text-gray-700 dark:hover:text-gray-300"
-              >
-                Cancel
-              </button>
+        {/* Edit mode actions — shown in footer when editing */}
+        {editing && (
+          <div className="px-4 py-3 border-t border-gray-200 dark:border-gray-700 flex items-center gap-2">
+            <button
+              onClick={handleSave}
+              disabled={saving || !title.trim()}
+              className="text-sm bg-blue-600 text-white px-4 py-1.5 rounded hover:bg-blue-700 disabled:opacity-50"
+            >
+              {saving ? "Saving..." : "Save"}
+            </button>
+            <button
+              onClick={handleCancelEdit}
+              className="text-sm text-gray-500 dark:text-gray-400 px-4 py-1.5 hover:text-gray-700 dark:hover:text-gray-300"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={handleEnhance}
+              disabled={!title.trim() || enhancing}
+              title="Enhance with AI"
+              className="ml-auto text-sm text-purple-600 px-2 py-1.5 hover:text-purple-800 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
+            >
+              {enhancing ? (
+                <svg className="animate-spin h-3.5 w-3.5" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+                </svg>
+              ) : (
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 3l1.5 3.5L10 8l-3.5 1.5L5 13l-1.5-3.5L0 8l3.5-1.5L5 3zM19 11l1 2.5L22.5 14l-2.5 1L19 17.5l-1-2.5L15.5 14l2.5-1L19 11z" />
+                </svg>
+              )}
+              {enhancing ? "Enhancing..." : "Enhance"}
+            </button>
+            {preEnhanceSnapshot && (
               <button
                 type="button"
-                onClick={handleEnhance}
-                disabled={!title.trim() || enhancing}
-                title="Enhance with AI"
-                className="ml-auto text-sm text-purple-600 px-2 py-1.5 hover:text-purple-800 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
+                onClick={handleUndoEnhance}
+                title="Undo enhancement"
+                className="text-sm text-gray-500 dark:text-gray-400 px-2 py-1.5 hover:text-gray-700 dark:hover:text-gray-300 flex items-center gap-1"
               >
-                {enhancing ? (
-                  <svg className="animate-spin h-3.5 w-3.5" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
-                  </svg>
-                ) : (
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 3l1.5 3.5L10 8l-3.5 1.5L5 13l-1.5-3.5L0 8l3.5-1.5L5 3zM19 11l1 2.5L22.5 14l-2.5 1L19 17.5l-1-2.5L15.5 14l2.5-1L19 11z" />
-                  </svg>
-                )}
-                {enhancing ? "Enhancing..." : "Enhance"}
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" />
+                </svg>
+                Undo
               </button>
-              {preEnhanceSnapshot && (
-                <button
-                  type="button"
-                  onClick={handleUndoEnhance}
-                  title="Undo enhancement"
-                  className="text-sm text-gray-500 dark:text-gray-400 px-2 py-1.5 hover:text-gray-700 dark:hover:text-gray-300 flex items-center gap-1"
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" />
-                  </svg>
-                  Undo
-                </button>
-              )}
-            </>
-          ) : (
-            <>
-              <button
-                onClick={() => setEditing(true)}
-                className="text-sm bg-blue-600 text-white px-4 py-1.5 rounded hover:bg-blue-700"
-              >
-                Edit
-              </button>
-              <button
-                onClick={handleDelete}
-                disabled={saving}
-                className={`text-sm px-4 py-1.5 rounded ${
-                  confirmDelete
-                    ? "bg-red-600 text-white hover:bg-red-700"
-                    : "text-red-600 hover:bg-red-50 dark:hover:bg-red-950"
-                } disabled:opacity-50`}
-              >
-                {confirmDelete ? "Confirm Delete" : "Delete"}
-              </button>
-            </>
-          )}
-        </div>
+            )}
+          </div>
+        )}
       </div>
       {moveToDonePending && (
         <MoveToDoneDialog
