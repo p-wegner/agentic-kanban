@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
-import type { CreateIssueRequest } from "@agentic-kanban/shared";
+import type { CreateIssueRequest, ProfileSelection } from "@agentic-kanban/shared";
 import type { CreateIssueFormState } from "./CreateIssueForm.js";
 import { apiFetch } from "../lib/api.js";
 import { showToast } from "./Toast.js";
@@ -13,18 +13,12 @@ interface Skill {
   description: string | null;
 }
 
-interface Skill {
-  id: string;
-  name: string;
-  description: string | null;
-}
-
 interface CreateIssuePanelProps {
   projectId: string;
   statusId: string;
   statusName?: string;
   initialState?: Partial<CreateIssueFormState>;
-  onSubmit: (data: CreateIssueRequest & { startWorkspace?: boolean; planMode?: boolean; skipAutoReview?: boolean; claudeProfile?: string; isDirect?: boolean; skillId?: string }) => Promise<void>;
+  onSubmit: (data: CreateIssueRequest & { startWorkspace?: boolean; planMode?: boolean; skipAutoReview?: boolean; profile?: ProfileSelection; isDirect?: boolean; skillId?: string }) => Promise<void>;
   onClose: () => void;
   canStartWorkspace?: boolean;
 }
@@ -44,7 +38,10 @@ export function CreateIssuePanel({
   const [startWorkspace, setStartWorkspace] = useState(initialState?.startWorkspace ?? false);
   const [planMode, setPlanMode] = useState(initialState?.planMode ?? false);
   const [skipAutoReview, setSkipAutoReview] = useState(initialState?.skipAutoReview ?? false);
-  const [claudeProfile, setClaudeProfile] = useState("");
+  const [selectedProfile, setSelectedProfile] = useState("");
+  const [settings, setSettings] = useState<Record<string, string>>({});
+  const [claudeProfiles, setClaudeProfiles] = useState<string[]>([]);
+  const [codexProfiles, setCodexProfiles] = useState<string[]>([]);
   const [isDirect, setIsDirect] = useState(false);
   const [skillId, setSkillId] = useState<string>(initialState?.skillId ?? "");
   const [skills, setSkills] = useState<Skill[]>([]);
@@ -86,10 +83,28 @@ export function CreateIssuePanel({
 
   useEffect(() => {
     if (!startWorkspace || !projectId) return;
-    apiFetch<Skill[]>(`/api/agent-skills?projectId=${projectId}`)
-      .then(setSkills)
-      .catch(() => {});
+    Promise.all([
+      apiFetch<Skill[]>(`/api/agent-skills?projectId=${projectId}`).catch(() => [] as Skill[]),
+      apiFetch<Record<string, string>>("/api/preferences/settings").catch(() => ({} as Record<string, string>)),
+      apiFetch<{ profiles: string[] }>("/api/preferences/claude-profiles").catch(() => ({ profiles: [] as string[] })),
+      apiFetch<{ profiles: string[] }>("/api/preferences/codex-profiles").catch(() => ({ profiles: [] as string[] })),
+    ]).then(([skillsData, settingsData, claudeData, codexData]) => {
+      setSkills(skillsData);
+      setSettings(settingsData);
+      setClaudeProfiles(claudeData.profiles);
+      setCodexProfiles(codexData.profiles);
+    });
   }, [startWorkspace, projectId]);
+
+  function profileSelection(): ProfileSelection | undefined {
+    if (!selectedProfile) return undefined;
+    const colonIdx = selectedProfile.indexOf(":");
+    if (colonIdx === -1) return undefined;
+    const provider = selectedProfile.slice(0, colonIdx);
+    const name = selectedProfile.slice(colonIdx + 1);
+    if ((provider !== "claude" && provider !== "codex") || !name) return undefined;
+    return { provider, name };
+  }
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
@@ -113,7 +128,7 @@ export function CreateIssuePanel({
         startWorkspace: startWorkspace || undefined,
         planMode: (startWorkspace && planMode) || undefined,
         skipAutoReview: (startWorkspace && skipAutoReview) || undefined,
-        claudeProfile: (startWorkspace && claudeProfile.trim()) ? claudeProfile.trim() : undefined,
+        profile: startWorkspace ? profileSelection() : undefined,
         isDirect: (startWorkspace && isDirect) || undefined,
         skillId: (startWorkspace && skillId) || undefined,
       });
@@ -240,16 +255,32 @@ export function CreateIssuePanel({
                     />
                     Skip auto AI code review
                   </label>
-                  <div className="flex items-center gap-2">
-                    <label className="text-sm text-gray-600 dark:text-gray-400 whitespace-nowrap">Profile override</label>
-                    <input
-                      type="text"
-                      placeholder="e.g. zai (blank = default)"
-                      value={claudeProfile}
-                      onChange={(e) => setClaudeProfile(e.target.value)}
-                      className="flex-1 text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:bg-gray-900 dark:text-gray-100"
-                    />
-                  </div>
+                  {(claudeProfiles.length > 0 || codexProfiles.length > 0) && (
+                    <div className="flex items-center gap-2">
+                      <label className="text-sm text-gray-600 dark:text-gray-400 whitespace-nowrap">Profile override</label>
+                      <select
+                        value={selectedProfile}
+                        onChange={(e) => setSelectedProfile(e.target.value)}
+                        className="flex-1 text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:bg-gray-900 dark:text-gray-100"
+                      >
+                        <option value="">Default ({settings.provider === "codex" ? `codex:${settings.codex_profile || "none"}` : `claude:${settings.claude_profile || "none"}`})</option>
+                        {claudeProfiles.length > 0 && (
+                          <optgroup label="Claude">
+                            {claudeProfiles.map((p) => (
+                              <option key={`claude:${p}`} value={`claude:${p}`}>{p}</option>
+                            ))}
+                          </optgroup>
+                        )}
+                        {codexProfiles.length > 0 && (
+                          <optgroup label="Codex">
+                            {codexProfiles.map((p) => (
+                              <option key={`codex:${p}`} value={`codex:${p}`}>{p}</option>
+                            ))}
+                          </optgroup>
+                        )}
+                      </select>
+                    </div>
+                  )}
                   <label className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400 cursor-pointer">
                     <input
                       type="checkbox"

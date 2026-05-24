@@ -3,6 +3,11 @@ name: count-code-lines
 description: Count productive code lines per package using scc, scoped to actual source directories
 ---
 
+---
+name: count-code-lines
+description: Count productive code lines per package using scc, scoped to actual source directories
+---
+
 # count-code-lines
 
 Count productive (non-blank, non-comment) code lines across all source packages using `scc`.
