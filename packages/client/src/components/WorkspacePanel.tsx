@@ -221,6 +221,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
   const [error, setError] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
   const [conflictState, setConflictState] = useState<{ hasConflicts: boolean; conflictingFiles: string[] } | null>(null);
+  const [expandedQuickActions, setExpandedQuickActions] = useState<Record<string, boolean>>({});
   const [mergeError, setMergeError] = useState<{ wsId: string; message: string } | null>(null);
 
   const [latestCommits, setLatestCommits] = useState<Record<string, { sha: string; message: string } | null>>({});
@@ -1360,10 +1361,21 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                     {ws.status !== "closed" && !isRunning && ws.workingDir && (() => {
                       const lastReview = completedSessions.filter(s => s.triggerType === "review").at(-1);
                       const lastMerge = completedSessions.filter(s => s.triggerType === "merge").at(-1);
+                      const quickActionsKey = `qa-${ws.id}`;
+                      const qaExpanded = expandedQuickActions[quickActionsKey];
                       return (
-                      <div className="space-y-1 pt-1">
-                        <div className="text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide">Quick Actions</div>
-                        <div className="flex flex-wrap gap-x-3 gap-y-1.5">
+                      <div className="pt-1">
+                        <button
+                          onClick={() => setExpandedQuickActions((prev) => ({ ...prev, [quickActionsKey]: !prev[quickActionsKey] }))}
+                          className="flex items-center gap-1 text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide hover:text-gray-600 dark:hover:text-gray-300 w-full text-left"
+                        >
+                          <svg className={`w-3 h-3 transition-transform ${qaExpanded ? "rotate-90" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                          </svg>
+                          Quick Actions
+                        </button>
+                        {qaExpanded && (
+                        <div className="flex flex-wrap gap-x-3 gap-y-1.5 mt-1">
                           <div className="flex flex-col gap-0.5">
                             <button
                               onClick={(e) => { e.stopPropagation(); handleReview(ws.id); }}
@@ -1415,6 +1427,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                             );
                           })}
                         </div>
+                        )}
                       </div>
                       );
                     })()}
