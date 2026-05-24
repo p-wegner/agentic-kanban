@@ -360,6 +360,64 @@ describe("Session Summary API", () => {
     ]);
   });
 
+  it("extracts Copilot CLI nested JSONL session activity", async () => {
+    const { sessionId } = await createSessionWithData(testApp.db);
+
+    await testApp.db.insert(schema.sessionMessages).values([
+      {
+        sessionId,
+        type: "stdout",
+        data: [
+          JSON.stringify({
+            type: "assistant.message",
+            data: {
+              model: "claude-sonnet-4.6",
+              content: "I found global setup and teardown for isolated E2E projects.",
+            },
+          }),
+          JSON.stringify({
+            type: "tool.execution_start",
+            data: {
+              toolCallId: "tool-read",
+              toolName: "view",
+              arguments: { path: "/repo/packages/e2e/global-setup.ts" },
+            },
+          }),
+          JSON.stringify({
+            type: "tool.execution_start",
+            data: {
+              toolCallId: "tool-shell",
+              toolName: "shell",
+              arguments: { command: "pnpm --filter @agentic-kanban/e2e test" },
+            },
+          }),
+          JSON.stringify({
+            type: "tool.execution_complete",
+            data: {
+              toolCallId: "tool-shell",
+              success: false,
+              result: { content: "test failed" },
+            },
+          }),
+        ].join("\n"),
+      },
+    ]);
+
+    const res = await testApp.app.request(`/api/sessions/${sessionId}/summary`);
+    expect(res.status).toBe(200);
+
+    const body = await res.json();
+    expect(body.model).toBe("claude-sonnet-4.6");
+    expect(body.keyExcerpts).toContain("I found global setup and teardown for isolated E2E projects.");
+    expect(body.filesRead).toEqual(["/repo/packages/e2e/global-setup.ts"]);
+    expect(body.commandsRun).toEqual(["pnpm --filter @agentic-kanban/e2e test"]);
+    expect(body.errors[0]).toContain("shell");
+    expect(body.toolUsePatterns).toEqual([
+      { tool: "view", count: 1, failedCount: 0 },
+      { tool: "shell", count: 1, failedCount: 1 },
+    ]);
+  });
+
   it("extracts error results from tool_result blocks", async () => {
     const { sessionId } = await createSessionWithData(testApp.db);
 
