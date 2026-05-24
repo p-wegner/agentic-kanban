@@ -2,7 +2,7 @@
 
 /** Tagged profile selection — provider-aware replacement for the bare claudeProfile string. */
 export interface ProfileSelection {
-  provider: "claude" | "codex";
+  provider: "claude" | "codex" | "copilot";
   name: string;
 }
 

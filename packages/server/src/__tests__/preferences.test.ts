@@ -167,6 +167,7 @@ describe("Preferences API - settings", () => {
         agent_args: "--verbose",
         output_parser: "stream-json",
         claude_profile: "",
+        copilot_profile: "gpt-5.2",
       }),
     });
     expect(res.status).toBe(200);
@@ -194,6 +195,25 @@ describe("Preferences API - settings", () => {
     // agent_args and output_parser were not set
     expect(body.agent_args).toBeUndefined();
     expect(body.output_parser).toBeUndefined();
+  });
+
+  it("GET /api/preferences/settings returns Copilot provider settings", async () => {
+    const { app: freshApp } = createTestApp();
+
+    await freshApp.request("/api/preferences/settings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        provider: "copilot",
+        copilot_profile: "agent:reviewer",
+      }),
+    });
+
+    const res = await freshApp.request("/api/preferences/settings");
+    expect(res.status).toBe(200);
+    const body = await res.json() as any;
+    expect(body.provider).toBe("copilot");
+    expect(body.copilot_profile).toBe("agent:reviewer");
   });
 
   it("PUT /api/preferences/settings ignores disallowed keys", async () => {
@@ -237,7 +257,7 @@ describe("Preferences API - settings", () => {
     expect(body.agent_command).toBe("second");
   });
 
-  it("PUT /api/preferences/settings handles all four allowed keys", async () => {
+  it("PUT /api/preferences/settings handles agent/profile allowed keys", async () => {
     const { app: freshApp } = createTestApp();
 
     await freshApp.request("/api/preferences/settings", {
@@ -248,6 +268,7 @@ describe("Preferences API - settings", () => {
         agent_args: "--flag value",
         output_parser: "custom",
         claude_profile: "mock",
+        copilot_profile: "gpt-5.2",
       }),
     });
 
@@ -257,6 +278,15 @@ describe("Preferences API - settings", () => {
     expect(body.agent_args).toBe("--flag value");
     expect(body.output_parser).toBe("custom");
     expect(body.claude_profile).toBe("mock");
+    expect(body.copilot_profile).toBe("gpt-5.2");
+  });
+
+  it("GET /api/preferences/copilot-profiles returns an empty profile list", async () => {
+    const { app: freshApp } = createTestApp();
+    const res = await freshApp.request("/api/preferences/copilot-profiles");
+    expect(res.status).toBe(200);
+    const body = await res.json() as any;
+    expect(body.profiles).toEqual([]);
   });
 });
 

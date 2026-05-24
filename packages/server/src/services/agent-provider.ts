@@ -12,7 +12,8 @@ const TSX_URL = pathToFileURL(TSX_LOADER).href;
 
 let claudeMcpConfigPath: string | null = null;
 
-export type ProviderId = "claude-code" | "codex";
+export type ProviderName = "claude" | "codex" | "copilot";
+export type ProviderId = "claude-code" | "codex" | "copilot";
 
 /** Sentinel markers wrapping the machine-readable plan block emitted by a plan-mode run. */
 export const PLAN_BEGIN_MARKER = "===PLAN BEGIN===";
@@ -39,7 +40,7 @@ export interface ProviderLaunchOptions {
   /** @deprecated Use profile instead — kept for back-compat during migration */
   claudeProfile?: string;
   /** Provider-tagged profile selection (replaces bare claudeProfile string). */
-  profile?: { provider: "claude" | "codex"; name: string };
+  profile?: { provider: ProviderName; name: string };
   keepAlive?: boolean;
   permissionPromptTool?: string;
   planMode?: boolean;
@@ -506,6 +507,211 @@ export class CodexProvider implements AgentProvider {
   }
 }
 
+// --- Copilot provider ---
+
+const COPILOT_PLAN_PROMPT_PREFIX = [
+  "IMPORTANT: This is a PLAN-ONLY session. Do NOT implement, write, edit, or modify any files.",
+  "Do NOT run commands that make changes (git, npm, pnpm, yarn, pip, etc.). Only read and explore the codebase,",
+  "analyze the issue, and produce a detailed implementation plan.",
+  "",
+  "At the very END of your response, output the complete plan as Markdown wrapped EXACTLY between",
+  "these two marker lines, each on its own line with nothing else on the line:",
+  PLAN_BEGIN_MARKER,
+  "<your full markdown implementation plan here>",
+  PLAN_END_MARKER,
+  "Then stop.",
+].join("\n");
+
+const COPILOT_PLAN_DENIED_TOOLS = [
+  "write",
+  "shell(git add)",
+  "shell(git commit)",
+  "shell(git reset)",
+  "shell(git checkout)",
+  "shell(git clean)",
+  "shell(git push)",
+  "shell(npm install)",
+  "shell(pnpm install)",
+  "shell(yarn install)",
+  "shell(pip install)",
+  "shell(rm)",
+  "shell(del)",
+  "shell(Remove-Item)",
+];
+
+const COPILOT_DEFAULT_ALLOWED_TOOLS = [
+  "read",
+  "write",
+  "search",
+  "shell",
+  "agentic-kanban",
+];
+
+export class CopilotProvider implements AgentProvider {
+  readonly name = "copilot";
+
+  buildLaunchConfig(options: ProviderLaunchOptions): AgentLaunchConfig {
+    const { agentArgs, providerSessionId, agentCommand, keepAlive, profile, planMode, prompt } = options;
+    const isWindows = process.platform === "win32";
+
+    const isMockAgent = !!process.env.AGENT_COMMAND || (agentCommand?.includes("mock-agent") ?? false);
+    const command = process.env.AGENT_COMMAND || agentCommand || "copilot";
+
+    const args: string[] = [];
+    let promptPrefix: string | undefined;
+
+    if (isMockAgent) {
+      if (providerSessionId) {
+        args.push("--resume", providerSessionId);
+      }
+      if (keepAlive) {
+        args.push("--profile", "multi-turn");
+      }
+    } else {
+      args.push("-p", prompt ?? "");
+      args.push("--output-format", "json", "--stream", "on", "--no-ask-user", "--no-color");
+
+      if (providerSessionId) {
+        args.push(`--resume=${providerSessionId}`);
+      }
+
+      try {
+        args.push("--additional-mcp-config", `@${getMcpConfigPath()}`);
+      } catch (err) {
+        console.warn(`[agent] Failed to generate MCP config: ${err}`);
+      }
+      args.push("--disable-builtin-mcps");
+
+      const profileName = profile?.provider === "copilot" ? profile.name : undefined;
+      if (profileName) {
+        const mapped = mapCopilotProfile(profileName);
+        args.push(mapped.flag, mapped.value);
+      }
+
+      // Non-interactive Copilot requires explicit tool permissions. Keep this
+      // targeted instead of defaulting to --allow-all/--allow-all-tools.
+      for (const allowedTool of COPILOT_DEFAULT_ALLOWED_TOOLS) {
+        args.push(`--allow-tool=${allowedTool}`);
+      }
+
+      if (planMode) {
+        args.push("--plan");
+        args.push("--available-tools=read,search,shell,agentic-kanban");
+        for (const deniedTool of COPILOT_PLAN_DENIED_TOOLS) {
+          args.push(`--deny-tool=${deniedTool}`);
+        }
+        promptPrefix = COPILOT_PLAN_PROMPT_PREFIX;
+      }
+
+      if (agentArgs) {
+        args.push(...splitArgs(agentArgs));
+      }
+    }
+
+    return {
+      command,
+      args,
+      // On Windows `copilot` is installed as a .cmd/.ps1 shim in common Node
+      // installs, so route through the shell while keeping the window hidden.
+      useShell: isWindows,
+      isMockAgent,
+      env: { ...process.env as Record<string, string> },
+      keepStdinOpen: false,
+      promptPrefix,
+    };
+  }
+
+  parseStreamEvent(line: string): ParsedStreamEvent | undefined {
+    let obj: Record<string, unknown>;
+    try {
+      obj = JSON.parse(line);
+    } catch {
+      return undefined;
+    }
+
+    const result: ParsedStreamEvent = {};
+    const type = typeof obj.type === "string" ? obj.type : "";
+
+    const sessionId =
+      stringValue(obj.session_id) ??
+      stringValue(obj.sessionId) ??
+      stringValue((obj.session as Record<string, unknown> | undefined)?.id) ??
+      (type.includes("session") ? stringValue(obj.id) : undefined);
+    if (sessionId) {
+      result.providerSessionId = sessionId;
+    }
+
+    const model = stringValue(obj.model) ?? stringValue((obj.provider as Record<string, unknown> | undefined)?.model) ?? "";
+    const usage = obj.usage as Record<string, unknown> | undefined;
+    const inputTokens = numberValue(usage?.input_tokens ?? usage?.inputTokens ?? usage?.prompt_tokens);
+    const cachedTokens = numberValue(usage?.cached_input_tokens ?? usage?.cache_read_input_tokens ?? usage?.cachedInputTokens);
+    const outputTokens = numberValue(usage?.output_tokens ?? usage?.outputTokens ?? usage?.completion_tokens);
+
+    if (inputTokens || cachedTokens || model) {
+      result.liveStats = { model, contextTokens: inputTokens + cachedTokens };
+    }
+
+    if (type === "result" || type === "turn.completed" || type === "session.completed" || type === "completed") {
+      result.stats = {
+        durationMs: numberValue(obj.duration_ms ?? obj.durationMs),
+        totalCostUsd: numberValue(obj.total_cost_usd ?? obj.cost_usd ?? obj.costUsd),
+        inputTokens,
+        outputTokens,
+        numTurns: numberValue(obj.num_turns ?? obj.numTurns) || 1,
+        model,
+        success: obj.is_error !== true && obj.error === undefined,
+        agentSummary: stringValue(obj.result ?? obj.summary ?? obj.text),
+      };
+      result.turnComplete = true;
+    }
+
+    const item = obj.item as Record<string, unknown> | undefined;
+    const toolName = stringValue(obj.tool_name ?? obj.toolName ?? item?.tool_name ?? item?.toolName ?? item?.name);
+    if (toolName) {
+      result.toolActivity = {
+        name: toolName,
+        input: objectValue(obj.input ?? item?.input),
+        toolUseId: stringValue(obj.tool_use_id ?? obj.toolUseId ?? item?.id),
+      };
+    } else if (type.includes("command") || item?.type === "command_execution") {
+      const command = stringValue(obj.command ?? item?.command);
+      if (command) {
+        result.toolActivity = {
+          name: "shell",
+          input: { command },
+          toolUseId: stringValue(obj.id ?? item?.id),
+        };
+      }
+    }
+
+    if (type.includes("tool") && (type.includes("completed") || type.includes("result"))) {
+      const toolUseId = stringValue(obj.tool_use_id ?? obj.toolUseId ?? obj.id ?? item?.id);
+      if (toolUseId) result.toolResult = { toolUseId };
+    } else if (item?.type === "command_execution" && item.id && type.includes("completed")) {
+      result.toolResult = { toolUseId: String(item.id) };
+    }
+
+    const assistantText = extractCopilotAssistantText(obj);
+    if (assistantText) {
+      result.assistantText = assistantText;
+    }
+
+    if (
+      result.providerSessionId === undefined &&
+      result.stats === undefined &&
+      result.turnComplete === undefined &&
+      result.liveStats === undefined &&
+      result.assistantText === undefined &&
+      result.toolActivity === undefined &&
+      result.toolResult === undefined
+    ) {
+      return undefined;
+    }
+
+    return result;
+  }
+}
+
 // --- Provider registry ---
 
 const providers = new Map<string, AgentProvider>();
@@ -530,6 +736,7 @@ export function setDefaultProvider(name: string): void {
 // Register built-in providers
 registerProvider(new ClaudeProvider());
 registerProvider(new CodexProvider());
+registerProvider(new CopilotProvider());
 
 // --- Backward-compatible entry point ---
 
@@ -624,4 +831,52 @@ function splitArgs(input: string): string[] {
   }
   if (current) args.push(current);
   return args;
+}
+
+function mapCopilotProfile(profileName: string): { flag: "--model" | "--agent"; value: string } {
+  const agentPrefix = "agent:";
+  const modelPrefix = "model:";
+  if (profileName.startsWith(agentPrefix)) {
+    return { flag: "--agent", value: profileName.slice(agentPrefix.length) };
+  }
+  if (profileName.startsWith(modelPrefix)) {
+    return { flag: "--model", value: profileName.slice(modelPrefix.length) };
+  }
+  return { flag: "--model", value: profileName };
+}
+
+function stringValue(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function numberValue(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function objectValue(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function extractCopilotAssistantText(obj: Record<string, unknown>): string | undefined {
+  const direct = stringValue(obj.text ?? obj.message ?? obj.response ?? obj.result);
+  if (direct) return direct;
+
+  const item = obj.item as Record<string, unknown> | undefined;
+  const itemText = stringValue(item?.text ?? item?.message);
+  if (itemText) return itemText;
+
+  const content = obj.content ?? item?.content;
+  if (typeof content === "string" && content.length > 0) return content;
+  if (Array.isArray(content)) {
+    const textParts: string[] = [];
+    for (const block of content) {
+      if (block && typeof block === "object") {
+        const text = stringValue((block as Record<string, unknown>).text);
+        if (text) textParts.push(text);
+      }
+    }
+    if (textParts.length > 0) return textParts.join("\n");
+  }
+
+  return undefined;
 }

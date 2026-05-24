@@ -10,7 +10,8 @@ import type { BoardEvents } from "../services/board-events.js";
 import type { Database } from "../db/index.js";
 
 import { writeAgentSkillFile, readLocalSkillPrompt } from "@agentic-kanban/shared/lib/agent-skill-files";
-import { resolveAgentSettings } from "../services/agent-settings.service.js";
+import { resolveAgentSettings, toExecutorProvider } from "../services/agent-settings.service.js";
+import type { ProviderName } from "../services/agent-provider.js";
 
 export function createWorkspacesRoute(
   database: Database = db,
@@ -39,7 +40,7 @@ export function createWorkspacesRoute(
     let branch: string = body.branch;
     let claudeProfile: string | undefined;
     let agentCommand: string | undefined;
-    let resolvedProvider: "claude" | "codex" = "claude";
+    let resolvedProvider: ProviderName = "claude";
 
     try {
       // Resolve issue → project to get repoPath and defaultBranch
@@ -160,6 +161,10 @@ export function createWorkspacesRoute(
       if (profileOverride?.name) {
         if (profileOverride.provider === "codex") {
           prefMap.set("codex_profile", profileOverride.name);
+          prefMap.set("provider", "codex");
+        } else if (profileOverride.provider === "copilot") {
+          prefMap.set("copilot_profile", profileOverride.name);
+          prefMap.set("provider", "copilot");
         } else {
           prefMap.set("claude_profile", profileOverride.name);
           prefMap.set("provider", "claude");
@@ -219,7 +224,7 @@ export function createWorkspacesRoute(
       if (getSessionManager) {
         const truncatedPrompt = agentPrompt.length > 80 ? agentPrompt.slice(0, 80) + "..." : agentPrompt;
         console.log(`[workspaces] auto-launch: workspaceId=${id} branch=${branch} isDirect=${isDirect} prompt="${truncatedPrompt}" agentCommand=${agentCommand ?? "default"}`);
-        const executorProvider = resolvedProvider === "codex" ? "codex" : "claude-code";
+        const executorProvider = toExecutorProvider(resolvedProvider);
         sessionId = await getSessionManager().startSession({ workspaceId: id, prompt: agentPrompt, agentCommand, agentArgs, claudeProfile: resolvedProfile, permissionPromptTool, planMode, provider: executorProvider, triggerType: skillName ? `skill:${skillName}` : "agent", profile: resolvedProfileSelection });
       }
 

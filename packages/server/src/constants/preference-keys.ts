@@ -3,6 +3,7 @@ export const PREF_AGENT_ARGS = "agent_args";
 export const PREF_SKIP_PERMISSIONS = "skip_permissions";
 export const PREF_CLAUDE_PROFILE = "claude_profile";
 export const PREF_CODEX_PROFILE = "codex_profile";
+export const PREF_COPILOT_PROFILE = "copilot_profile";
 export const PREF_PROVIDER = "provider";
 export const PREF_MOCK_AGENT_PROFILE = "mock_agent_profile";
 export const PREF_MOCK_AGENT_DELAY_MS = "mock_agent_delay_ms";

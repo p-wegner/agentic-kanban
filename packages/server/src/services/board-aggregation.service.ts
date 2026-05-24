@@ -2,6 +2,7 @@ import { workspaces, sessions, sessionMessages, issues, projectStatuses, issueDe
 import { eq, inArray, sql, desc } from "drizzle-orm";
 import type { Database } from "../db/index.js";
 import { getDiffShortstat, detectConflicts } from "./git.service.js";
+import type { ProviderName } from "./agent-provider.js";
 
 // Limit concurrent background git operations to avoid hammering the filesystem
 let _bgGitRunning = 0;
@@ -27,7 +28,7 @@ type WorkspaceSummary = {
     branch: string;
     status: "active" | "reviewing" | "fixing" | "idle" | "closed";
     claudeProfile: string | null;
-    profile?: { provider: "claude" | "codex"; name: string } | null;
+    profile?: { provider: ProviderName; name: string } | null;
     agentCommand: string | null;
     readyForMerge?: boolean;
     planMode?: boolean;
@@ -133,7 +134,7 @@ export async function buildWorkspaceSummaryMap(
       branch: mainWs.branch,
       status: mainWs.status as "active" | "reviewing" | "fixing" | "idle" | "closed",
       claudeProfile: mainWs.claudeProfile,
-      profile: mainWs.claudeProfile ? { provider: (mainWs.provider as "claude" | "codex") ?? "claude", name: mainWs.claudeProfile } : null,
+      profile: mainWs.claudeProfile ? { provider: (mainWs.provider as ProviderName) ?? "claude", name: mainWs.claudeProfile } : null,
       agentCommand: mainWs.agentCommand,
       readyForMerge: mainWs.readyForMerge,
       planMode: mainWs.planMode,
