@@ -30,6 +30,7 @@ type WorkspaceSummary = {
     profile?: { provider: "claude" | "codex"; name: string } | null;
     agentCommand: string | null;
     readyForMerge?: boolean;
+    planMode?: boolean;
     diffStats?: { filesChanged: number; insertions: number; deletions: number } | null;
     conflicts?: { hasConflicts: boolean; conflictingFiles: string[] } | null;
     lastSessionAt?: string | null;
@@ -92,6 +93,7 @@ export async function buildWorkspaceSummaryMap(
       agentCommand: workspaces.agentCommand,
       provider: workspaces.provider,
       pendingPlanPath: workspaces.pendingPlanPath,
+      planMode: workspaces.planMode,
       workingDir: workspaces.workingDir,
       baseBranch: workspaces.baseBranch,
       isDirect: workspaces.isDirect,
@@ -134,6 +136,7 @@ export async function buildWorkspaceSummaryMap(
       profile: mainWs.claudeProfile ? { provider: (mainWs.provider as "claude" | "codex") ?? "claude", name: mainWs.claudeProfile } : null,
       agentCommand: mainWs.agentCommand,
       readyForMerge: mainWs.readyForMerge,
+      planMode: mainWs.planMode,
       pendingPlanPath: mainWs.pendingPlanPath,
     };
 
