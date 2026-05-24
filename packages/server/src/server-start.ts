@@ -627,26 +627,37 @@ export async function startServer(port?: number) {
     console.log("[startup] auto_monitor disabled — re-enable in Settings → Workflow → Board Monitoring");
   }
 
-  // Clean up stale sessions — but skip any whose agent process is still alive (survived hot-reload)
+  // Clean up stale sessions
   const staleSessions = await db.select({ id: sessions.id, workspaceId: sessions.workspaceId, pid: sessions.pid }).from(sessions).where(eq(sessions.status, "running"));
   if (staleSessions.length > 0) {
+    console.log(`[startup] Cleaning up ${staleSessions.length} stale session(s)`);
     const now = new Date().toISOString();
-    const dead = staleSessions.filter(s => {
-      if (!s.pid) return true;
-      try { process.kill(s.pid, 0); return false; } catch { return true; }
-    });
-    const alive = staleSessions.filter(s => !dead.includes(s));
+    const dead = [];
+    const alive = [];
+    for (const s of staleSessions) {
+      if (s.pid) {
+        try {
+          process.kill(s.pid, 0);
+          alive.push(s);
+        } catch {
+          dead.push(s);
+        }
+      } else {
+        dead.push(s);
+      }
+    }
+    for (const s of dead) {
+      await db.update(sessions).set({ status: "stopped", endedAt: now }).where(eq(sessions.id, s.id));
+    }
     if (alive.length > 0) {
+      for (const s of alive) {
+        if (s.pid) agentService.registerPid(s.id, s.pid);
+      }
       console.log(`[startup] ${alive.length} session(s) have surviving agent processes — leaving as running`);
     }
-    if (dead.length > 0) {
-      console.log(`[startup] Cleaning up ${dead.length} dead stale session(s)`);
-      const deadIds = dead.map(s => s.id);
-      await db.update(sessions).set({ status: "stopped", endedAt: now }).where(sql`${sessions.id} IN (${sql.join(deadIds.map(id => sql`${id}`), sql`, `)})`);
-      const workspaceIds = [...new Set(dead.map(s => s.workspaceId))];
-      for (const wsId of workspaceIds) {
-        await db.update(workspaces).set({ status: "idle", updatedAt: now }).where(eq(workspaces.id, wsId));
-      }
+    const workspaceIds = [...new Set(staleSessions.map(s => s.workspaceId))];
+    for (const wsId of workspaceIds) {
+      await db.update(workspaces).set({ status: "idle", updatedAt: now }).where(eq(workspaces.id, wsId));
     }
   }
 
