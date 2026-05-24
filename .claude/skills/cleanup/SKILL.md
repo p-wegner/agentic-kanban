@@ -1,3 +1,9 @@
+---
+name: cleanup
+description: "Clean up stale agentic-kanban resources including git worktrees, Claude Code sessions, and E2E test artifacts."
+argument-hint: "[--worktrees] [--sessions] [--e2e]"
+---
+
 # Cleanup Skill
 
 Cleans up stale resources related to the agentic-kanban project:
