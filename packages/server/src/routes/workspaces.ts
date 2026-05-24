@@ -89,8 +89,9 @@ export function createWorkspacesRoute(
         worktreePath = await gitService.createWorktree(project.repoPath, branch, baseBranch ?? undefined);
       }
 
-      // Run setup script if configured and enabled
-      if (setupScript && worktreePath && setupEnabled && !skipSetup) {
+      // Run setup script only for isolated git worktrees. Direct workspaces use
+      // the main checkout, where install/setup commands would mutate the real repo.
+      if (!isDirect && setupScript && worktreePath && setupEnabled && !skipSetup) {
         if (setupBlocking) {
           try {
             const result = await runSetupScript(worktreePath, setupScript);
