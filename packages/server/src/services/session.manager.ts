@@ -519,19 +519,7 @@ function createSessionManager(
 
   /** Check if an agent process is actually alive. Returns false if process is gone. */
   function isProcessAlive(sessionId: string): boolean {
-    const proc = agentService.getProcess(sessionId);
-    if (!proc) return false;
-    // On Windows, check if the process still exists via PID
-    if (process.platform === "win32") {
-      try {
-        // Sending signal 0 checks existence without killing
-        process.kill(proc.pid!, 0);
-        return true;
-      } catch {
-        return false;
-      }
-    }
-    return !proc.killed;
+    return agentService.isPidAlive(sessionId);
   }
 
   /** Clean up stale in-memory state for a session whose process is gone. */
