@@ -77,6 +77,8 @@ function createSessionManager(
   const sessionExitPlanModeDenied = new Set<string>();
   // Guard against infinite auto-resume loops (max 1 per workspace)
   const workspaceAutoResumeCount = new Map<string, number>();
+  // Track provider per session so broadcast uses the correct stream parser
+  const sessionProviders = new Map<string, string>();
 
   function broadcast(sessionId: string, message: AgentOutputMessage) {
     // Buffer the message for late subscribers
@@ -101,7 +103,8 @@ function createSessionManager(
 
     // Parse stdout data — may contain multiple JSONL lines in a single chunk
     if (message.type === "stdout" && message.data) {
-      const provider = getProvider();
+      const providerName = sessionProviders.get(sessionId);
+      const provider = getProvider(providerName);
       for (const line of message.data.split("\n")) {
         if (!line.trim()) continue;
         const evt = provider.parseStreamEvent(line);
@@ -360,6 +363,7 @@ function createSessionManager(
       resumeFromId: resumeFromId ?? null,
       triggerType: triggerType ?? null,
     });
+    sessionProviders.set(sessionId, executor);
 
     try {
       const proc = agentService.launch(workspace.workingDir, sessionId, prompt, agentArgs, (event) => { // onOutput callback
@@ -372,6 +376,7 @@ function createSessionManager(
           // Always clean up in-memory state regardless of DB result
           sessionContexts.delete(sessionId);
           turnStates.delete(sessionId);
+          sessionProviders.delete(sessionId);
           const hadExitPlanModeDenied = sessionExitPlanModeDenied.delete(sessionId);
 
           // Skip DB update if user explicitly stopped — stopSession already wrote "stopped"

@@ -147,20 +147,30 @@ export function createWorkspacesRoute(
         }
       }
 
-      // Read agent settings from preferences, then allow body.claudeProfile to override
+      // Read agent settings from preferences, then allow body overrides
       const prefRows = await database.select().from(preferences);
       const prefMap = new Map(prefRows.map(r => [r.key, r.value]));
 
       // Per-workspace profile overrides the global preference
-      const profileOverride = (body.claudeProfile as string | undefined) || undefined;
-      if (profileOverride) prefMap.set("claude_profile", profileOverride);
+      // New tagged format: body.profile = { provider, name }
+      // Legacy format: body.claudeProfile = string (Claude-only)
+      const profileOverride = body.profile as { provider?: string; name?: string } | undefined;
+      const legacyProfileOverride = (body.claudeProfile as string | undefined) || undefined;
+      if (profileOverride?.name) {
+        if (profileOverride.provider === "codex") {
+          prefMap.set("codex_profile", profileOverride.name);
+        } else {
+          prefMap.set("claude_profile", profileOverride.name);
+        }
+      } else if (legacyProfileOverride) {
+        prefMap.set("claude_profile", legacyProfileOverride);
+      }
 
       const { agentCommand: resolvedCommand, agentArgs, claudeProfile: resolvedProfile, profile: resolvedProfileSelection, provider, permissionPromptTool } = resolveAgentSettings(prefMap);
       resolvedProvider = provider;
       agentCommand = resolvedCommand;
-      // Keep the raw profile name (including "mock") on the workspace record for display, but pass
-      // undefined to the session when it's the mock profile (resolvedProfile is already sanitized)
-      claudeProfile = profileOverride || prefMap.get("claude_profile") || undefined;
+      // Keep the raw profile name on the workspace record for display
+      claudeProfile = resolvedProfileSelection?.name || legacyProfileOverride || prefMap.get("claude_profile") || undefined;
 
       // Insert DB record with workingDir and baseBranch
       await database.insert(workspaces).values({
