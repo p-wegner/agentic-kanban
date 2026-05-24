@@ -17,6 +17,7 @@ import { SettingsPanel } from "../components/SettingsPanel.js";
 import { SkeletonBoard } from "../components/SkeletonBoard.js";
 import { ToastContainer, showToast } from "../components/Toast.js";
 import { suggestBranchName } from "../lib/branch.js";
+import { MentionProvider } from "../lib/MentionContext.js";
 import { CommandPalette } from "../components/CommandPalette.js";
 import { ShortcutHelp } from "../components/ShortcutHelp.js";
 import { apiFetch } from "../lib/api.js";
@@ -1296,6 +1297,7 @@ export function BoardPage() {
   const canStartWorkspace = !!activeProject?.repoPath;
 
   return (
+    <MentionProvider value={{ issues: allMentionIssues, onMentionClick: handleMentionClick }}>
     <Layout
       projects={projects}
       activeProjectId={activeProjectId}
@@ -1651,5 +1653,6 @@ export function BoardPage() {
         />
       )}
     </Layout>
+    </MentionProvider>
   );
 }
