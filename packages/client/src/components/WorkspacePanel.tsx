@@ -16,6 +16,7 @@ import type {
   DiffResponse,
   DiffComment,
   SessionSummaryResponse,
+  ProfileSelection,
 } from "@agentic-kanban/shared";
 
 interface Project {
@@ -71,6 +72,51 @@ const STATUS_COLORS: Record<string, string> = {
   idle: "bg-yellow-100 text-yellow-700",
   closed: "bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400",
 };
+
+type AgentProvider = ProfileSelection["provider"];
+
+const COPILOT_DEFAULT_PROFILE = "default";
+
+type ProfileOption = {
+  provider: AgentProvider;
+  name: string;
+};
+
+function profileOptionValue(option: ProfileOption): string {
+  return `${option.provider}:${option.name}`;
+}
+
+function uniqueProfileOptions(options: ProfileOption[]): ProfileOption[] {
+  const seen = new Set<string>();
+  return options.filter((option) => {
+    const value = profileOptionValue(option);
+    if (seen.has(value)) return false;
+    seen.add(value);
+    return true;
+  });
+}
+
+function providerLabel(provider?: string | null): string {
+  if (provider === "codex") return "Codex";
+  if (provider === "copilot") return "Copilot";
+  return "Claude";
+}
+
+function profileSelectionFromValue(value: string): ProfileSelection | undefined {
+  const colonIdx = value.indexOf(":");
+  if (colonIdx === -1) return undefined;
+  const provider = value.slice(0, colonIdx) as AgentProvider;
+  const name = value.slice(colonIdx + 1);
+  if ((provider !== "claude" && provider !== "codex" && provider !== "copilot") || !name) return undefined;
+  return { provider, name };
+}
+
+function defaultSelectedProfile(settings: Record<string, string>): string {
+  if (settings.provider === "codex" && settings.codex_profile) return `codex:${settings.codex_profile}`;
+  if (settings.provider === "copilot") return `copilot:${settings.copilot_profile || COPILOT_DEFAULT_PROFILE}`;
+  if (settings.claude_profile) return `claude:${settings.claude_profile}`;
+  return "";
+}
 
 const SESSION_STATUS_COLORS: Record<string, string> = {
   running: "bg-blue-100 text-blue-700",
@@ -183,7 +229,9 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
   const [requiresReview, setRequiresReview] = useState(false);
   const [prompt, setPrompt] = useState("");
   const [prefs, setPrefs] = useState<Record<string, string>>({});
-  const [availableProfiles, setAvailableProfiles] = useState<string[]>([]);
+  const [availableProfileOptions, setAvailableProfileOptions] = useState<ProfileOption[]>([
+    { provider: "copilot", name: COPILOT_DEFAULT_PROFILE },
+  ]);
   const [selectedProfile, setSelectedProfile] = useState<string>("");
   const [availableSkills, setAvailableSkills] = useState<{ id: string; name: string; description: string }[]>([]);
   const [lastPrompt, setLastPrompt] = useState<string>(
@@ -316,12 +364,21 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
       .then((s) => {
         setPrefs(s);
         setRequiresReview(s.auto_review !== "false");
-        setSelectedProfile(s.claude_profile || "");
+        setSelectedProfile(defaultSelectedProfile(s));
       })
       .catch(() => {});
-    apiFetch<{ profiles: string[] }>("/api/preferences/claude-profiles")
-      .then((data) => setAvailableProfiles(data.profiles))
-      .catch(() => {});
+    Promise.all([
+      apiFetch<{ profiles: string[] }>("/api/preferences/claude-profiles").catch(() => ({ profiles: [] as string[] })),
+      apiFetch<{ profiles: string[] }>("/api/preferences/codex-profiles").catch(() => ({ profiles: [] as string[] })),
+      apiFetch<{ profiles: string[] }>("/api/preferences/copilot-profiles").catch(() => ({ profiles: [COPILOT_DEFAULT_PROFILE] })),
+    ]).then(([claudeData, codexData, copilotData]) => {
+      setAvailableProfileOptions(uniqueProfileOptions([
+        ...claudeData.profiles.map((name) => ({ provider: "claude" as const, name })),
+        ...codexData.profiles.map((name) => ({ provider: "codex" as const, name })),
+        { provider: "copilot" as const, name: COPILOT_DEFAULT_PROFILE },
+        ...copilotData.profiles.map((name) => ({ provider: "copilot" as const, name })),
+      ]));
+    }).catch(() => {});
     const skillsUrl = project ? `/api/agent-skills?projectId=${project.id}` : "/api/agent-skills";
     apiFetch<{ id: string; name: string; description: string }[]>(skillsUrl)
       .then(setAvailableSkills)
@@ -365,7 +422,8 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
         planMode: withPlanMode,
         branch: suggestion,
       };
-      if (selectedProfile) body.claudeProfile = selectedProfile;
+      const profile = profileSelectionFromValue(selectedProfile);
+      if (profile) body.profile = profile;
       const result = await apiFetch<WorkspaceResponse & { sessionId?: string }>("/api/workspaces", {
         method: "POST",
         body: JSON.stringify(body),
@@ -399,7 +457,8 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
         branch: suggestion,
         skillId,
       };
-      if (selectedProfile) body.claudeProfile = selectedProfile;
+      const profile = profileSelectionFromValue(selectedProfile);
+      if (profile) body.profile = profile;
       const result = await apiFetch<WorkspaceResponse & { sessionId?: string }>("/api/workspaces", {
         method: "POST",
         body: JSON.stringify(body),
@@ -985,7 +1044,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                 </button>
                 {quickDropdownOpen && (
                   <div className="absolute top-full left-0 mt-1 w-52 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded shadow-lg z-10">
-                    {availableProfiles.length > 0 && (
+                    {availableProfileOptions.length > 0 && (
                       <>
                         <div className="px-3 py-1.5">
                           <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">Profile</label>
@@ -996,8 +1055,10 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                             onClick={(e) => e.stopPropagation()}
                           >
                             <option value="">Default</option>
-                            {availableProfiles.map((p) => (
-                              <option key={p} value={p}>{p}</option>
+                            {availableProfileOptions.map((option) => (
+                              <option key={profileOptionValue(option)} value={profileOptionValue(option)}>
+                                {providerLabel(option.provider)}: {option.provider === "copilot" && option.name === COPILOT_DEFAULT_PROFILE ? "Default" : option.name}
+                              </option>
                             ))}
                           </select>
                         </div>
@@ -1080,6 +1141,8 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
             const sessions = workspaceSessions[ws.id] ?? [];
             const completedSessions = sessions.filter((s) => s.status !== "running");
             const runningSession = sessions.find((s) => s.status === "running");
+            const workspaceProvider = ws.profile?.provider ?? ws.provider;
+            const workspaceProfile = ws.profile?.name ?? ws.claudeProfile;
             const runningTriggerLabel = runningSession
               ? (getTriggerTypeLabel(runningSession.triggerType, runningSession.skillName) ?? { label: "Agent", className: "bg-blue-50 text-blue-600" })
               : null;
@@ -1100,6 +1163,11 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                     )}
                     {ws.planMode && (
                       <span className="ml-1.5 text-[10px] font-medium px-1.5 py-0.5 rounded bg-blue-100 text-blue-700">plan</span>
+                    )}
+                    {workspaceProvider && (
+                      <span className="ml-1.5 text-[10px] font-medium px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300">
+                        {providerLabel(workspaceProvider)}{workspaceProfile ? `:${workspaceProfile}` : ""}
+                      </span>
                     )}
                   </span>
                   <div className="flex items-center gap-1.5">
@@ -1557,7 +1625,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                                     }
                                   }
                                 }}
-                                placeholder={isSessionAlive && !isWaitingForInput ? "Agent is working..." : "Message Claude Code..."}
+                                placeholder={isSessionAlive && !isWaitingForInput ? "Agent is working..." : "Message agent..."}
                                 rows={2}
                                 disabled={isSessionAlive && !isWaitingForInput}
                                 className="flex-1 text-sm bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none disabled:bg-gray-50 dark:disabled:bg-gray-950 disabled:text-gray-400 dark:disabled:text-gray-500"
@@ -1609,7 +1677,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                               }
                             }
                           }}
-                          placeholder={isSessionAlive && !isWaitingForInput ? "Agent is working..." : "Message Claude Code..."}
+                          placeholder={isSessionAlive && !isWaitingForInput ? "Agent is working..." : "Message agent..."}
                           rows={2}
                           disabled={isSessionAlive && !isWaitingForInput}
                           className="flex-1 text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none disabled:bg-gray-50 dark:disabled:bg-gray-950 disabled:text-gray-400 dark:disabled:text-gray-500"
@@ -1834,7 +1902,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
               </button>
               {quickDropdownOpen && (
                 <div className="absolute bottom-full left-0 mb-1 w-52 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded shadow-lg z-10">
-                  {availableProfiles.length > 0 && (
+                  {availableProfileOptions.length > 0 && (
                     <>
                       <div className="px-3 py-1.5">
                         <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">Profile</label>
@@ -1845,8 +1913,10 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                           onClick={(e) => e.stopPropagation()}
                         >
                           <option value="">Default</option>
-                          {availableProfiles.map((p) => (
-                            <option key={p} value={p}>{p}</option>
+                          {availableProfileOptions.map((option) => (
+                            <option key={profileOptionValue(option)} value={profileOptionValue(option)}>
+                              {providerLabel(option.provider)}: {option.provider === "copilot" && option.name === COPILOT_DEFAULT_PROFILE ? "Default" : option.name}
+                            </option>
                           ))}
                         </select>
                       </div>

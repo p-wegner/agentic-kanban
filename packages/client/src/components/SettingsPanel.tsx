@@ -15,6 +15,7 @@ interface Settings {
   skip_permissions?: string;
   claude_profile?: string;
   codex_profile?: string;
+  copilot_profile?: string;
   provider?: string;
   permission_prompt_tool?: string;
   auto_review?: string;
@@ -44,6 +45,7 @@ const DEFAULT_SETTINGS: Settings = {
   skip_permissions: "false",
   claude_profile: "",
   codex_profile: "",
+  copilot_profile: "",
   provider: "claude",
   permission_prompt_tool: "true",
   auto_review: "true",
@@ -78,6 +80,22 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "schedule", label: "Schedule" },
   { id: "advanced", label: "Advanced" },
 ];
+
+type AgentProvider = "claude" | "codex" | "copilot";
+
+const COPILOT_DEFAULT_PROFILE = "default";
+
+function uniqueProfiles(profiles: string[], fallback?: string): string[] {
+  const all = fallback ? [fallback, ...profiles] : profiles;
+  return [...new Set(all.filter(Boolean))];
+}
+
+function settingsProfileValue(settings: Settings): string {
+  const provider = (settings.provider || "claude") as AgentProvider;
+  if (provider === "codex") return `codex:${settings.codex_profile || ""}`;
+  if (provider === "copilot") return `copilot:${settings.copilot_profile || COPILOT_DEFAULT_PROFILE}`;
+  return `claude:${settings.claude_profile || ""}`;
+}
 
 function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return (
@@ -342,6 +360,7 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [profiles, setProfiles] = useState<string[]>([]);
   const [codexProfiles, setCodexProfiles] = useState<string[]>([]);
+  const [copilotProfiles, setCopilotProfiles] = useState<string[]>([COPILOT_DEFAULT_PROFILE]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [tab, setTab] = useState<Tab>("agent");
@@ -415,16 +434,18 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
   useEffect(() => {
     async function load() {
       try {
-        const [data, profileData, codexProfileData, skillsData, tagsData] = await Promise.all([
+        const [data, profileData, codexProfileData, copilotProfileData, skillsData, tagsData] = await Promise.all([
           apiFetch<Record<string, string>>("/api/preferences/settings"),
           apiFetch<{ profiles: string[] }>("/api/preferences/claude-profiles"),
           apiFetch<{ profiles: string[] }>("/api/preferences/codex-profiles"),
+          apiFetch<{ profiles: string[] }>("/api/preferences/copilot-profiles").catch(() => ({ profiles: [COPILOT_DEFAULT_PROFILE] })),
           apiFetch<{ id: string; name: string; description: string; prompt: string; model: string | null; projectId: string | null; isBuiltin: boolean }[]>("/api/agent-skills"),
           apiFetch<{ id: string; name: string; color: string | null }[]>("/api/tags"),
         ]);
         setSettings({ ...DEFAULT_SETTINGS, ...data });
         setProfiles(profileData.profiles);
         setCodexProfiles(codexProfileData.profiles);
+        setCopilotProfiles(uniqueProfiles(copilotProfileData.profiles, COPILOT_DEFAULT_PROFILE));
         setSkills(skillsData);
         setTagsList(tagsData);
 
@@ -593,19 +614,21 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                       className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
                     />
                   </Field>
-                  <Field label="Agent Profile" hint="Selects agent profile and provider. Claude: ~/.claude/settings_*.json — Codex: ~/.codex/<name>.config.toml (rename legacy config_<name>.toml → <name>.config.toml)">
+                  <Field label="Agent Profile" hint="Selects agent provider and profile. Claude uses ~/.claude/settings_*.json, Codex uses ~/.codex/<name>.config.toml, Copilot uses the CLI default or configured model profile.">
                     <select
-                      value={`${settings.provider || "claude"}:${settings.provider === "codex" ? (settings.codex_profile || "") : (settings.claude_profile || "")}`}
+                      value={settingsProfileValue(settings)}
                       onChange={(e) => {
                         const val = e.target.value;
                         if (val === "") {
-                          setSettings((s) => ({ ...s, provider: "claude", claude_profile: "", codex_profile: s.codex_profile }));
+                          setSettings((s) => ({ ...s, provider: "claude", claude_profile: "", codex_profile: s.codex_profile, copilot_profile: s.copilot_profile }));
                         } else {
                           const [prov, name] = val.split(":");
                           if (prov === "codex") {
-                            setSettings((s) => ({ ...s, provider: "codex", codex_profile: name, claude_profile: s.claude_profile }));
+                            setSettings((s) => ({ ...s, provider: "codex", codex_profile: name, claude_profile: s.claude_profile, copilot_profile: s.copilot_profile }));
+                          } else if (prov === "copilot") {
+                            setSettings((s) => ({ ...s, provider: "copilot", copilot_profile: name === COPILOT_DEFAULT_PROFILE ? "" : name, claude_profile: s.claude_profile, codex_profile: s.codex_profile }));
                           } else {
-                            setSettings((s) => ({ ...s, provider: "claude", claude_profile: name, codex_profile: s.codex_profile }));
+                            setSettings((s) => ({ ...s, provider: "claude", claude_profile: name, codex_profile: s.codex_profile, copilot_profile: s.copilot_profile }));
                           }
                         }
                       }}
@@ -624,6 +647,11 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                           ))}
                         </optgroup>
                       )}
+                      <optgroup label="Copilot">
+                        {copilotProfiles.map((p) => (
+                          <option key={`copilot:${p}`} value={`copilot:${p}`}>{p === COPILOT_DEFAULT_PROFILE ? "Default" : p}</option>
+                        ))}
+                      </optgroup>
                     </select>
                   </Field>
                   <Field label="Additional Arguments" hint="Extra CLI arguments passed to the agent command. Arguments are shell-split (supports quoting).">
