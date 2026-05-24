@@ -95,11 +95,21 @@ test.describe("Settings UI", () => {
     await expect(page.locator("h2", { hasText: "Settings" })).toBeVisible();
 
     const profileSelect = page.locator("label", { hasText: "Agent Profile" }).locator("xpath=..").locator("select");
+    await expect(profileSelect.locator('option[value=""]')).toHaveText("Default (Claude)");
     await expect(profileSelect.locator('optgroup[label="Copilot"]')).toHaveCount(1);
     await expect(profileSelect.locator('option[value="copilot:default"]')).toHaveText("Copilot: Default");
 
     await profileSelect.selectOption("copilot:default");
     await expect(profileSelect).toHaveValue("copilot:default");
+  });
+
+  test("agent profile default option names the active harness", async ({ page }) => {
+    await page.locator('button[title="Settings"]').click();
+    await expect(page.locator("h2", { hasText: "Settings" })).toBeVisible();
+
+    const profileSelect = page.locator("label", { hasText: "Agent Profile" }).locator("xpath=..").locator("select");
+    await profileSelect.selectOption("copilot:default");
+    await expect(profileSelect.locator('option[value=""]')).toHaveText("Default (Copilot)");
   });
 
   test("cancel closes panel without saving", async ({ page }) => {
