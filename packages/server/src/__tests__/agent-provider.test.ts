@@ -656,6 +656,9 @@ describe("CopilotProvider", () => {
 
   it("parses session id, assistant text, tool activity, and completion stats from flexible JSON events", () => {
     expect(provider.parseStreamEvent(JSON.stringify({ type: "session.started", id: "copilot-1" }))?.providerSessionId).toBe("copilot-1");
+    expect(provider.parseStreamEvent(JSON.stringify({ type: "session.background_tasks_changed", id: "event-1" }))?.providerSessionId).toBeUndefined();
+    expect(provider.parseStreamEvent(JSON.stringify({ type: "session.warning", id: "warning-1" }))?.providerSessionId).toBeUndefined();
+    expect(provider.parseStreamEvent(JSON.stringify({ type: "result", sessionId: "copilot-result-1" }))?.providerSessionId).toBe("copilot-result-1");
     expect(provider.parseStreamEvent(JSON.stringify({ type: "assistant.message", text: "Done" }))?.assistantText).toBe("Done");
 
     const toolEvt = provider.parseStreamEvent(JSON.stringify({

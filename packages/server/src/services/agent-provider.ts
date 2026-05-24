@@ -549,6 +549,16 @@ const COPILOT_DEFAULT_ALLOWED_TOOLS = [
   "agentic-kanban",
 ];
 
+const COPILOT_SESSION_ID_TYPES = new Set([
+  "session.start",
+  "session.started",
+  "session.created",
+  "session_start",
+  "session_started",
+  "session_created",
+  "result",
+]);
+
 function resolveCopilotNpmLoader(command: string): string | undefined {
   if (process.platform !== "win32") return undefined;
 
@@ -673,12 +683,13 @@ export class CopilotProvider implements AgentProvider {
 
     const result: ParsedStreamEvent = {};
     const type = typeof obj.type === "string" ? obj.type : "";
+    const normalized = type.toLowerCase().replace(/-/g, "_");
 
     const sessionId =
       stringValue(obj.session_id) ??
       stringValue(obj.sessionId) ??
       stringValue((obj.session as Record<string, unknown> | undefined)?.id) ??
-      (type.includes("session") ? stringValue(obj.id) : undefined);
+      (COPILOT_SESSION_ID_TYPES.has(normalized) ? stringValue(obj.id) : undefined);
     if (sessionId) {
       result.providerSessionId = sessionId;
     }
