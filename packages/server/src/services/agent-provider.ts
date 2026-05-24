@@ -29,6 +29,8 @@ export interface AgentLaunchConfig {
   env: Record<string, string>;
   /** If true, write prompt to stdin and keep it open for follow-up writes. */
   keepStdinOpen?: boolean;
+  /** If true, do not write the prompt to stdin because the provider receives it via argv. */
+  suppressStdinPrompt?: boolean;
   /** Prepended to the stdin prompt (used for providers that lack a system-prompt flag, e.g. Codex plan mode). */
   promptPrefix?: string;
 }
@@ -559,6 +561,7 @@ export class CopilotProvider implements AgentProvider {
 
     const args: string[] = [];
     let promptPrefix: string | undefined;
+    let suppressStdinPrompt = false;
 
     if (isMockAgent) {
       if (providerSessionId) {
@@ -568,7 +571,9 @@ export class CopilotProvider implements AgentProvider {
         args.push("--profile", "multi-turn");
       }
     } else {
-      args.push("-p", prompt ?? "");
+      const effectivePrompt = planMode ? `${COPILOT_PLAN_PROMPT_PREFIX}\n\n${prompt ?? ""}` : (prompt ?? "");
+      args.push("-p", effectivePrompt);
+      suppressStdinPrompt = true;
       args.push("--output-format", "json", "--stream", "on", "--no-ask-user", "--no-color");
 
       if (providerSessionId) {
@@ -600,7 +605,6 @@ export class CopilotProvider implements AgentProvider {
         for (const deniedTool of COPILOT_PLAN_DENIED_TOOLS) {
           args.push(`--deny-tool=${deniedTool}`);
         }
-        promptPrefix = COPILOT_PLAN_PROMPT_PREFIX;
       }
 
       if (agentArgs) {
@@ -617,6 +621,7 @@ export class CopilotProvider implements AgentProvider {
       isMockAgent,
       env: { ...process.env as Record<string, string> },
       keepStdinOpen: false,
+      suppressStdinPrompt,
       promptPrefix,
     };
   }
