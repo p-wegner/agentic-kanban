@@ -590,7 +590,9 @@ export class CopilotProvider implements AgentProvider {
       const profileName = profile?.provider === "copilot" ? profile.name : undefined;
       if (profileName) {
         const mapped = mapCopilotProfile(profileName);
-        args.push(mapped.flag, mapped.value);
+        if (mapped) {
+          args.push(mapped.flag, mapped.value);
+        }
       }
 
       // Non-interactive Copilot requires explicit tool permissions. Keep this
@@ -838,9 +840,12 @@ function splitArgs(input: string): string[] {
   return args;
 }
 
-function mapCopilotProfile(profileName: string): { flag: "--model" | "--agent"; value: string } {
+function mapCopilotProfile(profileName: string): { flag: "--model" | "--agent"; value: string } | undefined {
   const agentPrefix = "agent:";
   const modelPrefix = "model:";
+  if (profileName === "default") {
+    return undefined;
+  }
   if (profileName.startsWith(agentPrefix)) {
     return { flag: "--agent", value: profileName.slice(agentPrefix.length) };
   }
