@@ -95,10 +95,10 @@ export async function autoStartFollowups(
       const inProgressStatus = statuses.find(s => s.name === "In Progress") ?? todoStatus;
       await database.update(issues).set({ statusId: inProgressStatus.id, updatedAt: now, statusChangedAt: now }).where(eq(issues.id, dep.issueId));
 
-      const { agentCommand, agentArgs, claudeProfile } = resolveAgentSettings(prefMap);
+      const { agentCommand, agentArgs, claudeProfile, profile, provider } = resolveAgentSettings(prefMap);
       const prompt = `${followupIssue[0].title}\n\n${followupIssue[0].description ?? ""}`.trim();
 
-      await getSessionManager().startSession({ workspaceId: wsId, prompt, agentCommand, agentArgs, claudeProfile, triggerType: "auto-start" });
+      await getSessionManager().startSession({ workspaceId: wsId, prompt, agentCommand, agentArgs, claudeProfile, profile, provider: provider === "codex" ? "codex" : "claude-code", triggerType: "auto-start" });
       await database.update(workspaces).set({ status: "active", updatedAt: now }).where(eq(workspaces.id, wsId));
 
       console.log(`[followup-workspace] auto-started follow-up workspace for issue ${followupIssue[0].issueNumber ?? dep.issueId}`);

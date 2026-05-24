@@ -393,7 +393,10 @@ export async function startServer(port?: number) {
           const agentCmd = isMockProfile(learningProfile) ? MOCK_AGENT_COMMAND : (prefMapLearning.get("agent_command") || undefined);
           const agentArgs = prefMapLearning.get("agent_args") || undefined;
           const claudeProfile = isMockProfile(learningProfile) ? undefined : learningProfile;
-          const learningSessId = await sessionManager.startSession({ workspaceId: workspace.id, prompt: learningPrompt, agentCommand: agentCmd, agentArgs, claudeProfile, triggerType: "learning" });
+          const providerLearnMerge = (prefMapLearning.get("provider") || "claude") as "claude" | "codex";
+          const effectiveProfileLearnMerge = providerLearnMerge === "codex" ? (prefMapLearning.get(PREF_CODEX_PROFILE) || undefined) : claudeProfile;
+          const profileSelectionLearnMerge = effectiveProfileLearnMerge ? { provider: providerLearnMerge, name: effectiveProfileLearnMerge } : undefined;
+          const learningSessId = await sessionManager.startSession({ workspaceId: workspace.id, prompt: learningPrompt, agentCommand: agentCmd, agentArgs, claudeProfile, profile: profileSelectionLearnMerge, provider: providerLearnMerge === "codex" ? "codex" : "claude-code", triggerType: "learning" });
           learningSessionIds.add(learningSessId);
           console.log(`[workflow] learning step started: session=${learningSessId}`);
           await new Promise<void>((resolve) => {
@@ -488,10 +491,12 @@ export async function startServer(port?: number) {
       const manualProfile = prefMap.get("claude_profile") || undefined;
       const agentCommand = isMockProfile(manualProfile) ? MOCK_AGENT_COMMAND : (prefMap.get("agent_command") || undefined);
       const claudeProfile = isMockProfile(manualProfile) ? undefined : manualProfile;
-      const manualProfileSelection = claudeProfile ? { provider: "claude" as const, name: claudeProfile } : undefined;
+      const provider = ((prefMap.get("provider") || "claude") as "claude" | "codex");
+      const codexProfile = prefMap.get(PREF_CODEX_PROFILE) || undefined;
+      const effectiveProfileName = provider === "codex" ? codexProfile : claudeProfile;
+      const manualProfileSelection = effectiveProfileName ? { provider, name: effectiveProfileName } : undefined;
       const reviewArgs = buildReviewArgs(prefMap);
       const autoFix = prefMap.get("review_auto_fix") !== "false";
-      const provider = (prefMap.get("provider") || undefined) as ProviderId | undefined;
 
       const projectRows = await db.select({ defaultBranch: projects.defaultBranch }).from(projects).where(eq(projects.id, projectId)).limit(1);
       const defaultBranch = projectRows.length > 0 ? projectRows[0].defaultBranch : "main";
@@ -516,7 +521,7 @@ export async function startServer(port?: number) {
       await db.update(workspaces).set({ status: "reviewing", updatedAt: now }).where(eq(workspaces.id, workspaceId));
       boardEvents.broadcast(projectId, "issue_updated");
 
-      const reviewSessionId = await sessionManager.startSession({ workspaceId, prompt: reviewPromptText, agentCommand, agentArgs: reviewArgsWithModel, claudeProfile, provider, triggerType: "review" });
+      const reviewSessionId = await sessionManager.startSession({ workspaceId, prompt: reviewPromptText, agentCommand, agentArgs: reviewArgsWithModel, claudeProfile, profile: manualProfileSelection, provider: provider === "codex" ? "codex" : "claude-code", triggerType: "review" });
       reviewSessionIds.add(reviewSessionId);
       console.log(`[workflow] manual review session ${reviewSessionId} for workspace ${workspaceId}`);
 
