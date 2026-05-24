@@ -4,6 +4,14 @@ import type { CreateIssueRequest } from "@agentic-kanban/shared";
 import type { CreateIssueFormState } from "./CreateIssueForm.js";
 import { apiFetch } from "../lib/api.js";
 import { showToast } from "./Toast.js";
+import TicketMentionInput from "./TicketMentionInput.js";
+import TicketMentionRenderer from "./TicketMentionRenderer.js";
+
+interface Skill {
+  id: string;
+  name: string;
+  description: string | null;
+}
 
 interface Skill {
   id: string;

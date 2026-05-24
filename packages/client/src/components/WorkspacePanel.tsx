@@ -1524,10 +1524,10 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                         sessionId={selectedHistoryId ?? activeSession ?? undefined}
                         footer={isRunning && ws.status !== "closed" ? (
                             <div className="flex gap-2">
-                              <textarea
-                                ref={textareaRef}
+                              <TicketMentionInput
+                                inputRef={textareaRef}
                                 value={prompt}
-                                onChange={(e) => setPrompt(e.target.value)}
+                                onChange={setPrompt}
                                 onKeyDown={(e) => {
                                   if (e.key === "Enter" && e.ctrlKey) {
                                     e.preventDefault();
@@ -1544,7 +1544,6 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                                 rows={2}
                                 disabled={isSessionAlive && !isWaitingForInput}
                                 className="flex-1 text-sm bg-white text-gray-900 border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none disabled:bg-gray-50 disabled:text-gray-400"
-                                onClick={(e) => e.stopPropagation()}
                               />
                               {isSessionAlive && !isWaitingForInput ? (
                                 <button
@@ -1579,10 +1578,10 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
 
                     {!selectedHistoryId && !activeSession && ws.workingDir && ws.status !== "closed" && (
                       <div className="flex gap-2">
-                        <textarea
-                          ref={textareaRef}
+                        <TicketMentionInput
+                          inputRef={textareaRef}
                           value={prompt}
-                          onChange={(e) => setPrompt(e.target.value)}
+                          onChange={(val) => setPrompt(val)}
                           onKeyDown={(e) => {
                             if (e.key === "Enter" && e.ctrlKey) {
                               e.preventDefault();
@@ -1597,7 +1596,6 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                           rows={2}
                           disabled={isSessionAlive && !isWaitingForInput}
                           className="flex-1 text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none disabled:bg-gray-50 disabled:text-gray-400"
-                          onClick={(e) => e.stopPropagation()}
                         />
                         {isSessionAlive && !isWaitingForInput ? (
                           <button
