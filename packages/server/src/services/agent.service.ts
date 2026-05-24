@@ -62,9 +62,11 @@ export function launch(
 
   console.log(`[agent] launching: command=${command} provider=${provider ?? "auto"} worktree=${worktreePath} sessionId=${sessionId} resume=${providerSessionId ?? "none"}`);
 
-  // On Windows, detached: true breaks stdout pipes when shell: true is used (mock agents).
-  // Only detach non-mock agents — they need to outlive server hot-reload restarts.
-  const shouldDetach = !(isMockAgent && process.platform === "win32");
+  // On Windows, detached: true breaks stdout pipes (and the exit event) when shell: true
+  // is used — this hits mock agents and Codex (a .cmd shim that requires a shell). Such
+  // agents can't survive a server hot-reload, but detaching them would drop all their output.
+  // Real claude.exe agents don't need a shell, so they stay detached to outlive hot-reloads.
+  const shouldDetach = !(useShell && process.platform === "win32");
   const proc = spawn(command, args, {
     cwd: worktreePath,
     shell: useShell,
