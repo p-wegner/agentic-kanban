@@ -162,15 +162,19 @@ export function createWorkspacesRoute(
           prefMap.set("codex_profile", profileOverride.name);
         } else {
           prefMap.set("claude_profile", profileOverride.name);
+          prefMap.set("provider", "claude");
         }
       } else if (legacyProfileOverride) {
+        // Legacy Claude profile: implicitly switches provider to Claude
         prefMap.set("claude_profile", legacyProfileOverride);
+        prefMap.set("provider", "claude");
       }
 
       const { agentCommand: resolvedCommand, agentArgs, claudeProfile: resolvedProfile, profile: resolvedProfileSelection, provider, permissionPromptTool } = resolveAgentSettings(prefMap);
       resolvedProvider = provider;
       agentCommand = resolvedCommand;
       // Keep the raw profile name on the workspace record for display
+      // Priority: resolvedProfileSelection?.name (from agent-settings), then legacyProfileOverride (from request body), then default from prefs
       claudeProfile = resolvedProfileSelection?.name || legacyProfileOverride || prefMap.get("claude_profile") || undefined;
 
       // Insert DB record with workingDir and baseBranch
@@ -293,6 +297,9 @@ export function createWorkspacesRoute(
         includeVisualProof: workspaces.includeVisualProof,
         readyForMerge: workspaces.readyForMerge,
         status: workspaces.status,
+        claudeProfile: workspaces.claudeProfile,
+        agentCommand: workspaces.agentCommand,
+        provider: workspaces.provider,
         createdAt: workspaces.createdAt,
         updatedAt: workspaces.updatedAt,
         issueTitle: issues.title,
@@ -318,6 +325,9 @@ export function createWorkspacesRoute(
       includeVisualProof: row.includeVisualProof,
       readyForMerge: row.readyForMerge,
       status: row.status,
+      claudeProfile: row.claudeProfile,
+      agentCommand: row.agentCommand,
+      provider: row.provider,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
       issue: { title: row.issueTitle, priority: row.issuePriority },
