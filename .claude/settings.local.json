@@ -20,6 +20,9 @@
       "PowerShell($env:CLAUDE_PROFILE)",
       "PowerShell(Get-NetTCPConnection -ErrorAction SilentlyContinue | Where-Object { $_.LocalPort -in @\\(3001,3002,3003,3004,3005\\) -and $_.State -eq \"Listen\" } | Select-Object LocalPort, State, OwningProcess)",
       "Bash(scc)"
+    ],
+    "additionalDirectories": [
+      "C:\\andrena\\claude_code\\claude-marketplace"
     ]
   },
   "spinnerTipsEnabled": true
