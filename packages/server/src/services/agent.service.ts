@@ -67,7 +67,7 @@ export function launch(
   // is used — this hits mock agents and Codex (a .cmd shim that requires a shell). Such
   // agents can't survive a server hot-reload, but detaching them would drop all their output.
   // Real claude.exe agents don't need a shell, so they stay detached to outlive hot-reloads.
-  const shouldDetach = !(useShell && process.platform === "win32");
+  const shouldDetach = provider !== "copilot" && !(useShell && process.platform === "win32");
   const proc = spawn(command, args, {
     cwd: worktreePath,
     shell: useShell,
