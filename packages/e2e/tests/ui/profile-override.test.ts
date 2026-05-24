@@ -35,14 +35,14 @@ test.describe("Claude profile override — expanded create panel", () => {
     await page.goto("/");
     await page.waitForSelector("h2");
 
-    const firstColumn = page.locator(".bg-gray-100.rounded-lg").first();
+    const firstColumn = page.locator(".bg-gray-100.rounded-xl").first();
     await firstColumn.locator("button[title='Add issue']").click();
     await page.locator("button[title='Expand form']").click();
 
     const panel = page.locator(".fixed.right-0.top-0");
     await expect(panel).toBeVisible();
 
-    // Profile override input should not be visible before Start workspace is checked
+    // Profile override select should not be visible before Start workspace is checked
     await expect(
       panel.locator("label", { hasText: "Profile override" }),
     ).not.toBeVisible();
@@ -56,22 +56,34 @@ test.describe("Claude profile override — expanded create panel", () => {
     }
     await startWsLabel.locator("input[type='checkbox']").check();
 
-    // Profile override input should now be visible
+    // Profile override select should now be visible
     await expect(
       panel.locator("label", { hasText: "Profile override" }),
     ).toBeVisible();
     await expect(
-      panel.locator("input[placeholder='e.g. zai (blank = default)']"),
+      panel.locator("select").filter({
+        has: page.locator("option", { hasText: /Default/ }),
+      }),
     ).toBeVisible();
 
     await panel.locator("button[title='Close']").click();
   });
 
-  test("Profile override field accepts text input", async ({ page }) => {
+  test("Profile override field selects an available profile", async ({
+    request,
+    page,
+  }) => {
+    const profilesRes = await request.get(
+      `${SERVER_URL}/api/preferences/claude-profiles`,
+    );
+    expect(profilesRes.status()).toBe(200);
+    const { profiles } = await profilesRes.json();
+    expect(profiles.length).toBeGreaterThan(0);
+
     await page.goto("/");
     await page.waitForSelector("h2");
 
-    const firstColumn = page.locator(".bg-gray-100.rounded-lg").first();
+    const firstColumn = page.locator(".bg-gray-100.rounded-xl").first();
     await firstColumn.locator("button[title='Add issue']").click();
     await page.locator("button[title='Expand form']").click();
 
@@ -84,15 +96,14 @@ test.describe("Claude profile override — expanded create panel", () => {
     }
     await startWsLabel.locator("input[type='checkbox']").check();
 
-    const profileInput = panel.locator(
-      "input[placeholder='e.g. zai (blank = default)']",
-    );
-    await profileInput.fill("test-profile");
-    await expect(profileInput).toHaveValue("test-profile");
+    const profileSelect = panel.locator("select").filter({
+      has: page.locator("option", { hasText: /Default/ }),
+    });
+    await profileSelect.selectOption(`claude:${profiles[0]}`);
+    await expect(profileSelect).toHaveValue(`claude:${profiles[0]}`);
 
-    // Clear value
-    await profileInput.clear();
-    await expect(profileInput).toHaveValue("");
+    await profileSelect.selectOption("");
+    await expect(profileSelect).toHaveValue("");
 
     await panel.locator("button[title='Close']").click();
   });
@@ -131,7 +142,13 @@ test.describe("Claude profile override — expanded create panel", () => {
 
     expect(ws.id).toBeDefined();
 
-    // Verify via board endpoint — workspaceSummary.main.claudeProfile is included there
+    // Verify via workspace GET endpoint directly — this workspace should have the profile stored
+    const wsDetailRes = await request.get(`${SERVER_URL}/api/workspaces/${ws.id}`);
+    expect(wsDetailRes.status()).toBe(200);
+    const wsDetail = await wsDetailRes.json();
+    expect(wsDetail.claudeProfile).toBe(profileName);
+
+    // Also verify via board endpoint — workspaceSummary.main.claudeProfile is included there
     const boardRes = await request.get(
       `${SERVER_URL}/api/projects/${projectId}/board`,
     );
@@ -218,16 +235,31 @@ test.describe("Claude profile override — workspace panel select", () => {
     await page.goto("/");
     await page.waitForSelector("h2");
 
-    // Find and click the issue card to open the workspace panel
+    // Find and click the issue card to open the issue detail panel
     const issueCard = page.locator("p", { hasText: issue.title }).first();
     await expect(issueCard).toBeVisible({ timeout: 5000 });
     await issueCard.click();
 
-    // The workspace panel should open; wait for it
+    // Wait for issue detail panel to appear
+    const issuePanel = page.locator(".fixed.right-0.top-0");
+    await expect(issuePanel).toBeVisible({ timeout: 5000 });
+
+    // Click on the workspace button in the issue detail panel to open workspace panel
+    // The workspace button shows the branch name
+    const workspaceBtn = issuePanel.locator("button").filter({ hasText: ws.branch }).first();
+    await expect(workspaceBtn).toBeVisible({ timeout: 5000 });
+    await workspaceBtn.click();
+
+    // The workspace panel should now be visible; wait for it
     const wsPanel = page.locator(".fixed.right-0.top-0");
     await expect(wsPanel).toBeVisible({ timeout: 5000 });
 
-    // Profile select should be visible (profiles available)
+    // Wait a bit for the profiles to fetch and render, then open the dropdown
+    await page.waitForTimeout(1000);
+    const moreOptionsBtn = wsPanel.locator("button[title='More options']").last();
+    await moreOptionsBtn.click({ timeout: 5000 });
+
+    // Profile select should now be visible in the dropdown
     await expect(
       wsPanel.locator("label", { hasText: "Profile" }),
     ).toBeVisible({ timeout: 5000 });

@@ -32,6 +32,7 @@ import { BacklogPanel } from "../components/BacklogPanel.js";
 import type {
   CreateIssueRequest,
   IssueWithStatus,
+  ProfileSelection,
   StatusWithIssues,
   UpdateIssueRequest,
 } from "@agentic-kanban/shared";
@@ -699,10 +700,10 @@ export function BoardPage() {
     showToast(`Removed "${project?.name ?? "project"}"`, "success");
   }
 
-  async function handleCreateIssue(data: CreateIssueRequest & { startWorkspace?: boolean; planMode?: boolean; claudeProfile?: string; isDirect?: boolean; skillId?: string }) {
+  async function handleCreateIssue(data: CreateIssueRequest & { startWorkspace?: boolean; planMode?: boolean; profile?: ProfileSelection; isDirect?: boolean; skillId?: string }) {
     setMutating(true);
     setError(null);
-    const { startWorkspace, planMode, claudeProfile, isDirect, skillId, ...issueData } = data;
+    const { startWorkspace, planMode, profile, isDirect, skillId, ...issueData } = data;
     try {
       const created = await apiFetch<{ id: string; issueNumber: number; title: string }>(
         "/api/issues",
@@ -727,7 +728,7 @@ export function BoardPage() {
               baseBranch: isDirect ? undefined : activeProject.defaultBranch,
               isDirect: isDirect || undefined,
               planMode: planMode || undefined,
-              claudeProfile: claudeProfile || undefined,
+              profile: profile || undefined,
               skillId: skillId || undefined,
             }),
           });
