@@ -1496,7 +1496,15 @@ export function BoardPage() {
             <BoardColumn
               key={col.id}
               column={col}
-              style={dynamicColumnScaling && !columnWidths[col.id] ? { flexGrow: Math.max(1, col.issues.length) } : undefined}
+              style={
+                columnWidths[col.id]
+                  ? undefined
+                  : dynamicColumnScaling
+                    ? { flexGrow: Math.max(1, col.issues.length) }
+                    : colIdx === activeColumns.length - 1
+                      ? { flexGrow: 1 }
+                      : undefined
+              }
               width={columnWidths[col.id]}
               onResizeStart={colIdx < activeColumns.length - 1 ? (e) => handleColumnResizeStart(col.id, e) : undefined}
               onResizeReset={colIdx < activeColumns.length - 1 ? () => setColumnWidths((prev) => {
