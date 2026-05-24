@@ -11,7 +11,20 @@ export interface AgentOutputEvent {
 export type AgentOutputCallback = (event: AgentOutputEvent) => void;
 
 const activeProcesses = new Map<string, ChildProcess>();
+const activePids = new Map<string, number>();
 const stdinOpen = new Map<string, boolean>();
+
+function killPid(pid: number): void {
+  if (process.platform === "win32") {
+    spawn("taskkill", ["/pid", String(pid), "/T", "/F"], { shell: true, windowsHide: true });
+  } else {
+    try {
+      process.kill(pid, "SIGTERM");
+    } catch (err) {
+      console.warn(`[agent] failed to kill pid=${pid}`, err);
+    }
+  }
+}
 
 /**
  * Launch an agent subprocess in the given worktree directory.
@@ -71,6 +84,9 @@ export function launch(
 
 
   activeProcesses.set(sessionId, proc);
+  if (proc.pid) {
+    activePids.set(sessionId, proc.pid);
+  }
 
   proc.stdout?.on("data", (chunk: Buffer) => {
     try {
@@ -91,6 +107,7 @@ export function launch(
   proc.on("exit", (code, signal) => {
     console.log(`[agent] exited: sessionId=${sessionId} code=${code} signal=${signal ?? "none"} pid=${proc.pid}`);
     activeProcesses.delete(sessionId);
+    activePids.delete(sessionId);
     stdinOpen.delete(sessionId);
     try {
       onOutput({ type: "exit", sessionId, exitCode: code });
@@ -107,6 +124,7 @@ export function launch(
       console.error(`[agent] error callback error: sessionId=${sessionId}`, cbErr);
     }
     activeProcesses.delete(sessionId);
+    activePids.delete(sessionId);
     try {
       onOutput({ type: "exit", sessionId, exitCode: 1 });
     } catch (cbErr) {
@@ -120,17 +138,14 @@ export function launch(
 /** Kill a running agent process by session ID. */
 export function kill(sessionId: string): boolean {
   const proc = activeProcesses.get(sessionId);
-  if (!proc) return false;
+  const pid = proc?.pid ?? activePids.get(sessionId);
+  if (!pid) return false;
 
-  console.log(`[agent] killing: sessionId=${sessionId} pid=${proc.pid}`);
-  if (process.platform === "win32") {
-    // On Windows, use taskkill to kill the process tree
-    spawn("taskkill", ["/pid", String(proc.pid), "/T", "/F"], { shell: true });
-  } else {
-    proc.kill("SIGTERM");
-  }
+  console.log(`[agent] killing: sessionId=${sessionId} pid=${pid}`);
+  killPid(pid);
 
   activeProcesses.delete(sessionId);
+  activePids.delete(sessionId);
   stdinOpen.delete(sessionId);
   return true;
 }
@@ -165,18 +180,15 @@ export function isStdinOpen(sessionId: string): boolean {
 
 /** Kill all active agent processes (for graceful shutdown). */
 export function killAll(): number {
-  const count = activeProcesses.size;
+  const count = activePids.size;
   if (count === 0) return 0;
   console.log(`[agent] killAll: terminating ${count} active process(es)`);
-  for (const [sessionId, proc] of activeProcesses) {
-    console.log(`[agent] killAll: sessionId=${sessionId} pid=${proc.pid}`);
-    if (process.platform === "win32") {
-      spawn("taskkill", ["/pid", String(proc.pid), "/T", "/F"], { shell: true });
-    } else {
-      proc.kill("SIGTERM");
-    }
+  for (const [sessionId, pid] of activePids) {
+    console.log(`[agent] killAll: sessionId=${sessionId} pid=${pid}`);
+    killPid(pid);
   }
   activeProcesses.clear();
+  activePids.clear();
   stdinOpen.clear();
   return count;
 }
@@ -184,4 +196,27 @@ export function killAll(): number {
 /** Get the active process for a session, if any. */
 export function getProcess(sessionId: string): ChildProcess | undefined {
   return activeProcesses.get(sessionId);
+}
+
+/** Register a persisted PID for a surviving process whose ChildProcess handle was lost. */
+export function registerPid(sessionId: string, pid: number): void {
+  activePids.set(sessionId, pid);
+}
+
+/** Get the tracked PID for a session, whether or not a ChildProcess handle exists. */
+export function getPid(sessionId: string): number | undefined {
+  return activeProcesses.get(sessionId)?.pid ?? activePids.get(sessionId);
+}
+
+/** Check if the tracked PID still exists without requiring a ChildProcess handle. */
+export function isPidAlive(sessionId: string): boolean {
+  const pid = getPid(sessionId);
+  if (!pid) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    activePids.delete(sessionId);
+    return false;
+  }
 }
