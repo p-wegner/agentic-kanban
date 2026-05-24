@@ -442,7 +442,7 @@ export function TerminalView({ messages, connectionState, parseOutput = "true", 
 
   return (
     <>
-      <div className="flex flex-col h-64 border border-gray-300 rounded bg-gray-900">
+      <div className="flex flex-col h-64 border border-gray-300 dark:border-gray-600 rounded bg-gray-900">
         <div className="flex items-center gap-2 px-3 py-1.5 bg-gray-800 border-b border-gray-700">
           <span className={`w-2 h-2 rounded-full ${statusColors[connectionState]}`} />
           <span className="text-xs text-gray-300">{statusLabels[connectionState]}</span>

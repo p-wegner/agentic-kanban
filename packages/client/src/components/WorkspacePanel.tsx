@@ -68,7 +68,7 @@ const STATUS_COLORS: Record<string, string> = {
   active: "bg-green-100 text-green-700",
   reviewing: "bg-purple-100 text-purple-700",
   idle: "bg-yellow-100 text-yellow-700",
-  closed: "bg-gray-100 text-gray-500",
+  closed: "bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400",
 };
 
 const SESSION_STATUS_COLORS: Record<string, string> = {
@@ -84,7 +84,7 @@ const TRIGGER_TYPE_LABELS: Record<string, { label: string; className: string }> 
   merge: { label: "AI Merge", className: "bg-emerald-100 text-emerald-700" },
   "fix-conflicts": { label: "Fix Conflicts", className: "bg-orange-100 text-orange-700" },
   learning: { label: "Learning", className: "bg-teal-100 text-teal-700" },
-  "auto-start": { label: "Auto-start", className: "bg-gray-100 text-gray-600" },
+  "auto-start": { label: "Auto-start", className: "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400" },
 };
 
 const SKILL_NAME_ACRONYMS = new Set(["ui", "ai", "api", "llm", "url", "http", "id"]);
@@ -136,7 +136,7 @@ function SessionStatsBadge({ stats }: { stats: string | null | undefined }) {
   const s = parseStats(stats);
   if (!s) return null;
   return (
-    <span className="text-[10px] text-gray-400" title={`Tokens: ${s.inputTokens.toLocaleString()} in / ${s.outputTokens.toLocaleString()} out\nCost: $${s.totalCostUsd.toFixed(4)}\nDuration: ${(s.durationMs / 1000).toFixed(0)}s`}>
+    <span className="text-[10px] text-gray-400 dark:text-gray-500" title={`Tokens: ${s.inputTokens.toLocaleString()} in / ${s.outputTokens.toLocaleString()} out\nCost: $${s.totalCostUsd.toFixed(4)}\nDuration: ${(s.durationMs / 1000).toFixed(0)}s`}>
       ${s.totalCostUsd.toFixed(2)}
     </span>
   );
@@ -146,7 +146,7 @@ function SessionStatsSummary({ stats }: { stats: string | null | undefined }) {
   const s = parseStats(stats);
   if (!s) return null;
   return (
-    <div className="flex items-center gap-3 text-xs text-gray-500 py-1 px-1">
+    <div className="flex items-center gap-3 text-xs text-gray-500 dark:text-gray-400 py-1 px-1">
       <span title="Input / output tokens">{formatTokenCount(s.inputTokens)} in / {formatTokenCount(s.outputTokens)} out</span>
       <span>${s.totalCostUsd.toFixed(2)}</span>
       <span>{(s.durationMs / 1000).toFixed(0)}s</span>
@@ -885,12 +885,12 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
       <div className="fixed inset-0 bg-black/30 z-40" onClick={onClose} />
       <div
         data-panel
-        className={`fixed bg-white shadow-xl z-50 flex flex-col animate-slide-in-right ${
+        className={`fixed bg-white dark:bg-gray-900 shadow-xl z-50 flex flex-col animate-slide-in-right ${
           panelMode === "modal"
-            ? "top-[5vh] left-1/2 -translate-x-1/2 w-[min(560px,96vw)] h-[90vh] rounded-lg border border-gray-200"
+            ? "top-[5vh] left-1/2 -translate-x-1/2 w-[min(560px,96vw)] h-[90vh] rounded-lg border border-gray-200 dark:border-gray-700"
             : sidebarSide === "left"
-            ? "left-0 top-0 h-full border-r border-gray-200 w-[min(560px,100vw)]"
-            : "right-0 top-0 h-full border-l border-gray-200 w-[min(560px,100vw)]"
+            ? "left-0 top-0 h-full border-r border-gray-200 dark:border-gray-700 w-[min(560px,100vw)]"
+            : "right-0 top-0 h-full border-l border-gray-200 dark:border-gray-700 w-[min(560px,100vw)]"
         }`}
         style={
           dragPos && panelMode === "modal"
@@ -899,17 +899,17 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
         }
       >
         <div
-          className={`flex items-center gap-2 px-4 py-3 border-b border-gray-200 min-w-0 cursor-grab active:cursor-grabbing ${panelMode === "modal" ? "rounded-t-lg" : ""}`}
+          className={`flex items-center gap-2 px-4 py-3 border-b border-gray-200 dark:border-gray-700 min-w-0 cursor-grab active:cursor-grabbing ${panelMode === "modal" ? "rounded-t-lg" : ""}`}
           onMouseDown={handleHeaderMouseDown}
         >
-          <h2 className="flex-1 min-w-0 text-sm font-semibold text-gray-900 truncate" title={issue.title}>
+          <h2 className="flex-1 min-w-0 text-sm font-semibold text-gray-900 dark:text-gray-100 truncate" title={issue.title}>
             {issue.title}
           </h2>
           <div className="flex items-center gap-2 shrink-0">
             <button
               onClick={() => { setPanelMode(m => m === "sidebar" ? "modal" : "sidebar"); setDragPos(null); }}
               title={panelMode === "sidebar" ? "Detach to floating panel" : "Snap back to sidebar"}
-              className="text-gray-400 hover:text-gray-600 p-0.5 rounded"
+              className="text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 p-0.5 rounded"
             >
               {panelMode === "modal" ? (
                 <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -924,7 +924,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
             <button
               onClick={handleMonitorRunNow}
               disabled={monitorRunning}
-              className="flex items-center justify-center w-6 h-6 rounded border border-gray-200 bg-white text-gray-500 hover:bg-gray-50 hover:text-gray-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              className="flex items-center justify-center w-6 h-6 rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700 hover:text-gray-700 dark:hover:text-gray-300 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
               title="Run monitor now and reset timer"
             >
               {monitorRunning
@@ -934,7 +934,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
             </button>
             <button
               onClick={onClose}
-              className="text-gray-400 hover:text-gray-600 text-lg leading-none"
+              className="text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 text-lg leading-none"
             >
               &times;
             </button>
@@ -945,27 +945,27 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
           {error && (
             <div className="p-2 bg-red-50 border border-red-200 rounded text-sm text-red-700">
               {error}
-              <button onClick={() => { setError(null); setMergeError(null); }} className="ml-2 text-red-400 hover:text-red-600">
+              <button onClick={() => { setError(null); setMergeError(null); }} className="ml-2 text-red-400 dark:text-red-500 hover:text-red-600">
                 Dismiss
               </button>
             </div>
           )}
 
           {project && (
-            <div className="text-xs text-gray-500 space-y-0.5">
-              <div><span className="font-medium text-gray-600">Repo:</span> {project.repoPath}</div>
-              <div><span className="font-medium text-gray-600">Branch:</span> {project.defaultBranch}</div>
+            <div className="text-xs text-gray-500 dark:text-gray-400 space-y-0.5">
+              <div><span className="font-medium text-gray-600 dark:text-gray-400">Repo:</span> {project.repoPath}</div>
+              <div><span className="font-medium text-gray-600 dark:text-gray-400">Branch:</span> {project.defaultBranch}</div>
               {project.remoteUrl && (
-                <div><span className="font-medium text-gray-600">Remote:</span> {project.remoteUrl}</div>
+                <div><span className="font-medium text-gray-600 dark:text-gray-400">Remote:</span> {project.remoteUrl}</div>
               )}
             </div>
           )}
 
           {loading ? (
-            <div className="text-sm text-gray-500">Loading workspaces...</div>
+            <div className="text-sm text-gray-500 dark:text-gray-400">Loading workspaces...</div>
           ) : workspaces.length === 0 && !showCreate ? (
             <div className="text-center py-6">
-              <p className="text-sm text-gray-500 mb-3">No workspaces yet</p>
+              <p className="text-sm text-gray-500 dark:text-gray-400 mb-3">No workspaces yet</p>
               <div className="inline-flex relative">
                 <button
                   onClick={() => handleQuickLaunch(false)}
@@ -983,15 +983,15 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                   &#9662;
                 </button>
                 {quickDropdownOpen && (
-                  <div className="absolute top-full left-0 mt-1 w-52 bg-white border border-gray-200 rounded shadow-lg z-10">
+                  <div className="absolute top-full left-0 mt-1 w-52 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded shadow-lg z-10">
                     {availableProfiles.length > 0 && (
                       <>
                         <div className="px-3 py-1.5">
-                          <label className="block text-xs text-gray-500 mb-1">Profile</label>
+                          <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">Profile</label>
                           <select
                             value={selectedProfile}
                             onChange={(e) => setSelectedProfile(e.target.value)}
-                            className="w-full text-sm border border-gray-200 rounded px-2 py-1"
+                            className="w-full text-sm border border-gray-200 dark:border-gray-700 rounded px-2 py-1"
                             onClick={(e) => e.stopPropagation()}
                           >
                             <option value="">Default</option>
@@ -1000,30 +1000,30 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                             ))}
                           </select>
                         </div>
-                        <div className="border-t border-gray-100" />
+                        <div className="border-t border-gray-100 dark:border-gray-800" />
                       </>
                     )}
                     <button
                       onClick={() => handleQuickLaunch(false)}
-                      className="w-full text-left text-sm px-3 py-2 hover:bg-gray-50"
+                      className="w-full text-left text-sm px-3 py-2 hover:bg-gray-50 dark:hover:bg-gray-800"
                     >
                       New Workspace
                     </button>
                     <button
                       onClick={() => handleQuickLaunch(true)}
-                      className="w-full text-left text-sm px-3 py-2 hover:bg-gray-50"
+                      className="w-full text-left text-sm px-3 py-2 hover:bg-gray-50 dark:hover:bg-gray-800"
                     >
                       New Workspace with Plan Mode
                     </button>
                     {availableSkills.length > 0 && (
                       <>
-                        <div className="border-t border-gray-100" />
-                        <div className="px-3 py-1 text-[10px] font-medium text-gray-400 uppercase tracking-wide">Skills</div>
+                        <div className="border-t border-gray-100 dark:border-gray-800" />
+                        <div className="px-3 py-1 text-[10px] font-medium text-gray-400 dark:text-gray-500 uppercase tracking-wide">Skills</div>
                         {availableSkills.map((skill) => (
                           <button
                             key={skill.id}
                             onClick={() => handleSkillQuickLaunch(skill.id)}
-                            className="w-full text-left text-sm px-3 py-2 hover:bg-gray-50 flex items-center gap-2"
+                            className="w-full text-left text-sm px-3 py-2 hover:bg-gray-50 dark:hover:bg-gray-800 flex items-center gap-2"
                             title={skill.description}
                           >
                             <span className="text-purple-500">✨</span>
@@ -1032,13 +1032,13 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                         ))}
                       </>
                     )}
-                    <div className="border-t border-gray-100" />
+                    <div className="border-t border-gray-100 dark:border-gray-800" />
                     <button
                       onClick={() => {
                         setQuickDropdownOpen(false);
                         setShowCreate(true);
                       }}
-                      className="w-full text-left text-sm px-3 py-2 hover:bg-gray-50 text-gray-500"
+                      className="w-full text-left text-sm px-3 py-2 hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-500 dark:text-gray-400"
                     >
                       Custom options...
                     </button>
@@ -1075,7 +1075,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
             const isSelected = selectedWorkspace === ws.id;
             const isThisRunning = isSelected && isRunning;
             const isLaunching = isSelected && ws.status === "active" && activeSession && messages.length === 0;
-            const badgeColor = STATUS_COLORS[ws.status] ?? "bg-gray-100 text-gray-500";
+            const badgeColor = STATUS_COLORS[ws.status] ?? "bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400";
             const sessions = workspaceSessions[ws.id] ?? [];
             const completedSessions = sessions.filter((s) => s.status !== "running");
             const runningSession = sessions.find((s) => s.status === "running");
@@ -1087,12 +1087,12 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
               <div
                 key={ws.id}
                 className={`border rounded p-3 space-y-2 cursor-pointer transition-colors ${
-                  isSelected ? "border-blue-400 bg-blue-50" : "border-gray-200 hover:border-gray-300"
+                  isSelected ? "border-blue-400 bg-blue-50 dark:bg-blue-950" : "border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600"
                 }`}
                 onClick={() => { setSelectedWorkspace(isSelected ? null : ws.id); setSelectedHistoryId(null); setHistoryMessages([]); setViewMode("output"); }}
               >
                 <div className="flex items-center justify-between">
-                  <span className="text-sm font-medium text-gray-900">
+                  <span className="text-sm font-medium text-gray-900 dark:text-gray-100">
                     {ws.branch}
                     {ws.isDirect && (
                       <span className="ml-1.5 text-[10px] font-medium px-1.5 py-0.5 rounded bg-purple-100 text-purple-700">direct</span>
@@ -1123,7 +1123,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                 </div>
 
                 {ws.workingDir && (
-                  <p className="text-xs text-gray-500 truncate">{ws.workingDir}</p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 truncate">{ws.workingDir}</p>
                 )}
 
                 {(ws.baseBranch && ws.baseBranch !== project?.defaultBranch || ws.skillName) && (
@@ -1141,28 +1141,28 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                   </div>
                 )}
 
-                <div className="flex gap-3 text-xs text-gray-400">
+                <div className="flex gap-3 text-xs text-gray-400 dark:text-gray-500">
                   <span>Created {formatRelativeTime(ws.createdAt)}</span>
                   {ws.closedAt && <span>Closed {formatRelativeTime(ws.closedAt)}</span>}
                 </div>
 
                 {ws.workingDir && (
-                  <div className="text-xs text-gray-500 font-mono truncate">
+                  <div className="text-xs text-gray-500 dark:text-gray-400 font-mono truncate">
                     {latestCommits[ws.id] === undefined
                       ? null
                       : latestCommits[ws.id] === null
-                      ? <span className="text-gray-400 font-sans">No commits</span>
+                      ? <span className="text-gray-400 dark:text-gray-500 font-sans">No commits</span>
                       : <span title={latestCommits[ws.id]!.message}>
-                          <span className="text-gray-400">{latestCommits[ws.id]!.sha}</span>
+                          <span className="text-gray-400 dark:text-gray-500">{latestCommits[ws.id]!.sha}</span>
                           {" "}
-                          <span className="text-gray-600">{latestCommits[ws.id]!.message}</span>
+                          <span className="text-gray-600 dark:text-gray-300">{latestCommits[ws.id]!.message}</span>
                         </span>
                     }
                   </div>
                 )}
 
                 {isThisRunning && (ws.contextTokens || ws.lastTool) && (
-                  <div className="flex items-center gap-2 text-[10px] text-gray-400">
+                  <div className="flex items-center gap-2 text-[10px] text-gray-400 dark:text-gray-500">
                     {ws.contextTokens ? (
                       <span>
                         {ws.contextTokens >= 1000
@@ -1177,10 +1177,10 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                 )}
 
                 {isSelected && (
-                  <div className="space-y-2 pt-2 border-t border-gray-200" onClick={(e) => e.stopPropagation()}>
+                  <div className="space-y-2 pt-2 border-t border-gray-200 dark:border-gray-700" onClick={(e) => e.stopPropagation()}>
                     {completedSessions.length > 0 && (
                       <div className="space-y-1">
-                        <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide">Sessions</div>
+                        <div className="text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide">Sessions</div>
                         {(() => {
                           const specialSessions = completedSessions.filter(s =>
                             s.triggerType && s.triggerType !== "agent" && s.triggerType !== "chat"
@@ -1209,21 +1209,21 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                         })()}
                         <div className="space-y-0.5 max-h-48 overflow-y-auto">
                         {completedSessions.map((session) => {
-                          const sessionBadge = SESSION_STATUS_COLORS[session.status] ?? "bg-gray-100 text-gray-500";
+                          const sessionBadge = SESSION_STATUS_COLORS[session.status] ?? "bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400";
                           const isActive = selectedHistoryId === session.id;
                           const isContinuation = !!session.resumeFromId && completedSessions.some(s => s.id === session.resumeFromId);
                           return (
                             <div key={session.id} className={`flex items-center gap-1 ${isContinuation ? "ml-3" : ""}`}>
                               {isContinuation && (
-                                <span className="text-gray-300 shrink-0 select-none">↳</span>
+                                <span className="text-gray-300 dark:text-gray-600 shrink-0 select-none">↳</span>
                               )}
                               <button
                                 data-session-id={session.id}
                                 onClick={() => handleViewHistory(session.id)}
                                 className={`flex-1 flex items-center gap-2 py-1 px-2 rounded text-left text-xs ${
                                   isActive
-                                    ? "bg-blue-50 text-blue-700 font-medium"
-                                    : "hover:bg-gray-50 text-gray-600"
+                                    ? "bg-blue-50 dark:bg-blue-950 text-blue-700 font-medium"
+                                    : "hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-300"
                                 }`}
                               >
                                 {(() => {
@@ -1252,10 +1252,10 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                                     </>
                                   );
                                 })()}
-                                <span className="text-xs text-gray-600">
+                                <span className="text-xs text-gray-600 dark:text-gray-400">
                                   {formatRelativeTime(session.startedAt)}
                                 </span>
-                                <span className="text-[10px] text-gray-400 ml-auto">
+                                <span className="text-[10px] text-gray-400 dark:text-gray-500 ml-auto">
                                   ({formatDuration(session.startedAt, session.endedAt)})
                                 </span>
                                 <SessionStatsBadge stats={session.stats} />
@@ -1293,7 +1293,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                       const lastMerge = completedSessions.filter(s => s.triggerType === "merge").at(-1);
                       return (
                       <div className="space-y-1 pt-1">
-                        <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide">Quick Actions</div>
+                        <div className="text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide">Quick Actions</div>
                         <div className="flex flex-wrap gap-x-3 gap-y-1.5">
                           <div className="flex flex-col gap-0.5">
                             <button
@@ -1351,13 +1351,13 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                     })()}
 
                     {(selectedHistoryId ? historyMessages : (activeSession || completedMessages.length > 0)) && (
-                      <div className="flex border-b border-gray-200">
+                      <div className="flex border-b border-gray-200 dark:border-gray-700">
                         <button
                           onClick={() => { setViewMode("output"); }}
                           className={`flex-1 text-xs py-1.5 text-center font-medium ${
                             viewMode === "output"
                               ? "text-blue-700 border-b-2 border-blue-600"
-                              : "text-gray-500 hover:text-gray-700"
+                              : "text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"
                           }`}
                         >
                           Output
@@ -1371,7 +1371,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                           className={`flex-1 text-xs py-1.5 text-center font-medium ${
                             viewMode === "summary"
                               ? "text-blue-700 border-b-2 border-blue-600"
-                              : "text-gray-500 hover:text-gray-700"
+                              : "text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"
                           }`}
                         >
                           Summary
@@ -1386,29 +1386,29 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                         ? completedSessions.find(s => s.id === selectedHistoryId)?.stats ?? null
                         : completedSessions.find(s => s.id === lastSessionPerWorkspace[ws.id])?.stats ?? null;
                       return (
-                        <div className="border border-gray-200 rounded p-3 space-y-3 text-sm max-h-80 overflow-y-auto">
+                        <div className="border border-gray-200 dark:border-gray-700 rounded p-3 space-y-3 text-sm max-h-80 overflow-y-auto">
                           {summaryLoading && (
-                            <div className="text-gray-500 text-xs animate-pulse">Loading summary...</div>
+                            <div className="text-gray-500 dark:text-gray-400 text-xs animate-pulse">Loading summary...</div>
                           )}
                           {!summaryLoading && !summary && (
-                            <div className="text-gray-400 text-xs">No summary available. Click Summary again to load.</div>
+                            <div className="text-gray-400 dark:text-gray-500 text-xs">No summary available. Click Summary again to load.</div>
                           )}
                           {summary && (
                             <>
                               {summary.agentSummary && (
                                 <div>
-                                  <h4 className="text-xs font-semibold text-gray-700 uppercase tracking-wide mb-1">Summary</h4>
-                                  <div className="text-xs text-gray-700 bg-blue-50 border border-blue-100 rounded p-2.5 whitespace-pre-wrap leading-relaxed">
+                                  <h4 className="text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wide mb-1">Summary</h4>
+                                  <div className="text-xs text-gray-700 dark:text-gray-300 bg-blue-50 dark:bg-blue-950 border border-blue-100 dark:border-blue-900 rounded p-2.5 whitespace-pre-wrap leading-relaxed">
                                     {summary.agentSummary}
                                   </div>
                                 </div>
                               )}
 
                               <div>
-                                <h4 className="text-xs font-semibold text-gray-700 uppercase tracking-wide mb-1">Overview</h4>
-                                <p className="text-gray-600 text-xs">{summary.overview}</p>
+                                <h4 className="text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wide mb-1">Overview</h4>
+                                <p className="text-gray-600 dark:text-gray-400 text-xs">{summary.overview}</p>
                                 {summary.model && (
-                                  <p className="text-gray-400 text-[10px] mt-0.5">Model: {summary.model}</p>
+                                  <p className="text-gray-400 dark:text-gray-500 text-[10px] mt-0.5">Model: {summary.model}</p>
                                 )}
                               </div>
 
@@ -1416,7 +1416,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                                 const s = parseStats(JSON.stringify(summary.stats));
                                 if (!s) return null;
                                 return (
-                                  <div className="flex items-center gap-3 text-[10px] text-gray-400">
+                                  <div className="flex items-center gap-3 text-[10px] text-gray-400 dark:text-gray-500">
                                     {s.inputTokens > 0 && <span>{formatTokenCount(s.inputTokens)} in / {formatTokenCount(s.outputTokens)} out</span>}
                                     {s.totalCostUsd > 0 && <span>${s.totalCostUsd.toFixed(2)}</span>}
                                     {s.durationMs > 0 && <span>{(s.durationMs / 1000).toFixed(0)}s</span>}
@@ -1428,7 +1428,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
 
                               {summary.tasks && summary.tasks.length > 0 && (
                                 <div>
-                                  <h4 className="text-xs font-semibold text-gray-700 uppercase tracking-wide mb-1">
+                                  <h4 className="text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wide mb-1">
                                     Tasks ({summary.tasks.filter(t => t.status === "completed").length}/{summary.tasks.length})
                                   </h4>
                                   <ul className="space-y-1">
@@ -1437,7 +1437,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                                         <span className="mt-0.5 shrink-0">
                                           {task.status === "completed" ? "Ô£ô" : task.status === "in_progress" ? "Ôƒ│" : "Ôùï"}
                                         </span>
-                                        <span className={task.status === "completed" ? "text-gray-400 line-through" : "text-gray-700"}>
+                                        <span className={task.status === "completed" ? "text-gray-400 dark:text-gray-500 line-through" : "text-gray-700 dark:text-gray-300"}>
                                           {task.subject}
                                         </span>
                                       </li>
@@ -1448,13 +1448,13 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
 
                               {summary.filesRead.length > 0 && (
                                 <div>
-                                  <h4 className="text-xs font-semibold text-gray-700 uppercase tracking-wide mb-1">Files Read ({summary.filesRead.length})</h4>
-                                  <ul className="text-xs text-gray-500 space-y-0.5">
+                                  <h4 className="text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wide mb-1">Files Read ({summary.filesRead.length})</h4>
+                                  <ul className="text-xs text-gray-500 dark:text-gray-400 space-y-0.5">
                                     {summary.filesRead.slice(0, 20).map((f) => (
                                       <li key={f} className="font-mono text-[11px] truncate">{f}</li>
                                     ))}
                                     {summary.filesRead.length > 20 && (
-                                      <li className="text-gray-400">...and {summary.filesRead.length - 20} more</li>
+                                      <li className="text-gray-400 dark:text-gray-500">...and {summary.filesRead.length - 20} more</li>
                                     )}
                                   </ul>
                                 </div>
@@ -1462,8 +1462,8 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
 
                               {summary.filesEdited.length > 0 && (
                                 <div>
-                                  <h4 className="text-xs font-semibold text-gray-700 uppercase tracking-wide mb-1">Files Edited ({summary.filesEdited.length})</h4>
-                                  <ul className="text-xs text-gray-500 space-y-0.5">
+                                  <h4 className="text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wide mb-1">Files Edited ({summary.filesEdited.length})</h4>
+                                  <ul className="text-xs text-gray-500 dark:text-gray-400 space-y-0.5">
                                     {summary.filesEdited.map((f) => (
                                       <li key={f} className="font-mono text-[11px] truncate">{f}</li>
                                     ))}
@@ -1473,8 +1473,8 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
 
                               {summary.filesWritten.length > 0 && (
                                 <div>
-                                  <h4 className="text-xs font-semibold text-gray-700 uppercase tracking-wide mb-1">Files Written ({summary.filesWritten.length})</h4>
-                                  <ul className="text-xs text-gray-500 space-y-0.5">
+                                  <h4 className="text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wide mb-1">Files Written ({summary.filesWritten.length})</h4>
+                                  <ul className="text-xs text-gray-500 dark:text-gray-400 space-y-0.5">
                                     {summary.filesWritten.map((f) => (
                                       <li key={f} className="font-mono text-[11px] truncate">{f}</li>
                                     ))}
@@ -1484,13 +1484,13 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
 
                               {summary.commandsRun.length > 0 && (
                                 <div>
-                                  <h4 className="text-xs font-semibold text-gray-700 uppercase tracking-wide mb-1">Commands ({summary.commandsRun.length})</h4>
-                                  <ul className="text-xs text-gray-500 space-y-0.5">
+                                  <h4 className="text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wide mb-1">Commands ({summary.commandsRun.length})</h4>
+                                  <ul className="text-xs text-gray-500 dark:text-gray-400 space-y-0.5">
                                     {summary.commandsRun.slice(0, 15).map((cmd, i) => (
                                       <li key={i} className="font-mono text-[11px] truncate">{cmd}</li>
                                     ))}
                                     {summary.commandsRun.length > 15 && (
-                                      <li className="text-gray-400">...and {summary.commandsRun.length - 15} more</li>
+                                      <li className="text-gray-400 dark:text-gray-500">...and {summary.commandsRun.length - 15} more</li>
                                     )}
                                   </ul>
                                 </div>
@@ -1498,15 +1498,15 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
 
                               {summary.keyExcerpts.length > 0 && (
                                 <div>
-                                  <h4 className="text-xs font-semibold text-gray-700 uppercase tracking-wide mb-1">Agent Excerpts</h4>
+                                  <h4 className="text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wide mb-1">Agent Excerpts</h4>
                                   <div className="space-y-1.5">
                                     {summary.keyExcerpts.slice(0, 5).map((excerpt, i) => (
-                                      <div key={i} className="text-xs text-gray-600 bg-gray-50 rounded p-2 whitespace-pre-wrap">
+                                      <div key={i} className="text-xs text-gray-600 dark:text-gray-400 bg-gray-50 dark:bg-gray-800 rounded p-2 whitespace-pre-wrap">
                                         {excerpt}
                                       </div>
                                     ))}
                                     {summary.keyExcerpts.length > 5 && (
-                                      <p className="text-gray-400 text-[10px]">...and {summary.keyExcerpts.length - 5} more excerpts</p>
+                                      <p className="text-gray-400 dark:text-gray-500 text-[10px]">...and {summary.keyExcerpts.length - 5} more excerpts</p>
                                     )}
                                   </div>
                                 </div>
@@ -1559,7 +1559,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                                 placeholder={isSessionAlive && !isWaitingForInput ? "Agent is working..." : "Message Claude Code..."}
                                 rows={2}
                                 disabled={isSessionAlive && !isWaitingForInput}
-                                className="flex-1 text-sm bg-white text-gray-900 border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none disabled:bg-gray-50 disabled:text-gray-400"
+                                className="flex-1 text-sm bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none disabled:bg-gray-50 dark:disabled:bg-gray-950 disabled:text-gray-400 dark:disabled:text-gray-500"
                               />
                               {isSessionAlive && !isWaitingForInput ? (
                                 <button
@@ -1611,7 +1611,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                           placeholder={isSessionAlive && !isWaitingForInput ? "Agent is working..." : "Message Claude Code..."}
                           rows={2}
                           disabled={isSessionAlive && !isWaitingForInput}
-                          className="flex-1 text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none disabled:bg-gray-50 disabled:text-gray-400"
+                          className="flex-1 text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none disabled:bg-gray-50 dark:disabled:bg-gray-950 disabled:text-gray-400 dark:disabled:text-gray-500"
                         />
                         {isSessionAlive && !isWaitingForInput ? (
                           <button
@@ -1636,7 +1636,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                     {ws.status !== "closed" && (
                       <>
                       {!ws.workingDir && (
-                        <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded px-2 py-1">
+                        <p className="text-xs text-amber-600 bg-amber-50 dark:bg-amber-950 border border-amber-200 dark:border-amber-800 rounded px-2 py-1">
                           Worktree directory unavailable -- some actions are disabled.
                         </p>
                       )}
@@ -1728,20 +1728,20 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                           {ws.isDirect ? "Close" : "Merge"}
                         </button>
                         )}
-                        <span className="w-px bg-gray-300 self-stretch mx-2" aria-hidden="true" />
+                        <span className="w-px bg-gray-300 dark:bg-gray-600 self-stretch mx-2" aria-hidden="true" />
                         <button
                           onClick={() => handleDeleteWorkspace(ws.id)}
                           disabled={actionLoading}
-                          className="text-sm text-red-600 px-3 py-1.5 rounded hover:bg-red-50 disabled:opacity-50 border border-red-300 font-medium"
+                          className="text-sm text-red-600 px-3 py-1.5 rounded hover:bg-red-50 dark:hover:bg-red-950 disabled:opacity-50 border border-red-300 dark:border-red-800 font-medium"
                           title="Delete this workspace permanently"
                         >
                           Delete
                         </button>
                       </div>
                       {mergeError && mergeError.wsId === ws.id && (
-                        <div className="mt-2 p-2 bg-orange-50 border border-orange-200 rounded">
+                        <div className="mt-2 p-2 bg-orange-50 dark:bg-orange-950 border border-orange-200 dark:border-orange-800 rounded">
                           <div className="flex items-center justify-between">
-                            <span className="text-sm font-medium text-orange-700">Merge failed -- AI can fix and retry</span>
+                            <span className="text-sm font-medium text-orange-700 dark:text-orange-400">Merge failed -- AI can fix and retry</span>
                             <button
                               onClick={() => handleFixAndMerge(ws.id, mergeError.message)}
                               disabled={actionLoading}
@@ -1750,13 +1750,13 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                               Fix &amp; Merge with AI
                             </button>
                           </div>
-                          <p className="mt-1 text-xs text-orange-600 font-mono break-all">{mergeError.message}</p>
+                          <p className="mt-1 text-xs text-orange-600 dark:text-orange-400 font-mono break-all">{mergeError.message}</p>
                         </div>
                       )}
                       {conflictState && conflictState.hasConflicts && (
-                        <div className="mt-2 p-2 bg-red-50 border border-red-200 rounded">
+                        <div className="mt-2 p-2 bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 rounded">
                           <div className="flex items-center justify-between">
-                            <span className="text-sm font-medium text-red-700">
+                            <span className="text-sm font-medium text-red-700 dark:text-red-400">
                               {conflictState.conflictingFiles.length} conflicting file{conflictState.conflictingFiles.length !== 1 ? "s" : ""}
                             </span>
                             <div className="flex gap-2">
@@ -1787,7 +1787,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                     )}
 
                     {!selectedHistoryId && ws.status === "closed" && (
-                      <div className="pt-2 border-t border-gray-200">
+                      <div className="pt-2 border-t border-gray-200 dark:border-gray-700">
                         <button
                           onClick={() => handleDeleteWorkspace(ws.id)}
                           disabled={actionLoading}
@@ -1832,15 +1832,15 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                 &#9662;
               </button>
               {quickDropdownOpen && (
-                <div className="absolute bottom-full left-0 mb-1 w-52 bg-white border border-gray-200 rounded shadow-lg z-10">
+                <div className="absolute bottom-full left-0 mb-1 w-52 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded shadow-lg z-10">
                   {availableProfiles.length > 0 && (
                     <>
                       <div className="px-3 py-1.5">
-                        <label className="block text-xs text-gray-500 mb-1">Profile</label>
+                        <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">Profile</label>
                         <select
                           value={selectedProfile}
                           onChange={(e) => setSelectedProfile(e.target.value)}
-                          className="w-full text-sm border border-gray-200 rounded px-2 py-1"
+                          className="w-full text-sm border border-gray-200 dark:border-gray-700 rounded px-2 py-1"
                           onClick={(e) => e.stopPropagation()}
                         >
                           <option value="">Default</option>
@@ -1849,30 +1849,30 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                           ))}
                         </select>
                       </div>
-                      <div className="border-t border-gray-100" />
+                      <div className="border-t border-gray-100 dark:border-gray-800" />
                     </>
                   )}
                   <button
                     onClick={() => handleQuickLaunch(false)}
-                    className="w-full text-left text-sm px-3 py-2 hover:bg-gray-50"
+                    className="w-full text-left text-sm px-3 py-2 hover:bg-gray-50 dark:hover:bg-gray-800"
                   >
                     New Workspace
                   </button>
                   <button
                     onClick={() => handleQuickLaunch(true)}
-                    className="w-full text-left text-sm px-3 py-2 hover:bg-gray-50"
+                    className="w-full text-left text-sm px-3 py-2 hover:bg-gray-50 dark:hover:bg-gray-800"
                   >
                     New Workspace with Plan Mode
                   </button>
                   {availableSkills.length > 0 && (
                     <>
-                      <div className="border-t border-gray-100" />
-                      <div className="px-3 py-1 text-[10px] font-medium text-gray-400 uppercase tracking-wide">Skills</div>
+                      <div className="border-t border-gray-100 dark:border-gray-800" />
+                      <div className="px-3 py-1 text-[10px] font-medium text-gray-400 dark:text-gray-500 uppercase tracking-wide">Skills</div>
                       {availableSkills.map((skill) => (
                         <button
                           key={skill.id}
                           onClick={() => handleSkillQuickLaunch(skill.id)}
-                          className="w-full text-left text-sm px-3 py-2 hover:bg-gray-50 flex items-center gap-2"
+                          className="w-full text-left text-sm px-3 py-2 hover:bg-gray-50 dark:hover:bg-gray-800 flex items-center gap-2"
                           title={skill.description}
                         >
                           <span className="text-purple-500">✨</span>
@@ -1881,10 +1881,10 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                       ))}
                     </>
                   )}
-                  <div className="border-t border-gray-100" />
+                  <div className="border-t border-gray-100 dark:border-gray-800" />
                   <button
                     onClick={() => { setQuickDropdownOpen(false); setShowCreate(true); }}
-                    className="w-full text-left text-sm px-3 py-2 hover:bg-gray-50 text-gray-500"
+                    className="w-full text-left text-sm px-3 py-2 hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-500 dark:text-gray-400"
                   >
                     Custom options...
                   </button>

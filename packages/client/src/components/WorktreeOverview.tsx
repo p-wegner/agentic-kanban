@@ -175,18 +175,18 @@ export function WorktreeOverview({ projectId, onClose, onIssueClick, onWorkspace
   return (
     <div className="fixed inset-0 z-50 flex justify-end">
       <div className="absolute inset-0 bg-black/20" onClick={onClose} />
-      <div className="relative w-[min(480px,100vw)] bg-white shadow-xl flex flex-col animate-slide-in-right">
+      <div className="relative w-[min(480px,100vw)] bg-white dark:bg-gray-900 shadow-xl flex flex-col animate-slide-in-right">
         {/* Header */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-gray-700">
           <div className="flex items-center gap-2">
-            <svg className="h-5 w-5 text-gray-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <svg className="h-5 w-5 text-gray-600 dark:text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <line x1="6" y1="3" x2="6" y2="15" />
               <circle cx="18" cy="6" r="3" />
               <circle cx="6" cy="18" r="3" />
               <path d="M18 9a9 9 0 0 1-9 9" />
             </svg>
-            <h2 className="text-lg font-semibold text-gray-900">Worktrees</h2>
-            <span className="text-sm text-gray-500">({worktrees.length})</span>
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Worktrees</h2>
+            <span className="text-sm text-gray-500 dark:text-gray-400">({worktrees.length})</span>
             {orphanCount > 0 && (
               <span className="text-xs bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded font-medium">
                 {orphanCount} orphaned
@@ -195,7 +195,7 @@ export function WorktreeOverview({ projectId, onClose, onIssueClick, onWorkspace
           </div>
           <button
             onClick={onClose}
-            className="text-gray-400 hover:text-gray-600 text-lg leading-none"
+            className="text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 text-lg leading-none"
           >
             &times;
           </button>
@@ -203,7 +203,7 @@ export function WorktreeOverview({ projectId, onClose, onIssueClick, onWorkspace
 
         {/* Bulk action toolbar */}
         {additionalWorktrees.length > 0 && (
-          <div className="flex items-center gap-2 px-4 py-2 border-b border-gray-100 bg-gray-50">
+          <div className="flex items-center gap-2 px-4 py-2 border-b border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-950">
             <input
               type="checkbox"
               checked={allSelected}
@@ -211,7 +211,7 @@ export function WorktreeOverview({ projectId, onClose, onIssueClick, onWorkspace
               className="h-4 w-4 rounded border-gray-300 text-blue-600"
               title="Select all"
             />
-            <span className="text-xs text-gray-500 flex-1">
+            <span className="text-xs text-gray-500 dark:text-gray-400 flex-1">
               {selected.size > 0 ? `${selected.size} selected` : "Select worktrees to bulk delete"}
             </span>
             {orphanCount > 0 && selected.size === 0 && (
@@ -247,19 +247,19 @@ export function WorktreeOverview({ projectId, onClose, onIssueClick, onWorkspace
         {/* Content */}
         <div className="flex-1 overflow-y-auto">
           {loading ? (
-            <div className="p-4 text-sm text-gray-500">Loading...</div>
+            <div className="p-4 text-sm text-gray-500 dark:text-gray-400">Loading...</div>
           ) : error ? (
             <div className="p-4 text-sm text-red-600">{error}</div>
           ) : (
-            <div className="divide-y divide-gray-100">
+            <div className="divide-y divide-gray-100 dark:divide-gray-800">
               {/* Main checkout */}
               {mainWorktree && (
-                <div className="px-4 py-3 bg-gray-50">
+                <div className="px-4 py-3 bg-gray-50 dark:bg-gray-950">
                   <div className="flex items-center gap-2 mb-1">
-                    <span className="text-sm font-medium text-gray-900">
+                    <span className="text-sm font-medium text-gray-900 dark:text-gray-100">
                       {mainWorktree.branch}
                     </span>
-                    <span className="text-xs bg-gray-200 text-gray-600 px-1.5 py-0.5 rounded">main</span>
+                    <span className="text-xs bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-400 px-1.5 py-0.5 rounded">main</span>
                     {mainWorktree.workspace?.isDirect && (
                       <span className="text-xs bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded">direct</span>
                     )}
@@ -271,7 +271,7 @@ export function WorktreeOverview({ projectId, onClose, onIssueClick, onWorkspace
                     <button
                       onClick={() => handleOpenFolder(mainWorktree)}
                       disabled={opening === mainWorktree.path}
-                      className="ml-auto p-1 text-gray-300 hover:text-blue-500 rounded hover:bg-blue-50 disabled:opacity-50"
+                      className="ml-auto p-1 text-gray-300 dark:text-gray-600 hover:text-blue-500 rounded hover:bg-blue-50 dark:hover:bg-blue-900/30 disabled:opacity-50"
                       title="Open folder in explorer"
                     >
                       <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -279,7 +279,7 @@ export function WorktreeOverview({ projectId, onClose, onIssueClick, onWorkspace
                       </svg>
                     </button>
                   </div>
-                  <div className="text-xs text-gray-400 font-mono">
+                  <div className="text-xs text-gray-400 dark:text-gray-500 font-mono">
                     {truncatePath(mainWorktree.path, 60)}
                   </div>
                   {mainWorktree.workspace && mainWorktree.workspace.issueNumber != null && (
@@ -295,7 +295,7 @@ export function WorktreeOverview({ projectId, onClose, onIssueClick, onWorkspace
 
               {/* Additional worktrees */}
               {additionalWorktrees.length === 0 ? (
-                <div className="px-4 py-8 text-center text-sm text-gray-500">
+                <div className="px-4 py-8 text-center text-sm text-gray-500 dark:text-gray-400">
                   No additional worktrees
                 </div>
               ) : (
@@ -305,7 +305,7 @@ export function WorktreeOverview({ projectId, onClose, onIssueClick, onWorkspace
                   return (
                     <div
                       key={wt.path}
-                      className={`px-4 py-3 hover:bg-gray-50 ${isSelected ? "bg-blue-50" : ""}`}
+                      className={`px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-800 ${isSelected ? "bg-blue-50 dark:bg-blue-900/20" : ""}`}
                     >
                       <div className="flex items-center gap-2 mb-1 flex-wrap">
                         <input
@@ -314,7 +314,7 @@ export function WorktreeOverview({ projectId, onClose, onIssueClick, onWorkspace
                           onChange={() => toggleSelect(wt.path)}
                           className="h-4 w-4 rounded border-gray-300 text-blue-600 shrink-0"
                         />
-                        <span className="text-sm font-medium text-gray-900">
+                        <span className="text-sm font-medium text-gray-900 dark:text-gray-100">
                           {wt.branch}
                         </span>
                         {isOrphan && (
@@ -329,7 +329,7 @@ export function WorktreeOverview({ projectId, onClose, onIssueClick, onWorkspace
                           </span>
                         )}
                         {wt.diffStats && wt.diffStats.filesChanged > 0 && (
-                          <span className="text-xs text-gray-500">
+                          <span className="text-xs text-gray-500 dark:text-gray-400">
                             {wt.diffStats.filesChanged} file{wt.diffStats.filesChanged !== 1 ? "s" : ""},{" "}
                             <span className="text-green-600">+{wt.diffStats.insertions}</span>
                             {" "}/{" "}
@@ -339,7 +339,7 @@ export function WorktreeOverview({ projectId, onClose, onIssueClick, onWorkspace
                         <button
                           onClick={() => handleOpenFolder(wt)}
                           disabled={opening === wt.path}
-                          className="ml-auto p-1 text-gray-300 hover:text-blue-500 rounded hover:bg-blue-50 disabled:opacity-50"
+                          className="ml-auto p-1 text-gray-300 dark:text-gray-600 hover:text-blue-500 rounded hover:bg-blue-50 dark:hover:bg-blue-900/30 disabled:opacity-50"
                           title="Open folder in explorer"
                         >
                           <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -349,7 +349,7 @@ export function WorktreeOverview({ projectId, onClose, onIssueClick, onWorkspace
                         <button
                           onClick={() => handleDelete(wt)}
                           disabled={deleting === wt.path}
-                          className="p-1 text-gray-300 hover:text-red-500 rounded hover:bg-red-50 disabled:opacity-50"
+                          className="p-1 text-gray-300 dark:text-gray-600 hover:text-red-500 rounded hover:bg-red-50 dark:hover:bg-red-900/30 disabled:opacity-50"
                           title="Delete worktree"
                         >
                           <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -358,7 +358,7 @@ export function WorktreeOverview({ projectId, onClose, onIssueClick, onWorkspace
                           </svg>
                         </button>
                       </div>
-                      <div className="text-xs text-gray-400 font-mono pl-6">
+                      <div className="text-xs text-gray-400 dark:text-gray-500 font-mono pl-6">
                         {truncatePath(wt.path, 55)}
                       </div>
                       {wt.workspace && wt.workspace.issueNumber != null && (
