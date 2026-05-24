@@ -68,43 +68,43 @@ export function QuickTasksPanel({ projectId, onClose, onLaunched }: QuickTasksPa
   return (
     <>
       <div className="fixed inset-0 bg-black/30 z-50" onClick={onClose} />
-      <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-md bg-white rounded-xl shadow-2xl z-50 border border-gray-200 overflow-hidden flex flex-col max-h-[85vh] animate-slide-in-right">
-        <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-gray-900">Quick Tasks</h3>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-lg leading-none">&times;</button>
+      <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-md bg-white dark:bg-gray-900 rounded-xl shadow-2xl z-50 border border-gray-200 dark:border-gray-700 overflow-hidden flex flex-col max-h-[85vh] animate-slide-in-right">
+        <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+          <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Quick Tasks</h3>
+          <button onClick={onClose} className="text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 text-lg leading-none">&times;</button>
         </div>
 
         <div className="p-3 space-y-1.5 overflow-y-auto flex-1 min-h-0">
-          {loading && <p className="text-xs text-gray-400 text-center py-4">Loading skills...</p>}
+          {loading && <p className="text-xs text-gray-400 dark:text-gray-500 text-center py-4">Loading skills...</p>}
 
           {!loading && skills.map((skill) => (
             <button
               key={skill.id}
               disabled={!!launching}
               onClick={() => launch(skill.id, skill.description ?? skill.name)}
-              className="w-full text-left px-3 py-2.5 rounded-lg hover:bg-blue-50 border border-transparent hover:border-blue-200 transition-colors disabled:opacity-50 group"
+              className="w-full text-left px-3 py-2.5 rounded-lg hover:bg-blue-50 dark:hover:bg-blue-900/30 border border-transparent hover:border-blue-200 dark:hover:border-blue-800 transition-colors disabled:opacity-50 group"
             >
               <div className="flex items-center justify-between">
-                <span className="text-sm font-medium text-gray-800">{skill.name}</span>
+                <span className="text-sm font-medium text-gray-800 dark:text-gray-200">{skill.name}</span>
                 <div className="flex items-center gap-1.5">
-                  {skill.model && <span className="text-[10px] text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded">{skill.model}</span>}
+                  {skill.model && <span className="text-[10px] text-gray-400 dark:text-gray-500 bg-gray-100 dark:bg-gray-800 px-1.5 py-0.5 rounded">{skill.model}</span>}
                   {launching === skill.id
                     ? <span className="text-xs text-blue-500">Launching...</span>
-                    : <span className="text-xs text-gray-400 opacity-0 group-hover:opacity-100">▶ Run</span>}
+                    : <span className="text-xs text-gray-400 dark:text-gray-500 opacity-0 group-hover:opacity-100">▶ Run</span>}
                 </div>
               </div>
               {skill.description && (
-                <p className="text-xs text-gray-500 mt-0.5 line-clamp-2">{skill.description}</p>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 line-clamp-2">{skill.description}</p>
               )}
             </button>
           ))}
 
           {!loading && skills.length === 0 && (
-            <p className="text-xs text-gray-400 text-center py-4">No skills configured. Add skills in Settings → Skills.</p>
+            <p className="text-xs text-gray-400 dark:text-gray-500 text-center py-4">No skills configured. Add skills in Settings → Skills.</p>
           )}
         </div>
 
-        <div className="px-3 pb-3 border-t border-gray-100 pt-2 space-y-2">
+        <div className="px-3 pb-3 border-t border-gray-100 dark:border-gray-800 pt-2 space-y-2">
           {showContext && (
             <div>
               <textarea
@@ -126,7 +126,7 @@ export function QuickTasksPanel({ projectId, onClose, onLaunched }: QuickTasksPa
                 onChange={(e) => setCustomPrompt(e.target.value)}
                 placeholder="Describe the task for the agent..."
                 rows={3}
-                className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none"
+                className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none dark:bg-gray-900 dark:text-gray-100"
                 onKeyDown={(e) => { if (e.key === "Escape") setShowCustom(false); }}
               />
               <div className="flex gap-2">
@@ -137,7 +137,7 @@ export function QuickTasksPanel({ projectId, onClose, onLaunched }: QuickTasksPa
                 >
                   {launching === "custom" ? "Launching..." : "Run"}
                 </button>
-                <button onClick={() => setShowCustom(false)} className="text-sm text-gray-500 px-3 py-1.5 hover:text-gray-700">
+                <button onClick={() => setShowCustom(false)} className="text-sm text-gray-500 dark:text-gray-400 px-3 py-1.5 hover:text-gray-700 dark:hover:text-gray-200">
                   Cancel
                 </button>
               </div>
@@ -146,13 +146,13 @@ export function QuickTasksPanel({ projectId, onClose, onLaunched }: QuickTasksPa
             <div className="flex items-center justify-between">
               <button
                 onClick={() => setShowCustom(true)}
-                className="text-xs text-gray-400 hover:text-gray-600 py-1.5 text-left"
+                className="text-xs text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 py-1.5 text-left"
               >
                 + Custom task prompt...
               </button>
               <button
                 onClick={() => { setShowContext(!showContext); if (showContext) setExtraContext(""); }}
-                className={`text-xs py-1.5 px-2 rounded ${showContext ? "text-amber-600 bg-amber-50" : "text-gray-400 hover:text-gray-600"}`}
+                className={`text-xs py-1.5 px-2 rounded ${showContext ? "text-amber-600 bg-amber-50" : "text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300"}`}
                 title="Add extra context appended to every task"
               >
                 {showContext ? "− context" : "+ context"}

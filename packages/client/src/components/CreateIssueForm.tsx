@@ -150,7 +150,7 @@ export function CreateIssueForm({
       onSubmit={handleSubmit}
       onKeyDown={handleKeyDown}
       onBlur={handleBlur}
-      className="bg-white rounded-md shadow-sm p-3 border border-blue-200 space-y-2"
+      className="bg-white dark:bg-gray-900 rounded-md shadow-sm p-3 border border-blue-200 dark:border-blue-800 space-y-2"
     >
       <textarea
         ref={titleRef}
@@ -160,7 +160,7 @@ export function CreateIssueForm({
         onKeyDown={handleTitleKeyDown}
         autoFocus
         rows={1}
-        className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none overflow-y-hidden"
+        className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none overflow-y-hidden dark:bg-gray-900 dark:text-gray-100"
       />
       <textarea
         ref={descRef}
@@ -168,12 +168,12 @@ export function CreateIssueForm({
         value={description}
         onChange={(e) => setDescription(e.target.value)}
         rows={2}
-        className="w-full text-xs border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none overflow-y-hidden"
+        className="w-full text-xs border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none overflow-y-hidden dark:bg-gray-900 dark:text-gray-100"
       />
       <select
         value={priority}
         onChange={(e) => setPriority(e.target.value as CreateIssueRequest["priority"])}
-        className="w-full text-xs border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
+        className="w-full text-xs border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:bg-gray-900 dark:text-gray-100"
       >
         <option value="low">Low</option>
         <option value="medium">Medium</option>
@@ -181,7 +181,7 @@ export function CreateIssueForm({
         <option value="critical">Critical</option>
       </select>
       {canStartWorkspace && (
-        <label className="flex items-center gap-2 text-xs text-gray-600 cursor-pointer">
+        <label className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400 cursor-pointer">
           <input
             type="checkbox"
             checked={startWorkspace}
@@ -192,8 +192,8 @@ export function CreateIssueForm({
         </label>
       )}
       {canStartWorkspace && startWorkspace && (
-        <div className="pl-4 space-y-1 border-l-2 border-blue-100">
-          <label className="flex items-center gap-2 text-xs text-gray-600 cursor-pointer">
+        <div className="pl-4 space-y-1 border-l-2 border-blue-100 dark:border-blue-800">
+          <label className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400 cursor-pointer">
             <input
               type="checkbox"
               checked={planMode}
@@ -202,7 +202,7 @@ export function CreateIssueForm({
             />
             Plan mode (agent plans before implementing)
           </label>
-          <label className="flex items-center gap-2 text-xs text-gray-600 cursor-pointer">
+          <label className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400 cursor-pointer">
             <input
               type="checkbox"
               checked={skipAutoReview}
@@ -211,7 +211,7 @@ export function CreateIssueForm({
             />
             Skip auto AI code review
           </label>
-          <label className="flex items-center gap-2 text-xs text-gray-600 cursor-pointer">
+          <label className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400 cursor-pointer">
             <input
               type="checkbox"
               checked={isDirect}
@@ -222,11 +222,11 @@ export function CreateIssueForm({
           </label>
           {skills.length > 0 && (
             <div className="flex items-center gap-2">
-              <label className="text-xs text-gray-600 shrink-0">Skill:</label>
+              <label className="text-xs text-gray-600 dark:text-gray-400 shrink-0">Skill:</label>
               <select
                 value={skillId}
                 onChange={(e) => setSkillId(e.target.value)}
-                className="flex-1 text-xs border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                className="flex-1 text-xs border border-gray-300 dark:border-gray-600 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:bg-gray-900 dark:text-gray-100"
               >
                 <option value="">None</option>
                 {skills.map((s) => (
@@ -250,7 +250,7 @@ export function CreateIssueForm({
         <button
           type="button"
           onClick={onCancel}
-          className="text-xs text-gray-500 px-3 py-1.5 hover:text-gray-700"
+          className="text-xs text-gray-500 dark:text-gray-400 px-3 py-1.5 hover:text-gray-700 dark:hover:text-gray-200"
         >
           Cancel
         </button>
@@ -278,7 +278,7 @@ export function CreateIssueForm({
             type="button"
             onClick={handleUndoEnhance}
             title="Undo enhancement"
-            className="text-xs text-gray-500 px-2 py-1.5 hover:text-gray-700 flex items-center gap-1"
+            className="text-xs text-gray-500 dark:text-gray-400 px-2 py-1.5 hover:text-gray-700 dark:hover:text-gray-200 flex items-center gap-1"
           >
             <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" />
@@ -290,7 +290,7 @@ export function CreateIssueForm({
           <button
             type="button"
             onClick={() => onExpand({ title, description, priority, startWorkspace, planMode, skipAutoReview, skillId })}
-            className="ml-auto text-gray-400 hover:text-gray-600 p-1 rounded"
+            className="ml-auto text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 p-1 rounded"
             title="Expand form"
           >
             <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
