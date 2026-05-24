@@ -64,7 +64,7 @@ update_issue(issueId, description="## Progress\n- Schema migrated\n- API route W
 Some workspaces have `isDirect: true` — the agent is working directly on the project's default branch (e.g. master) instead of a separate feature branch. In this case:
 - There is no separate branch to merge — changes go directly to master.
 - **You must still move the issue status** when done. Do not skip status transitions just because there is no branch to merge.
-- After committing, move to **In Review** (if review is desired) or directly to **Done** (if the work is trivially correct and no review is needed).
+- **The system does NOT auto-review direct workspaces.** You must run a self-review subagent before committing (see step 5 below).
 - The absence of a feature branch is NOT a reason to leave the ticket in "In Progress" forever.
 
 ### 5. Commit your changes
@@ -75,32 +75,52 @@ Some workspaces have `isDirect: true` — the agent is working directly on the p
 
 Do NOT leave uncommitted changes in the worktree. If you have made changes, commit them before moving to the next step.
 
-### 6. Move to In Review when code is ready
-After committing, move the issue to **In Review**:
-```
-update_issue(issueId, statusName="In Review")
-```
-This signals that the implementation is complete and ready for review. An automated code review will be triggered.
+### 6. Run a code review
+**Every workspace must be reviewed before closing — no exceptions.** How the review happens depends on the workspace type:
 
-### 7. AI Code Review (automatic)
-When auto-review is enabled, the system launches a review agent after your session exits. The board shows a purple **AI Reviewing** badge on the issue card during review.
+#### Branched workspaces (automatic)
+After your session exits, the system automatically launches a review subagent. The board shows a purple **AI Reviewing** badge during review. You don't need to do anything — the system handles the full review-then-fix-then-merge cycle.
 
-**Review agent behavior:**
-- Reviews the git diff for correctness, security, and code quality
-- If **CRITICAL or MAJOR** issues found: moves issue to **In Progress**, fixes the issues, commits, then exits → system auto-merges
-- If **only MINOR or no issues**: exits normally → system auto-merges and moves to **AI Reviewed**
-- If review agent crashes (non-zero exit): issue stays where it is, no merge happens
+#### Direct workspaces (you must trigger it)
+The system does NOT auto-review direct workspaces. You must launch a review subagent yourself **before marking the issue Done**:
 
-The review-then-fix loop is: implement → review → fix (if needed) → merge. No manual intervention required.
+1. **Move the issue to In Review** so the board reflects the current state:
+   ```
+   update_issue(issueId, statusName="In Review")
+   ```
+2. **Spawn a review subagent** using the project's code-review skill. Use your agent's subagent mechanism (e.g. `spawn_agent` for Codex, `Agent` tool for Claude Code):
+   - Pass the diff context: what files changed, the commit message, and the issue description
+   - Respect the user's review settings:
+     - **Normal review** (`thorough_review: false` or unset): use the `code-review` skill — focused on correctness bugs, security, logic errors
+     - **Thorough review** (`thorough_review: true`): use the `code-review-thorough` skill — broader coverage, includes style, naming, edge cases
+   - The review subagent should read the full `git diff HEAD~1` (or `git diff <commit-before-your-changes>`) and assess every changed file
+3. **Act on the review results**:
+   - If **CRITICAL or MAJOR** issues found: fix them, commit, and re-run the review
+   - If **only MINOR or no issues**: proceed to close the issue
+4. **Update the board** — after review passes:
+   ```
+   update_issue(issueId, statusName="Done")
+   ```
 
-### 8. Close the issue
+#### What the review subagent should check
+- Correctness bugs and logic errors
+- Security vulnerabilities (injection, XSS, etc.)
+- Missing error handling
+- Dead code or forgotten debug output
+- Broken existing patterns or regressions
+- That the commit actually addresses the ticket's requirements (all checklist items, not just some)
+
+#### Complete the ticket's checklist
+If the ticket description lists remaining steps, complete ALL of them before the review. Do not ask the user for permission to skip steps listed in the ticket. If a step is genuinely blocked, note it in the issue description — but do not commit partial work and mark Done.
+
+### 7. Close the issue
 After review approval:
 ```
 update_issue(issueId, statusName="Done")
 ```
-Do this only after the work is actually complete (tests pass, code committed, review approved). Do **not** mark Done while work is still in progress.
+Do this only after the work is actually complete (tests pass, code committed, review passed). Do **not** mark Done while work is still in progress.
 
-### 9. Cancel if work is abandoned
+### 8. Cancel if work is abandoned
 ```
 update_issue(issueId, statusName="Cancelled")
 ```
@@ -179,8 +199,11 @@ Shorthand for "review #N and merge if fine" — same workflow as above.
 ## Rules of Thumb
 
 1. **Move first, code second** — update to In Progress before any file edits.
-2. **Commit before moving to In Review** — never leave uncommitted changes when signaling completion.
-3. **One status transition per logical checkpoint** — don't batch-move issues after the fact.
-4. **Description is a shared log** — write progress notes so the user can follow along without reading code.
-5. **Done means done** — code committed, tests green, review approved, no loose ends.
-6. **Cancelled is not failure** — use it freely when scope changes.
+2. **Every commit gets reviewed** — branched workspaces get auto-reviewed by the system. Direct workspaces get reviewed by a subagent you spawn. No workspace skips review.
+3. **Board reflects reality** — move to In Review while the review runs, move to Done only after review passes. Never skip In Review for direct workspaces.
+4. **Complete the full ticket** — if the ticket lists steps, do all of them. Do not ask the user for permission to skip checklist items. If blocked, note it in the description and stop — don't mark Done.
+5. **Commit before review** — never trigger review with uncommitted changes.
+6. **One status transition per logical checkpoint** — don't batch-move issues after the fact.
+7. **Description is a shared log** — write progress notes so the user can follow along without reading code.
+8. **Done means done** — code committed, tests green, review passed, no loose ends, no open questions.
+9. **Cancelled is not failure** — use it freely when scope changes.
