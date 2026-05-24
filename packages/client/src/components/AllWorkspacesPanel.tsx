@@ -49,7 +49,7 @@ const WS_STATUS_COLORS: Record<string, string> = {
   reviewing: "bg-purple-100 text-purple-700",
   fixing: "bg-orange-100 text-orange-700",
   idle: "bg-yellow-100 text-yellow-700",
-  closed: "bg-gray-100 text-gray-500",
+  closed: "bg-gray-100 text-gray-500 dark:text-gray-400",
 };
 
 const ISSUE_STATUS_COLORS: Record<string, string> = {
@@ -154,18 +154,18 @@ export function AllWorkspacesPanel({ columns, activeProjectId, onClose, onIssueC
   return (
     <div className="fixed inset-0 z-50 flex justify-end">
       <div className="absolute inset-0 bg-black/20" onClick={onClose} />
-      <div className="relative w-[min(520px,100vw)] bg-white shadow-xl flex flex-col animate-slide-in-right">
+      <div className="relative w-[min(520px,100vw)] bg-white dark:bg-gray-900 shadow-xl flex flex-col animate-slide-in-right">
         {/* Header */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-gray-700">
           <div className="flex items-center gap-2">
-            <svg className="h-5 w-5 text-gray-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <svg className="h-5 w-5 text-gray-600 dark:text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <rect x="3" y="3" width="7" height="7" rx="1" />
               <rect x="14" y="3" width="7" height="7" rx="1" />
               <rect x="3" y="14" width="7" height="7" rx="1" />
               <rect x="14" y="14" width="7" height="7" rx="1" />
             </svg>
-            <h2 className="text-lg font-semibold text-gray-900">All Workspaces</h2>
-            <span className="text-sm text-gray-500">
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">All Workspaces</h2>
+            <span className="text-sm text-gray-500 dark:text-gray-400">
               {crossProjectLoading
                 ? "…"
                 : filtered.length === issuesWithWorkspaces.length
@@ -190,7 +190,7 @@ export function AllWorkspacesPanel({ columns, activeProjectId, onClose, onIssueC
             )}
             <button
               onClick={onClose}
-              className="text-gray-400 hover:text-gray-600 text-lg leading-none"
+              className="text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 text-lg leading-none"
             >
               &times;
             </button>
@@ -198,12 +198,12 @@ export function AllWorkspacesPanel({ columns, activeProjectId, onClose, onIssueC
         </div>
 
         {/* Filters */}
-        <div className="px-4 py-2 border-b border-gray-100 space-y-2">
+        <div className="px-4 py-2 border-b border-gray-100 dark:border-gray-800 space-y-2">
           {/* Project filter */}
           <select
             value={projectFilter}
             onChange={(e) => setProjectFilter(e.target.value)}
-            className="w-full text-sm px-3 py-1.5 border border-gray-200 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-400 bg-white"
+            className="w-full text-sm px-3 py-1.5 border border-gray-200 dark:border-gray-700 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-400 bg-white dark:bg-gray-900 dark:text-gray-200"
           >
             <option value="all">All projects</option>
             {allProjects.map((p) => (
@@ -219,7 +219,7 @@ export function AllWorkspacesPanel({ columns, activeProjectId, onClose, onIssueC
             placeholder={showingCrossProject ? "Search by title, branch, or project…" : "Search by title or branch…"}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full text-sm px-3 py-1.5 border border-gray-200 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-400"
+            className="w-full text-sm px-3 py-1.5 border border-gray-200 dark:border-gray-700 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-400 dark:bg-gray-900 dark:text-gray-200"
           />
           {/* Status chips */}
           <div className="flex gap-1.5 flex-wrap">
@@ -230,7 +230,7 @@ export function AllWorkspacesPanel({ columns, activeProjectId, onClose, onIssueC
                 className={`text-xs px-2.5 py-1 rounded-full font-medium transition-colors ${
                   statusFilter === chip.value
                     ? "bg-blue-600 text-white"
-                    : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                    : "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700"
                 }`}
               >
                 {chip.label}
@@ -242,15 +242,15 @@ export function AllWorkspacesPanel({ columns, activeProjectId, onClose, onIssueC
         {/* Content */}
         <div className="flex-1 overflow-y-auto">
           {crossProjectLoading ? (
-            <div className="px-4 py-12 text-center text-sm text-gray-400">Loading…</div>
+            <div className="px-4 py-12 text-center text-sm text-gray-400 dark:text-gray-500">Loading…</div>
           ) : filtered.length === 0 ? (
-            <div className="px-4 py-12 text-center text-sm text-gray-500">
+            <div className="px-4 py-12 text-center text-sm text-gray-500 dark:text-gray-400">
               {issuesWithWorkspaces.length === 0
                 ? "No workspaces yet. Create a workspace from an issue to get started."
                 : "No workspaces match the current filter."}
             </div>
           ) : (
-            <div className="divide-y divide-gray-100">
+            <div className="divide-y divide-gray-100 dark:divide-gray-800">
               {filtered.map((issue) => {
                 const ws = issue.workspaceSummary!;
                 const main = ws.main;
@@ -259,7 +259,7 @@ export function AllWorkspacesPanel({ columns, activeProjectId, onClose, onIssueC
                 return (
                   <div
                     key={issue.id}
-                    className="px-4 py-3 hover:bg-gray-50 cursor-pointer"
+                    className="px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer"
                     onClick={async () => {
                       if (showingCrossProject && issue.projectId !== activeProjectId && onProjectSwitch) {
                         await onProjectSwitch(issue.projectId);
@@ -269,10 +269,10 @@ export function AllWorkspacesPanel({ columns, activeProjectId, onClose, onIssueC
                   >
                     {/* Issue title + status */}
                     <div className="flex items-start gap-2 mb-1.5">
-                      <span className="text-xs text-gray-400 font-mono mt-0.5 shrink-0">
+                      <span className="text-xs text-gray-400 dark:text-gray-500 font-mono mt-0.5 shrink-0">
                         #{issue.issueNumber}
                       </span>
-                      <span className="text-sm font-medium text-gray-900 flex-1 min-w-0 line-clamp-1">
+                      <span className="text-sm font-medium text-gray-900 dark:text-gray-100 flex-1 min-w-0 line-clamp-1">
                         {issue.title}
                       </span>
                       <span
@@ -295,7 +295,7 @@ export function AllWorkspacesPanel({ columns, activeProjectId, onClose, onIssueC
                     {main && (
                       <div className="flex items-center gap-2 flex-wrap ml-6">
                         {/* Branch */}
-                        <span className="text-xs text-gray-500 font-mono truncate max-w-[180px]">
+                        <span className="text-xs text-gray-500 dark:text-gray-400 font-mono truncate max-w-[180px]">
                           {main.branch}
                         </span>
 
@@ -315,7 +315,7 @@ export function AllWorkspacesPanel({ columns, activeProjectId, onClose, onIssueC
 
                         {/* Diff stats */}
                         {main.diffStats && main.diffStats.filesChanged > 0 && (
-                          <span className="text-xs text-gray-500">
+                          <span className="text-xs text-gray-500 dark:text-gray-400">
                             {main.diffStats.filesChanged} file{main.diffStats.filesChanged !== 1 ? "s" : ""},&nbsp;
                             <span className="text-green-600">+{main.diffStats.insertions}</span>
                             {" / "}
@@ -346,14 +346,14 @@ export function AllWorkspacesPanel({ columns, activeProjectId, onClose, onIssueC
 
                         {/* Last session */}
                         {main.lastSessionAt && (
-                          <span className="text-xs text-gray-400">
+                          <span className="text-xs text-gray-400 dark:text-gray-500">
                             {formatRelativeTime(main.lastSessionAt)}
                           </span>
                         )}
 
                         {/* Context usage */}
                         {(main.status === "active" || main.status === "fixing") && main.contextTokens ? (
-                          <span className="text-xs text-gray-400" title={`${main.contextTokens.toLocaleString()} context tokens`}>
+                          <span className="text-xs text-gray-400 dark:text-gray-500" title={`${main.contextTokens.toLocaleString()} context tokens`}>
                             {main.contextTokens >= 1000
                               ? `${Math.round(main.contextTokens / 1000)}k ctx`
                               : `${main.contextTokens} ctx`}
@@ -362,8 +362,8 @@ export function AllWorkspacesPanel({ columns, activeProjectId, onClose, onIssueC
 
                         {/* Last tool */}
                         {(main.status === "active" || main.status === "fixing") && main.lastTool ? (
-                          <span className="text-xs text-gray-400 truncate max-w-[160px]" title={`Last tool: ${main.lastTool}`}>
-                            <span className="font-medium text-gray-500">tool:</span> {main.lastTool}
+                          <span className="text-xs text-gray-400 dark:text-gray-500 truncate max-w-[160px]" title={`Last tool: ${main.lastTool}`}>
+                            <span className="font-medium text-gray-500 dark:text-gray-400">tool:</span> {main.lastTool}
                           </span>
                         ) : null}
                       </div>
@@ -371,7 +371,7 @@ export function AllWorkspacesPanel({ columns, activeProjectId, onClose, onIssueC
 
                     {/* Multiple workspaces indicator */}
                     {ws.total > 1 && (
-                      <div className="ml-6 mt-1 text-xs text-gray-400">
+                      <div className="ml-6 mt-1 text-xs text-gray-400 dark:text-gray-500">
                         +{ws.total - 1} more workspace{ws.total - 1 !== 1 ? "s" : ""}
                       </div>
                     )}
