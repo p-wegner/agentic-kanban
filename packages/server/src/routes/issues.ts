@@ -228,6 +228,7 @@ export function createIssuesRoute(database: Database = db, options?: { boardEven
         status: workspaces.status,
         agentCommand: workspaces.agentCommand,
         provider: workspaces.provider,
+        pendingPlanPath: workspaces.pendingPlanPath,
         skillId: workspaces.skillId,
         skillName: agentSkills.name,
         createdAt: workspaces.createdAt,

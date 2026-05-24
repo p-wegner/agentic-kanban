@@ -267,6 +267,13 @@
       "when": 1780474800000,
       "tag": "0037_workspace_provider",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "6",
+      "when": 1780561200000,
+      "tag": "0038_pending_plan_path",
+      "breakpoints": true
     }
   ]
 }

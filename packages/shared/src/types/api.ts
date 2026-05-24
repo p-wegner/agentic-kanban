@@ -144,6 +144,7 @@ export interface WorkspaceResponse {
   readyForMerge: boolean;
   agentCommand?: string | null;
   provider?: string | null;
+  pendingPlanPath?: string | null;
   sessionId?: string;
   skillName?: string | null;
   createdAt: string;

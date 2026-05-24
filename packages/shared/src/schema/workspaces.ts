@@ -18,6 +18,7 @@ export const workspaces = sqliteTable("workspaces", {
   claudeProfile: text("claude_profile"),
   agentCommand: text("agent_command"),
   provider: text("provider"),
+  pendingPlanPath: text("pending_plan_path"),
   skillId: text("skill_id").references(() => agentSkills.id),
   includeVisualProof: integer("include_visual_proof", { mode: "boolean" }).notNull().default(false),
   createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),

@@ -14,6 +14,10 @@ let claudeMcpConfigPath: string | null = null;
 
 export type ProviderId = "claude-code" | "codex";
 
+/** Sentinel markers wrapping the machine-readable plan block emitted by a plan-mode run. */
+export const PLAN_BEGIN_MARKER = "===PLAN BEGIN===";
+export const PLAN_END_MARKER = "===PLAN END===";
+
 // --- Provider interface ---
 
 export interface AgentLaunchConfig {
@@ -392,8 +396,21 @@ export class CodexProvider implements AgentProvider {
       }
       // Codex has no --append-system-prompt; convey plan-only intent via the stdin prompt
       // so the agent produces a plan directly instead of repeatedly hitting the sandbox.
+      // The sentinel-wrapped block is the machine-readable contract the server parses out
+      // and persists as PLAN.md (see PLAN_BEGIN_MARKER / PLAN_END_MARKER).
       if (planMode) {
-        promptPrefix = "IMPORTANT: This is a PLAN-ONLY session. Do NOT implement, write, edit, or modify any files. Do NOT run commands that make changes (git, npm, pip, etc.). Only read and explore the codebase, analyze the issue, and produce a detailed implementation plan. Output your plan and stop.";
+        promptPrefix = [
+          "IMPORTANT: This is a PLAN-ONLY session. Do NOT implement, write, edit, or modify any files.",
+          "Do NOT run commands that make changes (git, npm, pip, etc.). Only read and explore the codebase,",
+          "analyze the issue, and produce a detailed implementation plan.",
+          "",
+          "At the very END of your response, output the complete plan as Markdown wrapped EXACTLY between",
+          "these two marker lines, each on its own line with nothing else on the line:",
+          PLAN_BEGIN_MARKER,
+          "<your full markdown implementation plan here>",
+          PLAN_END_MARKER,
+          "Then stop.",
+        ].join("\n");
       }
       // Prompt is passed via stdin (using `-` as the last argument)
       args.push("-");
@@ -467,6 +484,8 @@ export class CodexProvider implements AgentProvider {
       const item = obj.item as Record<string, unknown>;
       if (item.type === "command_execution" && item.id) {
         result.toolResult = { toolUseId: item.id as string };
+      } else if (item.type === "agent_message" && typeof item.text === "string" && item.text) {
+        result.assistantText = item.text;
       }
     }
 
@@ -475,6 +494,7 @@ export class CodexProvider implements AgentProvider {
       result.stats === undefined &&
       result.turnComplete === undefined &&
       result.liveStats === undefined &&
+      result.assistantText === undefined &&
       result.toolActivity === undefined &&
       result.toolResult === undefined &&
       result.todos === undefined
