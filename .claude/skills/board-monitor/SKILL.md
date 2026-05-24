@@ -123,13 +123,17 @@ Write a concise human-readable summary — imagine sending it to Slack. The goal
 
 ⚠️ Needs attention:
   • #N  <title>  — <what's wrong, e.g. "merge conflicts in Layout.tsx">
+
+💤 Idle / stopped:
+  • #N  <title>  — <last agent message, first line, max ~80 chars>
 ```
 
 Rules:
 - Always include ticket numbers AND a short title description (never numbers alone).
 - Omit sections that are empty.
 - Title summaries: strip "E2E: cover", "Add", "Show" boilerplate if it makes it shorter — keep the core noun phrase. E.g. "#253 Estimate badge on issue cards" not "#253 Show estimate badge on kanban issue cards".
-- Keep the whole summary under ~20 lines.
+- For idle/stopped workspaces: include the `last:` line from the `pnpm cli -- status` output so the reader knows what the agent was doing. If the reader asks "why did it stop?", use `pnpm cli -- issue status <N>` for the full context.
+- Keep the whole summary under ~25 lines.
 
 ---
 
