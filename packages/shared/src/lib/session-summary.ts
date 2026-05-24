@@ -5,6 +5,17 @@ export interface TaskSummaryItem {
   status: "pending" | "in_progress" | "completed" | "deleted";
 }
 
+export interface ToolUsePattern {
+  tool: string;
+  count: number;
+  failedCount: number;
+}
+
+export interface RepeatedCommand {
+  command: string;
+  count: number;
+}
+
 export interface SessionSummary {
   overview: string;
   agentSummary: string | null;
@@ -18,6 +29,8 @@ export interface SessionSummary {
   model: string;
   tasks: TaskSummaryItem[];
   rateLimits: Array<{ rateLimitType: string; status: string; resetsAt?: number; overageStatus?: string }>;
+  toolUsePatterns: ToolUsePattern[];
+  repeatedCommands: RepeatedCommand[];
 }
 
 export function formatDurationStr(diffMs: number): string {
@@ -35,6 +48,8 @@ export function parseSessionSummary(
   rows: Array<{ type: string; data: string | null }>,
 ): SessionSummary {
   const toolNameMap = new Map<string, string>();
+  const toolUseCounts = new Map<string, { count: number; failedCount: number }>();
+  const commandCounts = new Map<string, number>();
 
   const filesRead = new Set<string>();
   const filesEdited = new Set<string>();
@@ -91,6 +106,9 @@ export function parseSessionSummary(
             const toolUseId = (block.id as string) || "";
             const toolName = (block.name as string) || "unknown";
             if (toolUseId) toolNameMap.set(toolUseId, toolName);
+            const existing = toolUseCounts.get(toolName) ?? { count: 0, failedCount: 0 };
+            existing.count++;
+            toolUseCounts.set(toolName, existing);
             const input = block.input as Record<string, unknown> | undefined;
 
             if (toolName === "Read" && input?.file_path) {
@@ -102,6 +120,8 @@ export function parseSessionSummary(
             } else if (toolName === "Bash" && input?.command) {
               const cmd = (input.command as string).slice(0, 200);
               commandsRun.push(cmd);
+              const normCmd = cmd.replace(/\s+/g, " ").trim().slice(0, 80);
+              commandCounts.set(normCmd, (commandCounts.get(normCmd) ?? 0) + 1);
             } else if (toolName === "TaskCreate" && input?.subject) {
               taskCounter++;
               const id = String(taskCounter);
@@ -141,6 +161,8 @@ export function parseSessionSummary(
               if (errors.length < 10) {
                 errors.push(`${toolName}: ${output.length > 200 ? output.slice(0, 200) + "..." : output}`);
               }
+              const entry = toolUseCounts.get(toolName);
+              if (entry) entry.failedCount++;
             } else if (toolName === "Agent" && output) {
               agentSummaryParts.push(output);
             }
@@ -186,6 +208,15 @@ export function parseSessionSummary(
 
   const agentSummary = agentSummaryParts.length > 0 ? agentSummaryParts.join("\n\n---\n\n") : null;
 
+  const toolUsePatterns: ToolUsePattern[] = [...toolUseCounts.entries()]
+    .map(([tool, { count, failedCount }]) => ({ tool, count, failedCount }))
+    .sort((a, b) => b.count - a.count);
+
+  const repeatedCommands: RepeatedCommand[] = [...commandCounts.entries()]
+    .filter(([, count]) => count >= 2)
+    .map(([command, count]) => ({ command, count }))
+    .sort((a, b) => b.count - a.count);
+
   return {
     overview,
     agentSummary,
@@ -199,5 +230,7 @@ export function parseSessionSummary(
     model,
     tasks: [...tasksMap.values()],
     rateLimits,
+    toolUsePatterns,
+    repeatedCommands,
   };
 }
