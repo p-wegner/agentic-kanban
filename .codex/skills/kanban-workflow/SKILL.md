@@ -64,11 +64,20 @@ update_issue(issueId, description="## Progress\n- Schema migrated\n- API route W
 Some workspaces have `isDirect: true` — the agent is working directly on the project's default branch (e.g. master) instead of a separate feature branch. In this case:
 - There is no separate branch to merge — changes go directly to master.
 - **You must still move the issue status** when done. Do not skip status transitions just because there is no branch to merge.
-- After committing, move to **In Review** (if review is desired) or directly to **Done** (if the work is trivially correct and no review is needed).
+- **The system does NOT auto-review direct workspaces.** You must self-review before committing (see step 5a below).
+- After self-review and commit, move to **Done**.
 - The absence of a feature branch is NOT a reason to leave the ticket in "In Progress" forever.
 
-### 5. Commit your changes
-**This is mandatory before finishing.** After implementation is complete:
+### 5. Self-review before committing
+**This is mandatory for direct workspaces and strongly recommended for all workspaces.** Before you commit:
+
+1. **Read the full diff** — run `git diff` (or `git diff --staged` if already staged). Do not skip this. You must see every line you're about to commit.
+2. **Review your own changes critically** — look for correctness bugs, security issues, dead code, forgotten debug output, missing error handling.
+3. **Complete the ticket's checklist** — if the ticket description lists remaining steps, complete ALL of them before committing. Do not ask the user for permission to skip steps listed in the ticket. If a step is genuinely blocked, note it in the issue description and move the issue to the appropriate status — but do not commit partial work and mark Done.
+4. **Verify the commit is complete** — the commit should represent a coherent, reviewable unit of work.
+
+### 5a. Commit your changes
+After self-review, commit:
 1. Stage and commit all changed files with a descriptive message
 2. The commit message should summarize the what and why
 3. Reference the issue in the commit if appropriate
@@ -76,14 +85,16 @@ Some workspaces have `isDirect: true` — the agent is working directly on the p
 Do NOT leave uncommitted changes in the worktree. If you have made changes, commit them before moving to the next step.
 
 ### 6. Move to In Review when code is ready
-After committing, move the issue to **In Review**:
+After committing on a **branched workspace**, move the issue to **In Review**:
 ```
 update_issue(issueId, statusName="In Review")
 ```
 This signals that the implementation is complete and ready for review. An automated code review will be triggered.
 
-### 7. AI Code Review (automatic)
-When auto-review is enabled, the system launches a review agent after your session exits. The board shows a purple **AI Reviewing** badge on the issue card during review.
+**For direct workspaces**: skip this step. You already self-reviewed in step 5. Move directly to **Done** after committing.
+
+### 7. AI Code Review (automatic, branched workspaces only)
+When auto-review is enabled and the workspace has a feature branch, the system launches a review agent after your session exits. The board shows a purple **AI Reviewing** badge on the issue card during review.
 
 **Review agent behavior:**
 - Reviews the git diff for correctness, security, and code quality
@@ -179,8 +190,10 @@ Shorthand for "review #N and merge if fine" — same workflow as above.
 ## Rules of Thumb
 
 1. **Move first, code second** — update to In Progress before any file edits.
-2. **Commit before moving to In Review** — never leave uncommitted changes when signaling completion.
-3. **One status transition per logical checkpoint** — don't batch-move issues after the fact.
-4. **Description is a shared log** — write progress notes so the user can follow along without reading code.
-5. **Done means done** — code committed, tests green, review approved, no loose ends.
-6. **Cancelled is not failure** — use it freely when scope changes.
+2. **Read your diff before committing** — always `git diff` your changes. Never commit blind.
+3. **Complete the full ticket** — if the ticket lists steps, do all of them. Do not ask the user for permission to skip checklist items. If blocked, note it in the description and stop — don't mark Done.
+4. **Commit before moving to In Review** — never leave uncommitted changes when signaling completion.
+5. **One status transition per logical checkpoint** — don't batch-move issues after the fact.
+6. **Description is a shared log** — write progress notes so the user can follow along without reading code.
+7. **Done means done** — code committed, tests green, review approved (or self-reviewed for direct), no loose ends, no open questions.
+8. **Cancelled is not failure** — use it freely when scope changes.
