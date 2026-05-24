@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { apiFetch } from "../lib/api.js";
 import { suggestBranchName, sanitizeBranchName } from "../lib/branch.js";
-import type { IssueWithStatus, WorkspaceResponse } from "@agentic-kanban/shared";
+import type { IssueWithStatus, ProfileSelection, WorkspaceResponse } from "@agentic-kanban/shared";
 
 interface Project {
   id: string;
@@ -23,6 +23,21 @@ interface CreateWorkspaceFormProps {
   onSubmitting?: () => void;
 }
 
+type AgentProvider = ProfileSelection["provider"];
+
+const COPILOT_DEFAULT_PROFILE = "default";
+
+function uniqueProfiles(profiles: string[], fallback?: string): string[] {
+  const all = fallback ? [fallback, ...profiles] : profiles;
+  return [...new Set(all.filter(Boolean))];
+}
+
+function defaultProfileLabel(prefs: Record<string, string>): string {
+  if (prefs.provider === "codex") return `codex:${prefs.codex_profile || "none"}`;
+  if (prefs.provider === "copilot") return `copilot:${prefs.copilot_profile || COPILOT_DEFAULT_PROFILE}`;
+  return `claude:${prefs.claude_profile || "none"}`;
+}
+
 export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCreated, onCancel, onSubmitting }: CreateWorkspaceFormProps) {
   const suggestion = suggestBranchName(issue);
 
@@ -30,14 +45,15 @@ export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCr
   const [baseBranch, setBaseBranch] = useState("");
   const [isDirect, setIsDirect] = useState(false);
   const [requiresReview, setRequiresReview] = useState(prefs.auto_review !== "false");
-const [planMode, setPlanMode] = useState(false);
+  const [planMode, setPlanMode] = useState(false);
   const [skipSetup, setSkipSetup] = useState(false);
   const [branches, setBranches] = useState<{ local: string[]; remote: string[] } | null>(null);
   const [availableSkills, setAvailableSkills] = useState<{ id: string; name: string; description: string }[]>([]);
   const [selectedSkillId, setSelectedSkillId] = useState<string>("");
   const [claudeProfiles, setClaudeProfiles] = useState<string[]>([]);
   const [codexProfiles, setCodexProfiles] = useState<string[]>([]);
-  // selectedProfile format: "<provider>:<name>" e.g. "claude:myprofile" or "codex:myprofile" or "" for default
+  const [copilotProfiles, setCopilotProfiles] = useState<string[]>([COPILOT_DEFAULT_PROFILE]);
+  // selectedProfile format: "<provider>:<name>" e.g. "claude:myprofile", "codex:myprofile", "copilot:default", or "" for default
   const [selectedProfile, setSelectedProfile] = useState<string>("");
   const [localLoading, setLocalLoading] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
@@ -51,14 +67,18 @@ const [planMode, setPlanMode] = useState(false);
     Promise.all([
       apiFetch<{ profiles: string[] }>("/api/preferences/claude-profiles").catch(() => ({ profiles: [] as string[] })),
       apiFetch<{ profiles: string[] }>("/api/preferences/codex-profiles").catch(() => ({ profiles: [] as string[] })),
+      apiFetch<{ profiles: string[] }>("/api/preferences/copilot-profiles").catch(() => ({ profiles: [COPILOT_DEFAULT_PROFILE] })),
       apiFetch<Record<string, string>>("/api/preferences/settings").catch(() => ({} as Record<string, string>)),
-    ]).then(([claudeData, codexData, settings]) => {
+    ]).then(([claudeData, codexData, copilotData, settings]) => {
       setClaudeProfiles(claudeData.profiles);
       setCodexProfiles(codexData.profiles);
+      setCopilotProfiles(uniqueProfiles(copilotData.profiles, COPILOT_DEFAULT_PROFILE));
       // Set default selection from global settings
       const globalProvider = settings.provider || "claude";
       if (globalProvider === "codex" && settings.codex_profile) {
         setSelectedProfile(`codex:${settings.codex_profile}`);
+      } else if (globalProvider === "copilot") {
+        setSelectedProfile(`copilot:${settings.copilot_profile || COPILOT_DEFAULT_PROFILE}`);
       } else if (settings.claude_profile) {
         setSelectedProfile(`claude:${settings.claude_profile}`);
       } else {
@@ -82,9 +102,9 @@ const [planMode, setPlanMode] = useState(false);
       if (selectedProfile) {
         const colonIdx = selectedProfile.indexOf(":");
         if (colonIdx !== -1) {
-          const provider = selectedProfile.slice(0, colonIdx) as "claude" | "codex";
+          const provider = selectedProfile.slice(0, colonIdx) as AgentProvider;
           const name = selectedProfile.slice(colonIdx + 1);
-          if (name) body.profile = { provider, name };
+          if ((provider === "claude" || provider === "codex" || provider === "copilot") && name) body.profile = { provider, name };
         }
       }
       if (!isDirect) {
@@ -227,7 +247,7 @@ const [planMode, setPlanMode] = useState(false);
           </select>
         </div>
       )}
-      {(claudeProfiles.length > 0 || codexProfiles.length > 0) && (
+      {(claudeProfiles.length > 0 || codexProfiles.length > 0 || copilotProfiles.length > 0) && (
         <div>
           <label className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-1 block">Profile</label>
           <select
@@ -235,7 +255,7 @@ const [planMode, setPlanMode] = useState(false);
             onChange={(e) => setSelectedProfile(e.target.value)}
             className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:bg-gray-900 dark:text-gray-100"
           >
-            <option value="">Default ({prefs.provider === "codex" ? `codex:${prefs.codex_profile || "none"}` : `claude:${prefs.claude_profile || "none"}`})</option>
+            <option value="">Default ({defaultProfileLabel(prefs)})</option>
             {claudeProfiles.length > 0 && (
               <optgroup label="Claude">
                 {claudeProfiles.map((p) => (
@@ -250,6 +270,11 @@ const [planMode, setPlanMode] = useState(false);
                 ))}
               </optgroup>
             )}
+            <optgroup label="Copilot">
+              {copilotProfiles.map((p) => (
+                <option key={`copilot:${p}`} value={`copilot:${p}`}>{p === COPILOT_DEFAULT_PROFILE ? "Default" : p}</option>
+              ))}
+            </optgroup>
           </select>
         </div>
       )}
