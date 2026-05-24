@@ -585,6 +585,7 @@ describe("CopilotProvider", () => {
     expect(config.args).toContain("--additional-mcp-config");
     expect(config.args.some((arg) => arg.startsWith("@") && arg.includes("agentic-kanban-mcp-config.json"))).toBe(true);
     expect(config.isMockAgent).toBe(false);
+    expect(config.suppressStdinPrompt).toBe(true);
   });
 
   it("uses --resume=<id> for Copilot resume", () => {
@@ -632,8 +633,11 @@ describe("CopilotProvider", () => {
     expect(config.args).toContain("--available-tools=read,search,shell,agentic-kanban");
     expect(config.args).toContain("--deny-tool=write");
     expect(config.args).toContain("--deny-tool=shell(git commit)");
-    expect(config.promptPrefix).toContain("PLAN-ONLY");
-    expect(config.promptPrefix).toContain("===PLAN BEGIN===");
+    expect(config.promptPrefix).toBeUndefined();
+    const promptIdx = config.args.indexOf("-p");
+    expect(config.args[promptIdx + 1]).toContain("PLAN-ONLY");
+    expect(config.args[promptIdx + 1]).toContain("===PLAN BEGIN===");
+    expect(config.args[promptIdx + 1]).toContain("Plan it");
   });
 
   it("preserves user-supplied agent args after provider defaults", () => {
