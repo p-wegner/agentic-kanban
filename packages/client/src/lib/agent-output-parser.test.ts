@@ -49,8 +49,10 @@ describe("getOutputFormatForAgent", () => {
     expect(getOutputFormatForAgent("/some/path/mock-agent-foo")).toBe("claude-stream-json");
   });
 
-  it("returns raw for codex command", () => {
-    expect(getOutputFormatForAgent("codex")).toBe("raw");
+  it("returns codex-jsonl for codex command", () => {
+    expect(getOutputFormatForAgent("codex")).toBe("codex-jsonl");
+    expect(getOutputFormatForAgent("codex.cmd")).toBe("codex-jsonl");
+    expect(getOutputFormatForAgent("C:\\Users\\test\\scoop\\codex.cmd")).toBe("codex-jsonl");
   });
 
   it("returns raw for other agent commands", () => {

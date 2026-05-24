@@ -43,6 +43,7 @@ export class RawOutputParser implements AgentOutputParser {
 }
 
 const CLAUDE_COMMANDS = ["claude", "claude.exe"];
+const CODEX_COMMANDS = ["codex"];
 
 export function getOutputFormatForProvider(provider?: string | null): AgentOutputFormat {
   if (!provider || provider === "claude") return "claude-stream-json";
@@ -52,8 +53,9 @@ export function getOutputFormatForProvider(provider?: string | null): AgentOutpu
 
 export function getOutputFormatForAgent(agentCommand?: string): AgentOutputFormat {
   if (!agentCommand) return "claude-stream-json";
-  const base = agentCommand.split(/[\\/]/).pop()?.replace(/\.exe$/i, "")?.toLowerCase() ?? "";
+  const base = agentCommand.split(/[\\/]/).pop()?.replace(/\.(exe|cmd)$/i, "")?.toLowerCase() ?? "";
   if (CLAUDE_COMMANDS.includes(base) || base.includes("mock-agent")) return "claude-stream-json";
+  if (CODEX_COMMANDS.includes(base)) return "codex-jsonl";
   return "raw";
 }
 
