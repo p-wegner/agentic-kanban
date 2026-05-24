@@ -97,6 +97,12 @@ function settingsProfileValue(settings: Settings): string {
   return `claude:${settings.claude_profile || ""}`;
 }
 
+function profileOptionLabel(provider: AgentProvider, name: string): string {
+  const displayName = provider === "copilot" && name === COPILOT_DEFAULT_PROFILE ? "Default" : name;
+  const providerLabel = provider === "codex" ? "Codex" : provider === "copilot" ? "Copilot" : "Claude";
+  return `${providerLabel}: ${displayName}`;
+}
+
 function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return (
     <div className="space-y-1">
@@ -637,19 +643,19 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                       <option value="">Default (no profile)</option>
                       <optgroup label="Claude">
                         {profiles.map((p) => (
-                          <option key={`claude:${p}`} value={`claude:${p}`}>{p}</option>
+                          <option key={`claude:${p}`} value={`claude:${p}`}>{profileOptionLabel("claude", p)}</option>
                         ))}
                       </optgroup>
                       {codexProfiles.length > 0 && (
                         <optgroup label="Codex">
                           {codexProfiles.map((p) => (
-                            <option key={`codex:${p}`} value={`codex:${p}`}>{p}</option>
+                            <option key={`codex:${p}`} value={`codex:${p}`}>{profileOptionLabel("codex", p)}</option>
                           ))}
                         </optgroup>
                       )}
                       <optgroup label="Copilot">
                         {copilotProfiles.map((p) => (
-                          <option key={`copilot:${p}`} value={`copilot:${p}`}>{p === COPILOT_DEFAULT_PROFILE ? "Default" : p}</option>
+                          <option key={`copilot:${p}`} value={`copilot:${p}`}>{profileOptionLabel("copilot", p)}</option>
                         ))}
                       </optgroup>
                     </select>
