@@ -49,6 +49,7 @@ const MIGRATION_FILES = [
   "../../../shared/drizzle/0035_session_trigger.sql",
   "../../../shared/drizzle/0036_scheduled_runs_cron.sql",
   "../../../shared/drizzle/0037_workspace_provider.sql",
+  "../../../shared/drizzle/0038_pending_plan_path.sql",
 ];
 
 function createTestApp() {
@@ -285,6 +286,78 @@ describe("Session Summary API", () => {
     expect(body.overview).toContain("edited 1 file");
     expect(body.overview).toContain("wrote 1 file");
     expect(body.overview).toContain("ran 1 command");
+  });
+
+  it("extracts Copilot JSONL session activity", async () => {
+    const { sessionId } = await createSessionWithData(testApp.db);
+
+    await testApp.db.insert(schema.sessionMessages).values([
+      {
+        sessionId,
+        type: "stdout",
+        data: [
+          JSON.stringify({
+            type: "session.started",
+            session_id: "copilot-123",
+            model: "gpt-5.2",
+          }),
+          JSON.stringify({
+            type: "assistant_message",
+            text: "I'll inspect the parser and add tests.",
+            model: "gpt-5.2",
+          }),
+          JSON.stringify({
+            type: "tool_call.started",
+            id: "tool-read",
+            name: "view",
+            input: { path: "/src/parser.ts" },
+          }),
+          JSON.stringify({
+            type: "tool_call.started",
+            id: "tool-edit",
+            name: "edit",
+            input: { path: "/src/parser.ts" },
+          }),
+          JSON.stringify({
+            type: "tool_call.started",
+            id: "tool-shell",
+            name: "bash",
+            input: { command: "pnpm test" },
+          }),
+          JSON.stringify({
+            type: "tool_call.completed",
+            id: "tool-shell",
+            result: "failed",
+            status: "failed",
+          }),
+          JSON.stringify({
+            type: "stats",
+            usage: { input_tokens: 100, output_tokens: 50 },
+            model: "gpt-5.2",
+          }),
+        ].join("\n"),
+      },
+    ]);
+
+    const res = await testApp.app.request(`/api/sessions/${sessionId}/summary`);
+    expect(res.status).toBe(200);
+
+    const body = await res.json();
+    expect(body.model).toBe("gpt-5.2");
+    expect(body.keyExcerpts).toContain("I'll inspect the parser and add tests.");
+    expect(body.filesRead).toEqual(["/src/parser.ts"]);
+    expect(body.filesEdited).toEqual(["/src/parser.ts"]);
+    expect(body.commandsRun).toEqual(["pnpm test"]);
+    expect(body.errors[0]).toContain("bash");
+    expect(body.overview).toContain("Agent session using gpt-5.2");
+    expect(body.overview).toContain("read 1 file");
+    expect(body.overview).toContain("edited 1 file");
+    expect(body.overview).toContain("ran 1 command");
+    expect(body.toolUsePatterns).toEqual([
+      { tool: "view", count: 1, failedCount: 0 },
+      { tool: "edit", count: 1, failedCount: 0 },
+      { tool: "bash", count: 1, failedCount: 1 },
+    ]);
   });
 
   it("extracts error results from tool_result blocks", async () => {

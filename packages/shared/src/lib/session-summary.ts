@@ -44,6 +44,150 @@ export function formatDurationStr(diffMs: number): string {
   return `${hr}h ${remMin}m`;
 }
 
+const COPILOT_SESSION_START_TYPES = new Set([
+  "session_start",
+  "session_started",
+  "session_created",
+  "session.start",
+  "session.started",
+  "session.created",
+]);
+
+const COPILOT_TOOL_USE_TYPES = new Set([
+  "tool_call",
+  "tool_call_start",
+  "tool_call_started",
+  "tool_use",
+  "tool_use_start",
+  "tool_use_started",
+  "tool.start",
+  "tool.started",
+  "tool_call.started",
+]);
+
+const COPILOT_TOOL_RESULT_TYPES = new Set([
+  "tool_result",
+  "tool_call_result",
+  "tool_call_complete",
+  "tool_call_completed",
+  "tool.completed",
+  "tool_call.completed",
+]);
+
+const COPILOT_RESULT_TYPES = new Set([
+  "result",
+  "done",
+  "session_end",
+  "session_ended",
+  "session.end",
+  "session.ended",
+  "turn_completed",
+  "turn.completed",
+  "stats",
+]);
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined;
+}
+
+function normalizedType(obj: Record<string, unknown>): string {
+  return String(obj.type || obj.event || obj.name || "").toLowerCase();
+}
+
+function getString(obj: Record<string, unknown>, keys: string[]): string {
+  for (const key of keys) {
+    const value = obj[key];
+    if (typeof value === "string" && value.trim()) return value;
+  }
+  return "";
+}
+
+function stringifyValue(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (value === undefined || value === null) return "";
+  return JSON.stringify(value);
+}
+
+function contentToText(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (!Array.isArray(value)) return "";
+  return value
+    .map((block) => {
+      if (typeof block === "string") return block;
+      const record = asRecord(block);
+      return record ? getString(record, ["text", "content", "message"]) : "";
+    })
+    .filter(Boolean)
+    .join("\n");
+}
+
+function extractCopilotAssistantText(obj: Record<string, unknown>): string {
+  const type = normalizedType(obj);
+  const role = String(obj.role || "").toLowerCase();
+  const message = asRecord(obj.message);
+
+  if (type === "assistant" || type === "assistant_message" || role === "assistant") {
+    return contentToText(obj.content)
+      || getString(obj, ["text", "message", "delta"])
+      || (message ? contentToText(message.content) || getString(message, ["text", "content", "message"]) : "");
+  }
+
+  if (type === "message" && role === "assistant") {
+    return contentToText(obj.content) || getString(obj, ["text", "message"]);
+  }
+
+  return "";
+}
+
+function extractCopilotToolUse(obj: Record<string, unknown>): {
+  id: string;
+  name: string;
+  input: Record<string, unknown>;
+  rawInput: unknown;
+} | null {
+  if (!COPILOT_TOOL_USE_TYPES.has(normalizedType(obj))) return null;
+
+  const tool = asRecord(obj.tool) || asRecord(obj.tool_call) || asRecord(obj.toolCall) || obj;
+  const rawInput = tool.input ?? tool.arguments ?? tool.args ?? tool.parameters ?? tool.command ?? tool.path;
+  return {
+    id: getString(tool, ["id", "tool_use_id", "toolUseId", "call_id", "callId"]),
+    name: getString(tool, ["name", "tool", "tool_name", "toolName", "kind"]) || "copilot_tool",
+    input: asRecord(rawInput) || {},
+    rawInput,
+  };
+}
+
+function extractCopilotToolResult(
+  obj: Record<string, unknown>,
+  toolNameMap: Map<string, string>,
+): { id: string; name: string; output: string; isError: boolean } | null {
+  if (!COPILOT_TOOL_RESULT_TYPES.has(normalizedType(obj))) return null;
+
+  const tool = asRecord(obj.tool) || asRecord(obj.tool_call) || asRecord(obj.toolCall) || obj;
+  const id = getString(tool, ["id", "tool_use_id", "toolUseId", "call_id", "callId"]);
+  const status = String(tool.status || "").toLowerCase();
+  return {
+    id,
+    name: getString(tool, ["name", "tool", "tool_name", "toolName", "kind"])
+      || (id ? toolNameMap.get(id) : "")
+      || "copilot_tool",
+    output: stringifyValue(tool.output ?? tool.result ?? tool.content ?? tool.message ?? tool.error),
+    isError: Boolean(tool.is_error || tool.isError || tool.error) || status === "error" || status === "failed",
+  };
+}
+
+function getPathLike(input: Record<string, unknown>, rawInput: unknown): string {
+  return getString(input, ["file_path", "filePath", "path", "target", "uri"])
+    || (typeof rawInput === "string" && !rawInput.includes("\n") ? rawInput : "");
+}
+
+function getCommandLike(input: Record<string, unknown>, rawInput: unknown): string {
+  return getString(input, ["command", "cmd", "script"])
+    || (typeof rawInput === "string" ? rawInput : "");
+}
+
 export function parseSessionSummary(
   rows: Array<{ type: string; data: string | null }>,
 ): SessionSummary {
@@ -80,6 +224,7 @@ export function parseSessionSummary(
       }
 
       const type = obj.type as string;
+      const copilotType = normalizedType(obj);
 
       if (type === "system" && obj.subtype === "init") {
         initFound = true;
@@ -87,9 +232,61 @@ export function parseSessionSummary(
         continue;
       }
 
+      if (COPILOT_SESSION_START_TYPES.has(copilotType)) {
+        initFound = true;
+        model = getString(obj, ["model", "modelId", "model_id"]) || model || "copilot";
+        continue;
+      }
+
+      const copilotToolUse = extractCopilotToolUse(obj);
+      if (copilotToolUse) {
+        if (copilotToolUse.id) toolNameMap.set(copilotToolUse.id, copilotToolUse.name);
+        const existing = toolUseCounts.get(copilotToolUse.name) ?? { count: 0, failedCount: 0 };
+        existing.count++;
+        toolUseCounts.set(copilotToolUse.name, existing);
+
+        const toolName = copilotToolUse.name.toLowerCase();
+        const pathLike = getPathLike(copilotToolUse.input, copilotToolUse.rawInput);
+        const commandLike = getCommandLike(copilotToolUse.input, copilotToolUse.rawInput);
+        if (["view", "read", "grep", "glob"].includes(toolName) && pathLike) {
+          filesRead.add(pathLike);
+        } else if (["edit", "write", "create", "apply_patch"].includes(toolName) && pathLike) {
+          if (toolName === "create" || toolName === "write") filesWritten.add(pathLike);
+          else filesEdited.add(pathLike);
+        } else if (["bash", "powershell", "shell", "shell_command"].includes(toolName) && commandLike) {
+          const cmd = commandLike.slice(0, 200);
+          commandsRun.push(cmd);
+          const normCmd = cmd.replace(/\s+/g, " ").trim().slice(0, 80);
+          commandCounts.set(normCmd, (commandCounts.get(normCmd) ?? 0) + 1);
+        }
+        continue;
+      }
+
+      const copilotToolResult = extractCopilotToolResult(obj, toolNameMap);
+      if (copilotToolResult) {
+        if (copilotToolResult.isError) {
+          if (errors.length < 10) {
+            errors.push(`${copilotToolResult.name}: ${copilotToolResult.output.length > 200 ? copilotToolResult.output.slice(0, 200) + "..." : copilotToolResult.output}`);
+          }
+          const entry = toolUseCounts.get(copilotToolResult.name);
+          if (entry) entry.failedCount++;
+        }
+        continue;
+      }
+
+      if (copilotType !== "result" && COPILOT_RESULT_TYPES.has(copilotType)) {
+        const usage = asRecord(obj.usage) || asRecord(obj.stats) || obj;
+        model = getString(obj, ["model", "modelId", "model_id"]) || getString(usage, ["model", "modelId", "model_id"]) || model;
+        const resultText = getString(obj, ["result", "message", "summary"]);
+        if (resultText) agentSummaryParts.push(resultText);
+        continue;
+      }
+
       if (type === "assistant") {
         const message = obj.message as Record<string, unknown> | undefined;
-        const content = (message?.content as Array<Record<string, unknown>>) || [];
+        const content = Array.isArray(message?.content)
+          ? message.content as Array<Record<string, unknown>>
+          : [];
         const msgModel = (message?.model as string) || "";
         if (msgModel) model = msgModel;
 
@@ -142,6 +339,16 @@ export function parseSessionSummary(
             }
           }
         }
+        if (content.length === 0) {
+          const text = extractCopilotAssistantText(obj);
+          if (text) {
+            if (keyExcerpts.length < 10) {
+              keyExcerpts.push(text.length > 300 ? text.slice(0, 300) + "..." : text);
+            }
+            agentSummaryParts.push(text);
+            model = getString(obj, ["model", "modelId", "model_id"]) || model;
+          }
+        }
         continue;
       }
 
@@ -174,6 +381,18 @@ export function parseSessionSummary(
       if (type === "result") {
         const resultText = (obj.result as string) || "";
         if (resultText) agentSummaryParts.push(resultText);
+        const usage = asRecord(obj.usage) || asRecord(obj.stats) || obj;
+        model = getString(obj, ["model", "modelId", "model_id"]) || getString(usage, ["model", "modelId", "model_id"]) || model;
+        continue;
+      }
+
+      const copilotAssistantText = extractCopilotAssistantText(obj);
+      if (copilotAssistantText) {
+        model = getString(obj, ["model", "modelId", "model_id"]) || model;
+        if (keyExcerpts.length < 10) {
+          keyExcerpts.push(copilotAssistantText.length > 300 ? copilotAssistantText.slice(0, 300) + "..." : copilotAssistantText);
+        }
+        agentSummaryParts.push(copilotAssistantText);
         continue;
       }
 
