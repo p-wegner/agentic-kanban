@@ -67,6 +67,7 @@ export interface MainWorkspaceInfo {
   branch: string;
   status: "active" | "reviewing" | "fixing" | "idle" | "closed";
   readyForMerge?: boolean;
+  planMode?: boolean;
   /** @deprecated Use profile instead */
   claudeProfile?: string | null;
   profile?: ProfileSelection | null;

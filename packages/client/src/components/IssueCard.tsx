@@ -248,6 +248,11 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
               {ws.main.conflicts.conflictingFiles.length} file{ws.main.conflicts.conflictingFiles.length !== 1 ? "s" : ""}
             </span>
           )}
+          {ws.main.planMode && (
+            <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 text-[10px] font-medium shrink-0">
+              Plan Mode
+            </span>
+          )}
           {(ws.main.profile?.name ?? ws.main.claudeProfile) && (ws.main.status === "active" || ws.main.status === "fixing") && liveActivity && (
             <span className="inline-flex items-center px-1 rounded bg-indigo-50 text-indigo-600 font-medium shrink-0">{ws.main.profile?.name ?? ws.main.claudeProfile}</span>
           )}
