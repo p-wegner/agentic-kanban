@@ -1,12 +1,18 @@
 ---
 name: session-inspector
-description: Inspect agent session transcripts from ~/.claude/projects/ (Claude) or ~/.codex/sessions/ (Codex) to debug why sessions stopped, what they did, and whether they produced output. Use when diagnosing stopped agents, "no response" sessions, or tracing what an agent actually did.
-argument-hint: [issue-number, keyword, or --codex <path>]
+description: Inspect agent session transcripts from Claude (~/.claude/projects/), Codex (~/.codex/sessions/), or Copilot (board API + ~/.copilot/) to debug why sessions stopped, what they did, and whether they produced output.
+argument-hint: [issue-number, keyword, --codex <path>, --copilot]
 ---
 
 # Session Inspector — Debugging Agent Session Transcripts
 
-Claude Code stores full JSONL transcripts for every session under `~/.claude/projects/`, one directory per working directory path. Codex CLI stores session files under `~/.codex/sessions/` organized by date (`YYYY/MM/DD/`). This skill lets you parse those files efficiently without loading entire large files.
+Inspect session transcripts across all three supported agents. Each stores data differently:
+
+| Agent | Location | Format |
+|-------|----------|--------|
+| Claude Code | `~/.claude/projects/` | Full JSONL transcripts per session |
+| Codex CLI | `~/.codex/sessions/YYYY/MM/DD/` | Full JSONL transcripts per session |
+| Copilot CLI | Board DB + `~/.copilot/session-state/` | Metadata locally; full output via API only |
 
 ## Directory naming convention
 
@@ -245,10 +251,115 @@ Get-Content $file | ForEach-Object {
 }
 ```
 
+## Copilot Sessions — Overview
+
+Copilot CLI does **not** store full JSONL transcripts locally. Session data is split:
+- **Full output**: stored in the kanban board database, accessible via API
+- **Local metadata**: `~/.copilot/session-state/<uuid>/workspace.yaml` (session id, cwd, branch, task name)
+- **Process logs**: `~/.copilot/logs/process-<timestamp>-<pid>.log` (structured logs: model requests, compaction, tool notifications)
+
+### Find Copilot sessions for an issue
+
+The easiest way is through the board API:
+
+```powershell
+# Get session summary for an issue (includes agent's final message)
+$sessionId = "SESSION_ID"  # from `pnpm cli -- issue status <N>`
+$summary = Invoke-RestMethod "http://localhost:$env:KANBAN_SERVER_PORT/api/sessions/$sessionId/summary" -TimeoutSec 10
+$summary.agentSummary  # full agent summary text
+$summary.stats.model   # model used
+$summary.stats.success # whether session succeeded
+$summary.stats.agentSummary  # final agent message
+```
+
+### List all Copilot sessions (local metadata)
+
+```powershell
+Get-ChildItem "$env:USERPROFILE\.copilot\session-state" -Directory |
+  Sort-Object LastWriteTime -Descending |
+  ForEach-Object {
+    $yaml = Get-Content (Join-Path $_.FullName "workspace.yaml") -ErrorAction SilentlyContinue
+    if (-not $yaml) { return }
+    $branch = ($yaml | Select-String "^branch:").Line.TrimStart("branch: ")
+    $created = ($yaml | Select-String "^created_at:").Line.TrimStart("created_at: ")
+    # Name is multi-line YAML block — take first meaningful line
+    $nameLine = $yaml | Select-String -Pattern "^  [^|\-]" | Select-Object -First 1
+    $name = if ($nameLine) { $nameLine.Line.Trim() } else { "(unnamed)" }
+    "  $created  $branch  $($name.Substring(0, [math]::Min(50, $name.Length)))  ($($_.Name))"
+  }
+```
+
+### Read Copilot session output (via board API)
+
+```powershell
+# Get the raw session messages
+$sessionId = "SESSION_ID"
+$output = Invoke-RestMethod "http://localhost:$env:KANBAN_SERVER_PORT/api/sessions/$sessionId/output" -TimeoutSec 10
+
+# Messages are stored as Copilot JSONL events — parse them
+$messages = $output.messages
+$total = $messages.Count
+$withData = ($messages | Where-Object { $_.data -and $_.data.Length -gt 2 }).Count
+Write-Host "Total: $total messages, with data: $withData"
+
+# Show the structured summary instead (recommended)
+$summary = Invoke-RestMethod "http://localhost:$env:KANBAN_SERVER_PORT/api/sessions/$sessionId/summary" -TimeoutSec 10
+Write-Host "Duration: $($summary.duration)"
+Write-Host "Model: $($summary.model)"
+Write-Host "Status: $($summary.status)"
+Write-Host "Files read: $($summary.filesRead -join ', ')"
+Write-Host "Commands: $($summary.commandsRun -join ', ')"
+Write-Host "Errors: $($summary.errors -join '`n')"
+Write-Host "Key excerpts: $($summary.keyExcerpts -join '`n')"
+Write-Host "Agent summary: $($summary.agentSummary.Substring(0, [math]::Min(500, $summary.agentSummary.Length)))"
+```
+
+### Check Copilot process logs
+
+Logs show model requests, compaction state, tool notifications, and errors. Each process gets its own log file:
+
+```powershell
+# Most recent log
+$log = Get-ChildItem "$env:USERPROFILE\.copilot\logs" -Filter "*.log" |
+  Sort-Object LastWriteTime -Descending | Select-Object -First 1
+
+# Show errors and key events
+Get-Content $log.FullName |
+  Where-Object { $_ -match "\[ERROR\]|notification:|Session|failed|Workspace" }
+```
+
+### Correlate Copilot sessions with board workspaces
+
+```powershell
+# Find the Copilot session for issue #N
+$issueNum = "32"
+$board = Invoke-RestMethod "http://localhost:$env:KANBAN_SERVER_PORT/api/projects/f6046402-8373-4294-9624-e0e4e54e1961/board" -TimeoutSec 10
+$issue = $board.issues | Where-Object { $_.issueNumber -eq $issueNum }
+$ws = $issue.workspaces | Select-Object -First 1
+Write-Host "Workspace: $($ws.id) branch=$($ws.branch) status=$($ws.status)"
+
+# Get sessions for this workspace
+$sessions = Invoke-RestMethod "http://localhost:$env:KANBAN_SERVER_PORT/api/workspaces/$($ws.id)/sessions" -TimeoutSec 10
+$sessions | ForEach-Object {
+  Write-Host "  $($_.id) status=$($_.status) provider=$($_.provider) trigger=$($_.triggerType) started=$($_.startedAt)"
+}
+```
+
+### Common Copilot session issues
+
+| Symptom | Likely cause |
+|---------|-------------|
+| `overview: "No activity recorded"` | Copilot MCP was disabled by org policy; session ran but tools didn't fire |
+| `model: ""` empty | Model extraction from Copilot events failed; check session-output.ts parsing |
+| 131 messages with 0 data | Copilot JSONL events not parsed into readable format by the output API |
+| Session completes in <2min with open question | Agent asked user a question, got no response, session ended |
+| `Skipping third-party MCP server` in logs | Org policy blocks MCP; agent ran without kanban tools |
+
 ## Tips
 
 - **Never `Get-Content` a large JSONL without `-Tail`** — some files are 1-2MB+ and will flood the terminal.
 - Each line is a self-contained JSON object; parse line-by-line with `ConvertFrom-Json -ErrorAction SilentlyContinue`.
 - For **Claude sessions**: the `sessionId` field is on most entries and matches the filename (minus `.jsonl`). `ai-title`, `queue-operation`, `attachment` entries are metadata — only `user` and `assistant` entries carry content.
 - For **Codex sessions**: every line wraps in `{ timestamp, type, payload }`. Use the `analyze-codex-session.mjs` script for structured summaries.
+- For **Copilot sessions**: no local JSONL transcripts exist. Use the board API (`/api/sessions/:id/summary`) to get structured output, and `~/.copilot/logs/` for process-level diagnostics.
 - Sessions with 8 lines and no `assistant` entry = the process started but exited before Claude responded. Check for auth errors or process kills.
