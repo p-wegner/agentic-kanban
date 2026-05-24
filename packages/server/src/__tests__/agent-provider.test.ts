@@ -673,6 +673,24 @@ describe("CopilotProvider", () => {
       toolUseId: "tool-1",
     });
 
+    const copilotToolEvt = provider.parseStreamEvent(JSON.stringify({
+      type: "tool.execution_start",
+      data: {
+        toolCallId: "tool-read",
+        toolName: "view",
+        arguments: { path: "packages/e2e/global-setup.ts" },
+      },
+    }));
+    expect(copilotToolEvt?.toolActivity).toEqual({
+      name: "view",
+      input: { path: "packages/e2e/global-setup.ts" },
+      toolUseId: "tool-read",
+    });
+    expect(provider.parseStreamEvent(JSON.stringify({
+      type: "assistant.message",
+      data: { content: "I found the E2E project helper.", model: "claude-sonnet-4.6" },
+    }))?.assistantText).toBe("I found the E2E project helper.");
+
     const doneEvt = provider.parseStreamEvent(JSON.stringify({
       type: "session.completed",
       model: "gpt-5.2",

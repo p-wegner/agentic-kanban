@@ -93,7 +93,7 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
 }
 
 function normalizedType(obj: Record<string, unknown>): string {
-  return String(obj.type || obj.event || obj.name || "").toLowerCase();
+  return String(obj.type || obj.event || obj.name || "").toLowerCase().replace(/-/g, "_");
 }
 
 function getString(obj: Record<string, unknown>, keys: string[]): string {
@@ -126,7 +126,14 @@ function contentToText(value: unknown): string {
 function extractCopilotAssistantText(obj: Record<string, unknown>): string {
   const type = normalizedType(obj);
   const role = String(obj.role || "").toLowerCase();
+  const data = asRecord(obj.data);
   const message = asRecord(obj.message);
+
+  if (type === "assistant.message" && data) {
+    return contentToText(data.content)
+      || getString(data, ["content", "text", "message"])
+      || "";
+  }
 
   if (type === "assistant" || type === "assistant_message" || role === "assistant") {
     return contentToText(obj.content)
@@ -147,12 +154,14 @@ function extractCopilotToolUse(obj: Record<string, unknown>): {
   input: Record<string, unknown>;
   rawInput: unknown;
 } | null {
-  if (!COPILOT_TOOL_USE_TYPES.has(normalizedType(obj))) return null;
+  const type = normalizedType(obj);
+  if (!COPILOT_TOOL_USE_TYPES.has(type) && type !== "tool.execution_start") return null;
 
-  const tool = asRecord(obj.tool) || asRecord(obj.tool_call) || asRecord(obj.toolCall) || obj;
+  const data = asRecord(obj.data);
+  const tool = data || asRecord(obj.tool) || asRecord(obj.tool_call) || asRecord(obj.toolCall) || obj;
   const rawInput = tool.input ?? tool.arguments ?? tool.args ?? tool.parameters ?? tool.command ?? tool.path;
   return {
-    id: getString(tool, ["id", "tool_use_id", "toolUseId", "call_id", "callId"]),
+    id: getString(tool, ["id", "tool_use_id", "toolUseId", "call_id", "callId", "toolCallId"]),
     name: getString(tool, ["name", "tool", "tool_name", "toolName", "kind"]) || "copilot_tool",
     input: asRecord(rawInput) || {},
     rawInput,
@@ -163,18 +172,21 @@ function extractCopilotToolResult(
   obj: Record<string, unknown>,
   toolNameMap: Map<string, string>,
 ): { id: string; name: string; output: string; isError: boolean } | null {
-  if (!COPILOT_TOOL_RESULT_TYPES.has(normalizedType(obj))) return null;
+  const type = normalizedType(obj);
+  if (!COPILOT_TOOL_RESULT_TYPES.has(type) && type !== "tool.execution_complete" && type !== "tool.execution_partial_result") return null;
 
-  const tool = asRecord(obj.tool) || asRecord(obj.tool_call) || asRecord(obj.toolCall) || obj;
-  const id = getString(tool, ["id", "tool_use_id", "toolUseId", "call_id", "callId"]);
+  const data = asRecord(obj.data);
+  const tool = data || asRecord(obj.tool) || asRecord(obj.tool_call) || asRecord(obj.toolCall) || obj;
+  const result = asRecord(tool.result);
+  const id = getString(tool, ["id", "tool_use_id", "toolUseId", "call_id", "callId", "toolCallId"]);
   const status = String(tool.status || "").toLowerCase();
   return {
     id,
     name: getString(tool, ["name", "tool", "tool_name", "toolName", "kind"])
       || (id ? toolNameMap.get(id) : "")
       || "copilot_tool",
-    output: stringifyValue(tool.output ?? tool.result ?? tool.content ?? tool.message ?? tool.error),
-    isError: Boolean(tool.is_error || tool.isError || tool.error) || status === "error" || status === "failed",
+    output: stringifyValue(result?.content ?? result?.detailedContent ?? tool.output ?? tool.result ?? tool.content ?? tool.message ?? tool.error),
+    isError: tool.success === false || Boolean(tool.is_error || tool.isError || tool.error) || status === "error" || status === "failed",
   };
 }
 
@@ -388,7 +400,8 @@ export function parseSessionSummary(
 
       const copilotAssistantText = extractCopilotAssistantText(obj);
       if (copilotAssistantText) {
-        model = getString(obj, ["model", "modelId", "model_id"]) || model;
+        const data = asRecord(obj.data);
+        model = getString(data || obj, ["model", "modelId", "model_id"]) || model;
         if (keyExcerpts.length < 10) {
           keyExcerpts.push(copilotAssistantText.length > 300 ? copilotAssistantText.slice(0, 300) + "..." : copilotAssistantText);
         }
