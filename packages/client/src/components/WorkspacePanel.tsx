@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import ReactMarkdown from "react-markdown";
 import { apiFetch } from "../lib/api.js";
 import { formatRelativeTime } from "../lib/formatRelativeTime.js";
 import { getOutputFormatForAgent, getOutputFormatForProvider } from "../lib/agent-output-parser.js";
@@ -1398,8 +1399,8 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                               {summary.agentSummary && (
                                 <div>
                                   <h4 className="text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wide mb-1">Summary</h4>
-                                  <div className="text-xs text-gray-700 dark:text-gray-300 bg-blue-50 dark:bg-blue-950 border border-blue-100 dark:border-blue-900 rounded p-2.5 whitespace-pre-wrap leading-relaxed">
-                                    {summary.agentSummary}
+                                  <div className="markdown-body text-xs bg-blue-50 dark:bg-blue-950 border border-blue-100 dark:border-blue-900 rounded p-2.5 leading-relaxed">
+                                    <ReactMarkdown>{summary.agentSummary}</ReactMarkdown>
                                   </div>
                                 </div>
                               )}
