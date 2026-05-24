@@ -1,28 +1,21 @@
 /**
- * Global E2E teardown — deletes test-artifact issues and temporary projects.
+ * Global E2E teardown — deletes the dedicated E2E test project created by global-setup,
+ * which cascade-deletes all issues, workspaces, sessions, and statuses created during the run.
+ * Also restores the active-project preference to what it was before the tests ran.
  *
- * E2E tests track their created issues in `afterAll` hooks, but if a test crashes or times out
- * those hooks may not run. This teardown provides a safety net by identifying and removing:
- *
- * Issues whose titles match known test-generated patterns:
- *  - "Session stats test ..."
- *  - "Task progress test ..."
- *  - "board-stats-..." (board-stats-bar.test.ts)
- *  - "RT create test ..." / "RT status test ..." (board-realtime.test.ts)
- *  - "⏰ e2e-..." (scheduled-run system issues whose parent run was deleted without cleanup)
- *  - Any title starting with "e2e-" followed by a random slug
- *
- * All projects whose name starts with "E2E Test Project" or whose repoPath is under a temp directory.
- * The global-setup recreates the project it needs on the next run.
+ * If the state file written by global-setup is missing (e.g. setup failed), this falls back
+ * to the legacy pattern-based cleanup to catch any orphaned test artifacts.
  */
 
 import { request } from "@playwright/test";
 import { tmpdir } from "node:os";
 import { normalize, sep } from "node:path";
+import { existsSync, readFileSync, unlinkSync } from "node:fs";
+import { E2E_STATE_FILE } from "./global-setup.js";
 
 const serverPort = Number(process.env.SERVER_PORT) || 3001;
 
-/** Patterns that identify E2E-generated test artifact issues. */
+/** Patterns that identify E2E-generated test artifact issues (fallback only). */
 const TEST_TITLE_PATTERNS: RegExp[] = [
   /^Session stats test /,
   /^Task progress test /,
@@ -36,7 +29,41 @@ function isTestArtifact(title: string): boolean {
   return TEST_TITLE_PATTERNS.some((re) => re.test(title));
 }
 
-async function cleanupIssuesAndRuns(apiContext: import("@playwright/test").APIRequestContext) {
+async function cleanupE2EProject(
+  apiContext: import("@playwright/test").APIRequestContext,
+  e2eProjectId: string,
+  previousActiveProjectId: string | null,
+) {
+  // Delete the entire E2E project — this cascades to issues, workspaces, sessions, and statuses.
+  const deleteRes = await apiContext.delete(`/api/projects/${e2eProjectId}`);
+  if (deleteRes.ok()) {
+    console.log(`[global-teardown] Deleted E2E test project (${e2eProjectId})`);
+  } else {
+    console.warn(`[global-teardown] Failed to delete E2E project ${e2eProjectId}: ${deleteRes.status()}`);
+  }
+
+  // Restore the previously active project (if any and if it still exists).
+  if (previousActiveProjectId) {
+    const projectsRes = await apiContext.get("/api/projects");
+    if (projectsRes.ok()) {
+      const projects: Array<{ id: string }> = await projectsRes.json();
+      const stillExists = projects.some((p) => p.id === previousActiveProjectId);
+      if (stillExists) {
+        await apiContext.put("/api/preferences/active-project", {
+          data: { projectId: previousActiveProjectId },
+        });
+        console.log(`[global-teardown] Restored active project to ${previousActiveProjectId}`);
+      } else if (projects.length > 0) {
+        // Fallback: activate whatever project is still registered
+        await apiContext.put("/api/preferences/active-project", {
+          data: { projectId: projects[0].id },
+        });
+      }
+    }
+  }
+}
+
+async function fallbackCleanupIssuesAndRuns(apiContext: import("@playwright/test").APIRequestContext) {
   const prefRes = await apiContext.get("/api/preferences/active-project");
   if (!prefRes.ok()) return;
   const { projectId } = await prefRes.json();
@@ -68,23 +95,23 @@ async function cleanupIssuesAndRuns(apiContext: import("@playwright/test").APIRe
   }
 }
 
-async function cleanupProjects(apiContext: import("@playwright/test").APIRequestContext) {
+async function fallbackCleanupProjects(apiContext: import("@playwright/test").APIRequestContext) {
   const projectsRes = await apiContext.get("/api/projects");
   if (!projectsRes.ok()) return;
   const projects: Array<{ id: string; name: string; repoPath: string }> = await projectsRes.json();
   const tempPrefix = normalize(tmpdir()) + sep;
-  const tempProjects = projects.filter(
+  const orphaned = projects.filter(
     (p) =>
-      p.name.startsWith("E2E Test Project") ||
+      /^E2E Test Project /.test(p.name) ||
       /^e2e-project-/.test(p.name) ||
       normalize(p.repoPath).startsWith(tempPrefix),
   );
-  if (tempProjects.length > 0) {
+  if (orphaned.length > 0) {
     console.log(
-      `[global-teardown] Cleaning up ${tempProjects.length} temporary project(s):`,
-      tempProjects.map((p) => `"${p.name}"`).join(", "),
+      `[global-teardown] Cleaning up ${orphaned.length} orphaned E2E project(s):`,
+      orphaned.map((p) => `"${p.name}"`).join(", "),
     );
-    for (const project of tempProjects) {
+    for (const project of orphaned) {
       await apiContext.delete(`/api/projects/${project.id}`);
     }
   }
@@ -96,8 +123,17 @@ async function globalTeardown() {
   });
 
   try {
-    await cleanupIssuesAndRuns(apiContext);
-    await cleanupProjects(apiContext);
+    if (existsSync(E2E_STATE_FILE)) {
+      const state: { e2eProjectId: string; previousActiveProjectId: string | null } =
+        JSON.parse(readFileSync(E2E_STATE_FILE, "utf8"));
+      await cleanupE2EProject(apiContext, state.e2eProjectId, state.previousActiveProjectId);
+      try { unlinkSync(E2E_STATE_FILE); } catch { /* ignore */ }
+    } else {
+      // State file missing — global-setup may have failed. Use legacy fallback cleanup.
+      console.warn("[global-teardown] State file not found — using fallback cleanup");
+      await fallbackCleanupIssuesAndRuns(apiContext);
+      await fallbackCleanupProjects(apiContext);
+    }
   } catch (err) {
     console.warn("[global-teardown] Cleanup error (non-fatal):", err);
   } finally {

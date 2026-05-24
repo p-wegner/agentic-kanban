@@ -1,5 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { SERVER_URL } from "../helpers/port.js";
+import { getE2EProjectId } from "../helpers/e2e-project.js";
 
 test.describe("Workspace lifecycle API", () => {
   let projectId: string;
@@ -9,11 +10,10 @@ test.describe("Workspace lifecycle API", () => {
   const suffix = Date.now().toString(36);
   const extraIssueIds: string[] = [];
   const extraWorkspaceIds: string[] = [];
+  let originalClaudeProfile = "";
 
   test.beforeAll(async ({ request }) => {
-    const projectsRes = await request.get(`${SERVER_URL}/api/projects`);
-    const projects = await projectsRes.json();
-    projectId = projects[0].id;
+    projectId = await getE2EProjectId(request);
 
     const statusesRes = await request.get(
       `${SERVER_URL}/api/projects/${projectId}/statuses`,
@@ -39,24 +39,33 @@ test.describe("Workspace lifecycle API", () => {
     });
     expect(wsRes.status()).toBe(201);
     workspaceId = (await wsRes.json()).id;
+
+    // Capture original claude_profile so we can restore it exactly.
+    const settingsRes = await request.get(`${SERVER_URL}/api/preferences/settings`);
+    if (settingsRes.ok()) {
+      const s = await settingsRes.json();
+      originalClaudeProfile = s.claude_profile ?? "";
+    }
   });
 
   test.afterAll(async ({ request }) => {
-    // Reset settings
-    await request.put(`${SERVER_URL}/api/preferences/settings`, {
-      data: { claude_profile: "" },
-    });
+    // Restore original claude_profile (not hardcoded "") to avoid corrupting real settings.
+    try {
+      await request.put(`${SERVER_URL}/api/preferences/settings`, {
+        data: { claude_profile: originalClaudeProfile },
+      });
+    } catch { /* best-effort */ }
     for (const id of extraWorkspaceIds) {
-      await request.delete(`${SERVER_URL}/api/workspaces/${id}`);
+      await request.delete(`${SERVER_URL}/api/workspaces/${id}`).catch(() => {});
     }
     for (const id of extraIssueIds) {
-      await request.delete(`${SERVER_URL}/api/issues/${id}`);
+      await request.delete(`${SERVER_URL}/api/issues/${id}`).catch(() => {});
     }
     if (workspaceId) {
-      await request.delete(`${SERVER_URL}/api/workspaces/${workspaceId}`);
+      await request.delete(`${SERVER_URL}/api/workspaces/${workspaceId}`).catch(() => {});
     }
     if (issueId) {
-      await request.delete(`${SERVER_URL}/api/issues/${issueId}`);
+      await request.delete(`${SERVER_URL}/api/issues/${issueId}`).catch(() => {});
     }
   });
 
@@ -103,7 +112,7 @@ test.describe("Workspace lifecycle API", () => {
     );
     if (setupRes.status() !== 200) {
       await request.put(`${SERVER_URL}/api/preferences/settings`, {
-        data: { claude_profile: "" },
+        data: { claude_profile: originalClaudeProfile },
       });
       test.skip();
       return;
@@ -134,7 +143,7 @@ test.describe("Workspace lifecycle API", () => {
     expect(["running", "completed", "stopped"]).toContain(session.status);
 
     await request.put(`${SERVER_URL}/api/preferences/settings`, {
-      data: { claude_profile: "" },
+      data: { claude_profile: originalClaudeProfile },
     });
   });
 

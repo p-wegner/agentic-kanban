@@ -1,5 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { SERVER_URL } from "../helpers/port.js";
+import { getE2EProjectId } from "../helpers/e2e-project.js";
 
 test.describe("Issues API", () => {
   let projectId: string;
@@ -7,9 +8,7 @@ test.describe("Issues API", () => {
   const createdIssueIds: string[] = [];
 
   test.beforeAll(async ({ request }) => {
-    const projectsRes = await request.get(`${SERVER_URL}/api/projects`);
-    const projects = await projectsRes.json();
-    projectId = projects[0].id;
+    projectId = await getE2EProjectId(request);
 
     const statusesRes = await request.get(
       `${SERVER_URL}/api/projects/${projectId}/statuses`,
@@ -20,7 +19,7 @@ test.describe("Issues API", () => {
 
   test.afterAll(async ({ request }) => {
     for (const id of createdIssueIds) {
-      await request.delete(`${SERVER_URL}/api/issues/${id}`);
+      await request.delete(`${SERVER_URL}/api/issues/${id}`).catch(() => {});
     }
   });
 
