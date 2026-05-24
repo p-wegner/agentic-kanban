@@ -940,6 +940,27 @@ export function BoardPage() {
     [filteredColumns],
   );
 
+  const allMentionIssues = useMemo(
+    () =>
+      columns
+        .flatMap((col) => col.issues)
+        .map((i) => ({ id: i.id, issueNumber: i.issueNumber, title: i.title })),
+    [columns],
+  );
+
+  const handleMentionClick = useCallback(
+    (issueId: string) => {
+      for (const col of columns) {
+        const found = col.issues.find((i) => i.id === issueId);
+        if (found) {
+          setSelectedIssue(found);
+          return;
+        }
+      }
+    },
+    [columns],
+  );
+
   function toggleGroup(group: string) {
     setCollapsedGroups((prev) => {
       const next = new Set(prev);
