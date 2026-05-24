@@ -362,7 +362,7 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery }: Gra
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-full text-gray-500 text-sm">
+      <div className="flex items-center justify-center h-full text-gray-500 dark:text-gray-400 text-sm">
         Loading graph…
       </div>
     );
@@ -370,7 +370,7 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery }: Gra
 
   if (nodes.length === 0) {
     return (
-      <div className="flex items-center justify-center h-full text-gray-500 text-sm">
+      <div className="flex items-center justify-center h-full text-gray-500 dark:text-gray-400 text-sm">
         No issues to display
       </div>
     );
@@ -379,7 +379,7 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery }: Gra
   const edges = getEdges();
 
   return (
-    <div ref={containerRef} className="relative h-full w-full overflow-hidden bg-gray-50 select-none">
+    <div ref={containerRef} className="relative h-full w-full overflow-hidden bg-gray-50 dark:bg-gray-950 select-none">
       {/* Top-left controls */}
       <div className="absolute top-3 left-3 z-10 flex items-start gap-2">
         {/* Status filter */}
@@ -389,7 +389,7 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery }: Gra
             className={`px-2.5 py-1 text-xs rounded border shadow-sm font-medium transition-colors flex items-center gap-1 ${
               hiddenStatuses.size > 0
                 ? "bg-amber-50 border-amber-300 text-amber-700"
-                : "bg-white border-gray-300 text-gray-600 hover:bg-gray-50"
+                : "bg-white dark:bg-gray-900 border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800"
             }`}
           >
             <svg viewBox="0 0 16 16" className="w-3 h-3" fill="currentColor">
@@ -416,7 +416,7 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery }: Gra
               const color = STATUS_COLORS[status] ?? "#6b7280";
               const isDefaultHidden = DEFAULT_HIDDEN_STATUSES.has(status);
               return (
-                <label key={status} className="flex items-center gap-2 px-1 py-0.5 rounded hover:bg-gray-50 cursor-pointer">
+                <label key={status} className="flex items-center gap-2 px-1 py-0.5 rounded hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer">
                   <input
                     type="checkbox"
                     checked={!isHidden}
@@ -431,8 +431,8 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery }: Gra
                     className="w-3 h-3 accent-blue-500"
                   />
                   <span className="w-2 h-2 rounded-full shrink-0" style={{ background: color }} />
-                  <span className="text-xs text-gray-700 flex-1">{status}</span>
-                  <span className="text-[10px] text-gray-400">{count}</span>
+                  <span className="text-xs text-gray-700 dark:text-gray-300 flex-1">{status}</span>
+                  <span className="text-[10px] text-gray-400 dark:text-gray-500">{count}</span>
                   {isDefaultHidden && (
                     <span className="text-[9px] text-amber-500 font-medium" title="Hidden by default">off</span>
                   )}
@@ -441,33 +441,33 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery }: Gra
             };
 
             return (
-              <div className="absolute top-full left-0 mt-1 bg-white border border-gray-200 rounded-md shadow-lg p-2 min-w-[172px]">
+              <div className="absolute top-full left-0 mt-1 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-md shadow-lg p-2 min-w-[172px]">
                 {backlogStatuses.length > 0 && (
                   <>
-                    <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide px-1 mb-0.5">Backlog</div>
+                    <div className="text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide px-1 mb-0.5">Backlog</div>
                     <div className="space-y-0.5 mb-1">{backlogStatuses.map(renderStatus)}</div>
                   </>
                 )}
                 {workflowStatuses.length > 0 && (
                   <>
-                    <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide px-1 mb-0.5">Active</div>
+                    <div className="text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide px-1 mb-0.5">Active</div>
                     <div className="space-y-0.5 mb-1">{workflowStatuses.map(renderStatus)}</div>
                   </>
                 )}
                 {archiveStatuses.length > 0 && (
                   <>
-                    <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide px-1 mb-0.5">Archive</div>
+                    <div className="text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide px-1 mb-0.5">Archive</div>
                     <div className="space-y-0.5 mb-1">{archiveStatuses.map(renderStatus)}</div>
                   </>
                 )}
-                <div className="border-t border-gray-100 mt-1 pt-1 flex gap-1">
+                <div className="border-t border-gray-100 dark:border-gray-800 mt-1 pt-1 flex gap-1">
                   <button
                     onClick={() => setHiddenStatuses(new Set())}
                     className="flex-1 text-[10px] text-blue-600 hover:text-blue-800 py-0.5"
                   >Show all</button>
                   <button
                     onClick={() => setHiddenStatuses(new Set(DEFAULT_HIDDEN_STATUSES))}
-                    className="flex-1 text-[10px] text-gray-500 hover:text-gray-700 py-0.5"
+                    className="flex-1 text-[10px] text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 py-0.5"
                   >Reset</button>
                 </div>
               </div>
@@ -479,15 +479,15 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery }: Gra
       <div className="absolute top-3 right-3 z-10 flex flex-col gap-1">
         <button
           onClick={() => setZoom((z) => Math.min(3, z * 1.2))}
-          className="w-7 h-7 bg-white border border-gray-300 rounded text-gray-600 hover:bg-gray-100 flex items-center justify-center text-sm font-bold shadow-sm"
+          className="w-7 h-7 bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 flex items-center justify-center text-sm font-bold shadow-sm"
         >+</button>
         <button
           onClick={() => setZoom((z) => Math.max(0.1, z * 0.8))}
-          className="w-7 h-7 bg-white border border-gray-300 rounded text-gray-600 hover:bg-gray-100 flex items-center justify-center text-sm font-bold shadow-sm"
+          className="w-7 h-7 bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 flex items-center justify-center text-sm font-bold shadow-sm"
         >−</button>
         <button
           onClick={fitView}
-          className="w-7 h-7 bg-white border border-gray-300 rounded text-gray-600 hover:bg-gray-100 flex items-center justify-center shadow-sm"
+          className="w-7 h-7 bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 flex items-center justify-center shadow-sm"
           title="Fit to view"
         >
           <svg viewBox="0 0 24 24" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2}>
@@ -497,8 +497,8 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery }: Gra
         </button>
       </div>
       {/* Legend */}
-      <div className="absolute bottom-3 left-3 z-10 bg-white border border-gray-200 rounded-md p-2 shadow-sm text-xs text-gray-600 space-y-1">
-        <div className="font-medium text-gray-700 mb-1">Status</div>
+      <div className="absolute bottom-3 left-3 z-10 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-md p-2 shadow-sm text-xs text-gray-600 dark:text-gray-400 space-y-1">
+        <div className="font-medium text-gray-700 dark:text-gray-300 mb-1">Status</div>
         {Object.entries(STATUS_COLORS).map(([name, color]) => (
           <div key={name} className="flex items-center gap-1.5">
             <span className="w-2.5 h-2.5 rounded-full inline-block shrink-0" style={{ background: color }} />

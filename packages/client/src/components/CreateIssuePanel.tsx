@@ -120,14 +120,14 @@ export function CreateIssuePanel({
         className="fixed inset-0 bg-black/20 z-40"
         onClick={onClose}
       />
-      <div className="fixed right-0 top-0 h-full w-full max-w-lg bg-white shadow-xl z-50 flex flex-col animate-slide-in-right">
-        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200">
-          <h2 className="font-semibold text-gray-800 text-sm">
-            New Issue{statusName ? <span className="ml-2 text-xs font-normal text-gray-400">in {statusName}</span> : null}
+      <div className="fixed right-0 top-0 h-full w-full max-w-lg bg-white dark:bg-gray-900 shadow-xl z-50 flex flex-col animate-slide-in-right">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200 dark:border-gray-700">
+          <h2 className="font-semibold text-gray-800 dark:text-gray-200 text-sm">
+            New Issue{statusName ? <span className="ml-2 text-xs font-normal text-gray-400 dark:text-gray-500">in {statusName}</span> : null}
           </h2>
           <button
             onClick={onClose}
-            className="text-gray-400 hover:text-gray-600 p-1 rounded"
+            className="text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 p-1 rounded"
             title="Close"
           >
             <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -138,32 +138,32 @@ export function CreateIssuePanel({
 
         <form onSubmit={handleSubmit} className="flex flex-col flex-1 overflow-y-auto p-5 gap-4">
           <div className="flex flex-col gap-1.5">
-            <label className="text-xs font-medium text-gray-600">Title</label>
+            <label className="text-xs font-medium text-gray-600 dark:text-gray-400">Title</label>
             <input
               ref={titleRef}
               type="text"
               placeholder="Issue title"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              className="w-full text-sm border border-gray-300 rounded px-3 py-2 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded px-3 py-2 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:bg-gray-900 dark:text-gray-100"
             />
           </div>
 
           <div className="flex flex-col gap-1.5 flex-1">
             <div className="flex items-center justify-between">
-              <label className="text-xs font-medium text-gray-600">Description</label>
-              <div className="flex border border-gray-300 rounded overflow-hidden">
+              <label className="text-xs font-medium text-gray-600 dark:text-gray-400">Description</label>
+              <div className="flex border border-gray-300 dark:border-gray-600 rounded overflow-hidden">
                 <button
                   type="button"
                   onClick={() => setDescriptionMode("edit")}
-                  className={`text-xs px-2 py-0.5 ${descriptionMode === "edit" ? "bg-blue-500 text-white" : "bg-white text-gray-600 hover:bg-gray-50"}`}
+                  className={`text-xs px-2 py-0.5 ${descriptionMode === "edit" ? "bg-blue-500 text-white" : "bg-white dark:bg-gray-900 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800"}`}
                 >
                   Edit
                 </button>
                 <button
                   type="button"
                   onClick={() => setDescriptionMode("preview")}
-                  className={`text-xs px-2 py-0.5 border-l border-gray-300 ${descriptionMode === "preview" ? "bg-blue-500 text-white" : "bg-white text-gray-600 hover:bg-gray-50"}`}
+                  className={`text-xs px-2 py-0.5 border-l border-gray-300 dark:border-gray-600 ${descriptionMode === "preview" ? "bg-blue-500 text-white" : "bg-white dark:bg-gray-900 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800"}`}
                 >
                   Preview
                 </button>
@@ -171,28 +171,28 @@ export function CreateIssuePanel({
             </div>
             {descriptionMode === "preview" ? (
               description ? (
-                <div className="markdown-body flex-1 min-h-[200px] border border-gray-200 rounded px-3 py-2">
+                <div className="markdown-body flex-1 min-h-[200px] border border-gray-200 dark:border-gray-700 rounded px-3 py-2 dark:text-gray-200">
                   <ReactMarkdown>{description}</ReactMarkdown>
                 </div>
               ) : (
-                <p className="text-sm text-gray-400 italic flex-1 min-h-[200px] border border-gray-200 rounded px-3 py-2">Nothing to preview.</p>
+                <p className="text-sm text-gray-400 dark:text-gray-500 italic flex-1 min-h-[200px] border border-gray-200 dark:border-gray-700 rounded px-3 py-2">Nothing to preview.</p>
               )
             ) : (
               <textarea
                 placeholder="Describe the issue, agent instructions, acceptance criteria…"
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
-                className="w-full flex-1 min-h-[200px] text-sm border border-gray-300 rounded px-3 py-2 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none"
+                className="w-full flex-1 min-h-[200px] text-sm border border-gray-300 dark:border-gray-600 rounded px-3 py-2 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none dark:bg-gray-900 dark:text-gray-100"
               />
             )}
           </div>
 
           <div className="flex flex-col gap-1.5">
-            <label className="text-xs font-medium text-gray-600">Priority</label>
+            <label className="text-xs font-medium text-gray-600 dark:text-gray-400">Priority</label>
             <select
               value={priority}
               onChange={(e) => setPriority(e.target.value as CreateIssueRequest["priority"])}
-              className="w-full text-sm border border-gray-300 rounded px-3 py-2 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded px-3 py-2 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:bg-gray-900 dark:text-gray-100"
             >
               <option value="low">Low</option>
               <option value="medium">Medium</option>
@@ -203,7 +203,7 @@ export function CreateIssuePanel({
 
           {canStartWorkspace && (
             <div className="flex flex-col gap-2">
-              <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer">
+              <label className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400 cursor-pointer">
                 <input
                   type="checkbox"
                   checked={startWorkspace}
@@ -213,8 +213,8 @@ export function CreateIssuePanel({
                 Start workspace
               </label>
               {startWorkspace && (
-                <div className="pl-5 flex flex-col gap-2 border-l-2 border-blue-100">
-                  <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer">
+                <div className="pl-5 flex flex-col gap-2 border-l-2 border-blue-100 dark:border-blue-800">
+                  <label className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400 cursor-pointer">
                     <input
                       type="checkbox"
                       checked={planMode}
@@ -223,7 +223,7 @@ export function CreateIssuePanel({
                     />
                     Plan mode (agent plans before implementing)
                   </label>
-                  <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer">
+                  <label className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400 cursor-pointer">
                     <input
                       type="checkbox"
                       checked={skipAutoReview}
@@ -233,16 +233,16 @@ export function CreateIssuePanel({
                     Skip auto AI code review
                   </label>
                   <div className="flex items-center gap-2">
-                    <label className="text-sm text-gray-600 whitespace-nowrap">Profile override</label>
+                    <label className="text-sm text-gray-600 dark:text-gray-400 whitespace-nowrap">Profile override</label>
                     <input
                       type="text"
                       placeholder="e.g. zai (blank = default)"
                       value={claudeProfile}
                       onChange={(e) => setClaudeProfile(e.target.value)}
-                      className="flex-1 text-sm border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                      className="flex-1 text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:bg-gray-900 dark:text-gray-100"
                     />
                   </div>
-                  <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer">
+                  <label className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400 cursor-pointer">
                     <input
                       type="checkbox"
                       checked={isDirect}
@@ -253,11 +253,11 @@ export function CreateIssuePanel({
                   </label>
                   {skills.length > 0 && (
                     <div className="flex items-center gap-2">
-                      <label className="text-sm text-gray-600 whitespace-nowrap">Skill</label>
+                      <label className="text-sm text-gray-600 dark:text-gray-400 whitespace-nowrap">Skill</label>
                       <select
                         value={skillId}
                         onChange={(e) => setSkillId(e.target.value)}
-                        className="flex-1 text-sm border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                        className="flex-1 text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:bg-gray-900 dark:text-gray-100"
                       >
                         <option value="">None</option>
                         {skills.map((s) => (
@@ -271,7 +271,7 @@ export function CreateIssuePanel({
             </div>
           )}
 
-          <div className="flex gap-2 pt-2 border-t border-gray-100 flex-wrap">
+          <div className="flex gap-2 pt-2 border-t border-gray-100 dark:border-gray-800 flex-wrap">
             <button
               type="submit"
               disabled={!title.trim() || submitting}
@@ -284,7 +284,7 @@ export function CreateIssuePanel({
             <button
               type="button"
               onClick={onClose}
-              className="text-sm text-gray-500 px-4 py-2 hover:text-gray-700"
+              className="text-sm text-gray-500 dark:text-gray-400 px-4 py-2 hover:text-gray-700 dark:hover:text-gray-200"
             >
               Cancel
             </button>
@@ -312,7 +312,7 @@ export function CreateIssuePanel({
                 type="button"
                 onClick={handleUndoEnhance}
                 title="Undo enhancement"
-                className="text-sm text-gray-500 px-3 py-2 hover:text-gray-700 flex items-center gap-1.5"
+                className="text-sm text-gray-500 dark:text-gray-400 px-3 py-2 hover:text-gray-700 dark:hover:text-gray-200 flex items-center gap-1.5"
               >
                 <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" />

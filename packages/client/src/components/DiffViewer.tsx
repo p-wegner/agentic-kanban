@@ -119,7 +119,7 @@ function CommentBlock({
           ref={textareaRef}
           value={editBody}
           onChange={(e) => setEditBody(e.target.value)}
-          className="flex-1 text-xs border border-gray-300 rounded px-2 py-1 resize-none min-h-[40px]"
+          className="flex-1 text-xs border border-gray-300 dark:border-gray-600 rounded px-2 py-1 resize-none min-h-[40px] dark:bg-gray-900 dark:text-gray-100"
           rows={2}
         />
         <div className="flex flex-col gap-1">
@@ -131,7 +131,7 @@ function CommentBlock({
           </button>
           <button
             onClick={() => { setEditBody(comment.body); setEditing(false); }}
-            className="text-xs px-2 py-0.5 text-gray-500 hover:text-gray-700"
+            className="text-xs px-2 py-0.5 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
           >
             Cancel
           </button>
@@ -150,13 +150,13 @@ function CommentBlock({
   return (
     <div className="bg-yellow-50 border-l-2 border-yellow-400 px-3 py-1.5 group/comment">
       <div className="flex items-center gap-2 mb-0.5">
-        <span className="text-[10px] text-gray-400">{timestamp}</span>
+        <span className="text-[10px] text-gray-400 dark:text-gray-500">{timestamp}</span>
       </div>
-      <div className="text-xs text-gray-700 whitespace-pre-wrap">{comment.body}</div>
+      <div className="text-xs text-gray-700 dark:text-gray-300 whitespace-pre-wrap">{comment.body}</div>
       <div className="flex items-center gap-2 mt-0.5 opacity-0 group-hover/comment:opacity-100 transition-opacity">
         <button
           onClick={() => setEditing(true)}
-          className="text-[10px] text-gray-400 hover:text-gray-600"
+          className="text-[10px] text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300"
         >
           Edit
         </button>
@@ -192,7 +192,7 @@ function CommentInput({
         value={body}
         onChange={(e) => setBody(e.target.value)}
         placeholder="Write a comment..."
-        className="w-full text-xs border border-gray-300 rounded px-2 py-1 resize-none min-h-[40px]"
+        className="w-full text-xs border border-gray-300 dark:border-gray-600 rounded px-2 py-1 resize-none min-h-[40px] dark:bg-gray-900 dark:text-gray-100"
         rows={2}
         onKeyDown={(e) => {
           if (e.key === "Escape") onCancel();
@@ -212,11 +212,11 @@ function CommentInput({
         </button>
         <button
           onClick={onCancel}
-          className="text-xs px-2 py-0.5 text-gray-500 hover:text-gray-700"
+          className="text-xs px-2 py-0.5 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
         >
           Cancel
         </button>
-        <span className="text-[10px] text-gray-400 ml-auto">Ctrl+Enter to submit</span>
+        <span className="text-[10px] text-gray-400 dark:text-gray-500 ml-auto">Ctrl+Enter to submit</span>
       </div>
     </div>
   );
@@ -238,7 +238,7 @@ function UnifiedFileView({
   const [inputLineIdx, setInputLineIdx] = useState<number | null>(null);
 
   return (
-    <div className="overflow-auto max-h-80 bg-gray-50 font-mono text-xs">
+    <div className="overflow-auto max-h-80 bg-gray-50 dark:bg-gray-950 font-mono text-xs">
       {file.lines.map((line, li) => {
         const isCommentable = line.type !== "header" && line.type !== "hunk";
         const side = line.type === "delete" ? "old" : "new";
@@ -256,7 +256,7 @@ function UnifiedFileView({
         } else if (line.type === "delete") {
           className += "bg-red-50 text-red-800";
         } else {
-          className += "text-gray-700";
+          className += "text-gray-700 dark:text-gray-300";
         }
 
         return (
@@ -270,7 +270,7 @@ function UnifiedFileView({
               {line.type === "add" ? "+" : line.type === "delete" ? "-" : " "}
               {line.type === "hunk" ? line.content : line.content || " "}
               {isCommentable && onCreateComment && lineComments.length === 0 && !isInputOpen && (
-                <span className="absolute right-1 top-1/2 -translate-y-1/2 opacity-0 group-hover/line:opacity-100 transition-opacity cursor-pointer select-none w-5 h-5 flex items-center justify-center rounded-full bg-gray-200 hover:bg-blue-200 text-gray-500 hover:text-blue-600 text-sm leading-none">
+                <span className="absolute right-1 top-1/2 -translate-y-1/2 opacity-0 group-hover/line:opacity-100 transition-opacity cursor-pointer select-none w-5 h-5 flex items-center justify-center rounded-full bg-gray-200 dark:bg-gray-700 hover:bg-blue-200 text-gray-500 dark:text-gray-400 hover:text-blue-600 text-sm leading-none">
                   +
                 </span>
               )}
@@ -340,7 +340,7 @@ function SplitFileView({
   }
 
   return (
-    <div className="overflow-auto max-h-80 bg-gray-50 font-mono text-xs">
+    <div className="overflow-auto max-h-80 bg-gray-50 dark:bg-gray-950 font-mono text-xs">
       <table className="w-full border-collapse">
         <tbody>
           {pairs.map((pair) => {
@@ -382,16 +382,16 @@ function SplitFileView({
                     if (isCommentable && onCreateComment) setInputLineIdx(pair.lineIdx);
                   }}
                 >
-                  <td className={`px-1 text-right text-gray-400 w-8 select-none ${pair.left?.type === "delete" ? "bg-red-50" : ""}`}>
+                  <td className={`px-1 text-right text-gray-400 dark:text-gray-500 w-8 select-none ${pair.left?.type === "delete" ? "bg-red-50" : ""}`}>
                     {pair.left?.lineNumOld ?? ""}
                   </td>
-                  <td className={`px-2 ${pair.left?.type === "delete" ? "bg-red-50 text-red-800" : "text-gray-700"}`}>
+                  <td className={`px-2 ${pair.left?.type === "delete" ? "bg-red-50 text-red-800" : "text-gray-700 dark:text-gray-300"}`}>
                     {pair.left ? pair.left.content : ""}
                   </td>
-                  <td className={`px-1 text-right text-gray-400 w-8 select-none border-l border-gray-200 ${pair.right?.type === "add" ? "bg-green-50" : ""}`}>
+                  <td className={`px-1 text-right text-gray-400 dark:text-gray-500 w-8 select-none border-l border-gray-200 dark:border-gray-700 ${pair.right?.type === "add" ? "bg-green-50" : ""}`}>
                     {pair.right?.lineNumNew ?? ""}
                   </td>
-                  <td className={`px-2 ${pair.right?.type === "add" ? "bg-green-50 text-green-800" : "text-gray-700"}`}>
+                  <td className={`px-2 ${pair.right?.type === "add" ? "bg-green-50 text-green-800" : "text-gray-700 dark:text-gray-300"}`}>
                     {pair.right ? pair.right.content : ""}
                   </td>
                 </tr>
@@ -458,10 +458,10 @@ function FileDiffAccordion({
     <div>
       <button
         onClick={onToggle}
-        className="w-full flex items-center gap-2 px-3 py-2 bg-gray-100 hover:bg-gray-200 cursor-pointer select-none transition-colors text-left"
+        className="w-full flex items-center gap-2 px-3 py-2 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 cursor-pointer select-none transition-colors text-left"
       >
         <svg
-          className={`w-3.5 h-3.5 text-gray-500 shrink-0 transition-transform duration-150 ${expanded ? "rotate-90" : ""}`}
+          className={`w-3.5 h-3.5 text-gray-500 dark:text-gray-400 shrink-0 transition-transform duration-150 ${expanded ? "rotate-90" : ""}`}
           fill="none"
           viewBox="0 0 24 24"
           stroke="currentColor"
@@ -469,7 +469,7 @@ function FileDiffAccordion({
         >
           <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
         </svg>
-        <span className="text-xs font-mono text-gray-700 truncate flex-1 min-w-0" title={file.filePath}>
+        <span className="text-xs font-mono text-gray-700 dark:text-gray-300 truncate flex-1 min-w-0" title={file.filePath}>
           {file.filePath}
         </span>
         <span className="text-xs text-green-600 font-medium shrink-0">+{additions}</span>
@@ -501,16 +501,16 @@ export function DiffViewer({ diff, stats, comments = [], onCreateComment, onEdit
 
   if (!diff) {
     return (
-      <div className="text-sm text-gray-500 italic p-4">
+      <div className="text-sm text-gray-500 dark:text-gray-400 italic p-4">
         No changes to show.
       </div>
     );
   }
 
   return (
-    <div className="border border-gray-300 rounded overflow-hidden">
-      <div className="flex items-center justify-between px-3 py-1.5 bg-gray-50 border-b border-gray-200">
-        <div className="flex items-center gap-4 text-xs text-gray-600">
+    <div className="border border-gray-300 dark:border-gray-600 rounded overflow-hidden">
+      <div className="flex items-center justify-between px-3 py-1.5 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
+        <div className="flex items-center gap-4 text-xs text-gray-600 dark:text-gray-400">
           <span>{stats.filesChanged} file{stats.filesChanged !== 1 ? "s" : ""} changed</span>
           <span className="text-green-600">+{stats.insertions}</span>
           <span className="text-red-600">-{stats.deletions}</span>
@@ -528,28 +528,28 @@ export function DiffViewer({ diff, stats, comments = [], onCreateComment, onEdit
                   setExpandedFiles(new Set(files.map((_, i) => i)));
                 }
               }}
-              className="text-xs px-2 py-0.5 text-gray-500 hover:text-gray-700"
+              className="text-xs px-2 py-0.5 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
             >
               {allExpanded ? "Collapse all" : "Expand all"}
             </button>
           )}
-          <div className="flex items-center bg-gray-200 rounded overflow-hidden">
+          <div className="flex items-center bg-gray-200 dark:bg-gray-700 rounded overflow-hidden">
             <button
               onClick={() => setViewMode("unified")}
-              className={`px-2 py-0.5 text-xs ${viewMode === "unified" ? "bg-white shadow-sm" : "text-gray-500 hover:text-gray-700"}`}
+              className={`px-2 py-0.5 text-xs ${viewMode === "unified" ? "bg-white dark:bg-gray-900 shadow-sm dark:text-gray-100" : "text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"}`}
             >
               Unified
             </button>
             <button
               onClick={() => setViewMode("split")}
-              className={`px-2 py-0.5 text-xs ${viewMode === "split" ? "bg-white shadow-sm" : "text-gray-500 hover:text-gray-700"}`}
+              className={`px-2 py-0.5 text-xs ${viewMode === "split" ? "bg-white dark:bg-gray-900 shadow-sm dark:text-gray-100" : "text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"}`}
             >
               Split
             </button>
           </div>
         </div>
       </div>
-      <div className="divide-y divide-gray-200">
+      <div className="divide-y divide-gray-200 dark:divide-gray-700">
         {files.map((file, fi) => (
           <FileDiffAccordion
             key={fi}

@@ -76,9 +76,9 @@ const TABS: { id: Tab; label: string }[] = [
 function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return (
     <div className="space-y-1">
-      <label className="block text-sm font-medium text-gray-700">{label}</label>
+      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">{label}</label>
       {children}
-      {hint && <p className="text-xs text-gray-500">{hint}</p>}
+      {hint && <p className="text-xs text-gray-500 dark:text-gray-400">{hint}</p>}
     </div>
   );
 }
@@ -92,17 +92,17 @@ function Toggle({ checked, onChange, label, hint, disabled }: {
 }) {
   return (
     <div className={`space-y-0.5 ${disabled ? "opacity-50" : ""}`}>
-      <label className="flex items-center gap-2 text-sm font-medium text-gray-700 cursor-pointer select-none">
+      <label className="flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-300 cursor-pointer select-none">
         <input
           type="checkbox"
           checked={checked}
           onChange={(e) => onChange(e.target.checked)}
           disabled={disabled}
-          className="rounded border-gray-300"
+          className="rounded border-gray-300 dark:border-gray-600"
         />
         {label}
       </label>
-      {hint && <p className="text-xs text-gray-500 pl-5">{hint}</p>}
+      {hint && <p className="text-xs text-gray-500 dark:text-gray-400 pl-5">{hint}</p>}
     </div>
   );
 }
@@ -115,11 +115,11 @@ function CollapsibleSection({ title, configured, defaultOpen, children }: {
 }) {
   const [open, setOpen] = useState(defaultOpen ?? false);
   return (
-    <div className="border border-gray-200 rounded-md">
+    <div className="border border-gray-200 dark:border-gray-700 rounded-md">
       <button
         type="button"
         onClick={() => setOpen(!open)}
-        className="w-full flex items-center justify-between px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 rounded-md"
+        className="w-full flex items-center justify-between px-3 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 rounded-md"
       >
         <span className="flex items-center gap-2">
           {title}
@@ -128,14 +128,14 @@ function CollapsibleSection({ title, configured, defaultOpen, children }: {
           )}
         </span>
         <svg
-          className={`w-4 h-4 text-gray-400 transition-transform ${open ? "rotate-90" : ""}`}
+          className={`w-4 h-4 text-gray-400 dark:text-gray-500 transition-transform ${open ? "rotate-90" : ""}`}
           fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
         >
           <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
         </svg>
       </button>
       {open && (
-        <div className="px-3 pb-3 pt-2 space-y-2 border-t border-gray-100">
+        <div className="px-3 pb-3 pt-2 space-y-2 border-t border-gray-100 dark:border-gray-800">
           {children}
         </div>
       )}
@@ -191,7 +191,7 @@ function EditSkillForm({ skill, isNew, onSave, onCancel }: {
         value={name}
         onChange={(e) => setName(e.target.value)}
         placeholder="Skill name (e.g. dependency-analyzer)"
-        className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
+        className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
         disabled={!isNew}
       />
       <input
@@ -199,14 +199,14 @@ function EditSkillForm({ skill, isNew, onSave, onCancel }: {
         value={description}
         onChange={(e) => setDescription(e.target.value)}
         placeholder="Short description"
-        className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
+        className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
       />
       <textarea
         value={prompt}
         onChange={(e) => setPrompt(e.target.value)}
         placeholder="Skill prompt — injected into the agent's context before the issue description"
         rows={6}
-        className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 font-mono"
+        className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 font-mono"
       />
       <div className="flex items-center gap-2">
         <input
@@ -214,7 +214,7 @@ function EditSkillForm({ skill, isNew, onSave, onCancel }: {
           value={model}
           onChange={(e) => setModel(e.target.value)}
           placeholder="Model override (optional, e.g. haiku)"
-          className="flex-1 text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
+          className="flex-1 text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
         />
       </div>
       <div className="flex gap-2 flex-wrap">
@@ -225,7 +225,7 @@ function EditSkillForm({ skill, isNew, onSave, onCancel }: {
         >
           {isNew ? "Create" : "Save"}
         </button>
-        <button onClick={onCancel} className="text-xs px-3 py-1.5 text-gray-600 hover:bg-gray-100 rounded">
+        <button onClick={onCancel} className="text-xs px-3 py-1.5 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded">
           Cancel
         </button>
         <button
@@ -245,7 +245,7 @@ function EditSkillForm({ skill, isNew, onSave, onCancel }: {
         {preEnhanceSnapshot && (
           <button
             onClick={handleUndoEnhance}
-            className="text-xs px-3 py-1.5 text-gray-600 border border-gray-300 rounded hover:bg-gray-50"
+            className="text-xs px-3 py-1.5 text-gray-600 dark:text-gray-400 border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-800"
           >
             Undo enhance
           </button>
@@ -268,11 +268,11 @@ function ToolToggle({ name, description, disabled, onToggle }: {
           type="checkbox"
           checked={!disabled}
           onChange={(e) => onToggle(!e.target.checked)}
-          className="rounded border-gray-300"
+          className="rounded border-gray-300 dark:border-gray-600"
         />
-        <span className="text-sm font-mono text-gray-800">{name}</span>
+        <span className="text-sm font-mono text-gray-800 dark:text-gray-200">{name}</span>
       </label>
-      <p className="text-xs text-gray-500 flex-1">{description}</p>
+      <p className="text-xs text-gray-500 dark:text-gray-400 flex-1">{description}</p>
     </div>
   );
 }
@@ -542,15 +542,15 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-2">
       <div className="absolute inset-0 bg-black/30" onClick={onClose} />
-      <div className="relative w-full max-w-5xl bg-white rounded-xl shadow-2xl flex flex-col h-[90vh] max-h-[96vh] animate-slide-in-right">
+      <div className="relative w-full max-w-5xl bg-white dark:bg-gray-900 rounded-xl shadow-2xl flex flex-col h-[90vh] max-h-[96vh] animate-slide-in-right">
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200">
-          <h2 className="text-base font-semibold text-gray-900">Settings</h2>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-lg leading-none">&times;</button>
+        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200 dark:border-gray-700">
+          <h2 className="text-base font-semibold text-gray-900 dark:text-gray-100">Settings</h2>
+          <button onClick={onClose} className="text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 text-lg leading-none">&times;</button>
         </div>
 
         {/* Tabs */}
-        <div className="flex border-b border-gray-200 px-5">
+        <div className="flex border-b border-gray-200 dark:border-gray-700 px-5">
           {TABS.map((t) => (
             <button
               key={t.id}
@@ -558,7 +558,7 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
               className={`px-3 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors ${
                 tab === t.id
                   ? "border-blue-500 text-blue-600"
-                  : "border-transparent text-gray-500 hover:text-gray-700"
+                  : "border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"
               }`}
             >
               {t.label}
@@ -569,7 +569,7 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
         {/* Content */}
         <div className="flex-1 overflow-y-auto px-5 py-4">
           {loading ? (
-            <div className="text-sm text-gray-500">Loading...</div>
+            <div className="text-sm text-gray-500 dark:text-gray-400">Loading...</div>
           ) : (
             <div className="space-y-5">
               {/* Agent tab */}
@@ -581,14 +581,14 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                       value={settings.agent_command || ""}
                       onChange={(e) => set("agent_command")(e.target.value)}
                       placeholder="claude"
-                      className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
+                      className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
                     />
                   </Field>
                   <Field label="Claude Profile" hint={`Passes --settings to Claude Code pointing to ~/.claude/settings_*.json`}>
                     <select
                       value={settings.claude_profile || ""}
                       onChange={(e) => set("claude_profile")(e.target.value)}
-                      className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
+                      className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
                     >
                       <option value="">Default (no profile)</option>
                       {profiles.map((p) => (
@@ -602,7 +602,7 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                       value={settings.agent_args || ""}
                       onChange={(e) => set("agent_args")(e.target.value)}
                       placeholder="--model opus --settings .claude/settings.json"
-                      className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
+                      className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
                     />
                   </Field>
                 </>
@@ -612,8 +612,8 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
               {tab === "workflow" && (
                 <>
                   {/* Process pipeline visualization */}
-                  <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 mb-2">
-                    <div className="text-xs font-medium text-gray-600 mb-2">Process pipeline</div>
+                  <div className="bg-gray-50 dark:bg-gray-950 border border-gray-200 dark:border-gray-700 rounded-lg p-3 mb-2">
+                    <div className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-2">Process pipeline</div>
                     <div className="flex items-center gap-1 flex-wrap">
                       {[
                         { label: "Agent runs", always: true },
@@ -627,14 +627,14 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                         { label: "Merge", always: true },
                       ].filter(s => s.always || s.enabled).map((step, i, arr) => (
                         <div key={step.label} className="flex items-center gap-1">
-                          {i > 0 && <span className="text-gray-400 text-xs">→</span>}
+                          {i > 0 && <span className="text-gray-400 dark:text-gray-500 text-xs">→</span>}
                           <span className={`px-2 py-0.5 rounded text-xs font-medium ${step.always ? "bg-blue-100 text-blue-700" : "bg-green-100 text-green-700"}`}>
                             {step.label}
                           </span>
                         </div>
                       ))}
                     </div>
-                    <div className="text-xs text-gray-400 mt-1.5">Green steps are optional — toggle them below to add/remove from pipeline.</div>
+                    <div className="text-xs text-gray-400 dark:text-gray-500 mt-1.5">Green steps are optional — toggle them below to add/remove from pipeline.</div>
                   </div>
                   <Toggle
                     checked={autoReviewOn}
@@ -642,7 +642,7 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                     label="Auto Code Review"
                     hint="When an agent commits and exits successfully, automatically launch a review agent that checks the diff for issues."
                   />
-                  <div className={`pl-5 space-y-3 border-l-2 ${autoReviewOn ? "border-blue-200" : "border-gray-100"}`}>
+                  <div className={`pl-5 space-y-3 border-l-2 ${autoReviewOn ? "border-blue-200" : "border-gray-100 dark:border-gray-800"}`}>
                     <Toggle
                       checked={settings.review_auto_fix !== "false"}
                       onChange={setBool("review_auto_fix")}
@@ -695,12 +695,12 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                     hint="When enabled, runs an agent session before merging that reads the worktree's session transcripts and updates docs and Claude hooks with extracted insights. Blocks merge until complete (up to 3 minutes)."
                   />
 
-                  <div className="pt-3 border-t border-gray-200">
+                  <div className="pt-3 border-t border-gray-200 dark:border-gray-700">
                     <div className="flex items-center justify-between mb-3">
                       <div className="flex items-center gap-2">
-                        <div className="text-xs font-semibold text-gray-700 uppercase tracking-wide">Board Monitor</div>
+                        <div className="text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wide">Board Monitor</div>
                         {monitorStatus && (
-                          <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium ${monitorStatus.active ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-500"}`}>
+                          <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium ${monitorStatus.active ? "bg-green-100 text-green-700" : "bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400"}`}>
                             <span className={`w-1.5 h-1.5 rounded-full ${monitorStatus.active ? "bg-green-500 animate-pulse" : "bg-gray-400"}`} />
                             {monitorStatus.active ? "Active" : "Idle"}
                           </span>
@@ -709,7 +709,7 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                       <button
                         onClick={handleMonitorRunNow}
                         disabled={monitorRunning}
-                        className="flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium bg-gray-100 text-gray-700 hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                        className="flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                         title="Run a monitor cycle now and restart the interval timer"
                       >
                         {monitorRunning ? (
@@ -730,23 +730,23 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                     </div>
                     {settings.auto_monitor === "true" && (
                       <div className="mt-2 pl-5 flex items-center gap-2">
-                        <label className="text-xs text-gray-600">Interval</label>
+                        <label className="text-xs text-gray-600 dark:text-gray-400">Interval</label>
                         <input
                           type="number"
                           min="1"
                           max="60"
                           value={settings.auto_monitor_interval || "4"}
                           onChange={(e) => set("auto_monitor_interval")(e.target.value)}
-                          className="w-16 px-2 py-1 text-xs border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                          className="w-16 px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
                         />
-                        <span className="text-xs text-gray-500">min</span>
+                        <span className="text-xs text-gray-500 dark:text-gray-400">min</span>
                       </div>
                     )}
                     {monitorStatus && (
-                      <div className="mt-3 rounded-lg border border-gray-200 overflow-hidden">
-                        <div className="flex items-center justify-between px-3 py-2 bg-gray-50 border-b border-gray-200">
-                          <span className="text-[11px] font-medium text-gray-500 uppercase tracking-wide">Last cycle</span>
-                          <div className="flex items-center gap-3 text-[11px] text-gray-500">
+                      <div className="mt-3 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
+                        <div className="flex items-center justify-between px-3 py-2 bg-gray-50 dark:bg-gray-950 border-b border-gray-200 dark:border-gray-700">
+                          <span className="text-[11px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">Last cycle</span>
+                          <div className="flex items-center gap-3 text-[11px] text-gray-500 dark:text-gray-400">
                             {monitorStatus.lastRun && (
                               <span title={new Date(monitorStatus.lastRun).toLocaleString()}>{new Date(monitorStatus.lastRun).toLocaleTimeString()}</span>
                             )}
@@ -757,13 +757,13 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                         </div>
                         <div className="max-h-32 overflow-y-auto">
                           {monitorStatus.recentActions.length > 0 ? (
-                            <ul className="divide-y divide-gray-100">
+                            <ul className="divide-y divide-gray-100 dark:divide-gray-800">
                               {monitorStatus.recentActions.slice(0, 10).map((action, i) => (
-                                <li key={i} className="px-3 py-1.5 text-[11px] text-gray-600 leading-snug">{action}</li>
+                                <li key={i} className="px-3 py-1.5 text-[11px] text-gray-600 dark:text-gray-400 leading-snug">{action}</li>
                               ))}
                             </ul>
                           ) : (
-                            <div className="px-3 py-2.5 text-[11px] text-gray-400 italic">No actions taken in last cycle</div>
+                            <div className="px-3 py-2.5 text-[11px] text-gray-400 dark:text-gray-500 italic">No actions taken in last cycle</div>
                           )}
                         </div>
                       </div>
@@ -776,11 +776,11 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
               {/* Skills tab */}
               {tab === "skills" && (
                 <div className="space-y-3">
-                  <p className="text-xs text-gray-500">
+                  <p className="text-xs text-gray-500 dark:text-gray-400">
                     Agent skills are prompt templates injected into the agent's context when launching a workspace. They teach the agent how to interact with the board and perform specific tasks. Skills can be global or scoped to a specific project.
                   </p>
                   {skills.map((skill) => (
-                    <div key={skill.id} className="border border-gray-200 rounded-md p-3">
+                    <div key={skill.id} className="border border-gray-200 dark:border-gray-700 rounded-md p-3">
                       {editingSkill === skill.id ? (
                         <EditSkillForm
                           skill={skill}
@@ -917,7 +917,7 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                   <select
                     value={settings.output_parser || "true"}
                     onChange={(e) => set("output_parser")(e.target.value)}
-                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
                   >
                     <option value="true">Parse stream-json output</option>
                     <option value="minimal">Minimal activity view</option>

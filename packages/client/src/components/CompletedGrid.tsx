@@ -53,10 +53,10 @@ export function CompletedGrid({
     return (
       <button
         onClick={onToggle}
-        className="w-full bg-gray-50 border border-gray-200 rounded-lg px-4 py-2 flex items-center gap-3 hover:bg-gray-100 transition-colors text-left"
+        className="w-full bg-gray-50 dark:bg-gray-950 border border-gray-200 dark:border-gray-700 rounded-lg px-4 py-2 flex items-center gap-3 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors text-left"
       >
         <svg
-          className="w-4 h-4 text-gray-400 shrink-0"
+          className="w-4 h-4 text-gray-400 dark:text-gray-500 shrink-0"
           fill="none"
           viewBox="0 0 24 24"
           stroke="currentColor"
@@ -64,9 +64,9 @@ export function CompletedGrid({
         >
           <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
         </svg>
-        <span className="text-sm font-medium text-gray-600">Completed</span>
-        <span className="text-xs text-gray-400 flex items-center gap-1.5 min-w-0">
-          <span className="bg-gray-200 rounded-full px-1.5 py-0.5 shrink-0">{totalIssues}</span>
+        <span className="text-sm font-medium text-gray-600 dark:text-gray-400">Completed</span>
+        <span className="text-xs text-gray-400 dark:text-gray-500 flex items-center gap-1.5 min-w-0">
+          <span className="bg-gray-200 dark:bg-gray-700 rounded-full px-1.5 py-0.5 shrink-0">{totalIssues}</span>
           {breakdown.done > 0 && breakdown.cancelled > 0 && (
             <span className="truncate">
               ({breakdown.done} done · {breakdown.cancelled} cancelled)
@@ -109,7 +109,7 @@ export function CompletedGrid({
     <div className="shrink-0 max-h-[40vh] overflow-y-auto scrollbar-hide">
       <button
         onClick={onToggle}
-        className="flex items-center gap-2 text-sm text-gray-500 hover:text-gray-700 mb-2 transition-colors"
+        className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 mb-2 transition-colors"
       >
         <svg
           className="w-4 h-4"
@@ -121,12 +121,12 @@ export function CompletedGrid({
           <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
         </svg>
         <span className="font-medium">Completed</span>
-        <span className="text-xs text-gray-400">{totalIssues}</span>
+        <span className="text-xs text-gray-400 dark:text-gray-500">{totalIssues}</span>
       </button>
 
       <div
         className={`rounded-lg p-3 transition-all ${
-          dragOver ? "ring-2 ring-blue-400 ring-offset-1 bg-blue-50/30" : "bg-gray-50/50"
+          dragOver ? "ring-2 ring-blue-400 ring-offset-1 bg-blue-50/30" : "bg-gray-50/50 dark:bg-gray-950/50"
         }`}
         onDragEnter={handleDragEnter}
         onDragLeave={handleDragLeave}
@@ -148,7 +148,7 @@ export function CompletedGrid({
           ))}
         </div>
         {allIssues.length === 0 && !dragOver && (
-          <p className="text-xs text-gray-400 text-center py-4">No completed issues</p>
+          <p className="text-xs text-gray-400 dark:text-gray-500 text-center py-4">No completed issues</p>
         )}
       </div>
     </div>

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef, useEffect, useState } from "react";
 
 export interface SplitButtonOption {
   label: string;
@@ -70,14 +70,14 @@ export function SplitButton({
       </button>
       {open && (
         <div
-          className={`absolute ${dropUp ? "bottom-full mb-1" : "top-full mt-1"} left-0 w-52 bg-white border border-gray-200 rounded shadow-lg z-10`}
+          className={`absolute ${dropUp ? "bottom-full mb-1" : "top-full mt-1"} left-0 w-52 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded shadow-lg z-10`}
         >
           {options.map((opt) => (
             <button
               key={opt.label}
               onClick={() => { setOpen(false); opt.onClick(); }}
               title={opt.title}
-              className="w-full text-left text-sm px-3 py-2 hover:bg-gray-50"
+              className="w-full text-left text-sm px-3 py-2 hover:bg-gray-50 dark:hover:bg-gray-800 dark:text-gray-200"
             >
               {opt.label}
             </button>
