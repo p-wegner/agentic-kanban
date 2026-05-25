@@ -41,7 +41,7 @@ interface Settings {
 const DEFAULT_SETTINGS: Settings = {
   agent_command: "",
   agent_args: "",
-  output_parser: "true",
+  output_parser: "minimal",
   skip_permissions: "false",
   claude_profile: "",
   codex_profile: "",
@@ -991,15 +991,14 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
               {/* UI tab */}
               {tab === "ui" && (
                 <>
-                <Field label="Output Parsing" hint={`When enabled, the terminal view parses structured agent output and displays it with syntax highlighting. "Minimal" shows a compact activity timeline.`}>
+                <Field label="Output Parsing" hint='Parses structured agent output into a compact activity timeline. Disable for debugging to see raw JSONL output.'>
                   <select
-                    value={settings.output_parser || "true"}
+                    value={settings.output_parser || "minimal"}
                     onChange={(e) => set("output_parser")(e.target.value)}
                     className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
                   >
-                    <option value="true">Parse stream-json output</option>
                     <option value="minimal">Minimal activity view</option>
-                    <option value="false">Show raw output</option>
+                    <option value="false">Show raw output (debug)</option>
                   </select>
                 </Field>
                 <div className="space-y-3 mt-4">
