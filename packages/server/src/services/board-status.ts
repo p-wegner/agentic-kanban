@@ -58,6 +58,7 @@ export async function getBoardStatus(
       issueNumber: issues.issueNumber,
       title: issues.title,
       priority: issues.priority,
+      issueType: issues.issueType,
       statusId: issues.statusId,
       statusName: projectStatuses.name,
     })
@@ -144,6 +145,7 @@ export async function getBoardStatus(
       issueId: issue.id,
       title: issue.title,
       priority: issue.priority,
+      issueType: issue.issueType,
       statusName: issue.statusName,
       workspace: mainWs ? {
         id: mainWs.id, branch: mainWs.branch, status: mainWs.status,

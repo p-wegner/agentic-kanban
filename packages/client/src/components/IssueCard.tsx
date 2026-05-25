@@ -32,11 +32,11 @@ function getLastSessionBadge(triggerType: string | null | undefined): { label: s
   return null;
 }
 
-const priorityColors: Record<string, string> = {
-  low: "bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300",
-  medium: "bg-blue-100 text-blue-700",
-  high: "bg-orange-100 text-orange-700",
-  critical: "bg-red-100 text-red-700",
+const issueTypeColors: Record<string, string> = {
+  task: "bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300",
+  bug: "bg-red-100 text-red-700",
+  feature: "bg-blue-100 text-blue-700",
+  chore: "bg-amber-100 text-amber-700",
 };
 
 interface TagBadge {
@@ -82,7 +82,7 @@ function HighlightedText({ text, query }: { text: string; query: string }) {
 }
 
 export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, onDragStart, onMoveToNext, nextStatusName, tags, searchQuery, liveActivity, liveStats, todos, isPendingWorkspace }: IssueCardProps) {
-  const badgeColor = priorityColors[issue.priority] ?? "bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300";
+  const badgeColor = issueTypeColors[issue.issueType ?? "task"] ?? "bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300";
   const ws = issue.workspaceSummary;
   const hasActiveWorkspace = ws?.main && ws.main.status !== "closed";
   const [depDragOver, setDepDragOver] = useState(false);
@@ -165,9 +165,9 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
           </span>
         ) : null}
         <span
-          className={`inline-block text-xs font-medium px-1.5 py-0.5 rounded ${badgeColor}`}
+          className={`inline-block text-xs font-medium px-1.5 py-0.5 rounded capitalize ${badgeColor}`}
         >
-          {issue.priority}
+          {issue.issueType ?? "task"}
         </span>
         {issue.estimate && (
           <span className="inline-block text-xs font-medium px-1.5 py-0.5 rounded bg-teal-100 text-teal-700">

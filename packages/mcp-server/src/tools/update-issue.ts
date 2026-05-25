@@ -7,16 +7,17 @@ import { notifyBoard } from "../notify.js";
 export function registerUpdateIssue(server: McpServer) {
   server.tool(
     "update_issue",
-    "Update an existing issue (title, description, status, priority)",
+    "Update an existing issue (title, description, status, priority, type)",
     {
       issueId: z.string().describe("The issue ID to update"),
       title: z.string().optional().describe("New title"),
       description: z.string().optional().describe("New description"),
       statusName: z.string().optional().describe("Move to status column by name (e.g., 'In Progress', 'Done')"),
       priority: z.enum(["low", "medium", "high", "critical"]).optional().describe("New priority"),
+      issueType: z.enum(["task", "bug", "feature", "chore"]).optional().describe("Issue type (task, bug, feature, chore)"),
       estimate: z.enum(["XS", "S", "M", "L", "XL"]).nullable().optional().describe("Size estimate (XS/S/M/L/XL), or null to clear"),
     },
-    async ({ issueId, title, description, statusName, priority, estimate }) => {
+    async ({ issueId, title, description, statusName, priority, issueType, estimate }) => {
       const existing = await db.select().from(schema.issues).where(eq(schema.issues.id, issueId)).limit(1);
       if (existing.length === 0) {
         return { content: [{ type: "text" as const, text: `Issue ${issueId} not found` }] };
@@ -28,6 +29,7 @@ export function registerUpdateIssue(server: McpServer) {
       if (title !== undefined) updates.title = title;
       if (description !== undefined) updates.description = description;
       if (priority !== undefined) updates.priority = priority;
+      if (issueType !== undefined) updates.issueType = issueType;
       if (estimate !== undefined) updates.estimate = estimate;
 
       if (statusName) {
