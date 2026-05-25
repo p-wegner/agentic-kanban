@@ -5,6 +5,12 @@
  * Blocks agent termination when client source files were edited,
  * reminding the agent to visually verify changes via playwright-cli.
  *
+ * Behaviour depends on the `visual_verification_mode` preference:
+ *   "before_merge" (default) — blocks the agent until it verifies the UI.
+ *   "after_merge"            — exits 0 immediately; the autoMerge handler in
+ *                              server-start.ts detects client changes and tags
+ *                              the issue with "needs-visual-verification".
+ *
  * Receives edited file list via SMART_HOOKS_EDITED_FILES env var (set by
  * smart-hooks-runner.js). Falls back to reading .smart-hooks-state.json for
  * standalone invocation.
@@ -15,6 +21,7 @@
 
 const fs = require("fs");
 const path = require("path");
+const { execSync } = require("child_process");
 
 function getProjectDir() {
   return process.env.CLAUDE_PROJECT_DIR || process.cwd();
@@ -32,6 +39,20 @@ function hasClientEdits(files) {
   );
 }
 
+function getVisualVerificationMode() {
+  try {
+    const port = process.env.KANBAN_SERVER_PORT || process.env.SERVER_PORT || "3001";
+    const result = execSync(
+      `curl -s --max-time 3 "http://localhost:${port}/api/preferences/settings"`,
+      { encoding: "utf8", windowsHide: true, timeout: 4000 }
+    );
+    const settings = JSON.parse(result);
+    return settings.visual_verification_mode || "before_merge";
+  } catch {
+    return "before_merge";
+  }
+}
+
 function main() {
   let editedFiles = [];
   if (process.env.SMART_HOOKS_EDITED_FILES) {
@@ -45,6 +66,15 @@ function main() {
   const state = { editedFiles };
 
   if (!hasClientEdits(state.editedFiles)) process.exit(0);
+
+  const mode = getVisualVerificationMode();
+
+  if (mode === "after_merge") {
+    // Defer verification to post-merge — let the agent stop freely.
+    // The server detects client changes at merge time and tags the issue
+    // with "needs-visual-verification" after the branch is merged.
+    process.exit(0);
+  }
 
   // Output block decision — the smart-hooks-runner will relay it
   process.stdout.write(
