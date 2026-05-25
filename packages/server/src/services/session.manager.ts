@@ -382,6 +382,14 @@ function createSessionManager(
     });
     sessionProviders.set(sessionId, executor);
 
+    // Read skip_permissions preference
+    const skipPermRows = await db
+      .select()
+      .from(preferences)
+      .where(eq(preferences.key, "skip_permissions"))
+      .limit(1);
+    const skipPermissions = skipPermRows.length > 0 && skipPermRows[0].value === "true";
+
     try {
       const proc = agentService.launch(effectiveWorkingDir, sessionId, prompt, agentArgs, (event) => { // onOutput callback
         // Broadcast to WebSocket subscribers
@@ -487,7 +495,7 @@ function createSessionManager(
           }
         }
       // When resumeWithNewModel is true, omit --resume so the new profile/provider is used instead
-      }, resumeWithNewModel ? undefined : providerSessionId, agentCommand, claudeProfile, multiTurn, permissionPromptTool, planMode, provider, profile, extraEnv);
+      }, resumeWithNewModel ? undefined : providerSessionId, agentCommand, claudeProfile, multiTurn, permissionPromptTool, planMode, provider, profile, extraEnv, skipPermissions);
 
       // Persist PID so hot-reload can detect surviving processes
       if (proc.pid) {

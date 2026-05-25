@@ -1,4 +1,7 @@
 {
+  "env": {
+    "ALLOW_DB_DESTROY": "1"
+  },
   "mcpServers": {
     "agentic-kanban": {
       "command": "pnpm",

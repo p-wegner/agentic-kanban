@@ -48,6 +48,8 @@ export interface ProviderLaunchOptions {
   planMode?: boolean;
   provider?: ProviderId;
   prompt?: string;
+  /** Skip permission prompts (use Copilot --allow-all, Claude system setting). */
+  skipPermissions?: boolean;
 }
 
 /**
@@ -589,7 +591,7 @@ export class CopilotProvider implements AgentProvider {
   readonly name = "copilot";
 
   buildLaunchConfig(options: ProviderLaunchOptions): AgentLaunchConfig {
-    const { agentArgs, providerSessionId, agentCommand, keepAlive, profile, planMode, prompt } = options;
+    const { agentArgs, providerSessionId, agentCommand, keepAlive, profile, planMode, prompt, skipPermissions } = options;
     const isWindows = process.platform === "win32";
 
     const isMockAgent = !!process.env.AGENT_COMMAND || (agentCommand?.includes("mock-agent") ?? false);
@@ -640,10 +642,16 @@ export class CopilotProvider implements AgentProvider {
         }
       }
 
-      // Non-interactive Copilot requires explicit tool permissions. Keep this
-      // targeted instead of defaulting to --allow-all/--allow-all-tools.
-      for (const allowedTool of COPILOT_DEFAULT_ALLOWED_TOOLS) {
-        args.push(`--allow-tool=${allowedTool}`);
+      // Skip permission prompts: use --allow-all when enabled. Otherwise,
+      // use targeted tool list to avoid permission prompts for known-safe tools.
+      if (skipPermissions) {
+        args.push("--allow-all");
+      } else {
+        // Non-interactive Copilot requires explicit tool permissions. Keep this
+        // targeted instead of defaulting to --allow-all/--allow-all-tools.
+        for (const allowedTool of COPILOT_DEFAULT_ALLOWED_TOOLS) {
+          args.push(`--allow-tool=${allowedTool}`);
+        }
       }
 
       if (planMode) {
