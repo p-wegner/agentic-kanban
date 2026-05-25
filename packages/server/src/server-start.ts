@@ -460,17 +460,15 @@ export async function startServer(port?: number) {
       const TAG_NAME = "needs-visual-verification";
       const TAG_COLOR = "#F59E0B"; // amber
 
-      // Ensure the tag exists (upsert by name)
-      let tagId: string;
-      const existing = await db.select({ id: tags.id }).from(tags).where(eq(tags.name, TAG_NAME)).limit(1);
-      if (existing.length > 0) {
-        tagId = existing[0].id;
-      } else {
-        const { randomUUID } = await import("node:crypto");
-        tagId = randomUUID();
-        await db.insert(tags).values({ id: tagId, name: TAG_NAME, color: TAG_COLOR, createdAt: now });
-        console.log(`[workflow] created tag "${TAG_NAME}"`);
-      }
+      // Upsert the tag by name: attempt insert (ignore duplicate), then always re-query
+      // for the canonical ID. This is race-safe: concurrent merges may both try to insert
+      // the tag, but only one will succeed and both will read back the same ID.
+      const { randomUUID } = await import("node:crypto");
+      await db.insert(tags).values({ id: randomUUID(), name: TAG_NAME, color: TAG_COLOR, createdAt: now })
+        .catch(() => {/* tag already exists — safe to ignore */});
+      const [tagRow] = await db.select({ id: tags.id }).from(tags).where(eq(tags.name, TAG_NAME)).limit(1);
+      if (!tagRow) return; // should never happen, but guard anyway
+      const tagId = tagRow.id;
 
       // Add the tag to the issue (ignore duplicate)
       const alreadyTagged = await db.select({ tagId: issueTags.tagId }).from(issueTags)
