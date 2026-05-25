@@ -291,6 +291,52 @@ describe("CopilotOutputParser", () => {
       expect(resultEvent.output).toBe("found 3 matches");
     }
   });
+
+  it("emits thinking event from assistant.message reasoningText", () => {
+    const parser = new CopilotOutputParser();
+    const output = [
+      JSON.stringify({
+        type: "assistant.message",
+        data: {
+          model: "claude-sonnet-4.6",
+          content: "",
+          reasoningText: "Let me explore the codebase to understand the structure.",
+          toolRequests: [{ toolCallId: "call-2", name: "glob", arguments: { pattern: "**/*.ts" } }],
+        },
+      }),
+    ].join("\n") + "\n";
+
+    const events = parser.feed(output);
+    expect(events).toHaveLength(1);
+    expect(events[0].kind).toBe("thinking");
+    if (events[0].kind === "thinking") {
+      expect(events[0].text).toBe("Let me explore the codebase to understand the structure.");
+    }
+  });
+
+  it("emits both thinking and assistant events when assistant.message has both", () => {
+    const parser = new CopilotOutputParser();
+    const output = JSON.stringify({
+      type: "assistant.message",
+      data: {
+        model: "claude-sonnet-4.6",
+        content: "I found the issue — the path uses backslashes.",
+        reasoningText: "The code looks correct. Let me think about edge cases.",
+      },
+    }) + "\n";
+
+    const events = parser.feed(output);
+    expect(events).toHaveLength(2);
+    expect(events[0].kind).toBe("thinking");
+    expect(events[1].kind).toBe("assistant");
+    if (events[0].kind === "thinking") {
+      expect(events[0].text).toBe("The code looks correct. Let me think about edge cases.");
+    }
+    if (events[1].kind === "assistant") {
+      expect(events[1].text).toBe("I found the issue — the path uses backslashes.");
+      expect(events[1].model).toBe("claude-sonnet-4.6");
+    }
+  });
 });
 
 
