@@ -825,6 +825,14 @@ Server: http://localhost:${serverPort}`;
     throw err;
   }
 
+  // Ensure required built-in tags exist (idempotent — safe to run on every startup)
+  try {
+    const { ensureBuiltinTags } = await import("./db/seed.js");
+    await ensureBuiltinTags(db);
+  } catch (err) {
+    console.warn("[startup] ensureBuiltinTags failed (non-fatal):", err instanceof Error ? err.message : String(err));
+  }
+
   // Disable auto_monitor on every startup — prevents mass agent spawns from idle workspaces
   {
     const now = new Date().toISOString();
