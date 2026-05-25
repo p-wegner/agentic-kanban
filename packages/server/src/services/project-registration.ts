@@ -1,6 +1,6 @@
 import { db } from "../db/index.js";
-import { projects, projectStatuses, preferences, issues, agentSkills } from "@agentic-kanban/shared/schema";
-import { eq } from "drizzle-orm";
+import { projects, projectStatuses, preferences, issues, agentSkills, repos, scheduledRuns } from "@agentic-kanban/shared/schema";
+import { eq, and } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { resolve, basename } from "node:path";
 import { execFile } from "node:child_process";
@@ -68,10 +68,26 @@ export async function deduplicateProjects(): Promise<void> {
         `— same git repo as "${keep.name}" (${keep.repoPath})`
       );
 
+      // Remap issue statusIds to the surviving project's statuses (matched by name)
+      const dupStatuses = await db.select().from(projectStatuses).where(eq(projectStatuses.projectId, dup.id));
+      const keepStatuses = await db.select().from(projectStatuses).where(eq(projectStatuses.projectId, keep.id));
+      for (const dupStatus of dupStatuses) {
+        const match = keepStatuses.find((s) => s.name === dupStatus.name);
+        if (match && match.id !== dupStatus.id) {
+          await db.update(issues)
+            .set({ statusId: match.id })
+            .where(and(eq(issues.projectId, dup.id), eq(issues.statusId, dupStatus.id)));
+        }
+      }
+
       // Move issues to the surviving project
       await db.update(issues).set({ projectId: keep.id }).where(eq(issues.projectId, dup.id));
       // Move project-scoped skills to the surviving project
       await db.update(agentSkills).set({ projectId: keep.id }).where(eq(agentSkills.projectId, dup.id));
+      // Move repos to the surviving project
+      await db.update(repos).set({ projectId: keep.id }).where(eq(repos.projectId, dup.id));
+      // Move scheduled runs to the surviving project
+      await db.update(scheduledRuns).set({ projectId: keep.id }).where(eq(scheduledRuns.projectId, dup.id));
       // Remove duplicate's statuses
       await db.delete(projectStatuses).where(eq(projectStatuses.projectId, dup.id));
       // Remove duplicate project
