@@ -1,9 +1,5 @@
 import { test, expect, type Page, type APIRequestContext } from "@playwright/test";
-import { SERVER_URL as _SERVER_URL } from "../helpers/port.js";
-
-// Use 127.0.0.1 explicitly: Node 26 resolves "localhost" to ::1 (IPv6) but the
-// server listens on 127.0.0.1, causing ECONNREFUSED in the request fixture.
-const SERVER_URL = _SERVER_URL.replace("localhost", "127.0.0.1");
+import { SERVER_URL } from "../helpers/port.js";
 
 async function getActiveProjectId(request: APIRequestContext): Promise<string | null> {
   try {

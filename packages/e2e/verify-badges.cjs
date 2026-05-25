@@ -5,7 +5,7 @@ const { chromium } = require('playwright');
   const browser = await chromium.launch({ headless: true, executablePath });
   const page = await browser.newPage();
   await page.setViewportSize({ width: 1600, height: 900 });
-  await page.goto('http://localhost:5173');
+  await page.goto('http://127.0.0.1:5173');
   await page.waitForTimeout(4000);
 
   await page.getByText('worspace sessions view should include').click();
