@@ -64,11 +64,12 @@ export function BoardStats({
   }
 
   const [commitCount, setCommitCount] = useState<number | null>(null);
+  const [commitBranch, setCommitBranch] = useState<string | null>(null);
 
   useEffect(() => {
     if (!projectId) return;
-    apiFetch<{ commitCount: number }>(`/api/projects/${projectId}/stats`)
-      .then((s) => setCommitCount(s.commitCount))
+    apiFetch<{ commitCount: number; detectedBranch: string | null }>(`/api/projects/${projectId}/stats`)
+      .then((s) => { setCommitCount(s.commitCount); setCommitBranch(s.detectedBranch); })
       .catch(() => {});
   }, [projectId]);
 
@@ -150,8 +151,8 @@ export function BoardStats({
         )}
 
         {/* Commit count */}
-        {commitCount !== null && (
-          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-gray-50 dark:bg-gray-950 border border-gray-200 dark:border-gray-700" title="Commits on main branch">
+        {commitCount !== null && commitCount > 0 && (
+          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-gray-50 dark:bg-gray-950 border border-gray-200 dark:border-gray-700" title={commitBranch ? `Commits on ${commitBranch}` : "Commits on default branch"}>
             <svg className="w-3 h-3 text-gray-400 dark:text-gray-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
               <circle cx="12" cy="12" r="3" /><line x1="12" y1="3" x2="12" y2="9" /><line x1="12" y1="15" x2="12" y2="21" />
             </svg>
