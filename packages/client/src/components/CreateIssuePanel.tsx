@@ -58,7 +58,7 @@ export function CreateIssuePanel({
 }: CreateIssuePanelProps) {
   const [title, setTitle] = useState(initialState?.title ?? "");
   const [description, setDescription] = useState(initialState?.description ?? "");
-  const [priority, setPriority] = useState<CreateIssueRequest["priority"]>(initialState?.priority ?? "medium");
+  const [issueType, setIssueType] = useState<CreateIssueRequest["issueType"]>(initialState?.issueType ?? "task");
   const [startWorkspace, setStartWorkspace] = useState(initialState?.startWorkspace ?? false);
   const [planMode, setPlanMode] = useState(initialState?.planMode ?? false);
   const [skipAutoReview, setSkipAutoReview] = useState(initialState?.skipAutoReview ?? false);
@@ -149,7 +149,7 @@ export function CreateIssuePanel({
       await onSubmit({
         title: title.trim(),
         description: description.trim() || undefined,
-        priority,
+        issueType,
         statusId,
         projectId,
         startWorkspace: startWorkspace || undefined,
@@ -238,16 +238,16 @@ export function CreateIssuePanel({
           </div>
 
           <div className="flex flex-col gap-1.5">
-            <label className="text-xs font-medium text-gray-600 dark:text-gray-400">Priority</label>
+            <label className="text-xs font-medium text-gray-600 dark:text-gray-400">Type</label>
             <select
-              value={priority}
-              onChange={(e) => setPriority(e.target.value as CreateIssueRequest["priority"])}
+              value={issueType}
+              onChange={(e) => setIssueType(e.target.value as CreateIssueRequest["issueType"])}
               className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded px-3 py-2 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:bg-gray-900 dark:text-gray-100"
             >
-              <option value="low">Low</option>
-              <option value="medium">Medium</option>
-              <option value="high">High</option>
-              <option value="critical">Critical</option>
+              <option value="task">Task</option>
+              <option value="bug">Bug</option>
+              <option value="feature">Feature</option>
+              <option value="chore">Chore</option>
             </select>
           </div>
 

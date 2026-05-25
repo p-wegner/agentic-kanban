@@ -58,6 +58,7 @@ export async function getBoardStatus(
       issueNumber: issues.issueNumber,
       title: issues.title,
       priority: issues.priority,
+      issueType: issues.issueType,
       statusId: issues.statusId,
       statusName: projectStatuses.name,
     })
@@ -144,6 +145,7 @@ export async function getBoardStatus(
       issueId: issue.id,
       title: issue.title,
       priority: issue.priority,
+      issueType: issue.issueType,
       statusName: issue.statusName,
       workspace: mainWs ? {
         id: mainWs.id, branch: mainWs.branch, status: mainWs.status,
@@ -225,6 +227,21 @@ export async function getBoardStatus(
                         entry.lastAgentMessage = block.text.trim().slice(0, 300);
                         break;
                       }
+                    }
+                  }
+                  // Copilot stream: assistant.message
+                  if (obj.type === "assistant.message" && obj.data) {
+                    const data = obj.data as Record<string, unknown>;
+                    const raw = data.content;
+                    const contentStr = typeof raw === "string" ? raw
+                      : Array.isArray(raw)
+                        ? (raw as { type?: string; text?: string }[])
+                            .filter(b => b.type === "text" && typeof b.text === "string")
+                            .map(b => b.text as string)
+                            .join("\n")
+                        : "";
+                    if (contentStr.trim()) {
+                      entry.lastAgentMessage = contentStr.trim().slice(0, 300);
                     }
                   }
                   // Codex stream: agent_message item

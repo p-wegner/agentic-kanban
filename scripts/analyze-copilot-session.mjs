@@ -68,13 +68,18 @@ function parseCopilotSession(lines) {
     }
     else if (type === "assistant.message") {
       if (data.content) stats.assistantMessages.push(data.content);
+      else if (data.reasoningText) {
+        // Use first line of reasoning as summary when there is no direct content
+        const firstLine = String(data.reasoningText).split("\n")[0];
+        if (firstLine) stats.assistantMessages.push(firstLine.slice(0, 300));
+      }
       if (data.model && !stats.model) stats.model = data.model;
       if (data.toolRequests) {
         for (const tr of data.toolRequests) {
           stats.toolCalls++;
           stats.toolNames[tr.name] = (stats.toolNames[tr.name] || 0) + 1;
           callNameMap.set(tr.toolCallId, tr.name);
-          if (tr.name === "shell" && tr.arguments?.command) {
+          if ((tr.name === "shell" || tr.name === "bash" || tr.name === "powershell") && tr.arguments?.command) {
             stats.commands.push(tr.arguments.command);
           }
         }
