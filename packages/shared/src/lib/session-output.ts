@@ -60,9 +60,15 @@ export function extractMeaningfulOutput(
       const obj = parseJsonLine(trimmedLine);
 
       if (obj) {
-        if (obj.type === "assistant.message" && obj.data?.content?.trim()) {
-          const text = obj.data.content.trim().split("\n").pop() ?? "";
-          if (text) lines.push(text.slice(0, 200));
+        if (obj.type === "assistant.message") {
+          if (obj.data?.content?.trim()) {
+            const text = obj.data.content.trim().split("\n").pop() ?? "";
+            if (text) lines.push(text.slice(0, 200));
+          } else if (obj.data?.reasoningText?.trim()) {
+            // Use first line of reasoning as fallback when there is no direct content
+            const text = obj.data.reasoningText.trim().split("\n")[0] ?? "";
+            if (text) lines.push(text.slice(0, 200));
+          }
         }
 
         if (obj.type === "tool.execution_start" && obj.data?.toolName) {
