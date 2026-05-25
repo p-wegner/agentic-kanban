@@ -119,7 +119,7 @@ async function fallbackCleanupProjects(apiContext: import("@playwright/test").AP
 
 async function globalTeardown() {
   const apiContext = await request.newContext({
-    baseURL: `http://localhost:${serverPort}`,
+    baseURL: `http://127.0.0.1:${serverPort}`,
   });
 
   try {
