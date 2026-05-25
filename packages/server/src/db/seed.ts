@@ -1,15 +1,54 @@
 import { db } from "./index.js";
+import type { Database } from "./index.js";
 import { tags, agentSkills } from "@agentic-kanban/shared/schema";
 import { randomUUID } from "node:crypto";
 import { eq, sql } from "drizzle-orm";
 
+/** Built-in tags that must always exist and cannot be deleted or renamed. */
+export const BUILTIN_TAGS = [
+  { name: "needs-visual-verification", color: "#F59E0B" },
+] as const;
+
+export async function ensureBuiltinTags(database: Database = db): Promise<void> {
+  const now = new Date().toISOString();
+  // Read all existing tags by name to handle both missing and non-builtin cases
+  const existing = await database.select({ name: tags.name, isBuiltin: tags.isBuiltin }).from(tags);
+  const existingByName = new Map(existing.map(r => [r.name, r.isBuiltin]));
+
+  let added = 0;
+  for (const tag of BUILTIN_TAGS) {
+    if (existingByName.has(tag.name)) {
+      // Tag exists — ensure it's marked as builtin (handles pre-migration DBs)
+      if (!existingByName.get(tag.name)) {
+        await database.update(tags).set({ isBuiltin: true }).where(eq(tags.name, tag.name)).catch(() => {});
+        console.log(`[seed] marked tag "${tag.name}" as built-in`);
+      }
+      continue;
+    }
+    await database.insert(tags).values({
+      id: randomUUID(),
+      name: tag.name,
+      color: tag.color,
+      isBuiltin: true,
+      createdAt: now,
+    }).catch(() => {/* race-safe: ignore if concurrently inserted */});
+    added++;
+  }
+  if (added > 0) {
+    console.log(`Seeded ${added} built-in tag(s).`);
+  }
+}
+
 export async function seed() {
   const now = new Date().toISOString();
 
-  // Seed default tags (global, not project-scoped)
-  const existingTags = await db.select().from(tags).limit(1);
-  if (existingTags.length > 0) {
-    console.log("Tags already seeded, skipping.");
+  // Upsert required built-in tags — always run, regardless of whether other tags exist
+  await ensureBuiltinTags();
+
+  // Seed default non-builtin tags only if the DB has no non-builtin tags yet
+  const existingTags = await db.select({ id: tags.id }).from(tags);
+  if (existingTags.length > BUILTIN_TAGS.length) {
+    console.log("Tags already seeded, skipping default tags.");
   } else {
     const DEFAULT_TAGS = [
       { name: "bug", color: "#EF4444" },
