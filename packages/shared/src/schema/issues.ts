@@ -9,6 +9,7 @@ export const issues = sqliteTable("issues", {
   title: text("title").notNull(),
   description: text("description"),
   priority: text("priority").notNull().default("medium"),
+  issueType: text("issue_type").notNull().default("task"),
   sortOrder: integer("sort_order").notNull().default(0),
   statusId: text("status_id").notNull().references(() => projectStatuses.id),
   projectId: text("project_id").notNull().references(() => projects.id),
