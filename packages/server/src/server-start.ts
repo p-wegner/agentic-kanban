@@ -6,7 +6,7 @@ import { createNodeWebSocket } from "@hono/node-ws";
 import { createRoutes } from "./routes/index.js";
 import { createSessionsRoute } from "./routes/sessions.js";
 import { migrate } from "drizzle-orm/libsql/migrator";
-import { db } from "./db/index.js";
+import { db, rawClient } from "./db/index.js";
 import { createSessionManager } from "./services/session.manager.js";
 import type { ProviderName } from "./services/agent-provider.js";
 import { createBoardEvents } from "./services/board-events.js";
@@ -22,6 +22,7 @@ import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { existsSync } from "node:fs";
 import { getMigrationsFolder } from "./db/migrations.js";
+import { applyMigrations } from "./db/manual-migrate.js";
 import { MOCK_AGENT_COMMAND, isMockProfile, toExecutorProvider } from "./services/agent-settings.service.js";
 import { PREF_CODEX_PROFILE, PREF_COPILOT_PROFILE } from "./constants/preference-keys.js";
 
@@ -634,14 +635,10 @@ export async function startServer(port?: number) {
   }
 
   try {
-    await migrate(db, { migrationsFolder: getMigrationsFolder() });
+    await applyMigrations(rawClient);
   } catch (err: unknown) {
-    // libsql@0.4.7 + Node.js 26 bug: CREATE TABLE IF NOT EXISTS on existing table returns
-    // SQLITE_OK (0) which libsql misinterprets as an error. Safe to ignore when DB is already migrated.
-    const isSpuriousLibsqlBug = err instanceof Error && err.message.includes("not an error") &&
-      (err as NodeJS.ErrnoException).code === "SQLITE_OK";
-    if (!isSpuriousLibsqlBug) throw err;
-    console.warn("[startup] Ignoring known libsql SQLITE_OK false-error during migrate — DB already up to date");
+    console.error("[startup] Migration failed:", err instanceof Error ? err.message : String(err));
+    throw err;
   }
 
   // Disable auto_monitor on every startup — prevents mass agent spawns from idle workspaces
