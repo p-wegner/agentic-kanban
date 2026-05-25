@@ -20,6 +20,25 @@ export async function getConflictingFiles(workingDir: string): Promise<string[]>
   }
 }
 
+export function buildFixAndMergePrompt(errorMessage: string, baseBranch: string): string {
+  return `The merge of this workspace branch into ${baseBranch} failed with this error:
+
+${errorMessage}
+
+Fix the issue so the branch can be merged. Common causes:
+- Uncommitted changes in the working tree (stash or commit them)
+- Binary file conflicts (remove the problematic files from the branch if they are generated files like .db-shm, .db-wal, .db)
+- Dirty working tree (reset uncommitted changes with "git checkout -- ." or "git stash")
+
+Steps:
+1. Run "git status" to see what is going on
+2. Fix the issue (stash, reset, or commit as appropriate)
+3. Do NOT attempt the merge yourself - just clean up the working tree so it is ready for merge
+4. Commit any fixes if needed
+
+Base branch: ${baseBranch}`;
+}
+
 export function buildConflictResolutionPrompt(conflictingFiles: string[], baseBranch: string): string {
   return `Resolve the merge/rebase conflicts in this workspace.
 

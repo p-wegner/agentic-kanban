@@ -19,7 +19,7 @@ import { buildImplementPrompt } from "../services/plan-mode.service.js";
 import { PREF_AUTO_START_FOLLOWUP } from "../constants/preference-keys.js";
 import { autoStartFollowups } from "../services/followup-workspace.service.js";
 import { parseDiffStats } from "../services/board-aggregation.service.js";
-import { getConflictingFiles, buildConflictResolutionPrompt, runLearningStep } from "../services/merge-helpers.service.js";
+import { getConflictingFiles, buildConflictResolutionPrompt, buildFixAndMergePrompt, runLearningStep } from "../services/merge-helpers.service.js";
 import type { ProviderName } from "../services/agent-provider.js";
 
 function applyWorkspaceAgentSelection(settings: AgentSettings, workspace: typeof workspaces.$inferSelect): AgentSettings {
@@ -583,6 +583,54 @@ export function createWorkspaceActionsRoute(
       return c.json({ sessionId });
     } catch (err) {
       return c.json({ error: `Resolve conflicts failed: ${err instanceof Error ? err.message : String(err)}` }, 500);
+    }
+  });
+
+  // POST /api/workspaces/:id/fix-and-merge — launch AI agent to fix merge error and retry
+  router.post("/:id/fix-and-merge", async (c) => {
+    const id = c.req.param("id");
+    const workspace = await getWorkspaceById(id, database);
+    if (!workspace) return c.json({ error: "Workspace not found" }, 404);
+    if (!workspace.workingDir) {
+      return c.json({ error: "Workspace not set up" }, 400);
+    }
+    if (workspace.status === "fixing") {
+      return c.json({ error: "Fix already in progress" }, 409);
+    }
+
+    try {
+      const body = await c.req.json<{ mergeError?: string }>().catch(() => ({}));
+      const errorMessage = body.mergeError || "Unknown merge error";
+
+      const { defaultBranch } = await resolveProjectRepo(id, database);
+      const baseBranch = workspace.baseBranch || defaultBranch;
+
+      const prompt = buildFixAndMergePrompt(errorMessage, baseBranch);
+
+      const { agentCommand, agentArgs, claudeProfile, profile, provider } =
+        applyWorkspaceAgentSelection(await loadAgentSettings(database), workspace);
+
+      const sessionId = await getSessionManager().startSession({
+        workspaceId: id,
+        prompt,
+        agentCommand,
+        agentArgs,
+        claudeProfile,
+        profile,
+        provider: toExecutorProvider(provider),
+        multiTurn: true,
+        triggerType: "fix-and-merge",
+      });
+      options?.fixAndMergeSessionIds?.add(sessionId);
+
+      await updateWorkspaceStatus(id, "fixing", {}, database);
+
+      const projectId = await resolveProjectId(id, database);
+      if (projectId) options?.boardEvents?.broadcast(projectId, "session_launched");
+
+      return c.json({ sessionId });
+    } catch (err) {
+      return c.json({ error: `Fix-and-merge failed: ${err instanceof Error ? err.message : String(err)}` }, 500);
     }
   });
 
