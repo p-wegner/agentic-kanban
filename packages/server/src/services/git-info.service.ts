@@ -1,10 +1,10 @@
-import { execFile, execSync } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { resolve, basename } from "node:path";
 
 export interface RepoInfo {
   repoPath: string;
   repoName: string;
-  defaultBranch: string;
+  defaultBranch: string | null;
   remoteUrl: string | null;
 }
 
@@ -18,6 +18,25 @@ function execGit(args: string[], cwd: string): Promise<string> {
       }
     });
   });
+}
+
+export async function branchExists(repoPath: string, branch: string): Promise<boolean> {
+  const normalized = branch.trim();
+  if (!normalized || normalized.startsWith("-")) return false;
+
+  try {
+    await execGit(["show-ref", "--verify", "--quiet", `refs/heads/${normalized}`], repoPath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function detectDefaultBranch(repoPath: string): Promise<string | null> {
+  for (const branch of ["main", "master"]) {
+    if (await branchExists(repoPath, branch)) return branch;
+  }
+  return null;
 }
 
 /**
@@ -34,19 +53,7 @@ export async function detectRepoInfo(repoPath: string): Promise<RepoInfo> {
     throw new Error(`Not a git repository: ${absPath}`);
   }
 
-  // Get default branch
-  let defaultBranch = "main";
-  try {
-    const ref = await execGit(["symbolic-ref", "refs/remotes/origin/HEAD"], absPath);
-    // Output is like "refs/remotes/origin/main"
-    defaultBranch = ref.replace("refs/remotes/origin/", "");
-  } catch {
-    try {
-      defaultBranch = await execGit(["config", "init.defaultBranch"], absPath);
-    } catch {
-      // Keep "main" as fallback
-    }
-  }
+  const defaultBranch = await detectDefaultBranch(absPath);
 
   // Get remote URL
   let remoteUrl: string | null = null;
@@ -71,13 +78,14 @@ export interface ProjectGitStats {
   recentCommits: { hash: string; message: string; date: string }[];
 }
 
-export function getProjectGitStats(repoPath: string, defaultBranch: string): ProjectGitStats {
+export function getProjectGitStats(repoPath: string, defaultBranch: string | null): ProjectGitStats {
   let commitCount = 0;
   let recentCommits: { hash: string; message: string; date: string }[] = [];
+  if (!defaultBranch) return { commitCount, recentCommits };
   try {
-    const countOut = execSync(`git rev-list --count ${defaultBranch}`, { cwd: repoPath, timeout: 5000 }).toString().trim();
+    const countOut = execFileSync("git", ["rev-list", "--count", defaultBranch], { cwd: repoPath, timeout: 5000 }).toString().trim();
     commitCount = parseInt(countOut, 10) || 0;
-    const logOut = execSync(`git log ${defaultBranch} --oneline --format="%H|%s|%cr" -10`, { cwd: repoPath, timeout: 5000 }).toString().trim();
+    const logOut = execFileSync("git", ["log", defaultBranch, "--oneline", "--format=%H|%s|%cr", "-10"], { cwd: repoPath, timeout: 5000 }).toString().trim();
     recentCommits = logOut.split("\n").filter(Boolean).map((line) => {
       const [hash, message, date] = line.split("|");
       return { hash: hash?.slice(0, 7) ?? "", message: message ?? "", date: date ?? "" };

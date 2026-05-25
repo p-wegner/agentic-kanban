@@ -22,6 +22,15 @@ const DEFAULT_STATUSES = [
   { name: "Cancelled", sortOrder: 5, isDefault: false },
 ];
 
+function logDefaultBranch(defaultBranch: string | null | undefined, indent = "  ") {
+  if (defaultBranch) {
+    console.log(`${indent}Branch: ${defaultBranch}`);
+    return;
+  }
+  console.warn(`${indent}Warning: no default branch detected (looked for local main, then master).`);
+  console.warn(`${indent}Set it manually in project settings before creating worktrees.`);
+}
+
 async function runMigrations() {
   await applyMigrations(rawClient);
 }
@@ -115,7 +124,7 @@ Examples:
 
       console.log(`Registered project "${projectName}"`);
       console.log(`  Repo: ${repoInfo.repoPath}`);
-      console.log(`  Branch: ${repoInfo.defaultBranch}`);
+      logDefaultBranch(repoInfo.defaultBranch);
       if (repoInfo.remoteUrl) {
         console.log(`  Remote: ${repoInfo.remoteUrl}`);
       }
@@ -277,7 +286,7 @@ Setup:
       dirCreated = false; // DB registration succeeded; keep the directory
       console.log(`Created and registered project "${projectName}"`);
       console.log(`  Path: ${repoInfo.repoPath}`);
-      console.log(`  Branch: ${repoInfo.defaultBranch}`);
+      logDefaultBranch(repoInfo.defaultBranch);
       console.log(`  Statuses: ${DEFAULT_STATUSES.map((s) => s.name).join(", ")}`);
       console.log(`  Set as active project.`);
       process.exit(0);
@@ -446,7 +455,7 @@ Example:
         const marker = p.id === activeId ? " (active)" : "";
         console.log(`  ${p.name}${marker}`);
         console.log(`    Path: ${p.repoPath}`);
-        console.log(`    Branch: ${p.defaultBranch}`);
+        console.log(`    Branch: ${p.defaultBranch ?? "(unset)"}`);
         if (p.remoteUrl) {
           console.log(`    Remote: ${p.remoteUrl}`);
         }
@@ -1290,6 +1299,10 @@ Tip: Use 'issue list' to find the issue ID.
 
       const branchName = options.branch ?? `workspace/${issueId.slice(0, 8)}`;
       const baseBranch = options.base ?? project.defaultBranch;
+      if (!baseBranch) {
+        console.error("No base branch configured. Set the project's default branch in settings or pass --base <branch>.");
+        process.exit(1);
+      }
       const worktreePath = await createWorktree(project.repoPath, branchName, baseBranch);
 
       const id = randomUUID();
@@ -2044,7 +2057,7 @@ Examples:
         } else {
           console.log(`Registered project "${project.name}"`);
           console.log(`  Repo: ${project.repoPath}`);
-          console.log(`  Branch: ${project.defaultBranch}`);
+          logDefaultBranch(project.defaultBranch);
         }
       }
 
@@ -2405,7 +2418,8 @@ if (!hasSubcommand) {
           const { project, created } = await registerProject(process.cwd());
           if (created) {
             console.log(`  Registered project "${project.name}" (${project.repoPath})`);
-            console.log(`  Branch: ${project.defaultBranch}\n`);
+            logDefaultBranch(project.defaultBranch);
+            console.log("");
           }
         } catch {
           // Not a git repo — skip registration, user can do it manually

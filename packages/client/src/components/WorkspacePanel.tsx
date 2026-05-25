@@ -24,7 +24,7 @@ interface Project {
   name: string;
   repoPath: string;
   repoName: string;
-  defaultBranch: string;
+  defaultBranch: string | null;
   remoteUrl: string | null;
   setupScript?: string | null;
 }
@@ -1018,7 +1018,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
           {project && (
             <div className="text-xs text-gray-500 dark:text-gray-400 space-y-0.5">
               <div><span className="font-medium text-gray-600 dark:text-gray-400">Repo:</span> {project.repoPath}</div>
-              <div><span className="font-medium text-gray-600 dark:text-gray-400">Branch:</span> {project.defaultBranch}</div>
+              <div><span className="font-medium text-gray-600 dark:text-gray-400">Branch:</span> {project.defaultBranch ?? "unset"}</div>
               {project.remoteUrl && (
                 <div><span className="font-medium text-gray-600 dark:text-gray-400">Remote:</span> {project.remoteUrl}</div>
               )}
