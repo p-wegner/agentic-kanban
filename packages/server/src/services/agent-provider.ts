@@ -389,9 +389,10 @@ export class CodexProvider implements AgentProvider {
       } else {
         args.push("exec", "--json", ...sandboxFlags);
       }
-      // Layer named config from $CODEX_HOME/<name>.config.toml on top of base config
+      // Layer named config from $CODEX_HOME/<name>.config.toml on top of base config.
+      // "default" means no config layering — use Codex's own defaults without any profile flag.
       const profileName = profile?.provider === "codex" ? profile.name : undefined;
-      if (profileName) {
+      if (profileName && profileName !== "default") {
         args.push("--profile-v2", profileName);
       }
       if (agentArgs) {

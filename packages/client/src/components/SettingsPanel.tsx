@@ -84,6 +84,7 @@ const TABS: { id: Tab; label: string }[] = [
 type AgentProvider = "claude" | "codex" | "copilot";
 
 const COPILOT_DEFAULT_PROFILE = "default";
+const CODEX_DEFAULT_PROFILE = "default";
 
 function uniqueProfiles(profiles: string[], fallback?: string): string[] {
   const all = fallback ? [fallback, ...profiles] : profiles;
@@ -92,13 +93,15 @@ function uniqueProfiles(profiles: string[], fallback?: string): string[] {
 
 function settingsProfileValue(settings: Settings): string {
   const provider = (settings.provider || "claude") as AgentProvider;
-  if (provider === "codex") return `codex:${settings.codex_profile || ""}`;
+  if (provider === "codex") return `codex:${settings.codex_profile || CODEX_DEFAULT_PROFILE}`;
   if (provider === "copilot") return `copilot:${settings.copilot_profile || COPILOT_DEFAULT_PROFILE}`;
   return `claude:${settings.claude_profile || ""}`;
 }
 
 function profileOptionLabel(provider: AgentProvider, name: string): string {
-  const displayName = provider === "copilot" && name === COPILOT_DEFAULT_PROFILE ? "Default" : name;
+  const isDefault = (provider === "copilot" && name === COPILOT_DEFAULT_PROFILE) ||
+    (provider === "codex" && name === CODEX_DEFAULT_PROFILE);
+  const displayName = isDefault ? "Default" : name;
   const providerLabel = provider === "codex" ? "Codex" : provider === "copilot" ? "Copilot" : "Claude";
   return `${providerLabel}: ${displayName}`;
 }
@@ -372,7 +375,7 @@ function describeCronExpression(expr: string): string {
 export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) {
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [profiles, setProfiles] = useState<string[]>([]);
-  const [codexProfiles, setCodexProfiles] = useState<string[]>([]);
+  const [codexProfiles, setCodexProfiles] = useState<string[]>([CODEX_DEFAULT_PROFILE]);
   const [copilotProfiles, setCopilotProfiles] = useState<string[]>([COPILOT_DEFAULT_PROFILE]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -457,7 +460,7 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
         ]);
         setSettings({ ...DEFAULT_SETTINGS, ...data });
         setProfiles(profileData.profiles);
-        setCodexProfiles(codexProfileData.profiles);
+        setCodexProfiles(uniqueProfiles(codexProfileData.profiles, CODEX_DEFAULT_PROFILE));
         setCopilotProfiles(uniqueProfiles(copilotProfileData.profiles, COPILOT_DEFAULT_PROFILE));
         setSkills(skillsData);
         setTagsList(tagsData);
@@ -637,7 +640,7 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                         } else {
                           const [prov, name] = val.split(":");
                           if (prov === "codex") {
-                            setSettings((s) => ({ ...s, provider: "codex", codex_profile: name, claude_profile: s.claude_profile, copilot_profile: s.copilot_profile }));
+                            setSettings((s) => ({ ...s, provider: "codex", codex_profile: name === CODEX_DEFAULT_PROFILE ? "" : name, claude_profile: s.claude_profile, copilot_profile: s.copilot_profile }));
                           } else if (prov === "copilot") {
                             setSettings((s) => ({ ...s, provider: "copilot", copilot_profile: name === COPILOT_DEFAULT_PROFILE ? "" : name, claude_profile: s.claude_profile, codex_profile: s.codex_profile }));
                           } else {
@@ -653,13 +656,11 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                           <option key={`claude:${p}`} value={`claude:${p}`}>{profileOptionLabel("claude", p)}</option>
                         ))}
                       </optgroup>
-                      {codexProfiles.length > 0 && (
-                        <optgroup label="Codex">
-                          {codexProfiles.map((p) => (
-                            <option key={`codex:${p}`} value={`codex:${p}`}>{profileOptionLabel("codex", p)}</option>
-                          ))}
-                        </optgroup>
-                      )}
+                      <optgroup label="Codex">
+                        {codexProfiles.map((p) => (
+                          <option key={`codex:${p}`} value={`codex:${p}`}>{profileOptionLabel("codex", p)}</option>
+                        ))}
+                      </optgroup>
                       <optgroup label="Copilot">
                         {copilotProfiles.map((p) => (
                           <option key={`copilot:${p}`} value={`copilot:${p}`}>{profileOptionLabel("copilot", p)}</option>

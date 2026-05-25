@@ -97,18 +97,19 @@ export function createPreferencesRoute(database: Database = db) {
   });
 
   // GET /api/preferences/codex-profiles — list available codex profiles
+  // Always includes "default" (no profile-v2 flag) so Codex works without any config files.
   router.get("/codex-profiles", async (c) => {
     const codexDir = join(homedir(), ".codex");
-    const profiles: string[] = [];
+    const profiles: string[] = ["default"];
     try {
       const files = readdirSync(codexDir);
       for (const file of files) {
         // New convention: <name>.config.toml
         const newMatch = file.match(/^(.+)\.config\.toml$/);
-        if (newMatch && newMatch[1] !== "config") profiles.push(newMatch[1]);
+        if (newMatch && newMatch[1] !== "config" && newMatch[1] !== "default") profiles.push(newMatch[1]);
         // Legacy convention: config_<name>.toml (but not base config.toml)
         const legacyMatch = file.match(/^config_(.+)\.toml$/);
-        if (legacyMatch) profiles.push(legacyMatch[1]);
+        if (legacyMatch && legacyMatch[1] !== "default") profiles.push(legacyMatch[1]);
       }
     } catch {}
     return c.json({ profiles: [...new Set(profiles)].sort() });
