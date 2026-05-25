@@ -488,6 +488,13 @@ describe("CodexProvider", () => {
     expect(config.args).not.toContain("--profile-v2");
   });
 
+  it("does not append --profile-v2 when codex profile is 'default'", () => {
+    const config = provider.buildLaunchConfig({
+      profile: { provider: "codex", name: "default" },
+    });
+    expect(config.args).not.toContain("--profile-v2");
+  });
+
   it("does not append --profile-v2 when profile is for claude", () => {
     const config = provider.buildLaunchConfig({
       profile: { provider: "claude", name: "sonnet" },

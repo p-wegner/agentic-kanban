@@ -36,12 +36,14 @@ interface Settings {
   nudge_wip_limit?: string;
   projects_base_path?: string;
   plan_auto_continue?: string;
+  visual_verification_mode?: string;
+  after_merge_verify_agent?: string;
 }
 
 const DEFAULT_SETTINGS: Settings = {
   agent_command: "",
   agent_args: "",
-  output_parser: "true",
+  output_parser: "minimal",
   skip_permissions: "false",
   claude_profile: "",
   codex_profile: "",
@@ -65,6 +67,7 @@ const DEFAULT_SETTINGS: Settings = {
   nudge_auto_start: "false",
   projects_base_path: "",
   plan_auto_continue: "true",
+  visual_verification_mode: "before_merge",
 };
 
 type Tab = "agent" | "workflow" | "skills" | "mcp" | "ui" | "project" | "tags" | "advanced" | "schedule";
@@ -84,6 +87,7 @@ const TABS: { id: Tab; label: string }[] = [
 type AgentProvider = "claude" | "codex" | "copilot";
 
 const COPILOT_DEFAULT_PROFILE = "default";
+const CODEX_DEFAULT_PROFILE = "default";
 
 function uniqueProfiles(profiles: string[], fallback?: string): string[] {
   const all = fallback ? [fallback, ...profiles] : profiles;
@@ -92,13 +96,15 @@ function uniqueProfiles(profiles: string[], fallback?: string): string[] {
 
 function settingsProfileValue(settings: Settings): string {
   const provider = (settings.provider || "claude") as AgentProvider;
-  if (provider === "codex") return `codex:${settings.codex_profile || ""}`;
+  if (provider === "codex") return `codex:${settings.codex_profile || CODEX_DEFAULT_PROFILE}`;
   if (provider === "copilot") return `copilot:${settings.copilot_profile || COPILOT_DEFAULT_PROFILE}`;
   return `claude:${settings.claude_profile || ""}`;
 }
 
 function profileOptionLabel(provider: AgentProvider, name: string): string {
-  const displayName = provider === "copilot" && name === COPILOT_DEFAULT_PROFILE ? "Default" : name;
+  const isDefault = (provider === "copilot" && name === COPILOT_DEFAULT_PROFILE) ||
+    (provider === "codex" && name === CODEX_DEFAULT_PROFILE);
+  const displayName = isDefault ? "Default" : name;
   const providerLabel = provider === "codex" ? "Codex" : provider === "copilot" ? "Copilot" : "Claude";
   return `${providerLabel}: ${displayName}`;
 }
@@ -372,20 +378,22 @@ function describeCronExpression(expr: string): string {
 export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) {
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [profiles, setProfiles] = useState<string[]>([]);
-  const [codexProfiles, setCodexProfiles] = useState<string[]>([]);
+  const [codexProfiles, setCodexProfiles] = useState<string[]>([CODEX_DEFAULT_PROFILE]);
   const [copilotProfiles, setCopilotProfiles] = useState<string[]>([COPILOT_DEFAULT_PROFILE]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [tab, setTab] = useState<Tab>("agent");
 
   // Project-specific settings
-  const [projectSettings, setProjectSettings] = useState<{ setupScript: string; setupBlocking: boolean; setupEnabled: boolean; teardownScript: string; color: string | null }>({
+  const [projectSettings, setProjectSettings] = useState<{ defaultBranch: string; setupScript: string; setupBlocking: boolean; setupEnabled: boolean; teardownScript: string; color: string | null }>({
+    defaultBranch: "",
     setupScript: "",
     setupBlocking: true,
     setupEnabled: true,
     teardownScript: "",
     color: null,
   });
+  const [projectBranches, setProjectBranches] = useState<{ local: string[]; remote: string[] } | null>(null);
   const [generatingScript, setGeneratingScript] = useState(false);
   const [generatingTeardown, setGeneratingTeardown] = useState(false);
 
@@ -457,7 +465,7 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
         ]);
         setSettings({ ...DEFAULT_SETTINGS, ...data });
         setProfiles(profileData.profiles);
-        setCodexProfiles(codexProfileData.profiles);
+        setCodexProfiles(uniqueProfiles(codexProfileData.profiles, CODEX_DEFAULT_PROFILE));
         setCopilotProfiles(uniqueProfiles(copilotProfileData.profiles, COPILOT_DEFAULT_PROFILE));
         setSkills(skillsData);
         setTagsList(tagsData);
@@ -486,10 +494,11 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
         // Load project-specific settings
         if (activeProjectId) {
           try {
-            const projects = await apiFetch<{ setupScript: string | null; setupBlocking: boolean; color: string | null }[]>(("/api/projects"));
+            const projects = await apiFetch<{ id: string; defaultBranch: string | null; setupScript: string | null; setupBlocking: boolean; color: string | null }[]>(("/api/projects"));
             const project = projects.find((p: any) => p.id === activeProjectId);
             if (project) {
               setProjectSettings({
+                defaultBranch: project.defaultBranch || "",
                 setupScript: project.setupScript || "",
                 setupBlocking: project.setupBlocking !== false,
                 setupEnabled: (project as any).setupEnabled !== false,
@@ -497,6 +506,9 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                 color: project.color || null,
               });
             }
+            apiFetch<{ local: string[]; remote: string[] }>(`/api/projects/${activeProjectId}/branches`)
+              .then(setProjectBranches)
+              .catch(() => setProjectBranches(null));
           } catch {
             // Use defaults for project settings
           }
@@ -543,6 +555,10 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
   }
 
   async function handleSave() {
+    if (defaultBranchInvalid) {
+      showToast("Default branch does not exist in this repo", "error");
+      return;
+    }
     setSaving(true);
     try {
       const promises: Promise<unknown>[] = [
@@ -561,6 +577,7 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
               setupEnabled: projectSettings.setupEnabled,
               teardownScript: projectSettings.teardownScript || null,
               color: projectSettings.color || null,
+              defaultBranch: projectSettings.defaultBranch.trim() || null,
             }),
           }),
         );
@@ -581,6 +598,8 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
     setSettings((s) => ({ ...s, [key]: checked ? "true" : "false" }));
 
   const autoReviewOn = settings.auto_review !== "false";
+  const defaultBranchValue = projectSettings.defaultBranch.trim();
+  const defaultBranchInvalid = !!defaultBranchValue && !!projectBranches && !projectBranches.local.includes(defaultBranchValue);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-2">
@@ -637,7 +656,7 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                         } else {
                           const [prov, name] = val.split(":");
                           if (prov === "codex") {
-                            setSettings((s) => ({ ...s, provider: "codex", codex_profile: name, claude_profile: s.claude_profile, copilot_profile: s.copilot_profile }));
+                            setSettings((s) => ({ ...s, provider: "codex", codex_profile: name === CODEX_DEFAULT_PROFILE ? "" : name, claude_profile: s.claude_profile, copilot_profile: s.copilot_profile }));
                           } else if (prov === "copilot") {
                             setSettings((s) => ({ ...s, provider: "copilot", copilot_profile: name === COPILOT_DEFAULT_PROFILE ? "" : name, claude_profile: s.claude_profile, codex_profile: s.codex_profile }));
                           } else {
@@ -653,13 +672,11 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                           <option key={`claude:${p}`} value={`claude:${p}`}>{profileOptionLabel("claude", p)}</option>
                         ))}
                       </optgroup>
-                      {codexProfiles.length > 0 && (
-                        <optgroup label="Codex">
-                          {codexProfiles.map((p) => (
-                            <option key={`codex:${p}`} value={`codex:${p}`}>{profileOptionLabel("codex", p)}</option>
-                          ))}
-                        </optgroup>
-                      )}
+                      <optgroup label="Codex">
+                        {codexProfiles.map((p) => (
+                          <option key={`codex:${p}`} value={`codex:${p}`}>{profileOptionLabel("codex", p)}</option>
+                        ))}
+                      </optgroup>
                       <optgroup label="Copilot">
                         {copilotProfiles.map((p) => (
                           <option key={`copilot:${p}`} value={`copilot:${p}`}>{profileOptionLabel("copilot", p)}</option>
@@ -696,6 +713,7 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                         { label: "Auto-merge", key: "auto_merge", enabled: settings.auto_review !== "false" && settings.auto_merge !== "false", indent: true },
                         { label: "Learn (before merge)", key: "learning_step_before_merge", enabled: settings.learning_step_before_merge === "true" },
                         { label: "Merge", always: true },
+                        { label: "Visual verify", key: "visual_verification_mode", enabled: settings.visual_verification_mode === "after_merge" },
                       ].filter(s => s.always || s.enabled).map((step, i, arr) => (
                         <div key={step.label} className="flex items-center gap-1">
                           {i > 0 && <span className="text-gray-400 dark:text-gray-500 text-xs">→</span>}
@@ -707,72 +725,134 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                     </div>
                     <div className="text-xs text-gray-400 dark:text-gray-500 mt-1.5">Green steps are optional — toggle them below to add/remove from pipeline.</div>
                   </div>
-                  <Toggle
-                    checked={settings.plan_auto_continue !== "false"}
-                    onChange={setBool("plan_auto_continue")}
-                    label="Auto-continue after plan (Codex)"
-                    hint="When a Codex plan-mode run finishes, the plan is saved to PLAN.md. If on, an implementation turn starts automatically. If off, the workspace waits for you to review the plan and click Accept & Implement."
-                  />
-                  <Toggle
-                    checked={autoReviewOn}
-                    onChange={setBool("auto_review")}
-                    label="Auto Code Review"
-                    hint="When an agent commits and exits successfully, automatically launch a review agent that checks the diff for issues."
-                  />
-                  <div className={`pl-5 space-y-3 border-l-2 ${autoReviewOn ? "border-blue-200" : "border-gray-100 dark:border-gray-800"}`}>
-                    <Toggle
-                      checked={settings.review_auto_fix !== "false"}
-                      onChange={setBool("review_auto_fix")}
-                      label="Auto-fix issues found in review"
-                      hint="When the review agent finds CRITICAL or MAJOR issues, it edits the code and commits fixes directly. Requires 'Skip permission prompts' to be enabled so the agent can write files. When disabled, the agent reports issues but makes no changes."
-                      disabled={!autoReviewOn}
-                    />
-                    <Toggle
-                      checked={settings.auto_merge !== "false"}
-                      onChange={setBool("auto_merge")}
-                      label="Auto-merge after review"
-                      hint="Merge the branch and close the workspace automatically once the review agent passes. When disabled, the issue moves to AI Reviewed and waits for manual merge."
-                      disabled={!autoReviewOn}
-                    />
+                  {/* Agent behaviour */}
+                  <div className="pt-2">
+                    <div className="text-[11px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">Agent behaviour</div>
+                    <div className="space-y-3">
+                      <Toggle
+                        checked={settings.plan_auto_continue !== "false"}
+                        onChange={setBool("plan_auto_continue")}
+                        label="Auto-continue after plan (Codex)"
+                        hint="When a Codex plan-mode run finishes, the plan is saved to PLAN.md. If on, an implementation turn starts automatically. If off, the workspace waits for you to review the plan and click Accept & Implement."
+                      />
+                      <Toggle
+                        checked={settings.resume_with_new_model === "true"}
+                        onChange={setBool("resume_with_new_model")}
+                        label="Use new profile on resume"
+                        hint="When continuing a chat, start a fresh session using the current profile instead of resuming the previous one. Use this when switching providers via a different Claude profile."
+                      />
+                      <Toggle
+                        checked={settings.persistent_agent === "true"}
+                        onChange={setBool("persistent_agent")}
+                        label="Persistent agent (warm pool)"
+                        hint="Keep a warm agent process alive between sessions to reduce startup latency. Experimental."
+                      />
+                    </div>
                   </div>
-                  <Toggle
-                    checked={settings.resume_with_new_model === "true"}
-                    onChange={setBool("resume_with_new_model")}
-                    label="Use new profile on resume"
-                    hint="When continuing a chat, start a fresh session using the current profile instead of resuming the previous one. Use this when switching providers via a different Claude profile."
-                  />
-                  <Toggle
-                    checked={settings.auto_start_followup === "true"}
-                    onChange={setBool("auto_start_followup")}
-                    label="Auto-start follow-up tasks after merge"
-                    hint="When a workspace is merged and the issue has outgoing 'depends_on' or 'child_of' dependencies, automatically create workspaces for unblocked follow-up issues."
-                  />
-                  <Toggle
-                    checked={settings.require_manual_approval === "true"}
-                    onChange={setBool("require_manual_approval")}
-                    label="Require manual approval before review"
-                    hint="When enabled, issues must be manually approved before the AI review step is triggered. Useful for gating expensive review sessions on deliberate human sign-off."
-                  />
-                  <Toggle
-                    checked={settings.learning_step_after_agent === "true"}
-                    onChange={setBool("learning_step_after_agent")}
-                    label="Learning step after agent (parallel)"
-                    hint="When an agent session completes with committed changes, runs a learning session in parallel with code review. Extracts insights from session transcripts and updates docs and hooks without blocking the review."
-                  />
-                  <Toggle
-                    checked={settings.learning_step_after_review === "true"}
-                    onChange={setBool("learning_step_after_review")}
-                    label="Learning step after review (parallel)"
-                    hint="When a review session completes, runs a learning session in parallel with the auto-merge step. Extracts insights without delaying the merge."
-                  />
-                  <Toggle
-                    checked={settings.learning_step_before_merge === "true"}
-                    onChange={setBool("learning_step_before_merge")}
-                    label="Learning step before merge (blocking)"
-                    hint="When enabled, runs an agent session before merging that reads the worktree's session transcripts and updates docs and Claude hooks with extracted insights. Blocks merge until complete (up to 3 minutes)."
-                  />
 
-                  <div className="pt-3 border-t border-gray-200 dark:border-gray-700">
+                  {/* Code review & merge pipeline */}
+                  <div className="pt-4 border-t border-gray-200 dark:border-gray-700">
+                    <div className="text-[11px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">Code review &amp; merge pipeline</div>
+                    <div className="space-y-3">
+                      <Toggle
+                        checked={autoReviewOn}
+                        onChange={setBool("auto_review")}
+                        label="Auto Code Review"
+                        hint="When an agent commits and exits successfully, automatically launch a review agent that checks the diff for issues."
+                      />
+                      <div className={`pl-5 space-y-3 border-l-2 ${autoReviewOn ? "border-blue-200" : "border-gray-100 dark:border-gray-800"}`}>
+                        <Toggle
+                          checked={settings.review_auto_fix !== "false"}
+                          onChange={setBool("review_auto_fix")}
+                          label="Auto-fix issues found in review"
+                          hint="When the review agent finds CRITICAL or MAJOR issues, it edits the code and commits fixes directly. Requires 'Skip permission prompts' to be enabled so the agent can write files. When disabled, the agent reports issues but makes no changes."
+                          disabled={!autoReviewOn}
+                        />
+                        <Toggle
+                          checked={settings.auto_merge !== "false"}
+                          onChange={setBool("auto_merge")}
+                          label="Auto-merge after review"
+                          hint="Merge the branch and close the workspace automatically once the review agent passes. When disabled, the issue moves to AI Reviewed and waits for manual merge."
+                          disabled={!autoReviewOn}
+                        />
+                      </div>
+                      <Toggle
+                        checked={settings.require_manual_approval === "true"}
+                        onChange={setBool("require_manual_approval")}
+                        label="Require manual approval before review"
+                        hint="When enabled, issues must be manually approved before the AI review step is triggered. Useful for gating expensive review sessions on deliberate human sign-off."
+                      />
+                      <Field
+                        label="Visual verification timing"
+                        hint="Controls when UI changes are visually verified via browser snapshot. 'Before merge' blocks the agent until it verifies (default, Claude only). 'After merge' lets the agent stop without verifying — the issue is tagged with 'needs-visual-verification' after merge and verification runs on master."
+                      >
+                        <select
+                          value={settings.visual_verification_mode || "before_merge"}
+                          onChange={(e) => set("visual_verification_mode")(e.target.value)}
+                          className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
+                        >
+                          <option value="before_merge">Before merge (default) — agent must verify UI before stopping</option>
+                          <option value="after_merge">After merge — verification runs on master after merge completes</option>
+                        </select>
+                      </Field>
+                      {(settings.visual_verification_mode || "before_merge") === "after_merge" && (
+                        <Field
+                          label="After-merge verification agent"
+                          hint="Who performs visual verification after merge. 'None' just tags the issue. 'Reviewer' instructs the review agent to merge then verify. 'Dedicated agent' spawns a separate verification-only session after the merge completes."
+                        >
+                          <select
+                            value={settings.after_merge_verify_agent || "none"}
+                            onChange={(e) => set("after_merge_verify_agent")(e.target.value)}
+                            className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
+                          >
+                            <option value="none">None (default) — tag issue, manual verification</option>
+                            <option value="reviewer">Reviewer — review agent merges + verifies UI</option>
+                            <option value="dedicated">Dedicated agent — separate verification session after merge</option>
+                          </select>
+                        </Field>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Learning steps */}
+                  <div className="pt-4 border-t border-gray-200 dark:border-gray-700">
+                    <div className="text-[11px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">Learning steps</div>
+                    <div className="space-y-3">
+                      <Toggle
+                        checked={settings.learning_step_after_agent === "true"}
+                        onChange={setBool("learning_step_after_agent")}
+                        label="Learning step after agent (parallel)"
+                        hint="When an agent session completes with committed changes, runs a learning session in parallel with code review. Extracts insights from session transcripts and updates docs and hooks without blocking the review."
+                      />
+                      <Toggle
+                        checked={settings.learning_step_after_review === "true"}
+                        onChange={setBool("learning_step_after_review")}
+                        label="Learning step after review (parallel)"
+                        hint="When a review session completes, runs a learning session in parallel with the auto-merge step. Extracts insights without delaying the merge."
+                      />
+                      <Toggle
+                        checked={settings.learning_step_before_merge === "true"}
+                        onChange={setBool("learning_step_before_merge")}
+                        label="Learning step before merge (blocking)"
+                        hint="When enabled, runs an agent session before merging that reads the worktree's session transcripts and updates docs and Claude hooks with extracted insights. Blocks merge until complete (up to 3 minutes)."
+                      />
+                    </div>
+                  </div>
+
+                  {/* Follow-up & automation */}
+                  <div className="pt-4 border-t border-gray-200 dark:border-gray-700">
+                    <div className="text-[11px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">Follow-up &amp; automation</div>
+                    <div className="space-y-3">
+                      <Toggle
+                        checked={settings.auto_start_followup === "true"}
+                        onChange={setBool("auto_start_followup")}
+                        label="Auto-start follow-up tasks after merge"
+                        hint="When a workspace is merged and the issue has outgoing 'depends_on' or 'child_of' dependencies, automatically create workspaces for unblocked follow-up issues."
+                      />
+                    </div>
+                  </div>
+
+                  <div className="pt-4 border-t border-gray-200 dark:border-gray-700">
                     <div className="flex items-center justify-between mb-3">
                       <div className="flex items-center gap-2">
                         <div className="text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wide">Board Monitor</div>
@@ -990,15 +1070,14 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
               {/* UI tab */}
               {tab === "ui" && (
                 <>
-                <Field label="Output Parsing" hint={`When enabled, the terminal view parses structured agent output and displays it with syntax highlighting. "Minimal" shows a compact activity timeline.`}>
+                <Field label="Output Parsing" hint='Parses structured agent output into a compact activity timeline. Disable for debugging to see raw JSONL output.'>
                   <select
-                    value={settings.output_parser || "true"}
+                    value={settings.output_parser || "minimal"}
                     onChange={(e) => set("output_parser")(e.target.value)}
                     className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
                   >
-                    <option value="true">Parse stream-json output</option>
                     <option value="minimal">Minimal activity view</option>
-                    <option value="false">Show raw output</option>
+                    <option value="false">Show raw output (debug)</option>
                   </select>
                 </Field>
                 <div className="space-y-3 mt-4">
@@ -1007,12 +1086,6 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                     onChange={setBool("dynamic_column_scaling")}
                     label="Dynamic column scaling"
                     hint="Columns grow proportionally to their issue count, giving more space to busy columns."
-                  />
-                  <Toggle
-                    checked={settings.persistent_agent === "true"}
-                    onChange={setBool("persistent_agent")}
-                    label="Persistent agent (warm pool)"
-                    hint="Keep a warm agent process alive between sessions to reduce startup latency. Experimental."
                   />
                 </div>
                 </>
@@ -1040,6 +1113,34 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                     <p className="text-sm text-gray-500">No active project selected.</p>
                   ) : (
                     <div className="space-y-3">
+                      <Field label="Default Branch" hint="Used as the base branch for new worktrees. Leave empty only if you do not want worktrees created until this is set.">
+                        <input
+                          type="text"
+                          value={projectSettings.defaultBranch}
+                          list="project-default-branches"
+                          onChange={(e) => setProjectSettings(s => ({ ...s, defaultBranch: e.target.value }))}
+                          placeholder="main"
+                          className={`w-full text-sm border rounded px-2 py-1.5 focus:outline-none focus:ring-1 font-mono ${
+                            defaultBranchInvalid
+                              ? "border-red-300 focus:ring-red-500"
+                              : "border-gray-300 focus:ring-blue-500"
+                          }`}
+                        />
+                        {projectBranches && (
+                          <datalist id="project-default-branches">
+                            {projectBranches.local.map((branch) => (
+                              <option key={branch} value={branch} />
+                            ))}
+                          </datalist>
+                        )}
+                        {defaultBranchInvalid ? (
+                          <p className="text-xs text-red-600 mt-1">Branch must exist locally in this repository.</p>
+                        ) : (
+                          <p className="text-xs text-gray-500 mt-1">
+                            Detected local branches: {projectBranches?.local.length ? projectBranches.local.join(", ") : "unavailable"}
+                          </p>
+                        )}
+                      </Field>
                       <Field label="Project Color">
                         <div className="flex items-center gap-3">
                           <input
@@ -1725,7 +1826,7 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
             </button>
             <button
               onClick={handleSave}
-              disabled={saving}
+              disabled={saving || defaultBranchInvalid}
               className="px-4 py-2 text-sm text-white bg-blue-600 hover:bg-blue-700 rounded-md disabled:opacity-50"
             >
               {saving ? "Saving..." : "Save"}

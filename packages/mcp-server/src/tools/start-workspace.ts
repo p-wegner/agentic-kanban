@@ -31,7 +31,7 @@ export function registerStartWorkspace(server: McpServer) {
 
       // Resolve repoPath and defaultBranch from issue → project chain if not provided
       let resolvedRepoPath = repoPath;
-      let resolvedBaseBranch = baseBranch;
+      let resolvedBaseBranch: string | null | undefined = baseBranch;
       const issue = issues[0];
       const projectRows = await db
         .select({ repoPath: schema.projects.repoPath, defaultBranch: schema.projects.defaultBranch, setupScript: schema.projects.setupScript, setupEnabled: schema.projects.setupEnabled })
@@ -49,6 +49,9 @@ export function registerStartWorkspace(server: McpServer) {
       if (!resolvedBaseBranch) {
         resolvedBaseBranch = projectRows[0].defaultBranch;
       }
+      if (!isDirect && !resolvedBaseBranch) {
+        return { content: [{ type: "text" as const, text: "No default branch configured for this project. Set a default branch in project settings or pass baseBranch." }] };
+      }
 
       const branchName = isDirect ? await gitService.getCurrentBranch(resolvedRepoPath) : (branch || `workspace/${issueId.slice(0, 8)}`);
       const id = randomUUID();
@@ -59,7 +62,7 @@ export function registerStartWorkspace(server: McpServer) {
         if (isDirect) {
           worktreePath = resolvedRepoPath;
         } else {
-          worktreePath = await gitService.createWorktree(resolvedRepoPath, branchName, resolvedBaseBranch);
+          worktreePath = await gitService.createWorktree(resolvedRepoPath, branchName, resolvedBaseBranch ?? undefined);
         }
 
         // Run setup script if configured and enabled
