@@ -367,6 +367,7 @@ export class CodexProvider implements AgentProvider {
 
     const isMockAgent = !!process.env.AGENT_COMMAND || (agentCommand?.includes("mock-agent") ?? false);
     let command = process.env.AGENT_COMMAND || agentCommand || "codex";
+    let useShell = isWindows;
 
     const args: string[] = [];
     let promptPrefix: string | undefined;
@@ -379,6 +380,15 @@ export class CodexProvider implements AgentProvider {
         args.push("--profile", "multi-turn");
       }
     } else {
+      // On Windows, resolve codex to direct node.exe invocation to avoid needing a shell.
+      // The .cmd shim requires shell: true, which prevents detaching (breaks stdout pipes).
+      const entry = resolveCodexDirect(command);
+      if (entry) {
+        args.unshift(entry);
+        command = process.execPath;
+        useShell = false;
+      }
+
       // Plan mode: run under Codex's read-only sandbox so the agent can read and explore
       // but the sandbox physically blocks file writes and mutating commands — the native
       // equivalent of Claude's plan mode. Otherwise bypass the sandbox for full runs.
@@ -425,10 +435,10 @@ export class CodexProvider implements AgentProvider {
     return {
       command,
       args,
-      // On Windows `codex` is a `.cmd` shim — Node refuses to spawn it without a shell
-      // (EINVAL), and a bare "codex" without a shell is ENOENT. Always use a shell on
-      // Windows so the .cmd resolves via PATHEXT.
-      useShell: isWindows,
+      // On Windows, useShell is false when the codex.js entry point was discovered directly,
+      // allowing the process to be detached and survive hot-reloads. Falls back to true for
+      // .cmd shims when direct resolution fails.
+      useShell,
       isMockAgent,
       env: { ...process.env as Record<string, string> },
       keepStdinOpen: false,
@@ -561,6 +571,31 @@ const COPILOT_SESSION_ID_TYPES = new Set([
   "session_created",
   "result",
 ]);
+
+function resolveCodexDirect(command: string): string | undefined {
+  if (process.platform !== "win32") return undefined;
+
+  const candidates: string[] = [];
+  const base = basename(command).toLowerCase();
+  if (base === "codex" || base === "codex.cmd" || base === "codex.ps1") {
+    if (command.includes("\\") || command.includes("/")) {
+      candidates.push(command);
+    } else {
+      const extensions = ["", ".cmd", ".ps1"];
+      for (const dir of (process.env.PATH ?? "").split(delimiter).filter(Boolean)) {
+        for (const ext of extensions) {
+          candidates.push(join(dir, `codex${ext}`));
+        }
+      }
+    }
+  }
+
+  for (const candidate of candidates) {
+    const entry = join(dirname(candidate), "node_modules", "@openai", "codex", "bin", "codex.js");
+    if (existsSync(entry)) return entry;
+  }
+  return undefined;
+}
 
 function resolveCopilotNpmLoader(command: string): string | undefined {
   if (process.platform !== "win32") return undefined;
