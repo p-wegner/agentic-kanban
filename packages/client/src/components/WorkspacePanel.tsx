@@ -70,6 +70,7 @@ const STATUS_COLORS: Record<string, string> = {
   active: "bg-green-100 text-green-700",
   reviewing: "bg-purple-100 text-purple-700",
   idle: "bg-yellow-100 text-yellow-700",
+  error: "bg-red-100 text-red-700",
   closed: "bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400",
 };
 
