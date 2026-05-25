@@ -421,6 +421,111 @@ export function parseSessionSummary(
         }
         continue;
       }
+
+      // ---- Codex exec --json streaming format ----
+
+      // thread.started: session initialized (no model info in this event)
+      if (type === "thread.started") {
+        initFound = true;
+        continue;
+      }
+
+      // turn.completed: aggregate stats; Codex doesn't emit model here
+      if (type === "turn.completed") {
+        // No agentSummary or model from turn.completed in Codex streaming format
+        continue;
+      }
+
+      // turn.failed: record the failure reason
+      if (type === "turn.failed") {
+        const error = asRecord(obj.error);
+        const msg = getString(error ?? {}, ["message"]) || "Turn failed";
+        if (errors.length < 10) errors.push(`codex: ${msg}`);
+        continue;
+      }
+
+      // item.started / item.completed: tool activity
+      if (type === "item.started" || type === "item.completed" || type === "item.updated") {
+        const item = asRecord(obj.item);
+        if (!item) continue;
+
+        const itemType = String(item.type || "");
+        const itemId = getString(item, ["id"]);
+
+        if (itemType === "agent_message" && type === "item.completed") {
+          const text = getString(item, ["text"]);
+          if (text) {
+            if (keyExcerpts.length < 10) {
+              keyExcerpts.push(text.length > 300 ? text.slice(0, 300) + "..." : text);
+            }
+            agentSummaryParts.push(text);
+          }
+          continue;
+        }
+
+        if (itemType === "command_execution") {
+          if (type === "item.started") {
+            const command = getString(item, ["command"]);
+            if (command) {
+              const cmd = command.slice(0, 200);
+              commandsRun.push(cmd);
+              const normCmd = cmd.replace(/\s+/g, " ").trim().slice(0, 80);
+              commandCounts.set(normCmd, (commandCounts.get(normCmd) ?? 0) + 1);
+              const existing = toolUseCounts.get("shell") ?? { count: 0, failedCount: 0 };
+              existing.count++;
+              toolUseCounts.set("shell", existing);
+              if (itemId) toolNameMap.set(itemId, "shell");
+            }
+          } else if (type === "item.completed") {
+            const exitCode = item.exit_code as number | null | undefined;
+            if (exitCode !== null && exitCode !== undefined && exitCode !== 0) {
+              const output = getString(item, ["aggregated_output"]);
+              const entry = toolUseCounts.get("shell");
+              if (entry) entry.failedCount++;
+              if (errors.length < 10) {
+                errors.push(`shell: ${output ? output.slice(0, 200) : `exit code ${exitCode}`}`);
+              }
+            }
+          }
+          continue;
+        }
+
+        if (itemType === "mcp_tool_call") {
+          const toolName = getString(item, ["name"]) || "mcp_tool";
+          const itemStatus = String(item.status || "");
+
+          if (type === "item.started" || itemStatus === "in_progress") {
+            if (itemId) toolNameMap.set(itemId, toolName);
+            const existing = toolUseCounts.get(toolName) ?? { count: 0, failedCount: 0 };
+            existing.count++;
+            toolUseCounts.set(toolName, existing);
+
+            const args = asRecord(item.args) ?? {};
+            const pathLike = getPathLike(args, undefined);
+            const toolLower = toolName.toLowerCase();
+            if (["view", "read", "grep", "glob"].includes(toolLower) && pathLike) {
+              filesRead.add(pathLike);
+            } else if (["edit", "write", "create"].includes(toolLower) && pathLike) {
+              if (toolLower === "create" || toolLower === "write") filesWritten.add(pathLike);
+              else filesEdited.add(pathLike);
+            }
+          } else if (type === "item.completed") {
+            // Check for failure via status
+            const itemStatus2 = String(item.status || "");
+            if (itemStatus2 === "failed" || itemStatus2 === "error") {
+              const entry = toolUseCounts.get(toolName);
+              if (entry) entry.failedCount++;
+              const result = getString(item, ["result"]);
+              if (errors.length < 10) {
+                errors.push(`${toolName}: ${result ? result.slice(0, 200) : "failed"}`);
+              }
+            }
+          }
+          continue;
+        }
+
+        continue;
+      }
     }
   }
 

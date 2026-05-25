@@ -288,6 +288,13 @@
       "when": 1780734000000,
       "tag": "0040_direct_workspace_base_commit",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "6",
+      "when": 1780820400000,
+      "tag": "0041_builtin_tags",
+      "breakpoints": true
     }
   ]
 }

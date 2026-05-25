@@ -492,6 +492,12 @@ export class CodexProvider implements AgentProvider {
           input: { command: item.command },
           toolUseId: item.id as string | undefined,
         };
+      } else if (item.type === "mcp_tool_call" && item.name) {
+        result.toolActivity = {
+          name: item.name as string,
+          input: (item.args ?? {}) as Record<string, unknown>,
+          toolUseId: item.id as string | undefined,
+        };
       }
     }
 
@@ -502,6 +508,12 @@ export class CodexProvider implements AgentProvider {
         result.toolResult = { toolUseId: item.id as string };
       } else if (item.type === "agent_message" && typeof item.text === "string" && item.text) {
         result.assistantText = item.text;
+      } else if (item.type === "mcp_tool_call" && item.id) {
+        const resultText = typeof item.result === "string" ? item.result : undefined;
+        result.toolResult = {
+          toolUseId: item.id as string,
+          ...(resultText ? { agentResultText: resultText } : {}),
+        };
       }
     }
 

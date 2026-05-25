@@ -48,6 +48,12 @@ const MIGRATION_FILES = [
   "../../../shared/drizzle/0033_backlog_status.sql",
   "../../../shared/drizzle/0034_session_pid.sql",
   "../../../shared/drizzle/0035_session_trigger.sql",
+  "../../../shared/drizzle/0036_scheduled_runs_cron.sql",
+  "../../../shared/drizzle/0037_workspace_provider.sql",
+  "../../../shared/drizzle/0038_pending_plan_path.sql",
+  "../../../shared/drizzle/0039_nullable_default_branch.sql",
+  "../../../shared/drizzle/0040_direct_workspace_base_commit.sql",
+  "../../../shared/drizzle/0041_builtin_tags.sql",
 ];
 
 function createTestApp() {
@@ -405,3 +411,96 @@ describe("Tags API - Issue Associations", () => {
   });
 });
 
+describe("Tags API - Built-in tag protection", () => {
+  const { app, db: database } = createTestApp();
+
+  async function createBuiltinTag(name: string) {
+    const { randomUUID } = await import("node:crypto");
+    const id = randomUUID();
+    await database.insert(schema.tags).values({
+      id,
+      name,
+      color: "#F59E0B",
+      isBuiltin: true,
+      createdAt: new Date().toISOString(),
+    });
+    return id;
+  }
+
+  it("GET /api/tags includes isBuiltin field", async () => {
+    const res = await app.request("/api/tags");
+    expect(res.status).toBe(200);
+    const body = await res.json() as any[];
+    // All returned tags should have the isBuiltin property
+    for (const tag of body) {
+      expect(typeof tag.isBuiltin === "boolean" || tag.isBuiltin === 0 || tag.isBuiltin === 1).toBe(true);
+    }
+  });
+
+  it("DELETE /api/tags/:id rejects built-in tag with 403", async () => {
+    const id = await createBuiltinTag("needs-visual-verification-test");
+    const res = await app.request(`/api/tags/${id}`, { method: "DELETE" });
+    expect(res.status).toBe(403);
+    const body = await res.json() as any;
+    expect(body.error).toContain("Built-in tags cannot be deleted");
+  });
+
+  it("PATCH /api/tags/:id rejects built-in tag rename with 403", async () => {
+    const id = await createBuiltinTag("builtin-rename-test");
+    const res = await app.request(`/api/tags/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "renamed" }),
+    });
+    expect(res.status).toBe(403);
+    const body = await res.json() as any;
+    expect(body.error).toContain("Built-in tags cannot be modified");
+  });
+
+  it("POST /api/tags/merge rejects merging away built-in tag with 403", async () => {
+    const builtinId = await createBuiltinTag("builtin-merge-source");
+    const regularRes = await app.request("/api/tags", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "merge-target" }),
+    });
+    const { id: targetId } = await regularRes.json();
+
+    const res = await app.request("/api/tags/merge", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ targetId, sourceIds: [builtinId] }),
+    });
+    expect(res.status).toBe(403);
+    const body = await res.json() as any;
+    expect(body.error).toContain("Built-in tags cannot be merged away");
+  });
+
+  it("non-builtin tags can still be deleted normally", async () => {
+    const createRes = await app.request("/api/tags", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "deletable-tag" }),
+    });
+    const { id } = await createRes.json();
+
+    const res = await app.request(`/api/tags/${id}`, { method: "DELETE" });
+    expect(res.status).toBe(200);
+  });
+
+  it("non-builtin tags can still be renamed normally", async () => {
+    const createRes = await app.request("/api/tags", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "renamable-tag" }),
+    });
+    const { id } = await createRes.json();
+
+    const res = await app.request(`/api/tags/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "renamed-tag" }),
+    });
+    expect(res.status).toBe(200);
+  });
+});

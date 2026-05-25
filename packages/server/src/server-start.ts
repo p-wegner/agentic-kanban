@@ -503,8 +503,11 @@ export async function startServer(port?: number, hostname?: string) {
       // for the canonical ID. This is race-safe: concurrent merges may both try to insert
       // the tag, but only one will succeed and both will read back the same ID.
       const { randomUUID } = await import("node:crypto");
-      await db.insert(tags).values({ id: randomUUID(), name: TAG_NAME, color: TAG_COLOR, createdAt: now })
+      await db.insert(tags).values({ id: randomUUID(), name: TAG_NAME, color: TAG_COLOR, isBuiltin: true, createdAt: now })
         .catch(() => {/* tag already exists — safe to ignore */});
+      // Ensure existing tag is marked as built-in (for DBs that predate this migration)
+      await db.update(tags).set({ isBuiltin: true }).where(eq(tags.name, TAG_NAME))
+        .catch(() => {/* non-fatal */});
       const [tagRow] = await db.select({ id: tags.id }).from(tags).where(eq(tags.name, TAG_NAME)).limit(1);
       if (!tagRow) return; // should never happen, but guard anyway
       const tagId = tagRow.id;
