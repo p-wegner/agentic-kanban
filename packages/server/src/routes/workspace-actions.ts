@@ -167,12 +167,17 @@ export function createWorkspaceActionsRoute(
 
       const promptStr = body.prompt as string;
       const truncatedPrompt = promptStr.length > 80 ? promptStr.slice(0, 80) + "..." : promptStr;
-      console.log(`[workspace-actions] launch: workspaceId=${id} prompt="${truncatedPrompt}" agentCommand=${agentCommand ?? "default"} agentArgs=${agentArgs ?? "none"} profile=${claudeProfile ?? "none"} resumeFromId=${body.resumeFromId ?? "none"} resumeWithNewModel=${resumeWithNewModel}`);
+
+      // Allow the caller to request permission elevation for this specific launch,
+      // overriding whatever the global skip_permissions preference says.
+      const skipPermissions = typeof body.skipPermissions === "boolean" ? body.skipPermissions : undefined;
+
+      console.log(`[workspace-actions] launch: workspaceId=${id} prompt="${truncatedPrompt}" agentCommand=${agentCommand ?? "default"} agentArgs=${agentArgs ?? "none"} profile=${claudeProfile ?? "none"} resumeFromId=${body.resumeFromId ?? "none"} resumeWithNewModel=${resumeWithNewModel} skipPermissions=${skipPermissions ?? "default"}`);
 
       const planMode = ws0.planMode ?? false;
 
       const resumeFromId = typeof body.resumeFromId === "string" ? body.resumeFromId : undefined;
-      const sessionId = await getSessionManager().startSession({ workspaceId: id, prompt: promptStr, agentCommand, agentArgs, resumeFromId, claudeProfile, provider: toExecutorProvider(agentProvider), multiTurn: false, permissionPromptTool, planMode, resumeWithNewModel, triggerType: "chat", profile: agentProfile });
+      const sessionId = await getSessionManager().startSession({ workspaceId: id, prompt: promptStr, agentCommand, agentArgs, resumeFromId, claudeProfile, provider: toExecutorProvider(agentProvider), multiTurn: false, permissionPromptTool, planMode, resumeWithNewModel, triggerType: "chat", profile: agentProfile, skipPermissions });
 
       await updateWorkspaceStatus(id, "active", { claudeProfile: claudeProfile ?? null, agentCommand: agentCommand ?? null, provider: agentProvider }, database);
 
@@ -222,10 +227,10 @@ export function createWorkspaceActionsRoute(
         const wsForTurn = await getWorkspaceById(id, database);
         if (!wsForTurn) return c.json({ error: "Workspace not found" }, 404);
         const planMode = wsForTurn?.planMode ?? false;
-        const { agentCommand, agentArgs, claudeProfile, profile, provider, resumeWithNewModel } =
+        const { agentCommand, agentArgs, claudeProfile, profile, provider, resumeWithNewModel, permissionPromptTool } =
           applyWorkspaceAgentSelection(await loadAgentSettings(database), wsForTurn);
 
-        const sessionId = await getSessionManager().startSession({ workspaceId: id, prompt: body.content, agentCommand, agentArgs, resumeFromId: running.id, claudeProfile, profile, provider: toExecutorProvider(provider), multiTurn: false, planMode, resumeWithNewModel, triggerType: "chat" });
+        const sessionId = await getSessionManager().startSession({ workspaceId: id, prompt: body.content, agentCommand, agentArgs, resumeFromId: running.id, claudeProfile, profile, provider: toExecutorProvider(provider), multiTurn: false, planMode, resumeWithNewModel, permissionPromptTool, triggerType: "chat" });
         await updateWorkspaceStatus(id, "active", { claudeProfile: claudeProfile ?? null, agentCommand: agentCommand ?? null, provider: provider }, database);
         const projectId = await resolveProjectId(id, database);
         if (projectId) options?.boardEvents?.broadcast(projectId, "session_launched");
