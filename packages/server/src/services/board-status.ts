@@ -229,6 +229,21 @@ export async function getBoardStatus(
                       }
                     }
                   }
+                  // Copilot stream: assistant.message
+                  if (obj.type === "assistant.message" && obj.data) {
+                    const data = obj.data as Record<string, unknown>;
+                    const raw = data.content;
+                    const contentStr = typeof raw === "string" ? raw
+                      : Array.isArray(raw)
+                        ? (raw as { type?: string; text?: string }[])
+                            .filter(b => b.type === "text" && typeof b.text === "string")
+                            .map(b => b.text as string)
+                            .join("\n")
+                        : "";
+                    if (contentStr.trim()) {
+                      entry.lastAgentMessage = contentStr.trim().slice(0, 300);
+                    }
+                  }
                   // Codex stream: agent_message item
                   if (obj.type === "item.completed" && obj.item?.type === "agent_message" && typeof obj.item.text === "string" && obj.item.text.trim()) {
                     entry.lastAgentMessage = obj.item.text.trim().slice(0, 300);

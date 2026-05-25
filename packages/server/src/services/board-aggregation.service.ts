@@ -268,6 +268,23 @@ export async function buildWorkspaceSummaryMap(
               }
             }
           }
+          // Copilot stream: assistant.message
+          if (obj.type === "assistant.message" && !hasMsg) {
+            const data = obj.data as Record<string, unknown> | undefined;
+            if (data) {
+              const raw = data.content;
+              const contentStr = typeof raw === "string" ? raw
+                : Array.isArray(raw)
+                  ? (raw as { type?: string; text?: string }[])
+                      .filter(b => b.type === "text" && typeof b.text === "string")
+                      .map(b => b.text as string)
+                      .join("\n")
+                  : "";
+              if (contentStr.trim()) {
+                lastAssistantMsgBySession.set(msg.sessionId, contentStr.trim());
+              }
+            }
+          }
         } catch { /* ignore */ }
       }
     }
@@ -348,6 +365,17 @@ export async function enrichWorkspacesWithSessionData(
           for (const block of content as { type: string; name?: string }[]) {
             if (block.type === "tool_use" && block.name) {
               lastToolMap.set(wsId, block.name);
+              break;
+            }
+          }
+        }
+        // Copilot stream: tool names are in assistant.message data.toolRequests
+        if (obj.type === "assistant.message" && !lastToolMap.has(wsId)) {
+          const data = obj.data as Record<string, unknown> | undefined;
+          const toolRequests = Array.isArray(data?.toolRequests) ? data!.toolRequests : [];
+          for (const tr of toolRequests as { name?: string }[]) {
+            if (tr.name) {
+              lastToolMap.set(wsId, tr.name);
               break;
             }
           }
