@@ -46,6 +46,7 @@ export function launch(
   provider?: ProviderId,
   profile?: { provider: ProviderName; name: string },
   extraEnv?: Record<string, string>,
+  skipPermissions?: boolean,
 ): ChildProcess {
   const launchConfig = buildAgentLaunchConfig({
     agentArgs,
@@ -58,6 +59,7 @@ export function launch(
     planMode,
     provider,
     prompt,
+    skipPermissions,
   });
   const { command, args, useShell, isMockAgent, env: spawnEnv, promptPrefix, suppressStdinPrompt } = launchConfig;
   const stdinPrompt = promptPrefix ? `${promptPrefix}\n\n${prompt}` : prompt;
