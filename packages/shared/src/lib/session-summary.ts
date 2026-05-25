@@ -160,10 +160,14 @@ function extractCopilotToolUse(obj: Record<string, unknown>): {
   const data = asRecord(obj.data);
   const tool = data || asRecord(obj.tool) || asRecord(obj.tool_call) || asRecord(obj.toolCall) || obj;
   const rawInput = tool.input ?? tool.arguments ?? tool.args ?? tool.parameters ?? tool.command ?? tool.path;
+  let inputRecord = asRecord(rawInput) || {};
+  if (Object.keys(inputRecord).length === 0 && typeof rawInput === "string") {
+    try { inputRecord = JSON.parse(rawInput) as Record<string, unknown>; } catch { /* keep empty */ }
+  }
   return {
     id: getString(tool, ["id", "tool_use_id", "toolUseId", "call_id", "callId", "toolCallId"]),
     name: getString(tool, ["name", "tool", "tool_name", "toolName", "kind"]) || "copilot_tool",
-    input: asRecord(rawInput) || {},
+    input: inputRecord,
     rawInput,
   };
 }
@@ -247,6 +251,24 @@ export function parseSessionSummary(
       if (COPILOT_SESSION_START_TYPES.has(copilotType)) {
         initFound = true;
         model = getString(obj, ["model", "modelId", "model_id"]) || model || "copilot";
+        continue;
+      }
+
+      if (copilotType === "session.model_change") {
+        const data = asRecord(obj.data);
+        if (data) {
+          const newModel = getString(data, ["newModel", "model", "modelId", "model_id"]);
+          if (newModel) model = newModel;
+        }
+        continue;
+      }
+
+      if (copilotType === "session.shutdown") {
+        const data = asRecord(obj.data);
+        if (data) {
+          const newModel = getString(data, ["model", "modelId", "model_id"]) || model;
+          if (newModel && newModel !== "copilot") model = newModel;
+        }
         continue;
       }
 
