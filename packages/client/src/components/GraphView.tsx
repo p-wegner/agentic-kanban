@@ -627,9 +627,9 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery }: Gra
                   cy={12}
                   r={4}
                   fill={
-                    node.issue.priority === "critical" ? "#ef4444" :
-                    node.issue.priority === "high" ? "#f97316" :
-                    node.issue.priority === "medium" ? "#3b82f6" : "#9ca3af"
+                    node.issue.issueType === "bug" ? "#ef4444" :
+                    node.issue.issueType === "feature" ? "#3b82f6" :
+                    node.issue.issueType === "chore" ? "#f59e0b" : "#9ca3af"
                   }
                 />
                 {/* Issue number */}

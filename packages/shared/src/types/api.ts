@@ -41,12 +41,15 @@ export interface ProjectResponse {
   updatedAt: string;
 }
 
+export type IssueType = "task" | "bug" | "feature" | "chore";
+
 export type IssueEstimate = "XS" | "S" | "M" | "L" | "XL";
 
 export interface CreateIssueRequest {
   title: string;
   description?: string;
   priority?: "low" | "medium" | "high" | "critical";
+  issueType?: IssueType;
   statusId: string;
   projectId: string;
   skipAutoReview?: boolean;
@@ -57,6 +60,7 @@ export interface UpdateIssueRequest {
   title?: string;
   description?: string;
   priority?: "low" | "medium" | "high" | "critical";
+  issueType?: IssueType;
   statusId?: string;
   sortOrder?: number;
   estimate?: IssueEstimate | null;
@@ -97,6 +101,7 @@ export interface IssueWithStatus {
   title: string;
   description: string | null;
   priority: string;
+  issueType: string;
   sortOrder: number;
   statusId: string;
   projectId: string;
@@ -294,6 +299,7 @@ export interface BoardStatusIssue {
   issueId: string;
   title: string;
   priority: string;
+  issueType: string;
   statusName: string;
   workspace: {
     id: string;
