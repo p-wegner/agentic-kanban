@@ -405,7 +405,7 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
   const [installingSkill, setInstallingSkill] = useState<string | null>(null);
 
   // Tags state
-  const [tagsList, setTagsList] = useState<{ id: string; name: string; color: string | null }[]>([]);
+  const [tagsList, setTagsList] = useState<{ id: string; name: string; color: string | null; isBuiltin: boolean }[]>([]);
   const [editingTag, setEditingTag] = useState<string | null>(null);
   const [editTagName, setEditTagName] = useState("");
   const [editTagColor, setEditTagColor] = useState("");
@@ -461,7 +461,7 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
           apiFetch<{ profiles: string[] }>("/api/preferences/codex-profiles"),
           apiFetch<{ profiles: string[] }>("/api/preferences/copilot-profiles").catch(() => ({ profiles: [COPILOT_DEFAULT_PROFILE] })),
           apiFetch<{ id: string; name: string; description: string; prompt: string; model: string | null; projectId: string | null; isBuiltin: boolean }[]>("/api/agent-skills"),
-          apiFetch<{ id: string; name: string; color: string | null }[]>("/api/tags"),
+          apiFetch<{ id: string; name: string; color: string | null; isBuiltin: boolean }[]>("/api/tags"),
         ]);
         setSettings({ ...DEFAULT_SETTINGS, ...data });
         setProfiles(profileData.profiles);
@@ -1307,13 +1307,14 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                         <input
                           type="checkbox"
                           checked={selectedTagIds.has(tag.id)}
+                          disabled={tag.isBuiltin}
                           onChange={(e) => {
                             const next = new Set(selectedTagIds);
                             if (e.target.checked) next.add(tag.id);
                             else next.delete(tag.id);
                             setSelectedTagIds(next);
                           }}
-                          className="rounded border-gray-300 shrink-0"
+                          className="rounded border-gray-300 shrink-0 disabled:opacity-40 disabled:cursor-not-allowed"
                         />
                         <span
                           className="w-3 h-3 rounded-full shrink-0"
@@ -1359,24 +1360,33 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                         ) : (
                           <>
                             <span className="flex-1 text-sm text-gray-800">{tag.name}</span>
-                            <button
-                              onClick={() => { setEditingTag(tag.id); setEditTagName(tag.name); setEditTagColor(tag.color ?? "#6B7280"); }}
-                              className="text-xs text-gray-400 hover:text-blue-600"
-                            >
-                              Rename
-                            </button>
-                            <button
-                              onClick={async () => {
-                                if (!confirm(`Delete tag "${tag.name}"? This will remove it from all issues.`)) return;
-                                await apiFetch(`/api/tags/${tag.id}`, { method: "DELETE" });
-                                setTagsList((t) => t.filter((tg) => tg.id !== tag.id));
-                                setSelectedTagIds((s) => { const n = new Set(s); n.delete(tag.id); return n; });
-                                showToast("Tag deleted", "success");
-                              }}
-                              className="text-xs text-gray-400 hover:text-red-600"
-                            >
-                              Delete
-                            </button>
+                            {tag.isBuiltin && (
+                              <span className="text-xs px-1.5 py-0.5 bg-gray-100 text-gray-500 rounded border border-gray-200 font-medium">
+                                built-in
+                              </span>
+                            )}
+                            {!tag.isBuiltin && (
+                              <>
+                                <button
+                                  onClick={() => { setEditingTag(tag.id); setEditTagName(tag.name); setEditTagColor(tag.color ?? "#6B7280"); }}
+                                  className="text-xs text-gray-400 hover:text-blue-600"
+                                >
+                                  Rename
+                                </button>
+                                <button
+                                  onClick={async () => {
+                                    if (!confirm(`Delete tag "${tag.name}"? This will remove it from all issues.`)) return;
+                                    await apiFetch(`/api/tags/${tag.id}`, { method: "DELETE" });
+                                    setTagsList((t) => t.filter((tg) => tg.id !== tag.id));
+                                    setSelectedTagIds((s) => { const n = new Set(s); n.delete(tag.id); return n; });
+                                    showToast("Tag deleted", "success");
+                                  }}
+                                  className="text-xs text-gray-400 hover:text-red-600"
+                                >
+                                  Delete
+                                </button>
+                              </>
+                            )}
                           </>
                         )}
                       </div>

@@ -50,7 +50,8 @@ const MIGRATION_FILES = [
   "../../../shared/drizzle/0036_scheduled_runs_cron.sql",
   "../../../shared/drizzle/0037_workspace_provider.sql",
   "../../../shared/drizzle/0038_pending_plan_path.sql",
-  "../../../shared/drizzle/0039_direct_workspace_base_commit.sql",
+  "../../../shared/drizzle/0039_nullable_default_branch.sql",
+  "../../../shared/drizzle/0040_direct_workspace_base_commit.sql",
 ];
 
 function createTestApp() {
@@ -606,5 +607,88 @@ describe("Session Summary API", () => {
 
     const body = await res.json();
     expect(body.overview).toBe("No activity recorded");
+  });
+
+  it("extracts Codex exec --json streaming session activity", async () => {
+    const { sessionId } = await createSessionWithData(testApp.db);
+
+    await testApp.db.insert(schema.sessionMessages).values([
+      {
+        sessionId,
+        type: "stdout",
+        data: [
+          JSON.stringify({ type: "thread.started", thread_id: "thread-abc" }),
+          JSON.stringify({
+            type: "item.started",
+            item: { id: "cmd-1", type: "command_execution", command: "pnpm test" },
+          }),
+          JSON.stringify({
+            type: "item.completed",
+            item: { id: "cmd-1", type: "command_execution", exit_code: 0, aggregated_output: "All tests passed" },
+          }),
+          JSON.stringify({
+            type: "item.started",
+            item: { id: "mcp-1", type: "mcp_tool_call", name: "view", status: "in_progress", args: { path: "/src/foo.ts" } },
+          }),
+          JSON.stringify({
+            type: "item.completed",
+            item: { id: "mcp-1", type: "mcp_tool_call", name: "view", status: "completed", result: "file contents" },
+          }),
+          JSON.stringify({
+            type: "item.completed",
+            item: { id: "msg-1", type: "agent_message", text: "I've completed the task successfully." },
+          }),
+          JSON.stringify({ type: "turn.completed", usage: { input_tokens: 500, output_tokens: 200 } }),
+        ].join("\n"),
+      },
+    ]);
+
+    const res = await testApp.app.request(`/api/sessions/${sessionId}/summary`);
+    expect(res.status).toBe(200);
+
+    const body = await res.json();
+    expect(body.commandsRun).toEqual(["pnpm test"]);
+    expect(body.filesRead).toEqual(["/src/foo.ts"]);
+    expect(body.keyExcerpts).toContain("I've completed the task successfully.");
+    expect(body.overview).toContain("ran 1 command");
+    expect(body.overview).toContain("read 1 file");
+    expect(body.toolUsePatterns).toEqual(expect.arrayContaining([
+      { tool: "shell", count: 1, failedCount: 0 },
+      { tool: "view", count: 1, failedCount: 0 },
+    ]));
+  });
+
+  it("records Codex command errors and turn failures", async () => {
+    const { sessionId } = await createSessionWithData(testApp.db);
+
+    await testApp.db.insert(schema.sessionMessages).values([
+      {
+        sessionId,
+        type: "stdout",
+        data: [
+          JSON.stringify({
+            type: "item.started",
+            item: { id: "cmd-fail", type: "command_execution", command: "bad-cmd" },
+          }),
+          JSON.stringify({
+            type: "item.completed",
+            item: { id: "cmd-fail", type: "command_execution", exit_code: 1, aggregated_output: "command not found: bad-cmd" },
+          }),
+          JSON.stringify({
+            type: "turn.failed",
+            error: { message: "Sandbox restriction violated" },
+          }),
+        ].join("\n"),
+      },
+    ]);
+
+    const res = await testApp.app.request(`/api/sessions/${sessionId}/summary`);
+    expect(res.status).toBe(200);
+
+    const body = await res.json();
+    expect(body.errors).toHaveLength(2);
+    expect(body.errors[0]).toContain("command not found: bad-cmd");
+    expect(body.errors[1]).toContain("Sandbox restriction violated");
+    expect(body.toolUsePatterns[0]).toMatchObject({ tool: "shell", count: 1, failedCount: 1 });
   });
 });
