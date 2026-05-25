@@ -649,6 +649,7 @@ Examples:
           id: issues.id,
           title: issues.title,
           priority: issues.priority,
+          issueType: issues.issueType,
           statusName: projectStatuses.name,
           createdAt: issues.createdAt,
         })
@@ -666,7 +667,7 @@ Examples:
 
       for (const r of rows) {
         const num = r.issueNumber != null ? `#${r.issueNumber}` : "(no number)";
-        console.log(`  ${num.padEnd(6)} [${r.priority.padEnd(8)}] [${r.statusName}] ${r.title}`);
+        console.log(`  ${num.padEnd(6)} [${(r.issueType ?? "task").padEnd(8)}] [${r.statusName}] ${r.title}`);
         console.log(`         id: ${r.id}`);
       }
       process.exit(0);
@@ -703,6 +704,7 @@ Examples:
           title: issues.title,
           description: issues.description,
           priority: issues.priority,
+          issueType: issues.issueType,
           statusName: projectStatuses.name,
           createdAt: issues.createdAt,
           updatedAt: issues.updatedAt,
@@ -726,6 +728,7 @@ Examples:
 
       console.log(`\n  #${issue.issueNumber} ${issue.title}`);
       console.log(`  Status:   ${issue.statusName}`);
+      console.log(`  Type:     ${issue.issueType ?? "task"}`);
       console.log(`  Priority: ${issue.priority}`);
       console.log(`  ID:       ${issue.id}`);
       if (issue.description) {
@@ -749,14 +752,15 @@ issueCmd
   .description("Create a new issue in the active project.\n\nIssue numbers are auto-incrementing per project. The issue is placed in the first project status (typically Todo) unless overridden with -s.")
   .option("-d, --description <description>", "Issue description (markdown supported)")
   .option("-p, --priority <priority>", "Priority: low, medium, high, critical (default: medium)")
+  .option("-t, --type <type>", "Issue type: task, bug, feature, chore (default: task)")
   .option("-s, --status <status>", "Initial status name (default: first project status, typically Todo)")
   .addHelpText("after", `
 Examples:
-  $ agentic-kanban issue create "Fix login bug"
-  $ agentic-kanban issue create "Add dark mode" -d "Support theme switching" -p high
-  $ agentic-kanban issue create "Hotfix" -p critical -s "In Progress"
+  $ agentic-kanban issue create "Fix login bug" -t bug
+  $ agentic-kanban issue create "Add dark mode" -d "Support theme switching" -t feature
+  $ agentic-kanban issue create "Hotfix" -t bug -s "In Progress"
 `)
-  .action(async (title: string, options: { description?: string; priority?: string; status?: string }) => {
+  .action(async (title: string, options: { description?: string; priority?: string; type?: string; status?: string }) => {
     try {
       await runMigrations();
       const projectId = await getActiveProjectId();
@@ -794,6 +798,7 @@ Examples:
         title,
         description: options.description ?? null,
         priority: (options.priority as "low" | "medium" | "high" | "critical") ?? "medium",
+        issueType: (options.type as "task" | "bug" | "feature" | "chore") ?? "task",
         sortOrder: 0,
         statusId,
         projectId,
@@ -881,7 +886,7 @@ Examples:
       }
 
       const issueRows = await db
-        .select({ id: issues.id, issueNumber: issues.issueNumber, title: issues.title, priority: issues.priority, statusName: projectStatuses.name })
+        .select({ id: issues.id, issueNumber: issues.issueNumber, title: issues.title, priority: issues.priority, issueType: issues.issueType, statusName: projectStatuses.name })
         .from(issues)
         .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
         .where(and(eq(issues.issueNumber, num), eq(issues.projectId, projectId)))
@@ -901,7 +906,7 @@ Examples:
 
       if (wsRows.length === 0) {
         console.log(`#${num} ${issue.title}`);
-        console.log(`  Status: ${issue.statusName} · Priority: ${issue.priority}`);
+        console.log(`  Status: ${issue.statusName} · Type: ${issue.issueType ?? "task"}`);
         console.log("  No workspace.");
         process.exit(0);
       }
@@ -984,7 +989,7 @@ Examples:
       }
 
       console.log(`\n  #${num} ${issue.title}`);
-      console.log(`  Status: ${issue.statusName} · Priority: ${issue.priority}`);
+      console.log(`  Status: ${issue.statusName} · Type: ${issue.issueType ?? "task"}`);
 
       if (matchingWs) {
         const wsType = matchingWs.isDirect ? "direct" : "worktree";
@@ -1922,7 +1927,7 @@ sessionCmd
       let issue: Record<string, unknown> | null = null;
       if (ws) {
         const issueRows = await db
-          .select({ id: issues.id, issueNumber: issues.issueNumber, title: issues.title, statusName: projectStatuses.name, priority: issues.priority })
+          .select({ id: issues.id, issueNumber: issues.issueNumber, title: issues.title, statusName: projectStatuses.name, priority: issues.priority, issueType: issues.issueType })
           .from(issues)
           .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
           .where(eq(issues.id, ws.issueId))
