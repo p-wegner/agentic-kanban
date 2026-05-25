@@ -6,7 +6,7 @@ import { createAgentOutputParser, type AgentOutputFormat, type DisplayEvent } fr
 interface TerminalViewProps {
   messages: AgentOutputMessage[];
   connectionState: "connecting" | "open" | "closed" | "error";
-  parseOutput?: "true" | "false" | "minimal";
+  parseOutput?: "minimal" | "false";
   outputFormat?: AgentOutputFormat;
   prompt?: string;
   title?: string;
@@ -26,7 +26,7 @@ interface RenderContext {
   multiTurn?: boolean;
   expandedSections: Set<number>;
   toggleExpand: (idx: number) => void;
-  parseOutput: "true" | "false" | "minimal";
+  parseOutput: "minimal" | "false";
   activeSubagentToolUseIds: Set<string>;
   subagentGroups: Map<string, SubagentGroup>;
   eventToSubagent: Map<number, string>;
@@ -98,7 +98,7 @@ function summarizeToolCall(name: string, input: Record<string, unknown>): string
   }
 }
 
-export function TerminalView({ messages, connectionState, parseOutput = "true", outputFormat = "claude-stream-json", prompt, title, footer, multiTurn, sessionId }: TerminalViewProps) {
+export function TerminalView({ messages, connectionState, parseOutput = "minimal", outputFormat = "claude-stream-json", prompt, title, footer, multiTurn, sessionId }: TerminalViewProps) {
   const [isMaximized, setIsMaximized] = useState(false);
   const preRef = useRef<HTMLPreElement>(null);
   const [displayEvents, setDisplayEvents] = useState<DisplayEvent[]>([]);
@@ -405,7 +405,7 @@ export function TerminalView({ messages, connectionState, parseOutput = "true", 
         <div className="flex items-center gap-2 px-3 py-2 bg-gray-900 border-b border-gray-700">
           <span className={`w-2 h-2 rounded-full ${statusColors[connectionState]}`} />
           <span className="text-sm text-gray-300">{title ?? "Agent Output"}</span>
-          {isParsed && <span className="text-xs text-blue-400">{parseOutput === "minimal" ? "minimal" : "stream-json"}</span>}
+          {isParsed && <span className="text-xs text-blue-400">parsed</span>}
           <button
             onClick={handleDownload}
             className="ml-auto p-1 text-gray-400 hover:text-white rounded hover:bg-gray-700"
@@ -447,7 +447,7 @@ export function TerminalView({ messages, connectionState, parseOutput = "true", 
           <span className={`w-2 h-2 rounded-full ${statusColors[connectionState]}`} />
           <span className="text-xs text-gray-300">{statusLabels[connectionState]}</span>
           {isParsed && (
-            <span className="text-xs text-blue-400 ml-auto">{parseOutput === "minimal" ? "minimal" : "stream-json"}</span>
+            <span className="text-xs text-blue-400 ml-auto">parsed</span>
           )}
           <button
             onClick={handleDownload}
