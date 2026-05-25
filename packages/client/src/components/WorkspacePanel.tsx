@@ -719,15 +719,16 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
     }
   }
 
-  async function handleResume(wsId: string) {
+  async function handleResume(wsId: string, skipPermissions?: boolean) {
     setActionLoading(true);
     setError(null);
     const resumePrompt = "Continue where you left off. If you were in the middle of implementing something, pick up from where you stopped. If the implementation is complete, commit your changes and move this issue to In Review.";
     try {
-      const body: Record<string, string> = {
+      const body: Record<string, unknown> = {
         prompt: resumePrompt,
         resumeFromId: lastSessionPerWorkspace[wsId] || "",
       };
+      if (skipPermissions) body.skipPermissions = true;
       const result = await apiFetch<{ sessionId: string }>(
         `/api/workspaces/${wsId}/launch`,
         { method: "POST", body: JSON.stringify(body) },
@@ -743,7 +744,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
     }
   }
 
-  async function handleRestart(wsId: string) {
+  async function handleRestart(wsId: string, skipPermissions?: boolean) {
     setActionLoading(true);
     setError(null);
     try {
@@ -773,9 +774,11 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
         }
       }
       const restartPrompt = `Continue where the previous session left off. If you were in the middle of implementing something, pick up from where it stopped. If the implementation is complete, commit your changes and move this issue to In Review.${contextSection}`;
+      const launchBody: Record<string, unknown> = { prompt: restartPrompt };
+      if (skipPermissions) launchBody.skipPermissions = true;
       const result = await apiFetch<{ sessionId: string }>(
         `/api/workspaces/${wsId}/launch`,
-        { method: "POST", body: JSON.stringify({ prompt: restartPrompt }) },
+        { method: "POST", body: JSON.stringify(launchBody) },
       );
       setActiveSession(result.sessionId);
       setLastPrompt(restartPrompt);
@@ -788,15 +791,16 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
     }
   }
 
-  async function handleContinueFromSession(wsId: string, sessionId: string) {
+  async function handleContinueFromSession(wsId: string, sessionId: string, skipPermissions?: boolean) {
     setActionLoading(true);
     setError(null);
     const continuePrompt = "Continue where you left off. If you were in the middle of implementing something, pick up from where you stopped. If the implementation is complete, commit your changes and move this issue to In Review.";
     try {
-      const body: Record<string, string> = {
+      const body: Record<string, unknown> = {
         prompt: continuePrompt,
         resumeFromId: sessionId,
       };
+      if (skipPermissions) body.skipPermissions = true;
       const result = await apiFetch<{ sessionId: string }>(
         `/api/workspaces/${wsId}/launch`,
         { method: "POST", body: JSON.stringify(body) },
@@ -1335,23 +1339,43 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                               </button>
                               {ws.status !== "closed" && (
                                 session.providerSessionId ? (
-                                  <button
-                                    onClick={() => handleContinueFromSession(ws.id, session.id)}
-                                    disabled={actionLoading}
-                                    className="text-[10px] bg-green-600 text-white px-1.5 py-0.5 rounded hover:bg-green-700 disabled:opacity-50 shrink-0"
-                                    title="Continue this session with --resume"
-                                  >
-                                    Continue
-                                  </button>
+                                  <div className="flex shrink-0">
+                                    <button
+                                      onClick={() => handleContinueFromSession(ws.id, session.id)}
+                                      disabled={actionLoading}
+                                      className="text-[10px] bg-green-600 text-white px-1.5 py-0.5 rounded-l hover:bg-green-700 disabled:opacity-50"
+                                      title="Continue this session with --resume"
+                                    >
+                                      Continue
+                                    </button>
+                                    <button
+                                      onClick={() => handleContinueFromSession(ws.id, session.id, true)}
+                                      disabled={actionLoading}
+                                      className="text-[10px] bg-green-700 text-white px-1 py-0.5 rounded-r hover:bg-green-800 disabled:opacity-50 border-l border-green-500"
+                                      title="Continue with --dangerously-skip-permissions (bypasses all permission prompts)"
+                                    >
+                                      ⚡
+                                    </button>
+                                  </div>
                                 ) : (
-                                  <button
-                                    onClick={() => handleRestart(ws.id)}
-                                    disabled={actionLoading}
-                                    className="text-[10px] bg-blue-600 text-white px-1.5 py-0.5 rounded hover:bg-blue-700 disabled:opacity-50 shrink-0"
-                                    title="Start a new session (previous session has no resume ID)"
-                                  >
-                                    Restart
-                                  </button>
+                                  <div className="flex shrink-0">
+                                    <button
+                                      onClick={() => handleRestart(ws.id)}
+                                      disabled={actionLoading}
+                                      className="text-[10px] bg-blue-600 text-white px-1.5 py-0.5 rounded-l hover:bg-blue-700 disabled:opacity-50"
+                                      title="Start a new session (previous session has no resume ID)"
+                                    >
+                                      Restart
+                                    </button>
+                                    <button
+                                      onClick={() => handleRestart(ws.id, true)}
+                                      disabled={actionLoading}
+                                      className="text-[10px] bg-blue-700 text-white px-1 py-0.5 rounded-r hover:bg-blue-800 disabled:opacity-50 border-l border-blue-500"
+                                      title="Restart with --dangerously-skip-permissions (bypasses all permission prompts)"
+                                    >
+                                      ⚡
+                                    </button>
+                                  </div>
                                 )
                               )}
                             </div>
@@ -1727,23 +1751,43 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                       )}
                       <div className="flex gap-2 flex-wrap">
                         {ws.workingDir && canResume(ws, sessions) && (
-                          <button
-                            onClick={() => handleResume(ws.id)}
-                            disabled={actionLoading}
-                            className="text-sm bg-green-600 text-white px-3 py-1.5 rounded hover:bg-green-700 disabled:opacity-50"
-                          >
-                            Resume
-                          </button>
+                          <div className="flex gap-1">
+                            <button
+                              onClick={() => handleResume(ws.id)}
+                              disabled={actionLoading}
+                              className="text-sm bg-green-600 text-white px-3 py-1.5 rounded-l hover:bg-green-700 disabled:opacity-50"
+                            >
+                              Resume
+                            </button>
+                            <button
+                              onClick={() => handleResume(ws.id, true)}
+                              disabled={actionLoading}
+                              className="text-sm bg-green-700 text-white px-2 py-1.5 rounded-r hover:bg-green-800 disabled:opacity-50 border-l border-green-500"
+                              title="Resume with --dangerously-skip-permissions (bypasses all permission prompts)"
+                            >
+                              ⚡
+                            </button>
+                          </div>
                         )}
                         {ws.workingDir && canRestart(ws, sessions) && (
-                          <button
-                            onClick={() => handleRestart(ws.id)}
-                            disabled={actionLoading}
-                            className="text-sm bg-blue-600 text-white px-3 py-1.5 rounded hover:bg-blue-700 disabled:opacity-50"
-                            title="Start a new session (previous session has no resume ID)"
-                          >
-                            Restart
-                          </button>
+                          <div className="flex gap-1">
+                            <button
+                              onClick={() => handleRestart(ws.id)}
+                              disabled={actionLoading}
+                              className="text-sm bg-blue-600 text-white px-3 py-1.5 rounded-l hover:bg-blue-700 disabled:opacity-50"
+                              title="Start a new session (previous session has no resume ID)"
+                            >
+                              Restart
+                            </button>
+                            <button
+                              onClick={() => handleRestart(ws.id, true)}
+                              disabled={actionLoading}
+                              className="text-sm bg-blue-700 text-white px-2 py-1.5 rounded-r hover:bg-blue-800 disabled:opacity-50 border-l border-blue-500"
+                              title="Restart with --dangerously-skip-permissions (bypasses all permission prompts)"
+                            >
+                              ⚡
+                            </button>
+                          </div>
                         )}
                         {ws.pendingPlanPath && ws.workingDir && ws.status !== "closed" && !isRunning && (
                           <button
