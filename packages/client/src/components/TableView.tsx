@@ -8,16 +8,16 @@ interface TableViewProps {
 }
 
 const PRIORITY_LABEL: Record<string, string> = {
-  urgent: "Urgent",
+  critical: "Critical",
   high: "High",
   medium: "Medium",
   low: "Low",
 };
 
 const PRIORITY_CLASS: Record<string, string> = {
-  urgent: "text-red-700 bg-red-50",
+  critical: "text-red-700 bg-red-50",
   high: "text-orange-700 bg-orange-50",
-  medium: "text-yellow-700 bg-yellow-50",
+  medium: "text-blue-700 bg-blue-50",
   low: "text-gray-600 bg-gray-100",
 };
 
@@ -35,7 +35,7 @@ const ARCHIVE_STATUSES = new Set(["Done", "Cancelled"]);
 type SortKey = "number" | "title" | "status" | "priority" | "estimate" | "updated";
 type SortDir = "asc" | "desc";
 
-const PRIORITY_ORDER: Record<string, number> = { urgent: 0, high: 1, medium: 2, low: 3 };
+const PRIORITY_ORDER: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3 };
 const ESTIMATE_ORDER: Record<string, number> = { XS: 0, S: 1, M: 2, L: 3, XL: 4 };
 
 const TAG_COLORS: Record<string, string> = {
