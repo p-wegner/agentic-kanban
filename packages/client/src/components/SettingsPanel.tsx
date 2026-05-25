@@ -36,6 +36,7 @@ interface Settings {
   nudge_wip_limit?: string;
   projects_base_path?: string;
   plan_auto_continue?: string;
+  visual_verification_mode?: string;
 }
 
 const DEFAULT_SETTINGS: Settings = {
@@ -65,6 +66,7 @@ const DEFAULT_SETTINGS: Settings = {
   nudge_auto_start: "false",
   projects_base_path: "",
   plan_auto_continue: "true",
+  visual_verification_mode: "before_merge",
 };
 
 type Tab = "agent" | "workflow" | "skills" | "mcp" | "ui" | "project" | "tags" | "advanced" | "schedule";
@@ -710,6 +712,7 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                         { label: "Auto-merge", key: "auto_merge", enabled: settings.auto_review !== "false" && settings.auto_merge !== "false", indent: true },
                         { label: "Learn (before merge)", key: "learning_step_before_merge", enabled: settings.learning_step_before_merge === "true" },
                         { label: "Merge", always: true },
+                        { label: "Visual verify", key: "visual_verification_mode", enabled: settings.visual_verification_mode === "after_merge" },
                       ].filter(s => s.always || s.enabled).map((step, i, arr) => (
                         <div key={step.label} className="flex items-center gap-1">
                           {i > 0 && <span className="text-gray-400 dark:text-gray-500 text-xs">→</span>}
@@ -785,6 +788,19 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                     label="Learning step before merge (blocking)"
                     hint="When enabled, runs an agent session before merging that reads the worktree's session transcripts and updates docs and Claude hooks with extracted insights. Blocks merge until complete (up to 3 minutes)."
                   />
+                  <Field
+                   label="Visual verification timing"
+                   hint="Controls when UI changes are visually verified via browser snapshot. 'Before merge' blocks the agent until it verifies (default, Claude only). 'After merge' lets the agent stop without verifying — the issue is tagged with 'needs-visual-verification' after merge and verification runs on master."
+                  >
+                   <select
+                     value={settings.visual_verification_mode || "before_merge"}
+                     onChange={(e) => set("visual_verification_mode")(e.target.value)}
+                     className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
+                   >
+                     <option value="before_merge">Before merge (default) — agent must verify UI before stopping</option>
+                     <option value="after_merge">After merge — verification runs on master after merge completes</option>
+                   </select>
+                  </Field>
 
                   <div className="pt-3 border-t border-gray-200 dark:border-gray-700">
                     <div className="flex items-center justify-between mb-3">
