@@ -25,8 +25,12 @@ import { getMigrationsFolder } from "./db/migrations.js";
 import { applyMigrations } from "./db/manual-migrate.js";
 import { MOCK_AGENT_COMMAND, isMockProfile, toExecutorProvider } from "./services/agent-settings.service.js";
 import { PREF_CODEX_PROFILE, PREF_COPILOT_PROFILE } from "./constants/preference-keys.js";
+import { sendMonitorNudge, type MonitorActionName } from "./services/monitor-nudge.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+
+const DEFAULT_MONITOR_NUDGE_PROMPT =
+  "Please continue with the task. If you are waiting for input or unsure how to proceed, use your best judgment and keep moving forward. Check the issue description and any open questions, then take the next logical step.";
 
 const DEFAULT_REVIEW_PROMPT = `You are an AI code reviewer. Review the changes on branch '{{branch}}'.
 
@@ -150,6 +154,20 @@ Steps to resolve:
     .replace(/\{\{workspaceId}}/g, workspaceId ?? "")
     .replace(/\{\{autoFixInstructions}}/g, autoFixInstructions);
   return { prompt, model: skillModel };
+}
+
+async function buildMonitorNudgePrompt(projectId: string): Promise<string> {
+  const skillRows = await db
+    .select({ prompt: agentSkills.prompt })
+    .from(agentSkills)
+    .where(sql`
+      ${agentSkills.name} = 'monitor-nudge'
+      AND (${agentSkills.projectId} = ${projectId} OR ${agentSkills.projectId} IS NULL)
+    `)
+    .orderBy(sql`${agentSkills.projectId} IS NULL`)
+    .limit(1);
+
+  return skillRows[0]?.prompt?.trim() || DEFAULT_MONITOR_NUDGE_PROMPT;
 }
 
 export async function startServer(port?: number) {
@@ -780,10 +798,10 @@ export async function startServer(port?: number) {
   let monitorNextRunAt: string | null = null;
   let monitorLastRun: { at: string; relaunched: number; merged: number; nudged: number } | null = null;
   let monitorCurrentIntervalMin: number | null = null;
-  type MonitorAction = { at: string; action: "relaunch" | "merge" | "nudge" | "mark_idle" | "mark_dead" | "auto_start"; workspaceId: string; issueId: string };
+  type MonitorAction = { at: string; action: MonitorActionName; workspaceId: string; issueId: string };
   const monitorRecentActions: MonitorAction[] = [];
 
-  function logMonitorAction(action: MonitorAction["action"], workspaceId: string, issueId: string) {
+  function logMonitorAction(action: MonitorActionName, workspaceId: string, issueId: string) {
     monitorRecentActions.unshift({ at: new Date().toISOString(), action, workspaceId, issueId });
     if (monitorRecentActions.length > 30) monitorRecentActions.splice(30);
   }
@@ -1003,8 +1021,18 @@ export async function startServer(port?: number) {
                   }
                 }
 
-
-                console.log(`[monitor] Nudged long-running agent in workspace ${ws.wsId}`);
+                const prompt = await buildMonitorNudgePrompt(ws.projectId);
+                const nudged = sendMonitorNudge({
+                  sessionManager,
+                  sessionId: sess.id,
+                  workspaceId: ws.wsId,
+                  issueId: ws.issueId,
+                  projectId: ws.projectId,
+                  prompt,
+                  logAction: logMonitorAction,
+                  broadcast: (projectId, event) => boardEvents.broadcast(projectId, event),
+                });
+                if (nudged) cycleStats.nudged++;
               }
             }
           }
