@@ -50,10 +50,17 @@ interface FeaturedCardProps {
 
 function FeaturedCard({ issue, activityHistory, liveStats, todos, onIssueClick, onWorkspaceClick }: FeaturedCardProps) {
   const ws = issue.workspaceSummary?.main;
+  const feedRef = useRef<HTMLDivElement>(null);
+
+  useLayoutEffect(() => {
+    if (feedRef.current) {
+      feedRef.current.scrollTop = feedRef.current.scrollHeight;
+    }
+  }, [activityHistory.length]);
+
   if (!ws) return null;
 
   const cfg = WS_STATUS_CONFIG[ws.status] ?? WS_STATUS_CONFIG.idle;
-  const feedRef = useRef<HTMLDivElement>(null);
 
   const doneTodos = todos?.filter((t) => t.status === "completed").length ?? 0;
   const totalTodos = todos?.length ?? 0;
@@ -63,12 +70,6 @@ function FeaturedCard({ issue, activityHistory, liveStats, todos, onIssueClick, 
   const diff = ws.diffStats;
   const tokens = liveStats?.contextTokens ?? ws.contextTokens ?? 0;
   const toolUses = liveStats?.toolUses;
-
-  useLayoutEffect(() => {
-    if (feedRef.current) {
-      feedRef.current.scrollTop = feedRef.current.scrollHeight;
-    }
-  }, [activityHistory.length]);
 
   const displayHistory = activityHistory.length > 0
     ? activityHistory
