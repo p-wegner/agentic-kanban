@@ -281,6 +281,13 @@
       "when": 1780647600000,
       "tag": "0039_nullable_default_branch",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "6",
+      "when": 1780734000000,
+      "tag": "0040_direct_workspace_base_commit",
+      "breakpoints": true
     }
   ]
 }
