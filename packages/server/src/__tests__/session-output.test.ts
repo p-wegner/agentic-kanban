@@ -332,5 +332,66 @@ describe("session-output", () => {
       const result = extractMeaningfulOutput(messages, 10);
       expect(result).toEqual(["All done"]);
     });
+
+    it("extracts Copilot assistant.message with string content", () => {
+      const messages = [
+        {
+          type: "stdout",
+          data: JSON.stringify({
+            type: "assistant.message",
+            data: { content: "I will review the changes now.", model: "gpt-5.2" },
+          }),
+        },
+      ];
+      const result = extractMeaningfulOutput(messages, 10);
+      expect(result).toEqual(["I will review the changes now."]);
+    });
+
+    it("extracts last line of Copilot multi-line assistant.message", () => {
+      const messages = [
+        {
+          type: "stdout",
+          data: JSON.stringify({
+            type: "assistant.message",
+            data: { content: "Reading files...\nAnalyzing...\nReview complete." },
+          }),
+        },
+      ];
+      const result = extractMeaningfulOutput(messages, 10);
+      expect(result).toEqual(["Review complete."]);
+    });
+
+    it("extracts Copilot assistant.message with array content blocks", () => {
+      const messages = [
+        {
+          type: "stdout",
+          data: JSON.stringify({
+            type: "assistant.message",
+            data: {
+              content: [
+                { type: "text", text: "First block." },
+                { type: "text", text: "Second block." },
+              ],
+            },
+          }),
+        },
+      ];
+      const result = extractMeaningfulOutput(messages, 10);
+      expect(result).toEqual(["Second block."]);
+    });
+
+    it("falls back to Copilot reasoningText when content is empty", () => {
+      const messages = [
+        {
+          type: "stdout",
+          data: JSON.stringify({
+            type: "assistant.message",
+            data: { content: "", reasoningText: "Thinking about the approach\nFirst step is to read." },
+          }),
+        },
+      ];
+      const result = extractMeaningfulOutput(messages, 10);
+      expect(result).toEqual(["Thinking about the approach"]);
+    });
   });
 });
