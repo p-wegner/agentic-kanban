@@ -60,6 +60,7 @@ const MIGRATION_FILES = [
   "../../../shared/drizzle/0036_scheduled_runs_cron.sql",
   "../../../shared/drizzle/0037_workspace_provider.sql",
   "../../../shared/drizzle/0038_pending_plan_path.sql",
+  "../../../shared/drizzle/0039_nullable_default_branch.sql",
 ];
 
 const DEFAULT_STATUSES = [

@@ -17,6 +17,7 @@ export interface UpdateProjectRequest {
   name?: string;
   description?: string;
   color?: string;
+  defaultBranch?: string | null;
   setupScript?: string | null;
   setupBlocking?: boolean;
   setupEnabled?: boolean;
@@ -30,7 +31,7 @@ export interface ProjectResponse {
   color: string | null;
   repoPath: string;
   repoName: string;
-  defaultBranch: string;
+  defaultBranch: string | null;
   remoteUrl: string | null;
   setupScript: string | null;
   setupBlocking: boolean;
@@ -326,7 +327,7 @@ export interface BoardStatusIssue {
 }
 
 export interface BoardStatusResponse {
-  project: { id: string; name: string; repoPath: string; defaultBranch: string };
+  project: { id: string; name: string; repoPath: string; defaultBranch: string | null };
   generatedAt: string;
   totals: { totalIssues: number; inProgress: number; activeWorkspaces: number; runningSessions: number };
   issues: BoardStatusIssue[];
