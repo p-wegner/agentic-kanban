@@ -33,6 +33,7 @@ export function createIssuesRoute(database: Database = db, options?: { boardEven
         title: issues.title,
         description: issues.description,
         priority: issues.priority,
+        issueType: issues.issueType,
         sortOrder: issues.sortOrder,
         statusId: issues.statusId,
         projectId: issues.projectId,
@@ -134,6 +135,7 @@ export function createIssuesRoute(database: Database = db, options?: { boardEven
       title: body.title,
       description: body.description ?? null,
       priority: body.priority ?? "medium",
+      issueType: body.issueType ?? "task",
       skipAutoReview: body.skipAutoReview ?? false,
       estimate: body.estimate ?? null,
       sortOrder: body.sortOrder ?? 0,
@@ -167,6 +169,7 @@ export function createIssuesRoute(database: Database = db, options?: { boardEven
     if (body.title !== undefined) updates.title = body.title;
     if (body.description !== undefined) updates.description = body.description;
     if (body.priority !== undefined) updates.priority = body.priority;
+    if (body.issueType !== undefined) updates.issueType = body.issueType;
     if (body.statusId !== undefined) { updates.statusId = body.statusId; updates.statusChangedAt = now; }
     if (body.sortOrder !== undefined) updates.sortOrder = body.sortOrder;
     if (body.estimate !== undefined) updates.estimate = body.estimate;
