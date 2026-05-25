@@ -24,6 +24,7 @@ import { fileURLToPath } from "node:url";
 import { existsSync } from "node:fs";
 import { getMigrationsFolder } from "./db/migrations.js";
 import { applyMigrations } from "./db/manual-migrate.js";
+import { deduplicateProjects } from "./services/project-registration.js";
 import { MOCK_AGENT_COMMAND, isMockProfile, toExecutorProvider } from "./services/agent-settings.service.js";
 import { PREF_CODEX_PROFILE, PREF_COPILOT_PROFILE } from "./constants/preference-keys.js";
 import { sendMonitorNudge, type MonitorActionName } from "./services/monitor-nudge.js";
@@ -823,6 +824,14 @@ Server: http://localhost:${serverPort}`;
   } catch (err: unknown) {
     console.error("[startup] Migration failed:", err instanceof Error ? err.message : String(err));
     throw err;
+  }
+
+  // Remove duplicate projects that share the same git root (e.g. a legacy "server" project
+  // registered from packages/server before detectRepoInfo added git-root resolution).
+  try {
+    await deduplicateProjects();
+  } catch (err) {
+    console.warn("[startup] project deduplication failed (non-fatal):", err instanceof Error ? err.message : String(err));
   }
 
   // Disable auto_monitor on every startup — prevents mass agent spawns from idle workspaces
