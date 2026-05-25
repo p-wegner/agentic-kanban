@@ -950,6 +950,21 @@ Examples:
                   }
                 }
               }
+              // Copilot stream: assistant.message
+              if (obj.type === "assistant.message") {
+                const data = obj.data as Record<string, unknown> | undefined;
+                if (data) {
+                  const raw = data.content;
+                  const contentStr = typeof raw === "string" ? raw
+                    : Array.isArray(raw)
+                      ? (raw as { type?: string; text?: string }[])
+                          .filter(b => b.type === "text" && typeof b.text === "string")
+                          .map(b => b.text as string)
+                          .join("\n")
+                      : "";
+                  if (contentStr.trim()) lastAgentMsg = contentStr;
+                }
+              }
               // Codex stream: agent_message
               if (obj.type === "item.completed" && obj.item?.type === "agent_message" && typeof obj.item.text === "string") {
                 lastAgentMsg = obj.item.text;
