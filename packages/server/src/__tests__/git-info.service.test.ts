@@ -38,6 +38,18 @@ describe("detectRepoInfo", () => {
     expect(info.remoteUrl).toBeNull();
   });
 
+  it("resolves to git root when called from a subdirectory", async () => {
+    const subDir = join(tempDir, "sub", "nested");
+    await exec("git", ["config", "user.email", "test@test.com"], tempDir);
+    const { mkdir } = await import("node:fs/promises");
+    await mkdir(subDir, { recursive: true });
+
+    const info = await detectRepoInfo(subDir);
+    // Should resolve to the git root, not the subdirectory
+    expect(info.repoPath).toBe(tempDir);
+    expect(info.repoName).toBe(tempDir.split(/[/\\]/).pop()!);
+  });
+
   it("throws for non-git directory", async () => {
     const nonGitDir = await mkdtemp(join(tmpdir(), "kanban-nongit-"));
     try {
