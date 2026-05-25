@@ -20,9 +20,12 @@ function sortIssues(issues: IssueWithStatus[], mode: SortMode): IssueWithStatus[
   );
 }
 
+const VALID_SORT_MODES = new Set<string>(["default", "priority"]);
+
 function loadSortMode(columnId: string): SortMode {
   try {
-    return (localStorage.getItem(`col-sort-${columnId}`) as SortMode) ?? "default";
+    const stored = localStorage.getItem(`col-sort-${columnId}`);
+    return (stored && VALID_SORT_MODES.has(stored) ? stored : "default") as SortMode;
   } catch {
     return "default";
   }
