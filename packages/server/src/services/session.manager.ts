@@ -400,21 +400,24 @@ function createSessionManager(
     const dbSkipPerms = skipPermRows.length > 0 && skipPermRows[0].value === "true";
     const skipPermissions = skipPermissionsOpt !== undefined ? skipPermissionsOpt : dbSkipPerms;
 
-    // For Claude, skip-permissions is conveyed via --dangerously-skip-permissions in agentArgs.
+    // For Claude only: skip-permissions is conveyed via --dangerously-skip-permissions in agentArgs.
     // When the caller explicitly requests elevation, ensure the flag is present in agentArgs
     // even if it was absent in the incoming opts (e.g. the global preference was off at the time
     // the workspace was created but the user wants this restart elevated).
+    // Copilot and Codex use their own permission mechanisms and must not receive this Claude-specific flag.
     let effectiveAgentArgs = agentArgs;
-    if (skipPermissions && !effectiveAgentArgs?.includes("--dangerously-skip-permissions")) {
-      effectiveAgentArgs = effectiveAgentArgs
-        ? `${effectiveAgentArgs} --dangerously-skip-permissions`
-        : "--dangerously-skip-permissions";
-    } else if (!skipPermissions && effectiveAgentArgs?.includes("--dangerously-skip-permissions")) {
-      // Explicit skipPermissions=false overrides agentArgs that may have the flag embedded
-      effectiveAgentArgs = effectiveAgentArgs
-        .split(/\s+/)
-        .filter(a => a && a !== "--dangerously-skip-permissions")
-        .join(" ") || undefined;
+    if (executor === "claude-code") {
+      if (skipPermissions && !effectiveAgentArgs?.includes("--dangerously-skip-permissions")) {
+        effectiveAgentArgs = effectiveAgentArgs
+          ? `${effectiveAgentArgs} --dangerously-skip-permissions`
+          : "--dangerously-skip-permissions";
+      } else if (!skipPermissions && effectiveAgentArgs?.includes("--dangerously-skip-permissions")) {
+        // Explicit skipPermissions=false overrides agentArgs that may have the flag embedded
+        effectiveAgentArgs = effectiveAgentArgs
+          .split(/\s+/)
+          .filter(a => a && a !== "--dangerously-skip-permissions")
+          .join(" ") || undefined;
+      }
     }
 
     try {
