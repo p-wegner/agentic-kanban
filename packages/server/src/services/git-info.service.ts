@@ -42,31 +42,36 @@ async function detectDefaultBranch(repoPath: string): Promise<string | null> {
 /**
  * Detect git repo information from a local path.
  * Validates the path is a git repo and extracts branch/remote info.
+ * Always resolves to the git repository root, so registering from a subdirectory
+ * (e.g. packages/server) produces the same project as registering from the root.
  */
 export async function detectRepoInfo(repoPath: string): Promise<RepoInfo> {
   const absPath = resolve(repoPath);
 
-  // Validate it's a git repo
+  // Resolve to the actual git root — prevents duplicate projects when a subdirectory
+  // (e.g. packages/server) and the repo root both get registered separately.
+  // Use resolve() to normalize the path (git outputs forward slashes on Windows).
+  let gitRoot: string;
   try {
-    await execGit(["rev-parse", "--git-dir"], absPath);
+    gitRoot = resolve(await execGit(["rev-parse", "--show-toplevel"], absPath));
   } catch {
     throw new Error(`Not a git repository: ${absPath}`);
   }
 
-  const defaultBranch = await detectDefaultBranch(absPath);
+  const defaultBranch = await detectDefaultBranch(gitRoot);
 
   // Get remote URL
   let remoteUrl: string | null = null;
   try {
-    remoteUrl = await execGit(["remote", "get-url", "origin"], absPath);
+    remoteUrl = await execGit(["remote", "get-url", "origin"], gitRoot);
   } catch {
     // No remote configured
   }
 
-  const repoName = basename(absPath);
+  const repoName = basename(gitRoot);
 
   return {
-    repoPath: absPath,
+    repoPath: gitRoot,
     repoName,
     defaultBranch,
     remoteUrl,
