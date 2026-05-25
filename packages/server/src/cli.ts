@@ -2143,8 +2143,9 @@ program
   .command("dev")
   .description("Start the development server (server + built client UI)")
   .option("-p, --port <port>", "Server port", process.env.PORT || "3001")
+  .option("-H, --host <host>", "Server hostname", process.env.KANBAN_HOST || "127.0.0.1")
   .option("--no-open", "Do not open browser")
-  .action(async (options: { port: string; open: boolean }) => {
+  .action(async (options: { port: string; host: string; open: boolean }) => {
     try {
       // Auto-initialize if no database exists
       const { dbExists, ensureDataDir } = await import("./db/data-dir.js");
@@ -2159,19 +2160,21 @@ program
       }
 
       const port = Number(options.port);
+      const host = options.host;
       process.env.PORT = String(port);
+      process.env.KANBAN_HOST = host;
 
       const { startServer } = await import("./server-start.js");
-      await startServer(port);
+      await startServer(port, host);
 
-      console.log(`\n  Agentic Kanban running at http://localhost:${port}`);
+      console.log(`\n  Agentic Kanban running at http://${host}:${port}`);
       console.log("  Press Ctrl+C to stop\n");
 
       // Open browser
       if (options.open) {
         const { execFile } = await import("node:child_process");
         const cmd = process.platform === "win32" ? "cmd" : "open";
-        const args = process.platform === "win32" ? ["/c", "start", `http://localhost:${port}`] : [`http://localhost:${port}`];
+        const args = process.platform === "win32" ? ["/c", "start", `http://${host}:${port}`] : [`http://${host}:${port}`];
         execFile(cmd, args, (err) => {
           if (err) console.warn("  Could not open browser:", err.message);
         });
@@ -2430,15 +2433,17 @@ if (!hasSubcommand) {
 
       // Start server
       const port = Number(process.env.PORT || 3001);
+      const host = process.env.KANBAN_HOST || "127.0.0.1";
       process.env.PORT = String(port);
+      process.env.KANBAN_HOST = host;
 
       const { startServer } = await import("./server-start.js");
-      await startServer(port);
+      await startServer(port, host);
 
       // Show concise startup info
       console.log(`\n  Agentic Kanban is running\n`);
-      console.log(`    UI:  http://localhost:${port}`);
-      console.log(`    API: http://localhost:${port}/api/projects\n`);
+      console.log(`    UI:  http://${host}:${port}`);
+      console.log(`    API: http://${host}:${port}/api/projects\n`);
       console.log("  Useful commands:");
       console.log("    agentic-kanban status              — board overview");
       console.log("    agentic-kanban issue create \"Title\" — create an issue");
@@ -2450,7 +2455,7 @@ if (!hasSubcommand) {
 
       // Open browser
       const cmd = process.platform === "win32" ? "cmd" : "open";
-      const args = process.platform === "win32" ? ["/c", "start", `http://localhost:${port}`] : [`http://localhost:${port}`];
+      const args = process.platform === "win32" ? ["/c", "start", `http://${host}:${port}`] : [`http://${host}:${port}`];
       execFile(cmd, args, (err) => {
         if (err) console.warn("  Could not open browser:", err.message);
       });

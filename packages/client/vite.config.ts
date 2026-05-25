@@ -4,6 +4,7 @@ import tailwindcss from "@tailwindcss/vite";
 
 const serverPort = Number(process.env.SERVER_PORT) || 3001;
 const clientPort = Number(process.env.VITE_PORT) || 5173;
+const clientHost = process.env.VITE_HOST || "127.0.0.1";
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
@@ -13,7 +14,7 @@ export default defineConfig({
     conditions: ["default", "browser", "module", "import"],
   },
   server: {
-    host: "127.0.0.1",
+    host: clientHost,
     port: clientPort,
     strictPort: true,
     proxy: {
