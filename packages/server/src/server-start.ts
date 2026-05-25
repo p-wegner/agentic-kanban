@@ -10,7 +10,7 @@ import { db, rawClient } from "./db/index.js";
 import { createSessionManager } from "./services/session.manager.js";
 import type { ProviderName } from "./services/agent-provider.js";
 import { createBoardEvents } from "./services/board-events.js";
-import { workspaces, issues, projects, projectStatuses, preferences, sessions, sessionMessages, agentSkills, issueDependencies, scheduledRuns } from "@agentic-kanban/shared/schema";
+import { workspaces, issues, projects, projectStatuses, preferences, sessions, sessionMessages, agentSkills, issueDependencies, scheduledRuns, tags, issueTags } from "@agentic-kanban/shared/schema";
 import { getNextCronRun } from "@agentic-kanban/shared/lib/cron-utils";
 import { eq, sql, desc } from "drizzle-orm";
 import * as agentService from "./services/agent.service.js";
@@ -18,6 +18,7 @@ import * as gitService from "./services/git.service.js";
 import { killProcessesInDir } from "./services/process-cleanup.js";
 import { runScript } from "./services/script-runner.js";
 import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { existsSync } from "node:fs";
@@ -28,6 +29,7 @@ import { PREF_CODEX_PROFILE, PREF_COPILOT_PROFILE } from "./constants/preference
 import { sendMonitorNudge, type MonitorActionName } from "./services/monitor-nudge.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+const execFileAsync = promisify(execFile);
 
 const DEFAULT_MONITOR_NUDGE_PROMPT =
   "Please continue with the task. If you are waiting for input or unsure how to proceed, use your best judgment and keep moving forward. Check the issue description and any open questions, then take the next logical step.";
@@ -434,6 +436,56 @@ export async function startServer(port?: number) {
     }
   }
 
+  /** Tag the issue with "needs-visual-verification" when in after_merge mode and client files changed. */
+  async function tagIfNeedsVisualVerification(
+    repoPath: string,
+    branch: string,
+    baseBranch: string | null,
+    issueId: string,
+    now: string,
+  ): Promise<void> {
+    try {
+      const prefRows = await db.select({ key: preferences.key, value: preferences.value }).from(preferences);
+      const prefMap = new Map(prefRows.map(r => [r.key, r.value]));
+      if (prefMap.get("visual_verification_mode") !== "after_merge") return;
+
+      const base = baseBranch || "main";
+      const { stdout } = await execFileAsync("git", ["diff", "--name-only", `${base}...${branch}`], { cwd: repoPath });
+      const changedFiles = stdout.split("\n").map(f => f.trim()).filter(Boolean);
+      const hasClientChanges = changedFiles.some(
+        f => f.startsWith("packages/client/") && /\.(tsx?|jsx?|css)$/.test(f)
+      );
+      if (!hasClientChanges) return;
+
+      const TAG_NAME = "needs-visual-verification";
+      const TAG_COLOR = "#F59E0B"; // amber
+
+      // Ensure the tag exists (upsert by name)
+      let tagId: string;
+      const existing = await db.select({ id: tags.id }).from(tags).where(eq(tags.name, TAG_NAME)).limit(1);
+      if (existing.length > 0) {
+        tagId = existing[0].id;
+      } else {
+        const { randomUUID } = await import("node:crypto");
+        tagId = randomUUID();
+        await db.insert(tags).values({ id: tagId, name: TAG_NAME, color: TAG_COLOR, createdAt: now });
+        console.log(`[workflow] created tag "${TAG_NAME}"`);
+      }
+
+      // Add the tag to the issue (ignore duplicate)
+      const alreadyTagged = await db.select({ tagId: issueTags.tagId }).from(issueTags)
+        .where(eq(issueTags.issueId, issueId)).limit(100);
+      const hasTag = alreadyTagged.some(t => t.tagId === tagId);
+      if (!hasTag) {
+        const { randomUUID } = await import("node:crypto");
+        await db.insert(issueTags).values({ id: randomUUID(), issueId, tagId }).catch(() => {/* already exists */});
+        console.log(`[workflow] tagged issue ${issueId} with "${TAG_NAME}"`);
+      }
+    } catch (err) {
+      console.warn("[workflow] tagIfNeedsVisualVerification failed (non-fatal):", err);
+    }
+  }
+
   async function autoMerge(
     workspace: { id: string; isDirect: boolean; branch: string; workingDir: string | null; baseBranch: string | null; issueId: string },
     projectId: string,
@@ -490,6 +542,10 @@ export async function startServer(port?: number) {
               try { await runScript(teardownScript, workspace.workingDir, `teardown:${workspace.id}`); } catch { /* best effort */ }
             }
           }
+
+          // In after_merge mode, check for client UI changes and tag the issue
+          await tagIfNeedsVisualVerification(repoPath, workspace.branch, workspace.baseBranch, issueId, now);
+
           await gitService.mergeBranch(repoPath, workspace.branch);
           if (workspace.workingDir) {
             try { await gitService.removeWorktree(repoPath, workspace.workingDir); } catch { /* best effort */ }
