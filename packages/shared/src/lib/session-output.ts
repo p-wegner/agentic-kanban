@@ -14,7 +14,11 @@ interface ParsedLine {
   type?: string;
   subtype?: string;
   data?: {
+<<<<<<< HEAD
     content?: string | unknown[];
+=======
+    content?: string;
+>>>>>>> d97d029 (fix: add missing reasoningText to ParsedLine data type)
     reasoningText?: string;
     model?: string;
     toolCallId?: string;
