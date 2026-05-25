@@ -826,6 +826,14 @@ Server: http://localhost:${serverPort}`;
     throw err;
   }
 
+  // Ensure required built-in tags exist (idempotent — safe to run on every startup)
+  try {
+    const { ensureBuiltinTags } = await import("./db/seed.js");
+    await ensureBuiltinTags(db);
+  } catch (err) {
+    console.warn("[startup] ensureBuiltinTags failed (non-fatal):", err instanceof Error ? err.message : String(err));
+  }
+
   // Remove duplicate projects that share the same git root (e.g. a legacy "server" project
   // registered from packages/server before detectRepoInfo added git-root resolution).
   try {
