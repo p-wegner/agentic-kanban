@@ -31,7 +31,7 @@ export async function updateWorkspaceStatus(
 export async function resolveProjectFull(
   workspaceId: string,
   database: Database = db,
-): Promise<{ project: Project | null; repoPath: string; defaultBranch: string }> {
+): Promise<{ project: Project | null; repoPath: string; defaultBranch: string | null }> {
   const wsRows = await database
     .select({ issueId: workspaces.issueId })
     .from(workspaces)
@@ -60,7 +60,7 @@ export async function resolveProjectFull(
 export async function resolveProjectRepo(
   workspaceId: string,
   database: Database = db,
-): Promise<{ repoPath: string; defaultBranch: string }> {
+): Promise<{ repoPath: string; defaultBranch: string | null }> {
   const wsRows = await database
     .select()
     .from(workspaces)
