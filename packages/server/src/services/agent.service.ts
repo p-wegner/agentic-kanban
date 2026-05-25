@@ -1,4 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
+import { openSync, closeSync, readSync, statSync, unlinkSync, existsSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { buildAgentLaunchConfig, type ProviderId, type ProviderName } from "./agent-provider.js";
 
 export interface AgentOutputEvent {
@@ -13,6 +16,13 @@ export type AgentOutputCallback = (event: AgentOutputEvent) => void;
 const activeProcesses = new Map<string, ChildProcess>();
 const activePids = new Map<string, number>();
 const stdinOpen = new Map<string, boolean>();
+const outputWatchers = new Map<string, { close(): void }>();
+const pidWatchers = new Map<string, { close(): void }>();
+
+/** Get the output file path for a session. */
+export function sessionOutputPath(sessionId: string): string {
+  return join(tmpdir(), `kanban-session-${sessionId}.out`);
+}
 
 function killPid(pid: number): void {
   if (process.platform === "win32") {
@@ -24,6 +34,79 @@ function killPid(pid: number): void {
       console.warn(`[agent] failed to kill pid=${pid}`, err);
     }
   }
+}
+
+/** Watch a session output file for new content and feed it to onOutput. */
+function startOutputFileWatcher(
+  sessionId: string,
+  filePath: string,
+  onOutput: AgentOutputCallback,
+  startOffset = 0,
+): { close(): void } {
+  let offset = startOffset;
+  let closed = false;
+  const poll = () => {
+    if (closed) return;
+    try {
+      const stat = statSync(filePath);
+      if (stat.size > offset) {
+        const fd = openSync(filePath, "r");
+        try {
+          const buf = Buffer.alloc(stat.size - offset);
+          readSync(fd, buf, 0, buf.length, offset);
+          offset = stat.size;
+          const data = buf.toString();
+          if (data) {
+            try {
+              onOutput({ type: "stdout", sessionId, data });
+            } catch (err) {
+              console.error(`[agent] output-watcher callback error: sessionId=${sessionId}`, err);
+            }
+          }
+        } finally {
+          closeSync(fd);
+        }
+      }
+    } catch {
+      // File might not exist yet or was deleted — ignore
+    }
+  };
+  const timer = setInterval(poll, 500);
+  // Unref so the timer doesn't keep the process alive (only matters for the agent child,
+  // not the server, but keeps things clean)
+  if (timer.unref) timer.unref();
+  return {
+    close() {
+      closed = true;
+      clearInterval(timer);
+    },
+  };
+}
+
+/** Poll a PID and call onExit when the process dies. */
+function startPidWatcher(
+  sessionId: string,
+  pid: number,
+  onExit: () => void,
+): { close(): void } {
+  let closed = false;
+  const timer = setInterval(() => {
+    if (closed) return;
+    try {
+      process.kill(pid, 0);
+    } catch {
+      closed = true;
+      clearInterval(timer);
+      onExit();
+    }
+  }, 5000);
+  if (timer.unref) timer.unref();
+  return {
+    close() {
+      closed = true;
+      clearInterval(timer);
+    },
+  };
 }
 
 /**
@@ -66,11 +149,23 @@ export function launch(
 
   console.log(`[agent] launching: command=${command} provider=${provider ?? "auto"} worktree=${worktreePath} sessionId=${sessionId} resume=${providerSessionId ?? "none"}`);
 
-  // On Windows, detached: true breaks stdout pipes (and the exit event) when shell: true
-  // is used — this hits mock agents and Codex (a .cmd shim that requires a shell). Such
-  // agents can't survive a server hot-reload, but detaching them would drop all their output.
-  // Real claude.exe agents don't need a shell, so they stay detached to outlive hot-reloads.
-  const shouldDetach = provider !== "copilot" && !(useShell && process.platform === "win32");
+  // Agents that don't need a shell can be detached — they survive tsx watch hot-reloads.
+  // shell: true on Windows is used by mock agents and Codex (.cmd shim) — detaching those
+  // breaks stdout pipes, so they stay attached (sacrificing hot-reload survival for output).
+  const shouldDetach = !(useShell && process.platform === "win32");
+
+  // For detached agents, redirect stdout to a file so the output survives server restarts.
+  // Non-detached agents use pipes as before.
+  let outFd: number | undefined;
+  let stdioConfig: ["pipe", "pipe" | number, "pipe" | "ignore"];
+  if (shouldDetach) {
+    const outPath = sessionOutputPath(sessionId);
+    outFd = openSync(outPath, "w");
+    stdioConfig = ["pipe", outFd, "ignore"];
+  } else {
+    stdioConfig = ["pipe", "pipe", "pipe"];
+  }
+
   const proc = spawn(command, args, {
     cwd: worktreePath,
     shell: useShell,
@@ -86,15 +181,12 @@ export function launch(
       PORT: process.env.PORT || "3001",
       ...extraEnv,
     },
-    // For real (detached) agents on Windows, use "ignore" for stderr so grandchild processes
-    // spawned by claude.exe don't inherit a broken pipe handle after the server hot-reloads.
-    // Mock agents (not detached) use "pipe" so we can capture the "resuming session" log.
-    stdio: ["pipe", "pipe", shouldDetach ? "ignore" as const : "pipe" as const],
+    stdio: stdioConfig,
   });
   // Allow server to exit/restart without waiting for real agents
   if (shouldDetach) proc.unref();
 
-  console.log(`[agent] spawned: sessionId=${sessionId} pid=${proc.pid} command=${command} shell=${useShell}`);
+  console.log(`[agent] spawned: sessionId=${sessionId} pid=${proc.pid} command=${command} shell=${useShell} detached=${shouldDetach}`);
 
   // In keepAlive (multi-turn) mode, keep stdin open so follow-ups can be sent via sendInput.
   // Otherwise close stdin immediately — on Windows, claude.exe buffers stdout until stdin closes.
@@ -112,27 +204,41 @@ export function launch(
     activePids.set(sessionId, proc.pid);
   }
 
-  proc.stdout?.on("data", (chunk: Buffer) => {
-    try {
-      onOutput({ type: "stdout", sessionId, data: chunk.toString() });
-    } catch (err) {
-      console.error(`[agent] stdout callback error: sessionId=${sessionId}`, err);
-    }
-  });
+  if (shouldDetach) {
+    // File-based output: watch the output file for new content
+    const outPath = sessionOutputPath(sessionId);
+    const watcher = startOutputFileWatcher(sessionId, outPath, onOutput);
+    outputWatchers.set(sessionId, watcher);
+  } else {
+    // Pipe-based output: read directly from stdout
+    proc.stdout?.on("data", (chunk: Buffer) => {
+      try {
+        onOutput({ type: "stdout", sessionId, data: chunk.toString() });
+      } catch (err) {
+        console.error(`[agent] stdout callback error: sessionId=${sessionId}`, err);
+      }
+    });
 
-  proc.stderr?.on("data", (chunk: Buffer) => {
-    try {
-      onOutput({ type: "stderr", sessionId, data: chunk.toString() });
-    } catch (err) {
-      console.error(`[agent] stderr callback error: sessionId=${sessionId}`, err);
-    }
-  });
+    proc.stderr?.on("data", (chunk: Buffer) => {
+      try {
+        onOutput({ type: "stderr", sessionId, data: chunk.toString() });
+      } catch (err) {
+        console.error(`[agent] stderr callback error: sessionId=${sessionId}`, err);
+      }
+    });
+  }
 
   proc.on("exit", (code, signal) => {
     console.log(`[agent] exited: sessionId=${sessionId} code=${code} signal=${signal ?? "none"} pid=${proc.pid}`);
     activeProcesses.delete(sessionId);
     activePids.delete(sessionId);
     stdinOpen.delete(sessionId);
+    // Clean up output file watcher and output file
+    const watcher = outputWatchers.get(sessionId);
+    if (watcher) { watcher.close(); outputWatchers.delete(sessionId); }
+    const pidW = pidWatchers.get(sessionId);
+    if (pidW) { pidW.close(); pidWatchers.delete(sessionId); }
+    cleanupOutputFile(sessionId);
     try {
       onOutput({ type: "exit", sessionId, exitCode: code });
     } catch (err) {
@@ -149,6 +255,11 @@ export function launch(
     }
     activeProcesses.delete(sessionId);
     activePids.delete(sessionId);
+    const watcher = outputWatchers.get(sessionId);
+    if (watcher) { watcher.close(); outputWatchers.delete(sessionId); }
+    const pidW = pidWatchers.get(sessionId);
+    if (pidW) { pidW.close(); pidWatchers.delete(sessionId); }
+    cleanupOutputFile(sessionId);
     try {
       onOutput({ type: "exit", sessionId, exitCode: 1 });
     } catch (cbErr) {
@@ -157,6 +268,12 @@ export function launch(
   });
 
   return proc;
+}
+
+/** Delete the output file for a session. */
+function cleanupOutputFile(sessionId: string): void {
+  const outPath = sessionOutputPath(sessionId);
+  try { unlinkSync(outPath); } catch { /* already gone */ }
 }
 
 /** Kill a running agent process by session ID. */
@@ -171,6 +288,11 @@ export function kill(sessionId: string): boolean {
   activeProcesses.delete(sessionId);
   activePids.delete(sessionId);
   stdinOpen.delete(sessionId);
+  const watcher = outputWatchers.get(sessionId);
+  if (watcher) { watcher.close(); outputWatchers.delete(sessionId); }
+  const pidW = pidWatchers.get(sessionId);
+  if (pidW) { pidW.close(); pidWatchers.delete(sessionId); }
+  cleanupOutputFile(sessionId);
   return true;
 }
 
@@ -214,6 +336,10 @@ export function killAll(): number {
   activeProcesses.clear();
   activePids.clear();
   stdinOpen.clear();
+  for (const watcher of outputWatchers.values()) watcher.close();
+  outputWatchers.clear();
+  for (const w of pidWatchers.values()) w.close();
+  pidWatchers.clear();
   return count;
 }
 
@@ -243,4 +369,48 @@ export function isPidAlive(sessionId: string): boolean {
     activePids.delete(sessionId);
     return false;
   }
+}
+
+/**
+ * Reattach to a surviving agent process after server restart.
+ * Starts watching the output file for new content and polls the PID for exit.
+ */
+export function reattachSession(
+  sessionId: string,
+  pid: number,
+  onOutput: AgentOutputCallback,
+  onExit: () => void,
+): void {
+  activePids.set(sessionId, pid);
+
+  // Start watching the output file from its current end
+  const outPath = sessionOutputPath(sessionId);
+  if (existsSync(outPath)) {
+    try {
+      const stat = statSync(outPath);
+      const watcher = startOutputFileWatcher(sessionId, outPath, onOutput, stat.size);
+      outputWatchers.set(sessionId, watcher);
+      console.log(`[agent] reattached output: sessionId=${sessionId} pid=${pid} fileOffset=${stat.size}`);
+    } catch {
+      console.warn(`[agent] failed to read output file for reattach: sessionId=${sessionId}`);
+    }
+  }
+
+  // Start PID exit monitoring
+  const pidWatcher = startPidWatcher(sessionId, pid, () => {
+    console.log(`[agent] reattached process exited: sessionId=${sessionId} pid=${pid}`);
+    activePids.delete(sessionId);
+    const w = outputWatchers.get(sessionId);
+    if (w) { w.close(); outputWatchers.delete(sessionId); }
+    cleanupOutputFile(sessionId);
+    try {
+      onOutput({ type: "exit", sessionId, exitCode: null });
+    } catch (err) {
+      console.error(`[agent] reattach exit callback error: sessionId=${sessionId}`, err);
+    }
+    onExit();
+  });
+  pidWatchers.set(sessionId, pidWatcher);
+
+  console.log(`[agent] reattached: sessionId=${sessionId} pid=${pid}`);
 }
