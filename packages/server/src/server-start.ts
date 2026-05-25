@@ -830,9 +830,15 @@ Server: http://localhost:${serverPort}`;
   }
 
   // Clean up stale sessions
-  const staleSessions = await db.select({ id: sessions.id, workspaceId: sessions.workspaceId, pid: sessions.pid }).from(sessions).where(eq(sessions.status, "running"));
+  // Clean up stale sessions and reattach to surviving agent processes
+  const staleSessions = await db.select({
+    id: sessions.id,
+    workspaceId: sessions.workspaceId,
+    pid: sessions.pid,
+    executor: sessions.executor,
+  }).from(sessions).where(eq(sessions.status, "running"));
   if (staleSessions.length > 0) {
-    console.log(`[startup] Cleaning up ${staleSessions.length} stale session(s)`);
+    console.log(`[startup] Checking ${staleSessions.length} running session(s)`);
     const now = new Date().toISOString();
     const dead = [];
     const alive = [];
@@ -851,15 +857,49 @@ Server: http://localhost:${serverPort}`;
     for (const s of dead) {
       await db.update(sessions).set({ status: "stopped", endedAt: now }).where(eq(sessions.id, s.id));
     }
-    if (alive.length > 0) {
-      for (const s of alive) {
-        if (s.pid) agentService.registerPid(s.id, s.pid);
-      }
-      console.log(`[startup] ${alive.length} session(s) have surviving agent processes — leaving as running`);
-    }
-    const workspaceIds = [...new Set(staleSessions.map(s => s.workspaceId))];
-    for (const wsId of workspaceIds) {
+    // Only set idle for workspaces whose sessions are dead
+    const deadWorkspaceIds = [...new Set(dead.map(s => s.workspaceId))];
+    for (const wsId of deadWorkspaceIds) {
       await db.update(workspaces).set({ status: "idle", updatedAt: now }).where(eq(workspaces.id, wsId));
+    }
+    if (dead.length > 0) {
+      console.log(`[startup] ${dead.length} dead session(s) cleaned up`);
+    }
+    if (alive.length > 0) {
+      console.log(`[startup] ${alive.length} session(s) have surviving agent processes — reattaching`);
+      for (const s of alive) {
+        if (!s.pid) continue;
+        // Look up workspace → issue → project for session context
+        const wsRows = await db.select({
+          issueId: workspaces.issueId,
+        }).from(workspaces).where(eq(workspaces.id, s.workspaceId)).limit(1);
+        let issueId = "";
+        let projectId = "";
+        if (wsRows.length > 0) {
+          issueId = wsRows[0].issueId;
+          const issueRows = await db.select({ projectId: issues.projectId }).from(issues).where(eq(issues.id, issueId)).limit(1);
+          if (issueRows.length > 0) projectId = issueRows[0].projectId;
+        }
+        // Restore session manager in-memory state
+        sessionManager.reattachSession({
+          sessionId: s.id,
+          workspaceId: s.workspaceId,
+          issueId,
+          projectId,
+          providerName: s.executor ?? undefined,
+        });
+        // Reattach output file watcher and PID exit monitor
+        agentService.reattachSession(
+          s.id,
+          s.pid,
+          (event) => { sessionManager.handleOutput(s.id, event); },
+          () => {
+            sessionManager.notifyExternalExit(s.id, null).catch((err: unknown) => {
+              console.error(`[startup] Failed to handle reattached session exit: sessionId=${s.id}`, err);
+            });
+          },
+        );
+      }
     }
   }
 
