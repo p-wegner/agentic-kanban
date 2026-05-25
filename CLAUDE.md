@@ -6,7 +6,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Stage 13 complete + Tauri desktop (Stages 0-13 done). Tech stack: TypeScript monorepo — Hono + Drizzle + React + MCP SDK + Tauri v2. Current progress: `docs/state.md`. Feature catalog visually verified: 2026-05-23.
 
 ## Active Project
-The board has two registered projects pointing at the same repo: "server" (packages/server) and "agentic-kanban" (repo root). **The active project is "agentic-kanban"** (`f6046402-8373-4294-9624-e0e4e54e1961`) — always use this for board monitor cycles, workspace operations, and MCP tools. The "server" project is a leftover from early dev and should not be used.
+The active project is "agentic-kanban" — always use this for board monitor cycles, workspace operations, and MCP tools.
+
+**Note:** On server startup, `deduplicateProjects()` automatically removes legacy duplicate projects (e.g. a "server" project registered from `packages/server` before git-root resolution was added). If you see two projects for the same repo, restart the server — it will self-heal.
 
 ## What This Is
 Cleanroom reimplementation of [vibe-kanban](https://github.com/BloopAI/vibe-kanban) — a kanban board for managing AI-driven coding tasks. Personal use only, single user, local-first.
@@ -39,6 +41,7 @@ All git operations live in `packages/shared/src/lib/git-service.ts`. Both `packa
 - **Direct workspace diff only shows tracked files**: `git diff HEAD` excludes untracked files. `getWorkingTreeDiff()` also runs `git ls-files --others --exclude-standard` for new files.
 
 ### E2E testing
+- **Always use `127.0.0.1`, never `localhost`** — on Windows, `localhost` resolves to `::1` (IPv6) but Playwright and the server listen on `127.0.0.1`. Using `localhost` causes silent ECONNREFUSED failures that are extremely hard to debug.
 - **Playwright browsers are pre-installed** — do NOT run `playwright install` or `playwright install chromium` in agent sessions. The headless-shell binary is already at `%LOCALAPPDATA%\ms-playwright\chromium_headless_shell-1217\`. Running install again wastes time and may corrupt the lock file. If you see "Executable not found", check `packages/e2e/playwright.config.ts` — it auto-detects the binary path.
 - **E2E locator specificity**: `page.locator("text=X")` can match multiple elements — use scoped selectors: `page.locator("label", { hasText: "X" })` or `.first()`.
 - **E2E test data cleanup**: Use `test.afterAll` to reset preferences/settings state. Use `Date.now()` suffixes for edited titles — hardcoded titles accumulate across runs. Known flaky: `board.test.ts` "edit issue from detail panel".

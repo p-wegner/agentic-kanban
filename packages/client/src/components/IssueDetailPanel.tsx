@@ -23,11 +23,11 @@ interface IssueDetailPanelProps {
   onNavigateToIssue?: (issueId: string) => void;
 }
 
-const priorityColors: Record<string, string> = {
-  low: "bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300",
-  medium: "bg-blue-100 text-blue-700",
-  high: "bg-orange-100 text-orange-700",
-  critical: "bg-red-100 text-red-700",
+const issueTypeColors: Record<string, string> = {
+  task: "bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300",
+  bug: "bg-red-100 text-red-700",
+  feature: "bg-blue-100 text-blue-700",
+  chore: "bg-amber-100 text-amber-700",
 };
 
 function CopyButton({ text }: { text: string }) {
@@ -85,7 +85,7 @@ export function IssueDetailPanel({
   const [title, setTitle] = useState(issue.title);
   const [description, setDescription] = useState(issue.description ?? "");
   const [pastedImages, setPastedImages] = useState<string[]>([]);
-  const [priority, setPriority] = useState(issue.priority);
+  const [issueType, setIssueType] = useState(issue.issueType ?? "task");
   const [estimate, setEstimate] = useState<string>(issue.estimate ?? "");
   const [skipAutoReview, setSkipAutoReview] = useState(issue.skipAutoReview ?? false);
   const [saving, setSaving] = useState(false);
@@ -116,7 +116,7 @@ export function IssueDetailPanel({
   const hasChanges = editing && (
     title !== issue.title ||
     description !== (issue.description ?? "") ||
-    priority !== issue.priority ||
+    issueType !== (issue.issueType ?? "task") ||
     estimate !== (issue.estimate ?? "") ||
     skipAutoReview !== (issue.skipAutoReview ?? false)
   );
@@ -148,7 +148,7 @@ export function IssueDetailPanel({
     if (!editing) {
       setTitle(issue.title);
       setDescription(issue.description ?? "");
-      setPriority(issue.priority);
+      setIssueType(issue.issueType ?? "task");
       setEstimate(issue.estimate ?? "");
       setSkipAutoReview(issue.skipAutoReview ?? false);
     }
@@ -190,7 +190,7 @@ export function IssueDetailPanel({
     setPreEnhanceSnapshot(null);
     setTitle(issue.title);
     setDescription(issue.description ?? "");
-    setPriority(issue.priority);
+    setIssueType(issue.issueType ?? "task");
     setEstimate(issue.estimate ?? "");
     setSkipAutoReview(issue.skipAutoReview ?? false);
   }
@@ -313,7 +313,7 @@ export function IssueDetailPanel({
       await onUpdate(issue.id, {
         title: title.trim(),
         description: fullDescription || undefined,
-        priority: priority as UpdateIssueRequest["priority"],
+        issueType: issueType as UpdateIssueRequest["issueType"],
         estimate: (estimate || null) as UpdateIssueRequest["estimate"],
         skipAutoReview,
       });
@@ -451,7 +451,7 @@ export function IssueDetailPanel({
     onClose();
   }
 
-  const badgeColor = priorityColors[issue.priority] ?? "bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300";
+  const badgeColor = issueTypeColors[issue.issueType ?? "task"] ?? "bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300";
 
   return (
     <>
@@ -752,25 +752,25 @@ export function IssueDetailPanel({
             </select>
           </div>
 
-          {/* Priority - always visible, editable in edit mode */}
+          {/* Type - always visible, editable in edit mode */}
           <div>
             <label className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">
-              Priority
+              Type
             </label>
             {editing ? (
               <select
-                value={priority}
-                onChange={(e) => setPriority(e.target.value)}
+                value={issueType}
+                onChange={(e) => setIssueType(e.target.value)}
                 className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
               >
-                <option value="low">Low</option>
-                <option value="medium">Medium</option>
-                <option value="high">High</option>
-                <option value="critical">Critical</option>
+                <option value="task">Task</option>
+                <option value="bug">Bug</option>
+                <option value="feature">Feature</option>
+                <option value="chore">Chore</option>
               </select>
             ) : (
               <span className={`inline-block text-xs font-medium px-1.5 py-0.5 rounded capitalize ${badgeColor}`}>
-                {issue.priority}
+                {issue.issueType ?? "task"}
               </span>
             )}
           </div>

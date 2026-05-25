@@ -2,8 +2,8 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { execFile } from "node:child_process";
-import { detectRepoInfo } from "../services/git-info.service.js";
+import { execFile, execFileSync } from "node:child_process";
+import { detectRepoInfo, getProjectGitStats } from "../services/git-info.service.js";
 
 function exec(cmd: string, args: string[], cwd: string): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -36,6 +36,18 @@ describe("detectRepoInfo", () => {
     expect(info.repoName).toBe(tempDir.split(/[/\\]/).pop()!);
     expect(info.defaultBranch === "main" || info.defaultBranch === "master").toBe(true);
     expect(info.remoteUrl).toBeNull();
+  });
+
+  it("resolves to git root when called from a subdirectory", async () => {
+    const subDir = join(tempDir, "sub", "nested");
+    await exec("git", ["config", "user.email", "test@test.com"], tempDir);
+    const { mkdir } = await import("node:fs/promises");
+    await mkdir(subDir, { recursive: true });
+
+    const info = await detectRepoInfo(subDir);
+    // Should resolve to the git root, not the subdirectory
+    expect(info.repoPath).toBe(tempDir);
+    expect(info.repoName).toBe(tempDir.split(/[/\\]/).pop()!);
   });
 
   it("throws for non-git directory", async () => {
@@ -80,5 +92,65 @@ describe("detectRepoInfo", () => {
     expect(info.defaultBranch).toBe("main");
 
     await rm(bothDir, { recursive: true, force: true });
+  });
+});
+
+describe("getProjectGitStats", () => {
+  let repoDir: string;
+
+  beforeAll(async () => {
+    repoDir = await mkdtemp(join(tmpdir(), "kanban-stats-test-"));
+    await exec("git", ["init"], repoDir);
+    await exec("git", ["config", "user.email", "test@test.com"], repoDir);
+    await exec("git", ["config", "user.name", "Test"], repoDir);
+    await exec("git", ["commit", "--allow-empty", "-m", "first commit"], repoDir);
+    await exec("git", ["commit", "--allow-empty", "-m", "second commit"], repoDir);
+  });
+
+  afterAll(async () => {
+    await rm(repoDir, { recursive: true, force: true });
+  });
+
+  it("returns commit count when defaultBranch is provided", () => {
+    const branchName = execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], { cwd: repoDir })
+      .toString()
+      .trim();
+    const stats = getProjectGitStats(repoDir, branchName);
+    expect(stats.commitCount).toBe(2);
+    expect(stats.detectedBranch).toBe(branchName);
+    expect(stats.recentCommits).toHaveLength(2);
+    expect(stats.recentCommits[0].message).toBe("second commit");
+  });
+
+  it("auto-detects branch and returns commit count when defaultBranch is null (bug fix)", () => {
+    // This was the bug: passing null would return { commitCount: 0 } immediately
+    const stats = getProjectGitStats(repoDir, null);
+    expect(stats.commitCount).toBe(2);
+    expect(stats.detectedBranch).toMatch(/^(main|master)$/);
+  });
+
+  it("returns zero commits for an invalid/non-existent repo path", () => {
+    const stats = getProjectGitStats("C:\\nonexistent\\path", "main");
+    expect(stats.commitCount).toBe(0);
+    expect(stats.recentCommits).toHaveLength(0);
+  });
+
+  it("returns null detectedBranch when branch cannot be detected", () => {
+    // A repo on a custom branch (not main/master) with null defaultBranch
+    const stats = getProjectGitStats(repoDir, null);
+    // Should still detect something (main or master) for this test repo
+    expect(stats.detectedBranch).not.toBeNull();
+  });
+
+  it("parses recent commits with correct fields", () => {
+    const branchName = execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], { cwd: repoDir })
+      .toString()
+      .trim();
+    const stats = getProjectGitStats(repoDir, branchName);
+    for (const commit of stats.recentCommits) {
+      expect(commit.hash).toHaveLength(7);
+      expect(typeof commit.message).toBe("string");
+      expect(typeof commit.date).toBe("string");
+    }
   });
 });

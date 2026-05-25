@@ -55,26 +55,34 @@ function isSkillRead(name: string, input: Record<string, unknown>): string | nul
 
 function summarizeToolCall(name: string, input: Record<string, unknown>): string {
   switch (name) {
-    case "Read": {
+    case "Read":
+    case "view": {
       const skillName = isSkillRead(name, input);
       if (skillName) return `Loading skill: ${skillName}`;
-      return `Reading ${basename((input.file_path as string) || "file")}`;
+      return `Reading ${basename((input.file_path as string) || (input.path as string) || "file")}`;
     }
     case "Edit":
-      return `Editing ${basename((input.file_path as string) || "file")}`;
+    case "edit":
+      return `Editing ${basename((input.file_path as string) || (input.path as string) || "file")}`;
     case "Write":
-      return `Writing ${basename((input.file_path as string) || "file")}`;
-    case "Bash": {
+    case "create":
+      return `Writing ${basename((input.file_path as string) || (input.path as string) || "file")}`;
+    case "Bash":
+    case "powershell":
+    case "shell": {
       const cmd = ((input.command as string) || "").slice(0, 80);
       return `Running: ${cmd || "command"}`;
     }
     case "Grep":
+    case "grep":
       return `Searching for "${input.pattern || "pattern"}"`;
     case "Glob":
+    case "glob":
       return `Finding ${input.pattern || "files"}`;
     case "Agent":
-      return `Subagent: ${(input.description as string) || "delegating to agent"}`;
+      return `Subagent: ${(input.description as string) || (input.prompt as string) || "delegating to agent"}`;
     case "WebSearch":
+    case "web_search":
       return "Searching web";
     case "WebFetch":
     case "mcp__web_reader__webReader":
@@ -355,7 +363,7 @@ export function TerminalView({ messages, connectionState, parseOutput = "minimal
         case "result": color = event.success ? "bg-emerald-400" : "bg-red-400"; break;
         case "init": color = "bg-cyan-400"; break;
         case "task_started": color = "bg-blue-500"; break;
-        case "notification": color = "bg-orange-500"; break;
+        case "notification": color = (event.kind === "notification" && event.key === "user") ? "bg-blue-500" : "bg-orange-500"; break;
         case "rate_limit": color = "bg-yellow-500"; break;
         default: color = "bg-gray-600";
       }
@@ -943,18 +951,22 @@ function renderParsedEvent(event: DisplayEvent, key: number, ctx: RenderContext)
 
   if (event.kind === "notification") {
     const inSubagent = isInsideSubagent && !isSubagentStart;
+    const isUserMsg = event.key === "user";
     if (isMinimal) {
       return (
         <div key={key} data-event-idx={key} className={`mb-0.5 text-[11px] ${inSubagent ? "ml-6" : "ml-1"}`}>
-          <span className="text-orange-400">Note: </span>
-          <span className="text-gray-400">{event.text}</span>
+          {isUserMsg
+            ? <><span className="text-blue-400">User: </span><span className="text-gray-300">{event.text}</span></>
+            : <><span className="text-orange-400">Note: </span><span className="text-gray-400">{event.text}</span></>}
         </div>
       );
     }
     return (
-      <div key={key} data-event-idx={key} className={`mb-1 ${inSubagent ? "ml-6" : "ml-2"} pl-2 border-l-2 border-orange-600`}>
-        <span className="text-orange-400">Notification: {event.text}</span>
-        <div className="text-gray-600 text-[10px]">{event.key} | {event.priority}</div>
+      <div key={key} data-event-idx={key} className={`mb-1 ${inSubagent ? "ml-6" : "ml-2"} pl-2 ${isUserMsg ? "border-l-2 border-blue-600" : "border-l-2 border-orange-600"}`}>
+        {isUserMsg
+          ? <span className="text-blue-400">User: <span className="text-gray-300">{event.text}</span></span>
+          : <span className="text-orange-400">Notification: {event.text}</span>}
+        {!isUserMsg && <div className="text-gray-600 text-[10px]">{event.key} | {event.priority}</div>}
       </div>
     );
   }

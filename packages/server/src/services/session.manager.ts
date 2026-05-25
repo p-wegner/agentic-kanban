@@ -45,6 +45,13 @@ export interface StartSessionOptions {
   extraEnv?: Record<string, string>;
   /** Override the working directory used to launch the agent (bypasses workspace.workingDir). */
   workingDirOverride?: string;
+  /**
+   * Explicitly request permission elevation for this session. When true, applies
+   * --dangerously-skip-permissions (Claude) or --allow-all (Copilot) regardless of the
+   * global skip_permissions preference. When false, disables skip-permissions even if the
+   * preference is enabled. When undefined, falls back to the DB preference as before.
+   */
+  skipPermissions?: boolean;
 }
 
 function createSessionManager(
@@ -308,6 +315,7 @@ function createSessionManager(
       profile,
       extraEnv,
       workingDirOverride,
+      skipPermissions: skipPermissionsOpt,
     } = opts;
     // Look up workspace to get workingDir
     const wsRows = await db
@@ -382,16 +390,38 @@ function createSessionManager(
     });
     sessionProviders.set(sessionId, executor);
 
-    // Read skip_permissions preference
+    // Determine skip_permissions: explicit opt takes priority over global preference.
+    // When opts.skipPermissions is undefined, fall back to the DB preference.
     const skipPermRows = await db
       .select()
       .from(preferences)
       .where(eq(preferences.key, "skip_permissions"))
       .limit(1);
-    const skipPermissions = skipPermRows.length > 0 && skipPermRows[0].value === "true";
+    const dbSkipPerms = skipPermRows.length > 0 && skipPermRows[0].value === "true";
+    const skipPermissions = skipPermissionsOpt !== undefined ? skipPermissionsOpt : dbSkipPerms;
+
+    // For Claude only: skip-permissions is conveyed via --dangerously-skip-permissions in agentArgs.
+    // When the caller explicitly requests elevation, ensure the flag is present in agentArgs
+    // even if it was absent in the incoming opts (e.g. the global preference was off at the time
+    // the workspace was created but the user wants this restart elevated).
+    // Copilot and Codex use their own permission mechanisms and must not receive this Claude-specific flag.
+    let effectiveAgentArgs = agentArgs;
+    if (executor === "claude-code") {
+      if (skipPermissions && !effectiveAgentArgs?.includes("--dangerously-skip-permissions")) {
+        effectiveAgentArgs = effectiveAgentArgs
+          ? `${effectiveAgentArgs} --dangerously-skip-permissions`
+          : "--dangerously-skip-permissions";
+      } else if (!skipPermissions && effectiveAgentArgs?.includes("--dangerously-skip-permissions")) {
+        // Explicit skipPermissions=false overrides agentArgs that may have the flag embedded
+        effectiveAgentArgs = effectiveAgentArgs
+          .split(/\s+/)
+          .filter(a => a && a !== "--dangerously-skip-permissions")
+          .join(" ") || undefined;
+      }
+    }
 
     try {
-      const proc = agentService.launch(effectiveWorkingDir, sessionId, prompt, agentArgs, (event) => { // onOutput callback
+      const proc = agentService.launch(effectiveWorkingDir, sessionId, prompt, effectiveAgentArgs, (event) => { // onOutput callback
         // Broadcast to WebSocket subscribers
         const message: AgentOutputMessage = event;
         broadcast(sessionId, message);
