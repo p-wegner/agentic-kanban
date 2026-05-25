@@ -292,8 +292,11 @@ export async function startServer(port?: number) {
       if (workspace.workingDir) {
         try {
           if (workspace.isDirect) {
+            // Compare against the stored base commit SHA (captured at workspace creation).
+            // Falls back to HEAD~1 for workspaces created before this feature.
+            const baseRef = workspace.baseCommitSha || "HEAD~1";
             hasCommittedChanges = await new Promise<boolean>((resolve) => {
-              execFile("git", ["diff", "--quiet", "HEAD"], { cwd: workspace.workingDir! }, (err: Error | null) => {
+              execFile("git", ["diff", "--quiet", baseRef, "HEAD"], { cwd: workspace.workingDir! }, (err: Error | null) => {
                 resolve(!!err);
               });
             });
@@ -315,17 +318,16 @@ export async function startServer(port?: number) {
         }
       }
 
-      // Direct workspaces: close immediately on exit - no review/merge flow.
-      // The agent commits directly to the current checkout; there is no branch to merge and no review makes sense.
-      // Leaving the workspace idle would cause the monitor to relaunch it indefinitely.
-      if (workspace.isDirect) {
+      // Direct workspaces with no committed changes: close immediately (nothing to review).
+      // Direct workspaces WITH changes fall through to the review flow below.
+      if (workspace.isDirect && !hasCommittedChanges) {
         const doneStatus = findStatus("Done");
         await db.update(workspaces).set({ status: "closed", workingDir: null, updatedAt: now }).where(eq(workspaces.id, workspaceId));
         if (doneStatus) {
           await db.update(issues).set({ statusId: doneStatus.id, updatedAt: now }).where(eq(issues.id, issueId));
         }
         boardEvents.broadcast(projectId, "workspace_merged");
-        console.log(`[workflow] direct workspace ${workspaceId} closed on agent exit — issue moved to Done`);
+        console.log(`[workflow] direct workspace ${workspaceId} closed on agent exit (no committed changes) — issue moved to Done`);
         return;
       }
 
@@ -366,12 +368,16 @@ export async function startServer(port?: number) {
           const effectiveReviewProfile = getEffectiveProfile(prefMap, reviewProvider, claudeProfile);
           const profileSelection = effectiveReviewProfile ? { provider: reviewProvider, name: effectiveReviewProfile } : undefined;
           const reviewArgs = buildReviewArgs(prefMap, reviewProvider);
-          const autoFix = prefMap.get("review_auto_fix") !== "false";
+          // Direct workspaces: never auto-fix on the default branch — reviewer reports only
+          const autoFix = workspace.isDirect ? false : prefMap.get("review_auto_fix") !== "false";
           const provider = toExecutorProvider(reviewProvider);
           let diffRef = workspace.baseBranch || defaultBranch;
           let conflictingFiles: string[] | undefined;
           let uncommittedChanges: string[] | undefined;
-          if (!workspace.isDirect && workspace.workingDir) {
+          if (workspace.isDirect) {
+            // Use the commit SHA captured at workspace creation as the diff base
+            diffRef = workspace.baseCommitSha || defaultBranch;
+          } else if (workspace.workingDir) {
             const baseBranch = workspace.baseBranch || defaultBranch;
             if (!baseBranch) {
               console.warn(`[workflow] cannot launch review for workspace ${workspaceId}: no base/default branch configured`);
