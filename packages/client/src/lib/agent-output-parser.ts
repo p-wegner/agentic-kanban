@@ -6,6 +6,7 @@ import type {
   ParsedNotificationEvent,
   ParsedResultEvent,
   ParsedTaskStartedEvent,
+  ParsedThinkingEvent,
   ParsedToolResultEvent,
   ParsedToolUseEvent,
 } from "./claude-output-parser.js";
@@ -168,6 +169,37 @@ export class CopilotOutputParser implements AgentOutputParser {
       return [];
     }
 
+    // Handle assistant.message as a unified block: reasoning + content + tool registration
+    if (type === "assistant.message" && data) {
+      const events: DisplayEvent[] = [];
+      const msgModel = getString(data, ["model", "modelId", "model_id"]);
+      if (msgModel) this.model = msgModel;
+
+      // Emit reasoning/thinking if present (agent's chain-of-thought)
+      const reasoningText = getString(data, ["reasoningText", "reasoning_text"]);
+      if (reasoningText) {
+        events.push({ kind: "thinking", text: reasoningText } satisfies ParsedThinkingEvent);
+      }
+
+      // Emit assistant content if present
+      const contentText = contentToText(data.content) || getString(data, ["content", "text", "message"]);
+      if (contentText) {
+        events.push({ kind: "assistant", text: contentText, model: msgModel || this.model || "" } satisfies ParsedAssistantEvent);
+      }
+
+      // Register tool names from toolRequests for later tool_result name resolution
+      const toolRequests = Array.isArray(data.toolRequests) ? data.toolRequests : [];
+      for (const tr of toolRequests) {
+        const trObj = asRecord(tr);
+        if (!trObj) continue;
+        const callId = getString(trObj, ["toolCallId", "id", "call_id"]);
+        const toolName = getString(trObj, ["name"]);
+        if (callId && toolName) this.toolNameMap.set(callId, toolName);
+      }
+
+      return events;
+    }
+
     const assistantText = extractAssistantText(obj);
     if (assistantText) {
       const msgModel = getString(data || obj, ["model", "modelId", "model_id"]);
@@ -177,22 +209,6 @@ export class CopilotOutputParser implements AgentOutputParser {
         text: assistantText,
         model: msgModel || this.model || "",
       } satisfies ParsedAssistantEvent];
-    }
-    if (type === "assistant.message") {
-      // assistant.message with empty content but toolRequests — register tools for later lookup
-      if (data) {
-        const msgModel = getString(data, ["model", "modelId", "model_id"]);
-        if (msgModel) this.model = msgModel;
-        const toolRequests = Array.isArray(data.toolRequests) ? data.toolRequests : [];
-        for (const tr of toolRequests) {
-          const trObj = asRecord(tr);
-          if (!trObj) continue;
-          const callId = getString(trObj, ["toolCallId", "id", "call_id"]);
-          const toolName = getString(trObj, ["name"]);
-          if (callId && toolName) this.toolNameMap.set(callId, toolName);
-        }
-      }
-      return [];
     }
 
     if (type === "subagent.started" && data) {
