@@ -57,6 +57,7 @@ export class CopilotOutputParser implements AgentOutputParser {
 
   private buffer = "";
   private toolNameMap = new Map<string, string>();
+  private model = "";
 
   feed(data: string): DisplayEvent[] {
     this.buffer += data;
@@ -95,15 +96,67 @@ export class CopilotOutputParser implements AgentOutputParser {
 
     if (type && SESSION_START_TYPES.has(type)) {
       const payload = data || obj;
+      const context = asRecord(payload.context);
+      const cwd = getString(payload, ["cwd", "working_directory", "workingDirectory"])
+        || getString(context || {}, ["cwd", "working_directory", "workingDirectory"])
+        || "";
+      const model = getString(payload, ["model", "modelId", "model_id"])
+        || getString(context || {}, ["model", "modelId", "model_id"])
+        || this.model || "copilot";
       return [{
         kind: "init",
-        model: getString(payload, ["model", "modelId", "model_id"]) || "copilot",
+        model,
         sessionId: getString(payload, ["session_id", "sessionId", "sessionID", "id"]) || getString(obj, ["id"]),
-        cwd: getString(payload, ["cwd", "working_directory", "workingDirectory"]) || "",
+        cwd,
         tools: getStringArray(payload.tools),
         mcpServers: [],
         permissionMode: getString(payload, ["permissionMode", "permission_mode"]) || "",
       } satisfies ParsedInitEvent];
+    }
+
+    if (type === "session.model_change" && data) {
+      const newModel = getString(data, ["newModel", "model", "modelId", "model_id"]);
+      if (newModel) this.model = newModel;
+      return [];
+    }
+
+    if (type === "session.shutdown" && data) {
+      const codeChanges = asRecord(data.codeChanges);
+      const filesModified = Array.isArray(codeChanges?.filesModified)
+        ? (codeChanges.filesModified as unknown[]).filter((f): f is string => typeof f === "string")
+        : [];
+      const linesAdded = Number(codeChanges?.linesAdded ?? 0);
+      const linesRemoved = Number(codeChanges?.linesRemoved ?? 0);
+      const durationMs = Number(data.totalApiDurationMs ?? 0);
+      const shutdownType = String(data.shutdownType || "");
+      const resultText = filesModified.length > 0
+        ? `${shutdownType ? shutdownType + " — " : ""}+${linesAdded}/-${linesRemoved} lines in ${filesModified.length} file${filesModified.length !== 1 ? "s" : ""}`
+        : (shutdownType || "");
+      return [{
+        kind: "result",
+        success: shutdownType !== "error" && shutdownType !== "abrupt",
+        durationMs,
+        result: resultText,
+        totalCostUsd: 0,
+        inputTokens: 0,
+        outputTokens: 0,
+        model: this.model || "",
+      } satisfies ParsedResultEvent];
+    }
+
+    if (type === "user.message" && data) {
+      const content = getString(data, ["content"]);
+      if (content) {
+        const firstLine = content.split("\n")[0].trim();
+        const truncated = firstLine.length > 120 ? firstLine.slice(0, 120) + "…" : firstLine;
+        return [{
+          kind: "notification",
+          key: "user",
+          text: truncated,
+          priority: "user",
+        } satisfies ParsedNotificationEvent];
+      }
+      return [];
     }
 
     if (type === "assistant.reasoning") {
@@ -117,13 +170,30 @@ export class CopilotOutputParser implements AgentOutputParser {
 
     const assistantText = extractAssistantText(obj);
     if (assistantText) {
+      const msgModel = getString(data || obj, ["model", "modelId", "model_id"]);
+      if (msgModel) this.model = msgModel;
       return [{
         kind: "assistant",
         text: assistantText,
-        model: getString(data || obj, ["model", "modelId", "model_id"]) || "",
+        model: msgModel || this.model || "",
       } satisfies ParsedAssistantEvent];
     }
-    if (type === "assistant.message") return [];
+    if (type === "assistant.message") {
+      // assistant.message with empty content but toolRequests — register tools for later lookup
+      if (data) {
+        const msgModel = getString(data, ["model", "modelId", "model_id"]);
+        if (msgModel) this.model = msgModel;
+        const toolRequests = Array.isArray(data.toolRequests) ? data.toolRequests : [];
+        for (const tr of toolRequests) {
+          const trObj = asRecord(tr);
+          if (!trObj) continue;
+          const callId = getString(trObj, ["toolCallId", "id", "call_id"]);
+          const toolName = getString(trObj, ["name"]);
+          if (callId && toolName) this.toolNameMap.set(callId, toolName);
+        }
+      }
+      return [];
+    }
 
     if (type === "subagent.started" && data) {
       return [{
@@ -253,7 +323,6 @@ const IGNORED_COPILOT_TYPES = new Set([
   "session.skills_loaded",
   "session.warning",
   "session.tools_updated",
-  "user.message",
 ]);
 
 const TOOL_USE_TYPES = new Set([
@@ -369,7 +438,10 @@ function extractToolUse(obj: Record<string, unknown>): {
   const id = getString(tool, ["id", "tool_use_id", "toolUseId", "call_id", "callId"]);
   const name = getString(tool, ["name", "tool", "tool_name", "toolName", "kind"]) || "copilot_tool";
   const inputValue = tool.input ?? tool.arguments ?? tool.args ?? tool.parameters ?? tool.command ?? tool.path;
-  const inputParsed = asRecord(inputValue) || {};
+  let inputParsed = asRecord(inputValue) || {};
+  if (Object.keys(inputParsed).length === 0 && typeof inputValue === "string") {
+    try { inputParsed = JSON.parse(inputValue) as Record<string, unknown>; } catch { /* keep empty */ }
+  }
 
   return {
     id: id || getString(tool, ["toolCallId"]),
