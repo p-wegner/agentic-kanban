@@ -6,7 +6,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Stage 13 complete + Tauri desktop (Stages 0-13 done). Tech stack: TypeScript monorepo — Hono + Drizzle + React + MCP SDK + Tauri v2. Current progress: `docs/state.md`. Feature catalog visually verified: 2026-05-23.
 
 ## Active Project
-The board has two registered projects pointing at the same repo: "server" (packages/server) and "agentic-kanban" (repo root). **The active project is "agentic-kanban"** (`f6046402-8373-4294-9624-e0e4e54e1961`) — always use this for board monitor cycles, workspace operations, and MCP tools. The "server" project is a leftover from early dev and should not be used.
+The active project is "agentic-kanban" — always use this for board monitor cycles, workspace operations, and MCP tools.
+
+**Note:** On server startup, `deduplicateProjects()` automatically removes legacy duplicate projects (e.g. a "server" project registered from `packages/server` before git-root resolution was added). If you see two projects for the same repo, restart the server — it will self-heal.
 
 ## What This Is
 Cleanroom reimplementation of [vibe-kanban](https://github.com/BloopAI/vibe-kanban) — a kanban board for managing AI-driven coding tasks. Personal use only, single user, local-first.
