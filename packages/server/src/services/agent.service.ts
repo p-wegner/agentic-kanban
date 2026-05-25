@@ -156,12 +156,14 @@ export function launch(
 
   // For detached agents, redirect stdout to a file so the output survives server restarts.
   // Non-detached agents use pipes as before.
+  // When suppressStdinPrompt is true (e.g. copilot passes prompt via -p argv), stdin can be
+  // "ignore" — this prevents Windows from allocating a console window for the detached process.
   let outFd: number | undefined;
-  let stdioConfig: ["pipe", "pipe" | number, "pipe" | "ignore"];
+  let stdioConfig: ["pipe" | "ignore", "pipe" | number, "pipe" | "ignore"];
   if (shouldDetach) {
     const outPath = sessionOutputPath(sessionId);
     outFd = openSync(outPath, "w");
-    stdioConfig = ["pipe", outFd, "ignore"];
+    stdioConfig = [suppressStdinPrompt ? "ignore" : "pipe", outFd, "ignore"];
   } else {
     stdioConfig = ["pipe", "pipe", "pipe"];
   }
