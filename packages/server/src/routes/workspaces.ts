@@ -37,6 +37,7 @@ export function createWorkspacesRoute(
     let sessionId: string | undefined;
     let worktreePath: string | null = null;
     let baseBranch: string | null = null;
+    let baseCommitSha: string | null = null;
     let branch: string = body.branch;
     let claudeProfile: string | undefined;
     let agentCommand: string | undefined;
@@ -80,13 +81,20 @@ export function createWorkspacesRoute(
       const skipSetup = body.skipSetup === true;
 
       if (isDirect) {
-        // Direct workspace: use main checkout, auto-detect branch
+        // Direct workspace: use main checkout, auto-detect branch, capture HEAD for diff tracking
         branch = await gitService.getCurrentBranch(project.repoPath);
         worktreePath = project.repoPath;
         baseBranch = null;
+        baseCommitSha = await gitService.getHeadCommitSha(project.repoPath);
       } else {
         // Normal workspace: create worktree
         baseBranch = body.baseBranch || project.defaultBranch;
+        if (!baseBranch) {
+          return c.json(
+            { error: "No default branch configured for this project. Set a default branch in project settings or choose a base branch." },
+            400,
+          );
+        }
         worktreePath = await gitService.createWorktree(project.repoPath, branch, baseBranch ?? undefined);
       }
 
@@ -190,6 +198,7 @@ export function createWorkspacesRoute(
         workingDir: worktreePath,
         baseBranch,
         isDirect,
+        baseCommitSha,
         requiresReview,
         thoroughReview,
         planMode,
@@ -264,6 +273,7 @@ export function createWorkspacesRoute(
           workingDir: worktreePath,
           baseBranch,
           isDirect,
+          baseCommitSha,
           requiresReview,
           thoroughReview,
           planMode,
