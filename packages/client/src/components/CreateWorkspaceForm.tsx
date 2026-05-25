@@ -26,6 +26,7 @@ interface CreateWorkspaceFormProps {
 type AgentProvider = ProfileSelection["provider"];
 
 const COPILOT_DEFAULT_PROFILE = "default";
+const CODEX_DEFAULT_PROFILE = "default";
 
 function uniqueProfiles(profiles: string[], fallback?: string): string[] {
   const all = fallback ? [fallback, ...profiles] : profiles;
@@ -33,13 +34,15 @@ function uniqueProfiles(profiles: string[], fallback?: string): string[] {
 }
 
 function defaultProfileLabel(prefs: Record<string, string>): string {
-  if (prefs.provider === "codex") return `codex:${prefs.codex_profile || "none"}`;
+  if (prefs.provider === "codex") return `codex:${prefs.codex_profile || CODEX_DEFAULT_PROFILE}`;
   if (prefs.provider === "copilot") return `copilot:${prefs.copilot_profile || COPILOT_DEFAULT_PROFILE}`;
   return `claude:${prefs.claude_profile || "none"}`;
 }
 
 function profileOptionLabel(provider: AgentProvider, name: string): string {
-  const displayName = provider === "copilot" && name === COPILOT_DEFAULT_PROFILE ? "Default" : name;
+  const isDefault = (provider === "copilot" && name === COPILOT_DEFAULT_PROFILE) ||
+    (provider === "codex" && name === CODEX_DEFAULT_PROFILE);
+  const displayName = isDefault ? "Default" : name;
   const providerLabel = provider === "codex" ? "Codex" : provider === "copilot" ? "Copilot" : "Claude";
   return `${providerLabel}: ${displayName}`;
 }
@@ -57,7 +60,7 @@ export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCr
   const [availableSkills, setAvailableSkills] = useState<{ id: string; name: string; description: string }[]>([]);
   const [selectedSkillId, setSelectedSkillId] = useState<string>("");
   const [claudeProfiles, setClaudeProfiles] = useState<string[]>([]);
-  const [codexProfiles, setCodexProfiles] = useState<string[]>([]);
+  const [codexProfiles, setCodexProfiles] = useState<string[]>([CODEX_DEFAULT_PROFILE]);
   const [copilotProfiles, setCopilotProfiles] = useState<string[]>([COPILOT_DEFAULT_PROFILE]);
   // selectedProfile format: "<provider>:<name>" e.g. "claude:myprofile", "codex:myprofile", "copilot:default", or "" for default
   const [selectedProfile, setSelectedProfile] = useState<string>("");
@@ -72,17 +75,17 @@ export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCr
     }
     Promise.all([
       apiFetch<{ profiles: string[] }>("/api/preferences/claude-profiles").catch(() => ({ profiles: [] as string[] })),
-      apiFetch<{ profiles: string[] }>("/api/preferences/codex-profiles").catch(() => ({ profiles: [] as string[] })),
+      apiFetch<{ profiles: string[] }>("/api/preferences/codex-profiles").catch(() => ({ profiles: [CODEX_DEFAULT_PROFILE] as string[] })),
       apiFetch<{ profiles: string[] }>("/api/preferences/copilot-profiles").catch(() => ({ profiles: [COPILOT_DEFAULT_PROFILE] })),
       apiFetch<Record<string, string>>("/api/preferences/settings").catch(() => ({} as Record<string, string>)),
     ]).then(([claudeData, codexData, copilotData, settings]) => {
       setClaudeProfiles(claudeData.profiles);
-      setCodexProfiles(codexData.profiles);
+      setCodexProfiles(uniqueProfiles(codexData.profiles, CODEX_DEFAULT_PROFILE));
       setCopilotProfiles(uniqueProfiles(copilotData.profiles, COPILOT_DEFAULT_PROFILE));
       // Set default selection from global settings
       const globalProvider = settings.provider || "claude";
-      if (globalProvider === "codex" && settings.codex_profile) {
-        setSelectedProfile(`codex:${settings.codex_profile}`);
+      if (globalProvider === "codex") {
+        setSelectedProfile(`codex:${settings.codex_profile || CODEX_DEFAULT_PROFILE}`);
       } else if (globalProvider === "copilot") {
         setSelectedProfile(`copilot:${settings.copilot_profile || COPILOT_DEFAULT_PROFILE}`);
       } else if (settings.claude_profile) {
@@ -269,13 +272,11 @@ export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCr
                 ))}
               </optgroup>
             )}
-            {codexProfiles.length > 0 && (
-              <optgroup label="Codex">
-                {codexProfiles.map((p) => (
-                  <option key={`codex:${p}`} value={`codex:${p}`}>{profileOptionLabel("codex", p)}</option>
-                ))}
-              </optgroup>
-            )}
+            <optgroup label="Codex">
+              {codexProfiles.map((p) => (
+                <option key={`codex:${p}`} value={`codex:${p}`}>{profileOptionLabel("codex", p)}</option>
+              ))}
+            </optgroup>
             <optgroup label="Copilot">
               {copilotProfiles.map((p) => (
                 <option key={`copilot:${p}`} value={`copilot:${p}`}>{profileOptionLabel("copilot", p)}</option>

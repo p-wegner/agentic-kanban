@@ -76,6 +76,7 @@ const STATUS_COLORS: Record<string, string> = {
 type AgentProvider = ProfileSelection["provider"];
 
 const COPILOT_DEFAULT_PROFILE = "default";
+const CODEX_DEFAULT_PROFILE = "default";
 
 type ProfileOption = {
   provider: AgentProvider;
@@ -112,7 +113,7 @@ function profileSelectionFromValue(value: string): ProfileSelection | undefined 
 }
 
 function defaultSelectedProfile(settings: Record<string, string>): string {
-  if (settings.provider === "codex" && settings.codex_profile) return `codex:${settings.codex_profile}`;
+  if (settings.provider === "codex") return `codex:${settings.codex_profile || CODEX_DEFAULT_PROFILE}`;
   if (settings.provider === "copilot") return `copilot:${settings.copilot_profile || COPILOT_DEFAULT_PROFILE}`;
   if (settings.claude_profile) return `claude:${settings.claude_profile}`;
   return "";
@@ -231,6 +232,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
   const [prompt, setPrompt] = useState("");
   const [prefs, setPrefs] = useState<Record<string, string>>({});
   const [availableProfileOptions, setAvailableProfileOptions] = useState<ProfileOption[]>([
+    { provider: "codex", name: CODEX_DEFAULT_PROFILE },
     { provider: "copilot", name: COPILOT_DEFAULT_PROFILE },
   ]);
   const [selectedProfile, setSelectedProfile] = useState<string>("");
@@ -370,11 +372,12 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
       .catch(() => {});
     Promise.all([
       apiFetch<{ profiles: string[] }>("/api/preferences/claude-profiles").catch(() => ({ profiles: [] as string[] })),
-      apiFetch<{ profiles: string[] }>("/api/preferences/codex-profiles").catch(() => ({ profiles: [] as string[] })),
+      apiFetch<{ profiles: string[] }>("/api/preferences/codex-profiles").catch(() => ({ profiles: [CODEX_DEFAULT_PROFILE] as string[] })),
       apiFetch<{ profiles: string[] }>("/api/preferences/copilot-profiles").catch(() => ({ profiles: [COPILOT_DEFAULT_PROFILE] })),
     ]).then(([claudeData, codexData, copilotData]) => {
       setAvailableProfileOptions(uniqueProfileOptions([
         ...claudeData.profiles.map((name) => ({ provider: "claude" as const, name })),
+        { provider: "codex" as const, name: CODEX_DEFAULT_PROFILE },
         ...codexData.profiles.map((name) => ({ provider: "codex" as const, name })),
         { provider: "copilot" as const, name: COPILOT_DEFAULT_PROFILE },
         ...copilotData.profiles.map((name) => ({ provider: "copilot" as const, name })),
@@ -1058,7 +1061,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                             <option value="">Default</option>
                             {availableProfileOptions.map((option) => (
                               <option key={profileOptionValue(option)} value={profileOptionValue(option)}>
-                                {providerLabel(option.provider)}: {option.provider === "copilot" && option.name === COPILOT_DEFAULT_PROFILE ? "Default" : option.name}
+                                {providerLabel(option.provider)}: {(option.provider === "copilot" && option.name === COPILOT_DEFAULT_PROFILE) || (option.provider === "codex" && option.name === CODEX_DEFAULT_PROFILE) ? "Default" : option.name}
                               </option>
                             ))}
                           </select>
@@ -1928,7 +1931,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                           <option value="">Default</option>
                           {availableProfileOptions.map((option) => (
                             <option key={profileOptionValue(option)} value={profileOptionValue(option)}>
-                              {providerLabel(option.provider)}: {option.provider === "copilot" && option.name === COPILOT_DEFAULT_PROFILE ? "Default" : option.name}
+                              {providerLabel(option.provider)}: {(option.provider === "copilot" && option.name === COPILOT_DEFAULT_PROFILE) || (option.provider === "codex" && option.name === CODEX_DEFAULT_PROFILE) ? "Default" : option.name}
                             </option>
                           ))}
                         </select>
