@@ -148,6 +148,45 @@ describe("Tags API - CRUD", () => {
     expect(body.error).toContain("name is required");
   });
 
+  it("POST /api/tags rejects duplicate name with 409", async () => {
+    await app.request("/api/tags", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "duplicate-tag" }),
+    });
+
+    const res = await app.request("/api/tags", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "duplicate-tag" }),
+    });
+    expect(res.status).toBe(409);
+    const body = await res.json() as any;
+    expect(body.error).toContain("already exists");
+  });
+
+  it("POST /api/tags rejects name that matches a builtin tag with 409", async () => {
+    const { app: isolatedApp, db: isolatedDb } = createTestApp();
+
+    // Seed a builtin tag
+    await isolatedDb.insert(schema.tags).values({
+      id: randomUUID(),
+      name: "builtin-unique",
+      color: "#F59E0B",
+      isBuiltin: true,
+      createdAt: new Date().toISOString(),
+    });
+
+    const res = await isolatedApp.request("/api/tags", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "builtin-unique" }),
+    });
+    expect(res.status).toBe(409);
+    const body = await res.json() as any;
+    expect(body.error).toContain("built-in tag");
+  });
+
   it("POST /api/tags creates a tag without color", async () => {
     const res = await app.request("/api/tags", {
       method: "POST",
