@@ -27,7 +27,25 @@ export function registerGetWorkspaceDiff(server: McpServer) {
       }
 
       try {
-        const diff = await gitService.getDiff(ws.workingDir, baseBranch || ws.baseBranch || "main");
+        let resolvedBaseBranch = baseBranch || ws.baseBranch;
+        if (!resolvedBaseBranch) {
+          const issueRows = await db.select({ projectId: schema.issues.projectId })
+            .from(schema.issues)
+            .where(eq(schema.issues.id, ws.issueId))
+            .limit(1);
+          if (issueRows.length > 0) {
+            const projectRows = await db.select({ defaultBranch: schema.projects.defaultBranch })
+              .from(schema.projects)
+              .where(eq(schema.projects.id, issueRows[0].projectId))
+              .limit(1);
+            resolvedBaseBranch = projectRows[0]?.defaultBranch ?? undefined;
+          }
+        }
+        if (!resolvedBaseBranch) {
+          return { content: [{ type: "text" as const, text: "No base branch configured for this workspace or project." }] };
+        }
+
+        const diff = await gitService.getDiff(ws.workingDir, resolvedBaseBranch);
 
         if (!diff.trim()) {
           return { content: [{ type: "text" as const, text: "No changes detected." }] };

@@ -47,7 +47,7 @@ export function createPreferencesRoute(database: Database = db) {
 
   // GET /api/preferences/settings — get all agent settings
   router.get("/settings", async (c) => {
-    const keys = ["agent_command", "agent_args", "output_parser", "skip_permissions", "claude_profile", "codex_profile", "copilot_profile", "provider", "mock_agent_profile", "mock_agent_delay_ms", "permission_prompt_tool", "auto_review", "auto_merge", "resume_with_new_model", "review_auto_fix", "disabled_mcp_tools", "auto_start_followup", "require_manual_approval", "dynamic_column_scaling", "persistent_agent", "learning_step_after_agent", "learning_step_after_review", "learning_step_before_merge", "auto_monitor", "auto_monitor_interval", "nudge_auto_start", "projects_base_path", "plan_auto_continue"];
+    const keys = ["agent_command", "agent_args", "output_parser", "skip_permissions", "claude_profile", "codex_profile", "copilot_profile", "provider", "mock_agent_profile", "mock_agent_delay_ms", "permission_prompt_tool", "auto_review", "auto_merge", "resume_with_new_model", "review_auto_fix", "disabled_mcp_tools", "auto_start_followup", "require_manual_approval", "dynamic_column_scaling", "persistent_agent", "learning_step_after_agent", "learning_step_after_review", "learning_step_before_merge", "auto_monitor", "auto_monitor_interval", "nudge_auto_start", "projects_base_path", "plan_auto_continue", "visual_verification_mode", "after_merge_verify_agent"];
     const rows = await database
       .select()
       .from(preferences);
@@ -66,7 +66,7 @@ export function createPreferencesRoute(database: Database = db) {
   router.put("/settings", async (c) => {
     const body = await c.req.json() as Record<string, string>;
     const now = new Date().toISOString();
-    const allowedKeys = ["agent_command", "agent_args", "output_parser", "skip_permissions", "claude_profile", "codex_profile", "copilot_profile", "provider", "mock_agent_profile", "mock_agent_delay_ms", "permission_prompt_tool", "auto_review", "auto_merge", "resume_with_new_model", "review_auto_fix", "disabled_mcp_tools", "auto_start_followup", "require_manual_approval", "dynamic_column_scaling", "persistent_agent", "learning_step_after_agent", "learning_step_after_review", "learning_step_before_merge", "auto_monitor", "auto_monitor_interval", "nudge_auto_start", "projects_base_path", "plan_auto_continue"];
+    const allowedKeys = ["agent_command", "agent_args", "output_parser", "skip_permissions", "claude_profile", "codex_profile", "copilot_profile", "provider", "mock_agent_profile", "mock_agent_delay_ms", "permission_prompt_tool", "auto_review", "auto_merge", "resume_with_new_model", "review_auto_fix", "disabled_mcp_tools", "auto_start_followup", "require_manual_approval", "dynamic_column_scaling", "persistent_agent", "learning_step_after_agent", "learning_step_after_review", "learning_step_before_merge", "auto_monitor", "auto_monitor_interval", "nudge_auto_start", "projects_base_path", "plan_auto_continue", "visual_verification_mode", "after_merge_verify_agent"];
 
     for (const [key, value] of Object.entries(body)) {
       if (!allowedKeys.includes(key)) continue;
@@ -97,18 +97,19 @@ export function createPreferencesRoute(database: Database = db) {
   });
 
   // GET /api/preferences/codex-profiles — list available codex profiles
+  // Always includes "default" (no profile-v2 flag) so Codex works without any config files.
   router.get("/codex-profiles", async (c) => {
     const codexDir = join(homedir(), ".codex");
-    const profiles: string[] = [];
+    const profiles: string[] = ["default"];
     try {
       const files = readdirSync(codexDir);
       for (const file of files) {
         // New convention: <name>.config.toml
         const newMatch = file.match(/^(.+)\.config\.toml$/);
-        if (newMatch && newMatch[1] !== "config") profiles.push(newMatch[1]);
+        if (newMatch && newMatch[1] !== "config" && newMatch[1] !== "default") profiles.push(newMatch[1]);
         // Legacy convention: config_<name>.toml (but not base config.toml)
         const legacyMatch = file.match(/^config_(.+)\.toml$/);
-        if (legacyMatch) profiles.push(legacyMatch[1]);
+        if (legacyMatch && legacyMatch[1] !== "default") profiles.push(legacyMatch[1]);
       }
     } catch {}
     return c.json({ profiles: [...new Set(profiles)].sort() });

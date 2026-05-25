@@ -10,7 +10,7 @@ import { db, rawClient } from "./db/index.js";
 import { createSessionManager } from "./services/session.manager.js";
 import type { ProviderName } from "./services/agent-provider.js";
 import { createBoardEvents } from "./services/board-events.js";
-import { workspaces, issues, projects, projectStatuses, preferences, sessions, sessionMessages, agentSkills, issueDependencies, scheduledRuns } from "@agentic-kanban/shared/schema";
+import { workspaces, issues, projects, projectStatuses, preferences, sessions, sessionMessages, agentSkills, issueDependencies, scheduledRuns, tags, issueTags } from "@agentic-kanban/shared/schema";
 import { getNextCronRun } from "@agentic-kanban/shared/lib/cron-utils";
 import { eq, sql, desc } from "drizzle-orm";
 import * as agentService from "./services/agent.service.js";
@@ -18,6 +18,7 @@ import * as gitService from "./services/git.service.js";
 import { killProcessesInDir } from "./services/process-cleanup.js";
 import { runScript } from "./services/script-runner.js";
 import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { existsSync } from "node:fs";
@@ -25,8 +26,13 @@ import { getMigrationsFolder } from "./db/migrations.js";
 import { applyMigrations } from "./db/manual-migrate.js";
 import { MOCK_AGENT_COMMAND, isMockProfile, toExecutorProvider } from "./services/agent-settings.service.js";
 import { PREF_CODEX_PROFILE, PREF_COPILOT_PROFILE } from "./constants/preference-keys.js";
+import { sendMonitorNudge, type MonitorActionName } from "./services/monitor-nudge.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+const execFileAsync = promisify(execFile);
+
+const DEFAULT_MONITOR_NUDGE_PROMPT =
+  "Please continue with the task. If you are waiting for input or unsure how to proceed, use your best judgment and keep moving forward. Check the issue description and any open questions, then take the next logical step.";
 
 const DEFAULT_REVIEW_PROMPT = `You are an AI code reviewer. Review the changes on branch '{{branch}}'.
 
@@ -66,7 +72,7 @@ function getEffectiveProfile(prefMap: Map<string, string>, provider: ProviderNam
   return claudeProfile;
 }
 
-async function buildReviewPrompt(branch: string, baseBranch: string | null, issueId: string, autoFix: boolean, projectId?: string, conflictingFiles?: string[], uncommittedChanges?: string[], workspaceId?: string, skillName = "code-review"): Promise<{ prompt: string; model: string | null }> {
+async function buildReviewPrompt(branch: string, baseBranch: string | null, issueId: string, autoFix: boolean, projectId?: string, conflictingFiles?: string[], uncommittedChanges?: string[], workspaceId?: string, skillName = "code-review", verifyAgent?: string): Promise<{ prompt: string; model: string | null }> {
   let template: string | null = null;
   let skillModel: string | null = null;
   if (projectId) {
@@ -105,8 +111,8 @@ If only MINOR issues or no issues:
 1. Use the mark_ready_for_merge MCP tool with workspaceId={{workspaceId}} to signal the workspace is approved
 2. Exit normally (the system will auto-merge)`;
 
-  // Strip "origin/" prefix so rebase instructions use the bare branch name (e.g. "master" not "origin/master")
-  const localBaseBranch = (baseBranch ?? "master").replace(/^origin\//, "");
+  // Strip "origin/" prefix so rebase instructions use the bare branch name.
+  const localBaseBranch = (baseBranch ?? "HEAD").replace(/^origin\//, "");
 
   let conflictPreamble = "";
   if (uncommittedChanges && uncommittedChanges.length > 0) {
@@ -143,13 +149,59 @@ Steps to resolve:
 `;
   }
 
-  const prompt = conflictPreamble + template
+  const serverPort = process.env.KANBAN_SERVER_PORT || process.env.PORT || "3001";
+  const clientPort = process.env.KANBAN_CLIENT_PORT || process.env.VITE_PORT || "5173";
+
+  let prompt = conflictPreamble + template
     .replace(/\{\{branch}}/g, branch)
     .replace(/\{\{baseBranch}}/g, baseBranch ?? "HEAD")
     .replace(/\{\{issueId}}/g, issueId)
     .replace(/\{\{workspaceId}}/g, workspaceId ?? "")
+    .replace(/\{\{serverPort}}/g, serverPort)
+    .replace(/\{\{clientPort}}/g, clientPort)
     .replace(/\{\{autoFixInstructions}}/g, autoFixInstructions);
+
+  if (verifyAgent === "reviewer") {
+    prompt += `
+
+## Post-Review: Merge + Visual Verification Required
+
+This project uses \`visual_verification_mode=after_merge\` with \`after_merge_verify_agent=reviewer\`.
+**You are responsible for the complete pipeline**: approve code → merge workspace → visual verify on master.
+
+After completing your code review and fixing any CRITICAL/MAJOR issues:
+
+1. **Merge the workspace** (instead of mark_ready_for_merge, call merge directly):
+   \`\`\`
+   curl -s -X POST http://localhost:${serverPort}/api/workspaces/${workspaceId ?? "{{workspaceId}}"}/merge
+   \`\`\`
+
+2. **After merge, visually verify** the UI changes on master:
+   - Use the playwright-cli skill (/playwright-cli) or run playwright directly
+   - Navigate to http://localhost:${clientPort}
+   - Check the relevant UI sections for the changed files on branch '${branch}'
+   - Take a screenshot to confirm the UI renders correctly
+
+3. **Report** your verification result.
+
+The stop hook will remind you if you try to exit before completing all three steps.`;
+  }
+
   return { prompt, model: skillModel };
+}
+
+async function buildMonitorNudgePrompt(projectId: string): Promise<string> {
+  const skillRows = await db
+    .select({ prompt: agentSkills.prompt })
+    .from(agentSkills)
+    .where(sql`
+      ${agentSkills.name} = 'monitor-nudge'
+      AND (${agentSkills.projectId} = ${projectId} OR ${agentSkills.projectId} IS NULL)
+    `)
+    .orderBy(sql`${agentSkills.projectId} IS NULL`)
+    .limit(1);
+
+  return skillRows[0]?.prompt?.trim() || DEFAULT_MONITOR_NUDGE_PROMPT;
 }
 
 export async function startServer(port?: number) {
@@ -215,7 +267,7 @@ export async function startServer(port?: number) {
       const autoMergeEnabled = prefMap.get("auto_merge") !== "false";
 
       const projectRows = await db.select({ defaultBranch: projects.defaultBranch }).from(projects).where(eq(projects.id, projectId)).limit(1);
-      const defaultBranch = projectRows.length > 0 ? projectRows[0].defaultBranch : "main";
+      const defaultBranch = projectRows.length > 0 ? projectRows[0].defaultBranch : null;
 
       if (fixAndMergeSessionIds.has(sessionId)) {
         fixAndMergeSessionIds.delete(sessionId);
@@ -292,35 +344,42 @@ export async function startServer(port?: number) {
       if (workspace.workingDir) {
         try {
           if (workspace.isDirect) {
+            // Compare against the stored base commit SHA (captured at workspace creation).
+            // Falls back to HEAD~1 for workspaces created before this feature.
+            const baseRef = workspace.baseCommitSha || "HEAD~1";
             hasCommittedChanges = await new Promise<boolean>((resolve) => {
-              execFile("git", ["diff", "--quiet", "HEAD"], { cwd: workspace.workingDir! }, (err: Error | null) => {
+              execFile("git", ["diff", "--quiet", baseRef, "HEAD"], { cwd: workspace.workingDir! }, (err: Error | null) => {
                 resolve(!!err);
               });
             });
           } else {
             const baseBranch = workspace.baseBranch || defaultBranch;
-            hasCommittedChanges = await new Promise<boolean>((resolve) => {
-              execFile("git", ["diff", "--quiet", baseBranch], { cwd: workspace.workingDir! }, (err: Error | null) => {
-                resolve(!!err);
+            if (!baseBranch) {
+              console.warn(`[workflow] workspace ${workspaceId} has no base/default branch; treating as no committed changes`);
+              hasCommittedChanges = false;
+            } else {
+              hasCommittedChanges = await new Promise<boolean>((resolve) => {
+                execFile("git", ["diff", "--quiet", baseBranch], { cwd: workspace.workingDir! }, (err: Error | null) => {
+                  resolve(!!err);
+                });
               });
-            });
+            }
           }
         } catch {
           hasCommittedChanges = false;
         }
       }
 
-      // Direct (master-branch) workspaces: close immediately on exit — no review/merge flow.
-      // The agent commits directly to master; there is no branch to merge and no review makes sense.
-      // Leaving the workspace idle would cause the monitor to relaunch it indefinitely.
-      if (workspace.isDirect) {
+      // Direct workspaces with no committed changes: close immediately (nothing to review).
+      // Direct workspaces WITH changes fall through to the review flow below.
+      if (workspace.isDirect && !hasCommittedChanges) {
         const doneStatus = findStatus("Done");
         await db.update(workspaces).set({ status: "closed", workingDir: null, updatedAt: now }).where(eq(workspaces.id, workspaceId));
         if (doneStatus) {
           await db.update(issues).set({ statusId: doneStatus.id, updatedAt: now }).where(eq(issues.id, issueId));
         }
         boardEvents.broadcast(projectId, "workspace_merged");
-        console.log(`[workflow] direct workspace ${workspaceId} closed on agent exit — issue moved to Done`);
+        console.log(`[workflow] direct workspace ${workspaceId} closed on agent exit (no committed changes) — issue moved to Done`);
         return;
       }
 
@@ -361,13 +420,21 @@ export async function startServer(port?: number) {
           const effectiveReviewProfile = getEffectiveProfile(prefMap, reviewProvider, claudeProfile);
           const profileSelection = effectiveReviewProfile ? { provider: reviewProvider, name: effectiveReviewProfile } : undefined;
           const reviewArgs = buildReviewArgs(prefMap, reviewProvider);
-          const autoFix = prefMap.get("review_auto_fix") !== "false";
+          // Direct workspaces: never auto-fix on the default branch — reviewer reports only
+          const autoFix = workspace.isDirect ? false : prefMap.get("review_auto_fix") !== "false";
           const provider = toExecutorProvider(reviewProvider);
           let diffRef = workspace.baseBranch || defaultBranch;
           let conflictingFiles: string[] | undefined;
           let uncommittedChanges: string[] | undefined;
-          if (!workspace.isDirect && workspace.workingDir) {
+          if (workspace.isDirect) {
+            // Use the commit SHA captured at workspace creation as the diff base
+            diffRef = workspace.baseCommitSha || defaultBranch;
+          } else if (workspace.workingDir) {
             const baseBranch = workspace.baseBranch || defaultBranch;
+            if (!baseBranch) {
+              console.warn(`[workflow] cannot launch review for workspace ${workspaceId}: no base/default branch configured`);
+              return;
+            }
             const prep = await gitService.prepareForReview(workspace.workingDir, baseBranch);
             diffRef = prep.diffRef;
             if (!prep.success) {
@@ -377,7 +444,8 @@ export async function startServer(port?: number) {
             }
           }
           const reviewSkillName = workspace.thoroughReview ? "code-review-thorough" : "code-review";
-          const { prompt: reviewPromptText, model: reviewModel } = await buildReviewPrompt(workspace.branch, diffRef, issueId, autoFix, projectId, conflictingFiles, uncommittedChanges, workspaceId, reviewSkillName);
+          const verifyAgent = prefMap.get("after_merge_verify_agent") || "none";
+          const { prompt: reviewPromptText, model: reviewModel } = await buildReviewPrompt(workspace.branch, diffRef, issueId, autoFix, projectId, conflictingFiles, uncommittedChanges, workspaceId, reviewSkillName, verifyAgent);
           // `--model` here carries a Claude model from the review skill. Non-Claude
           // providers select models via provider-specific profile/config plumbing.
           const reviewArgsWithModel = (reviewModel && reviewProvider === "claude") ? `${reviewArgs ?? ""} --model ${reviewModel}`.trim() : reviewArgs;
@@ -386,9 +454,13 @@ export async function startServer(port?: number) {
             await db.update(workspaces).set({ status: "reviewing", updatedAt: now }).where(eq(workspaces.id, workspaceId));
             boardEvents.broadcast(projectId, "issue_updated");
 
-            const reviewSessionId = await sessionManager.startSession({ workspaceId, prompt: reviewPromptText, agentCommand, agentArgs: reviewArgsWithModel, claudeProfile: effectiveReviewProfile, provider, triggerType: "review", profile: profileSelection });
+            const reviewExtraEnv: Record<string, string> = {
+              KANBAN_SESSION_TYPE: "review",
+              KANBAN_AFTER_MERGE_VERIFY: verifyAgent,
+            };
+            const reviewSessionId = await sessionManager.startSession({ workspaceId, prompt: reviewPromptText, agentCommand, agentArgs: reviewArgsWithModel, claudeProfile: effectiveReviewProfile, provider, triggerType: "review", profile: profileSelection, extraEnv: reviewExtraEnv });
             reviewSessionIds.add(reviewSessionId);
-            console.log(`[workflow] launched ${reviewSkillName} session ${reviewSessionId} for workspace ${workspaceId}`);
+            console.log(`[workflow] launched ${reviewSkillName} session ${reviewSessionId} for workspace ${workspaceId} (verifyAgent=${verifyAgent})`);
           } catch (err) {
             console.error("[workflow] Failed to launch review session:", err);
           }
@@ -398,6 +470,55 @@ export async function startServer(port?: number) {
       }
     } catch (err) {
       console.error("[workflow] onSessionExit error:", err);
+    }
+  }
+
+  /** Tag the issue with "needs-visual-verification" when in after_merge mode and client files changed. */
+  async function tagIfNeedsVisualVerification(
+    repoPath: string,
+    branch: string,
+    baseBranch: string | null,
+    issueId: string,
+    now: string,
+  ): Promise<void> {
+    try {
+      const prefRows = await db.select({ key: preferences.key, value: preferences.value }).from(preferences);
+      const prefMap = new Map(prefRows.map(r => [r.key, r.value]));
+      if (prefMap.get("visual_verification_mode") !== "after_merge") return;
+
+      const base = baseBranch || "main";
+      const { stdout } = await execFileAsync("git", ["diff", "--name-only", `${base}...${branch}`], { cwd: repoPath });
+      const changedFiles = stdout.split("\n").map(f => f.trim()).filter(Boolean);
+      // Detect frontend file changes regardless of directory structure so the feature works
+      // for any project managed by this board, not just the agentic-kanban monorepo.
+      const hasClientChanges = changedFiles.some(
+        f => /\.(jsx|tsx|css|scss|less|sass|vue|svelte)$/.test(f)
+      );
+      if (!hasClientChanges) return;
+
+      const TAG_NAME = "needs-visual-verification";
+      const TAG_COLOR = "#F59E0B"; // amber
+
+      // Upsert the tag by name: attempt insert (ignore duplicate), then always re-query
+      // for the canonical ID. This is race-safe: concurrent merges may both try to insert
+      // the tag, but only one will succeed and both will read back the same ID.
+      const { randomUUID } = await import("node:crypto");
+      await db.insert(tags).values({ id: randomUUID(), name: TAG_NAME, color: TAG_COLOR, createdAt: now })
+        .catch(() => {/* tag already exists — safe to ignore */});
+      const [tagRow] = await db.select({ id: tags.id }).from(tags).where(eq(tags.name, TAG_NAME)).limit(1);
+      if (!tagRow) return; // should never happen, but guard anyway
+      const tagId = tagRow.id;
+
+      // Add the tag to the issue (ignore duplicate)
+      const alreadyTagged = await db.select({ tagId: issueTags.tagId }).from(issueTags)
+        .where(eq(issueTags.issueId, issueId)).limit(100);
+      const hasTag = alreadyTagged.some(t => t.tagId === tagId);
+      if (!hasTag) {
+        await db.insert(issueTags).values({ id: randomUUID(), issueId, tagId }).catch(() => {/* already exists */});
+        console.log(`[workflow] tagged issue ${issueId} with "${TAG_NAME}"`);
+      }
+    } catch (err) {
+      console.warn("[workflow] tagIfNeedsVisualVerification failed (non-fatal):", err);
     }
   }
 
@@ -457,11 +578,62 @@ export async function startServer(port?: number) {
               try { await runScript(teardownScript, workspace.workingDir, `teardown:${workspace.id}`); } catch { /* best effort */ }
             }
           }
+
+          // In after_merge mode, check for client UI changes and tag the issue
+          await tagIfNeedsVisualVerification(repoPath, workspace.branch, workspace.baseBranch, issueId, now);
+
           await gitService.mergeBranch(repoPath, workspace.branch);
           if (workspace.workingDir) {
             try { await gitService.removeWorktree(repoPath, workspace.workingDir); } catch { /* best effort */ }
           }
           try { await gitService.deleteBranch(repoPath, workspace.branch); } catch { /* best effort */ }
+
+          // In dedicated mode, launch a verification agent on the main checkout after merge
+          const verifyAgent = prefMapLearning.get("after_merge_verify_agent") || "none";
+          const issueTagged = await db.select({ tagId: issueTags.tagId }).from(issueTags)
+            .where(eq(issueTags.issueId, issueId)).limit(100)
+            .then(rows => rows.some(r => r.tagId !== null));
+          if (verifyAgent === "dedicated" && issueTagged) {
+            try {
+              const clientPort = process.env.KANBAN_CLIENT_PORT || process.env.VITE_PORT || "5173";
+              const serverPort = process.env.KANBAN_SERVER_PORT || process.env.PORT || "3001";
+              const verifyPrompt = `You are a visual verification agent. The branch '${workspace.branch}' was just merged into master.
+
+Your task: visually verify that the UI changes look correct in the browser.
+
+1. Use the playwright-cli skill (/playwright-cli) or run playwright directly
+2. Navigate to http://localhost:${clientPort}
+3. Check the relevant UI sections based on the changed files from branch '${workspace.branch}'
+4. Take a screenshot confirming the UI renders correctly and report your findings
+
+If the dev server is not responding, wait 10 seconds and retry once.
+
+Issue ID: ${issueId}
+Workspace ID: ${workspace.id}
+Server: http://localhost:${serverPort}`;
+              const verifyProfile = prefMapLearning.get("claude_profile") || undefined;
+              const verifyCmd = isMockProfile(verifyProfile) ? MOCK_AGENT_COMMAND : (prefMapLearning.get("agent_command") || undefined);
+              const verifyArgs = prefMapLearning.get("agent_args") || undefined;
+              const verifyProvider = parseProviderPref(prefMapLearning);
+              const effectiveVerifyProfile = getEffectiveProfile(prefMapLearning, verifyProvider, isMockProfile(verifyProfile) ? undefined : verifyProfile);
+              const verifyProfileSelection = effectiveVerifyProfile ? { provider: verifyProvider, name: effectiveVerifyProfile } : undefined;
+              const verifySessId = await sessionManager.startSession({
+                workspaceId: workspace.id,
+                prompt: verifyPrompt,
+                agentCommand: verifyCmd,
+                agentArgs: verifyArgs,
+                claudeProfile: effectiveVerifyProfile,
+                provider: toExecutorProvider(verifyProvider),
+                triggerType: "verify",
+                profile: verifyProfileSelection,
+                workingDirOverride: repoPath,
+                extraEnv: { KANBAN_SESSION_TYPE: "verify" },
+              });
+              console.log(`[workflow] dedicated verification session started: session=${verifySessId}`);
+            } catch (err) {
+              console.warn("[workflow] dedicated verification session failed (non-fatal):", err);
+            }
+          }
         }
       }
       await db.update(workspaces).set({ status: "closed", workingDir: null, updatedAt: now }).where(eq(workspaces.id, workspace.id));
@@ -524,12 +696,15 @@ export async function startServer(port?: number) {
       const autoFix = prefMap.get("review_auto_fix") !== "false";
 
       const projectRows = await db.select({ defaultBranch: projects.defaultBranch }).from(projects).where(eq(projects.id, projectId)).limit(1);
-      const defaultBranch = projectRows.length > 0 ? projectRows[0].defaultBranch : "main";
+      const defaultBranch = projectRows.length > 0 ? projectRows[0].defaultBranch : null;
       let diffRef = workspace.baseBranch || defaultBranch;
       let manualConflictingFiles: string[] | undefined;
       let manualUncommittedChanges: string[] | undefined;
       if (!workspace.isDirect && workspace.workingDir) {
         const baseBranch = workspace.baseBranch || defaultBranch;
+        if (!baseBranch) {
+          return c.json({ error: "No default branch configured for this project. Set a default branch in project settings before reviewing." }, 400);
+        }
         const prep = await gitService.prepareForReview(workspace.workingDir, baseBranch);
         if (!prep.success) {
           manualConflictingFiles = prep.conflictingFiles;
@@ -539,7 +714,8 @@ export async function startServer(port?: number) {
         diffRef = prep.diffRef;
       }
       const manualSkillName = thoroughReview ? "code-review-thorough" : "code-review";
-      const { prompt: reviewPromptText, model: reviewModel } = await buildReviewPrompt(workspace.branch, diffRef, issueId, autoFix, projectId, manualConflictingFiles, manualUncommittedChanges, workspaceId, manualSkillName);
+      const verifyAgent = prefMap.get("after_merge_verify_agent") || "none";
+      const { prompt: reviewPromptText, model: reviewModel } = await buildReviewPrompt(workspace.branch, diffRef, issueId, autoFix, projectId, manualConflictingFiles, manualUncommittedChanges, workspaceId, manualSkillName, verifyAgent);
       // `--model` here is a Claude model name / flag; non-Claude providers use profile/config.
       const reviewArgsWithModel = (reviewModel && provider === "claude") ? `${reviewArgs ?? ""} --model ${reviewModel}`.trim() : reviewArgs;
 
@@ -547,7 +723,11 @@ export async function startServer(port?: number) {
       await db.update(workspaces).set({ status: "reviewing", updatedAt: now }).where(eq(workspaces.id, workspaceId));
       boardEvents.broadcast(projectId, "issue_updated");
 
-      const reviewSessionId = await sessionManager.startSession({ workspaceId, prompt: reviewPromptText, agentCommand, agentArgs: reviewArgsWithModel, claudeProfile, profile: manualProfileSelection, provider: toExecutorProvider(provider), triggerType: "review" });
+      const reviewExtraEnv: Record<string, string> = {
+        KANBAN_SESSION_TYPE: "review",
+        KANBAN_AFTER_MERGE_VERIFY: verifyAgent,
+      };
+      const reviewSessionId = await sessionManager.startSession({ workspaceId, prompt: reviewPromptText, agentCommand, agentArgs: reviewArgsWithModel, claudeProfile, profile: manualProfileSelection, provider: toExecutorProvider(provider), triggerType: "review", extraEnv: reviewExtraEnv });
       reviewSessionIds.add(reviewSessionId);
       console.log(`[workflow] manual review session ${reviewSessionId} for workspace ${workspaceId}`);
 
@@ -762,10 +942,10 @@ export async function startServer(port?: number) {
   let monitorNextRunAt: string | null = null;
   let monitorLastRun: { at: string; relaunched: number; merged: number; nudged: number } | null = null;
   let monitorCurrentIntervalMin: number | null = null;
-  type MonitorAction = { at: string; action: "relaunch" | "merge" | "nudge" | "mark_idle" | "mark_dead" | "auto_start"; workspaceId: string; issueId: string };
+  type MonitorAction = { at: string; action: MonitorActionName; workspaceId: string; issueId: string };
   const monitorRecentActions: MonitorAction[] = [];
 
-  function logMonitorAction(action: MonitorAction["action"], workspaceId: string, issueId: string) {
+  function logMonitorAction(action: MonitorActionName, workspaceId: string, issueId: string) {
     monitorRecentActions.unshift({ at: new Date().toISOString(), action, workspaceId, issueId });
     if (monitorRecentActions.length > 30) monitorRecentActions.splice(30);
   }
@@ -871,7 +1051,7 @@ export async function startServer(port?: number) {
           const MAX_SESSIONS = 10;
 
           if (ws.wsStatus === "idle") {
-            // Direct (master-branch) workspaces should never be relaunched — they commit directly to master.
+            // Direct workspaces should never be relaunched - they commit directly to the current checkout.
             // If they're still idle here, runWorkflowOnExit didn't close them (e.g. pre-existing idle from before
             // this fix). Close them now to stop the loop.
             if (ws.isDirect) {
@@ -985,8 +1165,18 @@ export async function startServer(port?: number) {
                   }
                 }
 
-
-                console.log(`[monitor] Nudged long-running agent in workspace ${ws.wsId}`);
+                const prompt = await buildMonitorNudgePrompt(ws.projectId);
+                const nudged = sendMonitorNudge({
+                  sessionManager,
+                  sessionId: sess.id,
+                  workspaceId: ws.wsId,
+                  issueId: ws.issueId,
+                  projectId: ws.projectId,
+                  prompt,
+                  logAction: logMonitorAction,
+                  broadcast: (projectId, event) => boardEvents.broadcast(projectId, event),
+                });
+                if (nudged) cycleStats.nudged++;
               }
             }
           }

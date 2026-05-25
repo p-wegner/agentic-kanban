@@ -45,6 +45,7 @@ export function launch(
   planMode?: boolean,
   provider?: ProviderId,
   profile?: { provider: ProviderName; name: string },
+  extraEnv?: Record<string, string>,
 ): ChildProcess {
   const launchConfig = buildAgentLaunchConfig({
     agentArgs,
@@ -81,6 +82,7 @@ export function launch(
       KANBAN_CLIENT_PORT: process.env.KANBAN_CLIENT_PORT || process.env.VITE_PORT || "5173",
       SERVER_PORT: process.env.SERVER_PORT || process.env.PORT || "3001",
       PORT: process.env.PORT || "3001",
+      ...extraEnv,
     },
     // For real (detached) agents on Windows, use "ignore" for stderr so grandchild processes
     // spawned by claude.exe don't inherit a broken pipe handle after the server hot-reloads.
