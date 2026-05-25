@@ -131,6 +131,27 @@ export async function moveIssueToDone(
   }
 }
 
+/**
+ * Move the issue to "In Progress" when a workspace is created.
+ * Logs a warning on failure but never throws.
+ */
+export async function moveIssueToInProgress(
+  issueId: string,
+  projectId: string,
+  now: string,
+  database: Database = db,
+): Promise<void> {
+  try {
+    const statuses = await database.select().from(projectStatuses).where(eq(projectStatuses.projectId, projectId));
+    const inProgress = statuses.find(s => s.name === "In Progress");
+    if (inProgress) {
+      await database.update(issues).set({ statusId: inProgress.id, updatedAt: now, statusChangedAt: now }).where(eq(issues.id, issueId));
+    }
+  } catch (err) {
+    console.warn("[workspaces] Failed to move issue to In Progress:", err);
+  }
+}
+
 /** Cascade delete a workspace: diff comments → session messages → sessions → workspace record. */
 export async function deleteWorkspaceCascade(
   workspaceId: string,
