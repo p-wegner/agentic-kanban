@@ -1471,7 +1471,7 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                             method: "POST",
                             body: JSON.stringify({ name: newTagName.trim(), color: newTagColor }),
                           });
-                          setTagsList((t) => [...t, created]);
+                          setTagsList((t) => [...t, { ...created, isBuiltin: false }]);
                           setNewTagName("");
                           setNewTagColor("#6B7280");
                           showToast("Tag created", "success");
