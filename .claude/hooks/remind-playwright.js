@@ -84,9 +84,6 @@ function main() {
     }
   }
 
-  // Output block decision — the smart-hooks-runner will relay it
-  process.stdout.write(
-    JSON.stringify({
   const clientPort = process.env.KANBAN_CLIENT_PORT || process.env.VITE_PORT || "5173";
   const serverPort = process.env.KANBAN_SERVER_PORT || process.env.SERVER_PORT || "3001";
 
@@ -98,7 +95,7 @@ function main() {
         "You are in after_merge+reviewer mode. Before stopping, you must:",
         "",
         "  1. Merge the workspace:",
-        `     curl -s -X POST http://localhost:${serverPort}/api/workspaces/$(echo $KANBAN_SESSION_TYPE && printenv KANBAN_WORKSPACE_ID 2>/dev/null || echo '{workspaceId}')/merge`,
+        `     curl -s -X POST http://localhost:${serverPort}/api/workspaces/{workspaceId}/merge`,
         "     (or use the workspaceId from your prompt)",
         "",
         "  2. Visually verify on master:",
