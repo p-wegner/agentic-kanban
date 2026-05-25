@@ -452,8 +452,10 @@ export async function startServer(port?: number) {
       const base = baseBranch || "main";
       const { stdout } = await execFileAsync("git", ["diff", "--name-only", `${base}...${branch}`], { cwd: repoPath });
       const changedFiles = stdout.split("\n").map(f => f.trim()).filter(Boolean);
+      // Detect frontend file changes regardless of directory structure so the feature works
+      // for any project managed by this board, not just the agentic-kanban monorepo.
       const hasClientChanges = changedFiles.some(
-        f => f.startsWith("packages/client/") && /\.(tsx?|jsx?|css)$/.test(f)
+        f => /\.(jsx|tsx|css|scss|less|sass|vue|svelte)$/.test(f)
       );
       if (!hasClientChanges) return;
 
@@ -475,7 +477,6 @@ export async function startServer(port?: number) {
         .where(eq(issueTags.issueId, issueId)).limit(100);
       const hasTag = alreadyTagged.some(t => t.tagId === tagId);
       if (!hasTag) {
-        const { randomUUID } = await import("node:crypto");
         await db.insert(issueTags).values({ id: randomUUID(), issueId, tagId }).catch(() => {/* already exists */});
         console.log(`[workflow] tagged issue ${issueId} with "${TAG_NAME}"`);
       }
