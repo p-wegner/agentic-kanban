@@ -10,9 +10,10 @@ const WS_STATUS_CONFIG: Record<string, { label: string; dot: string; ring: strin
   reviewing: { label: "Reviewing", dot: "bg-violet-500 animate-pulse", ring: "ring-violet-400/30", header: "from-violet-50 dark:from-violet-950/40", tier: "background" },
   idle:      { label: "Idle",      dot: "bg-gray-400",                 ring: "ring-gray-300/30",   header: "from-gray-50 dark:from-gray-800/40",    tier: "background" },
   closed:    { label: "Closed",    dot: "bg-gray-300",                 ring: "ring-gray-200/30",   header: "from-gray-50 dark:from-gray-800/40",    tier: "background" },
+  error:     { label: "Error",     dot: "bg-red-500",                  ring: "ring-red-400/40",    header: "from-red-50 dark:from-red-950/50",      tier: "background" },
 };
 
-const STATUS_ORDER = ["active", "fixing", "reviewing", "idle"];
+const STATUS_ORDER = ["active", "fixing", "reviewing", "error", "idle"];
 
 function formatDuration(ms: number): string {
   const s = Math.floor(ms / 1000);

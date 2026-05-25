@@ -6,6 +6,7 @@ import { randomUUID } from "node:crypto";
 import * as agentService from "./agent.service.js";
 import { getProvider } from "./agent-provider.js";
 import { extractPlan, writePlanFile, buildImplementPrompt } from "./plan-mode.service.js";
+import { preflightCheck } from "./preflight-check.js";
 import type { ParsedStreamEvent, ProviderName } from "./agent-provider.js";
 import type { AgentOutputMessage } from "@agentic-kanban/shared";
 import type { TodoItem } from "./board-events.js";
@@ -332,6 +333,37 @@ function createSessionManager(
     const effectiveWorkingDir = workingDirOverride ?? workspace.workingDir;
     if (!effectiveWorkingDir) {
       throw new Error("Workspace has no working directory; run setup first");
+    }
+
+    // Preflight health check — fail fast instead of launching a doomed session
+    const preflight = preflightCheck(effectiveWorkingDir, workspace.isDirect);
+    if (!preflight.ok) {
+      const errorMsg = preflight.errors.join("; ");
+      console.error(`[session] preflight failed: workspaceId=${workspaceId} errors=${errorMsg}`);
+      // Create a session record with the error so it's visible in the board UI
+      const errorSessionId = randomUUID();
+      const now = new Date().toISOString();
+      await db.insert(sessions).values({
+        id: errorSessionId,
+        workspaceId,
+        executor: provider ?? "claude-code",
+        status: "completed",
+        startedAt: now,
+        endedAt: now,
+        exitCode: "1",
+        triggerType: triggerType ?? null,
+      });
+      // Write error as session output
+      await db.insert(sessionMessages).values({
+        sessionId: errorSessionId,
+        type: "stderr",
+        data: `Preflight health check failed:\n${preflight.errors.map(e => `  - ${e}`).join("\n")}\n\nFix the issue and relaunch the workspace.`,
+      });
+      // Set workspace to error status
+      await db.update(workspaces)
+        .set({ status: "error", updatedAt: now })
+        .where(eq(workspaces.id, workspaceId));
+      return errorSessionId;
     }
 
     // Look up issue's projectId for activity broadcasting
