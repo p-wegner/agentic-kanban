@@ -13,7 +13,7 @@ export interface E2EProject {
   id: string;
   name: string;
   repoPath: string;
-  defaultBranch: string;
+  defaultBranch: string | null;
   [key: string]: unknown;
 }
 

@@ -34,8 +34,7 @@ describe("detectRepoInfo", () => {
     const info = await detectRepoInfo(tempDir);
     expect(info.repoPath).toBe(tempDir);
     expect(info.repoName).toBe(tempDir.split(/[/\\]/).pop()!);
-    expect(info.defaultBranch).toBeDefined();
-    expect(typeof info.defaultBranch).toBe("string");
+    expect(info.defaultBranch === "main" || info.defaultBranch === "master").toBe(true);
     expect(info.remoteUrl).toBeNull();
   });
 
@@ -56,21 +55,30 @@ describe("detectRepoInfo", () => {
     expect(info.remoteUrl).toBe("https://github.com/test/repo.git");
   });
 
-  it("detects custom default branch", async () => {
-    // Create a repo with custom init.defaultBranch
+  it("leaves default branch unset when neither main nor master exists", async () => {
     const customDir = await mkdtemp(join(tmpdir(), "kanban-custom-"));
-    await exec("git", ["init"], customDir);
+    await exec("git", ["init", "-b", "develop"], customDir);
     await exec("git", ["config", "user.email", "test@test.com"], customDir);
     await exec("git", ["config", "user.name", "Test"], customDir);
-    await exec("git", ["config", "init.defaultBranch", "develop"], customDir);
     await exec("git", ["commit", "--allow-empty", "-m", "init"], customDir);
 
     const info = await detectRepoInfo(customDir);
-    // If the system has init.defaultBranch set globally, we might get that
-    // At minimum, it should be a non-empty string
-    expect(info.defaultBranch).toBeTruthy();
-    expect(typeof info.defaultBranch).toBe("string");
+    expect(info.defaultBranch).toBeNull();
 
     await rm(customDir, { recursive: true, force: true });
+  });
+
+  it("prefers main over master when both branches exist", async () => {
+    const bothDir = await mkdtemp(join(tmpdir(), "kanban-both-"));
+    await exec("git", ["init", "-b", "master"], bothDir);
+    await exec("git", ["config", "user.email", "test@test.com"], bothDir);
+    await exec("git", ["config", "user.name", "Test"], bothDir);
+    await exec("git", ["commit", "--allow-empty", "-m", "init"], bothDir);
+    await exec("git", ["branch", "main"], bothDir);
+
+    const info = await detectRepoInfo(bothDir);
+    expect(info.defaultBranch).toBe("main");
+
+    await rm(bothDir, { recursive: true, force: true });
   });
 });
