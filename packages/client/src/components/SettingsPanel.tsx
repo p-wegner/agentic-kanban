@@ -37,6 +37,7 @@ interface Settings {
   projects_base_path?: string;
   plan_auto_continue?: string;
   visual_verification_mode?: string;
+  after_merge_verify_agent?: string;
 }
 
 const DEFAULT_SETTINGS: Settings = {
@@ -794,6 +795,22 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                           <option value="after_merge">After merge — verification runs on master after merge completes</option>
                         </select>
                       </Field>
+                      {(settings.visual_verification_mode || "before_merge") === "after_merge" && (
+                        <Field
+                          label="After-merge verification agent"
+                          hint="Who performs visual verification after merge. 'None' just tags the issue. 'Reviewer' instructs the review agent to merge then verify. 'Dedicated agent' spawns a separate verification-only session after the merge completes."
+                        >
+                          <select
+                            value={settings.after_merge_verify_agent || "none"}
+                            onChange={(e) => set("after_merge_verify_agent")(e.target.value)}
+                            className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
+                          >
+                            <option value="none">None (default) — tag issue, manual verification</option>
+                            <option value="reviewer">Reviewer — review agent merges + verifies UI</option>
+                            <option value="dedicated">Dedicated agent — separate verification session after merge</option>
+                          </select>
+                        </Field>
+                      )}
                     </div>
                   </div>
 
