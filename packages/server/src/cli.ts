@@ -3,14 +3,15 @@ import { Command } from "commander";
 import { readFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { migrate } from "drizzle-orm/libsql/migrator";
-import { db } from "./db/index.js";
+import { db, rawClient } from "./db/index.js";
 import { projects, projectStatuses, preferences, workspaces, issues, issueTags, sessions, sessionMessages, agentSkills, issueDependencies, DEPENDENCY_TYPES } from "@agentic-kanban/shared/schema";
 import { eq, inArray, sql, and, isNull, desc } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { detectRepoInfo } from "./services/git-info.service.js";
-import { getMigrationsFolder } from "./db/migrations.js";
+import { applyMigrations } from "./db/manual-migrate.js";
 import { parseSessionSummary, formatDurationStr } from "@agentic-kanban/shared";
+import { registerProject } from "./services/project-registration.js";
+import { BUILTIN_SKILLS } from "./builtin-skills.js";
 
 const DEFAULT_STATUSES = [
   { name: "Todo", sortOrder: 0, isDefault: true },
@@ -22,15 +23,7 @@ const DEFAULT_STATUSES = [
 ];
 
 async function runMigrations() {
-  try {
-    await migrate(db, { migrationsFolder: getMigrationsFolder() });
-  } catch (err: unknown) {
-    // libsql@0.4.7 + Node.js 26 bug: CREATE TABLE IF NOT EXISTS on existing table returns
-    // SQLITE_OK (0) which libsql misinterprets as an error. Safe to ignore when DB is already migrated.
-    const isSpuriousLibsqlBug = err instanceof Error && err.message.includes("not an error") &&
-      (err as NodeJS.ErrnoException).code === "SQLITE_OK";
-    if (!isSpuriousLibsqlBug) throw err;
-  }
+  await applyMigrations(rawClient);
 }
 
 const program = new Command();
@@ -2020,6 +2013,119 @@ sessionCmd
     }
   });
 
+// ── init command ──────────────────────────────────────────────────
+program
+  .command("init")
+  .description("Initialize agentic-kanban for the first time.\n\nCreates the data directory (~/.agentic-kanban/), runs database migrations, seeds default tags and skills, and optionally registers a project.")
+  .argument("[path]", "Path to a git repository to register as a project")
+  .option("-n, --name <name>", "Custom project name (defaults to repo directory name)")
+  .addHelpText("after", `
+Examples:
+  $ npx agentic-kanban init                  # set up data dir only
+  $ npx agentic-kanban init .                # set up + register current repo
+  $ npx agentic-kanban init /path/to/repo    # set up + register specific repo
+`)
+  .action(async (path?: string, options?: { name?: string }) => {
+    try {
+      const { ensureDataDir, DATA_DIR } = await import("./db/data-dir.js");
+      const dataDir = ensureDataDir();
+      console.log(`Data directory: ${dataDir}`);
+
+      await runMigrations();
+      console.log("Database migrated.");
+
+      const { seed } = await import("./db/seed.js");
+      await seed();
+
+      if (path) {
+        const { project, created } = await registerProject(path, { name: options?.name });
+        if (!created) {
+          console.log(`Project "${project.name}" already registered.`);
+        } else {
+          console.log(`Registered project "${project.name}"`);
+          console.log(`  Repo: ${project.repoPath}`);
+          console.log(`  Branch: ${project.defaultBranch}`);
+        }
+      }
+
+      console.log("\nInitialization complete!");
+      if (!path) {
+        console.log("Next: register a project with `agentic-kanban init <path>` or `agentic-kanban register <path>`");
+      } else {
+        console.log("Run `agentic-kanban dev` to start the server.");
+      }
+      process.exit(0);
+    } catch (err) {
+      console.error("Error:", err instanceof Error ? err.message : String(err));
+      process.exit(1);
+    }
+  });
+
+// ── install-skill command ─────────────────────────────────────────
+program
+  .command("install-skill")
+  .description("Install built-in agent skills as SKILL.md files into a project's .claude/skills/ directory.\n\nWorks without a running server or database. Each skill is written as .claude/skills/<name>/SKILL.md.")
+  .argument("[target-path]", "Path to the target project (defaults to current directory)", ".")
+  .option("-n, --names <names>", "Comma-separated list of skill names to install (default: all)")
+  .option("--list", "List available built-in skills without installing")
+  .addHelpText("after", `
+Examples:
+  $ npx agentic-kanban install-skill                        # install all skills to cwd
+  $ npx agentic-kanban install-skill /path/to/project       # install to a specific project
+  $ npx agentic-kanban install-skill -n "board-navigator"   # install a single skill
+  $ npx agentic-kanban install-skill --list                  # list available skills
+`)
+  .action(async (targetPath: string, options: { names?: string; list?: boolean }) => {
+    try {
+      if (options.list) {
+        console.log("Available built-in skills:");
+        for (const skill of BUILTIN_SKILLS) {
+          console.log(`  ${skill.name} — ${skill.description}`);
+        }
+        process.exit(0);
+      }
+
+      const { resolve: resolvePath } = await import("node:path");
+      const { access } = await import("node:fs/promises");
+      const resolvedPath = resolvePath(targetPath);
+      try {
+        await access(resolvedPath);
+      } catch {
+        console.error(`Target path does not exist: ${resolvedPath}`);
+        process.exit(1);
+      }
+
+      let skills = [...BUILTIN_SKILLS];
+      if (options.names) {
+        const nameSet = new Set(options.names.split(",").map(n => n.trim()));
+        skills = skills.filter(s => nameSet.has(s.name));
+        if (skills.length === 0) {
+          console.error(`No matching skills found. Available: ${BUILTIN_SKILLS.map(s => s.name).join(", ")}`);
+          process.exit(1);
+        }
+      }
+
+      const { writeAgentSkillFile } = await import("@agentic-kanban/shared/lib/agent-skill-files");
+
+      for (const skill of skills) {
+        await writeAgentSkillFile(resolvedPath, {
+          name: skill.name,
+          description: skill.description,
+          prompt: skill.prompt,
+        });
+      }
+
+      console.log(`Installed ${skills.length} skill(s) to ${resolvedPath}/.claude/skills/:`);
+      for (const s of skills) {
+        console.log(`  - ${s.name}`);
+      }
+      process.exit(0);
+    } catch (err) {
+      console.error("Error:", err instanceof Error ? err.message : String(err));
+      process.exit(1);
+    }
+  });
+
 program
   .command("dev")
   .description("Start the development server (server + built client UI)")
@@ -2027,6 +2133,18 @@ program
   .option("--no-open", "Do not open browser")
   .action(async (options: { port: string; open: boolean }) => {
     try {
+      // Auto-initialize if no database exists
+      const { dbExists, ensureDataDir } = await import("./db/data-dir.js");
+      if (!dbExists()) {
+        console.log("No database found — running first-time setup...");
+        ensureDataDir();
+        await runMigrations();
+        console.log("Database created and migrated.");
+        const { seed } = await import("./db/seed.js");
+        await seed();
+        console.log();
+      }
+
       const port = Number(options.port);
       process.env.PORT = String(port);
 
