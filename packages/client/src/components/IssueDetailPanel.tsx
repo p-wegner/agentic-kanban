@@ -245,7 +245,6 @@ export function IssueDetailPanel({
   }
 
   const VISUAL_VERIFY_TAG = "needs-visual-verification";
-  const VISUAL_VERIFY_COLOR = "#F59E0B";
   const isVisualVerify = issueTags.some((t) => t.name === VISUAL_VERIFY_TAG);
 
   async function toggleVisualVerify() {
@@ -260,11 +259,12 @@ export function IssueDetailPanel({
       } else {
         let tag = allTags.find((t) => t.name === VISUAL_VERIFY_TAG);
         if (!tag) {
-          tag = await apiFetch<{ id: string; name: string; color: string | null }>("/api/tags", {
-            method: "POST",
-            body: JSON.stringify({ name: VISUAL_VERIFY_TAG, color: VISUAL_VERIFY_COLOR }),
-          });
-          setAllTags((prev) => [...prev, tag!]);
+          const freshTags = await apiFetch<{ id: string; name: string; color: string | null }[]>("/api/tags");
+          setAllTags(freshTags);
+          tag = freshTags.find((t) => t.name === VISUAL_VERIFY_TAG);
+        }
+        if (!tag) {
+          throw new Error(`Built-in tag "${VISUAL_VERIFY_TAG}" not found`);
         }
         await apiFetch(`/api/issues/${issue.id}/tags`, {
           method: "POST",
