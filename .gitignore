@@ -13,6 +13,7 @@ Thumbs.db
 *.tsbuildinfo
 test-results/
 playwright-report/
+packages/e2e/.e2e-run-state.json
 blob-report/
 coverage/
 .claude/hooks/.edited-files.json

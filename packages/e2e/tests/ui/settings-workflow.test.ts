@@ -1,6 +1,22 @@
 import { test, expect } from "@playwright/test";
 import { SERVER_URL } from "../helpers/port.js";
 
+let originalWorkflowSettings: Record<string, string> = {};
+
+test.beforeAll(async ({ request }) => {
+  // Capture current workflow settings before any test modifies them.
+  const res = await request.get(`${SERVER_URL}/api/preferences/settings`);
+  if (res.ok()) {
+    const all = await res.json();
+    originalWorkflowSettings = {
+      auto_review: all.auto_review ?? "true",
+      review_auto_fix: all.review_auto_fix ?? "true",
+      auto_merge: all.auto_merge ?? "true",
+      auto_monitor: all.auto_monitor ?? "false",
+    };
+  }
+});
+
 async function openWorkflowTab(page: any) {
   await page.goto("/");
   await page.waitForSelector("h2");
@@ -201,13 +217,10 @@ test.describe("Settings > Workflow tab", () => {
 });
 
 test.afterAll(async ({ request }) => {
-  // Restore workflow defaults
-  await request.put(`${SERVER_URL}/api/preferences/settings`, {
-    data: {
-      auto_review: "true",
-      review_auto_fix: "true",
-      auto_merge: "true",
-      auto_monitor: "false",
-    },
-  });
+  // Restore original workflow settings (not hardcoded defaults) to avoid corrupting the real DB.
+  try {
+    await request.put(`${SERVER_URL}/api/preferences/settings`, {
+      data: originalWorkflowSettings,
+    });
+  } catch { /* best-effort */ }
 });
