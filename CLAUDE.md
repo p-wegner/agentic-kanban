@@ -198,10 +198,17 @@ Also kill orphaned tsx server processes — they hold the SQLite DB open, causin
 Register repo → Create issue → New Workspace (one step: branch + worktree + agent) → View diff → Merge
 
 ## Agent Skills
+
 Skills are prompt templates in `agent_skills` DB table. Written as `.claude/skills/<name>/SKILL.md` in the worktree on workspace creation.
 
-- **Built-in skills** (`isBuiltin: true`, seeded by `pnpm db:seed`): `board-navigator`, `code-review`, `dependency-analyzer`, `ticket-enhancer`. Cannot be modified/deleted via API.
+- **Built-in skills** (`isBuiltin: true`, seeded by `pnpm db:seed`): `board-navigator`, `code-review`, `code-review-thorough`, `dependency-analyzer`, `ticket-enhancer`, `orchestrator`, `monitor-nudge`, `kanban-workflow`. Cannot be modified/deleted via API. These are project-generic — useful for any git repo using the kanban board.
 - **Custom skills**: Created via API/CLI/MCP. Support optional `projectId` scoping.
 - **Review prompt**: Uses built-in `code-review` skill. Create a project-scoped `code-review` skill to override. Supports `{{branch}}`, `{{baseBranch}}`, `{{issueId}}`, `{{autoFixInstructions}}` placeholders.
 - **API**: `GET/POST/PUT/DELETE /api/agent-skills`. `GET ?projectId=<id>` returns global + project-specific.
 - **MCP**: `list_agent_skills`, `get_agent_skill`, `create_agent_skill`, `export_agent_skills`.
+
+### Built-in vs project-specific skills
+
+**Built-in skills** (in `packages/server/src/builtin-skills.ts`) are shipped with the app and installed via `npx agentic-kanban install-skill .`. They are generic — useful for any user's git repo (e.g. `kanban-workflow`, `code-review`, `board-navigator`).
+
+**Project-specific skills** live only in `.claude/skills/` on disk in this repo. They are NOT shipped with the npm package. These are for developing agentic-kanban itself (e.g. `publish`, `cleanup`, `session-inspector`, `board-monitor`, `ui-explorer`, `architecture-improvement`). Do NOT add project-specific skills to `builtin-skills.ts`.
