@@ -1,22 +1,23 @@
 {
   "name": "agentic-kanban",
-  "version": "0.1.0",
+  "version": "0.1.6",
   "type": "module",
   "description": "Kanban board for managing AI-driven coding tasks",
   "license": "MIT",
   "homepage": "https://github.com/p-wegner/agentic-kanban#readme",
   "repository": {
     "type": "git",
-    "url": "https://github.com/p-wegner/agentic-kanban.git"
+    "url": "git+https://github.com/p-wegner/agentic-kanban.git"
   },
   "bugs": {
     "url": "https://github.com/p-wegner/agentic-kanban/issues"
   },
   "bin": {
-    "agentic-kanban": "./dist/cli.js",
-    "agentic-kanban-mcp": "./dist/mcp.js"
+    "agentic-kanban": "bin/cli.js",
+    "agentic-kanban-mcp": "bin/mcp.js"
   },
   "files": [
+    "bin/",
     "dist/cli.js",
     "dist/server.js",
     "dist/mcp.js",
@@ -27,7 +28,6 @@
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
     "start": "node dist/cli.js dev",
-    "prepublishOnly": "echo 'Use pnpm release from monorepo root' && exit 1",
     "db:migrate": "drizzle-kit migrate",
     "db:seed": "tsx src/db/seed.ts",
     "db:reset": "tsx src/scripts/db-reset.ts && drizzle-kit migrate && tsx src/db/seed.ts",
