@@ -21,6 +21,15 @@ export function createTagsRoute(database: Database = db) {
       return c.json({ error: "name is required" }, 400);
     }
 
+    const [existing] = await database.select({ id: tags.id, isBuiltin: tags.isBuiltin })
+      .from(tags).where(eq(tags.name, body.name)).limit(1);
+    if (existing) {
+      if (existing.isBuiltin) {
+        return c.json({ error: `A built-in tag named "${body.name}" already exists and cannot be replaced` }, 409);
+      }
+      return c.json({ error: `A tag named "${body.name}" already exists` }, 409);
+    }
+
     const id = randomUUID();
     await database.insert(tags).values({
       id,
