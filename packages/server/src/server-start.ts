@@ -72,7 +72,7 @@ function getEffectiveProfile(prefMap: Map<string, string>, provider: ProviderNam
   return claudeProfile;
 }
 
-async function buildReviewPrompt(branch: string, baseBranch: string | null, issueId: string, autoFix: boolean, projectId?: string, conflictingFiles?: string[], uncommittedChanges?: string[], workspaceId?: string, skillName = "code-review"): Promise<{ prompt: string; model: string | null }> {
+async function buildReviewPrompt(branch: string, baseBranch: string | null, issueId: string, autoFix: boolean, projectId?: string, conflictingFiles?: string[], uncommittedChanges?: string[], workspaceId?: string, skillName = "code-review", verifyAgent?: string): Promise<{ prompt: string; model: string | null }> {
   let template: string | null = null;
   let skillModel: string | null = null;
   if (projectId) {
@@ -149,12 +149,44 @@ Steps to resolve:
 `;
   }
 
-  const prompt = conflictPreamble + template
+  const serverPort = process.env.KANBAN_SERVER_PORT || process.env.PORT || "3001";
+  const clientPort = process.env.KANBAN_CLIENT_PORT || process.env.VITE_PORT || "5173";
+
+  let prompt = conflictPreamble + template
     .replace(/\{\{branch}}/g, branch)
     .replace(/\{\{baseBranch}}/g, baseBranch ?? "HEAD")
     .replace(/\{\{issueId}}/g, issueId)
     .replace(/\{\{workspaceId}}/g, workspaceId ?? "")
+    .replace(/\{\{serverPort}}/g, serverPort)
+    .replace(/\{\{clientPort}}/g, clientPort)
     .replace(/\{\{autoFixInstructions}}/g, autoFixInstructions);
+
+  if (verifyAgent === "reviewer") {
+    prompt += `
+
+## Post-Review: Merge + Visual Verification Required
+
+This project uses \`visual_verification_mode=after_merge\` with \`after_merge_verify_agent=reviewer\`.
+**You are responsible for the complete pipeline**: approve code → merge workspace → visual verify on master.
+
+After completing your code review and fixing any CRITICAL/MAJOR issues:
+
+1. **Merge the workspace** (instead of mark_ready_for_merge, call merge directly):
+   \`\`\`
+   curl -s -X POST http://localhost:${serverPort}/api/workspaces/${workspaceId ?? "{{workspaceId}}"}/merge
+   \`\`\`
+
+2. **After merge, visually verify** the UI changes on master:
+   - Use the playwright-cli skill (/playwright-cli) or run playwright directly
+   - Navigate to http://localhost:${clientPort}
+   - Check the relevant UI sections for the changed files on branch '${branch}'
+   - Take a screenshot to confirm the UI renders correctly
+
+3. **Report** your verification result.
+
+The stop hook will remind you if you try to exit before completing all three steps.`;
+  }
+
   return { prompt, model: skillModel };
 }
 
@@ -412,7 +444,8 @@ export async function startServer(port?: number) {
             }
           }
           const reviewSkillName = workspace.thoroughReview ? "code-review-thorough" : "code-review";
-          const { prompt: reviewPromptText, model: reviewModel } = await buildReviewPrompt(workspace.branch, diffRef, issueId, autoFix, projectId, conflictingFiles, uncommittedChanges, workspaceId, reviewSkillName);
+          const verifyAgent = prefMap.get("after_merge_verify_agent") || "none";
+          const { prompt: reviewPromptText, model: reviewModel } = await buildReviewPrompt(workspace.branch, diffRef, issueId, autoFix, projectId, conflictingFiles, uncommittedChanges, workspaceId, reviewSkillName, verifyAgent);
           // `--model` here carries a Claude model from the review skill. Non-Claude
           // providers select models via provider-specific profile/config plumbing.
           const reviewArgsWithModel = (reviewModel && reviewProvider === "claude") ? `${reviewArgs ?? ""} --model ${reviewModel}`.trim() : reviewArgs;
@@ -421,9 +454,13 @@ export async function startServer(port?: number) {
             await db.update(workspaces).set({ status: "reviewing", updatedAt: now }).where(eq(workspaces.id, workspaceId));
             boardEvents.broadcast(projectId, "issue_updated");
 
-            const reviewSessionId = await sessionManager.startSession({ workspaceId, prompt: reviewPromptText, agentCommand, agentArgs: reviewArgsWithModel, claudeProfile: effectiveReviewProfile, provider, triggerType: "review", profile: profileSelection });
+            const reviewExtraEnv: Record<string, string> = {
+              KANBAN_SESSION_TYPE: "review",
+              KANBAN_AFTER_MERGE_VERIFY: verifyAgent,
+            };
+            const reviewSessionId = await sessionManager.startSession({ workspaceId, prompt: reviewPromptText, agentCommand, agentArgs: reviewArgsWithModel, claudeProfile: effectiveReviewProfile, provider, triggerType: "review", profile: profileSelection, extraEnv: reviewExtraEnv });
             reviewSessionIds.add(reviewSessionId);
-            console.log(`[workflow] launched ${reviewSkillName} session ${reviewSessionId} for workspace ${workspaceId}`);
+            console.log(`[workflow] launched ${reviewSkillName} session ${reviewSessionId} for workspace ${workspaceId} (verifyAgent=${verifyAgent})`);
           } catch (err) {
             console.error("[workflow] Failed to launch review session:", err);
           }
@@ -550,6 +587,53 @@ export async function startServer(port?: number) {
             try { await gitService.removeWorktree(repoPath, workspace.workingDir); } catch { /* best effort */ }
           }
           try { await gitService.deleteBranch(repoPath, workspace.branch); } catch { /* best effort */ }
+
+          // In dedicated mode, launch a verification agent on the main checkout after merge
+          const verifyAgent = prefMapLearning.get("after_merge_verify_agent") || "none";
+          const issueTagged = await db.select({ tagId: issueTags.tagId }).from(issueTags)
+            .where(eq(issueTags.issueId, issueId)).limit(100)
+            .then(rows => rows.some(r => r.tagId !== null));
+          if (verifyAgent === "dedicated" && issueTagged) {
+            try {
+              const clientPort = process.env.KANBAN_CLIENT_PORT || process.env.VITE_PORT || "5173";
+              const serverPort = process.env.KANBAN_SERVER_PORT || process.env.PORT || "3001";
+              const verifyPrompt = `You are a visual verification agent. The branch '${workspace.branch}' was just merged into master.
+
+Your task: visually verify that the UI changes look correct in the browser.
+
+1. Use the playwright-cli skill (/playwright-cli) or run playwright directly
+2. Navigate to http://localhost:${clientPort}
+3. Check the relevant UI sections based on the changed files from branch '${workspace.branch}'
+4. Take a screenshot confirming the UI renders correctly and report your findings
+
+If the dev server is not responding, wait 10 seconds and retry once.
+
+Issue ID: ${issueId}
+Workspace ID: ${workspace.id}
+Server: http://localhost:${serverPort}`;
+              const verifyProfile = prefMapLearning.get("claude_profile") || undefined;
+              const verifyCmd = isMockProfile(verifyProfile) ? MOCK_AGENT_COMMAND : (prefMapLearning.get("agent_command") || undefined);
+              const verifyArgs = prefMapLearning.get("agent_args") || undefined;
+              const verifyProvider = parseProviderPref(prefMapLearning);
+              const effectiveVerifyProfile = getEffectiveProfile(prefMapLearning, verifyProvider, isMockProfile(verifyProfile) ? undefined : verifyProfile);
+              const verifyProfileSelection = effectiveVerifyProfile ? { provider: verifyProvider, name: effectiveVerifyProfile } : undefined;
+              const verifySessId = await sessionManager.startSession({
+                workspaceId: workspace.id,
+                prompt: verifyPrompt,
+                agentCommand: verifyCmd,
+                agentArgs: verifyArgs,
+                claudeProfile: effectiveVerifyProfile,
+                provider: toExecutorProvider(verifyProvider),
+                triggerType: "verify",
+                profile: verifyProfileSelection,
+                workingDirOverride: repoPath,
+                extraEnv: { KANBAN_SESSION_TYPE: "verify" },
+              });
+              console.log(`[workflow] dedicated verification session started: session=${verifySessId}`);
+            } catch (err) {
+              console.warn("[workflow] dedicated verification session failed (non-fatal):", err);
+            }
+          }
         }
       }
       await db.update(workspaces).set({ status: "closed", workingDir: null, updatedAt: now }).where(eq(workspaces.id, workspace.id));
@@ -630,7 +714,8 @@ export async function startServer(port?: number) {
         diffRef = prep.diffRef;
       }
       const manualSkillName = thoroughReview ? "code-review-thorough" : "code-review";
-      const { prompt: reviewPromptText, model: reviewModel } = await buildReviewPrompt(workspace.branch, diffRef, issueId, autoFix, projectId, manualConflictingFiles, manualUncommittedChanges, workspaceId, manualSkillName);
+      const verifyAgent = prefMap.get("after_merge_verify_agent") || "none";
+      const { prompt: reviewPromptText, model: reviewModel } = await buildReviewPrompt(workspace.branch, diffRef, issueId, autoFix, projectId, manualConflictingFiles, manualUncommittedChanges, workspaceId, manualSkillName, verifyAgent);
       // `--model` here is a Claude model name / flag; non-Claude providers use profile/config.
       const reviewArgsWithModel = (reviewModel && provider === "claude") ? `${reviewArgs ?? ""} --model ${reviewModel}`.trim() : reviewArgs;
 
@@ -638,7 +723,11 @@ export async function startServer(port?: number) {
       await db.update(workspaces).set({ status: "reviewing", updatedAt: now }).where(eq(workspaces.id, workspaceId));
       boardEvents.broadcast(projectId, "issue_updated");
 
-      const reviewSessionId = await sessionManager.startSession({ workspaceId, prompt: reviewPromptText, agentCommand, agentArgs: reviewArgsWithModel, claudeProfile, profile: manualProfileSelection, provider: toExecutorProvider(provider), triggerType: "review" });
+      const reviewExtraEnv: Record<string, string> = {
+        KANBAN_SESSION_TYPE: "review",
+        KANBAN_AFTER_MERGE_VERIFY: verifyAgent,
+      };
+      const reviewSessionId = await sessionManager.startSession({ workspaceId, prompt: reviewPromptText, agentCommand, agentArgs: reviewArgsWithModel, claudeProfile, profile: manualProfileSelection, provider: toExecutorProvider(provider), triggerType: "review", extraEnv: reviewExtraEnv });
       reviewSessionIds.add(reviewSessionId);
       console.log(`[workflow] manual review session ${reviewSessionId} for workspace ${workspaceId}`);
 
