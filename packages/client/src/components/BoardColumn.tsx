@@ -3,20 +3,20 @@ import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
 import type { LiveSessionStats, TodoItem } from "../lib/useBoardEvents.js";
 import { IssueCard } from "./IssueCard.js";
 
-type SortMode = "default" | "priority";
+type SortMode = "default" | "type";
 
-const PRIORITY_ORDER: Record<string, number> = {
-  critical: 0,
-  high: 1,
-  medium: 2,
-  low: 3,
+const ISSUE_TYPE_ORDER: Record<string, number> = {
+  bug: 0,
+  feature: 1,
+  task: 2,
+  chore: 3,
 };
 
 function sortIssues(issues: IssueWithStatus[], mode: SortMode): IssueWithStatus[] {
   if (mode === "default") return issues;
   return [...issues].sort(
     (a, b) =>
-      (PRIORITY_ORDER[a.priority] ?? 99) - (PRIORITY_ORDER[b.priority] ?? 99)
+      (ISSUE_TYPE_ORDER[a.issueType ?? "task"] ?? 2) - (ISSUE_TYPE_ORDER[b.issueType ?? "task"] ?? 2)
   );
 }
 
@@ -153,7 +153,7 @@ export function BoardColumn({
   }
 
   function toggleSort() {
-    const next: SortMode = sortMode === "default" ? "priority" : "default";
+    const next: SortMode = sortMode === "default" ? "type" : "default";
     setSortMode(next);
     try {
       localStorage.setItem(`col-sort-${column.id}`, next);
@@ -198,13 +198,13 @@ export function BoardColumn({
           <button
             onClick={toggleSort}
             className={`text-xs rounded-md px-1.5 py-0.5 transition-colors ${
-              sortMode === "priority"
+              sortMode === "type"
                 ? "bg-blue-100 text-blue-600 hover:bg-blue-200"
                 : "text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-white/60 dark:hover:bg-gray-800/60"
             }`}
-            title={sortMode === "priority" ? "Sorted by priority — click for default" : "Sort by priority"}
+            title={sortMode === "type" ? "Sorted by type — click for default" : "Sort by type"}
           >
-            ↑P
+            ↑T
           </button>
           {!isCreating && column.name === "Todo" && (
             <button

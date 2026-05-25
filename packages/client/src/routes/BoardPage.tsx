@@ -445,7 +445,7 @@ export function BoardPage() {
         // Only update if data actually changed to avoid unnecessary re-renders
         if (found.title !== selectedIssue.title ||
             found.description !== selectedIssue.description ||
-            found.priority !== selectedIssue.priority ||
+            found.issueType !== selectedIssue.issueType ||
             found.statusId !== selectedIssue.statusId ||
             found.statusName !== selectedIssue.statusName ||
             found.updatedAt !== selectedIssue.updatedAt ||
