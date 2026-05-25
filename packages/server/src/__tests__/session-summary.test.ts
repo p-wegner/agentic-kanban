@@ -691,4 +691,80 @@ describe("Session Summary API", () => {
     expect(body.errors[1]).toContain("Sandbox restriction violated");
     expect(body.toolUsePatterns[0]).toMatchObject({ tool: "shell", count: 1, failedCount: 1 });
   });
+
+  it("captures model from session.model_change (Copilot CLI format)", async () => {
+    const { sessionId } = await createSessionWithData(testApp.db);
+
+    await testApp.db.insert(schema.sessionMessages).values([
+      {
+        sessionId,
+        type: "stdout",
+        data: [
+          JSON.stringify({
+            type: "session.start",
+            data: {
+              sessionId: "copilot-sess-1",
+              copilotVersion: "1.0.54",
+              context: { cwd: "C:\\repo\\worktree", branch: "feature/test" },
+            },
+          }),
+          JSON.stringify({
+            type: "session.model_change",
+            data: { newModel: "claude-sonnet-4.6", reasoningEffort: null },
+          }),
+          JSON.stringify({
+            type: "assistant.message",
+            data: { model: "", content: "Starting work." },
+          }),
+        ].join("\n"),
+      },
+    ]);
+
+    const res = await testApp.app.request(`/api/sessions/${sessionId}/summary`);
+    expect(res.status).toBe(200);
+
+    const body = await res.json();
+    expect(body.model).toBe("claude-sonnet-4.6");
+    expect(body.overview).toContain("claude-sonnet-4.6");
+  });
+
+  it("parses JSON string arguments from Copilot tool.execution_start", async () => {
+    const { sessionId } = await createSessionWithData(testApp.db);
+
+    await testApp.db.insert(schema.sessionMessages).values([
+      {
+        sessionId,
+        type: "stdout",
+        data: [
+          JSON.stringify({
+            type: "session.start",
+            data: { sessionId: "copilot-sess-1", context: { cwd: "/repo" } },
+          }),
+          JSON.stringify({
+            type: "tool.execution_start",
+            data: {
+              toolCallId: "tool-ps",
+              toolName: "powershell",
+              arguments: JSON.stringify({ command: "pnpm build", description: "Build project" }),
+            },
+          }),
+          JSON.stringify({
+            type: "tool.execution_start",
+            data: {
+              toolCallId: "tool-view",
+              toolName: "view",
+              arguments: JSON.stringify({ path: "/repo/src/index.ts" }),
+            },
+          }),
+        ].join("\n"),
+      },
+    ]);
+
+    const res = await testApp.app.request(`/api/sessions/${sessionId}/summary`);
+    expect(res.status).toBe(200);
+
+    const body = await res.json();
+    expect(body.commandsRun).toEqual(["pnpm build"]);
+    expect(body.filesRead).toEqual(["/repo/src/index.ts"]);
+  });
 });
