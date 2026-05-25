@@ -173,6 +173,7 @@ export function registerGetBoardStatus(server: McpServer) {
           if (mainWs && mainWs.workingDir && mainWs.status !== "closed") {
             const baseBranch = mainWs.baseBranch || project.defaultBranch;
             const diffRef = mainWs.isDirect ? "HEAD" : baseBranch;
+            if (!diffRef) continue;
 
             asyncWork.push(
               getDiffShortstat(mainWs.workingDir, diffRef)

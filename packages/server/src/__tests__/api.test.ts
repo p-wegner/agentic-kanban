@@ -6,7 +6,8 @@ import { createRoutes } from "../routes/index.js";
 import type { SessionManager } from "../services/session.manager.js";
 import * as schema from "@agentic-kanban/shared/schema";
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdtempSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { eq } from "drizzle-orm";
 import { tmpdir } from "node:os";
 import { resolve, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -53,6 +54,8 @@ const MIGRATION_FILES = [
   "../../../shared/drizzle/0036_scheduled_runs_cron.sql",
   "../../../shared/drizzle/0037_workspace_provider.sql",
   "../../../shared/drizzle/0038_pending_plan_path.sql",
+  "../../../shared/drizzle/0039_nullable_default_branch.sql",
+  "../../../shared/drizzle/0040_direct_workspace_base_commit.sql",
 ];
 
 function createTestApp() {
@@ -92,6 +95,7 @@ async function createProjectDirectly(database: ReturnType<typeof drizzle<typeof 
   setupScript?: string | null;
   setupBlocking?: boolean;
   setupEnabled?: boolean;
+  defaultBranch?: string | null;
 } = {}) {
   const now = new Date().toISOString();
   const id = randomUUID();
@@ -100,7 +104,7 @@ async function createProjectDirectly(database: ReturnType<typeof drizzle<typeof 
     name: overrides.name || "Test Project",
     repoPath: overrides.repoPath || "/tmp/test-repo",
     repoName: "test-repo",
-    defaultBranch: "main",
+    defaultBranch: overrides.defaultBranch === undefined ? "main" : overrides.defaultBranch,
     setupScript: overrides.setupScript,
     setupBlocking: overrides.setupBlocking,
     setupEnabled: overrides.setupEnabled,
@@ -151,6 +155,36 @@ describe("Projects API", () => {
   it("GET /api/projects/:id/branches returns 404 for missing project", async () => {
     const res = await app.request(`/api/projects/${randomUUID()}/branches`);
     expect(res.status).toBe(404);
+  });
+
+  it("PATCH /api/projects/:id validates defaultBranch exists locally", async () => {
+    const repoPath = mkdtempSync(join(tmpdir(), "kanban-project-branch-"));
+    execFileSync("git", ["init", "-b", "main"], { cwd: repoPath });
+    execFileSync("git", ["config", "user.email", "test@test.com"], { cwd: repoPath });
+    execFileSync("git", ["config", "user.name", "Test"], { cwd: repoPath });
+    execFileSync("git", ["commit", "--allow-empty", "-m", "init"], { cwd: repoPath });
+
+    const gitProjectId = await createProjectDirectly(database, { repoPath, defaultBranch: null });
+    try {
+      const invalid = await app.request(`/api/projects/${gitProjectId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ defaultBranch: "does-not-exist" }),
+      });
+      expect(invalid.status).toBe(400);
+
+      const valid = await app.request(`/api/projects/${gitProjectId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ defaultBranch: "main" }),
+      });
+      expect(valid.status).toBe(200);
+
+      const rows = await database.select({ defaultBranch: schema.projects.defaultBranch }).from(schema.projects).where(eq(schema.projects.id, gitProjectId));
+      expect(rows[0].defaultBranch).toBe("main");
+    } finally {
+      rmSync(repoPath, { recursive: true, force: true });
+    }
   });
 });
 

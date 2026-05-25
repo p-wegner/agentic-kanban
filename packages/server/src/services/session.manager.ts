@@ -41,6 +41,10 @@ export interface StartSessionOptions {
   provider?: import("./agent-provider.js").ProviderId;
   triggerType?: string;
   profile?: { provider: ProviderName; name: string };
+  /** Extra environment variables to pass to the agent process. */
+  extraEnv?: Record<string, string>;
+  /** Override the working directory used to launch the agent (bypasses workspace.workingDir). */
+  workingDirOverride?: string;
 }
 
 function createSessionManager(
@@ -302,6 +306,8 @@ function createSessionManager(
       provider,
       triggerType,
       profile,
+      extraEnv,
+      workingDirOverride,
     } = opts;
     // Look up workspace to get workingDir
     const wsRows = await db
@@ -315,7 +321,8 @@ function createSessionManager(
     }
 
     const workspace = wsRows[0];
-    if (!workspace.workingDir) {
+    const effectiveWorkingDir = workingDirOverride ?? workspace.workingDir;
+    if (!effectiveWorkingDir) {
       throw new Error("Workspace has no working directory; run setup first");
     }
 
@@ -355,7 +362,7 @@ function createSessionManager(
 
     const sessionId = randomUUID();
     const now = new Date().toISOString();
-    console.log(`[session] starting: workspaceId=${workspaceId} sessionId=${sessionId} workingDir=${workspace.workingDir}`);
+    console.log(`[session] starting: workspaceId=${workspaceId} sessionId=${sessionId} workingDir=${effectiveWorkingDir}`);
 
     // Cache session context for activity broadcasting
     sessionContexts.set(sessionId, { workspaceId, issueId: workspace.issueId, projectId });
@@ -376,7 +383,7 @@ function createSessionManager(
     sessionProviders.set(sessionId, executor);
 
     try {
-      const proc = agentService.launch(workspace.workingDir, sessionId, prompt, agentArgs, (event) => { // onOutput callback
+      const proc = agentService.launch(effectiveWorkingDir, sessionId, prompt, agentArgs, (event) => { // onOutput callback
         // Broadcast to WebSocket subscribers
         const message: AgentOutputMessage = event;
         broadcast(sessionId, message);
@@ -480,7 +487,7 @@ function createSessionManager(
           }
         }
       // When resumeWithNewModel is true, omit --resume so the new profile/provider is used instead
-      }, resumeWithNewModel ? undefined : providerSessionId, agentCommand, claudeProfile, multiTurn, permissionPromptTool, planMode, provider, profile);
+      }, resumeWithNewModel ? undefined : providerSessionId, agentCommand, claudeProfile, multiTurn, permissionPromptTool, planMode, provider, profile, extraEnv);
 
       // Persist PID so hot-reload can detect surviving processes
       if (proc.pid) {

@@ -22,7 +22,7 @@ test.describe("Workspace panel info: baseBranch and skill name", () => {
       : projects[0];
 
     projectId = activeProject.id;
-    defaultBranch = activeProject.defaultBranch ?? "master";
+    defaultBranch = activeProject.defaultBranch ?? "main";
 
     const statusesRes = await request.get(`${SERVER_URL}/api/projects/${projectId}/statuses`);
     const statuses = await statusesRes.json();

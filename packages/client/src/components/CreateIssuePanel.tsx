@@ -26,6 +26,7 @@ interface CreateIssuePanelProps {
 type AgentProvider = ProfileSelection["provider"];
 
 const COPILOT_DEFAULT_PROFILE = "default";
+const CODEX_DEFAULT_PROFILE = "default";
 
 function uniqueProfiles(profiles: string[], fallback?: string): string[] {
   const all = fallback ? [fallback, ...profiles] : profiles;
@@ -33,13 +34,15 @@ function uniqueProfiles(profiles: string[], fallback?: string): string[] {
 }
 
 function defaultProfileLabel(settings: Record<string, string>): string {
-  if (settings.provider === "codex") return `codex:${settings.codex_profile || "none"}`;
+  if (settings.provider === "codex") return `codex:${settings.codex_profile || CODEX_DEFAULT_PROFILE}`;
   if (settings.provider === "copilot") return `copilot:${settings.copilot_profile || COPILOT_DEFAULT_PROFILE}`;
   return `claude:${settings.claude_profile || "none"}`;
 }
 
 function profileOptionLabel(provider: AgentProvider, name: string): string {
-  const displayName = provider === "copilot" && name === COPILOT_DEFAULT_PROFILE ? "Default" : name;
+  const isDefault = (provider === "copilot" && name === COPILOT_DEFAULT_PROFILE) ||
+    (provider === "codex" && name === CODEX_DEFAULT_PROFILE);
+  const displayName = isDefault ? "Default" : name;
   const providerLabel = provider === "codex" ? "Codex" : provider === "copilot" ? "Copilot" : "Claude";
   return `${providerLabel}: ${displayName}`;
 }
@@ -62,7 +65,7 @@ export function CreateIssuePanel({
   const [selectedProfile, setSelectedProfile] = useState("");
   const [settings, setSettings] = useState<Record<string, string>>({});
   const [claudeProfiles, setClaudeProfiles] = useState<string[]>([]);
-  const [codexProfiles, setCodexProfiles] = useState<string[]>([]);
+  const [codexProfiles, setCodexProfiles] = useState<string[]>([CODEX_DEFAULT_PROFILE]);
   const [copilotProfiles, setCopilotProfiles] = useState<string[]>([COPILOT_DEFAULT_PROFILE]);
   const [isDirect, setIsDirect] = useState(false);
   const [skillId, setSkillId] = useState<string>(initialState?.skillId ?? "");
@@ -109,13 +112,13 @@ export function CreateIssuePanel({
       apiFetch<Skill[]>(`/api/agent-skills?projectId=${projectId}`).catch(() => [] as Skill[]),
       apiFetch<Record<string, string>>("/api/preferences/settings").catch(() => ({} as Record<string, string>)),
       apiFetch<{ profiles: string[] }>("/api/preferences/claude-profiles").catch(() => ({ profiles: [] as string[] })),
-      apiFetch<{ profiles: string[] }>("/api/preferences/codex-profiles").catch(() => ({ profiles: [] as string[] })),
+      apiFetch<{ profiles: string[] }>("/api/preferences/codex-profiles").catch(() => ({ profiles: [CODEX_DEFAULT_PROFILE] as string[] })),
       apiFetch<{ profiles: string[] }>("/api/preferences/copilot-profiles").catch(() => ({ profiles: [COPILOT_DEFAULT_PROFILE] })),
     ]).then(([skillsData, settingsData, claudeData, codexData, copilotData]) => {
       setSkills(skillsData);
       setSettings(settingsData);
       setClaudeProfiles(claudeData.profiles);
-      setCodexProfiles(codexData.profiles);
+      setCodexProfiles(uniqueProfiles(codexData.profiles, CODEX_DEFAULT_PROFILE));
       setCopilotProfiles(uniqueProfiles(copilotData.profiles, COPILOT_DEFAULT_PROFILE));
     });
   }, [startWorkspace, projectId]);
@@ -295,13 +298,11 @@ export function CreateIssuePanel({
                             ))}
                           </optgroup>
                         )}
-                        {codexProfiles.length > 0 && (
-                          <optgroup label="Codex">
-                            {codexProfiles.map((p) => (
-                              <option key={`codex:${p}`} value={`codex:${p}`}>{profileOptionLabel("codex", p)}</option>
-                            ))}
-                          </optgroup>
-                        )}
+                        <optgroup label="Codex">
+                          {codexProfiles.map((p) => (
+                            <option key={`codex:${p}`} value={`codex:${p}`}>{profileOptionLabel("codex", p)}</option>
+                          ))}
+                        </optgroup>
                         <optgroup label="Copilot">
                           {copilotProfiles.map((p) => (
                             <option key={`copilot:${p}`} value={`copilot:${p}`}>{profileOptionLabel("copilot", p)}</option>
@@ -317,7 +318,7 @@ export function CreateIssuePanel({
                       onChange={(e) => setIsDirect(e.target.checked)}
                       className="rounded border-gray-300 text-purple-600 focus:ring-purple-500"
                     />
-                    Work directly on master (no worktree)
+                    Work directly on current checkout (no worktree)
                   </label>
                   {skills.length > 0 && (
                     <div className="flex items-center gap-2">

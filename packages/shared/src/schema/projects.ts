@@ -7,7 +7,7 @@ export const projects = sqliteTable("projects", {
   color: text("color"),
   repoPath: text("repo_path").notNull().default(""),
   repoName: text("repo_name").notNull().default(""),
-  defaultBranch: text("default_branch").notNull().default("main"),
+  defaultBranch: text("default_branch"),
   remoteUrl: text("remote_url"),
   setupScript: text("setup_script"),
   setupBlocking: integer("setup_blocking", { mode: "boolean" }).notNull().default(true),
