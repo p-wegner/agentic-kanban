@@ -478,7 +478,7 @@ export function createProjectsRoute(database: Database = db) {
     if (projectRows.length === 0) return c.json({ error: "Project not found" }, 404);
     const { repoPath, defaultBranch } = projectRows[0];
 
-    const { commitCount, recentCommits } = getProjectGitStats(repoPath, defaultBranch);
+    const { commitCount, recentCommits, detectedBranch } = getProjectGitStats(repoPath, defaultBranch);
 
     // Issue counts by status name
     const issueRows = await database
@@ -490,7 +490,7 @@ export function createProjectsRoute(database: Database = db) {
     const issueCounts: Record<string, number> = {};
     for (const row of issueRows) if (row.statusName != null) issueCounts[row.statusName] = Number(row.count);
 
-    return c.json({ commitCount, recentCommits, issueCounts });
+    return c.json({ commitCount, recentCommits, issueCounts, detectedBranch });
   });
 
   // GET /api/projects/:id/worktrees

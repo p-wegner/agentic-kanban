@@ -76,20 +76,37 @@ export async function detectRepoInfo(repoPath: string): Promise<RepoInfo> {
 export interface ProjectGitStats {
   commitCount: number;
   recentCommits: { hash: string; message: string; date: string }[];
+  detectedBranch: string | null;
 }
 
 export function getProjectGitStats(repoPath: string, defaultBranch: string | null): ProjectGitStats {
   let commitCount = 0;
   let recentCommits: { hash: string; message: string; date: string }[] = [];
-  if (!defaultBranch) return { commitCount, recentCommits };
+
+  // If defaultBranch is not stored in the DB, try to detect it synchronously
+  let branch = defaultBranch;
+  if (!branch) {
+    for (const candidate of ["main", "master"]) {
+      try {
+        execFileSync("git", ["show-ref", "--verify", "--quiet", `refs/heads/${candidate}`], { cwd: repoPath, timeout: 2000 });
+        branch = candidate;
+        break;
+      } catch { /* branch doesn't exist */ }
+    }
+  }
+
+  if (!branch) return { commitCount, recentCommits, detectedBranch: null };
+
   try {
-    const countOut = execFileSync("git", ["rev-list", "--count", defaultBranch], { cwd: repoPath, timeout: 5000 }).toString().trim();
+    const countOut = execFileSync("git", ["rev-list", "--count", branch], { cwd: repoPath, timeout: 5000 }).toString().trim();
     commitCount = parseInt(countOut, 10) || 0;
-    const logOut = execFileSync("git", ["log", defaultBranch, "--oneline", "--format=%H|%s|%cr", "-10"], { cwd: repoPath, timeout: 5000 }).toString().trim();
+    // Use ASCII unit separator (\x1f) to avoid conflicts with commit message content
+    const sep = "\x1f";
+    const logOut = execFileSync("git", ["log", branch, `--format=%H${sep}%s${sep}%cr`, "-10"], { cwd: repoPath, timeout: 5000 }).toString().trim();
     recentCommits = logOut.split("\n").filter(Boolean).map((line) => {
-      const [hash, message, date] = line.split("|");
-      return { hash: hash?.slice(0, 7) ?? "", message: message ?? "", date: date ?? "" };
+      const parts = line.split(sep);
+      return { hash: (parts[0] ?? "").slice(0, 7), message: parts[1] ?? "", date: parts[2] ?? "" };
     });
   } catch { /* git unavailable or no commits */ }
-  return { commitCount, recentCommits };
+  return { commitCount, recentCommits, detectedBranch: branch };
 }
