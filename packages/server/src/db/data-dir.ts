@@ -4,10 +4,17 @@ import { mkdirSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const localDbDir = resolve(__dirname, "../../");
+// In bundled mode (__dirname = dist/), one level up = packages/server/
+// In dev mode (__dirname = src/db/), two levels up = packages/server/
+const localDbDir = existsSync(resolve(__dirname, "../kanban.db"))
+  ? resolve(__dirname, "../")
+  : existsSync(resolve(__dirname, "../../kanban.db"))
+    ? resolve(__dirname, "../../")
+    : null;
 
 export const DATA_DIR = process.env.AGENTIC_KANBAN_DIR
-  || (existsSync(resolve(localDbDir, "kanban.db")) ? localDbDir : join(homedir(), ".agentic-kanban"));
+  || localDbDir
+  || join(homedir(), ".agentic-kanban");
 
 export function getDbUrl(): string {
   if (process.env.DB_URL) return process.env.DB_URL;
