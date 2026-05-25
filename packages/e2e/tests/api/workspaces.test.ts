@@ -1,5 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { SERVER_URL } from "../helpers/port.js";
+import { getE2EProjectId } from "../helpers/e2e-project.js";
 
 test.describe("Workspaces API", () => {
   let projectId: string;
@@ -9,9 +10,7 @@ test.describe("Workspaces API", () => {
   const createdWorkspaceIds: string[] = [];
 
   test.beforeAll(async ({ request }) => {
-    const projectsRes = await request.get(`${SERVER_URL}/api/projects`);
-    const projects = await projectsRes.json();
-    projectId = projects[0].id;
+    projectId = await getE2EProjectId(request);
 
     const statusesRes = await request.get(
       `${SERVER_URL}/api/projects/${projectId}/statuses`,
@@ -32,10 +31,10 @@ test.describe("Workspaces API", () => {
 
   test.afterAll(async ({ request }) => {
     for (const id of createdWorkspaceIds) {
-      await request.delete(`${SERVER_URL}/api/workspaces/${id}`);
+      await request.delete(`${SERVER_URL}/api/workspaces/${id}`).catch(() => {});
     }
     if (issueId) {
-      await request.delete(`${SERVER_URL}/api/issues/${issueId}`);
+      await request.delete(`${SERVER_URL}/api/issues/${issueId}`).catch(() => {});
     }
   });
 
