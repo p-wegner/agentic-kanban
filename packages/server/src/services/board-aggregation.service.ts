@@ -45,7 +45,7 @@ type WorkspaceSummary = {
 
 export async function buildWorkspaceSummaryMap(
   issueIds: string[],
-  defaultBranch: string,
+  defaultBranch: string | null,
   database: Database,
 ): Promise<Map<string, WorkspaceSummary>> {
   const workspaceSummaryMap = new Map<string, WorkspaceSummary>();
@@ -143,6 +143,7 @@ export async function buildWorkspaceSummaryMap(
 
     if (mainWs.workingDir && mainWs.status !== "closed") {
       const diffRef = mainWs.isDirect ? "HEAD" : (mainWs.baseBranch || defaultBranch);
+      if (!diffRef) continue;
       const mainRef = summary.main;
 
       // Serve cached diff stats immediately
@@ -198,6 +199,7 @@ export async function buildWorkspaceSummaryMap(
           }
           const wsId = mainWs.id;
           const baseBranch = mainWs.baseBranch || defaultBranch;
+          if (!baseBranch) continue;
           const workingDir = mainWs.workingDir;
           runBgGit(() =>
             detectConflicts(workingDir, baseBranch)

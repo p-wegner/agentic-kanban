@@ -8,7 +8,7 @@ interface Project {
   name: string;
   repoPath: string;
   repoName: string;
-  defaultBranch: string;
+  defaultBranch: string | null;
   remoteUrl: string | null;
   setupScript?: string | null;
 }
@@ -144,6 +144,8 @@ export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCr
   }
 
   const isLoading = actionLoading || localLoading;
+  const defaultBranchLabel = project?.defaultBranch || "unset";
+  const cannotCreateWorktree = !isDirect && !baseBranch.trim() && !project?.defaultBranch;
 
   return (
     <div className="border border-gray-200 dark:border-gray-700 rounded p-3 space-y-2">
@@ -187,7 +189,7 @@ export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCr
               onChange={(e) => setBaseBranch(e.target.value)}
               className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:bg-gray-900 dark:text-gray-100"
             >
-              <option value="">Default ({project?.defaultBranch || "main"})</option>
+              <option value="">Default ({defaultBranchLabel})</option>
               {branches.local.map((b) => (
                 <option key={b} value={b}>{b}</option>
               ))}
@@ -204,9 +206,14 @@ export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCr
               type="text"
               value={baseBranch}
               onChange={(e) => setBaseBranch(e.target.value)}
-              placeholder={project?.defaultBranch || "main"}
+              placeholder={project?.defaultBranch || "Choose a base branch"}
               className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:bg-gray-900 dark:text-gray-100"
             />
+          )}
+          {cannotCreateWorktree && (
+            <p className="text-xs text-amber-600 dark:text-amber-400">
+              Set a project default branch in settings or choose a base branch.
+            </p>
           )}
         </>
       )}
@@ -288,7 +295,7 @@ export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCr
       <div className="flex gap-2">
         <button
           onClick={handleSubmit}
-          disabled={isLoading || (!isDirect && !branchName.trim())}
+          disabled={isLoading || (!isDirect && !branchName.trim()) || cannotCreateWorktree}
           className="text-sm bg-blue-600 text-white px-3 py-1.5 rounded hover:bg-blue-700 disabled:opacity-50"
         >
           {isLoading ? "Creating..." : isDirect ? "Create Direct & Launch" : "Create & Launch"}

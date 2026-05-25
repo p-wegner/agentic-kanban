@@ -382,13 +382,15 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
   const [tab, setTab] = useState<Tab>("agent");
 
   // Project-specific settings
-  const [projectSettings, setProjectSettings] = useState<{ setupScript: string; setupBlocking: boolean; setupEnabled: boolean; teardownScript: string; color: string | null }>({
+  const [projectSettings, setProjectSettings] = useState<{ defaultBranch: string; setupScript: string; setupBlocking: boolean; setupEnabled: boolean; teardownScript: string; color: string | null }>({
+    defaultBranch: "",
     setupScript: "",
     setupBlocking: true,
     setupEnabled: true,
     teardownScript: "",
     color: null,
   });
+  const [projectBranches, setProjectBranches] = useState<{ local: string[]; remote: string[] } | null>(null);
   const [generatingScript, setGeneratingScript] = useState(false);
   const [generatingTeardown, setGeneratingTeardown] = useState(false);
 
@@ -489,10 +491,11 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
         // Load project-specific settings
         if (activeProjectId) {
           try {
-            const projects = await apiFetch<{ setupScript: string | null; setupBlocking: boolean; color: string | null }[]>(("/api/projects"));
+            const projects = await apiFetch<{ id: string; defaultBranch: string | null; setupScript: string | null; setupBlocking: boolean; color: string | null }[]>(("/api/projects"));
             const project = projects.find((p: any) => p.id === activeProjectId);
             if (project) {
               setProjectSettings({
+                defaultBranch: project.defaultBranch || "",
                 setupScript: project.setupScript || "",
                 setupBlocking: project.setupBlocking !== false,
                 setupEnabled: (project as any).setupEnabled !== false,
@@ -500,6 +503,9 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                 color: project.color || null,
               });
             }
+            apiFetch<{ local: string[]; remote: string[] }>(`/api/projects/${activeProjectId}/branches`)
+              .then(setProjectBranches)
+              .catch(() => setProjectBranches(null));
           } catch {
             // Use defaults for project settings
           }
@@ -546,6 +552,10 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
   }
 
   async function handleSave() {
+    if (defaultBranchInvalid) {
+      showToast("Default branch does not exist in this repo", "error");
+      return;
+    }
     setSaving(true);
     try {
       const promises: Promise<unknown>[] = [
@@ -564,6 +574,7 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
               setupEnabled: projectSettings.setupEnabled,
               teardownScript: projectSettings.teardownScript || null,
               color: projectSettings.color || null,
+              defaultBranch: projectSettings.defaultBranch.trim() || null,
             }),
           }),
         );
@@ -584,6 +595,8 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
     setSettings((s) => ({ ...s, [key]: checked ? "true" : "false" }));
 
   const autoReviewOn = settings.auto_review !== "false";
+  const defaultBranchValue = projectSettings.defaultBranch.trim();
+  const defaultBranchInvalid = !!defaultBranchValue && !!projectBranches && !projectBranches.local.includes(defaultBranchValue);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-2">
@@ -1040,6 +1053,34 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                     <p className="text-sm text-gray-500">No active project selected.</p>
                   ) : (
                     <div className="space-y-3">
+                      <Field label="Default Branch" hint="Used as the base branch for new worktrees. Leave empty only if you do not want worktrees created until this is set.">
+                        <input
+                          type="text"
+                          value={projectSettings.defaultBranch}
+                          list="project-default-branches"
+                          onChange={(e) => setProjectSettings(s => ({ ...s, defaultBranch: e.target.value }))}
+                          placeholder="main"
+                          className={`w-full text-sm border rounded px-2 py-1.5 focus:outline-none focus:ring-1 font-mono ${
+                            defaultBranchInvalid
+                              ? "border-red-300 focus:ring-red-500"
+                              : "border-gray-300 focus:ring-blue-500"
+                          }`}
+                        />
+                        {projectBranches && (
+                          <datalist id="project-default-branches">
+                            {projectBranches.local.map((branch) => (
+                              <option key={branch} value={branch} />
+                            ))}
+                          </datalist>
+                        )}
+                        {defaultBranchInvalid ? (
+                          <p className="text-xs text-red-600 mt-1">Branch must exist locally in this repository.</p>
+                        ) : (
+                          <p className="text-xs text-gray-500 mt-1">
+                            Detected local branches: {projectBranches?.local.length ? projectBranches.local.join(", ") : "unavailable"}
+                          </p>
+                        )}
+                      </Field>
                       <Field label="Project Color">
                         <div className="flex items-center gap-3">
                           <input
@@ -1725,7 +1766,7 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
             </button>
             <button
               onClick={handleSave}
-              disabled={saving}
+              disabled={saving || defaultBranchInvalid}
               className="px-4 py-2 text-sm text-white bg-blue-600 hover:bg-blue-700 rounded-md disabled:opacity-50"
             >
               {saving ? "Saving..." : "Save"}
