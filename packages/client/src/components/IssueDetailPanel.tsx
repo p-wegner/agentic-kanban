@@ -99,6 +99,7 @@ export function IssueDetailPanel({
   const [preEnhanceSnapshot, setPreEnhanceSnapshot] = useState<{ title: string; description: string } | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [actionsOpen, setActionsOpen] = useState(false);
+  const [togglingVisualVerify, setTogglingVisualVerify] = useState(false);
   const actionsRef = useRef<HTMLDivElement>(null);
   const [moveToDonePending, setMoveToDonePending] = useState<{ confirm: () => Promise<void> } | null>(null);
   const [workspaceCount, setWorkspaceCount] = useState(0);
@@ -240,6 +241,42 @@ export function IssueDetailPanel({
       showToast(err instanceof Error ? err.message : "Dependency analysis failed", "error");
     } finally {
       setAnalyzingDeps(false);
+    }
+  }
+
+  const VISUAL_VERIFY_TAG = "needs-visual-verification";
+  const VISUAL_VERIFY_COLOR = "#F59E0B";
+  const isVisualVerify = issueTags.some((t) => t.name === VISUAL_VERIFY_TAG);
+
+  async function toggleVisualVerify() {
+    if (togglingVisualVerify) return;
+    setTogglingVisualVerify(true);
+    try {
+      if (isVisualVerify) {
+        const tag = issueTags.find((t) => t.name === VISUAL_VERIFY_TAG)!;
+        await apiFetch(`/api/issues/${issue.id}/tags/${tag.id}`, { method: "DELETE" });
+        setIssueTags((prev) => prev.filter((t) => t.name !== VISUAL_VERIFY_TAG));
+        showToast("Removed visual verify tag");
+      } else {
+        let tag = allTags.find((t) => t.name === VISUAL_VERIFY_TAG);
+        if (!tag) {
+          tag = await apiFetch<{ id: string; name: string; color: string | null }>("/api/tags", {
+            method: "POST",
+            body: JSON.stringify({ name: VISUAL_VERIFY_TAG, color: VISUAL_VERIFY_COLOR }),
+          });
+          setAllTags((prev) => [...prev, tag!]);
+        }
+        await apiFetch(`/api/issues/${issue.id}/tags`, {
+          method: "POST",
+          body: JSON.stringify({ tagId: tag.id }),
+        });
+        setIssueTags((prev) => [...prev, tag!]);
+        showToast("Marked for visual verification", "success");
+      }
+    } catch {
+      showToast("Failed to toggle visual verify tag", "error");
+    } finally {
+      setTogglingVisualVerify(false);
     }
   }
 
@@ -462,6 +499,19 @@ export function IssueDetailPanel({
             {editing ? "Edit Issue" : "Issue Details"}
           </h2>
           <div className="flex items-center gap-1">
+            {!editing && (
+              <button
+                onClick={toggleVisualVerify}
+                disabled={togglingVisualVerify}
+                title={isVisualVerify ? "Unmark visual verification" : "Mark for visual verification"}
+                className={`p-0.5 rounded transition-colors disabled:opacity-50 ${isVisualVerify ? "text-amber-500 hover:text-amber-600" : "text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300"}`}
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                </svg>
+              </button>
+            )}
             {!editing && (
               <div ref={actionsRef} className="relative">
                 <button
