@@ -14,7 +14,8 @@ interface ParsedLine {
   type?: string;
   subtype?: string;
   data?: {
-    content?: string;
+    content?: string | unknown[];
+    reasoningText?: string;
     model?: string;
     toolCallId?: string;
     toolName?: string;
@@ -61,12 +62,20 @@ export function extractMeaningfulOutput(
 
       if (obj) {
         if (obj.type === "assistant.message") {
-          if (obj.data?.content?.trim()) {
-            const text = obj.data.content.trim().split("\n").pop() ?? "";
+          const raw = obj.data?.content;
+          const contentStr = typeof raw === "string" ? raw
+            : Array.isArray(raw)
+              ? (raw as { type?: string; text?: string }[])
+                  .filter(b => b.type === "text" && typeof b.text === "string")
+                  .map(b => b.text as string)
+                  .join("\n")
+              : "";
+          if (contentStr.trim()) {
+            const text = contentStr.trim().split("\n").pop() ?? "";
             if (text) lines.push(text.slice(0, 200));
           } else if (obj.data?.reasoningText?.trim()) {
             // Use first line of reasoning as fallback when there is no direct content
-            const text = obj.data.reasoningText.trim().split("\n")[0] ?? "";
+            const text = (obj.data.reasoningText as string).trim().split("\n")[0] ?? "";
             if (text) lines.push(text.slice(0, 200));
           }
         }
