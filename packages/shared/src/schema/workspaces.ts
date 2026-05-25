@@ -10,6 +10,7 @@ export const workspaces = sqliteTable("workspaces", {
   workingDir: text("working_dir"),
   baseBranch: text("base_branch"),
   isDirect: integer("is_direct", { mode: "boolean" }).notNull().default(false),
+  baseCommitSha: text("base_commit_sha"),
   requiresReview: integer("requires_review", { mode: "boolean" }).notNull().default(false),
   thoroughReview: integer("thorough_review", { mode: "boolean" }).notNull().default(false),
   readyForMerge: integer("ready_for_merge", { mode: "boolean" }).notNull().default(false),

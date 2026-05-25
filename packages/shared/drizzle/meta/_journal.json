@@ -274,6 +274,13 @@
       "when": 1780561200000,
       "tag": "0038_pending_plan_path",
       "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "6",
+      "when": 1748131702000,
+      "tag": "0039_direct_workspace_base_commit",
+      "breakpoints": true
     }
   ]
 }
