@@ -5,7 +5,7 @@ import { eq, sql, and, inArray } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { execSync } from "node:child_process";
 import { existsSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
-import { detectRepoInfo, getProjectGitStats } from "../services/git-info.service.js";
+import { branchExists, detectRepoInfo, getProjectGitStats } from "../services/git-info.service.js";
 import { listBranches, listWorktrees, getDiffShortstat, removeWorktree } from "../services/git.service.js";
 import type { Database } from "../db/index.js";
 import { resolve, sep, join } from "node:path";
@@ -162,7 +162,7 @@ export function createProjectsRoute(database: Database = db) {
       }
     }
 
-    return c.json({ id, name, repoPath: repoInfo.repoPath }, 201);
+    return c.json({ id, name, repoPath: repoInfo.repoPath, defaultBranch: repoInfo.defaultBranch }, 201);
   });
 
   // POST /api/projects/create — create a new directory as a git repo and register it
@@ -258,7 +258,7 @@ export function createProjectsRoute(database: Database = db) {
 
     await initializeProjectStatuses(id, now, database);
 
-    return c.json({ id, name: projectName, repoPath: repoInfo.repoPath }, 201);
+    return c.json({ id, name: projectName, repoPath: repoInfo.repoPath, defaultBranch: repoInfo.defaultBranch }, 201);
   });
 
   // PATCH /api/projects/:id — update project fields
@@ -275,6 +275,29 @@ export function createProjectsRoute(database: Database = db) {
     if (body.setupBlocking !== undefined) updates.setupBlocking = !!body.setupBlocking;
     if (body.setupEnabled !== undefined) updates.setupEnabled = !!body.setupEnabled;
     if (body.teardownScript !== undefined) updates.teardownScript = body.teardownScript || null;
+    if (body.defaultBranch !== undefined) {
+      const projectRows = await database
+        .select({ repoPath: projects.repoPath })
+        .from(projects)
+        .where(eq(projects.id, id))
+        .limit(1);
+      if (projectRows.length === 0) {
+        return c.json({ error: "Project not found" }, 404);
+      }
+
+      const nextDefaultBranch = typeof body.defaultBranch === "string"
+        ? body.defaultBranch.trim()
+        : null;
+      if (nextDefaultBranch) {
+        const exists = await branchExists(projectRows[0].repoPath, nextDefaultBranch);
+        if (!exists) {
+          return c.json({ error: `Branch "${nextDefaultBranch}" does not exist in this repo` }, 400);
+        }
+        updates.defaultBranch = nextDefaultBranch;
+      } else {
+        updates.defaultBranch = null;
+      }
+    }
 
     await database.update(projects).set(updates).where(eq(projects.id, id));
     return c.json({ id });
@@ -539,15 +562,17 @@ export function createProjectsRoute(database: Database = db) {
         let diffStats: { filesChanged: number; insertions: number; deletions: number } | undefined;
         if (!isMain) {
           const base = ws?.baseBranch || defaultBranch;
-          diffStats = await getDiffShortstat(wt.path, base);
-          if (diffStats.filesChanged === 0 && diffStats.insertions === 0 && diffStats.deletions === 0) {
-            diffStats = undefined;
+          if (base) {
+            diffStats = await getDiffShortstat(wt.path, base);
+            if (diffStats.filesChanged === 0 && diffStats.insertions === 0 && diffStats.deletions === 0) {
+              diffStats = undefined;
+            }
           }
         }
 
         return {
           path: wt.path,
-          branch: isMain ? defaultBranch : wt.branch.replace(/^refs\/heads\//, ""),
+          branch: isMain ? (defaultBranch ?? (wt.branch.replace(/^refs\/heads\//, "") || "(unset)")) : wt.branch.replace(/^refs\/heads\//, ""),
           isMain,
           workspace: ws ? {
             id: ws.id,

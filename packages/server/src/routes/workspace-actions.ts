@@ -42,6 +42,13 @@ function applyWorkspaceAgentSelection(settings: AgentSettings, workspace: typeof
   };
 }
 
+function requireBaseBranch(baseBranch: string | null | undefined): string {
+  if (!baseBranch) {
+    throw new Error("No default branch configured for this project. Set a default branch in project settings or choose a base branch.");
+  }
+  return baseBranch;
+}
+
 export function createWorkspaceActionsRoute(
   getSessionManager: () => SessionManager,
   database: Database = db,
@@ -63,7 +70,7 @@ export function createWorkspaceActionsRoute(
 
     try {
       const { repoPath, defaultBranch } = await resolveProjectRepo(id, database);
-      const baseBranch = workspace.baseBranch || defaultBranch;
+      const baseBranch = requireBaseBranch(workspace.baseBranch || defaultBranch);
       console.log(`[workspace-actions] setup: workspaceId=${id} branch=${workspace.branch} repoPath=${repoPath} baseBranch=${baseBranch}`);
 
       const worktreePath = await gitService.createWorktree(repoPath, workspace.branch, baseBranch);
@@ -320,7 +327,7 @@ export function createWorkspaceActionsRoute(
       let diff = "";
       let conflicts: { hasConflicts: boolean; conflictingFiles: string[] } | null = null;
       const { repoPath, defaultBranch } = await resolveProjectRepo(id, database);
-      const baseBranch = workspace.baseBranch || defaultBranch;
+      const baseBranch = requireBaseBranch(workspace.baseBranch || defaultBranch);
 
       if (workspace.isDirect) {
         diff = workspace.workingDir
@@ -410,7 +417,7 @@ export function createWorkspaceActionsRoute(
 
       // Check for merge conflicts before attempting merge
       if (workspace.workingDir) {
-        const baseBranch = workspace.baseBranch || defaultBranch;
+        const baseBranch = requireBaseBranch(workspace.baseBranch || defaultBranch);
         const conflicts = await gitService.detectConflicts(workspace.workingDir, baseBranch);
         if (conflicts.hasConflicts) {
           return c.json({ error: "Merge conflicts detected", conflictingFiles: conflicts.conflictingFiles }, 409);
@@ -484,7 +491,7 @@ export function createWorkspaceActionsRoute(
     }
     try {
       const { defaultBranch } = await resolveProjectRepo(id, database);
-      const baseBranch = workspace.baseBranch || defaultBranch;
+      const baseBranch = requireBaseBranch(workspace.baseBranch || defaultBranch);
       const result = await gitService.detectConflicts(workspace.workingDir, baseBranch);
       return c.json(result);
     } catch (err) {
@@ -509,7 +516,7 @@ export function createWorkspaceActionsRoute(
 
     try {
       const { defaultBranch } = await resolveProjectRepo(id, database);
-      const baseBranch = workspace.baseBranch || defaultBranch;
+      const baseBranch = requireBaseBranch(workspace.baseBranch || defaultBranch);
 
       let result: { success: boolean; conflictingFiles?: string[]; error?: string };
       if (mode === "merge") {
@@ -565,7 +572,7 @@ export function createWorkspaceActionsRoute(
       const conflictingFiles = await getConflictingFiles(workspace.workingDir);
 
       const { defaultBranch } = await resolveProjectRepo(id, database);
-      const baseBranch = workspace.baseBranch || defaultBranch;
+      const baseBranch = requireBaseBranch(workspace.baseBranch || defaultBranch);
 
       const prompt = buildConflictResolutionPrompt(conflictingFiles, baseBranch);
 
@@ -599,11 +606,11 @@ export function createWorkspaceActionsRoute(
     }
 
     try {
-      const body = await c.req.json<{ mergeError?: string }>().catch(() => ({}));
+      const body: { mergeError?: string } = await c.req.json<{ mergeError?: string }>().catch(() => ({}));
       const errorMessage = body.mergeError || "Unknown merge error";
 
       const { defaultBranch } = await resolveProjectRepo(id, database);
-      const baseBranch = workspace.baseBranch || defaultBranch;
+      const baseBranch = requireBaseBranch(workspace.baseBranch || defaultBranch);
 
       const prompt = buildFixAndMergePrompt(errorMessage, baseBranch);
 
