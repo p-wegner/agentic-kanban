@@ -21,6 +21,8 @@ const external = [
   "drizzle-orm/libsql",
   "@libsql/client",
   "commander",
+  "@modelcontextprotocol/sdk",
+  "zod",
 ];
 
 const shared = {
@@ -29,7 +31,7 @@ const shared = {
   target: "node20",
   format: "esm",
   external,
-  packages: "external",
+  // Don't use packages: "external" — we need @agentic-kanban/shared bundled in.
   // Required for __dirname / import.meta usage in source
   banner: {
     js: `import { createRequire } from "node:module"; const require = createRequire(import.meta.url);`,
