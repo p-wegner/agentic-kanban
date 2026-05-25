@@ -4,7 +4,7 @@ const browser = await chromium.launch({
   executablePath: "C:/Users/pwegner/AppData/Local/ms-playwright/chromium_headless_shell-1208/chrome-headless-shell-win64/chrome-headless-shell.exe"
 });
 const page = await browser.newPage();
-await page.goto("http://localhost:5173");
+await page.goto("http://127.0.0.1:5173");
 await page.waitForTimeout(3000);
 // Click on an "In Progress" issue that likely has a workspace
 const inProgressCards = await page.locator(".cursor-pointer").all();
