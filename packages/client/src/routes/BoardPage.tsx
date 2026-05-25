@@ -4,6 +4,7 @@ import { Layout } from "../components/Layout.js";
 import { useTheme } from "../hooks/useTheme.js";
 import { GraphView } from "../components/GraphView.js";
 import { TableView } from "../components/TableView.js";
+import { AgentGrid } from "../components/AgentGrid.js";
 import { BoardColumn } from "../components/BoardColumn.js";
 import { CompletedGrid } from "../components/CompletedGrid.js";
 import { BoardStats } from "../components/BoardStats.js";
@@ -341,7 +342,7 @@ export function BoardPage() {
   const pendingGRef = useRef(false);
   const pendingGTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [expandedCreatePanel, setExpandedCreatePanel] = useState<{ statusId: string; statusName: string; state: Partial<CreateIssueFormState> } | null>(null);
-  const [viewMode, setViewMode] = useState<"kanban" | "graph" | "table">("kanban");
+  const [viewMode, setViewMode] = useState<"kanban" | "graph" | "table" | "agents">("kanban");
   const [dynamicColumnScaling, setDynamicColumnScaling] = useState(false);
   const [columnWidths, setColumnWidths] = useState<Record<string, number>>(() => {
     try { return JSON.parse(localStorage.getItem("kanban-column-widths") ?? "{}"); } catch { return {}; }
@@ -1059,12 +1060,13 @@ export function BoardPage() {
         setShowSettings(true);
         return;
       }
-      if ((e.key === "b" || e.key === "t") && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      if ((e.key === "b" || e.key === "t" || e.key === "l") && !e.ctrlKey && !e.metaKey && !e.altKey) {
         const target = e.target as HTMLElement;
         if (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT") return;
         e.preventDefault();
         if (e.key === "b") setViewMode("kanban");
         else if (e.key === "t") setViewMode("table");
+        else if (e.key === "l") setViewMode("agents");
         return;
       }
       // "a" to toggle All Workspaces panel
@@ -1219,6 +1221,16 @@ export function BoardPage() {
       shortcut: "g",
       category: "navigation",
       handler: () => setViewMode("graph"),
+    }));
+
+    unregisters.push(registerAction({
+      id: "view-agents",
+      label: "Switch to Agents View",
+      description: "Live grid of all active agent sessions",
+      icon: "⚡",
+      shortcut: "l",
+      category: "navigation",
+      handler: () => setViewMode("agents"),
     }));
 
     unregisters.push(registerAction({
@@ -1461,6 +1473,18 @@ export function BoardPage() {
               </svg>
               Table
             </button>
+            <button
+              onClick={() => setViewMode("agents")}
+              className={`px-2.5 py-1 text-xs rounded flex items-center gap-1.5 transition-colors ${viewMode === "agents" ? "bg-blue-600 text-white" : "text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700"}`}
+              title="Agents view (l)"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <circle cx="12" cy="8" r="4" />
+                <path d="M6 20v-2a6 6 0 0 1 12 0v2" />
+                <circle cx="12" cy="8" r="1.5" fill="currentColor" stroke="none" />
+              </svg>
+              Agents
+            </button>
           </div>
         </div>
         {viewMode === "graph" && activeProjectId ? (
@@ -1478,6 +1502,16 @@ export function BoardPage() {
             columns={columns}
             onIssueClick={handleIssueClick}
             searchQuery={searchQuery}
+          />
+        )}
+        {viewMode === "agents" && (
+          <AgentGrid
+            columns={columns}
+            liveActivity={sessionActivity}
+            liveStats={liveStats}
+            sessionTodos={sessionTodos}
+            onIssueClick={handleIssueClick}
+            onWorkspaceClick={handleManageWorkspaces}
           />
         )}
         {viewMode === "kanban" && activeColumns.length > 1 && (
