@@ -290,6 +290,12 @@ export async function getCurrentBranch(repoPath: string): Promise<string> {
   return output.trim();
 }
 
+/** Get the current HEAD commit SHA (full 40-character hash). */
+export async function getHeadCommitSha(repoPath: string): Promise<string> {
+  const output = await execGit(["rev-parse", "HEAD"], repoPath);
+  return output.trim();
+}
+
 /** Get diff of working tree changes against HEAD (for direct workspaces), including untracked files. */
 export async function getWorkingTreeDiff(workdirPath: string): Promise<string> {
   const tracked = await execGit(["diff", "HEAD"], workdirPath);
