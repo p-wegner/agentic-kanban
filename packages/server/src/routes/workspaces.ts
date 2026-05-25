@@ -87,6 +87,12 @@ export function createWorkspacesRoute(
       } else {
         // Normal workspace: create worktree
         baseBranch = body.baseBranch || project.defaultBranch;
+        if (!baseBranch) {
+          return c.json(
+            { error: "No default branch configured for this project. Set a default branch in project settings or choose a base branch." },
+            400,
+          );
+        }
         worktreePath = await gitService.createWorktree(project.repoPath, branch, baseBranch ?? undefined);
       }
 

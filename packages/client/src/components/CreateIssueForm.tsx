@@ -225,7 +225,7 @@ export function CreateIssueForm({
               onChange={(e) => setIsDirect(e.target.checked)}
               className="rounded border-gray-300 text-purple-600 focus:ring-purple-500"
             />
-            Work directly on master (no worktree)
+            Work directly on current checkout (no worktree)
           </label>
           {skills.length > 0 && (
             <div className="flex items-center gap-2">
