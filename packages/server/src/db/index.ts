@@ -1,8 +1,10 @@
 import { drizzle } from "drizzle-orm/libsql";
 import { createClient } from "@libsql/client";
 import * as schema from "@agentic-kanban/shared/schema";
+import { getDbUrl, ensureDataDir } from "./data-dir.js";
 
-const DB_URL = process.env.DB_URL || "file:kanban.db";
+ensureDataDir();
+const DB_URL = getDbUrl();
 
 // Create the libsql client manually so we can apply performance pragmas before
 // handing it to Drizzle. WAL mode allows concurrent reads without blocking writes,
@@ -19,6 +21,7 @@ try {
 }
 
 export const db = drizzle({ client, schema });
+export const rawClient = client;
 export { schema };
 
 export type Database = ReturnType<typeof drizzle<typeof schema>>;

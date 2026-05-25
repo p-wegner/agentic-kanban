@@ -1,40 +1,8 @@
-import { db } from "./index.js";
-import { tags, agentSkills } from "@agentic-kanban/shared/schema";
-import { randomUUID } from "node:crypto";
-import { eq, sql } from "drizzle-orm";
-
-export async function seed() {
-  const now = new Date().toISOString();
-
-  // Seed default tags (global, not project-scoped)
-  const existingTags = await db.select().from(tags).limit(1);
-  if (existingTags.length > 0) {
-    console.log("Tags already seeded, skipping.");
-  } else {
-    const DEFAULT_TAGS = [
-      { name: "bug", color: "#EF4444" },
-      { name: "feature", color: "#3B82F6" },
-      { name: "improvement", color: "#8B5CF6" },
-      { name: "docs", color: "#10B981" },
-    ];
-    for (const tag of DEFAULT_TAGS) {
-      await db.insert(tags).values({
-        id: randomUUID(),
-        name: tag.name,
-        color: tag.color,
-        createdAt: now,
-      });
-    }
-    console.log(`Seeded ${DEFAULT_TAGS.length} default tags.`);
-  }
-
-  // Seed default agent skills — upsert by name so new builtins are added to existing DBs
+export const BUILTIN_SKILLS = [
   {
-    const DEFAULT_SKILLS = [
-      {
-        name: "board-navigator",
-        description: "Comprehensive guide for agents to interact with the kanban board using MCP tools",
-        prompt: `You are an agent working on a kanban board. You have access to MCP tools (prefix: mcp__agentic-kanban__) to interact with the board.
+    name: "board-navigator",
+    description: "Comprehensive guide for agents to interact with the kanban board using MCP tools",
+    prompt: `You are an agent working on a kanban board. You have access to MCP tools (prefix: mcp__agentic-kanban__) to interact with the board.
 
 ## Available Tools
 - get_context — see active project, issue counts, running workspaces
@@ -69,12 +37,12 @@ Todo → In Progress → In Review → AI Reviewed → Done / Cancelled
 - Update the board in real-time as you work — don't batch updates
 - If blocked, update the issue description and set priority to "high"
 - For large issues, create sub-issues and track them independently`,
-        model: null,
-      },
-      {
-        name: "code-review",
-        description: "Default AI code review prompt — customize per project to change review behavior",
-        prompt: `You are an AI code reviewer. Review the changes on branch '{{branch}}'.
+    model: null,
+  },
+  {
+    name: "code-review",
+    description: "Default AI code review prompt — customize per project to change review behavior",
+    prompt: `You are an AI code reviewer. Review the changes on branch '{{branch}}'.
 First, run 'git diff --stat {{baseBranch}}' to see an overview of changed files.
 Then review each file individually with 'git diff {{baseBranch}} -- <filepath>' — do NOT dump the entire diff at once.
 
@@ -86,12 +54,12 @@ Classify each issue as CRITICAL (must fix — bugs, security, data loss), MAJOR 
 Do NOT move the issue to 'AI Reviewed' yourself — the system handles that on merge.
 
 Issue ID: {{issueId}}`,
-        model: null,
-      },
-      {
-        name: "dependency-analyzer",
-        description: "Analyze a ticket and its relationships to other open tickets, suggest dependency updates",
-        prompt: `Analyze the given issue and its relationships to other open (non-Done, non-Cancelled) issues on the board.
+    model: null,
+  },
+  {
+    name: "dependency-analyzer",
+    description: "Analyze a ticket and its relationships to other open tickets, suggest dependency updates",
+    prompt: `Analyze the given issue and its relationships to other open (non-Done, non-Cancelled) issues on the board.
 
 ## Steps
 
@@ -123,12 +91,12 @@ Issue ID: {{issueId}}`,
 - Prefer depends_on when one issue must land in production before the other can be implemented
 - Skip issues that are already linked (check existing dependencies in get_issue output)
 - Do not link an issue to itself`,
-        model: "haiku",
-      },
-      {
-        name: "ticket-enhancer",
-        description: "Enhance a ticket's title and description for clarity and completeness",
-        prompt: `Review and enhance the given issue to make it more actionable for an AI agent.
+    model: "haiku",
+  },
+  {
+    name: "ticket-enhancer",
+    description: "Enhance a ticket's title and description for clarity and completeness",
+    prompt: `Review and enhance the given issue to make it more actionable for an AI agent.
 
 Steps:
 1. Use get_issue to read the current title and description
@@ -145,12 +113,12 @@ Format the description with clear sections:
 - Acceptance criteria (if inferable)
 - Relevant files or areas (if inferable from the title/context)
 - Open Questions (unresolved decisions, assumptions, or clarifications needed before work begins — use \`- [ ]\` checkboxes)`,
-        model: "haiku",
-      },
-      {
-        name: "orchestrator",
-        description: "Delegating orchestrator — breaks work into sub-tasks and delegates to subagents or board tickets instead of doing everything itself",
-        prompt: `You are a delegating orchestrator. Your job is to break the current task into discrete units of work and delegate every unit — do NOT implement anything yourself.
+    model: "haiku",
+  },
+  {
+    name: "orchestrator",
+    description: "Delegating orchestrator — breaks work into sub-tasks and delegates to subagents or board tickets instead of doing everything itself",
+    prompt: `You are a delegating orchestrator. Your job is to break the current task into discrete units of work and delegate every unit — do NOT implement anything yourself.
 
 ## Core Rules
 
@@ -207,54 +175,18 @@ Update the parent issue description with:
 - Do NOT write detailed technical specs for subagents. They can read code themselves.
 - Do NOT do any implementation, even "quick fixes." Delegate it.
 - Do NOT create tickets for trivial changes that a single subagent call can handle.`,
-        model: null,
-      },
-      {
-        name: "monitor-nudge",
-        description: "Message sent to agents that have been running for more than 5 minutes without exiting — customize to change nudge behavior",
-        prompt: `Please continue with the task. If you are waiting for input or unsure how to proceed, use your best judgment and keep moving forward. Check the issue description and any open questions, then take the next logical step.`,
-        model: null,
-      },
-    ];
-
-    const existingByName = new Map(
-      (await db.select({ name: agentSkills.name }).from(agentSkills).where(eq(agentSkills.isBuiltin, true)))
-        .map(r => [r.name, true])
-    );
-
-    let added = 0;
-    for (const skill of DEFAULT_SKILLS) {
-      if (existingByName.has(skill.name)) continue;
-      await db.insert(agentSkills).values({
-        id: randomUUID(),
-        name: skill.name,
-        description: skill.description,
-        prompt: skill.prompt,
-        model: skill.model,
-        isBuiltin: true,
-        createdAt: now,
-        updatedAt: now,
-      });
-      added++;
-    }
-    if (added > 0) {
-      console.log(`Seeded ${added} new default agent skill(s).`);
-    } else {
-      console.log("Agent skills already up to date.");
-    }
-  }
-
-  // Upsert code-review-thorough skill (may not exist in older installs)
-  const thoroughSkillName = "code-review-thorough";
-  const existing = await db.select({ id: agentSkills.id }).from(agentSkills)
-    .where(sql`${agentSkills.name} = ${thoroughSkillName} AND ${agentSkills.projectId} IS NULL`)
-    .limit(1);
-  if (existing.length === 0) {
-    await db.insert(agentSkills).values({
-      id: randomUUID(),
-      name: thoroughSkillName,
-      description: "In-depth AI code review using a more capable model — catches subtle bugs and architecture issues",
-      prompt: `You are an expert AI code reviewer performing a thorough, in-depth review. Review the changes on branch '{{branch}}'.
+    model: null,
+  },
+  {
+    name: "monitor-nudge",
+    description: "Message sent to agents that have been running for more than 5 minutes without exiting — customize to change nudge behavior",
+    prompt: `Please continue with the task. If you are waiting for input or unsure how to proceed, use your best judgment and keep moving forward. Check the issue description and any open questions, then take the next logical step.`,
+    model: null,
+  },
+  {
+    name: "code-review-thorough",
+    description: "In-depth AI code review using a more capable model — catches subtle bugs and architecture issues",
+    prompt: `You are an expert AI code reviewer performing a thorough, in-depth review. Review the changes on branch '{{branch}}'.
 
 First, run 'git diff --stat {{baseBranch}}' to see an overview of changed files.
 Then review each file individually with 'git diff {{baseBranch}} -- <filepath>' — do NOT dump the entire diff at once.
@@ -277,22 +209,8 @@ Do NOT move the issue to 'AI Reviewed' yourself — the system handles that on m
 
 Issue ID: {{issueId}}
 Workspace ID: {{workspaceId}}`,
-      model: "claude-opus-4-7",
-      isBuiltin: true,
-      createdAt: now,
-      updatedAt: now,
-    });
-    console.log("Seeded code-review-thorough skill.");
-  }
+    model: "claude-opus-4-7",
+  },
+] as const;
 
-  console.log('Run `agentic-kanban init <path>` to register a git repo as a project.');
-}
-
-// Auto-run only when invoked directly (tsx src/db/seed.ts or node dist/seed.js)
-const scriptPath = process.argv[1];
-if (scriptPath && (scriptPath.endsWith("seed.ts") || scriptPath.endsWith("seed.js") || scriptPath.includes("db/seed"))) {
-  seed().catch((err) => {
-    console.error("Seed failed:", err);
-    process.exit(1);
-  });
-}
+export type BuiltinSkill = typeof BUILTIN_SKILLS[number];
