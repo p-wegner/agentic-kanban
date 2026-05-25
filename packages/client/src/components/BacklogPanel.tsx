@@ -5,11 +5,11 @@ import { showToast } from "./Toast.js";
 
 const STORAGE_KEY = "backlog-panel-open";
 
-const priorityColors: Record<string, string> = {
-  low: "bg-gray-200 text-gray-600",
-  medium: "bg-blue-100 text-blue-700",
-  high: "bg-orange-100 text-orange-700",
-  critical: "bg-red-100 text-red-700",
+const issueTypeColors: Record<string, string> = {
+  task: "bg-gray-200 text-gray-600",
+  bug: "bg-red-100 text-red-700",
+  feature: "bg-blue-100 text-blue-700",
+  chore: "bg-amber-100 text-amber-700",
 };
 
 interface BacklogPanelProps {
@@ -184,9 +184,9 @@ export function BacklogPanel({ backlogColumn, activeColumns, searchQuery, onIssu
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-1.5 mb-0.5">
                         <span className="text-[10px] text-gray-400 dark:text-gray-500 font-mono shrink-0">#{issue.issueNumber}</span>
-                        {issue.priority && issue.priority !== "medium" && (
-                          <span className={`text-[10px] px-1 rounded font-medium ${priorityColors[issue.priority] ?? "bg-gray-100 text-gray-600"}`}>
-                            {issue.priority}
+                        {issue.issueType && issue.issueType !== "task" && (
+                          <span className={`text-[10px] px-1 rounded font-medium capitalize ${issueTypeColors[issue.issueType] ?? "bg-gray-100 text-gray-600"}`}>
+                            {issue.issueType}
                           </span>
                         )}
                       </div>

@@ -19,7 +19,7 @@ interface Skill {
 export interface CreateIssueFormState {
   title: string;
   description: string;
-  priority: CreateIssueRequest["priority"];
+  issueType: CreateIssueRequest["issueType"];
   startWorkspace: boolean;
   planMode: boolean;
   skipAutoReview: boolean;
@@ -47,7 +47,7 @@ export function CreateIssueForm({
 }: CreateIssueFormProps) {
   const [title, setTitle] = useState(initialState?.title ?? "");
   const [description, setDescription] = useState(initialState?.description ?? "");
-  const [priority, setPriority] = useState<CreateIssueRequest["priority"]>(initialState?.priority ?? "medium");
+  const [issueType, setIssueType] = useState<CreateIssueRequest["issueType"]>(initialState?.issueType ?? "task");
   const [startWorkspace, setStartWorkspace] = useState(initialState?.startWorkspace ?? false);
   const [planMode, setPlanMode] = useState(initialState?.planMode ?? false);
   const [skipAutoReview, setSkipAutoReview] = useState(initialState?.skipAutoReview ?? false);
@@ -110,7 +110,7 @@ export function CreateIssueForm({
       await onSubmit({
         title: title.trim(),
         description: description.trim() || undefined,
-        priority,
+        issueType,
         statusId,
         projectId,
         startWorkspace: startWorkspace || undefined,
@@ -178,14 +178,14 @@ export function CreateIssueForm({
         className="w-full text-xs border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none overflow-y-hidden dark:bg-gray-900 dark:text-gray-100"
       />
       <select
-        value={priority}
-        onChange={(e) => setPriority(e.target.value as CreateIssueRequest["priority"])}
+        value={issueType}
+        onChange={(e) => setIssueType(e.target.value as CreateIssueRequest["issueType"])}
         className="w-full text-xs border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:bg-gray-900 dark:text-gray-100"
       >
-        <option value="low">Low</option>
-        <option value="medium">Medium</option>
-        <option value="high">High</option>
-        <option value="critical">Critical</option>
+        <option value="task">Task</option>
+        <option value="bug">Bug</option>
+        <option value="feature">Feature</option>
+        <option value="chore">Chore</option>
       </select>
       {canStartWorkspace && (
         <label className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400 cursor-pointer">
@@ -296,7 +296,7 @@ export function CreateIssueForm({
         {onExpand && (
           <button
             type="button"
-            onClick={() => onExpand({ title, description, priority, startWorkspace, planMode, skipAutoReview, skillId })}
+            onClick={() => onExpand({ title, description, issueType, startWorkspace, planMode, skipAutoReview, skillId })}
             className="ml-auto text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 p-1 rounded"
             title="Expand form"
           >

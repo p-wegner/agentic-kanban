@@ -2,12 +2,12 @@ import { test, expect } from "@playwright/test";
 import { SERVER_URL } from "../helpers/port.js";
 
 /**
- * Priority sort order: critical(0) > high(1) > medium(2) > low(3)
- * Toggle button text: "↑P"
+ * Issue type sort order: bug(0) > feature(1) > task(2) > chore(3)
+ * Toggle button text: "↑T"
  * localStorage key: col-sort-<columnId>
  */
 
-test.describe("Priority-based column sort", () => {
+test.describe("Type-based column sort", () => {
   let projectId: string;
   let todoStatusId: string;
   let inProgressStatusId: string;
@@ -31,17 +31,17 @@ test.describe("Priority-based column sort", () => {
     inProgressStatusId = find("In Progress") ?? statuses[1]?.id;
     inReviewStatusId = find("In Review") ?? statuses[2]?.id;
 
-    // Create four issues in Todo with different priorities
-    const priorities: Array<{ title: string; priority: string }> = [
-      { title: `Sort-Low-${Date.now()}`, priority: "low" },
-      { title: `Sort-Medium-${Date.now() + 1}`, priority: "medium" },
-      { title: `Sort-High-${Date.now() + 2}`, priority: "high" },
-      { title: `Sort-Critical-${Date.now() + 3}`, priority: "critical" },
+    // Create four issues in Todo with different types
+    const issueTypes: Array<{ title: string; issueType: string }> = [
+      { title: `Sort-Chore-${Date.now()}`, issueType: "chore" },
+      { title: `Sort-Task-${Date.now() + 1}`, issueType: "task" },
+      { title: `Sort-Feature-${Date.now() + 2}`, issueType: "feature" },
+      { title: `Sort-Bug-${Date.now() + 3}`, issueType: "bug" },
     ];
 
-    for (const { title, priority } of priorities) {
+    for (const { title, issueType } of issueTypes) {
       const res = await request.post(`${SERVER_URL}/api/issues`, {
-        data: { title, priority, statusId: todoStatusId, projectId },
+        data: { title, issueType, statusId: todoStatusId, projectId },
       });
       const issue = await res.json();
       createdIssueIds.push(issue.id);
@@ -83,7 +83,7 @@ test.describe("Priority-based column sort", () => {
     });
 
     const todoCol = await findTodoColumn(page);
-    const sortBtn = todoCol.locator('button[title="Sort by priority"]');
+    const sortBtn = todoCol.locator('button[title="Sort by type"]');
 
     // Button should be in inactive state initially
     await expect(sortBtn).toBeVisible();
@@ -93,13 +93,13 @@ test.describe("Priority-based column sort", () => {
 
     // After clicking, button becomes active (blue highlight)
     const activeBtn = todoCol.locator(
-      'button[title="Sorted by priority — click for default"]',
+      'button[title="Sorted by type — click for default"]',
     );
     await expect(activeBtn).toBeVisible();
     await expect(activeBtn).toHaveClass(/bg-blue-100/);
   });
 
-  test("critical issues appear before high, medium, low in Todo", async ({
+  test("bug issues appear before feature, task, chore in Todo", async ({
     page,
   }) => {
     await page.goto("/");
@@ -111,11 +111,11 @@ test.describe("Priority-based column sort", () => {
 
     const todoCol = await findTodoColumn(page);
 
-    // Activate priority sort
-    const sortBtn = todoCol.locator('button[title="Sort by priority"]');
+    // Activate type sort
+    const sortBtn = todoCol.locator('button[title="Sort by type"]');
     await sortBtn.click();
     await expect(
-      todoCol.locator('button[title="Sorted by priority — click for default"]'),
+      todoCol.locator('button[title="Sorted by type — click for default"]'),
     ).toBeVisible();
 
     // Collect visible issue titles in order.
@@ -132,21 +132,21 @@ test.describe("Priority-based column sort", () => {
     const positionOf = (prefix: string) =>
       ourTitles.findIndex((t) => t.startsWith(prefix));
 
-    const criticalPos = positionOf("Sort-Critical-");
-    const highPos = positionOf("Sort-High-");
-    const mediumPos = positionOf("Sort-Medium-");
-    const lowPos = positionOf("Sort-Low-");
+    const bugPos = positionOf("Sort-Bug-");
+    const featurePos = positionOf("Sort-Feature-");
+    const taskPos = positionOf("Sort-Task-");
+    const chorePos = positionOf("Sort-Chore-");
 
     // All four issues must be visible
-    expect(criticalPos).toBeGreaterThanOrEqual(0);
-    expect(highPos).toBeGreaterThanOrEqual(0);
-    expect(mediumPos).toBeGreaterThanOrEqual(0);
-    expect(lowPos).toBeGreaterThanOrEqual(0);
+    expect(bugPos).toBeGreaterThanOrEqual(0);
+    expect(featurePos).toBeGreaterThanOrEqual(0);
+    expect(taskPos).toBeGreaterThanOrEqual(0);
+    expect(chorePos).toBeGreaterThanOrEqual(0);
 
-    // Verify priority order: critical < high < medium < low (lower index = earlier)
-    expect(criticalPos).toBeLessThan(highPos);
-    expect(highPos).toBeLessThan(mediumPos);
-    expect(mediumPos).toBeLessThan(lowPos);
+    // Verify type order: bug < feature < task < chore (lower index = earlier)
+    expect(bugPos).toBeLessThan(featurePos);
+    expect(featurePos).toBeLessThan(taskPos);
+    expect(taskPos).toBeLessThan(chorePos);
   });
 
   test("sort preference persists across page reload", async ({ page }) => {
@@ -158,19 +158,19 @@ test.describe("Priority-based column sort", () => {
     });
 
     const todoCol = await findTodoColumn(page);
-    await todoCol.locator('button[title="Sort by priority"]').click();
+    await todoCol.locator('button[title="Sort by type"]').click();
     await expect(
-      todoCol.locator('button[title="Sorted by priority — click for default"]'),
+      todoCol.locator('button[title="Sorted by type — click for default"]'),
     ).toBeVisible();
 
     // Reload and verify sort is still active
     await page.reload();
     // Wait for board to fully render (not just column headings)
-    await page.waitForSelector('button[title="Sort by priority"], button[title="Sorted by priority — click for default"]');
+    await page.waitForSelector('button[title="Sort by type"], button[title="Sorted by type — click for default"]');
     const todoColAfterReload = await findTodoColumn(page);
     await expect(
       todoColAfterReload.locator(
-        'button[title="Sorted by priority — click for default"]',
+        'button[title="Sorted by type — click for default"]',
       ),
     ).toBeVisible();
   });
@@ -199,18 +199,18 @@ test.describe("Priority-based column sort", () => {
     }
     const defaultTitles = await collectSortTitles(todoCol);
 
-    // Enable priority sort
-    await todoCol.locator('button[title="Sort by priority"]').click();
+    // Enable type sort
+    await todoCol.locator('button[title="Sort by type"]').click();
     await expect(
-      todoCol.locator('button[title="Sorted by priority — click for default"]'),
+      todoCol.locator('button[title="Sorted by type — click for default"]'),
     ).toBeVisible();
 
-    // Disable priority sort
+    // Disable type sort
     await todoCol
-      .locator('button[title="Sorted by priority — click for default"]')
+      .locator('button[title="Sorted by type — click for default"]')
       .click();
     await expect(
-      todoCol.locator('button[title="Sort by priority"]'),
+      todoCol.locator('button[title="Sort by type"]'),
     ).toBeVisible();
 
     // Order should match default again
@@ -240,7 +240,7 @@ test.describe("Priority-based column sort", () => {
       if (activeColumnNames.includes(name ?? "")) {
         // Sort button must exist (may be inactive)
         const sortBtn = col.locator(
-          'button[title="Sort by priority"], button[title="Sorted by priority — click for default"]',
+          'button[title="Sort by type"], button[title="Sorted by type — click for default"]',
         );
         await expect(sortBtn).toBeVisible();
       }
@@ -275,19 +275,19 @@ test.describe("Priority-based column sort", () => {
       return;
     }
 
-    // Enable priority sort only for Todo
-    await todoCol.locator('button[title="Sort by priority"]').click();
+    // Enable type sort only for Todo
+    await todoCol.locator('button[title="Sort by type"]').click();
     await expect(
-      todoCol.locator('button[title="Sorted by priority — click for default"]'),
+      todoCol.locator('button[title="Sorted by type — click for default"]'),
     ).toBeVisible();
 
     // In Progress column should remain in default sort
     await expect(
-      inProgressCol.locator('button[title="Sort by priority"]'),
+      inProgressCol.locator('button[title="Sort by type"]'),
     ).toBeVisible();
     await expect(
       inProgressCol.locator(
-        'button[title="Sorted by priority — click for default"]',
+        'button[title="Sorted by type — click for default"]',
       ),
     ).toHaveCount(0);
   });
