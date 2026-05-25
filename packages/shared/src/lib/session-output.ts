@@ -28,6 +28,8 @@ interface ParsedLine {
   summary?: string;
   status?: string;
   rate_limit_info?: { status?: string; rateLimitType?: string; resetsAt?: number; overageStatus?: string; overageDisabledReason?: string; isUsingOverage?: boolean };
+  item?: Record<string, unknown>;
+  error?: Record<string, unknown>;
 }
 
 function parseJsonLine(line: string): ParsedLine | null {
