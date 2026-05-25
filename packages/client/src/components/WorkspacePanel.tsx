@@ -1617,7 +1617,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                       <TerminalView
                         messages={selectedHistoryId ? historyMessages : (activeSession ? messages : completedMessages)}
                         connectionState={selectedHistoryId ? "closed" : (activeSession ? wsState : "closed")}
-                        parseOutput={prefs.output_parser === "false" ? "false" : (prefs.output_parser === "minimal" ? "minimal" : "true")}
+                        parseOutput={prefs.output_parser === "false" ? "false" : "minimal"}
                         outputFormat={ws.provider ? getOutputFormatForProvider(ws.provider) : getOutputFormatForAgent(ws.agentCommand ?? prefs.agent_command)}
                         prompt={selectedHistoryId ? undefined : lastPrompt}
                         title={issue.title}
