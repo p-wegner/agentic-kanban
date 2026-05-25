@@ -504,3 +504,88 @@ describe("Tags API - Built-in tag protection", () => {
     expect(res.status).toBe(200);
   });
 });
+
+describe("ensureBuiltinTags", () => {
+  function createTestDb() {
+    const client = createClient({ url: ":memory:" });
+    for (const file of MIGRATION_FILES) {
+      const sql = readFileSync(resolve(__dirname, file), "utf-8");
+      const statements = sql
+        .split("--> statement-breakpoint")
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0);
+      for (const stmt of statements) {
+        client.execute(stmt);
+      }
+    }
+    return drizzle(client, { schema });
+  }
+
+  it("creates needs-visual-verification as a builtin tag on a fresh DB", async () => {
+    const { ensureBuiltinTags, BUILTIN_TAGS } = await import("../db/seed.js");
+    const database = createTestDb();
+
+    await ensureBuiltinTags(database as any);
+
+    const result = await database.select().from(schema.tags);
+    for (const builtin of BUILTIN_TAGS) {
+      const found = result.find((t) => t.name === builtin.name);
+      expect(found).toBeDefined();
+      expect(found!.isBuiltin).toBe(true);
+      expect(found!.color).toBe(builtin.color);
+    }
+  });
+
+  it("is idempotent — running twice does not create duplicate tags", async () => {
+    const { ensureBuiltinTags } = await import("../db/seed.js");
+    const database = createTestDb();
+
+    await ensureBuiltinTags(database as any);
+    await ensureBuiltinTags(database as any);
+
+    const result = await database.select().from(schema.tags);
+    const nvv = result.filter((t) => t.name === "needs-visual-verification");
+    expect(nvv.length).toBe(1);
+  });
+
+  it("marks existing non-builtin needs-visual-verification tag as builtin", async () => {
+    const { ensureBuiltinTags } = await import("../db/seed.js");
+    const database = createTestDb();
+
+    // Insert needs-visual-verification WITHOUT isBuiltin (simulates pre-migration DB)
+    await database.insert(schema.tags).values({
+      id: randomUUID(),
+      name: "needs-visual-verification",
+      color: "#F59E0B",
+      isBuiltin: false,
+      createdAt: new Date().toISOString(),
+    });
+
+    await ensureBuiltinTags(database as any);
+
+    const result = await database.select().from(schema.tags);
+    const nvv = result.find((t) => t.name === "needs-visual-verification");
+    expect(nvv).toBeDefined();
+    expect(nvv!.isBuiltin).toBe(true);
+  });
+
+  it("does not remove or alter existing non-builtin tags", async () => {
+    const { ensureBuiltinTags } = await import("../db/seed.js");
+    const database = createTestDb();
+
+    await database.insert(schema.tags).values({
+      id: randomUUID(),
+      name: "my-custom-tag",
+      color: "#ff0000",
+      isBuiltin: false,
+      createdAt: new Date().toISOString(),
+    });
+
+    await ensureBuiltinTags(database as any);
+
+    const result = await database.select().from(schema.tags);
+    const custom = result.find((t) => t.name === "my-custom-tag");
+    expect(custom).toBeDefined();
+    expect(custom!.isBuiltin).toBe(false);
+  });
+});
