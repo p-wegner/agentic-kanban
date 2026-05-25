@@ -569,9 +569,9 @@ export async function startServer(port?: number) {
   // Serve built client assets (production/npx mode)
   const clientDir = resolve(__dirname, "./client");
   if (existsSync(resolve(clientDir, "index.html"))) {
-    app.use("/*", serveStatic({ root: "./client" }));
+    app.use("/*", serveStatic({ root: clientDir }));
     // SPA fallback — serve index.html for non-API, non-WS routes
-    app.get("*", serveStatic({ root: "./client", path: "index.html" }));
+    app.get("*", serveStatic({ root: clientDir, path: "index.html" }));
   }
 
   // Start server

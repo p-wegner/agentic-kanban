@@ -2366,5 +2366,86 @@ Via pnpm (use -- to pass args):
 
 void sessionDebugCmd;
 
-program.parse();
+// ── Default action (no subcommand): auto-init + auto-register + start server ──
+const subcommands = [
+  "register", "create", "preferences", "unregister", "list", "cleanup",
+  "status", "issue", "workspace", "delete-status", "skill", "session",
+  "init", "install-skill", "dev", "session-history", "sh", "help",
+];
+const hasSubcommand = process.argv.length > 2 && subcommands.includes(process.argv[2]);
+
+if (!hasSubcommand) {
+  (async () => {
+    try {
+      const { dbExists, ensureDataDir } = await import("./db/data-dir.js");
+      const { execFile } = await import("node:child_process");
+      const { resolve: resolvePath } = await import("node:path");
+
+      // Auto-init if no database
+      if (!dbExists()) {
+        console.log("First run — setting up agentic-kanban...\n");
+        ensureDataDir();
+        await runMigrations();
+        console.log("  Database created and migrated.");
+        const { seed } = await import("./db/seed.js");
+        await seed();
+        console.log("  Default tags and skills seeded.\n");
+      } else {
+        await runMigrations();
+      }
+
+      // Auto-register CWD if it's a git repo and no project exists yet
+      const allProjects = await db.select().from(projects);
+      if (allProjects.length === 0) {
+        try {
+          const { promisify } = await import("node:util");
+          const execFileAsync = promisify(execFile);
+          await execFileAsync("git", ["-C", process.cwd(), "rev-parse", "--git-dir"]);
+          // CWD is a git repo — register it
+          const { project, created } = await registerProject(process.cwd());
+          if (created) {
+            console.log(`  Registered project "${project.name}" (${project.repoPath})`);
+            console.log(`  Branch: ${project.defaultBranch}\n`);
+          }
+        } catch {
+          // Not a git repo — skip registration, user can do it manually
+          console.log("  No project registered (current directory is not a git repo).");
+          console.log("  Run `agentic-kanban register <path>` to register one.\n");
+        }
+      }
+
+      // Start server
+      const port = Number(process.env.PORT || 3001);
+      process.env.PORT = String(port);
+
+      const { startServer } = await import("./server-start.js");
+      await startServer(port);
+
+      // Show concise startup info
+      console.log(`\n  Agentic Kanban is running\n`);
+      console.log(`    UI:  http://localhost:${port}`);
+      console.log(`    API: http://localhost:${port}/api/projects\n`);
+      console.log("  Useful commands:");
+      console.log("    agentic-kanban status              — board overview");
+      console.log("    agentic-kanban issue create \"Title\" — create an issue");
+      console.log("    agentic-kanban issue list           — list issues");
+      console.log("    agentic-kanban register <path>      — register another repo");
+      console.log("    agentic-kanban install-skill .       — write agent skills to cwd");
+      console.log("    agentic-kanban --help                — all commands\n");
+      console.log("  Press Ctrl+C to stop\n");
+
+      // Open browser
+      const cmd = process.platform === "win32" ? "cmd" : "open";
+      const args = process.platform === "win32" ? ["/c", "start", `http://localhost:${port}`] : [`http://localhost:${port}`];
+      execFile(cmd, args, (err) => {
+        if (err) console.warn("  Could not open browser:", err.message);
+      });
+    } catch (err) {
+      console.error("Error:", err instanceof Error ? err.message : String(err));
+      process.exit(1);
+    }
+  })();
+} else {
+  program.parse();
+}
 
