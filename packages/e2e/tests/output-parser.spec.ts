@@ -25,7 +25,7 @@ test.describe("Output parser verification", () => {
 
     // Ensure output_parser is enabled and the correct project is active
     await request.put(`${SERVER_URL}/api/preferences/settings`, {
-      data: { output_parser: "true" },
+      data: { output_parser: "minimal" },
     });
     await request.put(`${SERVER_URL}/api/preferences/active-project`, {
       data: { projectId: projects[0].id },
@@ -172,7 +172,7 @@ process.exit(0);
     await expect(page.locator("text=Completed").first()).toBeVisible();
     await expect(page.locator("text=Cost: $0.0420")).toBeVisible();
     await expect(page.locator("text=deepwiki")).toBeVisible();
-    await expect(page.locator("text=stream-json")).toBeVisible();
+    await expect(page.locator("text=parsed")).toBeVisible();
     await expect(page.locator("text=Process exited with code 0")).toBeVisible();
 
     // Verify NO raw JSON dumps visible
