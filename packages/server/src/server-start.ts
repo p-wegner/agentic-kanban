@@ -204,7 +204,7 @@ async function buildMonitorNudgePrompt(projectId: string): Promise<string> {
   return skillRows[0]?.prompt?.trim() || DEFAULT_MONITOR_NUDGE_PROMPT;
 }
 
-export async function startServer(port?: number) {
+export async function startServer(port?: number, hostname?: string) {
   const app = new Hono();
 
   app.use("/api/*", cors());
@@ -756,6 +756,7 @@ Server: http://localhost:${serverPort}`;
 
   // Start server
   const serverPort = port || Number(process.env.PORT) || 3001;
+  const serverHost = hostname || process.env.KANBAN_HOST || "127.0.0.1";
 
   // Kill orphaned tsx server processes from previous runs that may hold the SQLite DB locked.
   // These accumulate when the server hot-reloads (tsx watch) but old processes don't die cleanly.
@@ -930,8 +931,8 @@ Server: http://localhost:${serverPort}`;
   }
 
   console.log(`Server starting on port ${serverPort}...`);
-  const server = serve({ fetch: app.fetch, port: serverPort }, (info) => {
-    console.log(`Server running at http://localhost:${info.port}`);
+  const server = serve({ fetch: app.fetch, port: serverPort, hostname: serverHost }, (info) => {
+    console.log(`Server running at http://${serverHost}:${info.port}`);
   });
 
   injectWebSocket(server);
