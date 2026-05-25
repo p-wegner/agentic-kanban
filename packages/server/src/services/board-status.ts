@@ -165,6 +165,7 @@ export async function getBoardStatus(
     if (mainWs && mainWs.workingDir && mainWs.status !== "closed") {
       const baseBranch = mainWs.baseBranch || project.defaultBranch;
       const diffRef = mainWs.isDirect ? "HEAD" : baseBranch;
+      if (!diffRef) continue;
 
       asyncWork.push(
         getDiffShortstat(mainWs.workingDir, diffRef)
@@ -174,6 +175,7 @@ export async function getBoardStatus(
 
       // Conflict detection for non-direct idle workspaces (cached, non-blocking)
       if (!mainWs.isDirect && mainWs.status === "idle") {
+        if (!baseBranch) continue;
         const cached = conflictCache.get(mainWs.id);
         if (cached && Date.now() - cached.ts < CONFLICT_CACHE_TTL) {
           entry.conflicts = cached.result;

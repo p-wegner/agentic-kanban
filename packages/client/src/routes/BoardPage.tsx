@@ -42,7 +42,7 @@ interface Project {
   name: string;
   repoPath: string;
   repoName: string;
-  defaultBranch: string;
+  defaultBranch: string | null;
   remoteUrl: string | null;
 }
 
@@ -725,7 +725,7 @@ export function BoardPage() {
             body: JSON.stringify({
               issueId: created.id,
               branch: isDirect ? undefined : branch,
-              baseBranch: isDirect ? undefined : activeProject.defaultBranch,
+              baseBranch: isDirect ? undefined : activeProject.defaultBranch ?? undefined,
               isDirect: isDirect || undefined,
               planMode: planMode || undefined,
               profile: profile || undefined,
@@ -1395,7 +1395,7 @@ export function BoardPage() {
           )}
           <button
             onClick={() => setShowQuickTasks(true)}
-            title="Quick Tasks — run a skill directly on the main branch (t)"
+            title="Quick Tasks - run a skill directly on the current checkout (t)"
             className="shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium border transition-colors bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800"
           >
             <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>

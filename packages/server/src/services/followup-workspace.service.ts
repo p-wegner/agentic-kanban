@@ -36,6 +36,10 @@ export async function autoStartFollowups(
   const todoStatus = statuses.find(s => s.name === "Todo") ?? statuses[0];
   const project = await database.select().from(projects).where(eq(projects.id, projectId)).limit(1);
   if (!project[0]) return;
+  if (!project[0].defaultBranch) {
+    console.warn(`[followup-workspace] default branch is not configured for project ${projectId}; skipping auto-start follow-ups`);
+    return;
+  }
 
   for (const dep of dependents) {
     const allDeps = await database

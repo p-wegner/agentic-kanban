@@ -19,7 +19,7 @@ test.describe("baseBranch and skill name display in workspace panel", () => {
     const projectsRes = await request.get(`${SERVER_URL}/api/projects`);
     const projects = await projectsRes.json();
     projectId = projects[0].id;
-    defaultBranch = projects[0].defaultBranch;
+    defaultBranch = projects[0].defaultBranch ?? "main";
 
     await request.put(`${SERVER_URL}/api/preferences/active-project`, {
       data: { projectId },

@@ -105,8 +105,8 @@ If only MINOR issues or no issues:
 1. Use the mark_ready_for_merge MCP tool with workspaceId={{workspaceId}} to signal the workspace is approved
 2. Exit normally (the system will auto-merge)`;
 
-  // Strip "origin/" prefix so rebase instructions use the bare branch name (e.g. "master" not "origin/master")
-  const localBaseBranch = (baseBranch ?? "master").replace(/^origin\//, "");
+  // Strip "origin/" prefix so rebase instructions use the bare branch name.
+  const localBaseBranch = (baseBranch ?? "HEAD").replace(/^origin\//, "");
 
   let conflictPreamble = "";
   if (uncommittedChanges && uncommittedChanges.length > 0) {
@@ -215,7 +215,7 @@ export async function startServer(port?: number) {
       const autoMergeEnabled = prefMap.get("auto_merge") !== "false";
 
       const projectRows = await db.select({ defaultBranch: projects.defaultBranch }).from(projects).where(eq(projects.id, projectId)).limit(1);
-      const defaultBranch = projectRows.length > 0 ? projectRows[0].defaultBranch : "main";
+      const defaultBranch = projectRows.length > 0 ? projectRows[0].defaultBranch : null;
 
       if (fixAndMergeSessionIds.has(sessionId)) {
         fixAndMergeSessionIds.delete(sessionId);
@@ -299,19 +299,24 @@ export async function startServer(port?: number) {
             });
           } else {
             const baseBranch = workspace.baseBranch || defaultBranch;
-            hasCommittedChanges = await new Promise<boolean>((resolve) => {
-              execFile("git", ["diff", "--quiet", baseBranch], { cwd: workspace.workingDir! }, (err: Error | null) => {
-                resolve(!!err);
+            if (!baseBranch) {
+              console.warn(`[workflow] workspace ${workspaceId} has no base/default branch; treating as no committed changes`);
+              hasCommittedChanges = false;
+            } else {
+              hasCommittedChanges = await new Promise<boolean>((resolve) => {
+                execFile("git", ["diff", "--quiet", baseBranch], { cwd: workspace.workingDir! }, (err: Error | null) => {
+                  resolve(!!err);
+                });
               });
-            });
+            }
           }
         } catch {
           hasCommittedChanges = false;
         }
       }
 
-      // Direct (master-branch) workspaces: close immediately on exit — no review/merge flow.
-      // The agent commits directly to master; there is no branch to merge and no review makes sense.
+      // Direct workspaces: close immediately on exit - no review/merge flow.
+      // The agent commits directly to the current checkout; there is no branch to merge and no review makes sense.
       // Leaving the workspace idle would cause the monitor to relaunch it indefinitely.
       if (workspace.isDirect) {
         const doneStatus = findStatus("Done");
@@ -368,6 +373,10 @@ export async function startServer(port?: number) {
           let uncommittedChanges: string[] | undefined;
           if (!workspace.isDirect && workspace.workingDir) {
             const baseBranch = workspace.baseBranch || defaultBranch;
+            if (!baseBranch) {
+              console.warn(`[workflow] cannot launch review for workspace ${workspaceId}: no base/default branch configured`);
+              return;
+            }
             const prep = await gitService.prepareForReview(workspace.workingDir, baseBranch);
             diffRef = prep.diffRef;
             if (!prep.success) {
@@ -524,12 +533,15 @@ export async function startServer(port?: number) {
       const autoFix = prefMap.get("review_auto_fix") !== "false";
 
       const projectRows = await db.select({ defaultBranch: projects.defaultBranch }).from(projects).where(eq(projects.id, projectId)).limit(1);
-      const defaultBranch = projectRows.length > 0 ? projectRows[0].defaultBranch : "main";
+      const defaultBranch = projectRows.length > 0 ? projectRows[0].defaultBranch : null;
       let diffRef = workspace.baseBranch || defaultBranch;
       let manualConflictingFiles: string[] | undefined;
       let manualUncommittedChanges: string[] | undefined;
       if (!workspace.isDirect && workspace.workingDir) {
         const baseBranch = workspace.baseBranch || defaultBranch;
+        if (!baseBranch) {
+          return c.json({ error: "No default branch configured for this project. Set a default branch in project settings before reviewing." }, 400);
+        }
         const prep = await gitService.prepareForReview(workspace.workingDir, baseBranch);
         if (!prep.success) {
           manualConflictingFiles = prep.conflictingFiles;
@@ -871,7 +883,7 @@ export async function startServer(port?: number) {
           const MAX_SESSIONS = 10;
 
           if (ws.wsStatus === "idle") {
-            // Direct (master-branch) workspaces should never be relaunched — they commit directly to master.
+            // Direct workspaces should never be relaunched - they commit directly to the current checkout.
             // If they're still idle here, runWorkflowOnExit didn't close them (e.g. pre-existing idle from before
             // this fix). Close them now to stop the loop.
             if (ws.isDirect) {
