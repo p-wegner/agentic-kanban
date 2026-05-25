@@ -260,5 +260,77 @@ describe("session-output", () => {
       const result = extractMeaningfulOutput(messages, 10);
       expect(result[0].length).toBe(200);
     });
+
+    it("extracts Codex agent_message from item.completed", () => {
+      const messages = [
+        {
+          type: "stdout",
+          data: JSON.stringify({
+            type: "item.completed",
+            item: { id: "msg-1", type: "agent_message", text: "I have finished the implementation." },
+          }),
+        },
+      ];
+      const result = extractMeaningfulOutput(messages, 10);
+      expect(result).toEqual(["I have finished the implementation."]);
+    });
+
+    it("extracts Codex shell command from item.started", () => {
+      const messages = [
+        {
+          type: "stdout",
+          data: JSON.stringify({
+            type: "item.started",
+            item: { id: "cmd-1", type: "command_execution", command: "pnpm test" },
+          }),
+        },
+      ];
+      const result = extractMeaningfulOutput(messages, 10);
+      expect(result).toEqual(["[tool] shell(pnpm test)"]);
+    });
+
+    it("extracts Codex failed command from item.completed", () => {
+      const messages = [
+        {
+          type: "stdout",
+          data: JSON.stringify({
+            type: "item.completed",
+            item: { id: "cmd-1", type: "command_execution", command: "bad-cmd", exit_code: 1, aggregated_output: "command not found" },
+          }),
+        },
+      ];
+      const result = extractMeaningfulOutput(messages, 10);
+      expect(result[0]).toContain("[tool_error]");
+      expect(result[0]).toContain("command not found");
+    });
+
+    it("extracts Codex turn.failed event", () => {
+      const messages = [
+        {
+          type: "stdout",
+          data: JSON.stringify({
+            type: "turn.failed",
+            error: { message: "Sandbox restriction violated" },
+          }),
+        },
+      ];
+      const result = extractMeaningfulOutput(messages, 10);
+      expect(result[0]).toContain("[error]");
+      expect(result[0]).toContain("Sandbox restriction violated");
+    });
+
+    it("takes last line of Codex multi-line agent message", () => {
+      const messages = [
+        {
+          type: "stdout",
+          data: JSON.stringify({
+            type: "item.completed",
+            item: { id: "msg-1", type: "agent_message", text: "Step 1 done\nStep 2 done\nAll done" },
+          }),
+        },
+      ];
+      const result = extractMeaningfulOutput(messages, 10);
+      expect(result).toEqual(["All done"]);
+    });
   });
 });

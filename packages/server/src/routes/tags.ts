@@ -35,6 +35,11 @@ export function createTagsRoute(database: Database = db) {
   // PATCH /api/tags/:id
   router.patch("/:id", async (c) => {
     const id = c.req.param("id");
+
+    const [existing] = await database.select().from(tags).where(eq(tags.id, id)).limit(1);
+    if (!existing) return c.json({ error: "Tag not found" }, 404);
+    if (existing.isBuiltin) return c.json({ error: "Built-in tags cannot be modified" }, 403);
+
     const body = await c.req.json();
 
     const updates: Record<string, unknown> = {};
@@ -52,6 +57,11 @@ export function createTagsRoute(database: Database = db) {
   // DELETE /api/tags/:id
   router.delete("/:id", async (c) => {
     const id = c.req.param("id");
+
+    const [existing] = await database.select().from(tags).where(eq(tags.id, id)).limit(1);
+    if (!existing) return c.json({ error: "Tag not found" }, 404);
+    if (existing.isBuiltin) return c.json({ error: "Built-in tags cannot be deleted" }, 403);
+
     // Remove all issue associations first
     await database.delete(issueTags).where(eq(issueTags.tagId, id));
     await database.delete(tags).where(eq(tags.id, id));
@@ -67,6 +77,16 @@ export function createTagsRoute(database: Database = db) {
     }
     const toMerge = sourceIds.filter((id) => id !== targetId);
     if (toMerge.length === 0) return c.json({ success: true });
+
+    // Prevent merging (deleting) built-in tags
+    const builtinSources = await database
+      .select({ id: tags.id, name: tags.name, isBuiltin: tags.isBuiltin })
+      .from(tags)
+      .where(inArray(tags.id, toMerge));
+    const builtinBlocked = builtinSources.filter((t) => t.isBuiltin);
+    if (builtinBlocked.length > 0) {
+      return c.json({ error: `Built-in tags cannot be merged away: ${builtinBlocked.map((t) => t.name).join(", ")}` }, 403);
+    }
 
     // Find issues that already have the target tag (to avoid duplicate associations)
     const existing = await database

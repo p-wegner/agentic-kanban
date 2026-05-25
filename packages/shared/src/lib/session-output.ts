@@ -106,6 +106,49 @@ export function extractMeaningfulOutput(
           if (rli.resetsAt) parts.push(`resets ${new Date(rli.resetsAt * 1000).toISOString()}`);
           lines.push(parts.join(" | "));
         }
+
+        // Codex exec --json streaming events
+        if (obj.type === "item.completed" || obj.type === "item.updated") {
+          const item = obj.item as Record<string, unknown> | undefined;
+          if (item) {
+            const itemType = item.type as string | undefined;
+            if (itemType === "agent_message") {
+              const text = item.text as string | undefined;
+              if (text?.trim()) {
+                const lastLine = text.trim().split("\n").pop() ?? "";
+                if (lastLine) lines.push(lastLine.slice(0, 200));
+              }
+            } else if (itemType === "command_execution") {
+              const exitCode = item.exit_code as number | null | undefined;
+              if (exitCode !== null && exitCode !== undefined && exitCode !== 0) {
+                const output = item.aggregated_output as string | undefined;
+                const cmd = item.command as string | undefined;
+                lines.push(`[tool_error] shell${cmd ? `(${cmd.slice(0, 60)})` : ""}${output ? `: ${output.slice(0, 120)}` : ""}`);
+              }
+            } else if (itemType === "mcp_tool_call") {
+              const itemStatus = item.status as string | undefined;
+              const toolName = item.name as string | undefined;
+              if ((itemStatus === "failed" || itemStatus === "error") && toolName) {
+                const result = item.result as string | undefined;
+                lines.push(`[tool_error] ${toolName}${result ? `: ${result.slice(0, 120)}` : ""}`);
+              }
+            }
+          }
+        }
+
+        if (obj.type === "item.started") {
+          const item = obj.item as Record<string, unknown> | undefined;
+          if (item && item.type === "command_execution") {
+            const cmd = item.command as string | undefined;
+            if (cmd) lines.push(`[tool] shell(${cmd.slice(0, 160)})`);
+          }
+        }
+
+        if (obj.type === "turn.failed") {
+          const error = obj.error as Record<string, unknown> | undefined;
+          const msg = error?.message as string | undefined;
+          lines.push(`[error] ${msg ?? "Turn failed"}`);
+        }
       } else {
         if (trimmedLine.length > 2) {
           lines.push(trimmedLine.slice(0, 200));

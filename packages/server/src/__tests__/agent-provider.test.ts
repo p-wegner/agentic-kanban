@@ -568,6 +568,34 @@ describe("CodexProvider", () => {
     expect(evt?.assistantText).toBeUndefined();
     expect(evt?.toolResult?.toolUseId).toBe("item_1");
   });
+
+  it("extracts toolActivity from item.started mcp_tool_call", () => {
+    const evt = provider.parseStreamEvent(JSON.stringify({
+      type: "item.started",
+      item: { id: "mcp-1", type: "mcp_tool_call", name: "view", args: { path: "/src/foo.ts" } },
+    }));
+    expect(evt?.toolActivity?.name).toBe("view");
+    expect(evt?.toolActivity?.input).toEqual({ path: "/src/foo.ts" });
+    expect(evt?.toolActivity?.toolUseId).toBe("mcp-1");
+  });
+
+  it("extracts toolResult from item.completed mcp_tool_call", () => {
+    const evt = provider.parseStreamEvent(JSON.stringify({
+      type: "item.completed",
+      item: { id: "mcp-1", type: "mcp_tool_call", name: "view", result: "file content" },
+    }));
+    expect(evt?.toolResult?.toolUseId).toBe("mcp-1");
+    expect(evt?.toolResult?.agentResultText).toBe("file content");
+  });
+
+  it("extracts toolResult from item.completed mcp_tool_call without result text", () => {
+    const evt = provider.parseStreamEvent(JSON.stringify({
+      type: "item.completed",
+      item: { id: "mcp-2", type: "mcp_tool_call", name: "edit" },
+    }));
+    expect(evt?.toolResult?.toolUseId).toBe("mcp-2");
+    expect(evt?.toolResult?.agentResultText).toBeUndefined();
+  });
 });
 
 describe("CopilotProvider", () => {
