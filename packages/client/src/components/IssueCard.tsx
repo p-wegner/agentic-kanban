@@ -268,10 +268,17 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
               Plan Mode
             </span>
           )}
+          {ws.main.profile?.provider && ws.main.profile.provider !== "claude" && (
+            <span className={`inline-flex items-center px-1 rounded font-medium text-[10px] shrink-0 ${
+              ws.main.profile.provider === "copilot" ? "bg-emerald-50 dark:bg-emerald-950 text-emerald-600 dark:text-emerald-400" :
+              ws.main.profile.provider === "codex" ? "bg-amber-50 dark:bg-amber-950 text-amber-600 dark:text-amber-400" :
+              "bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400"
+            }`}>{ws.main.profile.provider === "copilot" ? "Copilot" : ws.main.profile.provider === "codex" ? "Codex" : ws.main.profile.provider}</span>
+          )}
           {(ws.main.profile?.name ?? ws.main.claudeProfile) && (
             <span className="inline-flex items-center px-1 rounded bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 font-medium shrink-0">{ws.main.profile?.name ?? ws.main.claudeProfile}</span>
           )}
-          {!(ws.main.profile?.name ?? ws.main.claudeProfile) && ws.main.agentCommand && ws.main.agentCommand !== "claude" && (
+          {!ws.main.profile?.name && !ws.main.claudeProfile && ws.main.agentCommand && ws.main.agentCommand !== "claude" && (
             <span className="inline-flex items-center px-1 rounded bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 font-mono text-[10px] shrink-0">{ws.main.agentCommand}</span>
           )}
           {ws.total > 1 && (
@@ -304,6 +311,16 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
               </svg>
               {liveStats.subagentCount}
             </span>
+          )}
+        </div>
+      )}
+      {!(ws?.main?.status === "active" || ws?.main?.status === "fixing") && ws?.main && (ws.main.contextTokens || ws.main.lastTool) && (
+        <div className="flex items-center gap-2 mt-0.5 text-[10px] text-gray-400 dark:text-gray-500 px-1">
+          {ws.main.contextTokens != null && ws.main.contextTokens > 0 && (
+            <span>{Math.round(ws.main.contextTokens / 1000)}k ctx</span>
+          )}
+          {ws.main.lastTool && (
+            <span className="font-mono truncate">{ws.main.lastTool}</span>
           )}
         </div>
       )}
