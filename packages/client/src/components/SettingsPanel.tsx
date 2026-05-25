@@ -724,85 +724,118 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                     </div>
                     <div className="text-xs text-gray-400 dark:text-gray-500 mt-1.5">Green steps are optional — toggle them below to add/remove from pipeline.</div>
                   </div>
-                  <Toggle
-                    checked={settings.plan_auto_continue !== "false"}
-                    onChange={setBool("plan_auto_continue")}
-                    label="Auto-continue after plan (Codex)"
-                    hint="When a Codex plan-mode run finishes, the plan is saved to PLAN.md. If on, an implementation turn starts automatically. If off, the workspace waits for you to review the plan and click Accept & Implement."
-                  />
-                  <Toggle
-                    checked={autoReviewOn}
-                    onChange={setBool("auto_review")}
-                    label="Auto Code Review"
-                    hint="When an agent commits and exits successfully, automatically launch a review agent that checks the diff for issues."
-                  />
-                  <div className={`pl-5 space-y-3 border-l-2 ${autoReviewOn ? "border-blue-200" : "border-gray-100 dark:border-gray-800"}`}>
-                    <Toggle
-                      checked={settings.review_auto_fix !== "false"}
-                      onChange={setBool("review_auto_fix")}
-                      label="Auto-fix issues found in review"
-                      hint="When the review agent finds CRITICAL or MAJOR issues, it edits the code and commits fixes directly. Requires 'Skip permission prompts' to be enabled so the agent can write files. When disabled, the agent reports issues but makes no changes."
-                      disabled={!autoReviewOn}
-                    />
-                    <Toggle
-                      checked={settings.auto_merge !== "false"}
-                      onChange={setBool("auto_merge")}
-                      label="Auto-merge after review"
-                      hint="Merge the branch and close the workspace automatically once the review agent passes. When disabled, the issue moves to AI Reviewed and waits for manual merge."
-                      disabled={!autoReviewOn}
-                    />
+                  {/* Agent behaviour */}
+                  <div className="pt-2">
+                    <div className="text-[11px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">Agent behaviour</div>
+                    <div className="space-y-3">
+                      <Toggle
+                        checked={settings.plan_auto_continue !== "false"}
+                        onChange={setBool("plan_auto_continue")}
+                        label="Auto-continue after plan (Codex)"
+                        hint="When a Codex plan-mode run finishes, the plan is saved to PLAN.md. If on, an implementation turn starts automatically. If off, the workspace waits for you to review the plan and click Accept & Implement."
+                      />
+                      <Toggle
+                        checked={settings.resume_with_new_model === "true"}
+                        onChange={setBool("resume_with_new_model")}
+                        label="Use new profile on resume"
+                        hint="When continuing a chat, start a fresh session using the current profile instead of resuming the previous one. Use this when switching providers via a different Claude profile."
+                      />
+                      <Toggle
+                        checked={settings.persistent_agent === "true"}
+                        onChange={setBool("persistent_agent")}
+                        label="Persistent agent (warm pool)"
+                        hint="Keep a warm agent process alive between sessions to reduce startup latency. Experimental."
+                      />
+                    </div>
                   </div>
-                  <Toggle
-                    checked={settings.resume_with_new_model === "true"}
-                    onChange={setBool("resume_with_new_model")}
-                    label="Use new profile on resume"
-                    hint="When continuing a chat, start a fresh session using the current profile instead of resuming the previous one. Use this when switching providers via a different Claude profile."
-                  />
-                  <Toggle
-                    checked={settings.auto_start_followup === "true"}
-                    onChange={setBool("auto_start_followup")}
-                    label="Auto-start follow-up tasks after merge"
-                    hint="When a workspace is merged and the issue has outgoing 'depends_on' or 'child_of' dependencies, automatically create workspaces for unblocked follow-up issues."
-                  />
-                  <Toggle
-                    checked={settings.require_manual_approval === "true"}
-                    onChange={setBool("require_manual_approval")}
-                    label="Require manual approval before review"
-                    hint="When enabled, issues must be manually approved before the AI review step is triggered. Useful for gating expensive review sessions on deliberate human sign-off."
-                  />
-                  <Toggle
-                    checked={settings.learning_step_after_agent === "true"}
-                    onChange={setBool("learning_step_after_agent")}
-                    label="Learning step after agent (parallel)"
-                    hint="When an agent session completes with committed changes, runs a learning session in parallel with code review. Extracts insights from session transcripts and updates docs and hooks without blocking the review."
-                  />
-                  <Toggle
-                    checked={settings.learning_step_after_review === "true"}
-                    onChange={setBool("learning_step_after_review")}
-                    label="Learning step after review (parallel)"
-                    hint="When a review session completes, runs a learning session in parallel with the auto-merge step. Extracts insights without delaying the merge."
-                  />
-                  <Toggle
-                    checked={settings.learning_step_before_merge === "true"}
-                    onChange={setBool("learning_step_before_merge")}
-                    label="Learning step before merge (blocking)"
-                    hint="When enabled, runs an agent session before merging that reads the worktree's session transcripts and updates docs and Claude hooks with extracted insights. Blocks merge until complete (up to 3 minutes)."
-                  />
-                  <Field
-                   label="Visual verification timing"
-                   hint="Controls when UI changes are visually verified via browser snapshot. 'Before merge' blocks the agent until it verifies (default, Claude only). 'After merge' lets the agent stop without verifying — the issue is tagged with 'needs-visual-verification' after merge and verification runs on master."
-                  >
-                   <select
-                     value={settings.visual_verification_mode || "before_merge"}
-                     onChange={(e) => set("visual_verification_mode")(e.target.value)}
-                     className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
-                   >
-                     <option value="before_merge">Before merge (default) — agent must verify UI before stopping</option>
-                     <option value="after_merge">After merge — verification runs on master after merge completes</option>
-                   </select>
-                  </Field>
 
-                  <div className="pt-3 border-t border-gray-200 dark:border-gray-700">
+                  {/* Code review & merge pipeline */}
+                  <div className="pt-4 border-t border-gray-200 dark:border-gray-700">
+                    <div className="text-[11px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">Code review &amp; merge pipeline</div>
+                    <div className="space-y-3">
+                      <Toggle
+                        checked={autoReviewOn}
+                        onChange={setBool("auto_review")}
+                        label="Auto Code Review"
+                        hint="When an agent commits and exits successfully, automatically launch a review agent that checks the diff for issues."
+                      />
+                      <div className={`pl-5 space-y-3 border-l-2 ${autoReviewOn ? "border-blue-200" : "border-gray-100 dark:border-gray-800"}`}>
+                        <Toggle
+                          checked={settings.review_auto_fix !== "false"}
+                          onChange={setBool("review_auto_fix")}
+                          label="Auto-fix issues found in review"
+                          hint="When the review agent finds CRITICAL or MAJOR issues, it edits the code and commits fixes directly. Requires 'Skip permission prompts' to be enabled so the agent can write files. When disabled, the agent reports issues but makes no changes."
+                          disabled={!autoReviewOn}
+                        />
+                        <Toggle
+                          checked={settings.auto_merge !== "false"}
+                          onChange={setBool("auto_merge")}
+                          label="Auto-merge after review"
+                          hint="Merge the branch and close the workspace automatically once the review agent passes. When disabled, the issue moves to AI Reviewed and waits for manual merge."
+                          disabled={!autoReviewOn}
+                        />
+                      </div>
+                      <Toggle
+                        checked={settings.require_manual_approval === "true"}
+                        onChange={setBool("require_manual_approval")}
+                        label="Require manual approval before review"
+                        hint="When enabled, issues must be manually approved before the AI review step is triggered. Useful for gating expensive review sessions on deliberate human sign-off."
+                      />
+                      <Field
+                        label="Visual verification timing"
+                        hint="Controls when UI changes are visually verified via browser snapshot. 'Before merge' blocks the agent until it verifies (default, Claude only). 'After merge' lets the agent stop without verifying — the issue is tagged with 'needs-visual-verification' after merge and verification runs on master."
+                      >
+                        <select
+                          value={settings.visual_verification_mode || "before_merge"}
+                          onChange={(e) => set("visual_verification_mode")(e.target.value)}
+                          className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
+                        >
+                          <option value="before_merge">Before merge (default) — agent must verify UI before stopping</option>
+                          <option value="after_merge">After merge — verification runs on master after merge completes</option>
+                        </select>
+                      </Field>
+                    </div>
+                  </div>
+
+                  {/* Learning steps */}
+                  <div className="pt-4 border-t border-gray-200 dark:border-gray-700">
+                    <div className="text-[11px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">Learning steps</div>
+                    <div className="space-y-3">
+                      <Toggle
+                        checked={settings.learning_step_after_agent === "true"}
+                        onChange={setBool("learning_step_after_agent")}
+                        label="Learning step after agent (parallel)"
+                        hint="When an agent session completes with committed changes, runs a learning session in parallel with code review. Extracts insights from session transcripts and updates docs and hooks without blocking the review."
+                      />
+                      <Toggle
+                        checked={settings.learning_step_after_review === "true"}
+                        onChange={setBool("learning_step_after_review")}
+                        label="Learning step after review (parallel)"
+                        hint="When a review session completes, runs a learning session in parallel with the auto-merge step. Extracts insights without delaying the merge."
+                      />
+                      <Toggle
+                        checked={settings.learning_step_before_merge === "true"}
+                        onChange={setBool("learning_step_before_merge")}
+                        label="Learning step before merge (blocking)"
+                        hint="When enabled, runs an agent session before merging that reads the worktree's session transcripts and updates docs and Claude hooks with extracted insights. Blocks merge until complete (up to 3 minutes)."
+                      />
+                    </div>
+                  </div>
+
+                  {/* Follow-up & automation */}
+                  <div className="pt-4 border-t border-gray-200 dark:border-gray-700">
+                    <div className="text-[11px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">Follow-up &amp; automation</div>
+                    <div className="space-y-3">
+                      <Toggle
+                        checked={settings.auto_start_followup === "true"}
+                        onChange={setBool("auto_start_followup")}
+                        label="Auto-start follow-up tasks after merge"
+                        hint="When a workspace is merged and the issue has outgoing 'depends_on' or 'child_of' dependencies, automatically create workspaces for unblocked follow-up issues."
+                      />
+                    </div>
+                  </div>
+
+                  <div className="pt-4 border-t border-gray-200 dark:border-gray-700">
                     <div className="flex items-center justify-between mb-3">
                       <div className="flex items-center gap-2">
                         <div className="text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wide">Board Monitor</div>
@@ -1036,12 +1069,6 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                     onChange={setBool("dynamic_column_scaling")}
                     label="Dynamic column scaling"
                     hint="Columns grow proportionally to their issue count, giving more space to busy columns."
-                  />
-                  <Toggle
-                    checked={settings.persistent_agent === "true"}
-                    onChange={setBool("persistent_agent")}
-                    label="Persistent agent (warm pool)"
-                    hint="Keep a warm agent process alive between sessions to reduce startup latency. Experimental."
                   />
                 </div>
                 </>
