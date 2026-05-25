@@ -15,6 +15,7 @@ interface ParsedLine {
   subtype?: string;
   data?: {
     content?: string;
+    reasoningText?: string;
     model?: string;
     toolCallId?: string;
     toolName?: string;
