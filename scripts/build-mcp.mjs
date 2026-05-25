@@ -21,7 +21,7 @@ await build({
   target: "node20",
   format: "esm",
   external,
-  packages: "external",
+  // Don't use packages: "external" — @agentic-kanban/shared must be bundled in.
   entryPoints: [resolve(root, "packages/mcp-server/src/index.ts")],
   outfile: resolve(root, "packages/server/dist/mcp.js"),
   banner: {
