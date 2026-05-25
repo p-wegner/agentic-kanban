@@ -163,7 +163,136 @@ describe("CopilotOutputParser", () => {
       },
     ]);
   });
+
+  it("extracts cwd from nested context in session.start", () => {
+    const parser = new CopilotOutputParser();
+    const output = JSON.stringify({
+      type: "session.start",
+      data: {
+        sessionId: "sess-1",
+        copilotVersion: "1.0.54",
+        startTime: "2026-01-01T00:00:00Z",
+        context: { cwd: "C:\\repo\\worktree", branch: "feature/test", gitRoot: "C:\\repo" },
+      },
+    }) + "\n";
+
+    const events = parser.feed(output);
+    expect(events).toHaveLength(1);
+    expect(events[0].kind).toBe("init");
+    if (events[0].kind === "init") {
+      expect(events[0].cwd).toBe("C:\\repo\\worktree");
+      expect(events[0].sessionId).toBe("sess-1");
+    }
+  });
+
+  it("handles session.model_change by tracking model and emitting nothing", () => {
+    const parser = new CopilotOutputParser();
+    const output = [
+      JSON.stringify({ type: "session.start", data: { sessionId: "sess-1", context: { cwd: "/repo" } } }),
+      JSON.stringify({ type: "session.model_change", data: { newModel: "claude-sonnet-4.6", reasoningEffort: null } }),
+      JSON.stringify({ type: "assistant.message", data: { content: "Hello!", model: "" } }),
+    ].join("\n") + "\n";
+
+    const events = parser.feed(output);
+    const assistantEvent = events.find(e => e.kind === "assistant");
+    expect(assistantEvent).toBeDefined();
+    if (assistantEvent?.kind === "assistant") {
+      // model should have been updated from session.model_change
+      expect(assistantEvent.model).toBe("claude-sonnet-4.6");
+    }
+    // model_change itself emits no event
+    expect(events.filter(e => e.kind === "raw").length).toBe(0);
+  });
+
+  it("generates result event from session.shutdown", () => {
+    const parser = new CopilotOutputParser();
+    const output = JSON.stringify({
+      type: "session.shutdown",
+      data: {
+        shutdownType: "routine",
+        totalApiDurationMs: 12000,
+        codeChanges: {
+          linesAdded: 50,
+          linesRemoved: 10,
+          filesModified: ["packages/client/src/App.tsx", "packages/server/src/index.ts"],
+        },
+      },
+    }) + "\n";
+
+    const events = parser.feed(output);
+    expect(events).toHaveLength(1);
+    expect(events[0].kind).toBe("result");
+    if (events[0].kind === "result") {
+      expect(events[0].success).toBe(true);
+      expect(events[0].durationMs).toBe(12000);
+      expect(events[0].result).toContain("+50/-10 lines in 2 files");
+    }
+  });
+
+  it("shows user.message as a notification with key 'user'", () => {
+    const parser = new CopilotOutputParser();
+    const output = JSON.stringify({
+      type: "user.message",
+      data: { content: "Fix the broken tests\nand also update docs", transformedContent: "<system>...</system>" },
+    }) + "\n";
+
+    const events = parser.feed(output);
+    expect(events).toHaveLength(1);
+    expect(events[0].kind).toBe("notification");
+    if (events[0].kind === "notification") {
+      expect(events[0].key).toBe("user");
+      expect(events[0].text).toBe("Fix the broken tests");
+    }
+  });
+
+  it("parses JSON string arguments in tool.execution_start", () => {
+    const parser = new CopilotOutputParser();
+    const args = JSON.stringify({ command: "pnpm test", description: "Run tests" });
+    const output = JSON.stringify({
+      type: "tool.execution_start",
+      data: {
+        toolCallId: "tool-1",
+        toolName: "powershell",
+        arguments: args,
+      },
+    }) + "\n";
+
+    const events = parser.feed(output);
+    expect(events).toHaveLength(1);
+    expect(events[0].kind).toBe("tool_use");
+    if (events[0].kind === "tool_use") {
+      expect(events[0].inputParsed).toEqual({ command: "pnpm test", description: "Run tests" });
+    }
+  });
+
+  it("registers toolCallId from assistant.message toolRequests for later name resolution", () => {
+    const parser = new CopilotOutputParser();
+    const output = [
+      JSON.stringify({
+        type: "assistant.message",
+        data: {
+          model: "claude-sonnet-4.6",
+          content: "",
+          toolRequests: [{ toolCallId: "call-1", name: "grep", arguments: { pattern: "TODO" } }],
+        },
+      }),
+      JSON.stringify({
+        type: "tool.execution_complete",
+        data: { toolCallId: "call-1", success: true, result: { content: "found 3 matches" } },
+      }),
+    ].join("\n") + "\n";
+
+    const events = parser.feed(output);
+    // tool_result should resolve tool name from toolRequests registration
+    const resultEvent = events.find(e => e.kind === "tool_result");
+    expect(resultEvent).toBeDefined();
+    if (resultEvent?.kind === "tool_result") {
+      expect(resultEvent.toolName).toBe("grep");
+      expect(resultEvent.output).toBe("found 3 matches");
+    }
+  });
 });
+
 
 describe("getOutputFormatForAgent", () => {
   it("returns claude-stream-json for undefined (default agent)", () => {
