@@ -659,7 +659,78 @@ function createSessionManager(
     return turnStates.get(sessionId);
   }
 
-  return { startSession, stopSession, sendTurn, getTurnState, subscribe, unsubscribe, wsRoute, isProcessAlive };
+  /**
+   * Reattach to a surviving agent session after server restart.
+   * Restores in-memory state so broadcast(), activity, and exit handling work.
+   */
+  function reattachSession(opts: {
+    sessionId: string;
+    workspaceId: string;
+    issueId: string;
+    projectId: string;
+    providerName?: string;
+  }): void {
+    const { sessionId, workspaceId, issueId, projectId, providerName } = opts;
+    sessionContexts.set(sessionId, { workspaceId, issueId, projectId });
+    if (providerName) sessionProviders.set(sessionId, providerName);
+    console.log(`[session] reattached: sessionId=${sessionId} workspaceId=${workspaceId} provider=${providerName ?? "unknown"}`);
+  }
+
+  /**
+   * Notify that an externally-monitored session's process has exited.
+   * Mirrors the exit handling in startSession's onOutput callback.
+   */
+  async function notifyExternalExit(sessionId: string, exitCode: number | null): Promise<void> {
+    const ctx = sessionContexts.get(sessionId);
+    // Clear in-memory state
+    sessionContexts.delete(sessionId);
+    turnStates.delete(sessionId);
+    sessionProviders.delete(sessionId);
+    sessionSubagents.delete(sessionId);
+    sessionTasks.delete(sessionId);
+    sessionHasTodoWrite.delete(sessionId);
+    sessionToolUses.delete(sessionId);
+    sessionModels.delete(sessionId);
+    sessionContextTokens.delete(sessionId);
+    sessionLastTool.delete(sessionId);
+    sessionAgentToolUseIds.delete(sessionId);
+    sessionTextParts.delete(sessionId);
+    sessionFinalText.delete(sessionId);
+    sessionExitPlanModeDenied.delete(sessionId);
+
+    // Clear activity and todos for this session
+    if (ctx) {
+      options?.onActivity?.(ctx.projectId, ctx.issueId, sessionId, "");
+      options?.onTodos?.(ctx.projectId, ctx.issueId, []);
+    }
+
+    // Update DB
+    const now = new Date().toISOString();
+    await db.update(sessions)
+      .set({ status: "completed", endedAt: now, exitCode: String(exitCode ?? 0) })
+      .where(eq(sessions.id, sessionId));
+
+    // Fire workflow callback
+    const wsId = ctx?.workspaceId;
+    if (wsId) {
+      options?.onSessionExit?.(wsId, sessionId, exitCode, false);
+    }
+  }
+
+  return {
+    startSession,
+    stopSession,
+    sendTurn,
+    getTurnState,
+    subscribe,
+    unsubscribe,
+    wsRoute,
+    isProcessAlive,
+    reattachSession,
+    notifyExternalExit,
+    /** Feed an output event to broadcast (for reattached sessions). */
+    handleOutput: broadcast,
+  };
 }
 
 export { createSessionManager };
