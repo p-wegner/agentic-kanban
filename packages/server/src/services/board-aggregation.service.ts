@@ -30,6 +30,7 @@ type WorkspaceSummary = {
     status: "active" | "reviewing" | "fixing" | "idle" | "error" | "closed";
     claudeProfile: string | null;
     profile?: { provider: ProviderName; name: string } | null;
+    model?: string | null;
     agentCommand: string | null;
     readyForMerge?: boolean;
     planMode?: boolean;
@@ -95,6 +96,7 @@ export async function buildWorkspaceSummaryMap(
       claudeProfile: workspaces.claudeProfile,
       agentCommand: workspaces.agentCommand,
       provider: workspaces.provider,
+      model: workspaces.model,
       pendingPlanPath: workspaces.pendingPlanPath,
       planMode: workspaces.planMode,
       workingDir: workspaces.workingDir,
@@ -137,6 +139,7 @@ export async function buildWorkspaceSummaryMap(
       status: mainWs.status as "active" | "reviewing" | "fixing" | "idle" | "error" | "closed",
       claudeProfile: mainWs.claudeProfile,
       profile: mainWs.claudeProfile ? { provider: (mainWs.provider as ProviderName) ?? "claude", name: mainWs.claudeProfile } : null,
+      model: mainWs.model,
       agentCommand: mainWs.agentCommand,
       readyForMerge: mainWs.readyForMerge,
       planMode: mainWs.planMode,

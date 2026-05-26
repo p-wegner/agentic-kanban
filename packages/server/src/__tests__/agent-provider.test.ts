@@ -15,7 +15,7 @@ vi.mock("node:fs", () => ({
 
 import { ClaudeProvider, CodexProvider, CopilotProvider, getProvider, buildAgentLaunchConfig } from "../services/agent-provider.js";
 import { execSync as execSyncMock } from "node:child_process";
-import { existsSync as existsSyncMock } from "node:fs";
+import { existsSync as existsSyncMock, readFileSync as readFileSyncMock } from "node:fs";
 
 const provider = new ClaudeProvider();
 
@@ -139,6 +139,46 @@ describe("ClaudeProvider", () => {
 
       const config = provider.buildLaunchConfig({ claudeProfile: "nonexistent" });
       expect(config.args).not.toContain("--settings");
+    });
+
+    it("adds --model when a model tier is provided", () => {
+      (existsSyncMock as any).mockReturnValue(false);
+
+      const config = provider.buildLaunchConfig({ model: "opus" });
+      expect(config.args).toContain("--model");
+      expect(config.args[config.args.indexOf("--model") + 1]).toBe("opus");
+    });
+
+    it("omits --model when no model is provided", () => {
+      (existsSyncMock as any).mockReturnValue(false);
+
+      const config = provider.buildLaunchConfig({});
+      expect(config.args).not.toContain("--model");
+    });
+
+    it("skips --model for profiles with a custom ANTHROPIC_BASE_URL (e.g. z.ai)", () => {
+      (existsSyncMock as any).mockImplementation((p: string) =>
+        p.includes("settings_zai.json")
+      );
+      (readFileSyncMock as any).mockReturnValue(
+        JSON.stringify({ env: { ANTHROPIC_BASE_URL: "https://api.z.ai/anthropic", ANTHROPIC_MODEL: "glm-5.1" } })
+      );
+
+      const config = provider.buildLaunchConfig({ claudeProfile: "zai", model: "opus" });
+      expect(config.args).not.toContain("--model");
+    });
+
+    it("adds --model for a standard profile without a custom endpoint", () => {
+      (existsSyncMock as any).mockImplementation((p: string) =>
+        p.includes("settings_work.json")
+      );
+      (readFileSyncMock as any).mockReturnValue(
+        JSON.stringify({ env: { ANTHROPIC_API_KEY: "sk-test" } })
+      );
+
+      const config = provider.buildLaunchConfig({ claudeProfile: "work", model: "sonnet" });
+      expect(config.args).toContain("--model");
+      expect(config.args[config.args.indexOf("--model") + 1]).toBe("sonnet");
     });
 
     it("sets keepStdinOpen for mock agent with keepAlive", () => {

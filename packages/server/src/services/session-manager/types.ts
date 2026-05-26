@@ -34,6 +34,8 @@ export interface StartSessionOptions {
   provider?: import("../agent-provider.js").ProviderId;
   triggerType?: string;
   profile?: { provider: ProviderName; name: string };
+  /** Claude model tier (e.g. "opus"). When omitted, the workspace's stored model is used. */
+  model?: string;
   extraEnv?: Record<string, string>;
   workingDirOverride?: string;
   skipPermissions?: boolean;

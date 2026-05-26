@@ -295,6 +295,7 @@ export async function getIssueWorkspaces(
       status: workspaces.status,
       agentCommand: workspaces.agentCommand,
       provider: workspaces.provider,
+      model: workspaces.model,
       pendingPlanPath: workspaces.pendingPlanPath,
       skillId: workspaces.skillId,
       skillName: agentSkills.name,

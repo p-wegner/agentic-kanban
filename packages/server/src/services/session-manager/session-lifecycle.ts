@@ -28,6 +28,7 @@ export function createSessionLifecycle(
       provider,
       triggerType,
       profile,
+      model,
       extraEnv,
       workingDirOverride,
       skipPermissions: skipPermissionsOpt,
@@ -38,6 +39,9 @@ export function createSessionLifecycle(
     if (wsRows.length === 0) throw new Error("Workspace not found");
 
     const workspace = wsRows[0];
+    // Per-call model wins; otherwise inherit the model stored on the workspace so resume/
+    // review/follow-up sessions stay on the same model the workspace was created with.
+    const effectiveModel = model ?? workspace.model ?? undefined;
     const effectiveWorkingDir = workingDirOverride ?? workspace.workingDir;
     if (!effectiveWorkingDir) throw new Error("Workspace has no working directory; run setup first");
 
@@ -242,7 +246,7 @@ export function createSessionLifecycle(
           }
         }
       // When resumeWithNewModel is true, omit --resume so the new profile/provider is used instead
-      }, resumeWithNewModel ? undefined : providerSessionId, agentCommand, claudeProfile, multiTurn, permissionPromptTool, planMode, provider, profile, extraEnv, skipPermissions);
+      }, resumeWithNewModel ? undefined : providerSessionId, agentCommand, claudeProfile, multiTurn, permissionPromptTool, planMode, provider, profile, extraEnv, skipPermissions, effectiveModel);
 
       // Persist PID so hot-reload can detect surviving processes
       if (proc.pid) {

@@ -32,7 +32,7 @@ export interface BoardKanbanViewProps {
   onMoveToNext: (issue: IssueWithStatus, nextStatusId: string) => void;
   onColumnResizeStart: (colId: string, e: React.MouseEvent) => void;
   onColumnResizeReset: (colId: string) => void;
-  onCreateIssue: (data: CreateIssueRequest & { startWorkspace?: boolean; planMode?: boolean; skipAutoReview?: boolean; profile?: ProfileSelection; isDirect?: boolean; skillId?: string }) => Promise<void>;
+  onCreateIssue: (data: CreateIssueRequest & { startWorkspace?: boolean; planMode?: boolean; skipAutoReview?: boolean; profile?: ProfileSelection; model?: string; isDirect?: boolean; skillId?: string }) => Promise<void>;
   onExpandCreate: (statusId: string, statusName: string, state: Partial<CreateIssueFormState>) => void;
 }
 

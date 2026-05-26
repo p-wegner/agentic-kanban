@@ -41,6 +41,7 @@ export function createWorkspacesRoute(
       skillId: body.skillId,
       profile: body.profile,
       claudeProfile: body.claudeProfile,
+      model: body.model,
     } satisfies CreateWorkspaceInput);
     return c.json(result, 201);
   });

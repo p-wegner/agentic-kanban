@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { apiFetch } from "../lib/api.js";
 import { showToast } from "./Toast.js";
 import { MCP_TOOL_DEFINITIONS, MCP_TOOL_CATEGORIES } from "@agentic-kanban/shared/lib";
+import { CLAUDE_MODEL_OPTIONS } from "@agentic-kanban/shared";
 
 interface SettingsPanelProps {
   onClose: () => void;
@@ -17,6 +18,7 @@ interface Settings {
   codex_profile?: string;
   copilot_profile?: string;
   provider?: string;
+  default_model?: string;
   permission_prompt_tool?: string;
   auto_review?: string;
   auto_merge?: string;
@@ -49,6 +51,7 @@ const DEFAULT_SETTINGS: Settings = {
   codex_profile: "",
   copilot_profile: "",
   provider: "claude",
+  default_model: "",
   permission_prompt_tool: "true",
   auto_review: "true",
   auto_merge: "true",
@@ -682,6 +685,17 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                           <option key={`copilot:${p}`} value={`copilot:${p}`}>{profileOptionLabel("copilot", p)}</option>
                         ))}
                       </optgroup>
+                    </select>
+                  </Field>
+                  <Field label="Default Model" hint="Default Claude model for new workspaces (passed via --model). Per-workspace selection overrides this. Ignored for profiles with a custom endpoint (e.g. z.ai) and for Codex/Copilot.">
+                    <select
+                      value={settings.default_model || ""}
+                      onChange={(e) => set("default_model")(e.target.value)}
+                      className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    >
+                      {CLAUDE_MODEL_OPTIONS.map((m) => (
+                        <option key={m.value} value={m.value}>{m.label}</option>
+                      ))}
                     </select>
                   </Field>
                   <Field label="Additional Arguments" hint="Extra CLI arguments passed to the agent command. Arguments are shell-split (supports quoting).">

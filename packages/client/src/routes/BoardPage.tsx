@@ -451,10 +451,10 @@ export function BoardPage() {
     showToast(`Removed "${project?.name ?? "project"}"`, "success");
   }
 
-  async function handleCreateIssue(data: CreateIssueRequest & { startWorkspace?: boolean; planMode?: boolean; profile?: ProfileSelection; isDirect?: boolean; skillId?: string }) {
+  async function handleCreateIssue(data: CreateIssueRequest & { startWorkspace?: boolean; planMode?: boolean; profile?: ProfileSelection; model?: string; isDirect?: boolean; skillId?: string }) {
     setMutating(true);
     setError(null);
-    const { startWorkspace, planMode, profile, isDirect, skillId, ...issueData } = data;
+    const { startWorkspace, planMode, profile, model, isDirect, skillId, ...issueData } = data;
     try {
       const created = await apiFetch<{ id: string; issueNumber: number; title: string }>(
         "/api/issues",
@@ -480,6 +480,7 @@ export function BoardPage() {
               isDirect: isDirect || undefined,
               planMode: planMode || undefined,
               profile: profile || undefined,
+              model: model || undefined,
               skillId: skillId || undefined,
             }),
           });
