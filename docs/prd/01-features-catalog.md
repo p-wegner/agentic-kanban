@@ -1,6 +1,6 @@
 # PRD-01: Features Catalog
 
-<!-- last-synced: 2026-05-26T00:00:00+02:00 | commit: baac823 -->
+<!-- last-synced: 2026-05-26T12:00:00+02:00 | commit: 2e68fa0 -->
 
 Complete inventory of features, organized by category. Status reflects the current implementation (Stages 0–14 complete).
 
@@ -229,7 +229,7 @@ Complete inventory of features, organized by category. Status reflects the curre
 - `Ctrl+K` for command palette, `Ctrl+Enter` to send chat message to agent
 - `c` to create issue, `w` to create issue + start workspace
 - `q` to open Quick Tasks panel
-- `b` to switch to Board view, `g` to switch to Graph view, `t` to switch to Table view
+- `b` to switch to Board view, `g` to switch to Graph view, `t` to switch to Table view, `f` to switch to Timeline view, `l` to switch to Agents view
 - `g + s` to open Settings
 - Help overlay (`?`) lists all shortcuts
 - **Status: DONE**
@@ -272,8 +272,8 @@ Complete inventory of features, organized by category. Status reflects the curre
 - Five view modes: Board (kanban columns), Graph (dependency DAG), Table (flat sortable list), Agents, Timeline
 - Table view: sortable columns (#, Title, Status, Priority, Estimate, Updated, Tags); **Active only** default filter (dropdown: Active only, All); row click opens detail panel
 - Graph view: nodes colored by status, dependency arrows, "Show completed" toggle, zoom controls (+/−/reset), status legend
-- Agents view: shows live agent activity across all active workspaces; "No active agents" empty state when none running
-- Timeline view: Gantt-style chart grouped by status; zoom controls (−/100%/+); tag type legend (Task, Bug, Feature, Chore) to filter bars; "N issues across M statuses" header; horizontal scrollbar for time range; bars positioned by created/updated date
+- Agents view: lists active agent sessions across workspaces
+- Timeline view: all issues as horizontal bars on a chronological timeline, grouped into per-status swim lanes; each bar spans createdAt->updatedAt; color-coded by issue type (task=blue, bug=red, feature=violet, chore=amber) with a priority-colored dot; sticky date axis with tick marks and a red 'Today' marker; zoom controls (50%-500%); hover tooltip showing #, created/updated dates, type, priority, tags; click a bar to open the issue detail panel; issue-type legend; empty state when no issues match; dark mode support
 - View toggle buttons in board header
 - **Status: DONE**
 
