@@ -1,13 +1,14 @@
-import { Hono } from "hono";
 import { createApproval, getApproval, resolveApproval, deleteApproval, resolveApprovalContext, type ApprovalDecision } from "../services/approvals.js";
 import type { BoardEvents } from "../services/board-events.js";
+import { createRouter } from "../middleware/create-router.js";
+import { parseJsonBody } from "../middleware/parse-body.js";
 
 export function createApprovalsRoute(boardEvents: BoardEvents) {
-  const app = new Hono();
+  const app = createRouter();
 
   // Create a new approval request (called by MCP approve_tool_use tool)
   app.post("/", async (c) => {
-    const body = await c.req.json<{ sessionId: string; toolName: string; toolInput: unknown }>();
+    const body = await parseJsonBody<{ sessionId: string; toolName: string; toolInput: unknown }>(c);
 
     const { workspaceId, projectId } = await resolveApprovalContext(body.sessionId);
 
@@ -29,7 +30,7 @@ export function createApprovalsRoute(boardEvents: BoardEvents) {
 
   // Resolve approval (called by UI)
   app.put("/:id", async (c) => {
-    const body = await c.req.json<{ decision: ApprovalDecision }>();
+    const body = await parseJsonBody<{ decision: ApprovalDecision }>(c);
     const ok = resolveApproval(c.req.param("id"), body.decision);
     if (!ok) return c.json({ error: "not found" }, 404);
     return c.json({ ok: true });
