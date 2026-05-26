@@ -131,6 +131,27 @@ export async function moveIssueToDone(
   }
 }
 
+/**
+ * Move the issue to "In Progress" when a workspace is created.
+ * Logs a warning on failure but never throws.
+ */
+export async function moveIssueToInProgress(
+  issueId: string,
+  projectId: string,
+  now: string,
+  database: Database = db,
+): Promise<void> {
+  try {
+    const statuses = await database.select().from(projectStatuses).where(eq(projectStatuses.projectId, projectId));
+    const inProgress = statuses.find(s => s.name === "In Progress");
+    if (inProgress) {
+      await database.update(issues).set({ statusId: inProgress.id, updatedAt: now, statusChangedAt: now }).where(eq(issues.id, issueId));
+    }
+  } catch (err) {
+    console.warn("[workspaces] Failed to move issue to In Progress:", err);
+  }
+}
+
 /** Cascade delete a workspace: diff comments → session messages → sessions → workspace record. */
 export async function deleteWorkspaceCascade(
   workspaceId: string,
@@ -147,4 +168,74 @@ export async function deleteWorkspaceCascade(
   }
   await database.delete(sessions).where(eq(sessions.workspaceId, workspaceId));
   await database.delete(workspaces).where(eq(workspaces.id, workspaceId));
+}
+
+export interface WorkspaceDetails {
+  id: string;
+  issueId: string;
+  branch: string | null;
+  workingDir: string | null;
+  baseBranch: string | null;
+  isDirect: boolean;
+  planMode: boolean;
+  includeVisualProof: boolean;
+  readyForMerge: boolean;
+  status: string;
+  claudeProfile: string | null;
+  agentCommand: string | null;
+  provider: string | null;
+  createdAt: string;
+  updatedAt: string;
+  issue: { title: string; priority: string | null };
+}
+
+export async function getWorkspaceDetails(
+  workspaceId: string,
+  database: Database = db,
+): Promise<WorkspaceDetails | null> {
+  const result = await database
+    .select({
+      id: workspaces.id,
+      issueId: workspaces.issueId,
+      branch: workspaces.branch,
+      workingDir: workspaces.workingDir,
+      baseBranch: workspaces.baseBranch,
+      isDirect: workspaces.isDirect,
+      planMode: workspaces.planMode,
+      includeVisualProof: workspaces.includeVisualProof,
+      readyForMerge: workspaces.readyForMerge,
+      status: workspaces.status,
+      claudeProfile: workspaces.claudeProfile,
+      agentCommand: workspaces.agentCommand,
+      provider: workspaces.provider,
+      createdAt: workspaces.createdAt,
+      updatedAt: workspaces.updatedAt,
+      issueTitle: issues.title,
+      issuePriority: issues.priority,
+    })
+    .from(workspaces)
+    .innerJoin(issues, eq(workspaces.issueId, issues.id))
+    .where(eq(workspaces.id, workspaceId));
+
+  if (result.length === 0) return null;
+
+  const row = result[0];
+  return {
+    id: row.id,
+    issueId: row.issueId,
+    branch: row.branch,
+    workingDir: row.workingDir,
+    baseBranch: row.baseBranch,
+    isDirect: row.isDirect,
+    planMode: row.planMode,
+    includeVisualProof: row.includeVisualProof,
+    readyForMerge: row.readyForMerge,
+    status: row.status,
+    claudeProfile: row.claudeProfile,
+    agentCommand: row.agentCommand,
+    provider: row.provider,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+    issue: { title: row.issueTitle, priority: row.issuePriority },
+  };
 }
