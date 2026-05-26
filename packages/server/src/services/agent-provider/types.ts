@@ -103,3 +103,10 @@ export interface AgentProvider {
 }
 
 export interface BuildAgentLaunchConfigOptions extends ProviderLaunchOptions {}
+
+/** Minimal filesystem abstraction to enable testing without global node:fs mocks. */
+export interface FileSystem {
+  existsSync(path: string): boolean;
+  readFileSync(path: string, encoding: BufferEncoding): string;
+  writeFileSync(path: string, data: string, encoding: BufferEncoding): void;
+}
