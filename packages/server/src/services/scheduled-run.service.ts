@@ -132,7 +132,7 @@ export function createScheduledRunService(deps: { database: Database; serverPort
     }
 
     // Create a direct workspace with the custom prompt
-    const wsRes = await fetch(`http://localhost:${port}/api/workspaces`, {
+    const wsRes = await fetch(`http://127.0.0.1:${port}/api/workspaces`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ issueId: systemIssueId, isDirect: true, customPrompt: effectivePrompt, skipSetup: true }),

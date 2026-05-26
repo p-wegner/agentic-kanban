@@ -232,6 +232,9 @@ export function createProjectService(deps: { database: Database }) {
     body: Record<string, unknown>,
   ) {
     const now = new Date().toISOString();
+    const project = await getProjectById(id, database);
+    if (!project) throw new ProjectError("Project not found", "NOT_FOUND");
+
     const updates: Record<string, unknown> = { updatedAt: now };
     if (body.name !== undefined) updates.name = body.name;
     if (body.description !== undefined) updates.description = body.description;
@@ -241,9 +244,6 @@ export function createProjectService(deps: { database: Database }) {
     if (body.setupEnabled !== undefined) updates.setupEnabled = !!body.setupEnabled;
     if (body.teardownScript !== undefined) updates.teardownScript = body.teardownScript || null;
     if (body.defaultBranch !== undefined) {
-      const project = await getProjectById(id, database);
-      if (!project) throw new ProjectError("Project not found", "NOT_FOUND");
-
       const nextDefaultBranch = typeof body.defaultBranch === "string"
         ? body.defaultBranch.trim()
         : null;

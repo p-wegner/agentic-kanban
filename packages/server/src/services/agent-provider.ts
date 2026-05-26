@@ -770,7 +770,7 @@ export class CopilotProvider implements AgentProvider {
         outputTokens,
         numTurns: numberValue(obj.num_turns ?? obj.numTurns) || 1,
         model,
-        success: payload.is_error !== true && payload.error === undefined && numberValue(payload.exitCode) === 0,
+        success: payload.is_error !== true && payload.error === undefined && (payload.exitCode === undefined || numberValue(payload.exitCode) === 0),
         agentSummary: stringValue(payload.result ?? payload.summary ?? payload.text),
       };
       result.turnComplete = true;
