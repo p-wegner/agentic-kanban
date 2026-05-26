@@ -270,7 +270,7 @@ Complete inventory of features, organized by category. Status reflects the curre
 
 ### F-UI-10: Board Views
 - Five view modes: Board (kanban columns), Graph (dependency DAG), Table (flat sortable list), Agents, Timeline
-- Table view: sortable columns (#, Title, Status, Priority, Estimate, Updated, Tags); **Active only** default filter (dropdown: Active only, All); row click opens detail panel
+- Table view: sortable columns (#, Title, Status, Priority, Type, Estimate, Updated, Tags); **Active only** default filter (dropdown: Active only, All); row click opens detail panel
 - Graph view: nodes colored by status, dependency arrows, "Show completed" toggle, zoom controls (+/−/reset), status legend
 - Agents view: lists active agent sessions across workspaces
 - Timeline view: all issues as horizontal bars on a chronological timeline, grouped into per-status swim lanes; each bar spans createdAt->updatedAt; color-coded by issue type (task=blue, bug=red, feature=violet, chore=amber) with a priority-colored dot; sticky date axis with tick marks and a red 'Today' marker; zoom controls (50%-500%); hover tooltip showing #, created/updated dates, type, priority, tags; click a bar to open the issue detail panel; issue-type legend; empty state when no issues match; dark mode support
