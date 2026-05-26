@@ -169,3 +169,73 @@ export async function deleteWorkspaceCascade(
   await database.delete(sessions).where(eq(sessions.workspaceId, workspaceId));
   await database.delete(workspaces).where(eq(workspaces.id, workspaceId));
 }
+
+export interface WorkspaceDetails {
+  id: string;
+  issueId: string;
+  branch: string | null;
+  workingDir: string | null;
+  baseBranch: string | null;
+  isDirect: boolean;
+  planMode: boolean;
+  includeVisualProof: boolean;
+  readyForMerge: boolean;
+  status: string;
+  claudeProfile: string | null;
+  agentCommand: string | null;
+  provider: string | null;
+  createdAt: string;
+  updatedAt: string;
+  issue: { title: string; priority: string | null };
+}
+
+export async function getWorkspaceDetails(
+  workspaceId: string,
+  database: Database = db,
+): Promise<WorkspaceDetails | null> {
+  const result = await database
+    .select({
+      id: workspaces.id,
+      issueId: workspaces.issueId,
+      branch: workspaces.branch,
+      workingDir: workspaces.workingDir,
+      baseBranch: workspaces.baseBranch,
+      isDirect: workspaces.isDirect,
+      planMode: workspaces.planMode,
+      includeVisualProof: workspaces.includeVisualProof,
+      readyForMerge: workspaces.readyForMerge,
+      status: workspaces.status,
+      claudeProfile: workspaces.claudeProfile,
+      agentCommand: workspaces.agentCommand,
+      provider: workspaces.provider,
+      createdAt: workspaces.createdAt,
+      updatedAt: workspaces.updatedAt,
+      issueTitle: issues.title,
+      issuePriority: issues.priority,
+    })
+    .from(workspaces)
+    .innerJoin(issues, eq(workspaces.issueId, issues.id))
+    .where(eq(workspaces.id, workspaceId));
+
+  if (result.length === 0) return null;
+
+  const row = result[0];
+  return {
+    id: row.id,
+    issueId: row.issueId,
+    branch: row.branch,
+    workingDir: row.workingDir,
+    baseBranch: row.baseBranch,
+    isDirect: row.isDirect,
+    planMode: row.planMode,
+    includeVisualProof: row.includeVisualProof,
+    readyForMerge: row.readyForMerge,
+    status: row.status,
+    claudeProfile: row.claudeProfile,
+    agentCommand: row.agentCommand,
+    provider: row.provider,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+    issue: { title: row.issueTitle, priority: row.issuePriority },
+  };
+}

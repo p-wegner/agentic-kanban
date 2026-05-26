@@ -9,7 +9,17 @@ import * as gitService from "./git.service.js";
 import { runSetupScript } from "./setup-script.js";
 import { writeAgentSkillFile, readLocalSkillPrompt } from "@agentic-kanban/shared/lib/agent-skill-files";
 import { resolveAgentSettings, toExecutorProvider } from "./agent-settings.service.js";
-import { moveIssueToInProgress } from "../repositories/workspace.repository.js";
+import { moveIssueToInProgress, resolveProjectRepo, resolveProjectId, resolveProjectFull, moveIssueToDone, getWorkspaceById, updateWorkspaceStatus } from "../repositories/workspace.repository.js";
+import { killProcessesInDir } from "./process-cleanup.js";
+import { runScript } from "./script-runner.js";
+import { parseDiffStats } from "./board-aggregation.service.js";
+import { getConflictingFiles, buildConflictResolutionPrompt, buildFixAndMergePrompt, runLearningStep } from "./merge-helpers.service.js";
+import { buildImplementPrompt } from "./plan-mode.service.js";
+import { PREF_AUTO_START_FOLLOWUP } from "../constants/preference-keys.js";
+import { autoStartFollowups } from "./followup-workspace.service.js";
+import { loadAgentSettings } from "./agent-settings.service.js";
+import type { AgentSettings } from "./agent-settings.service.js";
+import { getDiffComments } from "../repositories/session.repository.js";
 
 // --- Error types for service-to-route communication ---
 
@@ -17,9 +27,42 @@ export class WorkspaceError extends Error {
   constructor(
     message: string,
     public readonly code: "NOT_FOUND" | "BAD_REQUEST",
+    public readonly data?: Record<string, unknown>,
   ) {
     super(message);
   }
+}
+
+// --- Shared helpers ---
+
+function applyWorkspaceAgentSelection(settings: AgentSettings, workspace: typeof workspaces.$inferSelect): AgentSettings {
+  const provider = workspace.provider;
+  if (provider !== "claude" && provider !== "codex" && provider !== "copilot") return settings;
+
+  const profileName = workspace.claudeProfile || undefined;
+  const agentArgs = provider === "claude"
+    ? settings.agentArgs
+    : settings.agentArgs
+      ?.split(/\s+/)
+      .filter((arg) => arg && arg !== "--dangerously-skip-permissions")
+      .join(" ") || undefined;
+  return {
+    ...settings,
+    agentArgs,
+    provider,
+    claudeProfile: provider === "claude" ? profileName : undefined,
+    profile: profileName ? { provider: provider as ProviderName, name: profileName } : undefined,
+  };
+}
+
+function requireBaseBranch(baseBranch: string | null | undefined): string {
+  if (!baseBranch) {
+    throw new WorkspaceError(
+      "No default branch configured for this project. Set a default branch in project settings or choose a base branch.",
+      "BAD_REQUEST",
+    );
+  }
+  return baseBranch;
 }
 
 // --- Input / Output types ---
@@ -406,5 +449,300 @@ export function createWorkspaceService(deps: {
     return { id: workspaceId, readyForMerge: true };
   }
 
-  return { createWorkspace, deleteWorkspace, markReadyForMerge };
+  async function setupWorkspace(id: string) {
+    const workspace = await getWorkspaceById(id, database);
+    if (!workspace) throw new WorkspaceError("Workspace not found", "NOT_FOUND");
+
+    if (workspace.workingDir) {
+      return { id, workingDir: workspace.workingDir };
+    }
+
+    const { repoPath, defaultBranch } = await resolveProjectRepo(id, database);
+    const baseBranch = requireBaseBranch(workspace.baseBranch || defaultBranch);
+    console.log(`[workspace-service] setup: workspaceId=${id} branch=${workspace.branch} repoPath=${repoPath} baseBranch=${baseBranch}`);
+
+    const worktreePath = await gitService.createWorktree(repoPath, workspace.branch, baseBranch);
+    console.log(`[workspace-service] setup complete: workspaceId=${id} worktreePath=${worktreePath}`);
+
+    const now = new Date().toISOString();
+    await database
+      .update(workspaces)
+      .set({ workingDir: worktreePath, baseBranch, updatedAt: now })
+      .where(eq(workspaces.id, id));
+
+    const projectId = await resolveProjectId(id, database);
+    if (projectId) boardEvents?.broadcast(projectId, "workspace_setup");
+
+    return { id, workingDir: worktreePath };
+  }
+
+  async function getWorkspaceDiff(id: string) {
+    const workspace = await getWorkspaceById(id, database);
+    if (!workspace) throw new WorkspaceError("Workspace not found", "NOT_FOUND");
+    if (!workspace.workingDir && !workspace.branch) {
+      throw new WorkspaceError("Workspace not set up", "BAD_REQUEST");
+    }
+
+    let diff = "";
+    let conflicts: { hasConflicts: boolean; conflictingFiles: string[] } | null = null;
+    const { repoPath, defaultBranch } = await resolveProjectRepo(id, database);
+    const baseBranch = requireBaseBranch(workspace.baseBranch || defaultBranch);
+
+    if (workspace.isDirect) {
+      diff = workspace.workingDir
+        ? await gitService.getWorkingTreeDiff(workspace.workingDir)
+        : "";
+    } else {
+      let usedWorktree = false;
+      if (workspace.workingDir) {
+        try {
+          diff = await gitService.getDiff(workspace.workingDir, baseBranch);
+          conflicts = await gitService.detectConflicts(workspace.workingDir, baseBranch);
+          usedWorktree = true;
+        } catch {
+          // Worktree directory exists but is not a valid git repo — fall through
+        }
+      }
+      if (!usedWorktree) {
+        if (workspace.branch) {
+          diff = await gitService.getDiffFromRepo(repoPath, workspace.branch, baseBranch);
+        } else {
+          diff = "";
+        }
+      }
+    }
+
+    const stats = parseDiffStats(diff);
+    const comments = await getDiffComments(id, undefined, database);
+    console.log(`[workspace-service] diff: workspaceId=${id} isDirect=${workspace.isDirect} files=${stats.filesChanged} +${stats.insertions} -${stats.deletions} conflicts=${conflicts?.hasConflicts ?? "n/a"} comments=${comments.length}`);
+    return { diff, stats, comments, conflicts };
+  }
+
+  async function mergeWorkspace(id: string) {
+    const workspace = await getWorkspaceById(id, database);
+    if (!workspace) throw new WorkspaceError("Workspace not found", "NOT_FOUND");
+
+    const { project, repoPath, defaultBranch } = await resolveProjectFull(id, database);
+
+    // Pre-merge cleanup: kill processes and run teardown script
+    if (workspace.workingDir && !workspace.isDirect) {
+      try {
+        const killed = await killProcessesInDir(workspace.workingDir);
+        if (killed > 0) console.log(`[workspace-service] killed ${killed} process(es) in ${workspace.workingDir}`);
+      } catch { /* ignore */ }
+      if (project?.teardownScript && project.setupEnabled !== false) {
+        try {
+          const r = await runScript(project.teardownScript, workspace.workingDir, `teardown:${id}`);
+          console.log(`[workspace-service] teardown script: ${r.ok ? "ok" : "failed"} — ${r.output.slice(0, 100)}`);
+        } catch { /* ignore */ }
+      }
+    }
+
+    // Direct workspace: no merge needed, just close
+    if (workspace.isDirect) {
+      const now = new Date().toISOString();
+      await updateWorkspaceStatus(id, "closed", { closedAt: now }, database);
+      await moveIssueToDone(id, workspace.issueId, now, database, true);
+
+      const projectId = await resolveProjectId(id, database);
+      if (projectId) boardEvents?.broadcast(projectId, "workspace_merged");
+
+      return { id, mergeOutput: "Direct workspace closed (no merge needed)" };
+    }
+
+    // Load preferences for learning step + auto-start checks
+    const prefRows = await database.select().from(preferences);
+    const prefMap = new Map(prefRows.map(r => [r.key, r.value]));
+
+    // Optional learning step
+    if (workspace.workingDir && getSessionManager) {
+      await runLearningStep(id, prefMap, database, getSessionManager!);
+    }
+
+    // Check for merge conflicts
+    if (workspace.workingDir) {
+      const baseBranch = requireBaseBranch(workspace.baseBranch || defaultBranch);
+      const conflicts = await gitService.detectConflicts(workspace.workingDir, baseBranch);
+      if (conflicts.hasConflicts) {
+        throw new WorkspaceError(
+          "Merge conflicts detected",
+          "BAD_REQUEST",
+          { conflictingFiles: conflicts.conflictingFiles },
+        );
+      }
+    }
+
+    console.log(`[workspace-service] merge: workspaceId=${id} branch=${workspace.branch} repoPath=${repoPath}`);
+
+    // Sync branch ref to HEAD before merging
+    if (workspace.workingDir) {
+      const synced = await gitService.syncBranchToHead(workspace.workingDir, workspace.branch);
+      if (synced) {
+        console.log(`[workspace-service] synced branch ${workspace.branch} to worktree HEAD`);
+      }
+    }
+
+    const result = await gitService.mergeBranch(repoPath, workspace.branch);
+
+    // Cleanup worktree
+    if (workspace.workingDir) {
+      try { await gitService.removeWorktree(repoPath, workspace.workingDir); } catch { /* best effort */ }
+    }
+
+    // Delete merged branch
+    try {
+      await gitService.deleteBranch(repoPath, workspace.branch);
+      console.log(`[workspace-service] deleted branch ${workspace.branch}`);
+    } catch { /* ignore */ }
+
+    const now = new Date().toISOString();
+    await updateWorkspaceStatus(id, "closed", { workingDir: null, closedAt: now }, database);
+    await moveIssueToDone(id, workspace.issueId, now, database);
+
+    const projectId = await resolveProjectId(id, database);
+    if (projectId) boardEvents?.broadcast(projectId, "workspace_merged");
+
+    // Auto-start follow-up issues
+    try {
+      if (prefMap.get(PREF_AUTO_START_FOLLOWUP) === "true" && projectId) {
+        await autoStartFollowups(workspace.issueId, projectId, database, getSessionManager!, prefMap, { boardEvents });
+      }
+    } catch (err) {
+      console.warn("[workspace-service] auto_start_followup check failed:", err);
+    }
+
+    return { id, mergeOutput: result };
+  }
+
+  async function getConflicts(id: string) {
+    const workspace = await getWorkspaceById(id, database);
+    if (!workspace) throw new WorkspaceError("Workspace not found", "NOT_FOUND");
+    if (!workspace.workingDir || workspace.isDirect) {
+      return { hasConflicts: false, conflictingFiles: [] };
+    }
+
+    const { defaultBranch } = await resolveProjectRepo(id, database);
+    const baseBranch = requireBaseBranch(workspace.baseBranch || defaultBranch);
+    return gitService.detectConflicts(workspace.workingDir, baseBranch);
+  }
+
+  async function updateBase(id: string, mode: "rebase" | "merge") {
+    const workspace = await getWorkspaceById(id, database);
+    if (!workspace) throw new WorkspaceError("Workspace not found", "NOT_FOUND");
+    if (!workspace.workingDir || workspace.isDirect) {
+      throw new WorkspaceError("Not supported for direct workspaces", "BAD_REQUEST");
+    }
+    if (workspace.status === "closed") {
+      throw new WorkspaceError("Workspace is closed", "BAD_REQUEST");
+    }
+
+    const { defaultBranch } = await resolveProjectRepo(id, database);
+    const baseBranch = requireBaseBranch(workspace.baseBranch || defaultBranch);
+
+    let result: { success: boolean; conflictingFiles?: string[]; error?: string };
+    if (mode === "merge") {
+      result = await gitService.mergeBaseIntoBranch(workspace.workingDir, baseBranch);
+    } else {
+      result = await gitService.rebaseOntoBase(workspace.workingDir, baseBranch, workspace.branch);
+    }
+
+    console.log(`[workspace-service] update-base: workspaceId=${id} mode=${mode} success=${result.success} conflicts=${result.conflictingFiles?.length ?? 0}`);
+
+    const projectId = await resolveProjectId(id, database);
+    if (projectId) boardEvents?.broadcast(projectId, "board_changed");
+
+    return result;
+  }
+
+  async function abortRebase(id: string) {
+    const workspace = await getWorkspaceById(id, database);
+    if (!workspace) throw new WorkspaceError("Workspace not found", "NOT_FOUND");
+    if (!workspace.workingDir) {
+      throw new WorkspaceError("Workspace not set up", "BAD_REQUEST");
+    }
+
+    await gitService.abortRebase(workspace.workingDir);
+    const projectId = await resolveProjectId(id, database);
+    if (projectId) boardEvents?.broadcast(projectId, "board_changed");
+    return { ok: true };
+  }
+
+  async function resolveConflicts(id: string) {
+    const workspace = await getWorkspaceById(id, database);
+    if (!workspace) throw new WorkspaceError("Workspace not found", "NOT_FOUND");
+    if (!workspace.workingDir) throw new WorkspaceError("Workspace not set up", "BAD_REQUEST");
+    if (workspace.status === "fixing") throw new WorkspaceError("Conflict resolution already in progress", "BAD_REQUEST");
+    if (!getSessionManager) throw new WorkspaceError("Session manager not available", "BAD_REQUEST");
+
+    const conflictingFiles = await getConflictingFiles(workspace.workingDir);
+    const { defaultBranch } = await resolveProjectRepo(id, database);
+    const baseBranch = requireBaseBranch(workspace.baseBranch || defaultBranch);
+    const prompt = buildConflictResolutionPrompt(conflictingFiles, baseBranch);
+
+    const { agentCommand, agentArgs, claudeProfile, profile, provider } =
+      applyWorkspaceAgentSelection(await loadAgentSettings(database), workspace);
+
+    const sessionId = await getSessionManager().startSession({
+      workspaceId: id, prompt, agentCommand, agentArgs, claudeProfile, profile,
+      provider: toExecutorProvider(provider), multiTurn: true, triggerType: "fix-conflicts",
+    });
+
+    await updateWorkspaceStatus(id, "fixing", {}, database);
+
+    const projectId = await resolveProjectId(id, database);
+    if (projectId) boardEvents?.broadcast(projectId, "session_launched");
+
+    return { sessionId };
+  }
+
+  async function fixAndMerge(id: string, mergeError?: string) {
+    const workspace = await getWorkspaceById(id, database);
+    if (!workspace) throw new WorkspaceError("Workspace not found", "NOT_FOUND");
+    if (!workspace.workingDir) throw new WorkspaceError("Workspace not set up", "BAD_REQUEST");
+    if (workspace.status === "fixing") throw new WorkspaceError("Fix already in progress", "BAD_REQUEST");
+    if (!getSessionManager) throw new WorkspaceError("Session manager not available", "BAD_REQUEST");
+
+    const errorMessage = mergeError || "Unknown merge error";
+    const { defaultBranch } = await resolveProjectRepo(id, database);
+    const baseBranch = requireBaseBranch(workspace.baseBranch || defaultBranch);
+    const prompt = buildFixAndMergePrompt(errorMessage, baseBranch);
+
+    const { agentCommand, agentArgs, claudeProfile, profile, provider } =
+      applyWorkspaceAgentSelection(await loadAgentSettings(database), workspace);
+
+    const sessionId = await getSessionManager().startSession({
+      workspaceId: id, prompt, agentCommand, agentArgs, claudeProfile, profile,
+      provider: toExecutorProvider(provider), multiTurn: true, triggerType: "fix-and-merge",
+    });
+
+    await updateWorkspaceStatus(id, "fixing", {}, database);
+
+    const projectId = await resolveProjectId(id, database);
+    if (projectId) boardEvents?.broadcast(projectId, "session_launched");
+
+    return { sessionId };
+  }
+
+  async function getLatestCommit(id: string) {
+    const workspace = await getWorkspaceById(id, database);
+    if (!workspace) throw new WorkspaceError("Workspace not found", "NOT_FOUND");
+    if (!workspace.workingDir) return { sha: null, message: null };
+    const commit = await gitService.getLatestCommit(workspace.workingDir);
+    return commit ?? { sha: null, message: null };
+  }
+
+  return {
+    createWorkspace,
+    deleteWorkspace,
+    markReadyForMerge,
+    setupWorkspace,
+    getWorkspaceDiff,
+    mergeWorkspace,
+    getConflicts,
+    updateBase,
+    abortRebase,
+    resolveConflicts,
+    fixAndMerge,
+    getLatestCommit,
+  };
 }
