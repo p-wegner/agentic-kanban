@@ -48,6 +48,18 @@ All git operations live in `packages/shared/src/lib/git-service.ts`. Both `packa
 - **Pre-existing test failures**: Never dismiss as "pre-existing" without investigating root cause (data accumulation, race condition, API change). Fix if straightforward; document if not.
 - **E2E session/workspace tests**: Use retry loops (3 attempts, 500ms–1s delays) for setup and output fetching instead of `test.skip()`.
 
+### E2E Anti-Patterns
+
+| Anti-pattern | Problem | Fix |
+|---|---|---|
+| `page.locator("text=X")` | Matches multiple elements → ambiguous | Use `page.locator("role", { hasText: "X" })` or `.first()` |
+| Hardcoded issue/task titles | Titles accumulate across runs → false failures | Append `Date.now()` suffix so each run is unique |
+| No `afterAll` / `afterEach` cleanup | State leaks between tests and runs | Use `test.afterAll` to delete created data and reset preferences |
+| `localhost` in URLs/requests | On Windows resolves to `::1` (IPv6), server listens on `127.0.0.1` → silent ECONNREFUSED | Always use `127.0.0.1` |
+| `test.skip()` for flaky setup | Hides real failures, silently skips coverage | Use retry loops (3 attempts, 500ms–1s delays) |
+| Dismissing failures as "pre-existing" | Root cause stays unfixed (data accumulation, race, API change) | Always investigate; fix or document |
+| Hardcoded port numbers | Wrong port in worktrees → connection errors | Read `$env:KANBAN_CLIENT_PORT` / `$env:KANBAN_SERVER_PORT` |
+
 ## Visual Verification
 Every feature with UI must be visually verified using the `playwright-cli` skill.
 1. Determine ports: in a worktree, use `$env:KANBAN_CLIENT_PORT` / `$env:KANBAN_SERVER_PORT` — never hardcode 3001/5173. Check if server is already listening before starting `pnpm dev`.
