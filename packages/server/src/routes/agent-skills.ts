@@ -1,10 +1,12 @@
-import { Hono } from "hono";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
-import { createAgentSkillService, AgentSkillError } from "../services/agent-skill.service.js";
+import { createAgentSkillService } from "../services/agent-skill.service.js";
+import { parseJsonBody } from "../middleware/parse-body.js";
+import { createRouter } from "../middleware/create-router.js";
+import { wrapAiOperation } from "../middleware/ai-operation.js";
 
 export function createAgentSkillsRoute(database: Database = db) {
-  const router = new Hono();
+  const router = createRouter();
   const agentSkillService = createAgentSkillService({ database });
 
   // GET /api/agent-skills — list skills
@@ -16,115 +18,47 @@ export function createAgentSkillsRoute(database: Database = db) {
 
   // POST /api/agent-skills/enhance — AI-enhance a skill name, description, and prompt
   router.post("/enhance", async (c) => {
-    let body: { name: string; description?: string; prompt?: string };
-    try {
-      body = await c.req.json();
-    } catch {
-      return c.json({ error: "invalid JSON body" }, 400);
-    }
+    const body = await parseJsonBody<{ name: string; description?: string; prompt?: string }>(c);
     if (!body.name?.trim()) {
       return c.json({ error: "name is required" }, 400);
     }
-
-    try {
-      const enhanced = await agentSkillService.enhanceSkill(body.name, body.description, body.prompt);
-      return c.json(enhanced);
-    } catch (err: any) {
-      const parts: string[] = [];
-      if (err.message) parts.push(err.message);
-      if (err.stderr) parts.push(String(err.stderr).trim());
-      const msg = parts.length > 0 ? parts.join(" | ") : "claude CLI failed";
-      console.error("[skill-enhance] claude error:", msg);
-      if (err instanceof AgentSkillError) {
-        return c.json({ error: "AI enhancement failed", detail: msg }, 500);
-      }
-      // Parse failure from service
-      if (err instanceof SyntaxError) {
-        return c.json({ error: "Failed to parse AI response" }, 500);
-      }
-      return c.json({ error: "AI enhancement failed", detail: msg }, 500);
-    }
+    return c.json(await wrapAiOperation("skill-enhance", () => agentSkillService.enhanceSkill(body.name, body.description, body.prompt)));
   });
 
   // GET /api/agent-skills/:id — get a single skill
   router.get("/:id", async (c) => {
-    try {
-      return c.json(await agentSkillService.getSkill(c.req.param("id")));
-    } catch (err) {
-      if (err instanceof AgentSkillError && err.code === "NOT_FOUND") return c.json({ error: err.message }, 404);
-      throw err;
-    }
+    return c.json(await agentSkillService.getSkill(c.req.param("id")));
   });
 
   // POST /api/agent-skills — create a skill
   router.post("/", async (c) => {
-    const body = await c.req.json();
-    try {
-      const skill = await agentSkillService.createSkill(body);
-      return c.json(skill, 201);
-    } catch (err) {
-      if (err instanceof AgentSkillError) {
-        if (err.code === "BAD_REQUEST") return c.json({ error: err.message }, 400);
-        if (err.code === "CONFLICT") return c.json({ error: err.message }, 409);
-      }
-      throw err;
-    }
+    const body = await parseJsonBody(c);
+    const skill = await agentSkillService.createSkill(body);
+    return c.json(skill, 201);
   });
 
   // PUT /api/agent-skills/:id — update a skill
   router.put("/:id", async (c) => {
     const id = c.req.param("id");
-    const body = await c.req.json();
-    try {
-      const updated = await agentSkillService.updateSkill(id, body);
-      return c.json(updated);
-    } catch (err) {
-      if (err instanceof AgentSkillError) {
-        if (err.code === "NOT_FOUND") return c.json({ error: err.message }, 404);
-        if (err.code === "FORBIDDEN") return c.json({ error: err.message }, 403);
-        if (err.code === "BAD_REQUEST") return c.json({ error: err.message }, 400);
-        if (err.code === "CONFLICT") return c.json({ error: err.message }, 409);
-      }
-      throw err;
-    }
+    const body = await parseJsonBody(c);
+    const updated = await agentSkillService.updateSkill(id, body);
+    return c.json(updated);
   });
 
   // GET /api/agent-skills/:id/install-status
   router.get("/:id/install-status", async (c) => {
-    try {
-      return c.json(await agentSkillService.getInstallStatus(c.req.param("id")));
-    } catch (err) {
-      if (err instanceof AgentSkillError && err.code === "NOT_FOUND") return c.json({ error: err.message }, 404);
-      throw err;
-    }
+    return c.json(await agentSkillService.getInstallStatus(c.req.param("id")));
   });
 
   // POST /api/agent-skills/:id/install
   router.post("/:id/install", async (c) => {
-    try {
-      return c.json(await agentSkillService.installSkill(c.req.param("id")));
-    } catch (err) {
-      if (err instanceof AgentSkillError) {
-        if (err.code === "NOT_FOUND") return c.json({ error: err.message }, 404);
-        if (err.code === "BAD_REQUEST") return c.json({ error: err.message }, 400);
-        return c.json({ error: `Failed to install skill: ${err.message}` }, 500);
-      }
-      throw err;
-    }
+    return c.json(await agentSkillService.installSkill(c.req.param("id")));
   });
 
   // DELETE /api/agent-skills/:id
   router.delete("/:id", async (c) => {
-    try {
-      await agentSkillService.deleteSkill(c.req.param("id"));
-      return c.json({ success: true });
-    } catch (err) {
-      if (err instanceof AgentSkillError) {
-        if (err.code === "NOT_FOUND") return c.json({ error: err.message }, 404);
-        if (err.code === "FORBIDDEN") return c.json({ error: err.message }, 403);
-      }
-      throw err;
-    }
+    await agentSkillService.deleteSkill(c.req.param("id"));
+    return c.json({ success: true });
   });
 
   return router;
