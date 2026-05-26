@@ -11,6 +11,7 @@ import { createScheduledRunsRoute } from "./scheduled-runs.js";
 import type { Database } from "../db/index.js";
 import type { SessionManager } from "../services/session.manager.js";
 import type { BoardEvents } from "../services/board-events.js";
+import { createRouter } from "../middleware/create-router.js";
 
 interface RouteOptions {
   boardEvents?: BoardEvents;
@@ -19,7 +20,7 @@ interface RouteOptions {
 }
 
 export function createRoutes(database: Database, getSessionManager: () => SessionManager, options?: RouteOptions) {
-  const routes = new Hono();
+  const routes = createRouter();
   routes.route("/projects", createProjectsRoute(database));
   routes.route("/issues", createIssuesRoute(database, options));
   routes.route("/workspaces", createWorkspacesRoute(database, getSessionManager, options));
