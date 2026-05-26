@@ -227,6 +227,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
   const [mergeError, setMergeError] = useState<{ wsId: string; message: string } | null>(null);
 
   const [latestCommits, setLatestCommits] = useState<Record<string, { sha: string; message: string } | null>>({});
+  const [handoffContent, setHandoffContent] = useState<Record<string, string | null>>({});
 
   const [monitorRunning, setMonitorRunning] = useState(false);
   const [requiresReview, setRequiresReview] = useState(false);
@@ -355,6 +356,21 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
         }),
       );
       setLatestCommits(commits);
+      // Fetch handoff content for each workspace
+      const handoffs: Record<string, string | null> = {};
+      await Promise.all(
+        data.filter(ws => ws.workingDir && ws.status !== "closed").map(async (ws) => {
+          try {
+            const result = await apiFetch<{ content: string | null }>(
+              `/api/workspaces/${ws.id}/handoff`,
+            );
+            handoffs[ws.id] = result.content;
+          } catch {
+            handoffs[ws.id] = null;
+          }
+        }),
+      );
+      setHandoffContent(handoffs);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load workspaces");
     } finally {
@@ -1237,6 +1253,22 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                         </span>
                     }
                   </div>
+                )}
+
+                {handoffContent[ws.id] && (
+                  <details className="text-xs">
+                    <summary className="text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide cursor-pointer hover:text-gray-600 dark:hover:text-gray-300 flex items-center gap-1">
+                      <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4" />
+                      </svg>
+                      Session Handoff
+                    </summary>
+                    <div className="mt-1 bg-amber-50 dark:bg-amber-950/50 border border-amber-200 dark:border-amber-800 rounded p-2 max-h-40 overflow-y-auto">
+                      <div className="prose prose-xs max-w-none text-[11px] leading-relaxed text-gray-700 dark:text-gray-300">
+                        <ReactMarkdown>{handoffContent[ws.id]!}</ReactMarkdown>
+                      </div>
+                    </div>
+                  </details>
                 )}
 
                 {isThisRunning && (ws.contextTokens || ws.lastTool) && (
