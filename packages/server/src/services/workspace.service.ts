@@ -10,6 +10,7 @@ import type { SessionManager } from "./session.manager.js";
 import type { BoardEvents } from "./board-events.js";
 import type { ProviderName } from "./agent-provider.js";
 import * as gitService from "./git.service.js";
+import { createBackup } from "../db/backup.js";
 import { runSetupScript } from "./setup-script.js";
 import { writeAgentSkillFile, readLocalSkillPrompt } from "@agentic-kanban/shared/lib/agent-skill-files";
 import { resolveAgentSettings, toExecutorProvider } from "./agent-settings.service.js";
@@ -769,6 +770,13 @@ export function createWorkspaceService(deps: {
       if (synced) {
         console.log(`[workspace-service] synced branch ${workspace.branch} to worktree HEAD`);
       }
+    }
+
+    // Mandatory pre-merge backup. Non-fatal: backup trouble must not block a legit merge.
+    try {
+      await createBackup("pre-merge");
+    } catch (err) {
+      console.warn("[backup] pre-merge backup failed (non-fatal):", err instanceof Error ? err.message : String(err));
     }
 
     const result = await gitService.mergeBranch(repoPath, workspace.branch);
