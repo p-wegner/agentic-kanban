@@ -61,15 +61,19 @@ interface TooltipState {
   y: number;
 }
 
+const COMPLETED_STATUSES = new Set(["Done", "Cancelled"]);
+
 export function TimelineView({ columns, onIssueClick, searchQuery }: TimelineViewProps) {
   const [tooltip, setTooltip] = useState<TooltipState | null>(null);
   const [zoom, setZoom] = useState(1);
+  const [showCompleted, setShowCompleted] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const q = searchQuery?.toLowerCase() ?? "";
 
   const lanes = useMemo(() =>
     columns
+      .filter((col) => showCompleted || !COMPLETED_STATUSES.has(col.name))
       .map((col) => ({
         name: col.name,
         issues: col.issues.filter((i) =>
@@ -77,7 +81,7 @@ export function TimelineView({ columns, onIssueClick, searchQuery }: TimelineVie
         ),
       }))
       .filter((lane) => lane.issues.length > 0),
-    [columns, q]
+    [columns, q, showCompleted]
   );
 
   const allIssues = useMemo(() => lanes.flatMap((l) => l.issues), [lanes]);
@@ -146,6 +150,18 @@ export function TimelineView({ columns, onIssueClick, searchQuery }: TimelineVie
         <span className="text-xs text-gray-500 dark:text-gray-400">
           {allIssues.length} issue{allIssues.length !== 1 ? "s" : ""} across {lanes.length} status{lanes.length !== 1 ? "es" : ""}
         </span>
+        <button
+          onClick={() => setShowCompleted((v) => !v)}
+          className={`flex items-center gap-1.5 px-2 h-6 text-xs rounded border transition-colors ${
+            showCompleted
+              ? "bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
+              : "bg-amber-50 dark:bg-amber-950/30 border-amber-300 dark:border-amber-700 text-amber-700 dark:text-amber-400"
+          }`}
+          title={showCompleted ? "Hide completed issues" : "Show completed issues"}
+        >
+          <span className={`w-1.5 h-1.5 rounded-full ${showCompleted ? "bg-green-500" : "bg-gray-400"}`} />
+          Show completed
+        </button>
         <div className="ml-auto flex items-center gap-1">
           <span className="text-xs text-gray-400 dark:text-gray-500 mr-1">Zoom</span>
           <button
