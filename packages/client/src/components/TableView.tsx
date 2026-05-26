@@ -171,15 +171,19 @@ export function TableView({ columns, onIssueClick, searchQuery, onRefresh }: Tab
     setBulkLoading(true);
     const ids = [...selectedIds];
     try {
-      await Promise.all(ids.map((id) =>
+      const results = await Promise.allSettled(ids.map((id) =>
         apiFetch(`/api/issues/${id}`, { method: "PATCH", body: JSON.stringify({ statusId }) })
       ));
+      const failed = results.filter((r) => r.status === "rejected").length;
+      const succeeded = ids.length - failed;
       setSelectedIds(new Set());
-      showToast(`Moved ${ids.length} issue${ids.length !== 1 ? "s" : ""} to "${statusName}"`, "success");
-      onRefresh?.();
-    } catch {
-      showToast("Some issues failed to move", "error");
+      if (failed === 0) {
+        showToast(`Moved ${succeeded} issue${succeeded !== 1 ? "s" : ""} to "${statusName}"`, "success");
+      } else {
+        showToast(`Moved ${succeeded} issue${succeeded !== 1 ? "s" : ""} to "${statusName}"; ${failed} failed`, "error");
+      }
     } finally {
+      onRefresh?.();
       setBulkLoading(false);
     }
   }
@@ -189,15 +193,19 @@ export function TableView({ columns, onIssueClick, searchQuery, onRefresh }: Tab
     setBulkLoading(true);
     const ids = [...selectedIds];
     try {
-      await Promise.all(ids.map((id) =>
+      const results = await Promise.allSettled(ids.map((id) =>
         apiFetch(`/api/issues/${id}/tags`, { method: "POST", body: JSON.stringify({ tagId: tag.id }) })
       ));
+      const failed = results.filter((r) => r.status === "rejected").length;
+      const succeeded = ids.length - failed;
       setSelectedIds(new Set());
-      showToast(`Added tag "${tag.name}" to ${ids.length} issue${ids.length !== 1 ? "s" : ""}`, "success");
-      onRefresh?.();
-    } catch {
-      showToast("Some issues failed to update", "error");
+      if (failed === 0) {
+        showToast(`Added tag "${tag.name}" to ${succeeded} issue${succeeded !== 1 ? "s" : ""}`, "success");
+      } else {
+        showToast(`Added tag to ${succeeded} issue${succeeded !== 1 ? "s" : ""}; ${failed} failed`, "error");
+      }
     } finally {
+      onRefresh?.();
       setBulkLoading(false);
     }
   }
@@ -207,15 +215,19 @@ export function TableView({ columns, onIssueClick, searchQuery, onRefresh }: Tab
     setBulkLoading(true);
     const ids = [...selectedIds];
     try {
-      await Promise.all(ids.map((id) =>
+      const results = await Promise.allSettled(ids.map((id) =>
         apiFetch(`/api/issues/${id}`, { method: "DELETE" })
       ));
+      const failed = results.filter((r) => r.status === "rejected").length;
+      const succeeded = ids.length - failed;
       setSelectedIds(new Set());
-      showToast(`Deleted ${ids.length} issue${ids.length !== 1 ? "s" : ""}`, "success");
-      onRefresh?.();
-    } catch {
-      showToast("Some issues failed to delete", "error");
+      if (failed === 0) {
+        showToast(`Deleted ${succeeded} issue${succeeded !== 1 ? "s" : ""}`, "success");
+      } else {
+        showToast(`Deleted ${succeeded} issue${succeeded !== 1 ? "s" : ""}; ${failed} failed to delete`, "error");
+      }
     } finally {
+      onRefresh?.();
       setBulkLoading(false);
     }
   }
