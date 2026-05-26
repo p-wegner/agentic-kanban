@@ -1,4 +1,4 @@
-import type { AgentLaunchConfig, AgentProvider, ParsedStreamEvent, ProviderLaunchOptions } from "./types.js";
+import type { AgentLaunchConfig, AgentProvider, FileSystem, ParsedStreamEvent, ProviderLaunchOptions } from "./types.js";
 import {
   COPILOT_PLAN_PROMPT_PREFIX,
   COPILOT_PLAN_DENIED_TOOLS,
@@ -12,10 +12,16 @@ import {
   stringValue,
   numberValue,
   objectValue,
+  nodeFileSystem,
 } from "./helpers.js";
 
 export class CopilotProvider implements AgentProvider {
   readonly name = "copilot";
+  private readonly fs: FileSystem;
+
+  constructor(fs: FileSystem = nodeFileSystem) {
+    this.fs = fs;
+  }
 
   buildLaunchConfig(options: ProviderLaunchOptions): AgentLaunchConfig {
     const { agentArgs, providerSessionId, agentCommand, keepAlive, profile, planMode, prompt, skipPermissions } = options;
@@ -38,7 +44,7 @@ export class CopilotProvider implements AgentProvider {
         args.push("--profile", "multi-turn");
       }
     } else {
-      const loader = resolveCopilotNpmLoader(command);
+      const loader = resolveCopilotNpmLoader(command, this.fs);
       if (loader) {
         command = process.execPath;
         argsPrefix.push(loader);
@@ -55,7 +61,7 @@ export class CopilotProvider implements AgentProvider {
       }
 
       try {
-        args.push("--additional-mcp-config", `@${getMcpConfigPath()}`);
+        args.push("--additional-mcp-config", `@${getMcpConfigPath(this.fs)}`);
       } catch (err) {
         console.warn(`[agent] Failed to generate MCP config: ${err}`);
       }
