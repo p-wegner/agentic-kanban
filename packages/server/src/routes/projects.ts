@@ -1,12 +1,10 @@
 import { Hono } from "hono";
 import { db } from "../db/index.js";
-import { projects, projectStatuses, issues } from "@agentic-kanban/shared/schema";
-import { eq, and } from "drizzle-orm";
-import { randomUUID } from "node:crypto";
+import { spawn } from "node:child_process";
 import type { Database } from "../db/index.js";
 import { listBranches } from "../services/git.service.js";
 import { ProjectError, createProjectService } from "../services/project.service.js";
-import { getProjectById, getProjectStatuses } from "../repositories/project.repository.js";
+import { getProjectById, getProjectStatuses, getAllProjects, createProjectStatus, deleteProjectStatus } from "../repositories/project.repository.js";
 
 export function createProjectsRoute(database: Database = db) {
   const router = new Hono();
@@ -15,7 +13,7 @@ export function createProjectsRoute(database: Database = db) {
 
   // GET /api/projects
   router.get("/", async (c) => {
-    const result = await database.select().from(projects);
+    const result = await getAllProjects(database);
     return c.json(result);
   });
 
@@ -79,7 +77,7 @@ export function createProjectsRoute(database: Database = db) {
     }
   });
 
-  // POST /api/projects/generate-setup-script — AI-generate a setup script for a project
+  // POST /api/projects/generate-setup-script
   router.post("/generate-setup-script", async (c) => {
     let body: { projectId?: string };
     try {
@@ -87,9 +85,7 @@ export function createProjectsRoute(database: Database = db) {
     } catch {
       return c.json({ error: "invalid JSON body" }, 400);
     }
-    if (!body.projectId) {
-      return c.json({ error: "projectId is required" }, 400);
-    }
+    if (!body.projectId) return c.json({ error: "projectId is required" }, 400);
 
     try {
       const setupScript = await import("../services/project-setup.service.js").then(m => m.generateSetupScript(body.projectId!, database));
@@ -105,7 +101,7 @@ export function createProjectsRoute(database: Database = db) {
     }
   });
 
-  // POST /api/projects/generate-teardown-script — AI-generate a teardown script for a project
+  // POST /api/projects/generate-teardown-script
   router.post("/generate-teardown-script", async (c) => {
     let body: { projectId?: string };
     try {
@@ -113,9 +109,7 @@ export function createProjectsRoute(database: Database = db) {
     } catch {
       return c.json({ error: "invalid JSON body" }, 400);
     }
-    if (!body.projectId) {
-      return c.json({ error: "projectId is required" }, 400);
-    }
+    if (!body.projectId) return c.json({ error: "projectId is required" }, 400);
 
     try {
       const teardownScript = await import("../services/project-setup.service.js").then(m => m.generateTeardownScript(body.projectId!, database));
@@ -142,56 +136,24 @@ export function createProjectsRoute(database: Database = db) {
   router.post("/:id/statuses", async (c) => {
     const projectId = c.req.param("id");
     const body = await c.req.json();
-    const now = new Date().toISOString();
-    const id = randomUUID();
-
-    await database.insert(projectStatuses).values({
-      id,
-      projectId,
-      name: body.name,
-      sortOrder: body.sortOrder ?? 0,
-      createdAt: now,
-    });
-
-    return c.json({ id, projectId, name: body.name }, 201);
+    const result = await createProjectStatus(projectId, body.name, body.sortOrder ?? 0, database);
+    return c.json(result, 201);
   });
 
   // DELETE /api/projects/:id/statuses/:statusId
   router.delete("/:id/statuses/:statusId", async (c) => {
     const projectId = c.req.param("id");
     const statusId = c.req.param("statusId");
-
-    const statusRows = await database
-      .select()
-      .from(projectStatuses)
-      .where(and(eq(projectStatuses.id, statusId), eq(projectStatuses.projectId, projectId)));
-
-    if (statusRows.length === 0) {
-      return c.json({ error: "Status not found" }, 404);
-    }
-
-    const linkedIssues = await database
-      .select({ id: issues.id })
-      .from(issues)
-      .where(eq(issues.statusId, statusId))
-      .limit(1);
-
-    if (linkedIssues.length > 0) {
-      return c.json({ error: "Cannot delete status with linked issues" }, 409);
-    }
-
-    await database.delete(projectStatuses).where(eq(projectStatuses.id, statusId));
-
-    return c.json({ success: true });
+    const result = await deleteProjectStatus(projectId, statusId, database);
+    if ("error" in result) return c.json({ error: result.error }, result.status as 404 | 409);
+    return c.json(result);
   });
 
   // GET /api/projects/:id/branches
   router.get("/:id/branches", async (c) => {
     const projectId = c.req.param("id");
     const project = await getProjectById(projectId, database);
-    if (!project) {
-      return c.json({ error: "Project not found" }, 404);
-    }
+    if (!project) return c.json({ error: "Project not found" }, 404);
     try {
       const branches = await listBranches(project.repoPath);
       return c.json(branches);
@@ -232,14 +194,11 @@ export function createProjectsRoute(database: Database = db) {
     }
   });
 
-  // DELETE /api/projects/:id/worktrees — remove a worktree (and optionally its workspace)
+  // DELETE /api/projects/:id/worktrees
   router.delete("/:id/worktrees", async (c) => {
     const projectId = c.req.param("id");
     const body = await c.req.json<{ path?: string; workspaceId?: string }>();
-
-    if (!body.path && !body.workspaceId) {
-      return c.json({ error: "path or workspaceId is required" }, 400);
-    }
+    if (!body.path && !body.workspaceId) return c.json({ error: "path or workspaceId is required" }, 400);
 
     try {
       await projectService.removeWorktreeById(projectId, body);
@@ -258,7 +217,6 @@ export function createProjectsRoute(database: Database = db) {
     const body = await c.req.json<{ path: string }>();
     if (!body.path) return c.json({ error: "path is required" }, 400);
 
-    const { spawn } = await import("node:child_process");
     const platform = process.platform;
     let cmd: string;
     let args: string[];
@@ -297,7 +255,7 @@ export function createProjectsRoute(database: Database = db) {
     }
   });
 
-  // GET /api/projects/:id/graph — all issues + all dependencies for graph view
+  // GET /api/projects/:id/graph
   router.get("/:id/graph", async (c) => {
     const projectId = c.req.param("id");
     try {

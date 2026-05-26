@@ -1,8 +1,5 @@
 import { Hono } from "hono";
 import { db } from "../db/index.js";
-import { issues, issueTags, issueArtifacts } from "@agentic-kanban/shared/schema";
-import { eq, and } from "drizzle-orm";
-import { randomUUID } from "node:crypto";
 import type { Database } from "../db/index.js";
 import type { BoardEvents } from "../services/board-events.js";
 import { analyzeDependencies, enhanceIssue } from "../services/issue-ai.service.js";
@@ -15,6 +12,9 @@ import {
   getIncomingDependencies,
   getIssueWorkspaces,
   getIssueArtifacts,
+  assignTag,
+  removeTag,
+  deleteArtifact,
 } from "../repositories/issue.repository.js";
 
 export function createIssuesRoute(database: Database = db, options?: { boardEvents?: BoardEvents }) {
@@ -25,10 +25,7 @@ export function createIssuesRoute(database: Database = db, options?: { boardEven
   // GET /api/issues?projectId=...&issueNumber=N
   router.get("/", async (c) => {
     const projectId = c.req.query("projectId");
-    if (!projectId) {
-      return c.json({ error: "projectId query parameter required" }, 400);
-    }
-
+    if (!projectId) return c.json({ error: "projectId query parameter required" }, 400);
     const issueNumberParam = c.req.query("issueNumber");
     const result = await getIssuesByProject(
       projectId,
@@ -46,13 +43,10 @@ export function createIssuesRoute(database: Database = db, options?: { boardEven
     } catch {
       return c.json({ error: "invalid JSON body" }, 400);
     }
-    if (!body.title?.trim()) {
-      return c.json({ error: "title is required" }, 400);
-    }
+    if (!body.title?.trim()) return c.json({ error: "title is required" }, 400);
 
     try {
-      const result = await enhanceIssue(body.title, body.description, database);
-      return c.json(result);
+      return c.json(await enhanceIssue(body.title, body.description, database));
     } catch (err: any) {
       if (err.message?.includes("JSON") || err instanceof SyntaxError) {
         console.error("[enhance] failed to parse claude output:", err.message);
@@ -75,15 +69,11 @@ export function createIssuesRoute(database: Database = db, options?: { boardEven
     } catch {
       return c.json({ error: "invalid JSON body" }, 400);
     }
-    if (!body.issueId || !body.projectId) {
-      return c.json({ error: "issueId and projectId are required" }, 400);
-    }
+    if (!body.issueId || !body.projectId) return c.json({ error: "issueId and projectId are required" }, 400);
 
     try {
       const result = await analyzeDependencies(body.issueId, body.projectId, database);
-      if (result.total > 0) {
-        options?.boardEvents?.broadcast(body.projectId, "dependency_added");
-      }
+      if (result.total > 0) options?.boardEvents?.broadcast(body.projectId, "dependency_added");
       return c.json(result);
     } catch (err: any) {
       if (err.statusCode === 404) return c.json({ error: err.message }, 404);
@@ -103,12 +93,8 @@ export function createIssuesRoute(database: Database = db, options?: { boardEven
   // POST /api/issues
   router.post("/", async (c) => {
     const body = await c.req.json();
-    if (!body.projectId) {
-      return c.json({ error: "projectId is required" }, 400);
-    }
-    if (!body.title?.trim()) {
-      return c.json({ error: "title is required" }, 400);
-    }
+    if (!body.projectId) return c.json({ error: "projectId is required" }, 400);
+    if (!body.title?.trim()) return c.json({ error: "title is required" }, 400);
 
     try {
       const result = await issueService.createIssue({
@@ -131,7 +117,7 @@ export function createIssuesRoute(database: Database = db, options?: { boardEven
     }
   });
 
-  // GET /api/issues/:id/summary — issue summary by UUID or issue number
+  // GET /api/issues/:id/summary
   router.get("/:id/summary", async (c) => {
     const idParam = c.req.param("id");
     const result = await getIssueSummary(idParam, database);
@@ -143,12 +129,11 @@ export function createIssuesRoute(database: Database = db, options?: { boardEven
   router.patch("/:id", async (c) => {
     const id = c.req.param("id");
     const body = await c.req.json();
-
     const result = await issueService.updateIssue(id, body);
     return c.json({ id: result.id });
   });
 
-  // DELETE /api/issues/:id — cascade delete workspaces, sessions, messages, tags
+  // DELETE /api/issues/:id
   router.delete("/:id", async (c) => {
     const id = c.req.param("id");
     await issueService.deleteIssue(id);
@@ -158,35 +143,29 @@ export function createIssuesRoute(database: Database = db, options?: { boardEven
   // GET /api/issues/:id/workspaces
   router.get("/:id/workspaces", async (c) => {
     const issueId = c.req.param("id");
-    const result = await getIssueWorkspaces(issueId, database);
-    return c.json(result);
+    return c.json(await getIssueWorkspaces(issueId, database));
   });
 
   // GET /api/issues/:id/tags
   router.get("/:id/tags", async (c) => {
     const issueId = c.req.param("id");
-    const result = await getIssueTags(issueId, database);
-    return c.json(result);
+    return c.json(await getIssueTags(issueId, database));
   });
 
-  // POST /api/issues/:id/tags — assign tag to issue
+  // POST /api/issues/:id/tags
   router.post("/:id/tags", async (c) => {
     const issueId = c.req.param("id");
     const body = await c.req.json();
-    if (!body.tagId) {
-      return c.json({ error: "tagId is required" }, 400);
-    }
-    const id = randomUUID();
-    await database.insert(issueTags).values({ id, issueId, tagId: body.tagId });
-    return c.json({ id }, 201);
+    if (!body.tagId) return c.json({ error: "tagId is required" }, 400);
+    const result = await assignTag(issueId, body.tagId, database);
+    return c.json(result, 201);
   });
 
-  // DELETE /api/issues/:id/tags/:tagId — remove tag from issue
+  // DELETE /api/issues/:id/tags/:tagId
   router.delete("/:id/tags/:tagId", async (c) => {
     const issueId = c.req.param("id");
     const tagId = c.req.param("tagId");
-    await database.delete(issueTags)
-      .where(and(eq(issueTags.issueId, issueId), eq(issueTags.tagId, tagId)));
+    await removeTag(issueId, tagId, database);
     return c.json({ success: true });
   });
 
@@ -200,14 +179,11 @@ export function createIssuesRoute(database: Database = db, options?: { boardEven
     return c.json({ dependencies: [...outgoing, ...incoming] });
   });
 
-  // POST /api/issues/:id/dependencies — add dependency with cycle detection
+  // POST /api/issues/:id/dependencies
   router.post("/:id/dependencies", async (c) => {
     const issueId = c.req.param("id");
     const body = await c.req.json();
-
-    if (!body.dependsOnId) {
-      return c.json({ error: "dependsOnId is required" }, 400);
-    }
+    if (!body.dependsOnId) return c.json({ error: "dependsOnId is required" }, 400);
 
     try {
       const result = await issueService.addDependency(issueId, body.dependsOnId, body.type);
@@ -221,7 +197,7 @@ export function createIssuesRoute(database: Database = db, options?: { boardEven
     }
   });
 
-  // DELETE /api/issues/:id/dependencies/:depId — remove dependency by row ID
+  // DELETE /api/issues/:id/dependencies/:depId
   router.delete("/:id/dependencies/:depId", async (c) => {
     const issueId = c.req.param("id");
     const depId = c.req.param("depId");
@@ -232,8 +208,7 @@ export function createIssuesRoute(database: Database = db, options?: { boardEven
   // GET /api/issues/:id/artifacts
   router.get("/:id/artifacts", async (c) => {
     const issueId = c.req.param("id");
-    const result = await getIssueArtifacts(issueId, database);
-    return c.json(result);
+    return c.json(await getIssueArtifacts(issueId, database));
   });
 
   // POST /api/issues/:id/artifacts
@@ -245,17 +220,13 @@ export function createIssuesRoute(database: Database = db, options?: { boardEven
     } catch {
       return c.json({ error: "invalid JSON body" }, 400);
     }
-    if (!body.type || !body.content) {
-      return c.json({ error: "type and content are required" }, 400);
-    }
+    if (!body.type || !body.content) return c.json({ error: "type and content are required" }, 400);
 
     try {
       const result = await issueService.addArtifact(issueId, body);
       return c.json({ id: result.id }, 201);
     } catch (err) {
-      if (err instanceof IssueError) {
-        return c.json({ error: err.message }, 400);
-      }
+      if (err instanceof IssueError) return c.json({ error: err.message }, 400);
       throw err;
     }
   });
@@ -264,8 +235,7 @@ export function createIssuesRoute(database: Database = db, options?: { boardEven
   router.delete("/:id/artifacts/:artifactId", async (c) => {
     const issueId = c.req.param("id");
     const artifactId = c.req.param("artifactId");
-    await database.delete(issueArtifacts)
-      .where(and(eq(issueArtifacts.id, artifactId), eq(issueArtifacts.issueId, issueId)));
+    await deleteArtifact(issueId, artifactId, database);
     return c.json({ success: true });
   });
 
