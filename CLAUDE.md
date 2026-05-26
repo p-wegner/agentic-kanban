@@ -60,6 +60,18 @@ All git operations live in `packages/shared/src/lib/git-service.ts`. Both `packa
 | Dismissing failures as "pre-existing" | Root cause stays unfixed (data accumulation, race, API change) | Always investigate; fix or document |
 | Hardcoded port numbers | Wrong port in worktrees → connection errors | Read `$env:KANBAN_CLIENT_PORT` / `$env:KANBAN_SERVER_PORT` |
 
+### Unit testing
+- **For refactoring: use `--related`** — run only tests that cover the files you changed, not the full suite:
+  ```
+  pnpm --filter agentic-kanban test -- --related packages/server/src/services/foo.service.ts
+  ```
+- **Get changed files from git** and pass them directly:
+  ```
+  pnpm --filter agentic-kanban test -- --related $(git diff --name-only HEAD)
+  ```
+- **Full suite** (`pnpm --filter agentic-kanban test`) should only be used before committing or when cross-cutting changes may affect unrelated tests.
+- `--related` works on source files — vitest resolves which test files import them transitively.
+
 ## Visual Verification
 Every feature with UI must be visually verified using the `playwright-cli` skill.
 1. Determine ports: in a worktree, use `$env:KANBAN_CLIENT_PORT` / `$env:KANBAN_SERVER_PORT` — never hardcode 3001/5173. Check if server is already listening before starting `pnpm dev`.
@@ -151,7 +163,8 @@ When the user references `#N` (e.g., "review #70", "merge #65", "what's the stat
 ## Monorepo Commands
 - `pnpm dev` — start server + client (auto-detects worktree ports; default: server 3001, client 5173)
 - `pnpm dev:desktop` — start server + client + Tauri native window
-- `pnpm --filter agentic-kanban test` — Vitest unit tests
+- `pnpm --filter agentic-kanban test` — Vitest unit tests (full suite)
+- `pnpm --filter agentic-kanban test -- --related <files>` — **targeted**: run only tests covering the listed source files (use for refactoring)
 - `pnpm test:e2e` — Playwright E2E tests
 - `pnpm db:migrate && pnpm db:seed` — initialize DB
 - `pnpm cli -- register <path>` — register a git repo as a project
