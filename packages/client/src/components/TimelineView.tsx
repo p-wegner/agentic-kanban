@@ -229,7 +229,7 @@ export function TimelineView({ columns, onIssueClick, searchQuery }: TimelineVie
                 const priColor = PRIORITY_COLORS[issue.priority ?? "medium"] ?? PRIORITY_COLORS.medium;
 
                 return (
-                  <div key={issue.id} className="flex items-center border-b border-gray-50 dark:border-gray-850" style={{ height: ROW_H }}>
+                  <div key={issue.id} className="flex items-center border-b border-gray-50 dark:border-gray-800" style={{ height: ROW_H }}>
                     {/* Label column */}
                     <div
                       className="flex items-center gap-1 px-2 border-r border-gray-100 dark:border-gray-800 h-full shrink-0"
