@@ -186,6 +186,8 @@ export class ClaudeProvider implements AgentProvider {
       if (planMode) {
         args.push("--permission-mode", "plan");
         args.push("--append-system-prompt", "IMPORTANT: This is a PLAN-ONLY session. Do NOT implement, write, edit, or modify any files. Do NOT run commands that make changes (git, npm, pip, etc.). Only read and explore the codebase, analyze the issue, and produce a detailed implementation plan. Output your plan and stop.");
+      } else {
+        args.push("--append-system-prompt", "IMPORTANT: You are an autonomous implementation agent. Do NOT enter plan mode (EnterPlanMode tool) — proceed directly with code changes. If you are unsure how to approach something, make your best judgment and implement it. The human will review your changes after the session completes.");
       }
       args.push("-p");
     }
