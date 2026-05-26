@@ -1,0 +1,170 @@
+import { useState } from "react";
+import { BacklogPanel } from "./BacklogPanel.js";
+import { MonitorPopover, type MonitorStatus } from "./MonitorPopover.js";
+import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
+
+export type ViewMode = "kanban" | "graph" | "table" | "agents";
+
+interface BoardToolbarProps {
+  backlogColumn: StatusWithIssues | undefined;
+  activeColumns: StatusWithIssues[];
+  searchQuery: string;
+  onIssueClick: (issue: IssueWithStatus) => void;
+  onBacklogMoved: () => void;
+  onShowQuickTasks: () => void;
+  autoMonitor: boolean;
+  monitorRunning: boolean;
+  onMonitorRunNow: () => Promise<void>;
+  monitorStatus: MonitorStatus | null;
+  onToggleAutoMonitor: () => void;
+  autoMonitorInterval: string;
+  onIntervalChange: (v: string) => void;
+  nudgeAutoStart: boolean;
+  onNudgeAutoStartChange: (v: boolean) => void;
+  nudgeWipLimit: string;
+  onNudgeWipLimitChange: (v: string) => void;
+  columns: StatusWithIssues[];
+  onOpenWorkspace: (workspaceId: string, issueId: string) => void;
+  viewMode: ViewMode;
+  onViewModeChange: (mode: ViewMode) => void;
+}
+
+export function BoardToolbar({
+  backlogColumn,
+  activeColumns,
+  searchQuery,
+  onIssueClick,
+  onBacklogMoved,
+  onShowQuickTasks,
+  autoMonitor,
+  monitorRunning,
+  onMonitorRunNow,
+  monitorStatus,
+  onToggleAutoMonitor,
+  autoMonitorInterval,
+  onIntervalChange,
+  nudgeAutoStart,
+  onNudgeAutoStartChange,
+  nudgeWipLimit,
+  onNudgeWipLimitChange,
+  columns,
+  onOpenWorkspace,
+  viewMode,
+  onViewModeChange,
+}: BoardToolbarProps) {
+  const [showMonitorPopover, setShowMonitorPopover] = useState(false);
+
+  return (
+    <div className="flex items-start gap-2 flex-wrap">
+      {backlogColumn !== undefined && (
+        <BacklogPanel
+          backlogColumn={backlogColumn}
+          activeColumns={activeColumns}
+          searchQuery={searchQuery}
+          onIssueClick={onIssueClick}
+          onMoved={onBacklogMoved}
+        />
+      )}
+      <button
+        onClick={onShowQuickTasks}
+        title="Quick Tasks - run a skill directly on the current checkout (q)"
+        className="shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium border transition-colors bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800"
+      >
+        <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+          <polygon points="5,3 19,12 5,21" />
+        </svg>
+        Tasks
+      </button>
+      <div className="relative shrink-0 flex items-center gap-0.5">
+        <button
+          onClick={() => setShowMonitorPopover(v => !v)}
+          className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium border transition-colors ${autoMonitor ? "bg-green-50 dark:bg-green-950 border-green-200 dark:border-green-800 text-green-700 hover:bg-green-100 dark:hover:bg-green-900" : "bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800"}`}
+          title={autoMonitor ? "Board monitor active — click for details" : "Board monitor — click to configure"}
+        >
+          {autoMonitor && <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />}
+          Monitor
+        </button>
+        <button
+          onClick={onMonitorRunNow}
+          disabled={monitorRunning}
+          className="flex items-center justify-center w-6 h-6 rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800 hover:text-gray-700 dark:hover:text-gray-200 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          title="Run monitor now and reset timer"
+        >
+          {monitorRunning
+            ? <svg className="w-3 h-3 animate-spin" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>
+            : <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path strokeLinecap="round" strokeLinejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 010 1.972l-11.54 6.347a1.125 1.125 0 01-1.667-.986V5.653z"/></svg>
+          }
+        </button>
+        {showMonitorPopover && (
+          <MonitorPopover
+            status={monitorStatus}
+            onClose={() => setShowMonitorPopover(false)}
+            onOpenWorkspace={(workspaceId, issueId) => {
+              onOpenWorkspace(workspaceId, issueId);
+              setShowMonitorPopover(false);
+            }}
+            columns={columns}
+            onRunNow={onMonitorRunNow}
+            autoMonitor={autoMonitor}
+            onToggle={onToggleAutoMonitor}
+            interval={autoMonitorInterval}
+            onIntervalChange={onIntervalChange}
+            nudgeAutoStart={nudgeAutoStart}
+            onNudgeAutoStartChange={onNudgeAutoStartChange}
+            nudgeWipLimit={nudgeWipLimit}
+            onNudgeWipLimitChange={onNudgeWipLimitChange}
+          />
+        )}
+      </div>
+      <div className="flex items-center gap-1 border border-gray-200 dark:border-gray-700 rounded-md p-0.5 bg-white dark:bg-gray-900 shrink-0">
+        <button
+          onClick={() => onViewModeChange("kanban")}
+          className={`px-2.5 py-1 text-xs rounded flex items-center gap-1.5 transition-colors ${viewMode === "kanban" ? "bg-blue-600 text-white" : "text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700"}`}
+          title="Kanban view (b)"
+        >
+          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <rect x="3" y="3" width="5" height="18" rx="1" />
+            <rect x="10" y="3" width="5" height="14" rx="1" />
+            <rect x="17" y="3" width="5" height="10" rx="1" />
+          </svg>
+          Board
+        </button>
+        <button
+          onClick={() => onViewModeChange("graph")}
+          className={`px-2.5 py-1 text-xs rounded flex items-center gap-1.5 transition-colors ${viewMode === "graph" ? "bg-blue-600 text-white" : "text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700"}`}
+          title="Graph view (g)"
+        >
+          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <circle cx="5" cy="12" r="2" />
+            <circle cx="19" cy="5" r="2" />
+            <circle cx="19" cy="19" r="2" />
+            <path d="M7 12h6M15 6.5l-4 4M15 17.5l-4-4" />
+          </svg>
+          Graph
+        </button>
+        <button
+          onClick={() => onViewModeChange("table")}
+          className={`px-2.5 py-1 text-xs rounded flex items-center gap-1.5 transition-colors ${viewMode === "table" ? "bg-blue-600 text-white" : "text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700"}`}
+          title="Table view (t)"
+        >
+          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path d="M3 6h18M3 12h18M3 18h18M8 6v12" />
+          </svg>
+          Table
+        </button>
+        <button
+          onClick={() => onViewModeChange("agents")}
+          className={`px-2.5 py-1 text-xs rounded flex items-center gap-1.5 transition-colors ${viewMode === "agents" ? "bg-blue-600 text-white" : "text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700"}`}
+          title="Agents view (l)"
+        >
+          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <circle cx="12" cy="8" r="4" />
+            <path d="M6 20v-2a6 6 0 0 1 12 0v2" />
+            <circle cx="12" cy="8" r="1.5" fill="currentColor" stroke="none" />
+          </svg>
+          Agents
+        </button>
+      </div>
+    </div>
+  );
+}
