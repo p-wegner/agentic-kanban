@@ -33,10 +33,10 @@ function getLastSessionBadge(triggerType: string | null | undefined): { label: s
 }
 
 const issueTypeColors: Record<string, string> = {
-  task: "bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300",
-  bug: "bg-red-100 text-red-700",
-  feature: "bg-blue-100 text-blue-700",
-  chore: "bg-amber-100 text-amber-700",
+  task: "bg-blue-100 dark:bg-blue-900/50 text-blue-800 dark:text-blue-200",
+  bug: "bg-red-100 dark:bg-red-900/50 text-red-800 dark:text-red-200",
+  feature: "bg-violet-100 dark:bg-violet-900/50 text-violet-800 dark:text-violet-200",
+  chore: "bg-amber-100 dark:bg-amber-900/50 text-amber-800 dark:text-amber-200",
 };
 
 interface TagBadge {
@@ -82,7 +82,7 @@ function HighlightedText({ text, query }: { text: string; query: string }) {
 }
 
 export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, onDragStart, onMoveToNext, nextStatusName, tags, searchQuery, liveActivity, liveStats, todos, isPendingWorkspace }: IssueCardProps) {
-  const badgeColor = issueTypeColors[issue.issueType ?? "task"] ?? "bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300";
+  const typeBadgeColor = issue.issueType ? (issueTypeColors[issue.issueType] ?? null) : null;
   const ws = issue.workspaceSummary;
   const hasActiveWorkspace = ws?.main && ws.main.status !== "closed";
   const [depDragOver, setDepDragOver] = useState(false);
@@ -164,11 +164,11 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
             {(issue as IssueWithStatus & { dependencyCount?: number }).dependencyCount}
           </span>
         ) : null}
-        <span
-          className={`inline-block text-xs font-medium px-1.5 py-0.5 rounded capitalize ${badgeColor}`}
-        >
-          {issue.issueType ?? "task"}
-        </span>
+        {typeBadgeColor && (
+          <span className={`inline-block text-xs font-medium px-1.5 py-0.5 rounded capitalize ${typeBadgeColor}`}>
+            {issue.issueType}
+          </span>
+        )}
         {issue.estimate && (
           <span className="inline-block text-xs font-medium px-1.5 py-0.5 rounded bg-teal-100 text-teal-700">
             {issue.estimate}
