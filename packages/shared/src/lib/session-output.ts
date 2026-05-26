@@ -15,6 +15,7 @@ interface ParsedLine {
   subtype?: string;
   data?: {
     content?: string | unknown[];
+>>>>>>> feature/ak-20-worktree-preflight-health-check
     reasoningText?: string;
     model?: string;
     toolCallId?: string;

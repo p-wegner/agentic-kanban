@@ -70,7 +70,7 @@ export interface UpdateIssueRequest {
 export interface MainWorkspaceInfo {
   id: string;
   branch: string;
-  status: "active" | "reviewing" | "fixing" | "idle" | "closed";
+  status: "active" | "reviewing" | "fixing" | "idle" | "error" | "closed";
   readyForMerge?: boolean;
   planMode?: boolean;
   /** @deprecated Use profile instead */
@@ -134,7 +134,7 @@ export interface CreateWorkspaceRequest {
 }
 
 export interface UpdateWorkspaceRequest {
-  status?: "active" | "reviewing" | "fixing" | "idle" | "closed";
+  status?: "active" | "reviewing" | "fixing" | "idle" | "error" | "closed";
   workingDir?: string;
 }
 
