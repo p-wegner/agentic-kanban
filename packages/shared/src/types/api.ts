@@ -6,6 +6,19 @@ export interface ProfileSelection {
   name: string;
 }
 
+/**
+ * Selectable Claude model tiers. The value (`""` = profile default) is passed to the
+ * `claude` CLI via `--model`. Only applies to Claude profiles; for profiles that define a
+ * custom `ANTHROPIC_BASE_URL` (e.g. z.ai/glm), `--model` is omitted server-side so the
+ * profile's own `ANTHROPIC_MODEL` env wins.
+ */
+export const CLAUDE_MODEL_OPTIONS: ReadonlyArray<{ value: string; label: string }> = [
+  { value: "", label: "Profile default" },
+  { value: "opus", label: "Opus" },
+  { value: "sonnet", label: "Sonnet" },
+  { value: "haiku", label: "Haiku" },
+];
+
 export interface CreateProjectRequest {
   name?: string;
   repoPath: string;
@@ -76,6 +89,8 @@ export interface MainWorkspaceInfo {
   /** @deprecated Use profile instead */
   claudeProfile?: string | null;
   profile?: ProfileSelection | null;
+  /** Selected Claude model tier (e.g. "opus"); null/empty = profile default. */
+  model?: string | null;
   agentCommand?: string | null;
   diffStats?: { filesChanged: number; insertions: number; deletions: number } | null;
   conflicts?: { hasConflicts: boolean; conflictingFiles: string[] } | null;
@@ -156,6 +171,8 @@ export interface WorkspaceResponse {
   /** @deprecated Use profile instead */
   claudeProfile?: string | null;
   profile?: ProfileSelection | null;
+  /** Selected Claude model tier (e.g. "opus"); null/empty = profile default. */
+  model?: string | null;
   pendingPlanPath?: string | null;
   sessionId?: string;
   skillName?: string | null;

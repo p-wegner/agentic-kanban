@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { apiFetch } from "../lib/api.js";
 import { suggestBranchName, sanitizeBranchName } from "../lib/branch.js";
 import type { IssueWithStatus, ProfileSelection, WorkspaceResponse } from "@agentic-kanban/shared";
+import { CLAUDE_MODEL_OPTIONS } from "@agentic-kanban/shared";
 
 interface Project {
   id: string;
@@ -64,6 +65,7 @@ export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCr
   const [copilotProfiles, setCopilotProfiles] = useState<string[]>([COPILOT_DEFAULT_PROFILE]);
   // selectedProfile format: "<provider>:<name>" e.g. "claude:myprofile", "codex:myprofile", "copilot:default", or "" for default
   const [selectedProfile, setSelectedProfile] = useState<string>("");
+  const [selectedModel, setSelectedModel] = useState<string>("");
   const [localLoading, setLocalLoading] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
 
@@ -93,6 +95,7 @@ export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCr
       } else {
         setSelectedProfile("");
       }
+      setSelectedModel(settings.default_model || "");
     });
     const url = project ? `/api/agent-skills?projectId=${project.id}` : "/api/agent-skills";
     apiFetch<{ id: string; name: string; description: string }[]>(url)
@@ -116,6 +119,7 @@ export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCr
           if ((provider === "claude" || provider === "codex" || provider === "copilot") && name) body.profile = { provider, name };
         }
       }
+      if (isClaudeSelected && selectedModel) body.model = selectedModel;
       if (!isDirect) {
         body.branch = branchName.trim();
         if (baseBranch.trim()) {
@@ -144,6 +148,9 @@ export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCr
   }
 
   const isLoading = actionLoading || localLoading;
+  const isClaudeSelected = selectedProfile === ""
+    ? (prefs.provider !== "codex" && prefs.provider !== "copilot")
+    : selectedProfile.startsWith("claude:");
   const defaultBranchLabel = project?.defaultBranch || "unset";
   const cannotCreateWorktree = !isDirect && !baseBranch.trim() && !project?.defaultBranch;
 
@@ -289,6 +296,20 @@ export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCr
                 <option key={`copilot:${p}`} value={`copilot:${p}`}>{profileOptionLabel("copilot", p)}</option>
               ))}
             </optgroup>
+          </select>
+        </div>
+      )}
+      {isClaudeSelected && (
+        <div>
+          <label className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-1 block">Model</label>
+          <select
+            value={selectedModel}
+            onChange={(e) => setSelectedModel(e.target.value)}
+            className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:bg-gray-900 dark:text-gray-100"
+          >
+            {CLAUDE_MODEL_OPTIONS.map((m) => (
+              <option key={m.value} value={m.value}>{m.label}</option>
+            ))}
           </select>
         </div>
       )}

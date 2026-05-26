@@ -149,6 +149,7 @@ export function launch(
   profile?: { provider: ProviderName; name: string },
   extraEnv?: Record<string, string>,
   skipPermissions?: boolean,
+  model?: string,
 ): ChildProcess {
   const launchConfig = buildAgentLaunchConfig({
     agentArgs,
@@ -156,6 +157,7 @@ export function launch(
     agentCommand,
     claudeProfile,
     profile,
+    model,
     keepAlive,
     permissionPromptTool,
     planMode,

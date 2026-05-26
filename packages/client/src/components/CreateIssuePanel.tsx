@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import type { CreateIssueRequest, ProfileSelection } from "@agentic-kanban/shared";
+import { CLAUDE_MODEL_OPTIONS } from "@agentic-kanban/shared";
 import type { CreateIssueFormState } from "./CreateIssueForm.js";
 import { apiFetch } from "../lib/api.js";
 import { showToast } from "./Toast.js";
@@ -18,7 +19,7 @@ interface CreateIssuePanelProps {
   statusId: string;
   statusName?: string;
   initialState?: Partial<CreateIssueFormState>;
-  onSubmit: (data: CreateIssueRequest & { startWorkspace?: boolean; planMode?: boolean; skipAutoReview?: boolean; profile?: ProfileSelection; isDirect?: boolean; skillId?: string }) => Promise<void>;
+  onSubmit: (data: CreateIssueRequest & { startWorkspace?: boolean; planMode?: boolean; skipAutoReview?: boolean; profile?: ProfileSelection; model?: string; isDirect?: boolean; skillId?: string }) => Promise<void>;
   onClose: () => void;
   canStartWorkspace?: boolean;
 }
@@ -63,6 +64,7 @@ export function CreateIssuePanel({
   const [planMode, setPlanMode] = useState(initialState?.planMode ?? false);
   const [skipAutoReview, setSkipAutoReview] = useState(initialState?.skipAutoReview ?? false);
   const [selectedProfile, setSelectedProfile] = useState("");
+  const [selectedModel, setSelectedModel] = useState("");
   const [settings, setSettings] = useState<Record<string, string>>({});
   const [claudeProfiles, setClaudeProfiles] = useState<string[]>([]);
   const [codexProfiles, setCodexProfiles] = useState<string[]>([CODEX_DEFAULT_PROFILE]);
@@ -120,6 +122,7 @@ export function CreateIssuePanel({
       setClaudeProfiles(claudeData.profiles);
       setCodexProfiles(uniqueProfiles(codexData.profiles, CODEX_DEFAULT_PROFILE));
       setCopilotProfiles(uniqueProfiles(copilotData.profiles, COPILOT_DEFAULT_PROFILE));
+      setSelectedModel(settingsData.default_model || "");
     });
   }, [startWorkspace, projectId]);
 
@@ -132,6 +135,10 @@ export function CreateIssuePanel({
     if ((provider !== "claude" && provider !== "codex" && provider !== "copilot") || !name) return undefined;
     return { provider, name };
   }
+
+  const isClaudeSelected = selectedProfile === ""
+    ? (settings.provider !== "codex" && settings.provider !== "copilot")
+    : selectedProfile.startsWith("claude:");
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
@@ -156,6 +163,7 @@ export function CreateIssuePanel({
         planMode: (startWorkspace && planMode) || undefined,
         skipAutoReview: (startWorkspace && skipAutoReview) || undefined,
         profile: startWorkspace ? profileSelection() : undefined,
+        model: (startWorkspace && isClaudeSelected && selectedModel) || undefined,
         isDirect: (startWorkspace && isDirect) || undefined,
         skillId: (startWorkspace && skillId) || undefined,
       });
@@ -308,6 +316,20 @@ export function CreateIssuePanel({
                             <option key={`copilot:${p}`} value={`copilot:${p}`}>{profileOptionLabel("copilot", p)}</option>
                           ))}
                         </optgroup>
+                      </select>
+                    </div>
+                  )}
+                  {isClaudeSelected && (
+                    <div className="flex items-center gap-2">
+                      <label className="text-sm text-gray-600 dark:text-gray-400 whitespace-nowrap">Model</label>
+                      <select
+                        value={selectedModel}
+                        onChange={(e) => setSelectedModel(e.target.value)}
+                        className="flex-1 text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:bg-gray-900 dark:text-gray-100"
+                      >
+                        {CLAUDE_MODEL_OPTIONS.map((m) => (
+                          <option key={m.value} value={m.value}>{m.label}</option>
+                        ))}
                       </select>
                     </div>
                   )}

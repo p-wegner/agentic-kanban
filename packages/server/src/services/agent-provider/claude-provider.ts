@@ -2,7 +2,7 @@ import { execSync } from "node:child_process";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { AgentLaunchConfig, AgentProvider, FileSystem, ParsedStreamEvent, ProviderLaunchOptions } from "./types.js";
-import { getMcpConfigPath, buildSpawnEnv, splitArgs, nodeFileSystem } from "./helpers.js";
+import { getMcpConfigPath, buildSpawnEnv, splitArgs, nodeFileSystem, profileDefinesCustomEndpoint } from "./helpers.js";
 
 export class ClaudeProvider implements AgentProvider {
   readonly name = "claude";
@@ -19,6 +19,7 @@ export class ClaudeProvider implements AgentProvider {
       agentCommand,
       claudeProfile,
       profile,
+      model,
       keepAlive,
       permissionPromptTool,
       planMode,
@@ -64,6 +65,11 @@ export class ClaudeProvider implements AgentProvider {
         if (this.fs.existsSync(settingsPath)) {
           args.push("--settings", settingsPath);
         }
+      }
+      // Pass the selected model tier — but not for profiles routed to a custom endpoint
+      // (e.g. z.ai/glm), which don't understand Claude aliases and supply their own model via env.
+      if (model && !profileDefinesCustomEndpoint(effectiveProfileName, this.fs)) {
+        args.push("--model", model);
       }
       if (providerSessionId) {
         args.push("--resume", providerSessionId);

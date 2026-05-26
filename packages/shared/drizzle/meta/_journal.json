@@ -316,6 +316,13 @@
       "when": 1748332524000,
       "tag": "0044_diff_comments_workspace_idx",
       "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "6",
+      "when": 1748418924000,
+      "tag": "0045_workspace_model",
+      "breakpoints": true
     }
   ]
 }

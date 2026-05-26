@@ -18,6 +18,7 @@ import type {
   SessionSummaryResponse,
   ProfileSelection,
 } from "@agentic-kanban/shared";
+import { CLAUDE_MODEL_OPTIONS } from "@agentic-kanban/shared";
 
 interface Project {
   id: string;
@@ -238,6 +239,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
     { provider: "copilot", name: COPILOT_DEFAULT_PROFILE },
   ]);
   const [selectedProfile, setSelectedProfile] = useState<string>("");
+  const [selectedModel, setSelectedModel] = useState<string>("");
   const [availableSkills, setAvailableSkills] = useState<{ id: string; name: string; description: string }[]>([]);
   const [lastPrompt, setLastPrompt] = useState<string>(
     initialSessionId ? `${issue.title}${issue.description ? `\n\n${issue.description}` : ""}` : ""
@@ -276,6 +278,9 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
 
   const isRunning = activeSession !== null && !messages.some(m => m.type === "exit");
   const isSessionAlive = activeSession !== null && isRunning;
+  const isClaudeQuickLaunch = selectedProfile === ""
+    ? (prefs.provider !== "codex" && prefs.provider !== "copilot")
+    : selectedProfile.startsWith("claude:");
   const canResume = (ws: WorkspaceResponse, sessions: SessionInfo[]) =>
     (ws.status === "active" || ws.status === "idle") && !isRunning && !activeSession &&
     !!lastSessionPerWorkspace[ws.id] &&
@@ -385,6 +390,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
         setPrefs(s);
         setRequiresReview(s.auto_review !== "false");
         setSelectedProfile(defaultSelectedProfile(s));
+        setSelectedModel(s.default_model || "");
       })
       .catch(() => {});
     Promise.all([
@@ -445,6 +451,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
       };
       const profile = profileSelectionFromValue(selectedProfile);
       if (profile) body.profile = profile;
+      if (isClaudeQuickLaunch && selectedModel) body.model = selectedModel;
       const result = await apiFetch<WorkspaceResponse & { sessionId?: string }>("/api/workspaces", {
         method: "POST",
         body: JSON.stringify(body),
@@ -480,6 +487,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
       };
       const profile = profileSelectionFromValue(selectedProfile);
       if (profile) body.profile = profile;
+      if (isClaudeQuickLaunch && selectedModel) body.model = selectedModel;
       const result = await apiFetch<WorkspaceResponse & { sessionId?: string }>("/api/workspaces", {
         method: "POST",
         body: JSON.stringify(body),
@@ -1090,6 +1098,24 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                         <div className="border-t border-gray-100 dark:border-gray-800" />
                       </>
                     )}
+                    {isClaudeQuickLaunch && (
+                      <>
+                        <div className="px-3 py-1.5">
+                          <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">Model</label>
+                          <select
+                            value={selectedModel}
+                            onChange={(e) => setSelectedModel(e.target.value)}
+                            className="w-full text-sm border border-gray-200 dark:border-gray-700 rounded px-2 py-1"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            {CLAUDE_MODEL_OPTIONS.map((m) => (
+                              <option key={m.value} value={m.value}>{m.label}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <div className="border-t border-gray-100 dark:border-gray-800" />
+                      </>
+                    )}
                     <button
                       onClick={() => handleQuickLaunch(false)}
                       className="w-full text-left text-sm px-3 py-2 hover:bg-gray-50 dark:hover:bg-gray-800"
@@ -1192,6 +1218,11 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                     {workspaceProvider && (
                       <span className="ml-1.5 text-[10px] font-medium px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300">
                         {providerLabel(workspaceProvider)}{workspaceProfile ? `:${workspaceProfile}` : ""}
+                      </span>
+                    )}
+                    {ws.model && (
+                      <span className="ml-1.5 text-[10px] font-medium px-1.5 py-0.5 rounded bg-indigo-100 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 capitalize">
+                        {ws.model}
                       </span>
                     )}
                   </span>
