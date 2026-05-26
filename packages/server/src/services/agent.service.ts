@@ -13,11 +13,28 @@ export interface AgentOutputEvent {
 
 export type AgentOutputCallback = (event: AgentOutputEvent) => void;
 
-const activeProcesses = new Map<string, ChildProcess>();
-const activePids = new Map<string, number>();
-const stdinOpen = new Map<string, boolean>();
-const outputWatchers = new Map<string, { close(): void }>();
-const pidWatchers = new Map<string, { close(): void }>();
+/** Encapsulates all runtime state for active agent processes. Injectable for testing. */
+export class AgentState {
+  readonly activeProcesses = new Map<string, ChildProcess>();
+  readonly activePids = new Map<string, number>();
+  readonly stdinOpen = new Map<string, boolean>();
+  readonly outputWatchers = new Map<string, { close(): void }>();
+  readonly pidWatchers = new Map<string, { close(): void }>();
+
+  /** Close all watchers and clear all state without killing processes. Intended for test cleanup. */
+  reset(): void {
+    for (const watcher of this.outputWatchers.values()) watcher.close();
+    this.outputWatchers.clear();
+    for (const w of this.pidWatchers.values()) w.close();
+    this.pidWatchers.clear();
+    this.activeProcesses.clear();
+    this.activePids.clear();
+    this.stdinOpen.clear();
+  }
+}
+
+/** Module-level singleton used by all exported functions. */
+export const agentState = new AgentState();
 
 /** Get the output file path for a session. */
 export function sessionOutputPath(sessionId: string): string {
@@ -196,21 +213,21 @@ export function launch(
     proc.stdin?.end();
   } else if (keepAlive) {
     proc.stdin?.write(stdinPrompt + "\n");
-    stdinOpen.set(sessionId, true);
+    agentState.stdinOpen.set(sessionId, true);
   } else {
     proc.stdin?.end(stdinPrompt + "\n");
   }
 
-  activeProcesses.set(sessionId, proc);
+  agentState.activeProcesses.set(sessionId, proc);
   if (proc.pid) {
-    activePids.set(sessionId, proc.pid);
+    agentState.activePids.set(sessionId, proc.pid);
   }
 
   if (shouldDetach) {
     // File-based output: watch the output file for new content
     const outPath = sessionOutputPath(sessionId);
     const watcher = startOutputFileWatcher(sessionId, outPath, onOutput);
-    outputWatchers.set(sessionId, watcher);
+    agentState.outputWatchers.set(sessionId, watcher);
   } else {
     // Pipe-based output: read directly from stdout
     proc.stdout?.on("data", (chunk: Buffer) => {
@@ -232,14 +249,14 @@ export function launch(
 
   proc.on("exit", (code, signal) => {
     console.log(`[agent] exited: sessionId=${sessionId} code=${code} signal=${signal ?? "none"} pid=${proc.pid}`);
-    activeProcesses.delete(sessionId);
-    activePids.delete(sessionId);
-    stdinOpen.delete(sessionId);
+    agentState.activeProcesses.delete(sessionId);
+    agentState.activePids.delete(sessionId);
+    agentState.stdinOpen.delete(sessionId);
     // Clean up output file watcher and output file
-    const watcher = outputWatchers.get(sessionId);
-    if (watcher) { watcher.close(); outputWatchers.delete(sessionId); }
-    const pidW = pidWatchers.get(sessionId);
-    if (pidW) { pidW.close(); pidWatchers.delete(sessionId); }
+    const watcher = agentState.outputWatchers.get(sessionId);
+    if (watcher) { watcher.close(); agentState.outputWatchers.delete(sessionId); }
+    const pidW = agentState.pidWatchers.get(sessionId);
+    if (pidW) { pidW.close(); agentState.pidWatchers.delete(sessionId); }
     cleanupOutputFile(sessionId);
     try {
       onOutput({ type: "exit", sessionId, exitCode: code });
@@ -255,12 +272,12 @@ export function launch(
     } catch (cbErr) {
       console.error(`[agent] error callback error: sessionId=${sessionId}`, cbErr);
     }
-    activeProcesses.delete(sessionId);
-    activePids.delete(sessionId);
-    const watcher = outputWatchers.get(sessionId);
-    if (watcher) { watcher.close(); outputWatchers.delete(sessionId); }
-    const pidW = pidWatchers.get(sessionId);
-    if (pidW) { pidW.close(); pidWatchers.delete(sessionId); }
+    agentState.activeProcesses.delete(sessionId);
+    agentState.activePids.delete(sessionId);
+    const watcher = agentState.outputWatchers.get(sessionId);
+    if (watcher) { watcher.close(); agentState.outputWatchers.delete(sessionId); }
+    const pidW = agentState.pidWatchers.get(sessionId);
+    if (pidW) { pidW.close(); agentState.pidWatchers.delete(sessionId); }
     cleanupOutputFile(sessionId);
     try {
       onOutput({ type: "exit", sessionId, exitCode: 1 });
@@ -280,29 +297,29 @@ function cleanupOutputFile(sessionId: string): void {
 
 /** Kill a running agent process by session ID. */
 export function kill(sessionId: string): boolean {
-  const proc = activeProcesses.get(sessionId);
-  const pid = proc?.pid ?? activePids.get(sessionId);
+  const proc = agentState.activeProcesses.get(sessionId);
+  const pid = proc?.pid ?? agentState.activePids.get(sessionId);
   if (!pid) return false;
 
   console.log(`[agent] killing: sessionId=${sessionId} pid=${pid}`);
   killPid(pid);
 
-  activeProcesses.delete(sessionId);
-  activePids.delete(sessionId);
-  stdinOpen.delete(sessionId);
-  const watcher = outputWatchers.get(sessionId);
-  if (watcher) { watcher.close(); outputWatchers.delete(sessionId); }
-  const pidW = pidWatchers.get(sessionId);
-  if (pidW) { pidW.close(); pidWatchers.delete(sessionId); }
+  agentState.activeProcesses.delete(sessionId);
+  agentState.activePids.delete(sessionId);
+  agentState.stdinOpen.delete(sessionId);
+  const watcher = agentState.outputWatchers.get(sessionId);
+  if (watcher) { watcher.close(); agentState.outputWatchers.delete(sessionId); }
+  const pidW = agentState.pidWatchers.get(sessionId);
+  if (pidW) { pidW.close(); agentState.pidWatchers.delete(sessionId); }
   cleanupOutputFile(sessionId);
   return true;
 }
 
 /** Send a follow-up message to a running agent via stdin JSONL. */
 export function sendInput(sessionId: string, content: string): boolean {
-  const proc = activeProcesses.get(sessionId);
+  const proc = agentState.activeProcesses.get(sessionId);
   if (!proc || !proc.stdin || proc.stdin.destroyed) return false;
-  if (!stdinOpen.has(sessionId)) return false;
+  if (!agentState.stdinOpen.has(sessionId)) return false;
   const jsonl = JSON.stringify({ type: "user", content }) + "\n";
   try {
     return proc.stdin.write(jsonl);
@@ -314,50 +331,50 @@ export function sendInput(sessionId: string, content: string): boolean {
 
 /** Close stdin to signal the agent should finish. */
 export function closeStdin(sessionId: string): boolean {
-  const proc = activeProcesses.get(sessionId);
+  const proc = agentState.activeProcesses.get(sessionId);
   if (!proc || !proc.stdin || proc.stdin.destroyed) return false;
   proc.stdin.end();
-  stdinOpen.delete(sessionId);
+  agentState.stdinOpen.delete(sessionId);
   return true;
 }
 
 /** Check if stdin is open for a session (multi-turn mode). */
 export function isStdinOpen(sessionId: string): boolean {
-  return stdinOpen.get(sessionId) === true;
+  return agentState.stdinOpen.get(sessionId) === true;
 }
 
 /** Kill all active agent processes (for graceful shutdown). */
 export function killAll(): number {
-  const count = activePids.size;
+  const count = agentState.activePids.size;
   if (count === 0) return 0;
   console.log(`[agent] killAll: terminating ${count} active process(es)`);
-  for (const [sessionId, pid] of activePids) {
+  for (const [sessionId, pid] of agentState.activePids) {
     console.log(`[agent] killAll: sessionId=${sessionId} pid=${pid}`);
     killPid(pid);
   }
-  activeProcesses.clear();
-  activePids.clear();
-  stdinOpen.clear();
-  for (const watcher of outputWatchers.values()) watcher.close();
-  outputWatchers.clear();
-  for (const w of pidWatchers.values()) w.close();
-  pidWatchers.clear();
+  agentState.activeProcesses.clear();
+  agentState.activePids.clear();
+  agentState.stdinOpen.clear();
+  for (const watcher of agentState.outputWatchers.values()) watcher.close();
+  agentState.outputWatchers.clear();
+  for (const w of agentState.pidWatchers.values()) w.close();
+  agentState.pidWatchers.clear();
   return count;
 }
 
 /** Get the active process for a session, if any. */
 export function getProcess(sessionId: string): ChildProcess | undefined {
-  return activeProcesses.get(sessionId);
+  return agentState.activeProcesses.get(sessionId);
 }
 
 /** Register a persisted PID for a surviving process whose ChildProcess handle was lost. */
 export function registerPid(sessionId: string, pid: number): void {
-  activePids.set(sessionId, pid);
+  agentState.activePids.set(sessionId, pid);
 }
 
 /** Get the tracked PID for a session, whether or not a ChildProcess handle exists. */
 export function getPid(sessionId: string): number | undefined {
-  return activeProcesses.get(sessionId)?.pid ?? activePids.get(sessionId);
+  return agentState.activeProcesses.get(sessionId)?.pid ?? agentState.activePids.get(sessionId);
 }
 
 /** Check if the tracked PID still exists without requiring a ChildProcess handle. */
@@ -368,7 +385,7 @@ export function isPidAlive(sessionId: string): boolean {
     process.kill(pid, 0);
     return true;
   } catch {
-    activePids.delete(sessionId);
+    agentState.activePids.delete(sessionId);
     return false;
   }
 }
@@ -383,7 +400,7 @@ export function reattachSession(
   onOutput: AgentOutputCallback,
   onExit: () => void,
 ): void {
-  activePids.set(sessionId, pid);
+  agentState.activePids.set(sessionId, pid);
 
   // Start watching the output file from its current end
   const outPath = sessionOutputPath(sessionId);
@@ -391,7 +408,7 @@ export function reattachSession(
     try {
       const stat = statSync(outPath);
       const watcher = startOutputFileWatcher(sessionId, outPath, onOutput, stat.size);
-      outputWatchers.set(sessionId, watcher);
+      agentState.outputWatchers.set(sessionId, watcher);
       console.log(`[agent] reattached output: sessionId=${sessionId} pid=${pid} fileOffset=${stat.size}`);
     } catch {
       console.warn(`[agent] failed to read output file for reattach: sessionId=${sessionId}`);
@@ -401,9 +418,9 @@ export function reattachSession(
   // Start PID exit monitoring
   const pidWatcher = startPidWatcher(sessionId, pid, () => {
     console.log(`[agent] reattached process exited: sessionId=${sessionId} pid=${pid}`);
-    activePids.delete(sessionId);
-    const w = outputWatchers.get(sessionId);
-    if (w) { w.close(); outputWatchers.delete(sessionId); }
+    agentState.activePids.delete(sessionId);
+    const w = agentState.outputWatchers.get(sessionId);
+    if (w) { w.close(); agentState.outputWatchers.delete(sessionId); }
     cleanupOutputFile(sessionId);
     try {
       onOutput({ type: "exit", sessionId, exitCode: null });
@@ -412,7 +429,7 @@ export function reattachSession(
     }
     onExit();
   });
-  pidWatchers.set(sessionId, pidWatcher);
+  agentState.pidWatchers.set(sessionId, pidWatcher);
 
   console.log(`[agent] reattached: sessionId=${sessionId} pid=${pid}`);
 }
