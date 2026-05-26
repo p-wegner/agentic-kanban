@@ -39,6 +39,7 @@ export function createWorkspacesRoute(
       skipSetup: body.skipSetup === true,
       customPrompt: body.customPrompt,
       skillId: body.skillId,
+      skillName: body.skillName,
       profile: body.profile,
       claudeProfile: body.claudeProfile,
       model: body.model,

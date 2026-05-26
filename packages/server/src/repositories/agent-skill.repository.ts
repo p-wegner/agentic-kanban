@@ -95,3 +95,11 @@ export async function getActiveProjectRepoPath(
   const projectRows = await database.select({ repoPath: projects.repoPath }).from(projects).where(eq(projects.id, activeProjectId)).limit(1);
   return projectRows[0]?.repoPath ?? null;
 }
+
+export async function getProjectRepoPath(
+  projectId: string,
+  database: Database = db,
+): Promise<string | null> {
+  const rows = await database.select({ repoPath: projects.repoPath }).from(projects).where(eq(projects.id, projectId)).limit(1);
+  return rows[0]?.repoPath ?? null;
+}

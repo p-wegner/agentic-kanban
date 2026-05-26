@@ -9,6 +9,7 @@ interface Skill {
   description: string | null;
   model: string | null;
   isBuiltin: boolean;
+  source?: "db" | "disk";
 }
 
 interface QuickTasksPanelProps {
@@ -41,9 +42,10 @@ export function QuickTasksPanel({ projectId, onClose, onLaunched }: QuickTasksPa
     return () => window.removeEventListener("keydown", handler, { capture: true });
   }, [onClose, showCustom, showContext]);
 
-  async function launch(skillId: string | null, prompt: string) {
+  async function launch(skill: Skill | null, prompt: string) {
     if (!prompt.trim()) return;
-    setLaunching(skillId ?? "custom");
+    const launchKey = skill?.id ?? "custom";
+    setLaunching(launchKey);
     const fullPrompt = extraContext.trim()
       ? `${prompt.trim()}\n\nAdditional context: ${extraContext.trim()}`
       : prompt.trim();
@@ -53,9 +55,15 @@ export function QuickTasksPanel({ projectId, onClose, onLaunched }: QuickTasksPa
         method: "POST",
         body: JSON.stringify({ title: fullPrompt.slice(0, 100), projectId }),
       });
+      const isDisk = skill?.source === "disk";
       await apiFetch("/api/workspaces", {
         method: "POST",
-        body: JSON.stringify({ issueId: issue.id, isDirect: true, skillId: skillId ?? undefined }),
+        body: JSON.stringify({
+          issueId: issue.id,
+          isDirect: true,
+          skillId: isDisk ? undefined : (skill?.id ?? undefined),
+          skillName: isDisk ? skill?.name : undefined,
+        }),
       });
       showToast("Task launched", "success");
       onLaunched();
@@ -82,12 +90,15 @@ export function QuickTasksPanel({ projectId, onClose, onLaunched }: QuickTasksPa
             <button
               key={skill.id}
               disabled={!!launching}
-              onClick={() => launch(skill.id, skill.description ?? skill.name)}
+              onClick={() => launch(skill, skill.description ?? skill.name)}
               className="w-full text-left px-3 py-2.5 rounded-lg hover:bg-blue-50 dark:hover:bg-blue-900/30 border border-transparent hover:border-blue-200 dark:hover:border-blue-800 transition-colors disabled:opacity-50 group"
             >
               <div className="flex items-center justify-between">
                 <span className="text-sm font-medium text-gray-800 dark:text-gray-200">{skill.name}</span>
                 <div className="flex items-center gap-1.5">
+                  {skill.source === "disk" && (
+                    <span className="text-[10px] text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/30 px-1.5 py-0.5 rounded" title="Loaded from .claude/skills/ on disk">local</span>
+                  )}
                   {skill.model && <span className="text-[10px] text-gray-400 dark:text-gray-500 bg-gray-100 dark:bg-gray-800 px-1.5 py-0.5 rounded">{skill.model}</span>}
                   {launching === skill.id
                     ? <span className="text-xs text-blue-500">Launching...</span>
