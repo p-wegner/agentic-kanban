@@ -1,6 +1,5 @@
 import { Hono } from "hono";
 import { db } from "../db/index.js";
-import { spawn } from "node:child_process";
 import type { Database } from "../db/index.js";
 import { listBranches } from "../services/git.service.js";
 import { ProjectError, createProjectService } from "../services/project.service.js";
@@ -217,21 +216,7 @@ export function createProjectsRoute(database: Database = db) {
     const body = await c.req.json<{ path: string }>();
     if (!body.path) return c.json({ error: "path is required" }, 400);
 
-    const platform = process.platform;
-    let cmd: string;
-    let args: string[];
-    if (platform === "win32") {
-      cmd = "explorer";
-      args = [body.path.replace(/\//g, "\\")];
-    } else if (platform === "darwin") {
-      cmd = "open";
-      args = [body.path];
-    } else {
-      cmd = "xdg-open";
-      args = [body.path];
-    }
-
-    spawn(cmd, args, { detached: true, stdio: "ignore" }).unref();
+    projectService.openInExplorer(body.path);
     return c.json({ success: true });
   });
 

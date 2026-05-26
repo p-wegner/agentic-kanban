@@ -1,11 +1,10 @@
 import { issues, workspaces, sessions, sessionMessages, projectStatuses, tags, issueTags, issueDependencies, issueArtifacts, agentSkills } from "@agentic-kanban/shared/schema";
 import type { DependencyType } from "@agentic-kanban/shared/schema";
+import { parseSessionSummary, formatDurationStr } from "@agentic-kanban/shared";
 import { eq, inArray, desc, sql, and } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
-import { parseSessionSummary, formatDurationStr } from "../services/session-summary.js";
-import { enrichWorkspacesWithSessionData } from "../services/board-aggregation.service.js";
 
 type Issue = typeof issues.$inferSelect;
 type Workspace = typeof workspaces.$inferSelect;
@@ -280,7 +279,7 @@ export async function getIssueWorkspaces(
   issueId: string,
   database: Database = db,
 ) {
-  const wsRows = await database
+  return database
     .select({
       id: workspaces.id,
       issueId: workspaces.issueId,
@@ -306,15 +305,6 @@ export async function getIssueWorkspaces(
     .from(workspaces)
     .leftJoin(agentSkills, eq(workspaces.skillId, agentSkills.id))
     .where(eq(workspaces.issueId, issueId));
-
-  const wsIds = wsRows.map(w => w.id);
-  const { contextTokensMap, lastToolMap } = await enrichWorkspacesWithSessionData(wsIds, database);
-
-  return wsRows.map(w => ({
-    ...w,
-    contextTokens: contextTokensMap.get(w.id) ?? null,
-    lastTool: lastToolMap.get(w.id) ?? null,
-  }));
 }
 
 export async function getIssueArtifacts(
