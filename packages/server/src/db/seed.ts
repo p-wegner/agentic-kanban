@@ -67,7 +67,15 @@ export async function seed() {
     console.log(`Seeded ${DEFAULT_TAGS.length} default tags.`);
   }
 
-  // Seed default agent skills — upsert by name so new builtins are added to existing DBs
+  await ensureBuiltinSkills();
+
+  console.log('Run `agentic-kanban init <path>` to register a git repo as a project.');
+}
+
+/** Upsert all built-in agent skills by name. Idempotent; called from seed() and on server
+ * startup so a reconstructed DB always has its built-in skills (and Workspace Quick Actions). */
+export async function ensureBuiltinSkills(database: Database = db): Promise<void> {
+  const now = new Date().toISOString();
   {
     const DEFAULT_SKILLS = [
       {
@@ -435,14 +443,14 @@ Then list the created ticket numbers.
     ];
 
     const existingByName = new Map(
-      (await db.select({ name: agentSkills.name }).from(agentSkills).where(eq(agentSkills.isBuiltin, true)))
+      (await database.select({ name: agentSkills.name }).from(agentSkills).where(eq(agentSkills.isBuiltin, true)))
         .map(r => [r.name, true])
     );
 
     let added = 0;
     for (const skill of DEFAULT_SKILLS) {
       if (existingByName.has(skill.name)) continue;
-      await db.insert(agentSkills).values({
+      await database.insert(agentSkills).values({
         id: randomUUID(),
         name: skill.name,
         description: skill.description,
@@ -463,11 +471,11 @@ Then list the created ticket numbers.
 
   // Upsert code-review-thorough skill (may not exist in older installs)
   const thoroughSkillName = "code-review-thorough";
-  const existing = await db.select({ id: agentSkills.id }).from(agentSkills)
+  const existing = await database.select({ id: agentSkills.id }).from(agentSkills)
     .where(sql`${agentSkills.name} = ${thoroughSkillName} AND ${agentSkills.projectId} IS NULL`)
     .limit(1);
   if (existing.length === 0) {
-    await db.insert(agentSkills).values({
+    await database.insert(agentSkills).values({
       id: randomUUID(),
       name: thoroughSkillName,
       description: "In-depth AI code review using a more capable model — catches subtle bugs and architecture issues",
@@ -501,8 +509,6 @@ Workspace ID: {{workspaceId}}`,
     });
     console.log("Seeded code-review-thorough skill.");
   }
-
-  console.log('Run `agentic-kanban init <path>` to register a git repo as a project.');
 }
 
 // Auto-run only when invoked directly (tsx src/db/seed.ts or node dist/seed.js)
