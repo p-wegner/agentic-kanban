@@ -327,3 +327,31 @@ export async function getIssueArtifacts(
     .where(eq(issueArtifacts.issueId, issueId))
     .orderBy(issueArtifacts.createdAt);
 }
+
+export async function assignTag(
+  issueId: string,
+  tagId: string,
+  database: Database = db,
+) {
+  const id = randomUUID();
+  await database.insert(issueTags).values({ id, issueId, tagId });
+  return { id };
+}
+
+export async function removeTag(
+  issueId: string,
+  tagId: string,
+  database: Database = db,
+) {
+  await database.delete(issueTags)
+    .where(and(eq(issueTags.issueId, issueId), eq(issueTags.tagId, tagId)));
+}
+
+export async function deleteArtifact(
+  issueId: string,
+  artifactId: string,
+  database: Database = db,
+) {
+  await database.delete(issueArtifacts)
+    .where(and(eq(issueArtifacts.id, artifactId), eq(issueArtifacts.issueId, issueId)));
+}
