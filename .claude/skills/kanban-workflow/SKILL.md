@@ -90,6 +90,8 @@ Do NOT leave uncommitted changes in the worktree. If you have made changes, comm
 #### Branched workspaces (automatic)
 After your session exits, the system automatically launches a review subagent. The board shows a purple **AI Reviewing** badge during review. You don't need to do anything — the system handles the full review-then-fix-then-merge cycle.
 
+**Visual verification note:** If the project has `visual_verification_mode = "after_merge"` (Settings → Workflow), you are **not** required to verify the UI before stopping. The server will detect any client file changes and tag the issue with `needs-visual-verification` at merge time. If `visual_verification_mode = "before_merge"` (default), the stop hook will block you until you run `/playwright-cli` and confirm the UI renders correctly.
+
 #### Direct workspaces (you must trigger it)
 The system does NOT auto-review direct workspaces. You must launch a review subagent yourself **before marking the issue Done**:
 
