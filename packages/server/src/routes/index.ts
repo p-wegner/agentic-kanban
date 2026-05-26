@@ -1,11 +1,11 @@
 import { Hono } from "hono";
-import { createProjectsRoute, projectsRoute } from "./projects.js";
-import { createIssuesRoute, issuesRoute } from "./issues.js";
-import { createWorkspacesRoute, workspacesRoute } from "./workspaces.js";
+import { createProjectsRoute } from "./projects.js";
+import { createIssuesRoute } from "./issues.js";
+import { createWorkspacesRoute } from "./workspaces.js";
 import { createWorkspaceActionsRoute } from "./workspace-actions.js";
-import { createTagsRoute, tagsRoute } from "./tags.js";
-import { createPreferencesRoute, preferencesRoute } from "./preferences.js";
-import { createAgentSkillsRoute, agentSkillsRoute } from "./agent-skills.js";
+import { createTagsRoute } from "./tags.js";
+import { createPreferencesRoute } from "./preferences.js";
+import { createAgentSkillsRoute } from "./agent-skills.js";
 import { createApprovalsRoute } from "./approvals.js";
 import { createScheduledRunsRoute } from "./scheduled-runs.js";
 import type { Database } from "../db/index.js";
@@ -64,12 +64,3 @@ function getDefaultSessionManager(): SessionManager {
 export function setSessionManager(sm: SessionManager) {
   _sessionManager = sm;
 }
-
-export const routes = new Hono();
-routes.route("/projects", projectsRoute);
-routes.route("/issues", issuesRoute);
-routes.route("/workspaces", workspacesRoute);
-routes.route("/tags", tagsRoute);
-routes.route("/preferences", preferencesRoute);
-routes.route("/agent-skills", agentSkillsRoute);
-// Note: workspace-actions route is mounted separately in index.ts to avoid circular imports

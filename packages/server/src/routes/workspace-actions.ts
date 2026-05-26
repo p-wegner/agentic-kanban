@@ -1,5 +1,4 @@
 import { Hono } from "hono";
-import { db } from "../db/index.js";
 import type { SessionManager } from "../services/session.manager.js";
 import type { BoardEvents } from "../services/board-events.js";
 import type { Database } from "../db/index.js";
@@ -13,7 +12,7 @@ function wsStatus(err: WorkspaceError): 404 | 409 | 400 {
 
 export function createWorkspaceActionsRoute(
   getSessionManager: () => SessionManager,
-  database: Database = db,
+  database: Database,
   options?: { boardEvents?: BoardEvents; fixAndMergeSessionIds?: Set<string> },
 ) {
   const router = new Hono();
