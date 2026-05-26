@@ -16,6 +16,15 @@
             "command": "node C:/andrena/agentic-kanban/.claude/hooks/smart-hooks-runner.js PreToolUse"
           }
         ]
+      },
+      {
+        "matcher": "Write|Edit|MultiEdit|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node C:/andrena/agentic-kanban/.claude/hooks/prevent-cross-worktree-writes.js"
+          }
+        ]
       }
     ],
     "PostToolUse": [
