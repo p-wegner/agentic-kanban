@@ -4,6 +4,7 @@ import { useTheme } from "../hooks/useTheme.js";
 import { GraphView } from "../components/GraphView.js";
 import { TableView } from "../components/TableView.js";
 import { AgentGrid } from "../components/AgentGrid.js";
+import { TimelineView } from "../components/TimelineView.js";
 import { BoardErrorBoundary } from "../components/BoardErrorBoundary.js";
 import { BoardKanbanView } from "../components/BoardKanbanView.js";
 import { BoardStats } from "../components/BoardStats.js";
@@ -817,13 +818,14 @@ export function BoardPage() {
         setShowSettings(true);
         return;
       }
-      if ((e.key === "b" || e.key === "t" || e.key === "l") && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      if ((e.key === "b" || e.key === "t" || e.key === "l" || e.key === "f") && !e.ctrlKey && !e.metaKey && !e.altKey) {
         const target = e.target as HTMLElement;
         if (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT") return;
         e.preventDefault();
         if (e.key === "b") setViewMode("kanban");
         else if (e.key === "t") setViewMode("table");
         else if (e.key === "l") setViewMode("agents");
+        else if (e.key === "f") setViewMode("timeline");
         return;
       }
       // "a" to toggle All Workspaces panel
@@ -998,6 +1000,16 @@ export function BoardPage() {
       shortcut: "t",
       category: "navigation",
       handler: () => setViewMode("table"),
+    }));
+
+    unregisters.push(registerAction({
+      id: "view-timeline",
+      label: "Switch to Timeline View",
+      description: "Show issues on a chronological timeline",
+      icon: "⏱",
+      shortcut: "f",
+      category: "navigation",
+      handler: () => setViewMode("timeline"),
     }));
 
     // Register "Go to: [column]" for each column
@@ -1209,6 +1221,15 @@ export function BoardPage() {
               sessionTodos={sessionTodos}
               onIssueClick={handleIssueClick}
               onWorkspaceClick={handleManageWorkspaces}
+            />
+          </BoardErrorBoundary>
+        )}
+        {viewMode === "timeline" && (
+          <BoardErrorBoundary columnName="Timeline View">
+            <TimelineView
+              columns={columns}
+              onIssueClick={handleIssueClick}
+              searchQuery={searchQuery}
             />
           </BoardErrorBoundary>
         )}
