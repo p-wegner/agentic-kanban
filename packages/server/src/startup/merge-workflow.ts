@@ -6,6 +6,7 @@ import { db } from "../db/index.js";
 import { MOCK_AGENT_COMMAND, isMockProfile, toExecutorProvider } from "../services/agent-settings.service.js";
 import { createBoardEvents } from "../services/board-events.js";
 import * as gitService from "../services/git.service.js";
+import { createBackup } from "../db/backup.js";
 import { killProcessesInDir } from "../services/process-cleanup.js";
 import { runScript } from "../services/script-runner.js";
 import { createSessionManager } from "../services/session.manager.js";
@@ -101,6 +102,12 @@ export function createAutoMerge({ sessionManager, boardEvents, learningSessionId
             }
           }
           await tagIfNeedsVisualVerification(repoPath, workspace.branch, workspace.baseBranch, issueId, now);
+          // Mandatory pre-merge backup. Non-fatal: must not block a legit auto-merge.
+          try {
+            await createBackup("pre-merge");
+          } catch (err) {
+            console.warn("[backup] pre-merge backup failed (non-fatal):", err instanceof Error ? err.message : String(err));
+          }
           await gitService.mergeBranch(repoPath, workspace.branch);
           if (workspace.workingDir) {
             try { await gitService.removeWorktree(repoPath, workspace.workingDir); } catch {}

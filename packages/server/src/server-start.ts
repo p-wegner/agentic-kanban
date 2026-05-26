@@ -14,6 +14,8 @@ import { setupRoutes } from "./startup/route-setup.js";
 import { setupScheduledTasks } from "./startup/scheduled-tasks.js";
 import { runStartupTasks } from "./startup/startup-tasks.js";
 import { runSessionRestore } from "./startup/session-restore.js";
+import { startBackupScheduler } from "./startup/backup-scheduler.js";
+import { getPreference } from "./repositories/preferences.repository.js";
 import { domainErrorHandler } from "./middleware/error-handler.js";
 
 export async function startServer(port?: number, hostname?: string) {
@@ -56,5 +58,15 @@ export async function startServer(port?: number, hostname?: string) {
 
   setupScheduledTasks(serverPort);
   setupProcessHandlers(server, agentService);
+
+  // Periodic database backups (interval from the backup_interval_min preference).
+  try {
+    const raw = await getPreference("backup_interval_min");
+    const intervalMin = raw == null || raw === "" ? 30 : Number(raw);
+    startBackupScheduler(Number.isFinite(intervalMin) ? intervalMin : 30);
+  } catch (err) {
+    console.warn("[backup] failed to start scheduler (non-fatal):", err instanceof Error ? err.message : err);
+  }
+
   return { app, sessionManager, boardEvents };
 }
