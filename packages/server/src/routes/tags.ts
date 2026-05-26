@@ -1,17 +1,27 @@
 import { Hono } from "hono";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
-import { tags, issueTags } from "@agentic-kanban/shared/schema";
-import { eq, inArray } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
+import {
+  getAllTags,
+  createTag,
+  getTagById,
+  updateTag,
+  deleteTag,
+  getTagsByIds,
+  getIssueIdsWithTag,
+  getIssueIdsByTagIds,
+  addIssueTagEntries,
+  removeIssueTagsByTagIds,
+  deleteTagsByIds,
+} from "../repositories/tag.repository.js";
 
 export function createTagsRoute(database: Database = db) {
   const router = new Hono();
 
   // GET /api/tags
   router.get("/", async (c) => {
-    const result = await database.select().from(tags);
-    return c.json(result);
+    return c.json(await getAllTags(database));
   });
 
   // POST /api/tags
@@ -20,37 +30,18 @@ export function createTagsRoute(database: Database = db) {
     if (!body.name) {
       return c.json({ error: "name is required" }, 400);
     }
-
-    const [existing] = await database.select({ id: tags.id, isBuiltin: tags.isBuiltin })
-      .from(tags).where(eq(tags.name, body.name)).limit(1);
-    if (existing) {
-      if (existing.isBuiltin) {
-        return c.json({ error: `A built-in tag named "${body.name}" already exists and cannot be replaced` }, 409);
-      }
-      return c.json({ error: `A tag named "${body.name}" already exists` }, 409);
-    }
-
-    const id = randomUUID();
-    await database.insert(tags).values({
-      id,
-      name: body.name,
-      color: body.color ?? null,
-      createdAt: new Date().toISOString(),
-    });
-
-    return c.json({ id, name: body.name, color: body.color ?? null }, 201);
+    const result = await createTag(body.name, body.color ?? null, database);
+    return c.json(result, 201);
   });
 
   // PATCH /api/tags/:id
   router.patch("/:id", async (c) => {
     const id = c.req.param("id");
-
-    const [existing] = await database.select().from(tags).where(eq(tags.id, id)).limit(1);
+    const existing = await getTagById(id, database);
     if (!existing) return c.json({ error: "Tag not found" }, 404);
     if (existing.isBuiltin) return c.json({ error: "Built-in tags cannot be modified" }, 403);
 
     const body = await c.req.json();
-
     const updates: Record<string, unknown> = {};
     if (body.name !== undefined) updates.name = body.name;
     if (body.color !== undefined) updates.color = body.color;
@@ -59,21 +50,18 @@ export function createTagsRoute(database: Database = db) {
       return c.json({ error: "No fields to update" }, 400);
     }
 
-    await database.update(tags).set(updates).where(eq(tags.id, id));
+    await updateTag(id, updates, database);
     return c.json({ id });
   });
 
   // DELETE /api/tags/:id
   router.delete("/:id", async (c) => {
     const id = c.req.param("id");
-
-    const [existing] = await database.select().from(tags).where(eq(tags.id, id)).limit(1);
+    const existing = await getTagById(id, database);
     if (!existing) return c.json({ error: "Tag not found" }, 404);
     if (existing.isBuiltin) return c.json({ error: "Built-in tags cannot be deleted" }, 403);
 
-    // Remove all issue associations first
-    await database.delete(issueTags).where(eq(issueTags.tagId, id));
-    await database.delete(tags).where(eq(tags.id, id));
+    await deleteTag(id, database);
     return c.json({ success: true });
   });
 
@@ -88,41 +76,33 @@ export function createTagsRoute(database: Database = db) {
     if (toMerge.length === 0) return c.json({ success: true });
 
     // Prevent merging (deleting) built-in tags
-    const builtinSources = await database
-      .select({ id: tags.id, name: tags.name, isBuiltin: tags.isBuiltin })
-      .from(tags)
-      .where(inArray(tags.id, toMerge));
+    const builtinSources = await getTagsByIds(toMerge, database);
     const builtinBlocked = builtinSources.filter((t) => t.isBuiltin);
     if (builtinBlocked.length > 0) {
       return c.json({ error: `Built-in tags cannot be merged away: ${builtinBlocked.map((t) => t.name).join(", ")}` }, 403);
     }
 
     // Find issues that already have the target tag (to avoid duplicate associations)
-    const existing = await database
-      .select({ issueId: issueTags.issueId })
-      .from(issueTags)
-      .where(eq(issueTags.tagId, targetId));
+    const existing = await getIssueIdsWithTag(targetId, database);
     const alreadyTagged = new Set(existing.map((r) => r.issueId));
 
     // Find issues tagged with any source tag that don't already have the target
-    const sourceAssociations = await database
-      .select({ issueId: issueTags.issueId })
-      .from(issueTags)
-      .where(inArray(issueTags.tagId, toMerge));
+    const sourceAssociations = await getIssueIdsByTagIds(toMerge, database);
 
     const toInsert = sourceAssociations
       .map((r) => r.issueId)
       .filter((id, idx, arr) => arr.indexOf(id) === idx && !alreadyTagged.has(id));
 
     if (toInsert.length > 0) {
-      await database.insert(issueTags).values(
-        toInsert.map((issueId) => ({ id: randomUUID(), issueId, tagId: targetId }))
+      await addIssueTagEntries(
+        toInsert.map((issueId) => ({ id: randomUUID(), issueId, tagId: targetId })),
+        database,
       );
     }
 
     // Remove source tag associations and delete source tags
-    await database.delete(issueTags).where(inArray(issueTags.tagId, toMerge));
-    await database.delete(tags).where(inArray(tags.id, toMerge));
+    await removeIssueTagsByTagIds(toMerge, database);
+    await deleteTagsByIds(toMerge, database);
 
     return c.json({ success: true, merged: toMerge.length });
   });
