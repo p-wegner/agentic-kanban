@@ -56,6 +56,7 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort }: 
         sessionManager,
         boardEvents,
         serverPort,
+        autoMergeEnabled: prefMap.get("auto_merge") === "true",
         monitorRecentActions: monitorState.recentActions,
         logMonitorAction,
         buildMonitorNudgePrompt,

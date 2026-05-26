@@ -27,6 +27,14 @@ export interface ProcessWorkspaceDeps {
   sessionManager: ReturnType<typeof createSessionManager>;
   boardEvents: ReturnType<typeof createBoardEvents>;
   serverPort: number;
+  /**
+   * Whether the monitor is allowed to auto-merge workspaces on its timer.
+   * Gated on the `auto_merge` preference being exactly "true". When false/unset,
+   * the monitor must NOT merge (leaving the workspace in its current state) so an
+   * operator can freeze automatic merging. Does NOT affect the manual
+   * `POST /api/workspaces/:id/merge` route, relaunch, auto-start, or nudge behavior.
+   */
+  autoMergeEnabled: boolean;
   monitorRecentActions: MonitorAction[];
   logMonitorAction: (recentActions: MonitorAction[], action: MonitorActionName, workspaceId: string, issueId: string) => void;
   buildMonitorNudgePrompt: (projectId: string) => Promise<string>;
@@ -58,6 +66,10 @@ export async function processWorkspaceCandidates(candidates: WorkspaceCandidate[
           console.log(`[monitor] Closed stale direct workspace ${ws.wsId}  issue moved to Done`);
           deps.boardEvents.broadcast(ws.projectId, "board_changed");
         } else if (ws.readyForMerge) {
+          if (!deps.autoMergeEnabled) {
+            console.log(`[monitor] Skipping auto-merge for idle+readyForMerge workspace ${ws.wsId}  auto_merge is disabled`);
+            continue;
+          }
           const mergeRes = await fetch(`http://localhost:${deps.serverPort}/api/workspaces/${ws.wsId}/merge`, { method: "POST" }).catch(() => null);
           if (!mergeRes || !mergeRes.ok) {
             const body = mergeRes ? await mergeRes.json().catch(() => ({})) : {};
@@ -104,6 +116,10 @@ export async function processWorkspaceCandidates(candidates: WorkspaceCandidate[
           logAction("mark_idle", ws.wsId, ws.issueId);
           deps.boardEvents.broadcast(ws.projectId, "board_changed");
         } else if (sess?.status === "stopped") {
+          if (!deps.autoMergeEnabled) {
+            console.log(`[monitor] Skipping auto-merge for reviewing+stopped workspace ${ws.wsId}  auto_merge is disabled`);
+            continue;
+          }
           await fetch(`http://localhost:${deps.serverPort}/api/workspaces/${ws.wsId}/merge`, { method: "POST" }).catch(() => {});
           stats.merged++;
           logAction("merge", ws.wsId, ws.issueId);
