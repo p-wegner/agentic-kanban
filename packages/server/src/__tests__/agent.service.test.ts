@@ -1,5 +1,4 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import type { ChildProcess } from "node:child_process";
 
 // Mock child_process before importing agent.service
 vi.mock("node:child_process", () => ({
@@ -17,38 +16,7 @@ vi.mock("node:fs", () => ({
 // Import after mocking
 import { launch, kill, killAll, sendInput, closeStdin, isStdinOpen, getProcess, agentState } from "../services/agent.service.js";
 import { spawn as spawnMock } from "node:child_process";
-
-function createMockProc(overrides: Partial<ChildProcess> = {}): ChildProcess {
-  const listeners: Record<string, Function[]> = {};
-  return {
-    pid: 12345,
-    stdin: {
-      end: vi.fn(),
-      write: vi.fn(() => true),
-      destroyed: false,
-    } as any,
-    stdout: {
-      on: vi.fn((event: string, cb: Function) => {
-        listeners[`stdout_${event}`] = listeners[`stdout_${event}`] || [];
-        listeners[`stdout_${event}`].push(cb);
-      }),
-    } as any,
-    stderr: {
-      on: vi.fn((event: string, cb: Function) => {
-        listeners[`stderr_${event}`] = listeners[`stderr_${event}`] || [];
-        listeners[`stderr_${event}`].push(cb);
-      }),
-    } as any,
-    on: vi.fn((event: string, cb: Function) => {
-      listeners[event] = listeners[event] || [];
-      listeners[event].push(cb);
-    }),
-    kill: vi.fn(),
-    killed: false,
-    unref: vi.fn(),
-    ...overrides,
-  } as any;
-}
+import { createMockProc } from "./helpers/mocks.js";
 
 describe("agent.service", () => {
   const originalAgentCommand = process.env.AGENT_COMMAND;
