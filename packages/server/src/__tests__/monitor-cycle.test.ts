@@ -37,6 +37,7 @@ function makeDeps(): ProcessWorkspaceDeps {
     sessionManager: { isProcessAlive: vi.fn(() => true) } as unknown as ProcessWorkspaceDeps["sessionManager"],
     boardEvents: { broadcast: vi.fn() } as unknown as ProcessWorkspaceDeps["boardEvents"],
     serverPort: 3001,
+    autoMergeEnabled: true,
     monitorRecentActions: [],
     logMonitorAction: vi.fn(),
     buildMonitorNudgePrompt: vi.fn().mockResolvedValue("nudge"),
@@ -147,5 +148,63 @@ describe("processWorkspaceCandidates — idle + readyForMerge=false", () => {
     expect(stats.merged).toBe(0);
     const calls = vi.mocked(fetch).mock.calls;
     expect(calls.some(([url]) => String(url).includes("/launch"))).toBe(true);
+  });
+});
+
+describe("processWorkspaceCandidates — auto_merge gating", () => {
+  it("does NOT merge an idle+readyForMerge workspace when autoMergeEnabled=false", async () => {
+    vi.mocked(fetch).mockResolvedValue({ ok: true } as Response);
+
+    const deps = { ...makeDeps(), autoMergeEnabled: false };
+    const stats = await processWorkspaceCandidates([baseCandidate], deps);
+
+    expect(stats.merged).toBe(0);
+    expect(stats.relaunched).toBe(0);
+    // No merge, fix-and-merge, or launch should be triggered  workspace is left as-is.
+    expect(vi.mocked(fetch)).not.toHaveBeenCalled();
+    expect(vi.mocked(deps.logMonitorAction)).not.toHaveBeenCalled();
+  });
+
+  it("merges an idle+readyForMerge workspace when autoMergeEnabled=true", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({ ok: true } as Response);
+
+    const deps = { ...makeDeps(), autoMergeEnabled: true };
+    const stats = await processWorkspaceCandidates([baseCandidate], deps);
+
+    expect(stats.merged).toBe(1);
+    const calls = vi.mocked(fetch).mock.calls;
+    expect(calls.some(([url]) => String(url).includes("/merge"))).toBe(true);
+  });
+
+  it("does NOT merge a reviewing+stopped workspace when autoMergeEnabled=false", async () => {
+    // Override the default session mock: this path needs a stopped session.
+    vi.mocked(db.select).mockReset();
+    vi.mocked(db.select)
+      .mockReturnValueOnce(makeSelectChain([{ id: "sess-1", status: "stopped", startedAt: new Date().toISOString() }]) as ReturnType<typeof db.select>)
+      .mockReturnValueOnce(makeSelectChain([{ count: 1 }]) as ReturnType<typeof db.select>);
+    vi.mocked(fetch).mockResolvedValue({ ok: true } as Response);
+
+    const deps = { ...makeDeps(), autoMergeEnabled: false };
+    const candidate: WorkspaceCandidate = { ...baseCandidate, wsStatus: "reviewing", readyForMerge: false };
+    const stats = await processWorkspaceCandidates([candidate], deps);
+
+    expect(stats.merged).toBe(0);
+    expect(vi.mocked(fetch)).not.toHaveBeenCalled();
+  });
+
+  it("merges a reviewing+stopped workspace when autoMergeEnabled=true", async () => {
+    vi.mocked(db.select).mockReset();
+    vi.mocked(db.select)
+      .mockReturnValueOnce(makeSelectChain([{ id: "sess-1", status: "stopped", startedAt: new Date().toISOString() }]) as ReturnType<typeof db.select>)
+      .mockReturnValueOnce(makeSelectChain([{ count: 1 }]) as ReturnType<typeof db.select>);
+    vi.mocked(fetch).mockResolvedValue({ ok: true } as Response);
+
+    const deps = { ...makeDeps(), autoMergeEnabled: true };
+    const candidate: WorkspaceCandidate = { ...baseCandidate, wsStatus: "reviewing", readyForMerge: false };
+    const stats = await processWorkspaceCandidates([candidate], deps);
+
+    expect(stats.merged).toBe(1);
+    const calls = vi.mocked(fetch).mock.calls;
+    expect(calls.some(([url]) => String(url).includes("/merge"))).toBe(true);
   });
 });
