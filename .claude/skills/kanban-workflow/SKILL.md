@@ -67,11 +67,20 @@ Some workspaces have `isDirect: true` — the agent is working directly on the p
 - **The system does NOT auto-review direct workspaces.** You must run a self-review subagent before committing (see step 5 below).
 - The absence of a feature branch is NOT a reason to leave the ticket in "In Progress" forever.
 
-### 5. Commit your changes
+### 5. Run tests and commit your changes
 **This is mandatory before finishing.** After implementation is complete:
-1. Stage and commit all changed files with a descriptive message
-2. The commit message should summarize the what and why
-3. Reference the issue in the commit if appropriate
+1. **Run tests** — for refactoring tasks, run only the tests relevant to changed files:
+   ```
+   pnpm --filter agentic-kanban test -- --related <changed-files>
+   ```
+   Pass the changed source files explicitly, or derive them from git:
+   ```
+   pnpm --filter agentic-kanban test -- --related $(git diff --name-only HEAD)
+   ```
+   Only run the full suite (`pnpm --filter agentic-kanban test`) when cross-cutting changes may affect unrelated tests, or as a final pre-commit check.
+2. Stage and commit all changed files with a descriptive message
+3. The commit message should summarize the what and why
+4. Reference the issue in the commit if appropriate
 
 Do NOT leave uncommitted changes in the worktree. If you have made changes, commit them before moving to the next step.
 
@@ -209,3 +218,4 @@ Shorthand for "review #N and merge if fine" — same workflow as above.
 7. **Description is a shared log** — write progress notes so the user can follow along without reading code.
 8. **Done means done** — code committed, tests green, review passed, no loose ends, no open questions.
 9. **Cancelled is not failure** — use it freely when scope changes.
+10. **Targeted tests for refactoring** — use `vitest --related <changed-files>` instead of the full suite when refactoring. It's faster and proves the changed code is covered without re-running unrelated tests.
