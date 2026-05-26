@@ -15,3 +15,15 @@ export async function parseJsonBody<T = any>(c: Context): Promise<T> {
     throw new HTTPException(400, { message: "invalid JSON body" });
   }
 }
+
+/**
+ * Parses the JSON request body, returning an empty object if the body is missing or invalid.
+ * Use for endpoints where the request body is entirely optional.
+ */
+export async function parseOptionalJsonBody<T = Record<string, unknown>>(c: Context): Promise<Partial<T>> {
+  try {
+    return (await c.req.json()) as T;
+  } catch {
+    return {};
+  }
+}
