@@ -26,7 +26,7 @@ type WorkspaceSummary = {
   main?: {
     id: string;
     branch: string;
-    status: "active" | "reviewing" | "fixing" | "idle" | "closed";
+    status: "active" | "reviewing" | "fixing" | "idle" | "error" | "closed";
     claudeProfile: string | null;
     profile?: { provider: ProviderName; name: string } | null;
     agentCommand: string | null;
@@ -132,7 +132,7 @@ export async function buildWorkspaceSummaryMap(
     summary.main = {
       id: mainWs.id,
       branch: mainWs.branch,
-      status: mainWs.status as "active" | "reviewing" | "fixing" | "idle" | "closed",
+      status: mainWs.status as "active" | "reviewing" | "fixing" | "idle" | "error" | "closed",
       claudeProfile: mainWs.claudeProfile,
       profile: mainWs.claudeProfile ? { provider: (mainWs.provider as ProviderName) ?? "claude", name: mainWs.claudeProfile } : null,
       agentCommand: mainWs.agentCommand,
