@@ -1,14 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import { Layout } from "../components/Layout.js";
 import { useTheme } from "../hooks/useTheme.js";
 import { GraphView } from "../components/GraphView.js";
 import { TableView } from "../components/TableView.js";
 import { AgentGrid } from "../components/AgentGrid.js";
-import { BoardColumn } from "../components/BoardColumn.js";
-import { CompletedGrid } from "../components/CompletedGrid.js";
+import { BoardErrorBoundary } from "../components/BoardErrorBoundary.js";
+import { BoardKanbanView } from "../components/BoardKanbanView.js";
 import { BoardStats } from "../components/BoardStats.js";
-import { CreateIssueForm } from "../components/CreateIssueForm.js";
+import { BoardToolbar, type ViewMode } from "../components/BoardToolbar.js";
 import { CreateIssuePanel } from "../components/CreateIssuePanel.js";
 import type { CreateIssueFormState } from "../components/CreateIssueForm.js";
 import { IssueDetailPanel } from "../components/IssueDetailPanel.js";
@@ -29,7 +28,7 @@ import { MoveToDoneDialog } from "../components/MoveToDoneDialog.js";
 import { sendDesktopNotification } from "../lib/desktop.js";
 import { registerAction } from "../lib/actions.js";
 import { QuickTasksPanel } from "../components/QuickTasksPanel.js";
-import { BacklogPanel } from "../components/BacklogPanel.js";
+import type { MonitorStatus } from "../components/MonitorPopover.js";
 import type {
   CreateIssueRequest,
   IssueWithStatus,
@@ -50,255 +49,6 @@ interface Project {
 const ARCHIVE_STATUS_NAMES = new Set(["Done", "Cancelled"]);
 const BACKLOG_STATUS_NAME = "Backlog";
 
-type MonitorAction = { at: string; action: "relaunch" | "merge" | "nudge" | "mark_idle" | "mark_dead" | "auto_start"; workspaceId: string; issueId: string };
-type MonitorStatus = { enabled: boolean; intervalMin: number; active: boolean; lastRun: { at: string; relaunched: number; merged: number; nudged: number } | null; nextRunAt: string | null; recentActions: MonitorAction[] };
-
-const ACTION_LABELS: Record<MonitorAction["action"], { label: string; color: string }> = {
-  relaunch:   { label: "Relaunched agent",  color: "text-blue-600" },
-  merge:      { label: "Triggered merge",   color: "text-purple-600" },
-  nudge:      { label: "Nudged agent",      color: "text-amber-600" },
-  mark_idle:  { label: "Marked idle",       color: "text-gray-500 dark:text-gray-400" },
-  mark_dead:  { label: "Marked dead",       color: "text-red-500" },
-  auto_start: { label: "Auto-started issue", color: "text-green-600" },
-};
-
-function MonitorPopover({ status, onClose, onOpenWorkspace, columns, onRunNow, autoMonitor, onToggle, interval, onIntervalChange, nudgeAutoStart, onNudgeAutoStartChange, nudgeWipLimit, onNudgeWipLimitChange }: { status: MonitorStatus | null; onClose: () => void; onOpenWorkspace: (workspaceId: string, issueId: string) => void; columns: StatusWithIssues[]; onRunNow: () => Promise<void>; autoMonitor: boolean; onToggle: () => void; interval: string; onIntervalChange: (v: string) => void; nudgeAutoStart: boolean; onNudgeAutoStartChange: (v: boolean) => void; nudgeWipLimit: string; onNudgeWipLimitChange: (v: string) => void }) {
-  const [now, setNow] = useState(Date.now());
-  const [running, setRunning] = useState(false);
-
-  async function handleRunNow() {
-    setRunning(true);
-    try { await onRunNow(); } finally { setRunning(false); }
-  }
-
-  useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(t);
-  }, []);
-
-  useEffect(() => {
-    function handler(e: KeyboardEvent) { if (e.key === "Escape") onClose(); }
-    document.addEventListener("keydown", handler);
-    return () => document.removeEventListener("keydown", handler);
-  }, [onClose]);
-
-  function formatCountdown(isoStr: string) {
-    const ms = new Date(isoStr).getTime() - now;
-    if (ms <= 0) return "now";
-    const s = Math.floor(ms / 1000);
-    const m = Math.floor(s / 60);
-    const rem = s % 60;
-    return m > 0 ? `${m}m ${rem}s` : `${rem}s`;
-  }
-
-  function formatAge(isoStr: string) {
-    const s = Math.floor((now - new Date(isoStr).getTime()) / 1000);
-    if (s < 60) return `${s}s ago`;
-    const m = Math.floor(s / 60);
-    if (m < 60) return `${m}m ago`;
-    return `${Math.floor(m / 60)}h ago`;
-  }
-
-  const activeWs = columns.flatMap(c => c.issues).filter(iss =>
-    iss.workspaceSummary?.main &&
-    (iss.workspaceSummary.main.status === "active" || iss.workspaceSummary.main.status === "reviewing" || iss.workspaceSummary.main.status === "fixing") &&
-    iss.workspaceSummary.main.lastAssistantMessage
-  );
-
-  return createPortal(
-    <>
-      <div className="fixed inset-0 z-40" onClick={onClose} />
-      <div
-        id="monitor-popover"
-        className="fixed z-50 left-0 top-0 bottom-0 w-72 bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-700 shadow-xl text-xs flex flex-col"
-      >
-        {/* Header */}
-        <div className="px-3 py-2.5 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between shrink-0 rounded-t-xl bg-gray-50 dark:bg-gray-950">
-          <div className="flex items-center gap-2">
-            <div className={`w-2 h-2 rounded-full shrink-0 ${autoMonitor ? "bg-green-500 animate-pulse" : "bg-gray-300 dark:bg-gray-600"}`} />
-            <span className="font-semibold text-gray-800 dark:text-gray-200 text-[13px]">Board Monitor</span>
-            {autoMonitor && status?.nextRunAt && (
-              <span className="text-gray-400 dark:text-gray-500 text-[10px] font-mono">in {formatCountdown(status.nextRunAt)}</span>
-            )}
-          </div>
-          <div className="flex items-center gap-1.5">
-            <button
-              onClick={handleRunNow}
-              disabled={running}
-              className="flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-              title="Run monitor cycle now"
-            >
-              {running ? (
-                <svg className="w-3 h-3 animate-spin" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>
-              ) : (
-                <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path strokeLinecap="round" strokeLinejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 010 1.972l-11.54 6.347a1.125 1.125 0 01-1.667-.986V5.653z"/></svg>
-              )}
-              {running ? "Running" : "Run now"}
-            </button>
-            <button onClick={onClose} className="text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 transition-colors p-1 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700" title="Close">
-              <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
-            </button>
-          </div>
-        </div>
-
-        {/* Scrollable body */}
-        <div className="overflow-y-auto flex-1 min-h-0">
-
-          {/* Auto-monitor toggle row */}
-          <div className="px-3 py-2.5 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <span className="font-medium text-gray-700 dark:text-gray-300">Auto-monitor</span>
-              {autoMonitor && status?.active && (
-                <span className="px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 text-[10px] font-medium">running</span>
-              )}
-            </div>
-            <button
-              onClick={onToggle}
-              className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-emerald-400 focus:ring-offset-1 ${autoMonitor ? "bg-emerald-500" : "bg-gray-200 dark:bg-gray-600"}`}
-              title={autoMonitor ? "Disable auto-monitor" : "Enable auto-monitor"}
-            >
-              <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${autoMonitor ? "translate-x-[1.125rem]" : "translate-x-0.5"}`} />
-            </button>
-          </div>
-
-          {/* Active agents */}
-          {activeWs.length > 0 && (
-            <div className="border-b border-gray-100 dark:border-gray-800">
-              <div className="px-3 pt-2.5 pb-1 flex items-center gap-1.5">
-                <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">Active agents</span>
-                <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-emerald-100 text-emerald-700 text-[10px] font-bold">{activeWs.length}</span>
-              </div>
-              <div className="overflow-y-auto" style={{ maxHeight: "11rem" }}>
-                {activeWs.map(iss => (
-                  <div
-                    key={iss.id}
-                    className="cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 px-3 py-2 transition-colors border-t border-gray-50 dark:border-gray-800/50 first:border-t-0 group"
-                    onClick={() => { onOpenWorkspace(iss.workspaceSummary!.main!.id, iss.id); onClose(); }}
-                  >
-                    <div className="flex items-start gap-2">
-                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0 animate-pulse mt-1.5" />
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-baseline gap-1 mb-0.5">
-                          <span className="font-semibold text-gray-600 dark:text-gray-400 shrink-0 text-[11px]">#{iss.issueNumber}</span>
-                          <span className="text-gray-700 dark:text-gray-300 truncate text-[11px] font-medium">{iss.title}</span>
-                        </div>
-                        <p className="text-gray-400 dark:text-gray-500 leading-snug line-clamp-1 text-[10px]">{iss.workspaceSummary!.main!.lastAssistantMessage}</p>
-                      </div>
-                      <svg className="w-3 h-3 text-gray-300 dark:text-gray-600 group-hover:text-gray-500 dark:group-hover:text-gray-400 shrink-0 mt-1 transition-colors" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7"/></svg>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Last run summary */}
-          <div className="px-3 py-2.5 border-b border-gray-100 dark:border-gray-800">
-            <div className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500 mb-2">Last run</div>
-            {status?.lastRun ? (
-              <div className="space-y-1.5">
-                <div className="text-gray-400 dark:text-gray-500 text-[11px]">{formatAge(status.lastRun.at)}</div>
-                <div className="flex flex-wrap gap-1">
-                  {status.lastRun.relaunched > 0 && (
-                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-blue-50 dark:bg-blue-950 text-blue-700 font-medium text-[11px]">
-                      <span className="w-1 h-1 rounded-full bg-blue-400 shrink-0" />{status.lastRun.relaunched} relaunched
-                    </span>
-                  )}
-                  {status.lastRun.merged > 0 && (
-                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-purple-50 dark:bg-purple-950 text-purple-700 font-medium text-[11px]">
-                      <span className="w-1 h-1 rounded-full bg-purple-400 shrink-0" />{status.lastRun.merged} merged
-                    </span>
-                  )}
-                  {status.lastRun.nudged > 0 && (
-                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-amber-50 dark:bg-amber-950 text-amber-700 font-medium text-[11px]">
-                      <span className="w-1 h-1 rounded-full bg-amber-400 shrink-0" />{status.lastRun.nudged} nudged
-                    </span>
-                  )}
-                  {status.lastRun.relaunched === 0 && status.lastRun.merged === 0 && status.lastRun.nudged === 0 && (
-                    <span className="text-gray-400 dark:text-gray-500 text-[11px]">No actions needed</span>
-                  )}
-                </div>
-              </div>
-            ) : (
-              <div className="text-gray-400 dark:text-gray-500 text-[11px]">No runs yet this session</div>
-            )}
-          </div>
-
-          {/* Recent actions */}
-          {status?.recentActions && status.recentActions.length > 0 && (
-            <div className="px-3 py-2.5 border-b border-gray-100 dark:border-gray-800">
-              <div className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500 mb-1.5">Recent actions</div>
-              <div className="space-y-0.5">
-                {status.recentActions.map((a, i) => {
-                  const meta = ACTION_LABELS[a.action];
-                  const issue = columns.flatMap(c => c.issues).find(iss => iss.id === a.issueId);
-                  return (
-                    <div
-                      key={i}
-                      className="flex items-center gap-2 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-md px-1.5 -mx-1.5 py-1 transition-colors"
-                      onClick={() => { onOpenWorkspace(a.workspaceId, a.issueId); onClose(); }}
-                    >
-                      <span className={`${meta.color} font-medium truncate flex-1 text-[11px]`}>{meta.label}</span>
-                      {issue && <span className="text-gray-500 dark:text-gray-400 shrink-0 text-[11px]">#{issue.issueNumber}</span>}
-                      <span className="text-gray-400 dark:text-gray-500 shrink-0 text-[10px] font-mono">{formatAge(a.at)}</span>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
-          {/* Settings */}
-          <div className="px-3 py-2.5 space-y-2.5 rounded-b-xl">
-            <div className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">Settings</div>
-            <div className="flex items-center gap-2">
-              <label className="text-gray-500 dark:text-gray-400 flex-1 text-[11px]">Check interval</label>
-              <div className="flex items-center gap-1.5">
-                <input
-                  type="number"
-                  min={1}
-                  max={60}
-                  value={interval}
-                  onChange={(e) => onIntervalChange(e.target.value)}
-                  disabled={!autoMonitor}
-                  className="w-12 border border-gray-200 dark:border-gray-700 rounded-md px-2 py-1 text-center text-[11px] focus:outline-none focus:ring-1 focus:ring-emerald-400 disabled:opacity-40 disabled:bg-gray-50 dark:disabled:bg-gray-800"
-                />
-                <span className="text-gray-500 dark:text-gray-400 text-[11px]">min</span>
-              </div>
-            </div>
-            <div className="flex items-center justify-between gap-2">
-              <span className={`text-gray-600 dark:text-gray-400 text-[11px] ${!autoMonitor ? "opacity-40" : ""}`}>Auto-start unblocked todos</span>
-              <button
-                onClick={() => onNudgeAutoStartChange(!nudgeAutoStart)}
-                disabled={!autoMonitor}
-                className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors focus:outline-none disabled:opacity-40 ${nudgeAutoStart && autoMonitor ? "bg-emerald-500" : "bg-gray-200 dark:bg-gray-600"}`}
-              >
-                <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${nudgeAutoStart ? "translate-x-[1.125rem]" : "translate-x-0.5"}`} />
-              </button>
-            </div>
-            {nudgeAutoStart && autoMonitor && (
-              <div className="flex items-center gap-2 pl-2.5 border-l-2 border-emerald-200 dark:border-green-800 ml-0.5">
-                <label className="text-gray-500 dark:text-gray-400 flex-1 text-[11px]">WIP limit</label>
-                <div className="flex items-center gap-1.5">
-                  <input
-                    type="number"
-                    min={1}
-                    max={20}
-                    value={nudgeWipLimit}
-                    onChange={(e) => onNudgeWipLimitChange(e.target.value)}
-                    className="w-12 border border-gray-200 dark:border-gray-700 rounded-md px-2 py-1 text-center text-[11px] focus:outline-none focus:ring-1 focus:ring-emerald-400"
-                  />
-                  <span className="text-gray-500 dark:text-gray-400 text-[11px]">in progress</span>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-    </>,
-    document.body
-  );
-}
 
 export function BoardPage() {
   const { theme, setTheme, isDark } = useTheme();
@@ -342,7 +92,7 @@ export function BoardPage() {
   const pendingGRef = useRef(false);
   const pendingGTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [expandedCreatePanel, setExpandedCreatePanel] = useState<{ statusId: string; statusName: string; state: Partial<CreateIssueFormState> } | null>(null);
-  const [viewMode, setViewMode] = useState<"kanban" | "graph" | "table" | "agents">("kanban");
+  const [viewMode, setViewMode] = useState<ViewMode>("kanban");
   const [dynamicColumnScaling, setDynamicColumnScaling] = useState(false);
   const [columnWidths, setColumnWidths] = useState<Record<string, number>>(() => {
     try { return JSON.parse(localStorage.getItem("kanban-column-widths") ?? "{}"); } catch { return {}; }
@@ -381,7 +131,6 @@ export function BoardPage() {
   const [nudgeAutoStart, setNudgeAutoStart] = useState(false);
   const [nudgeWipLimit, setNudgeWipLimit] = useState("5");
   const [monitorStatus, setMonitorStatus] = useState<MonitorStatus | null>(null);
-  const [showMonitorPopover, setShowMonitorPopover] = useState(false);
   const [monitorRunning, setMonitorRunning] = useState(false);
   const [moveToDonePending, setMoveToDonePending] = useState<{ issue: IssueWithStatus; confirm: () => Promise<void> } | null>(null);
   const [pendingWorkspaceIssueIds, setPendingWorkspaceIssueIds] = useState<Set<string>>(new Set());
@@ -797,6 +546,14 @@ export function BoardPage() {
     }));
     e.dataTransfer.effectAllowed = "move";
   }
+
+  const handleBoardDragStart = useCallback((e: React.DragEvent, issue: IssueWithStatus) => {
+    (window as unknown as Record<string, unknown>).__dragData = {
+      issueId: issue.id,
+      sourceStatusId: issue.statusId,
+    };
+    handleDragStart(e, issue);
+  }, []);
 
   async function handleDrop(targetStatusId: string, sortOrder?: number) {
     try {
@@ -1395,215 +1152,102 @@ export function BoardPage() {
           showBlocked={showBlocked}
           onToggleBlocked={() => setShowBlocked((v) => !v)}
         />
-        <div className="flex items-start gap-2 flex-wrap">
-          {backlogColumn !== undefined && (
-            <BacklogPanel
-              backlogColumn={backlogColumn}
-              activeColumns={activeColumns}
-              searchQuery={searchQuery}
-              onIssueClick={handleIssueClick}
-              onMoved={() => refetchBoard()}
-            />
-          )}
-          <button
-            onClick={() => setShowQuickTasks(true)}
-            title="Quick Tasks - run a skill directly on the current checkout (t)"
-            className="shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium border transition-colors bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800"
-          >
-            <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-              <polygon points="5,3 19,12 5,21" />
-            </svg>
-            Tasks
-          </button>
-          <div className="relative shrink-0 flex items-center gap-0.5">
-            <button
-              onClick={() => setShowMonitorPopover(v => !v)}
-              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium border transition-colors ${autoMonitor ? "bg-green-50 dark:bg-green-950 border-green-200 dark:border-green-800 text-green-700 hover:bg-green-100 dark:hover:bg-green-900" : "bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800"}`}
-              title={autoMonitor ? "Board monitor active — click for details" : "Board monitor — click to configure"}
-            >
-              {autoMonitor && <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />}
-              Monitor
-            </button>
-            <button
-              onClick={handleMonitorRunNow}
-              disabled={monitorRunning}
-              className="flex items-center justify-center w-6 h-6 rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800 hover:text-gray-700 dark:hover:text-gray-200 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-              title="Run monitor now and reset timer"
-            >
-              {monitorRunning
-                ? <svg className="w-3 h-3 animate-spin" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>
-                : <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path strokeLinecap="round" strokeLinejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 010 1.972l-11.54 6.347a1.125 1.125 0 01-1.667-.986V5.653z"/></svg>
-              }
-            </button>
-            {showMonitorPopover && <MonitorPopover status={monitorStatus} onClose={() => setShowMonitorPopover(false)} onOpenWorkspace={(workspaceId, issueId) => { const issue = columns.flatMap(c => c.issues).find(i => i.id === issueId); if (issue) setWorkspaceIssue(issue); setWorkspaceInitial({ workspaceId, sessionId: "" }); }} columns={columns} onRunNow={handleMonitorRunNow} autoMonitor={autoMonitor} onToggle={toggleAutoMonitor} interval={autoMonitorInterval} onIntervalChange={handleIntervalChange} nudgeAutoStart={nudgeAutoStart} onNudgeAutoStartChange={handleNudgeAutoStartChange} nudgeWipLimit={nudgeWipLimit} onNudgeWipLimitChange={handleNudgeWipLimitChange} />}
-          </div>
-          <div className="flex items-center gap-1 border border-gray-200 dark:border-gray-700 rounded-md p-0.5 bg-white dark:bg-gray-900 shrink-0">
-            <button
-              onClick={() => setViewMode("kanban")}
-              className={`px-2.5 py-1 text-xs rounded flex items-center gap-1.5 transition-colors ${viewMode === "kanban" ? "bg-blue-600 text-white" : "text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700"}`}
-              title="Kanban view"
-            >
-              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <rect x="3" y="3" width="5" height="18" rx="1" />
-                <rect x="10" y="3" width="5" height="14" rx="1" />
-                <rect x="17" y="3" width="5" height="10" rx="1" />
-              </svg>
-              Board
-            </button>
-            <button
-              onClick={() => setViewMode("graph")}
-              className={`px-2.5 py-1 text-xs rounded flex items-center gap-1.5 transition-colors ${viewMode === "graph" ? "bg-blue-600 text-white" : "text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700"}`}
-              title="Graph view"
-            >
-              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <circle cx="5" cy="12" r="2" />
-                <circle cx="19" cy="5" r="2" />
-                <circle cx="19" cy="19" r="2" />
-                <path d="M7 12h6M15 6.5l-4 4M15 17.5l-4-4" />
-              </svg>
-              Graph
-            </button>
-            <button
-              onClick={() => setViewMode("table")}
-              className={`px-2.5 py-1 text-xs rounded flex items-center gap-1.5 transition-colors ${viewMode === "table" ? "bg-blue-600 text-white" : "text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700"}`}
-              title="Table view"
-            >
-              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path d="M3 6h18M3 12h18M3 18h18M8 6v12" />
-              </svg>
-              Table
-            </button>
-            <button
-              onClick={() => setViewMode("agents")}
-              className={`px-2.5 py-1 text-xs rounded flex items-center gap-1.5 transition-colors ${viewMode === "agents" ? "bg-blue-600 text-white" : "text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700"}`}
-              title="Agents view (l)"
-            >
-              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <circle cx="12" cy="8" r="4" />
-                <path d="M6 20v-2a6 6 0 0 1 12 0v2" />
-                <circle cx="12" cy="8" r="1.5" fill="currentColor" stroke="none" />
-              </svg>
-              Agents
-            </button>
-          </div>
-        </div>
+        <BoardToolbar
+          backlogColumn={backlogColumn}
+          activeColumns={activeColumns}
+          searchQuery={searchQuery}
+          onIssueClick={handleIssueClick}
+          onBacklogMoved={() => refetchBoard()}
+          onShowQuickTasks={() => setShowQuickTasks(true)}
+          autoMonitor={autoMonitor}
+          monitorRunning={monitorRunning}
+          onMonitorRunNow={handleMonitorRunNow}
+          monitorStatus={monitorStatus}
+          onToggleAutoMonitor={toggleAutoMonitor}
+          autoMonitorInterval={autoMonitorInterval}
+          onIntervalChange={handleIntervalChange}
+          nudgeAutoStart={nudgeAutoStart}
+          onNudgeAutoStartChange={handleNudgeAutoStartChange}
+          nudgeWipLimit={nudgeWipLimit}
+          onNudgeWipLimitChange={handleNudgeWipLimitChange}
+          columns={columns}
+          onOpenWorkspace={(workspaceId, issueId) => {
+            const issue = columns.flatMap(c => c.issues).find(i => i.id === issueId);
+            if (issue) setWorkspaceIssue(issue);
+            setWorkspaceInitial({ workspaceId, sessionId: "" });
+          }}
+          viewMode={viewMode}
+          onViewModeChange={setViewMode}
+        />
         {viewMode === "graph" && activeProjectId ? (
           <div className="flex-1 min-h-0">
-            <GraphView
-              columns={columns}
-              projectId={activeProjectId}
-              onIssueClick={handleIssueClick}
-              searchQuery={searchQuery}
-            />
+            <BoardErrorBoundary columnName="Graph View">
+              <GraphView
+                columns={columns}
+                projectId={activeProjectId}
+                onIssueClick={handleIssueClick}
+                searchQuery={searchQuery}
+              />
+            </BoardErrorBoundary>
           </div>
         ) : null}
         {viewMode === "table" && (
-          <TableView
-            columns={columns}
-            onIssueClick={handleIssueClick}
-            searchQuery={searchQuery}
-          />
+          <BoardErrorBoundary columnName="Table View">
+            <TableView
+              columns={columns}
+              onIssueClick={handleIssueClick}
+              searchQuery={searchQuery}
+            />
+          </BoardErrorBoundary>
         )}
         {viewMode === "agents" && (
-          <AgentGrid
-            columns={columns}
-            liveActivity={sessionActivity}
-            liveStats={liveStats}
-            sessionTodos={sessionTodos}
-            onIssueClick={handleIssueClick}
-            onWorkspaceClick={handleManageWorkspaces}
-          />
-        )}
-        {viewMode === "kanban" && activeColumns.length > 1 && (
-          <div className="flex sm:hidden gap-1 overflow-x-auto scrollbar-hide shrink-0">
-            {activeColumns.map((col) => (
-              <button
-                key={col.id}
-                onClick={() => {
-                  document.getElementById(`column-${col.id}`)?.scrollIntoView({ behavior: "smooth", inline: "start", block: "nearest" });
-                }}
-                className="shrink-0 px-3 py-1 text-xs rounded-full border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-600 dark:text-gray-400 hover:bg-blue-50 dark:hover:bg-blue-950 hover:border-blue-300 hover:text-blue-700 transition-colors"
-              >
-                {col.name}
-                <span className="ml-1 text-gray-400 dark:text-gray-500">{col.issues.length}</span>
-              </button>
-            ))}
-          </div>
-        )}
-        {viewMode === "kanban" && <div className="flex gap-0 flex-1 min-h-0 overflow-x-auto board-columns-scroll">
-          {activeColumns.map((col, colIdx) => (
-            <BoardColumn
-              key={col.id}
-              column={col}
-              style={
-                columnWidths[col.id]
-                  ? undefined
-                  : dynamicColumnScaling
-                    ? { flexGrow: Math.max(1, col.issues.length) }
-                    : colIdx === activeColumns.length - 1 && Object.keys(columnWidths).length === 0
-                      ? { flexGrow: 1 }
-                      : undefined
-              }
-              width={columnWidths[col.id]}
-              onResizeStart={colIdx < activeColumns.length - 1 ? (e) => handleColumnResizeStart(col.id, e) : undefined}
-              onResizeReset={colIdx < activeColumns.length - 1 ? () => setColumnWidths((prev) => {
-                const next = { ...prev };
-                delete next[col.id];
-                try { localStorage.setItem("kanban-column-widths", JSON.stringify(next)); } catch {}
-                return next;
-              }) : undefined}
-              projectId={activeProjectId}
-              creatingInColumn={creatingInColumnId}
-              onCreateClick={setCreatingInColumnId}
-              onCreateCancel={() => setCreatingInColumnId(null)}
-              onIssueClick={handleIssueClick}
-              onWorkspaceClick={handleManageWorkspaces}
-              onStartWorkspace={handleStartWorkspace}
-              onDragStart={(e, issue) => {
-                (window as unknown as Record<string, unknown>).__dragData = {
-                  issueId: issue.id,
-                  sourceStatusId: issue.statusId,
-                };
-                handleDragStart(e, issue);
-              }}
-              onDrop={handleDrop}
-              onMoveToNext={handleMoveToNext}
-              allColumns={columns}
-              searchQuery={searchQuery}
-              sessionActivity={sessionActivity}
+          <BoardErrorBoundary columnName="Agents View">
+            <AgentGrid
+              columns={columns}
+              liveActivity={sessionActivity}
               liveStats={liveStats}
               sessionTodos={sessionTodos}
-              pendingWorkspaceIssueIds={pendingWorkspaceIssueIds}
-            >
-              <CreateIssueForm
-                projectId={activeProjectId}
-                statusId={col.id}
-                onSubmit={handleCreateIssue}
-                onCancel={() => setCreatingInColumnId(null)}
-                canStartWorkspace={canStartWorkspace}
-                onExpand={(state) => {
-                  setCreatingInColumnId(null);
-                  setExpandedCreatePanel({ statusId: col.id, statusName: col.name, state });
-                }}
-              />
-            </BoardColumn>
-          ))}
-        </div>}
-        {viewMode === "kanban" && <CompletedGrid
-          columns={archiveColumns}
-          collapsed={collapsedGroups.has("archive")}
-          onToggle={() => toggleGroup("archive")}
-          onIssueClick={handleIssueClick}
-          onDragStart={(e, issue) => {
-            (window as unknown as Record<string, unknown>).__dragData = {
-              issueId: issue.id,
-              sourceStatusId: issue.statusId,
-            };
-            handleDragStart(e, issue);
-          }}
-          onDrop={handleDrop}
-          searchQuery={searchQuery}
-        />}
+              onIssueClick={handleIssueClick}
+              onWorkspaceClick={handleManageWorkspaces}
+            />
+          </BoardErrorBoundary>
+        )}
+        {viewMode === "kanban" && (
+          <BoardKanbanView
+            activeColumns={activeColumns}
+            archiveColumns={archiveColumns}
+            allColumns={columns}
+            projectId={activeProjectId}
+            columnWidths={columnWidths}
+            dynamicColumnScaling={dynamicColumnScaling}
+            creatingInColumnId={creatingInColumnId}
+            searchQuery={searchQuery}
+            sessionActivity={sessionActivity}
+            liveStats={liveStats}
+            sessionTodos={sessionTodos}
+            pendingWorkspaceIssueIds={pendingWorkspaceIssueIds}
+            collapsedArchive={collapsedGroups.has("archive")}
+            canStartWorkspace={canStartWorkspace}
+            onToggleArchive={() => toggleGroup("archive")}
+            onCreateClick={setCreatingInColumnId}
+            onCreateCancel={() => setCreatingInColumnId(null)}
+            onIssueClick={handleIssueClick}
+            onWorkspaceClick={handleManageWorkspaces}
+            onStartWorkspace={handleStartWorkspace}
+            onDragStart={handleBoardDragStart}
+            onDrop={handleDrop}
+            onMoveToNext={handleMoveToNext}
+            onColumnResizeStart={handleColumnResizeStart}
+            onColumnResizeReset={(colId) => setColumnWidths((prev) => {
+              const next = { ...prev };
+              delete next[colId];
+              try { localStorage.setItem("kanban-column-widths", JSON.stringify(next)); } catch {}
+              return next;
+            })}
+            onCreateIssue={handleCreateIssue}
+            onExpandCreate={(statusId, statusName, state) => setExpandedCreatePanel({ statusId, statusName, state })}
+          />
+        )}
       </div>
       {selectedIssue && (
         <IssueDetailPanel
