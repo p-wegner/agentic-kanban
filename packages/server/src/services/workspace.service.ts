@@ -91,6 +91,8 @@ export interface CreateWorkspaceInput {
   skillId?: string;
   profile?: { provider?: string; name?: string };
   claudeProfile?: string;
+  /** Claude model tier (e.g. "opus"). Falls back to the default_model preference when omitted. */
+  model?: string;
 }
 
 export interface CreateWorkspaceResult {
@@ -256,7 +258,7 @@ export function createWorkspaceService(deps: {
     return skill.name;
   }
 
-  async function buildAgentConfig(input: Pick<CreateWorkspaceInput, "profile" | "claudeProfile">): Promise<{
+  async function buildAgentConfig(input: Pick<CreateWorkspaceInput, "profile" | "claudeProfile" | "model">): Promise<{
     agentCommand: string | undefined;
     agentArgs: string | undefined;
     claudeProfile: string | undefined;
@@ -264,6 +266,7 @@ export function createWorkspaceService(deps: {
     resolvedProvider: ProviderName;
     resolvedProfileSelection: { provider: ProviderName; name: string } | undefined;
     permissionPromptTool: string | undefined;
+    model: string | undefined;
   }> {
     const prefRows = await database.select().from(preferences);
     const prefMap = new Map(prefRows.map(r => [r.key, r.value]));
@@ -289,7 +292,12 @@ export function createWorkspaceService(deps: {
     const { agentCommand, agentArgs, claudeProfile: resolvedProfile, profile: resolvedProfileSelection, provider, permissionPromptTool } = resolveAgentSettings(prefMap);
     const claudeProfile = resolvedProfileSelection?.name || legacyProfileOverride || prefMap.get("claude_profile") || undefined;
 
-    return { agentCommand, agentArgs, claudeProfile, resolvedProfile, resolvedProvider: provider, resolvedProfileSelection, permissionPromptTool };
+    // Model is Claude-only. Per-request model wins; otherwise fall back to the default_model preference.
+    const model = provider === "claude"
+      ? ((input.model ?? prefMap.get("default_model")) || undefined)
+      : undefined;
+
+    return { agentCommand, agentArgs, claudeProfile, resolvedProfile, resolvedProvider: provider, resolvedProfileSelection, permissionPromptTool, model };
   }
 
   async function insertWorkspaceRecord(params: {
@@ -308,6 +316,7 @@ export function createWorkspaceService(deps: {
     claudeProfile: string | undefined;
     agentCommand: string | undefined;
     resolvedProvider: ProviderName;
+    model: string | undefined;
     now: string;
   }): Promise<void> {
     await database.insert(workspaces).values({
@@ -327,6 +336,7 @@ export function createWorkspaceService(deps: {
       claudeProfile: params.claudeProfile ?? null,
       agentCommand: params.agentCommand ?? null,
       provider: params.resolvedProvider,
+      model: params.model ?? null,
       createdAt: params.now,
       updatedAt: params.now,
     });
@@ -344,6 +354,7 @@ export function createWorkspaceService(deps: {
     planMode: boolean;
     resolvedProvider: ProviderName;
     resolvedProfileSelection: { provider: ProviderName; name: string } | undefined;
+    model: string | undefined;
     skillName: string | null;
   }): Promise<string | undefined> {
     if (!getSessionManager) return undefined;
@@ -361,6 +372,7 @@ export function createWorkspaceService(deps: {
       provider: executorProvider,
       triggerType: params.skillName ? `skill:${params.skillName}` : "agent",
       profile: params.resolvedProfileSelection,
+      model: params.model,
     });
   }
 
@@ -478,7 +490,7 @@ export function createWorkspaceService(deps: {
       await insertWorkspaceRecord({
         id, issueId: input.issueId, branch, worktreePath, baseBranch, isDirect,
         baseCommitSha, requiresReview, thoroughReview, planMode, includeVisualProof,
-        skillId, claudeProfile, agentCommand, resolvedProvider, now,
+        skillId, claudeProfile, agentCommand, resolvedProvider, model: agentConfig.model, now,
       });
 
       await moveIssueToInProgress(input.issueId, issue.projectId, now, database);
@@ -490,6 +502,7 @@ export function createWorkspaceService(deps: {
         permissionPromptTool: agentConfig.permissionPromptTool,
         planMode, resolvedProvider,
         resolvedProfileSelection: agentConfig.resolvedProfileSelection,
+        model: agentConfig.model,
         skillName,
       });
 

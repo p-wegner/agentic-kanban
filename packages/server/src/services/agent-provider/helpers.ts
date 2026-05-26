@@ -98,6 +98,24 @@ const PROFILE_OWNED_ENV_VARS = [
   "API_TIMEOUT_MS",
 ];
 
+/**
+ * True if the Claude profile's settings.json defines a custom `ANTHROPIC_BASE_URL` (e.g. z.ai/glm).
+ * Such profiles route to a non-Anthropic endpoint that doesn't understand Claude model aliases, so
+ * the `--model` flag must be omitted — the profile's own `ANTHROPIC_MODEL` env decides the model.
+ */
+export function profileDefinesCustomEndpoint(profileName: string | undefined, fs: FileSystem = nodeFileSystem): boolean {
+  if (!profileName) return false;
+  const settingsPath = join(homedir(), ".claude", `settings_${profileName}.json`);
+  if (!fs.existsSync(settingsPath)) return false;
+  try {
+    const profileSettings = JSON.parse(fs.readFileSync(settingsPath, "utf-8"));
+    const env = profileSettings.env as Record<string, string> | undefined;
+    return !!(env && typeof env === "object" && env.ANTHROPIC_BASE_URL);
+  } catch {
+    return false;
+  }
+}
+
 export function buildSpawnEnv(claudeProfile?: string, fs: FileSystem = nodeFileSystem): Record<string, string> {
   const spawnEnv: Record<string, string> = { ...process.env as Record<string, string> };
 
