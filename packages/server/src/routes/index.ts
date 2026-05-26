@@ -12,6 +12,7 @@ import type { Database } from "../db/index.js";
 import type { SessionManager } from "../services/session.manager.js";
 import type { BoardEvents } from "../services/board-events.js";
 import { createRouter } from "../middleware/create-router.js";
+import { parseOptionalJsonBody } from "../middleware/parse-body.js";
 
 interface RouteOptions {
   boardEvents?: BoardEvents;
@@ -38,15 +39,11 @@ export function createRoutes(database: Database, getSessionManager: () => Sessio
     if (!options?.boardEvents) {
       return c.json({ ok: true, note: "no boardEvents" }, 200);
     }
-    try {
-      const body = await c.req.json<{ projectId?: string; reason?: string }>();
-      if (body.projectId) {
-        options.boardEvents.broadcast(body.projectId, body.reason ?? "internal_notify");
-      }
-      return c.json({ ok: true });
-    } catch {
-      return c.json({ ok: true, note: "invalid body" }, 200);
+    const body = await parseOptionalJsonBody<{ projectId?: string; reason?: string }>(c);
+    if (body.projectId) {
+      options.boardEvents.broadcast(body.projectId, body.reason ?? "internal_notify");
     }
+    return c.json({ ok: true });
   });
 
   return routes;
