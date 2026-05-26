@@ -13,6 +13,7 @@ import { setupProcessHandlers } from "./startup/process-handlers.js";
 import { setupRoutes } from "./startup/route-setup.js";
 import { setupScheduledTasks } from "./startup/scheduled-tasks.js";
 import { runStartupTasks } from "./startup/startup-tasks.js";
+import { runSessionRestore } from "./startup/session-restore.js";
 import { domainErrorHandler } from "./middleware/error-handler.js";
 
 export async function startServer(port?: number, hostname?: string) {
@@ -39,6 +40,7 @@ export async function startServer(port?: number, hostname?: string) {
   runWorkflowOnExit = workflow.runWorkflowOnExit;
 
   await runStartupTasks(sessionManager, { agentService });
+  await runSessionRestore(workflow);
   setupRoutes(app, { sessionManager, boardEvents, reviewSessionIds: workflow.reviewSessionIds, fixAndMergeSessionIds: workflow.fixAndMergeSessionIds, db });
 
   const serverPort = port || Number(process.env.PORT) || 3001;
