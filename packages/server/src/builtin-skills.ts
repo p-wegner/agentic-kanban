@@ -324,8 +324,16 @@ Use the description field as a shared progress log — update with blockers, dec
 ### 3b. Direct workspaces (isDirect: true)
 No separate branch — changes go directly to the default branch. You must still move issue status. The system does NOT auto-review direct workspaces — run a self-review subagent before marking Done.
 
-### 4. Commit your changes
-Mandatory before finishing. Stage and commit all changed files with a descriptive message.
+### 4. Run tests and commit your changes
+Mandatory before finishing. For refactoring tasks, run only the tests that cover changed files:
+\`\`\`
+# targeted (preferred for refactoring):
+pnpm --filter agentic-kanban test -- --related <changed-files>
+# or derive from git:
+pnpm --filter agentic-kanban test -- --related $(git diff --name-only HEAD)
+\`\`\`
+Use the full suite only when cross-cutting changes may affect unrelated tests.
+Stage and commit all changed files with a descriptive message.
 
 ### 5. Review
 **Branched workspaces:** system auto-launches review after your session exits.
@@ -383,7 +391,8 @@ Set priority to high and describe the blocker in the issue description.
 5. **Commit before review** — never trigger review with uncommitted changes.
 6. **Description is a shared log** — write progress notes so the user can follow along.
 7. **Done means done** — code committed, tests green, review passed, no loose ends.
-8. **Cancelled is not failure** — use it freely when scope changes.`,
+8. **Cancelled is not failure** — use it freely when scope changes.
+9. **Targeted tests for refactoring** — use \`vitest --related <changed-files>\` instead of the full suite when refactoring. Faster and proves the changed code is covered without re-running unrelated tests.`,
     model: null,
   },
   {
