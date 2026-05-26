@@ -87,6 +87,7 @@ export function IssueDetailPanel({
   const [pastedImages, setPastedImages] = useState<string[]>([]);
   const [issueType, setIssueType] = useState(issue.issueType ?? "task");
   const [estimate, setEstimate] = useState<string>(issue.estimate ?? "");
+  const [dueDate, setDueDate] = useState<string>(issue.dueDate ?? "");
   const [skipAutoReview, setSkipAutoReview] = useState(issue.skipAutoReview ?? false);
   const [saving, setSaving] = useState(false);
   const depTypeRef = useRef<HTMLSelectElement>(null);
@@ -118,6 +119,7 @@ export function IssueDetailPanel({
     description !== (issue.description ?? "") ||
     issueType !== (issue.issueType ?? "task") ||
     estimate !== (issue.estimate ?? "") ||
+    dueDate !== (issue.dueDate ?? "") ||
     skipAutoReview !== (issue.skipAutoReview ?? false)
   );
 
@@ -192,6 +194,7 @@ export function IssueDetailPanel({
     setDescription(issue.description ?? "");
     setIssueType(issue.issueType ?? "task");
     setEstimate(issue.estimate ?? "");
+    setDueDate(issue.dueDate ?? "");
     setSkipAutoReview(issue.skipAutoReview ?? false);
   }
 
@@ -316,6 +319,7 @@ export function IssueDetailPanel({
         issueType: issueType as UpdateIssueRequest["issueType"],
         estimate: (estimate || null) as UpdateIssueRequest["estimate"],
         skipAutoReview,
+        dueDate: dueDate || null,
       });
       setPastedImages([]);
       setEditing(false);
@@ -798,6 +802,32 @@ export function IssueDetailPanel({
                 {issue.estimate}
               </span>
             ) : (
+              <span className="text-xs text-gray-400 dark:text-gray-500">—</span>
+            )}
+          </div>
+
+          {/* Due Date */}
+          <div>
+            <label className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">
+              Due Date
+            </label>
+            {editing ? (
+              <input
+                type="date"
+                value={dueDate}
+                onChange={(e) => setDueDate(e.target.value)}
+                className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100"
+              />
+            ) : issue.dueDate ? (() => {
+              const overdue = new Date(issue.dueDate) < new Date(new Date().toDateString()) &&
+                issue.statusName !== "Done" && issue.statusName !== "Cancelled";
+              return (
+                <span className={`inline-block text-xs font-medium px-1.5 py-0.5 rounded ${overdue ? "bg-red-100 text-red-700" : "bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300"}`}>
+                  {new Date(issue.dueDate).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}
+                  {overdue && " ⚠ overdue"}
+                </span>
+              );
+            })() : (
               <span className="text-xs text-gray-400 dark:text-gray-500">—</span>
             )}
           </div>

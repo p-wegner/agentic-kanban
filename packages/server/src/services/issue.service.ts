@@ -106,6 +106,7 @@ export function createIssueService(deps: {
     if (body.sortOrder !== undefined) updates.sortOrder = body.sortOrder;
     if (body.estimate !== undefined) updates.estimate = body.estimate;
     if (body.skipAutoReview !== undefined) updates.skipAutoReview = body.skipAutoReview;
+    if (body.dueDate !== undefined) updates.dueDate = body.dueDate;
 
     await database.update(issues).set(updates).where(eq(issues.id, id));
 
