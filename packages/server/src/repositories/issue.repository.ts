@@ -1,9 +1,11 @@
-import { issues, workspaces, sessions, sessionMessages, projectStatuses } from "@agentic-kanban/shared/schema";
-import { eq, inArray, desc, sql } from "drizzle-orm";
+import { issues, workspaces, sessions, sessionMessages, projectStatuses, tags, issueTags, issueDependencies, issueArtifacts, agentSkills } from "@agentic-kanban/shared/schema";
+import type { DependencyType } from "@agentic-kanban/shared/schema";
+import { eq, inArray, desc, sql, and } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { parseSessionSummary, formatDurationStr } from "../services/session-summary.js";
+import { enrichWorkspacesWithSessionData } from "../services/board-aggregation.service.js";
 
 type Issue = typeof issues.$inferSelect;
 type Workspace = typeof workspaces.$inferSelect;
@@ -174,4 +176,154 @@ export async function getIssueSummary(
     } : null,
     ...summary,
   };
+}
+
+export async function getIssuesByProject(
+  projectId: string,
+  issueNumber?: number,
+  database: Database = db,
+) {
+  const whereClause = issueNumber
+    ? and(eq(issues.projectId, projectId), eq(issues.issueNumber, issueNumber))
+    : eq(issues.projectId, projectId);
+
+  return database
+    .select({
+      id: issues.id,
+      issueNumber: issues.issueNumber,
+      title: issues.title,
+      description: issues.description,
+      priority: issues.priority,
+      issueType: issues.issueType,
+      sortOrder: issues.sortOrder,
+      statusId: issues.statusId,
+      projectId: issues.projectId,
+      createdAt: issues.createdAt,
+      updatedAt: issues.updatedAt,
+      statusChangedAt: issues.statusChangedAt,
+      skipAutoReview: issues.skipAutoReview,
+      estimate: issues.estimate,
+      statusName: projectStatuses.name,
+    })
+    .from(issues)
+    .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
+    .where(whereClause)
+    .orderBy(issues.sortOrder);
+}
+
+export async function getIssueProjectId(
+  issueId: string,
+  database: Database = db,
+): Promise<string | null> {
+  const rows = await database
+    .select({ projectId: issues.projectId })
+    .from(issues)
+    .where(eq(issues.id, issueId))
+    .limit(1);
+  return rows[0]?.projectId ?? null;
+}
+
+export async function getIssueTags(
+  issueId: string,
+  database: Database = db,
+) {
+  return database
+    .select({ id: tags.id, name: tags.name, color: tags.color })
+    .from(issueTags)
+    .innerJoin(tags, eq(issueTags.tagId, tags.id))
+    .where(eq(issueTags.issueId, issueId));
+}
+
+export async function getOutgoingDependencies(
+  issueId: string,
+  database: Database = db,
+) {
+  return database
+    .select({
+      id: issueDependencies.id,
+      issueId: issueDependencies.issueId,
+      dependsOnId: issueDependencies.dependsOnId,
+      type: issueDependencies.type,
+      createdAt: issueDependencies.createdAt,
+      issueTitle: issues.title,
+      issueStatusName: projectStatuses.name,
+      issueNumber: issues.issueNumber,
+    })
+    .from(issueDependencies)
+    .innerJoin(issues, eq(issueDependencies.dependsOnId, issues.id))
+    .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
+    .where(eq(issueDependencies.issueId, issueId));
+}
+
+export async function getIncomingDependencies(
+  issueId: string,
+  database: Database = db,
+) {
+  return database
+    .select({
+      id: issueDependencies.id,
+      issueId: issueDependencies.issueId,
+      dependsOnId: issueDependencies.dependsOnId,
+      type: issueDependencies.type,
+      createdAt: issueDependencies.createdAt,
+      issueTitle: issues.title,
+      issueStatusName: projectStatuses.name,
+      issueNumber: issues.issueNumber,
+    })
+    .from(issueDependencies)
+    .innerJoin(issues, eq(issueDependencies.issueId, issues.id))
+    .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
+    .where(eq(issueDependencies.dependsOnId, issueId));
+}
+
+export async function getIssueWorkspaces(
+  issueId: string,
+  database: Database = db,
+) {
+  const wsRows = await database
+    .select({
+      id: workspaces.id,
+      issueId: workspaces.issueId,
+      branch: workspaces.branch,
+      workingDir: workspaces.workingDir,
+      baseBranch: workspaces.baseBranch,
+      isDirect: workspaces.isDirect,
+      planMode: workspaces.planMode,
+      includeVisualProof: workspaces.includeVisualProof,
+      requiresReview: workspaces.requiresReview,
+      thoroughReview: workspaces.thoroughReview,
+      readyForMerge: workspaces.readyForMerge,
+      status: workspaces.status,
+      agentCommand: workspaces.agentCommand,
+      provider: workspaces.provider,
+      pendingPlanPath: workspaces.pendingPlanPath,
+      skillId: workspaces.skillId,
+      skillName: agentSkills.name,
+      createdAt: workspaces.createdAt,
+      updatedAt: workspaces.updatedAt,
+      closedAt: workspaces.closedAt,
+    })
+    .from(workspaces)
+    .leftJoin(agentSkills, eq(workspaces.skillId, agentSkills.id))
+    .where(eq(workspaces.issueId, issueId));
+
+  const wsIds = wsRows.map(w => w.id);
+  const { contextTokensMap, lastToolMap } = await enrichWorkspacesWithSessionData(wsIds, database);
+
+  return wsRows.map(w => ({
+    ...w,
+    contextTokens: contextTokensMap.get(w.id) ?? null,
+    lastTool: lastToolMap.get(w.id) ?? null,
+  }));
+}
+
+export async function getIssueArtifacts(
+  issueId: string,
+  database: Database = db,
+) {
+  return database
+    .select()
+    .from(issueArtifacts)
+    .where(eq(issueArtifacts.issueId, issueId))
+    .orderBy(issueArtifacts.createdAt);
 }
