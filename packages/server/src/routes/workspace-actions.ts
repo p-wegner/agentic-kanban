@@ -4,7 +4,7 @@ import type { BoardEvents } from "../services/board-events.js";
 import type { Database } from "../db/index.js";
 import { createWorkspaceService } from "../services/workspace.service.js";
 import { createRouter } from "../middleware/create-router.js";
-import { parseJsonBody } from "../middleware/parse-body.js";
+import { parseJsonBody, parseOptionalJsonBody } from "../middleware/parse-body.js";
 
 export function createWorkspaceActionsRoute(
   getSessionManager: () => SessionManager,
@@ -35,8 +35,7 @@ export function createWorkspaceActionsRoute(
   // POST /api/workspaces/:id/launch
   router.post("/:id/launch", async (c) => {
     const id = c.req.param("id");
-    let body: Record<string, unknown> = {};
-    try { body = await c.req.json(); } catch { /* empty body is fine */ }
+    const body = await parseOptionalJsonBody(c);
     return c.json(await workspaceService.launchSession(id, body), 201);
   });
 
@@ -112,7 +111,7 @@ export function createWorkspaceActionsRoute(
   // POST /api/workspaces/:id/fix-and-merge
   router.post("/:id/fix-and-merge", async (c) => {
     const id = c.req.param("id");
-    const body: { mergeError?: string } = await c.req.json<{ mergeError?: string }>().catch(() => ({}));
+    const body = await parseOptionalJsonBody<{ mergeError?: string }>(c);
     const result = await workspaceService.fixAndMerge(id, body.mergeError);
     options?.fixAndMergeSessionIds?.add(result.sessionId);
     return c.json(result, 201);
