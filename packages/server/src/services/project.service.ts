@@ -8,8 +8,8 @@ import type { Database } from "../db/index.js";
 import { branchExists, detectRepoInfo, getProjectGitStats } from "./git-info.service.js";
 import { listBranches, listWorktrees, getDiffShortstat, removeWorktree } from "./git.service.js";
 import { buildWorkspaceSummaryMap, buildBlockedMap, buildTagMap, buildGraphEdges } from "./board-aggregation.service.js";
-import { getProjectById, getProjectByRepoPath, getAllProjects, insertProject, deleteProjectCascade, getProjectStats } from "../repositories/project.repository.js";
-import { generateSetupScript, generateTeardownScript } from "./project-setup.service.js";
+import { getProjectById, getProjectByRepoPath, getAllProjects, insertProject, deleteProjectCascade, getProjectStats, getProjectStatuses, createProjectStatus, deleteProjectStatus } from "../repositories/project.repository.js";
+import { generateSetupScript as generateSetupScriptAI, generateTeardownScript as generateTeardownScriptAI } from "./project-setup.service.js";
 import { deleteWorkspaceCascade } from "../repositories/workspace.repository.js";
 
 export class ProjectError extends Error {
@@ -555,6 +555,51 @@ export function createProjectService(deps: { database: Database }) {
     spawn(cmd, args, { detached: true, stdio: "ignore" }).unref();
   }
 
+  async function listProjects() {
+    return getAllProjects(database);
+  }
+
+  async function listStatuses(projectId: string) {
+    return getProjectStatuses(projectId, database);
+  }
+
+  async function addStatus(projectId: string, name: string, sortOrder: number) {
+    return createProjectStatus(projectId, name, sortOrder, database);
+  }
+
+  async function removeStatus(projectId: string, statusId: string) {
+    const result = await deleteProjectStatus(projectId, statusId, database);
+    if ("error" in result) {
+      const code = result.status === 404 ? "NOT_FOUND" : "CONFLICT";
+      throw new ProjectError(result.error, code as "NOT_FOUND" | "CONFLICT");
+    }
+    return result;
+  }
+
+  async function getBranches(projectId: string) {
+    const project = await getProjectById(projectId, database);
+    if (!project) throw new ProjectError("Project not found", "NOT_FOUND");
+    return listBranches(project.repoPath);
+  }
+
+  async function generateSetupScript(projectId: string) {
+    try {
+      return await generateSetupScriptAI(projectId, database);
+    } catch (err: any) {
+      if (err.statusCode === 404) throw new ProjectError("Project not found", "NOT_FOUND");
+      throw err;
+    }
+  }
+
+  async function generateTeardownScript(projectId: string) {
+    try {
+      return await generateTeardownScriptAI(projectId, database);
+    } catch (err: any) {
+      if (err.statusCode === 404) throw new ProjectError("Project not found", "NOT_FOUND");
+      throw err;
+    }
+  }
+
   return {
     registerProject,
     createProject,
@@ -567,5 +612,12 @@ export function createProjectService(deps: { database: Database }) {
     getGraph,
     getCrossProjectWorkspaces,
     openInExplorer,
+    listProjects,
+    listStatuses,
+    addStatus,
+    removeStatus,
+    getBranches,
+    generateSetupScript,
+    generateTeardownScript,
   };
 }
