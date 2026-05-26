@@ -111,7 +111,9 @@ function startPidWatcher(
     if (closed) return;
     try {
       process.kill(pid, 0);
-    } catch {
+    } catch (err: unknown) {
+      // EPERM means the process exists but we lack permission to signal it — don't call onExit.
+      if ((err as NodeJS.ErrnoException).code === "EPERM") return;
       closed = true;
       clearInterval(timer);
       onExit();
@@ -384,7 +386,9 @@ export function isPidAlive(sessionId: string): boolean {
   try {
     process.kill(pid, 0);
     return true;
-  } catch {
+  } catch (err: unknown) {
+    // EPERM means the process exists but we lack permission to signal it — treat as alive.
+    if ((err as NodeJS.ErrnoException).code === "EPERM") return true;
     agentState.activePids.delete(sessionId);
     return false;
   }
