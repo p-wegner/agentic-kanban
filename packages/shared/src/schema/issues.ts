@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, integer, index } from "drizzle-orm/sqlite-core";
 import { relations } from "drizzle-orm";
 import { projectStatuses } from "./project-statuses.js";
 import { projects } from "./projects.js";
@@ -18,7 +18,10 @@ export const issues = sqliteTable("issues", {
   statusChangedAt: text("status_changed_at"),
   skipAutoReview: integer("skip_auto_review", { mode: "boolean" }).notNull().default(false),
   estimate: text("estimate"),
-});
+}, (table) => ({
+  projectIdIdx: index("idx_issues_project_id").on(table.projectId),
+  statusIdIdx: index("idx_issues_status_id").on(table.statusId),
+}));
 
 export const issuesRelations = relations(issues, ({ one, many }) => ({
   status: one(projectStatuses, {

@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, integer, index } from "drizzle-orm/sqlite-core";
 import { relations } from "drizzle-orm";
 import { workspaces } from "./workspaces.js";
 
@@ -12,7 +12,9 @@ export const diffComments = sqliteTable("diff_comments", {
   body: text("body").notNull(),
   createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
   updatedAt: text("updated_at").notNull().$defaultFn(() => new Date().toISOString()),
-});
+}, (table) => ({
+  workspaceIdIdx: index("idx_diff_comments_workspace_id").on(table.workspaceId),
+}));
 
 export const diffCommentsRelations = relations(diffComments, ({ one }) => ({
   workspace: one(workspaces, {

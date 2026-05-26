@@ -33,6 +33,7 @@ export const workspaces = sqliteTable("workspaces", {
   diffStatCacheInsertions: integer("diff_stat_cache_insertions"),
   diffStatCacheDeletions: integer("diff_stat_cache_deletions"),
 }, (table) => ({
+  issueIdIdx: index("idx_workspaces_issue_id").on(table.issueId),
   statusIdx: index("idx_workspaces_status").on(table.status),
   createdAtIdx: index("idx_workspaces_created_at").on(table.createdAt),
 }));

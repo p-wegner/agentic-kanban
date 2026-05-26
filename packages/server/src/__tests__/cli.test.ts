@@ -1,4 +1,4 @@
-﻿import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { spawnSync } from "node:child_process";
 import { drizzle } from "drizzle-orm/libsql";
 import { createClient } from "@libsql/client";
@@ -64,6 +64,8 @@ const MIGRATION_FILES = [
   "../../../shared/drizzle/0040_direct_workspace_base_commit.sql",
   "../../../shared/drizzle/0041_builtin_tags.sql",
   "../../../shared/drizzle/0042_issue_type.sql",
+  "../../../shared/drizzle/0043_missing_indexes.sql",
+  "../../../shared/drizzle/0044_diff_comments_workspace_idx.sql",
 ];
 
 const DEFAULT_STATUSES = [
@@ -174,7 +176,7 @@ async function seedIssue(dbPath: string, projectId: string, overrides: { title?:
   return { id, issueNumber };
 }
 
-// â”€â”€ register â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── register ──────────────────────────────────────────────────────────────────
 
 describe("CLI register", () => {
   let ctx: ReturnType<typeof createTestDb>;
@@ -209,7 +211,7 @@ describe("CLI register", () => {
   });
 });
 
-// â”€â”€ list â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── list ──────────────────────────────────────────────────────────────────────
 
 describe("CLI list", () => {
   let ctx: ReturnType<typeof createTestDb>;
@@ -232,7 +234,7 @@ describe("CLI list", () => {
   });
 });
 
-// â”€â”€ unregister â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── unregister ────────────────────────────────────────────────────────────────
 
 describe("CLI unregister", () => {
   let ctx: ReturnType<typeof createTestDb>;
@@ -264,7 +266,7 @@ describe("CLI unregister", () => {
   });
 });
 
-// â”€â”€ cleanup â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── cleanup ───────────────────────────────────────────────────────────────────
 
 describe("CLI cleanup", () => {
   let ctx: ReturnType<typeof createTestDb>;
@@ -298,7 +300,7 @@ describe("CLI cleanup", () => {
   });
 });
 
-// â”€â”€ issue commands â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── issue commands ────────────────────────────────────────────────────────────
 
 describe("CLI issue list", () => {
   let ctx: ReturnType<typeof createTestDb>;
@@ -401,7 +403,7 @@ describe("CLI issue move", () => {
   });
 });
 
-// â”€â”€ workspace commands â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── workspace commands ────────────────────────────────────────────────────────
 
 describe("CLI workspace list", () => {
   let ctx: ReturnType<typeof createTestDb>;
@@ -441,7 +443,7 @@ describe("CLI workspace list", () => {
   });
 });
 
-// â”€â”€ skill commands â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── skill commands ────────────────────────────────────────────────────────────
 
 describe("CLI skill list", () => {
   let ctx: ReturnType<typeof createTestDb>;
@@ -545,7 +547,7 @@ describe("CLI skill get", () => {
   });
 });
 
-// â”€â”€ issue dependency commands â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── issue dependency commands ─────────────────────────────────────────────────
 
 describe("CLI issue dependency", () => {
   let ctx: ReturnType<typeof createTestDb>;
