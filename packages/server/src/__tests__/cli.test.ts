@@ -11,7 +11,8 @@ import { resolve, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 import { pathToFileURL } from "node:url";
-import { MIGRATION_FILES, MIGRATIONS_DIR } from "./helpers/migrations.js";
+import { MIGRATIONS_DIR } from "./helpers/migrations.js";
+import { applyMigrationsToClient } from "./helpers/test-db.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const CLI_PATH = resolve(__dirname, "../cli/index.ts");
@@ -32,16 +33,7 @@ const DEFAULT_STATUSES = [
 
 function applyMigrations(dbPath: string) {
   const client = createClient({ url: `file:${dbPath}` });
-  for (const file of MIGRATION_FILES) {
-    const sqlText = readFileSync(resolve(MIGRATIONS_DIR, file), "utf-8");
-    const statements = sqlText
-      .split("--> statement-breakpoint")
-      .map((s) => s.trim())
-      .filter((s) => s.length > 0);
-    for (const stmt of statements) {
-      client.execute(stmt);
-    }
-  }
+  applyMigrationsToClient(client);
 
   // Populate __drizzle_migrations so CLI's runMigrations() is a no-op
   client.execute("CREATE TABLE IF NOT EXISTS __drizzle_migrations (id INTEGER PRIMARY KEY AUTOINCREMENT, hash TEXT NOT NULL UNIQUE, created_at BIGINT NOT NULL)");

@@ -18,8 +18,15 @@ export function createTagsRoute(database: Database = db) {
     if (!body.name) {
       return c.json({ error: "name is required" }, 400);
     }
-    const result = await tagService.createNewTag(body.name, body.color ?? null);
-    return c.json(result, 201);
+    try {
+      const result = await tagService.createNewTag(body.name, body.color ?? null);
+      return c.json(result, 201);
+    } catch (err) {
+      if (err instanceof TagError) {
+        if (err.code === "CONFLICT") return c.json({ error: err.message }, 409);
+      }
+      throw err;
+    }
   });
 
   // PATCH /api/tags/:id
