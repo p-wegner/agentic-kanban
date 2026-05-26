@@ -1,6 +1,7 @@
 const NOISE_PATTERNS = [
   /"subtype"\s*:\s*"api_retry"/,
   /"type"\s*:\s*"system".*"subtype"\s*:\s*"init"/,
+  /^CODEX_OK\s*$/, // Codex health-check probe
 ];
 
 // eslint-disable-next-line no-control-regex

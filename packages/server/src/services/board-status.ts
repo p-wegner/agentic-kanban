@@ -4,6 +4,7 @@ import { eq, inArray, desc } from "drizzle-orm";
 import { getDiffShortstat, detectConflicts } from "./git.service.js";
 import { extractMeaningfulOutput } from "@agentic-kanban/shared";
 import type { BoardStatusResponse, BoardStatusIssue } from "@agentic-kanban/shared";
+import { isAnalyticsNoise } from "./session-filter.js";
 
 // In-memory conflict cache: workspaceId → { result, timestamp }
 const conflictCache = new Map<string, { result: { hasConflicts: boolean; conflictingFiles: string[] }; ts: number }>();
@@ -121,7 +122,8 @@ export async function getBoardStatus(
     })[0] ?? null;
 
     const mainSessions = mainWs ? (sessionsByWs.get(mainWs.id) ?? []) : [];
-    const latestSession = mainSessions[0] ?? null;
+    // Prefer the latest non-noise session for analytics; fall back to latest overall
+    const latestSession = mainSessions.find(s => !isAnalyticsNoise(s)) ?? mainSessions[0] ?? null;
 
     let sessionStats: BoardStatusIssue["sessionStats"] = null;
     if (latestSession?.stats) {

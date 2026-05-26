@@ -12,6 +12,7 @@ import { applyMigrations } from "./db/manual-migrate.js";
 import { parseSessionSummary, formatDurationStr } from "@agentic-kanban/shared";
 import { registerProject } from "./services/project-registration.js";
 import { BUILTIN_SKILLS } from "./builtin-skills.js";
+import { isAnalyticsNoise } from "./services/session-filter.js";
 
 const DEFAULT_STATUSES = [
   { name: "Todo", sortOrder: 0, isDefault: true },
@@ -931,7 +932,7 @@ Examples:
         .where(inArray(sessions.workspaceId, wsIds))
         .orderBy(desc(sessions.startedAt));
 
-      const latestSession = sessionRows[0] ?? null;
+      const latestSession = sessionRows.find(s => !isAnalyticsNoise(s)) ?? sessionRows[0] ?? null;
       const matchingWs = latestSession ? wsRows.find(w => w.id === latestSession.workspaceId) : wsRows[0];
 
       let lastAgentMsg: string | null = null;
@@ -1112,8 +1113,10 @@ Examples:
         .where(inArray(sessions.workspaceId, wsIds))
         .orderBy(desc(sessions.startedAt));
 
-      const completedSession = sessionRows.find(s => s.status === "completed" || s.status === "stopped")
-        ?? sessionRows[0]
+      const nonNoiseSessions = sessionRows.filter(s => !isAnalyticsNoise(s));
+      const relevantSessions = nonNoiseSessions.length > 0 ? nonNoiseSessions : sessionRows;
+      const completedSession = relevantSessions.find(s => s.status === "completed" || s.status === "stopped")
+        ?? relevantSessions[0]
         ?? null;
 
       if (!completedSession) {
