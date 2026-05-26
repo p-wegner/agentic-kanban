@@ -106,3 +106,49 @@ export async function getProjectStats(
     .where(eq(issues.projectId, projectId))
     .groupBy(projectStatuses.name);
 }
+
+export async function createProjectStatus(
+  projectId: string,
+  name: string,
+  sortOrder: number,
+  database: Database = db,
+) {
+  const id = randomUUID();
+  const now = new Date().toISOString();
+  await database.insert(projectStatuses).values({
+    id,
+    projectId,
+    name,
+    sortOrder,
+    createdAt: now,
+  });
+  return { id, projectId, name };
+}
+
+export async function deleteProjectStatus(
+  projectId: string,
+  statusId: string,
+  database: Database = db,
+): Promise<{ success: true } | { error: string; status: number }> {
+  const statusRows = await database
+    .select()
+    .from(projectStatuses)
+    .where(and(eq(projectStatuses.id, statusId), eq(projectStatuses.projectId, projectId)));
+
+  if (statusRows.length === 0) {
+    return { error: "Status not found", status: 404 };
+  }
+
+  const linkedIssues = await database
+    .select({ id: issues.id })
+    .from(issues)
+    .where(eq(issues.statusId, statusId))
+    .limit(1);
+
+  if (linkedIssues.length > 0) {
+    return { error: "Cannot delete status with linked issues", status: 409 };
+  }
+
+  await database.delete(projectStatuses).where(eq(projectStatuses.id, statusId));
+  return { success: true };
+}
