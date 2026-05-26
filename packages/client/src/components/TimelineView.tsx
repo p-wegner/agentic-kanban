@@ -39,7 +39,7 @@ const STATUS_BADGE: Record<string, string> = {
   "Cancelled":   "text-gray-500 dark:text-gray-500",
 };
 
-const LABEL_W = 148;
+const LABEL_W = 220;
 const BAR_H = 30;
 const ROW_H = 46;
 const AXIS_H = 28;
@@ -248,11 +248,14 @@ export function TimelineView({ columns, onIssueClick, searchQuery }: TimelineVie
                   <div key={issue.id} className="flex items-center border-b border-gray-50 dark:border-gray-800" style={{ height: ROW_H }}>
                     {/* Label column */}
                     <div
-                      className="flex items-center gap-1 px-2 border-r border-gray-100 dark:border-gray-800 h-full shrink-0"
+                      className="flex items-center gap-1.5 px-2 border-r border-gray-100 dark:border-gray-800 h-full shrink-0 overflow-hidden"
                       style={{ width: LABEL_W, minWidth: LABEL_W }}
                     >
                       <span className="text-[11px] text-gray-400 dark:text-gray-500 shrink-0">
                         #{issue.issueNumber}
+                      </span>
+                      <span className="text-[11px] text-gray-600 dark:text-gray-400 truncate" title={issue.title}>
+                        {issue.title}
                       </span>
                     </div>
 
