@@ -4,6 +4,7 @@ import type { Database } from "../db/index.js";
 import type { BoardEvents } from "../services/board-events.js";
 import { analyzeDependencies, enhanceIssue } from "../services/issue-ai.service.js";
 import { IssueError, createIssueService } from "../services/issue.service.js";
+import { enrichWorkspacesWithSessionData } from "../services/board-aggregation.service.js";
 import {
   getIssuesByProject,
   getIssueSummary,
@@ -143,7 +144,14 @@ export function createIssuesRoute(database: Database = db, options?: { boardEven
   // GET /api/issues/:id/workspaces
   router.get("/:id/workspaces", async (c) => {
     const issueId = c.req.param("id");
-    return c.json(await getIssueWorkspaces(issueId, database));
+    const wsRows = await getIssueWorkspaces(issueId, database);
+    const wsIds = wsRows.map((w: any) => w.id);
+    const { contextTokensMap, lastToolMap } = await enrichWorkspacesWithSessionData(wsIds, database);
+    return c.json(wsRows.map((w: any) => ({
+      ...w,
+      contextTokens: contextTokensMap.get(w.id) ?? null,
+      lastTool: lastToolMap.get(w.id) ?? null,
+    })));
   });
 
   // GET /api/issues/:id/tags
