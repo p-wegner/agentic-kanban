@@ -4,9 +4,9 @@ import { eq, and } from "drizzle-orm";
 import type { Database } from "../db/index.js";
 import type { BoardEvents } from "./board-events.js";
 import type { DependencyType } from "@agentic-kanban/shared/schema";
-import { resolveNewIssueDefaults, getIssueProjectId } from "../repositories/issue.repository.js";
+import { resolveNewIssueDefaults, getIssueProjectId, getIssueWorkspaces } from "../repositories/issue.repository.js";
 import { deleteWorkspaceCascade } from "../repositories/workspace.repository.js";
-import { wouldCreateCycle } from "./board-aggregation.service.js";
+import { enrichWorkspacesWithSessionData, wouldCreateCycle } from "./board-aggregation.service.js";
 
 export class IssueError extends Error {
   constructor(
@@ -204,5 +204,16 @@ export function createIssueService(deps: {
     return { id, projectId };
   }
 
-  return { createIssue, updateIssue, deleteIssue, addDependency, removeDependency, addArtifact };
+  async function getEnrichedWorkspaces(issueId: string) {
+    const wsRows = await getIssueWorkspaces(issueId, database);
+    const wsIds = wsRows.map(w => w.id);
+    const { contextTokensMap, lastToolMap } = await enrichWorkspacesWithSessionData(wsIds, database);
+    return wsRows.map(w => ({
+      ...w,
+      contextTokens: contextTokensMap.get(w.id) ?? null,
+      lastTool: lastToolMap.get(w.id) ?? null,
+    }));
+  }
+
+  return { createIssue, updateIssue, deleteIssue, addDependency, removeDependency, addArtifact, getEnrichedWorkspaces };
 }
