@@ -1,9 +1,8 @@
 import { Hono } from "hono";
-import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { createTagService, TagError } from "../services/tag.service.js";
 
-export function createTagsRoute(database: Database = db) {
+export function createTagsRoute(database: Database) {
   const router = new Hono();
   const tagService = createTagService({ database });
 
@@ -74,5 +73,3 @@ export function createTagsRoute(database: Database = db) {
 
   return router;
 }
-
-export const tagsRoute = createTagsRoute();

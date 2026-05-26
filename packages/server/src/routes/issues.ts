@@ -1,11 +1,10 @@
 import { Hono } from "hono";
-import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import type { BoardEvents } from "../services/board-events.js";
 import { analyzeDependencies, enhanceIssue } from "../services/issue-ai.service.js";
 import { IssueError, createIssueService } from "../services/issue.service.js";
 
-export function createIssuesRoute(database: Database = db, options?: { boardEvents?: BoardEvents }) {
+export function createIssuesRoute(database: Database, options?: { boardEvents?: BoardEvents }) {
   const router = new Hono();
 
   const issueService = createIssueService({ database, boardEvents: options?.boardEvents });
@@ -224,5 +223,3 @@ export function createIssuesRoute(database: Database = db, options?: { boardEven
 
   return router;
 }
-
-export const issuesRoute = createIssuesRoute();
