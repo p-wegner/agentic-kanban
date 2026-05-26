@@ -850,6 +850,7 @@ export function IssueDetailPanel({
                         issue.workspaceSummary.main.status === "active" ? "bg-green-500" :
                         issue.workspaceSummary.main.status === "reviewing" ? "bg-purple-500 animate-pulse" :
                         issue.workspaceSummary.main.status === "fixing" ? "bg-orange-500 animate-pulse" :
+                        issue.workspaceSummary.main.status === "error" ? "bg-red-500" :
                         issue.workspaceSummary.main.conflicts?.hasConflicts ? "bg-red-500" :
                         issue.workspaceSummary.main.status === "idle" ? "bg-amber-500" :
                         "bg-gray-400"
@@ -859,6 +860,7 @@ export function IssueDetailPanel({
                         issue.workspaceSummary.main.status === "active" ? "bg-green-100 text-green-700" :
                         issue.workspaceSummary.main.status === "reviewing" ? "bg-purple-100 text-purple-700" :
                         issue.workspaceSummary.main.status === "fixing" ? "bg-orange-100 text-orange-700" :
+                        issue.workspaceSummary.main.status === "error" ? "bg-red-100 text-red-700" :
                         issue.workspaceSummary.main.conflicts?.hasConflicts ? "bg-red-100 text-red-700" :
                         issue.workspaceSummary.main.status === "idle" ? "bg-amber-100 text-amber-700" :
                         issue.workspaceSummary.main.status === "closed" && issue.workspaceSummary.main.lastSessionTriggerType === "fix-conflicts" ? "bg-orange-100 text-orange-700" :
@@ -866,6 +868,7 @@ export function IssueDetailPanel({
                       }`}>
                         {issue.workspaceSummary.main.status === "reviewing" ? "AI Reviewing" :
                          issue.workspaceSummary.main.status === "fixing" ? "AI Fixing Conflicts" :
+                         issue.workspaceSummary.main.status === "error" ? "Preflight Error" :
                          issue.workspaceSummary.main.conflicts?.hasConflicts ? "Merge Conflicts" :
                          issue.workspaceSummary.main.status === "closed" && issue.workspaceSummary.main.lastSessionTriggerType === "fix-conflicts" ? "merged conflicts" :
                          issue.workspaceSummary.main.status}
