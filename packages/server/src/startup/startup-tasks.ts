@@ -63,7 +63,7 @@ export async function killOrphanedServers(): Promise<void> {
   }
 }
 
-/** Run database migrations, seed built-in tags, deduplicate projects, and disable auto_monitor. */
+/** Run database migrations, seed built-in tags and skills, deduplicate projects, and disable auto_monitor. */
 export async function runMigrations(): Promise<void> {
   try {
     await applyMigrations(rawClient);
@@ -73,10 +73,11 @@ export async function runMigrations(): Promise<void> {
   }
 
   try {
-    const { ensureBuiltinTags } = await import("../db/seed.js");
+    const { ensureBuiltinTags, ensureBuiltinSkills } = await import("../db/seed.js");
     await ensureBuiltinTags(db);
+    await ensureBuiltinSkills(db);
   } catch (err) {
-    console.warn("[startup] ensureBuiltinTags failed (non-fatal):", err instanceof Error ? err.message : String(err));
+    console.warn("[startup] ensureBuiltinTags/Skills failed (non-fatal):", err instanceof Error ? err.message : String(err));
   }
 
   try {
