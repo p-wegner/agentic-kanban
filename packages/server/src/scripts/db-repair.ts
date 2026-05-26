@@ -22,7 +22,7 @@ import { drizzle } from "drizzle-orm/libsql";
 import { migrate } from "drizzle-orm/libsql/migrator";
 import { resolve, dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { existsSync, statSync, mkdirSync, copyFileSync, readdirSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, statSync, mkdirSync, copyFileSync, readdirSync, unlinkSync, writeFileSync, renameSync } from "node:fs";
 import { getMigrationsFolder } from "../db/migrations.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -32,8 +32,38 @@ const SIDECARS = ["", "-wal", "-shm"] as const;
 
 const force = process.argv.includes("--force") || process.env.ALLOW_DB_DESTROY === "1";
 
+const LOCK_CODES = new Set(["EBUSY", "EPERM", "EACCES"]);
+
 function log(msg: string) {
   console.log(`[db:repair] ${msg}`);
+}
+
+function abortLocked(): never {
+  log("");
+  log("ABORTED: the database file is LOCKED by another process — refusing to destroy it.");
+  log("A transient lock must never cost data. This is almost always the dev server or an");
+  log("orphaned tsx process still holding the SQLite handle. Stop it, then retry:");
+  log("  Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*tsx*src/index*' -or $_.CommandLine -like '*dev.mjs*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }");
+  log("Your data is intact (a backup was also written above).");
+  process.exit(3);
+}
+
+/**
+ * Verify we have exclusive access to the db file WITHOUT deleting anything.
+ * On Windows a file held open by another process cannot be renamed, so a
+ * round-trip rename surfaces the lock first — letting us bail out before any
+ * destructive step instead of corrupting a live database mid-unlink.
+ */
+function assertNotLocked() {
+  if (!existsSync(DB_PATH)) return;
+  const probe = DB_PATH + ".repair-lock-probe";
+  try {
+    renameSync(DB_PATH, probe);
+    renameSync(probe, DB_PATH);
+  } catch (err) {
+    if (LOCK_CODES.has((err as NodeJS.ErrnoException)?.code ?? "")) abortLocked();
+    throw err;
+  }
 }
 
 /** Copy db + sidecars to a timestamped backup. Returns the backup dir, or null if nothing to back up. */
@@ -150,9 +180,17 @@ async function main() {
       process.exit(2);
     }
     log("--force set — recreating empty database (backup already taken).");
+    // Never destroy a db another process still holds open: probe for a lock first.
+    assertNotLocked();
     for (const s of SIDECARS) {
       const f = DB_PATH + s;
-      if (existsSync(f)) unlinkSync(f);
+      if (!existsSync(f)) continue;
+      try {
+        unlinkSync(f);
+      } catch (err) {
+        if (LOCK_CODES.has((err as NodeJS.ErrnoException)?.code ?? "")) abortLocked();
+        throw err;
+      }
     }
     writeFileSync(DB_PATH, "");
   }
