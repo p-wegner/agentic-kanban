@@ -1,84 +1,18 @@
 import { describe, it, expect, beforeAll } from "vitest";
-import { Hono } from "hono";
-import { drizzle } from "drizzle-orm/libsql";
-import { createClient } from "@libsql/client";
 import { createIssuesRoute } from "../routes/issues.js";
 import * as schema from "@agentic-kanban/shared/schema";
 import { randomUUID } from "node:crypto";
-import { readFileSync } from "node:fs";
-import { resolve, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const MIGRATION_FILES = [
-  "../../../shared/drizzle/0000_flawless_trauma.sql",
-  "../../../shared/drizzle/0001_magical_johnny_storm.sql",
-  "../../../shared/drizzle/0002_bent_may_parker.sql",
-  "../../../shared/drizzle/0003_tough_lightspeed.sql",
-  "../../../shared/drizzle/0004_boring_wind_dancer.sql",
-  "../../../shared/drizzle/0005_silky_frog_thor.sql",
-  "../../../shared/drizzle/0006_wide_ogun.sql",
-  "../../../shared/drizzle/0007_diff_comments.sql",
-  "../../../shared/drizzle/0008_direct_workspace.sql",
-  "../../../shared/drizzle/0009_requires_review.sql",
-  "../../../shared/drizzle/0010_session_messages_cascade.sql",
-  "../../../shared/drizzle/0011_timestamps.sql",
-  "../../../shared/drizzle/0012_session_stats.sql",
-  "../../../shared/drizzle/0013_plan_mode.sql",
-  "../../../shared/drizzle/0014_issue_dependencies.sql",
-  "../../../shared/drizzle/0015_ai_reviewed_status.sql",
-  "../../../shared/drizzle/0016_skip_auto_review.sql",
-  "../../../shared/drizzle/0017_agent_config.sql",
-  "../../../shared/drizzle/0018_agent_skills.sql",
-  "../../../shared/drizzle/0019_workspace_skill.sql",
-  "../../../shared/drizzle/0023_dependency_types.sql",
-  "../../../shared/drizzle/0020_setup_script.sql",
-  "../../../shared/drizzle/0021_project_skills.sql",
-  "../../../shared/drizzle/0022_teardown_script.sql",
-  "../../../shared/drizzle/0024_setup_enabled.sql",
-  "../../../shared/drizzle/0025_provider_session_id.sql",
-  "../../../shared/drizzle/0026_ready_for_merge.sql",
-  "../../../shared/drizzle/0027_estimate_field.sql",
-  "../../../shared/drizzle/0028_perf_indexes_conflict_cache.sql",
-  "../../../shared/drizzle/0029_issue_artifacts.sql",
-  "../../../shared/drizzle/0030_thorough_review.sql",
-  "../../../shared/drizzle/0031_scheduled_runs.sql",
-  "../../../shared/drizzle/0032_diff_stat_cache.sql",
-  "../../../shared/drizzle/0033_backlog_status.sql",
-  "../../../shared/drizzle/0034_session_pid.sql",
-  "../../../shared/drizzle/0035_session_trigger.sql",
-  "../../../shared/drizzle/0036_scheduled_runs_cron.sql",
-  "../../../shared/drizzle/0037_workspace_provider.sql",
-  "../../../shared/drizzle/0038_pending_plan_path.sql",
-  "../../../shared/drizzle/0039_nullable_default_branch.sql",
-  "../../../shared/drizzle/0040_direct_workspace_base_commit.sql",
-  "../../../shared/drizzle/0041_builtin_tags.sql",
-  "../../../shared/drizzle/0042_issue_type.sql",
-  "../../../shared/drizzle/0043_missing_indexes.sql",
-  "../../../shared/drizzle/0044_diff_comments_workspace_idx.sql",
-];
+import { createTestApp as _createTestApp } from "./helpers/test-app.js";
+import type { TestDb } from "./helpers/test-db.js";
 
 function createTestApp() {
-  const client = createClient({ url: ":memory:" });
-  for (const file of MIGRATION_FILES) {
-    const sql = readFileSync(resolve(__dirname, file), "utf-8");
-    const statements = sql
-      .split("--> statement-breakpoint")
-      .map((s) => s.trim())
-      .filter((s) => s.length > 0);
-    for (const stmt of statements) {
-      client.execute(stmt);
-    }
-  }
-
-  const database = drizzle(client, { schema });
-  const app = new Hono();
-  app.route("/api/issues", createIssuesRoute(database));
-  return { app, db: database };
+  return _createTestApp((app, db) => {
+    app.route("/api/issues", createIssuesRoute(db));
+  });
 }
 
 async function createProjectDirectly(
-  database: ReturnType<typeof drizzle<typeof schema>>,
+  database: TestDb,
   name: string,
 ) {
   const now = new Date().toISOString();
@@ -96,7 +30,7 @@ async function createProjectDirectly(
 }
 
 async function createStatusDirectly(
-  database: ReturnType<typeof drizzle<typeof schema>>,
+  database: TestDb,
   projectId: string,
   name: string,
   sortOrder: number,
