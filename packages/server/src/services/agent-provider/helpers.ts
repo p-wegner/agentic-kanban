@@ -1,8 +1,15 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { basename, delimiter, dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import type { FileSystem } from "./types.js";
 import { PLAN_BEGIN_MARKER, PLAN_END_MARKER } from "./types.js";
+
+export const nodeFileSystem: FileSystem = {
+  existsSync,
+  readFileSync: (path: string, encoding: BufferEncoding) => readFileSync(path, encoding),
+  writeFileSync: (path: string, data: string, encoding: BufferEncoding) => writeFileSync(path, data, encoding),
+};
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -64,8 +71,8 @@ export const COPILOT_SESSION_ID_TYPES = new Set([
 
 // --- MCP config ---
 
-export function getMcpConfigPath(): string {
-  if (claudeMcpConfigPath && existsSync(claudeMcpConfigPath)) return claudeMcpConfigPath;
+export function getMcpConfigPath(fs: FileSystem = nodeFileSystem): string {
+  if (claudeMcpConfigPath && fs.existsSync(claudeMcpConfigPath)) return claudeMcpConfigPath;
   const config = {
     mcpServers: {
       "agentic-kanban": {
@@ -75,7 +82,7 @@ export function getMcpConfigPath(): string {
     },
   };
   const path = resolve(tmpdir(), "agentic-kanban-mcp-config.json");
-  writeFileSync(path, JSON.stringify(config, null, 2), "utf-8");
+  fs.writeFileSync(path, JSON.stringify(config, null, 2), "utf-8");
   claudeMcpConfigPath = path;
   console.log(`[agent] Claude MCP config written to ${path}`);
   return path;
@@ -91,7 +98,7 @@ const PROFILE_OWNED_ENV_VARS = [
   "API_TIMEOUT_MS",
 ];
 
-export function buildSpawnEnv(claudeProfile?: string): Record<string, string> {
+export function buildSpawnEnv(claudeProfile?: string, fs: FileSystem = nodeFileSystem): Record<string, string> {
   const spawnEnv: Record<string, string> = { ...process.env as Record<string, string> };
 
   for (const key of PROFILE_OWNED_ENV_VARS) {
@@ -101,10 +108,10 @@ export function buildSpawnEnv(claudeProfile?: string): Record<string, string> {
   if (!claudeProfile) return spawnEnv;
 
   const settingsPath = join(homedir(), ".claude", `settings_${claudeProfile}.json`);
-  if (!existsSync(settingsPath)) return spawnEnv;
+  if (!fs.existsSync(settingsPath)) return spawnEnv;
 
   try {
-    const profileSettings = JSON.parse(readFileSync(settingsPath, "utf-8"));
+    const profileSettings = JSON.parse(fs.readFileSync(settingsPath, "utf-8"));
     if (profileSettings.env && typeof profileSettings.env === "object") {
       const profileEnv = profileSettings.env as Record<string, string>;
       if (profileEnv.ANTHROPIC_AUTH_TOKEN && !profileEnv.ANTHROPIC_API_KEY) {
@@ -203,7 +210,7 @@ export function extractCopilotAssistantText(obj: Record<string, unknown>): strin
 
 // --- Windows resolvers ---
 
-export function resolveCodexDirect(command: string): string | undefined {
+export function resolveCodexDirect(command: string, fs: FileSystem = nodeFileSystem): string | undefined {
   if (process.platform !== "win32") return undefined;
 
   const candidates: string[] = [];
@@ -223,12 +230,12 @@ export function resolveCodexDirect(command: string): string | undefined {
 
   for (const candidate of candidates) {
     const entry = join(dirname(candidate), "node_modules", "@openai", "codex", "bin", "codex.js");
-    if (existsSync(entry)) return entry;
+    if (fs.existsSync(entry)) return entry;
   }
   return undefined;
 }
 
-export function resolveCopilotNpmLoader(command: string): string | undefined {
+export function resolveCopilotNpmLoader(command: string, fs: FileSystem = nodeFileSystem): string | undefined {
   if (process.platform !== "win32") return undefined;
 
   const candidates: string[] = [];
@@ -248,7 +255,7 @@ export function resolveCopilotNpmLoader(command: string): string | undefined {
 
   for (const candidate of candidates) {
     const loader = join(dirname(candidate), "node_modules", "@github", "copilot", "npm-loader.js");
-    if (existsSync(loader)) return loader;
+    if (fs.existsSync(loader)) return loader;
   }
   return undefined;
 }
