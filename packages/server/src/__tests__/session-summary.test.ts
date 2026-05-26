@@ -1,4 +1,4 @@
-﻿import { describe, it, expect, beforeAll } from "vitest";
+import { describe, it, expect, beforeAll } from "vitest";
 import { Hono } from "hono";
 import { drizzle } from "drizzle-orm/libsql";
 import { createClient } from "@libsql/client";
@@ -54,6 +54,8 @@ const MIGRATION_FILES = [
   "../../../shared/drizzle/0040_direct_workspace_base_commit.sql",
   "../../../shared/drizzle/0041_builtin_tags.sql",
   "../../../shared/drizzle/0042_issue_type.sql",
+  "../../../shared/drizzle/0043_missing_indexes.sql",
+  "../../../shared/drizzle/0044_diff_comments_workspace_idx.sql",
 ];
 
 function createTestApp() {

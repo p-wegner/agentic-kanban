@@ -309,6 +309,13 @@
       "when": 1748246124000,
       "tag": "0043_missing_indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "6",
+      "when": 1748332524000,
+      "tag": "0044_diff_comments_workspace_idx",
+      "breakpoints": true
     }
   ]
 }
