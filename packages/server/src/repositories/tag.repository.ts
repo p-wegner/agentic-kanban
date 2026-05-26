@@ -31,6 +31,18 @@ export async function getTagById(
   return rows[0] ?? null;
 }
 
+export async function getTagByName(
+  name: string,
+  database: Database = db,
+) {
+  const rows = await database
+    .select({ id: tags.id, isBuiltin: tags.isBuiltin })
+    .from(tags)
+    .where(eq(tags.name, name))
+    .limit(1);
+  return rows[0] ?? null;
+}
+
 export async function updateTag(
   id: string,
   updates: Record<string, unknown>,
