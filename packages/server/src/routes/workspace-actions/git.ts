@@ -21,6 +21,21 @@ export function createGitRoutes(database: Database) {
     return c.json(commit);
   });
 
+  // GET /api/workspaces/:id/handoff — get session handoff content
+  router.get("/:id/handoff", async (c) => {
+    const id = c.req.param("id");
+    const workspace = await getWorkspaceById(id, database);
+    if (!workspace) return c.json({ error: "Workspace not found" }, 404);
+    if (!workspace.workingDir) return c.json({ content: null });
+    try {
+      const { readHandoffFile } = await import("../../services/handoff.service.js");
+      const content = await readHandoffFile(workspace.workingDir);
+      return c.json({ content });
+    } catch {
+      return c.json({ content: null });
+    }
+  });
+
   // GET /api/workspaces/:id/diff — get git diff
   router.get("/:id/diff", async (c) => {
     const id = c.req.param("id");
