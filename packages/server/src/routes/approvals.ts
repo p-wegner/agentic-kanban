@@ -1,9 +1,6 @@
 import { Hono } from "hono";
-import { createApproval, getApproval, resolveApproval, deleteApproval, type ApprovalDecision } from "../services/approvals.js";
+import { createApproval, getApproval, resolveApproval, deleteApproval, resolveApprovalContext, type ApprovalDecision } from "../services/approvals.js";
 import type { BoardEvents } from "../services/board-events.js";
-import { getSessionWorkspaceId } from "../repositories/session.repository.js";
-import { getWorkspaceById } from "../repositories/workspace.repository.js";
-import { getIssueProjectId } from "../repositories/issue.repository.js";
 
 export function createApprovalsRoute(boardEvents: BoardEvents) {
   const app = new Hono();
@@ -12,20 +9,7 @@ export function createApprovalsRoute(boardEvents: BoardEvents) {
   app.post("/", async (c) => {
     const body = await c.req.json<{ sessionId: string; toolName: string; toolInput: unknown }>();
 
-    // Resolve projectId from sessionId for WS broadcast
-    let projectId: string | undefined;
-    let workspaceId: string | undefined;
-    try {
-      workspaceId = await getSessionWorkspaceId(body.sessionId) ?? undefined;
-      if (workspaceId) {
-        const ws = await getWorkspaceById(workspaceId);
-        if (ws) {
-          projectId = await getIssueProjectId(ws.issueId) ?? undefined;
-        }
-      }
-    } catch {
-      // continue without projectId — approval still works, just no WS broadcast
-    }
+    const { workspaceId, projectId } = await resolveApprovalContext(body.sessionId);
 
     const approval = createApproval({ sessionId: body.sessionId, toolName: body.toolName, toolInput: body.toolInput, workspaceId, projectId });
 
