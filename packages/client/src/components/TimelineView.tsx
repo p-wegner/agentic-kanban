@@ -44,7 +44,11 @@ const BAR_H = 30;
 const ROW_H = 46;
 const AXIS_H = 28;
 
-function fmtAxisDate(d: Date): string {
+function fmtAxisDate(d: Date, spanMs: number): string {
+  if (spanMs < 2 * 86_400_000) {
+    // Sub-2-day span: show time so adjacent ticks are distinguishable
+    return d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+  }
   return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 function fmtTooltipDate(d: Date): string {
@@ -98,11 +102,23 @@ export function TimelineView({ columns, onIssueClick, searchQuery }: TimelineVie
     const span = range.max - range.min;
     const days = span / 86_400_000;
     const count = Math.min(10, Math.max(4, Math.floor(days / 3)));
-    return Array.from({ length: count + 1 }, (_, i) =>
+    const raw = Array.from({ length: count + 1 }, (_, i) =>
       new Date(range.min + (i / count) * span)
     );
+    // Remove adjacent ticks that would render identical labels
+    const deduped: Date[] = [];
+    let lastLabel = "";
+    for (const tick of raw) {
+      const label = fmtAxisDate(tick, span);
+      if (label !== lastLabel) {
+        deduped.push(tick);
+        lastLabel = label;
+      }
+    }
+    return deduped;
   }, [range]);
 
+  const span = range.max - range.min;
   const now = Date.now();
 
   function pct(ts: number): number {
@@ -174,7 +190,7 @@ export function TimelineView({ columns, onIssueClick, searchQuery }: TimelineVie
                   style={{ left: `${pct(tick.getTime())}%` }}
                 >
                   <span className="text-xs text-gray-400 dark:text-gray-500 -translate-x-1/2 whitespace-nowrap select-none px-1">
-                    {fmtAxisDate(tick)}
+                    {fmtAxisDate(tick, span)}
                   </span>
                 </div>
               ))}
