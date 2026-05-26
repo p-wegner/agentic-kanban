@@ -268,6 +268,11 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
               Plan Mode
             </span>
           )}
+          {ws.main.planOnlyWarning && (
+            <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-400 text-[10px] font-medium shrink-0" title="Session completed but produced no file changes">
+              No changes
+            </span>
+          )}
           {ws.main.profile?.provider && ws.main.profile.provider !== "claude" && (
             <span className={`inline-flex items-center px-1 rounded font-medium text-[10px] shrink-0 ${
               ws.main.profile.provider === "copilot" ? "bg-emerald-50 dark:bg-emerald-950 text-emerald-600 dark:text-emerald-400" :
