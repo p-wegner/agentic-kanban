@@ -302,6 +302,13 @@
       "when": 1780906800000,
       "tag": "0042_issue_type",
       "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "6",
+      "when": 1748246124000,
+      "tag": "0043_missing_indexes",
+      "breakpoints": true
     }
   ]
 }
