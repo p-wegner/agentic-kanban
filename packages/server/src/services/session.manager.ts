@@ -467,7 +467,7 @@ function createSessionManager(
                 workspaceId,
                 prompt: "Your plan has been approved. Proceed with the implementation now.",
                 agentCommand,
-                agentArgs,
+                agentArgs: effectiveAgentArgs,
                 resumeFromId: sessionId, // uses providerSessionId from this session
                 claudeProfile,
                 multiTurn: undefined,
@@ -506,7 +506,7 @@ function createSessionManager(
                     workspaceId,
                     prompt: buildImplementPrompt(),
                     agentCommand,
-                    agentArgs,
+                    agentArgs: effectiveAgentArgs,
                     claudeProfile,
                     permissionPromptTool,
                     planMode: false,
@@ -535,6 +535,14 @@ function createSessionManager(
           .catch((err) => console.error("Failed to store session pid:", err));
       }
     } catch (err) {
+      // Clean up zombie session state if launch failed
+      sessionContexts.delete(sessionId);
+      turnStates.delete(sessionId);
+      sessionProviders.delete(sessionId);
+      await db.update(sessions)
+        .set({ status: "stopped", endedAt: new Date().toISOString() })
+        .where(eq(sessions.id, sessionId))
+        .catch(() => {});
       throw err;
     }
 
