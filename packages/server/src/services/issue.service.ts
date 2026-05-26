@@ -4,7 +4,20 @@ import { eq, and } from "drizzle-orm";
 import type { Database } from "../db/index.js";
 import type { BoardEvents } from "./board-events.js";
 import type { DependencyType } from "@agentic-kanban/shared/schema";
-import { resolveNewIssueDefaults, getIssueProjectId, getIssueWorkspaces } from "../repositories/issue.repository.js";
+import {
+  resolveNewIssueDefaults,
+  getIssueProjectId,
+  getIssueWorkspaces,
+  getIssuesByProject,
+  getIssueSummary as getIssueSummaryRepo,
+  getIssueTags,
+  assignTag as assignTagRepo,
+  removeTag as removeTagRepo,
+  getOutgoingDependencies,
+  getIncomingDependencies,
+  getIssueArtifacts,
+  deleteArtifact as deleteArtifactRepo,
+} from "../repositories/issue.repository.js";
 import { deleteWorkspaceCascade } from "../repositories/workspace.repository.js";
 import { enrichWorkspacesWithSessionData, wouldCreateCycle } from "./board-aggregation.service.js";
 
@@ -218,5 +231,57 @@ export function createIssueService(deps: {
     }));
   }
 
-  return { createIssue, updateIssue, deleteIssue, addDependency, removeDependency, addArtifact, getEnrichedWorkspaces };
+  async function listIssues(projectId: string, issueNumber?: number) {
+    return getIssuesByProject(projectId, issueNumber, database);
+  }
+
+  async function getIssueSummary(idParam: string) {
+    return getIssueSummaryRepo(idParam, database);
+  }
+
+  async function getTags(issueId: string) {
+    return getIssueTags(issueId, database);
+  }
+
+  async function assignTag(issueId: string, tagId: string) {
+    return assignTagRepo(issueId, tagId, database);
+  }
+
+  async function removeTag(issueId: string, tagId: string) {
+    return removeTagRepo(issueId, tagId, database);
+  }
+
+  async function getDependencies(issueId: string) {
+    const [outgoing, incoming] = await Promise.all([
+      getOutgoingDependencies(issueId, database),
+      getIncomingDependencies(issueId, database),
+    ]);
+    return { dependencies: [...outgoing, ...incoming] };
+  }
+
+  async function getArtifacts(issueId: string) {
+    return getIssueArtifacts(issueId, database);
+  }
+
+  async function deleteArtifact(issueId: string, artifactId: string) {
+    return deleteArtifactRepo(issueId, artifactId, database);
+  }
+
+  return {
+    createIssue,
+    updateIssue,
+    deleteIssue,
+    addDependency,
+    removeDependency,
+    addArtifact,
+    deleteArtifact,
+    getEnrichedWorkspaces,
+    listIssues,
+    getIssueSummary,
+    getTags,
+    assignTag,
+    removeTag,
+    getDependencies,
+    getArtifacts,
+  };
 }
