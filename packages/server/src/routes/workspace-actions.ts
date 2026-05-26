@@ -4,16 +4,6 @@ import type { SessionManager } from "../services/session.manager.js";
 import type { BoardEvents } from "../services/board-events.js";
 import type { Database } from "../db/index.js";
 import { createWorkspaceService, WorkspaceError } from "../services/workspace.service.js";
-import { getWorkspaceById } from "../repositories/workspace.repository.js";
-import {
-  getWorkspaceSessions,
-  getDiffComments,
-  createDiffComment,
-  updateDiffComment,
-  findDiffComment,
-  deleteDiffComment,
-  getWorkspaceSkillName,
-} from "../repositories/session.repository.js";
 
 function wsStatus(err: WorkspaceError): 404 | 409 | 400 {
   if (err.code === "NOT_FOUND") return 404;
@@ -214,7 +204,7 @@ export function createWorkspaceActionsRoute(
   router.get("/:id/comments", async (c) => {
     const id = c.req.param("id");
     const filePath = c.req.query("filePath");
-    return c.json(await getDiffComments(id, filePath, database));
+    return c.json(await workspaceService.listComments(id, filePath));
   });
 
   // POST /api/workspaces/:id/comments
@@ -222,9 +212,12 @@ export function createWorkspaceActionsRoute(
     const id = c.req.param("id");
     const body = await c.req.json();
     if (!body.filePath || !body.body) return c.json({ error: "filePath and body are required" }, 400);
-    const wsCheck = await getWorkspaceById(id, database);
-    if (!wsCheck) return c.json({ error: "Workspace not found" }, 404);
-    return c.json(await createDiffComment(id, body, database), 201);
+    try {
+      return c.json(await workspaceService.createComment(id, body), 201);
+    } catch (err) {
+      if (err instanceof WorkspaceError) return c.json({ error: err.message }, wsStatus(err));
+      throw err;
+    }
   });
 
   // PATCH /api/workspaces/:id/comments/:commentId
@@ -233,29 +226,31 @@ export function createWorkspaceActionsRoute(
     const commentId = c.req.param("commentId");
     const body = await c.req.json();
     if (!body.body) return c.json({ error: "body is required" }, 400);
-    const existing = await findDiffComment(commentId, id, database);
-    if (!existing) return c.json({ error: "Comment not found" }, 404);
-    await updateDiffComment(commentId, body.body, database);
-    return c.json({ id: commentId });
+    try {
+      return c.json(await workspaceService.updateComment(id, commentId, body.body));
+    } catch (err) {
+      if (err instanceof WorkspaceError) return c.json({ error: err.message }, wsStatus(err));
+      throw err;
+    }
   });
 
   // DELETE /api/workspaces/:id/comments/:commentId
   router.delete("/:id/comments/:commentId", async (c) => {
     const id = c.req.param("id");
     const commentId = c.req.param("commentId");
-    const existing = await findDiffComment(commentId, id, database);
-    if (!existing) return c.json({ error: "Comment not found" }, 404);
-    await deleteDiffComment(commentId, database);
-    return c.json({ success: true });
+    try {
+      await workspaceService.deleteComment(id, commentId);
+      return c.json({ success: true });
+    } catch (err) {
+      if (err instanceof WorkspaceError) return c.json({ error: err.message }, wsStatus(err));
+      throw err;
+    }
   });
 
   // GET /api/workspaces/:id/sessions
   router.get("/:id/sessions", async (c) => {
     const id = c.req.param("id");
-    const ws = await getWorkspaceById(id, database);
-    const skillName = await getWorkspaceSkillName(ws?.skillId ?? null, database);
-    const result = await getWorkspaceSessions(id, database);
-    return c.json(result.map(s => ({ ...s, skillName })));
+    return c.json(await workspaceService.getSessions(id));
   });
 
   // POST /api/workspaces/:id/open-editor
