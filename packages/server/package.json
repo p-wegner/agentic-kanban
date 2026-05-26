@@ -18,7 +18,7 @@
   },
   "files": [
     "bin/",
-    "dist/cli.js",
+    "dist/cli/",
     "dist/server.js",
     "dist/mcp.js",
     "dist/client/",
