@@ -68,44 +68,46 @@ export async function deduplicateProjects(): Promise<void> {
         `— same git repo as "${keep.name}" (${keep.repoPath})`
       );
 
-      // Remap issue statusIds to the surviving project's statuses (matched by name)
-      const dupStatuses = await db.select().from(projectStatuses).where(eq(projectStatuses.projectId, dup.id));
-      const keepStatuses = await db.select().from(projectStatuses).where(eq(projectStatuses.projectId, keep.id));
-      for (const dupStatus of dupStatuses) {
-        const match = keepStatuses.find((s) => s.name === dupStatus.name);
-        if (match && match.id !== dupStatus.id) {
-          await db.update(issues)
-            .set({ statusId: match.id })
-            .where(and(eq(issues.projectId, dup.id), eq(issues.statusId, dupStatus.id)));
+      await db.transaction(async (tx) => {
+        // Remap issue statusIds to the surviving project's statuses (matched by name)
+        const dupStatuses = await tx.select().from(projectStatuses).where(eq(projectStatuses.projectId, dup.id));
+        const keepStatuses = await tx.select().from(projectStatuses).where(eq(projectStatuses.projectId, keep.id));
+        for (const dupStatus of dupStatuses) {
+          const match = keepStatuses.find((s) => s.name === dupStatus.name);
+          if (match && match.id !== dupStatus.id) {
+            await tx.update(issues)
+              .set({ statusId: match.id })
+              .where(and(eq(issues.projectId, dup.id), eq(issues.statusId, dupStatus.id)));
+          }
         }
-      }
 
-      // Move issues to the surviving project
-      await db.update(issues).set({ projectId: keep.id }).where(eq(issues.projectId, dup.id));
-      // Move project-scoped skills to the surviving project
-      await db.update(agentSkills).set({ projectId: keep.id }).where(eq(agentSkills.projectId, dup.id));
-      // Move repos to the surviving project
-      await db.update(repos).set({ projectId: keep.id }).where(eq(repos.projectId, dup.id));
-      // Move scheduled runs to the surviving project
-      await db.update(scheduledRuns).set({ projectId: keep.id }).where(eq(scheduledRuns.projectId, dup.id));
-      // Remove duplicate's statuses
-      await db.delete(projectStatuses).where(eq(projectStatuses.projectId, dup.id));
-      // Remove duplicate project
-      await db.delete(projects).where(eq(projects.id, dup.id));
+        // Move issues to the surviving project
+        await tx.update(issues).set({ projectId: keep.id }).where(eq(issues.projectId, dup.id));
+        // Move project-scoped skills to the surviving project
+        await tx.update(agentSkills).set({ projectId: keep.id }).where(eq(agentSkills.projectId, dup.id));
+        // Move repos to the surviving project
+        await tx.update(repos).set({ projectId: keep.id }).where(eq(repos.projectId, dup.id));
+        // Move scheduled runs to the surviving project
+        await tx.update(scheduledRuns).set({ projectId: keep.id }).where(eq(scheduledRuns.projectId, dup.id));
+        // Remove duplicate's statuses
+        await tx.delete(projectStatuses).where(eq(projectStatuses.projectId, dup.id));
+        // Remove duplicate project
+        await tx.delete(projects).where(eq(projects.id, dup.id));
 
-      // If activeProjectId pointed to the removed project, redirect it to the survivor
-      const activePref = await db
-        .select()
-        .from(preferences)
-        .where(eq(preferences.key, "activeProjectId"))
-        .limit(1);
-      if (activePref[0]?.value === dup.id) {
-        const now = new Date().toISOString();
-        await db
-          .insert(preferences)
-          .values({ key: "activeProjectId", value: keep.id, updatedAt: now })
-          .onConflictDoUpdate({ target: preferences.key, set: { value: keep.id, updatedAt: now } });
-      }
+        // If activeProjectId pointed to the removed project, redirect it to the survivor
+        const activePref = await tx
+          .select()
+          .from(preferences)
+          .where(eq(preferences.key, "activeProjectId"))
+          .limit(1);
+        if (activePref[0]?.value === dup.id) {
+          const now = new Date().toISOString();
+          await tx
+            .insert(preferences)
+            .values({ key: "activeProjectId", value: keep.id, updatedAt: now })
+            .onConflictDoUpdate({ target: preferences.key, set: { value: keep.id, updatedAt: now } });
+        }
+      });
     }
 
     // If the surviving project still has a non-root repoPath, update it to the git root
