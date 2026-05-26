@@ -127,6 +127,8 @@ export function TableView({ columns, onIssueClick, searchQuery, onRefresh }: Tab
   const visibleIds = sorted.map((i) => i.id);
   const allChecked = visibleIds.length > 0 && visibleIds.every((id) => selectedIds.has(id));
   const someChecked = visibleIds.some((id) => selectedIds.has(id));
+  // Only operate on items that are both selected AND currently visible (respects active filter)
+  const activeSelectedIds = visibleIds.filter((id) => selectedIds.has(id));
 
   function toggleSelectAll() {
     if (allChecked) {
@@ -159,7 +161,7 @@ export function TableView({ columns, onIssueClick, searchQuery, onRefresh }: Tab
   async function handleBulkMoveStatus(statusId: string, statusName: string) {
     setBulkStatusOpen(false);
     setBulkLoading(true);
-    const ids = [...selectedIds];
+    const ids = [...activeSelectedIds];
     try {
       const results = await Promise.allSettled(ids.map((id) =>
         apiFetch(`/api/issues/${id}`, { method: "PATCH", body: JSON.stringify({ statusId }) })
@@ -181,7 +183,7 @@ export function TableView({ columns, onIssueClick, searchQuery, onRefresh }: Tab
   async function handleBulkAddTag(tag: Tag) {
     setBulkTagOpen(false);
     setBulkLoading(true);
-    const ids = [...selectedIds];
+    const ids = [...activeSelectedIds];
     try {
       const results = await Promise.allSettled(ids.map((id) =>
         apiFetch(`/api/issues/${id}/tags`, { method: "POST", body: JSON.stringify({ tagId: tag.id }) })
@@ -201,9 +203,9 @@ export function TableView({ columns, onIssueClick, searchQuery, onRefresh }: Tab
   }
 
   async function handleBulkDelete() {
-    if (!confirm(`Delete ${selectedIds.size} issue${selectedIds.size !== 1 ? "s" : ""}? This cannot be undone.`)) return;
+    if (!confirm(`Delete ${activeSelectedIds.length} issue${activeSelectedIds.length !== 1 ? "s" : ""}? This cannot be undone.`)) return;
     setBulkLoading(true);
-    const ids = [...selectedIds];
+    const ids = [...activeSelectedIds];
     try {
       const results = await Promise.allSettled(ids.map((id) =>
         apiFetch(`/api/issues/${id}`, { method: "DELETE" })
@@ -256,7 +258,7 @@ export function TableView({ columns, onIssueClick, searchQuery, onRefresh }: Tab
       {someChecked && (
         <div className="flex items-center gap-2 px-3 py-2 mb-2 rounded-lg bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-700">
           <span className="text-xs font-medium text-blue-700 dark:text-blue-300">
-            {selectedIds.size} selected
+            {activeSelectedIds.length} selected
           </span>
           <button
             onClick={() => setSelectedIds(new Set())}
