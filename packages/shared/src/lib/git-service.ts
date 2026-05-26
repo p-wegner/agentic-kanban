@@ -227,12 +227,25 @@ export async function deleteBranch(
   await execGit(["branch", "-d", branch], repoPath);
 }
 
-/** Merge a branch into the current HEAD of the repo. */
+/** Merge a branch into the current HEAD of the repo.
+ * On conflict or any failure, automatically aborts the merge so the checkout is never left mid-merge.
+ */
 export async function mergeBranch(
   repoPath: string,
   branch: string,
 ): Promise<string> {
-  return execGit(["merge", "--no-ff", branch, "-m", `Merge branch '${branch}'`], repoPath);
+  try {
+    return await execGit(["merge", "--no-ff", branch, "-m", `Merge branch '${branch}'`], repoPath);
+  } catch (err) {
+    // Abort any in-progress merge to restore a clean state before re-throwing
+    try {
+      await execGit(["merge", "--abort"], repoPath);
+      console.log(`[git] merge --abort completed after conflict in ${repoPath}`);
+    } catch {
+      // No merge in progress or abort failed — best effort
+    }
+    throw err;
+  }
 }
 
 /**
