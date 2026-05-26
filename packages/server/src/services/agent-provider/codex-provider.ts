@@ -1,9 +1,14 @@
-import type { AgentLaunchConfig, AgentProvider, ParsedStreamEvent, ProviderLaunchOptions } from "./types.js";
+import type { AgentLaunchConfig, AgentProvider, FileSystem, ParsedStreamEvent, ProviderLaunchOptions } from "./types.js";
 import { PLAN_BEGIN_MARKER, PLAN_END_MARKER } from "./types.js";
-import { resolveCodexDirect, splitArgs } from "./helpers.js";
+import { resolveCodexDirect, splitArgs, nodeFileSystem } from "./helpers.js";
 
 export class CodexProvider implements AgentProvider {
   readonly name = "codex";
+  private readonly fs: FileSystem;
+
+  constructor(fs: FileSystem = nodeFileSystem) {
+    this.fs = fs;
+  }
 
   buildLaunchConfig(options: ProviderLaunchOptions): AgentLaunchConfig {
     const { agentArgs, providerSessionId, agentCommand, keepAlive, profile, planMode } = options;
@@ -24,7 +29,7 @@ export class CodexProvider implements AgentProvider {
         args.push("--profile", "multi-turn");
       }
     } else {
-      const entry = resolveCodexDirect(command);
+      const entry = resolveCodexDirect(command, this.fs);
       if (entry) {
         args.unshift(entry);
         command = process.execPath;
