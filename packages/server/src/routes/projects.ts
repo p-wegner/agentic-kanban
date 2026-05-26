@@ -1,9 +1,8 @@
 import { Hono } from "hono";
-import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { ProjectError, createProjectService } from "../services/project.service.js";
 
-export function createProjectsRoute(database: Database = db) {
+export function createProjectsRoute(database: Database) {
   const router = new Hono();
 
   const projectService = createProjectService({ database });
@@ -259,5 +258,3 @@ export function createProjectsRoute(database: Database = db) {
 
   return router;
 }
-
-export const projectsRoute = createProjectsRoute();

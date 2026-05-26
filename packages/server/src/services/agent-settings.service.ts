@@ -1,6 +1,5 @@
 import { resolve, dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { db } from "../db/index.js";
 import { preferences } from "@agentic-kanban/shared/schema";
 import type { Database } from "../db/index.js";
 import {
@@ -38,7 +37,7 @@ export interface AgentSettings {
 }
 
 export async function loadAgentSettings(
-  database: Database = db,
+  database: Database,
   commandOverride?: string,
 ): Promise<AgentSettings> {
   const prefRows = await database.select().from(preferences);
