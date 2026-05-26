@@ -59,3 +59,26 @@ export interface SessionState {
   workspaceAutoResumeCount: Map<string, number>;
   sessionProviders: Map<string, string>;
 }
+
+export function createSessionState(): SessionState {
+  return {
+    subscribers: new Map(),
+    messageBuffer: new Map(),
+    sessionContexts: new Map(),
+    turnStates: new Map(),
+    stoppedByUser: new Set(),
+    sessionToolUses: new Map(),
+    sessionModels: new Map(),
+    sessionSubagents: new Map(),
+    sessionContextTokens: new Map(),
+    sessionLastTool: new Map(),
+    sessionAgentToolUseIds: new Map(),
+    sessionTextParts: new Map(),
+    sessionFinalText: new Map(),
+    sessionTasks: new Map(),
+    sessionHasTodoWrite: new Set(),
+    sessionExitPlanModeDenied: new Set(),
+    workspaceAutoResumeCount: new Map(),
+    sessionProviders: new Map(),
+  };
+}
