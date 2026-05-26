@@ -392,6 +392,10 @@ Examples:
         // Delete issue tags
         await db.delete(issueTags).where(inArray(issueTags.issueId, issueIds));
 
+        // Delete issue dependencies
+        await db.delete(issueDependencies).where(inArray(issueDependencies.issueId, issueIds));
+        await db.delete(issueDependencies).where(inArray(issueDependencies.dependsOnId, issueIds));
+
         // Find and cleanup workspaces for these issues
         const wsRows = await db
           .select({ id: workspaces.id })
@@ -400,6 +404,15 @@ Examples:
 
         if (wsRows.length > 0) {
           const wsIds = wsRows.map((w) => w.id);
+          // Delete session messages for these sessions
+          const sessRows = await db
+            .select({ id: sessions.id })
+            .from(sessions)
+            .where(inArray(sessions.workspaceId, wsIds));
+          if (sessRows.length > 0) {
+            const sessIds = sessRows.map((s) => s.id);
+            await db.delete(sessionMessages).where(inArray(sessionMessages.sessionId, sessIds));
+          }
           // Delete sessions for these workspaces
           await db.delete(sessions).where(inArray(sessions.workspaceId, wsIds));
           // Delete workspaces

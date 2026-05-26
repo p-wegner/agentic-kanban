@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { issues, issueTags, issueDependencies, issueArtifacts } from "@agentic-kanban/shared/schema";
+import { issues, issueTags, issueDependencies, issueArtifacts, workspaces } from "@agentic-kanban/shared/schema";
 import { eq, and } from "drizzle-orm";
 import type { Database } from "../db/index.js";
 import type { BoardEvents } from "./board-events.js";
@@ -79,6 +79,9 @@ export function createIssueService(deps: {
     id: string,
     body: Record<string, unknown>,
   ): Promise<{ id: string; projectId: string | null }> {
+    const projectId = await getIssueProjectId(id, database);
+    if (!projectId) throw new IssueError("Issue not found", "NOT_FOUND");
+
     const now = new Date().toISOString();
 
     const updates: Record<string, unknown> = { updatedAt: now };
@@ -93,26 +96,26 @@ export function createIssueService(deps: {
 
     await database.update(issues).set(updates).where(eq(issues.id, id));
 
-    const projectId = await getIssueProjectId(id, database);
-    if (projectId) boardEvents?.broadcast(projectId, "issue_updated");
+    boardEvents?.broadcast(projectId, "issue_updated");
 
     return { id, projectId };
   }
 
   async function deleteIssue(id: string): Promise<string | null> {
     const projectId = await getIssueProjectId(id, database);
+    if (!projectId) throw new IssueError("Issue not found", "NOT_FOUND");
 
     // Find all workspaces for this issue and cascade delete
-    const { workspaces } = await import("@agentic-kanban/shared/schema");
     const wsRows = await database.select({ id: workspaces.id }).from(workspaces).where(eq(workspaces.issueId, id));
     for (const ws of wsRows) {
       await deleteWorkspaceCascade(ws.id, database);
     }
 
     await database.delete(issueTags).where(eq(issueTags.issueId, id));
+    await database.delete(issueDependencies).where(eq(issueDependencies.issueId, id));
     await database.delete(issues).where(eq(issues.id, id));
 
-    if (projectId) boardEvents?.broadcast(projectId, "issue_deleted");
+    boardEvents?.broadcast(projectId, "issue_deleted");
     return projectId;
   }
 
