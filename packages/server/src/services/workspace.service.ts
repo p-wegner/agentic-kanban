@@ -13,7 +13,7 @@ import * as gitService from "./git.service.js";
 import { runSetupScript } from "./setup-script.js";
 import { writeAgentSkillFile, readLocalSkillPrompt } from "@agentic-kanban/shared/lib/agent-skill-files";
 import { resolveAgentSettings, toExecutorProvider } from "./agent-settings.service.js";
-import { moveIssueToInProgress, resolveProjectRepo, resolveProjectId, resolveProjectFull, moveIssueToDone, getWorkspaceById, updateWorkspaceStatus } from "../repositories/workspace.repository.js";
+import { moveIssueToInProgress, resolveProjectRepo, resolveProjectId, resolveProjectFull, moveIssueToDone, getWorkspaceById, updateWorkspaceStatus, getWorkspaceDetails } from "../repositories/workspace.repository.js";
 import { killProcessesInDir } from "./process-cleanup.js";
 import { runScript } from "./script-runner.js";
 import { parseDiffStats } from "./board-aggregation.service.js";
@@ -23,7 +23,7 @@ import { PREF_AUTO_START_FOLLOWUP } from "../constants/preference-keys.js";
 import { autoStartFollowups } from "./followup-workspace.service.js";
 import { loadAgentSettings } from "./agent-settings.service.js";
 import type { AgentSettings } from "./agent-settings.service.js";
-import { getDiffComments, findResumableSession, getWorkspaceSessions, getWorkspaceSkillName } from "../repositories/session.repository.js";
+import { getDiffComments, createDiffComment as createDiffCommentRepo, updateDiffComment as updateDiffCommentRepo, findDiffComment, deleteDiffComment, findResumableSession, getWorkspaceSessions, getWorkspaceSkillName } from "../repositories/session.repository.js";
 
 // --- Error types for service-to-route communication ---
 
@@ -938,6 +938,43 @@ export function createWorkspaceService(deps: {
     return { id };
   }
 
+  async function getWorkspace(id: string) {
+    return getWorkspaceDetails(id, database);
+  }
+
+  async function listComments(workspaceId: string, filePath?: string) {
+    return getDiffComments(workspaceId, filePath, database);
+  }
+
+  async function createComment(
+    workspaceId: string,
+    body: { filePath: string; body: string; lineNumOld?: number | null; lineNumNew?: number | null; side?: string },
+  ) {
+    const ws = await getWorkspaceById(workspaceId, database);
+    if (!ws) throw new WorkspaceError("Workspace not found", "NOT_FOUND");
+    return createDiffCommentRepo(workspaceId, body, database);
+  }
+
+  async function updateComment(workspaceId: string, commentId: string, body: string) {
+    const existing = await findDiffComment(commentId, workspaceId, database);
+    if (!existing) throw new WorkspaceError("Comment not found", "NOT_FOUND");
+    await updateDiffCommentRepo(commentId, body, database);
+    return { id: commentId };
+  }
+
+  async function deleteComment(workspaceId: string, commentId: string) {
+    const existing = await findDiffComment(commentId, workspaceId, database);
+    if (!existing) throw new WorkspaceError("Comment not found", "NOT_FOUND");
+    await deleteDiffComment(commentId, database);
+  }
+
+  async function getSessions(workspaceId: string) {
+    const ws = await getWorkspaceById(workspaceId, database);
+    const skillName = await getWorkspaceSkillName(ws?.skillId ?? null, database);
+    const result = await getWorkspaceSessions(workspaceId, database);
+    return result.map(s => ({ ...s, skillName }));
+  }
+
   return {
     createWorkspace,
     deleteWorkspace,
@@ -958,5 +995,11 @@ export function createWorkspaceService(deps: {
     openTerminal,
     openEditor,
     updateWorkspace,
+    getWorkspace,
+    listComments,
+    createComment,
+    updateComment,
+    deleteComment,
+    getSessions,
   };
 }

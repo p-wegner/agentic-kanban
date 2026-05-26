@@ -5,7 +5,6 @@ import type { BoardEvents } from "../services/board-events.js";
 import type { Database } from "../db/index.js";
 import { createWorkspaceService, WorkspaceError } from "../services/workspace.service.js";
 import type { CreateWorkspaceInput } from "../services/workspace.service.js";
-import { getWorkspaceDetails } from "../repositories/workspace.repository.js";
 
 export function createWorkspacesRoute(
   database: Database = db,
@@ -57,7 +56,7 @@ export function createWorkspacesRoute(
   // GET /api/workspaces/:id
   router.get("/:id", async (c) => {
     const id = c.req.param("id");
-    const details = await getWorkspaceDetails(id, database);
+    const details = await workspaceService.getWorkspace(id);
     if (!details) {
       return c.json({ error: "Workspace not found" }, 404);
     }
