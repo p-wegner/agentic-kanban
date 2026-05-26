@@ -152,6 +152,10 @@ export async function scanLocalSkills(repoPath: string): Promise<DiskSkillEntry[
  * Used when launching a disk-only skill that has no DB entry.
  */
 export async function copySkillToWorktree(repoPath: string, skillName: string, worktreePath: string): Promise<boolean> {
+  // Reject names that could escape the skills directory via path traversal
+  if (/[/\\]/.test(skillName) || skillName === ".." || skillName === "." || skillName.includes("\0")) {
+    return false;
+  }
   const src = localSkillFilePath(repoPath, skillName);
   const destDir = join(worktreePath, ".claude", "skills", skillName);
   try {
