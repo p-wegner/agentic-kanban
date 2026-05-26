@@ -11,13 +11,15 @@ import type { Database } from "../db/index.js";
 export interface ClaudeCliOptions {
   timeout?: number;
   database?: Database;
+  /** Optional model override, e.g. "haiku" */
+  model?: string;
 }
 
 export async function invokeClaudePrompt(
   prompt: string,
   opts: ClaudeCliOptions = {}
 ): Promise<string> {
-  const { timeout = 60000, database = db } = opts;
+  const { timeout = 60000, database = db, model } = opts;
 
   let agentCommand = "claude";
   let claudeProfile: string | undefined;
@@ -47,6 +49,9 @@ export async function invokeClaudePrompt(
   }
 
   const args: string[] = ["--output-format", "text"];
+  if (!isCodex && model) {
+    args.push("--model", model);
+  }
   if (!isCodex && claudeProfile) {
     const settingsPath = join(homedir(), ".claude", `settings_${claudeProfile}.json`);
     if (existsSync(settingsPath)) {
