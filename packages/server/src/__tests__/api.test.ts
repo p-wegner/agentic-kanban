@@ -56,6 +56,8 @@ const MIGRATION_FILES = [
   "../../../shared/drizzle/0038_pending_plan_path.sql",
   "../../../shared/drizzle/0039_nullable_default_branch.sql",
   "../../../shared/drizzle/0040_direct_workspace_base_commit.sql",
+  "../../../shared/drizzle/0041_builtin_tags.sql",
+  "../../../shared/drizzle/0042_issue_type.sql",
 ];
 
 function createTestApp() {
