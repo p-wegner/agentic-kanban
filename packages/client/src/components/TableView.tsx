@@ -32,7 +32,11 @@ const STATUS_CLASS: Record<string, string> = {
 
 const ARCHIVE_STATUSES = new Set(["Done", "Cancelled"]);
 
+<<<<<<< HEAD
 type SortKey = "number" | "title" | "status" | "priority" | "type" | "estimate" | "updated" | "dueDate";
+=======
+type SortKey = "number" | "title" | "status" | "priority" | "type" | "estimate" | "updated";
+>>>>>>> c346cfd9 (feat: add Priority column and sorting to Table view)
 type SortDir = "asc" | "desc";
 
 const ISSUE_TYPE_ORDER: Record<string, number> = { bug: 0, feature: 1, task: 2, chore: 3 };
