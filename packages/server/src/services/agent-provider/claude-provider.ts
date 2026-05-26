@@ -1,12 +1,16 @@
 import { execSync } from "node:child_process";
-import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import type { AgentLaunchConfig, AgentProvider, ParsedStreamEvent, ProviderLaunchOptions } from "./types.js";
-import { getMcpConfigPath, buildSpawnEnv, splitArgs } from "./helpers.js";
+import type { AgentLaunchConfig, AgentProvider, FileSystem, ParsedStreamEvent, ProviderLaunchOptions } from "./types.js";
+import { getMcpConfigPath, buildSpawnEnv, splitArgs, nodeFileSystem } from "./helpers.js";
 
 export class ClaudeProvider implements AgentProvider {
   readonly name = "claude";
+  private readonly fs: FileSystem;
+
+  constructor(fs: FileSystem = nodeFileSystem) {
+    this.fs = fs;
+  }
 
   buildLaunchConfig(options: ProviderLaunchOptions): AgentLaunchConfig {
     const {
@@ -48,7 +52,7 @@ export class ClaudeProvider implements AgentProvider {
     } else {
       args = ["--output-format", "stream-json", "--verbose"];
       try {
-        args.push("--mcp-config", getMcpConfigPath());
+        args.push("--mcp-config", getMcpConfigPath(this.fs));
       } catch (err) {
         console.warn(`[agent] Failed to generate MCP config: ${err}`);
       }
@@ -57,7 +61,7 @@ export class ClaudeProvider implements AgentProvider {
       }
       if (effectiveProfileName) {
         const settingsPath = join(homedir(), ".claude", `settings_${effectiveProfileName}.json`);
-        if (existsSync(settingsPath)) {
+        if (this.fs.existsSync(settingsPath)) {
           args.push("--settings", settingsPath);
         }
       }
@@ -79,7 +83,7 @@ export class ClaudeProvider implements AgentProvider {
       args,
       useShell: isWindows && (isMockAgent || !!agentCommand),
       isMockAgent,
-      env: buildSpawnEnv(effectiveProfileName),
+      env: buildSpawnEnv(effectiveProfileName, this.fs),
       keepStdinOpen,
     };
   }
