@@ -84,6 +84,8 @@ export interface MainWorkspaceInfo {
   contextTokens?: number | null;
   lastTool?: string | null;
   lastAssistantMessage?: string | null;
+  /** True when a non-plan-mode session completed (idle) but produced no file changes. */
+  planOnlyWarning?: boolean;
 }
 
 export interface WorkspaceSummary {
