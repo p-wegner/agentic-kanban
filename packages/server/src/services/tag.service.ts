@@ -4,6 +4,7 @@ import type { Database } from "../db/index.js";
 import {
   getAllTags,
   createTag,
+  findTagByName,
   getTagById,
   updateTag,
   deleteTag,
@@ -14,6 +15,7 @@ import {
   removeIssueTagsByTagIds,
   deleteTagsByIds,
 } from "../repositories/tag.repository.js";
+import { ConflictError } from "../errors/index.js";
 
 export class TagError extends Error {
   constructor(
@@ -30,6 +32,11 @@ export function createTagService({ database }: { database: Database }) {
   }
 
   async function createNewTag(name: string, color: string | null) {
+    const existing = await findTagByName(name, database);
+    if (existing) {
+      if (existing.isBuiltin) throw new ConflictError(`Cannot create a tag with the same name as a built-in tag: "${name}"`);
+      throw new ConflictError(`A tag with name "${name}" already exists`);
+    }
     return createTag(name, color, database);
   }
 

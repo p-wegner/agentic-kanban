@@ -1,10 +1,11 @@
-import { Hono } from "hono";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { createPreferenceService } from "../services/preference.service.js";
+import { createRouter } from "../middleware/create-router.js";
+import { parseJsonBody } from "../middleware/parse-body.js";
 
 export function createPreferencesRoute(database: Database = db) {
-  const router = new Hono();
+  const router = createRouter();
   const preferenceService = createPreferenceService({ database });
 
   // GET /api/preferences/active-project
@@ -15,7 +16,7 @@ export function createPreferencesRoute(database: Database = db) {
 
   // PUT /api/preferences/active-project
   router.put("/active-project", async (c) => {
-    const body = await c.req.json();
+    const body = await parseJsonBody<{ projectId?: string }>(c);
     await preferenceService.setActiveProjectId(body.projectId ?? "");
     return c.json({ projectId: body.projectId });
   });
@@ -27,7 +28,7 @@ export function createPreferencesRoute(database: Database = db) {
 
   // PUT /api/preferences/settings — update agent settings
   router.put("/settings", async (c) => {
-    const body = await c.req.json() as Record<string, string>;
+    const body = await parseJsonBody<Record<string, string>>(c);
     await preferenceService.updateSettings(body);
     return c.json({ ok: true });
   });

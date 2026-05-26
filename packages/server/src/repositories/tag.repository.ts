@@ -1,11 +1,19 @@
 import { tags, issueTags } from "@agentic-kanban/shared/schema";
-import { eq, inArray } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 
 export async function getAllTags(database: Database = db) {
   return database.select().from(tags);
+}
+
+export async function findTagByName(
+  name: string,
+  database: Database = db,
+) {
+  const rows = await database.select().from(tags).where(sql`lower(${tags.name}) = lower(${name})`).limit(1);
+  return rows[0] ?? null;
 }
 
 export async function createTag(
