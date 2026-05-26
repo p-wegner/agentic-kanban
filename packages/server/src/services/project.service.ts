@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { execSync } from "node:child_process";
+import { execSync, spawn } from "node:child_process";
 import { existsSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { resolve, sep, join } from "node:path";
 import { projects, projectStatuses, issues, workspaces, preferences } from "@agentic-kanban/shared/schema";
@@ -538,6 +538,23 @@ export function createProjectService(deps: { database: Database }) {
     return results;
   }
 
+  function openInExplorer(dirPath: string): void {
+    const platform = process.platform;
+    let cmd: string;
+    let args: string[];
+    if (platform === "win32") {
+      cmd = "explorer";
+      args = [dirPath.replace(/\//g, "\\")];
+    } else if (platform === "darwin") {
+      cmd = "open";
+      args = [dirPath];
+    } else {
+      cmd = "xdg-open";
+      args = [dirPath];
+    }
+    spawn(cmd, args, { detached: true, stdio: "ignore" }).unref();
+  }
+
   return {
     registerProject,
     createProject,
@@ -549,5 +566,6 @@ export function createProjectService(deps: { database: Database }) {
     getBoard,
     getGraph,
     getCrossProjectWorkspaces,
+    openInExplorer,
   };
 }
