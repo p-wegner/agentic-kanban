@@ -3,7 +3,7 @@
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Project Status
-Stage 13 complete + Tauri desktop (Stages 0-13 done). Tech stack: TypeScript monorepo — Hono + Drizzle + React + MCP SDK + Tauri v2. Current progress: `docs/state.md`. Feature catalog visually verified: 2026-05-23.
+Stage 13 complete + Tauri desktop (Stages 0-13 done). Tech stack: TypeScript monorepo — Hono + Drizzle + React + MCP SDK + Tauri v2. Current progress: `docs/state.md`. Feature catalog visually verified: 2026-05-26.
 
 ## Active Project
 The active project is "agentic-kanban" — always use this for board monitor cycles, workspace operations, and MCP tools.
