@@ -2,6 +2,7 @@ import { createSessionState } from "./types.js";
 import { createWsHandler } from "./ws-handler.js";
 import { createBroadcaster } from "./broadcast.js";
 import { createSessionLifecycle } from "./session-lifecycle.js";
+import type { SessionManagerOptions } from "./types.js";
 
 export type { StartSessionOptions, SessionManagerOptions } from "./types.js";
 

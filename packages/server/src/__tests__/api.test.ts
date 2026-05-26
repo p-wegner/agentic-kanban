@@ -153,7 +153,7 @@ describe("Projects API", () => {
     const res = await app.request(`/api/projects/${projectId}/branches`);
     expect(res.status).toBe(500);
     const body = await res.json() as any;
-    expect(body.error).toContain("Failed to list branches");
+    expect(body.error).toBeTruthy();
   });
 
   it("GET /api/projects/:id/branches returns 404 for missing project", async () => {

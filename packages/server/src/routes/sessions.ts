@@ -1,45 +1,28 @@
-import { Hono } from "hono";
+import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
-import { createSessionReadService, SessionReadError } from "../services/session-read.service.js";
+import { createSessionReadService } from "../services/session-read.service.js";
+import { createRouter } from "../middleware/create-router.js";
 
-export function createSessionsRoute(database: Database) {
-  const router = new Hono();
+export function createSessionsRoute(database: Database = db) {
+  const router = createRouter();
   const sessionReadService = createSessionReadService({ database });
 
   // GET /api/sessions/:sessionId/output
   router.get("/:sessionId/output", async (c) => {
     const sessionId = c.req.param("sessionId");
-    try {
-      return c.json(await sessionReadService.getOutput(sessionId));
-    } catch (err) {
-      if (err instanceof SessionReadError) return c.json({ error: err.message }, 404);
-      throw err;
-    }
+    return c.json(await sessionReadService.getOutput(sessionId));
   });
 
   // GET /api/sessions/:sessionId/stats
   router.get("/:sessionId/stats", async (c) => {
     const sessionId = c.req.param("sessionId");
-    try {
-      return c.json(await sessionReadService.getStats(sessionId));
-    } catch (err) {
-      if (err instanceof SessionReadError) return c.json({ error: err.message }, 404);
-      if (err instanceof Error && err.message === "Invalid stats data") {
-        return c.json({ error: "Invalid stats data" }, 500);
-      }
-      throw err;
-    }
+    return c.json(await sessionReadService.getStats(sessionId));
   });
 
   // GET /api/sessions/:sessionId/summary
   router.get("/:sessionId/summary", async (c) => {
     const sessionId = c.req.param("sessionId");
-    try {
-      return c.json(await sessionReadService.getSummary(sessionId));
-    } catch (err) {
-      if (err instanceof SessionReadError) return c.json({ error: err.message }, 404);
-      throw err;
-    }
+    return c.json(await sessionReadService.getSummary(sessionId));
   });
 
   return router;

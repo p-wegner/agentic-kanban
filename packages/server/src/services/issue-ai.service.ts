@@ -4,6 +4,7 @@ import { eq, and, inArray, sql } from "drizzle-orm";
 import type { DependencyType } from "@agentic-kanban/shared/schema";
 import type { Database } from "../db/index.js";
 import { invokeClaudePrompt } from "./claude-cli.service.js";
+import { NotFoundError } from "../errors/index.js";
 
 export interface EnhanceIssueResult {
   title: string;
@@ -61,7 +62,7 @@ export async function analyzeDependencies(
     .where(eq(issues.id, issueId))
     .limit(1);
   if (issueRows.length === 0) {
-    throw Object.assign(new Error("Issue not found"), { statusCode: 404 });
+    throw new NotFoundError("Issue not found");
   }
   const targetIssue = issueRows[0];
 
