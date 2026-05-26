@@ -39,16 +39,22 @@ function ElapsedTimer({ since }: { since: string }) {
 
 // --- Featured card (active / fixing) ----------------------------------------
 
+const ATTENTION_CONFIG = {
+  merge:    { label: "Ready to merge", dot: "bg-emerald-500", ring: "ring-emerald-400/60", header: "from-emerald-50 dark:from-emerald-950/50" },
+  conflict: { label: "Conflicts",      dot: "bg-red-500",     ring: "ring-red-400/60",     header: "from-red-50 dark:from-red-950/50" },
+} as const;
+
 interface FeaturedCardProps {
   issue: IssueWithStatus;
   activityHistory: string[];
   liveStats?: LiveSessionStats;
   todos?: TodoItem[];
+  attention?: "merge" | "conflict";
   onIssueClick: (issue: IssueWithStatus) => void;
   onWorkspaceClick: (issue: IssueWithStatus, workspaceId?: string) => void;
 }
 
-function FeaturedCard({ issue, activityHistory, liveStats, todos, onIssueClick, onWorkspaceClick }: FeaturedCardProps) {
+function FeaturedCard({ issue, activityHistory, liveStats, todos, attention, onIssueClick, onWorkspaceClick }: FeaturedCardProps) {
   const ws = issue.workspaceSummary?.main;
   const feedRef = useRef<HTMLDivElement>(null);
 
@@ -60,7 +66,9 @@ function FeaturedCard({ issue, activityHistory, liveStats, todos, onIssueClick, 
 
   if (!ws) return null;
 
-  const cfg = WS_STATUS_CONFIG[ws.status] ?? WS_STATUS_CONFIG.idle;
+  const att = attention ? ATTENTION_CONFIG[attention] : null;
+  const baseCfg = WS_STATUS_CONFIG[ws.status] ?? WS_STATUS_CONFIG.idle;
+  const cfg = att ? { ...baseCfg, label: att.label, dot: att.dot, ring: att.ring, header: att.header } : baseCfg;
 
   const doneTodos = todos?.filter((t) => t.status === "completed").length ?? 0;
   const totalTodos = todos?.length ?? 0;
@@ -330,7 +338,12 @@ export function AgentGrid({ columns, liveActivity, liveStats, sessionTodos, onIs
     .flatMap((col) => col.issues)
     .filter((issue) => {
       const ws = issue.workspaceSummary?.main;
-      return ws && ws.status !== "closed";
+      if (!ws || ws.status === "closed") return false;
+      // Hide plan-only / zero-change idle workspaces (noise) — unless they still need a merge/conflict action.
+      if (ws.status === "idle" && ws.planOnlyWarning && !ws.readyForMerge && !ws.conflicts?.hasConflicts) {
+        return false;
+      }
+      return true;
     })
     .sort((a, b) => {
       const aStatus = a.workspaceSummary?.main?.status ?? "idle";
@@ -357,20 +370,35 @@ export function AgentGrid({ columns, liveActivity, liveStats, sessionTodos, onIs
     );
   }
 
-  const liveAgents = agents.filter((i) => WS_STATUS_CONFIG[i.workspaceSummary?.main?.status ?? ""]?.tier === "live");
-  const backgroundAgents = agents.filter((i) => WS_STATUS_CONFIG[i.workspaceSummary?.main?.status ?? ""]?.tier !== "live");
+  // Idle workspaces that are done and waiting on a human action (merge or conflict resolution).
+  const attentionAgents = agents.filter((i) => {
+    const ws = i.workspaceSummary?.main;
+    return ws?.status === "idle" && (ws.readyForMerge === true || ws.conflicts?.hasConflicts === true);
+  });
+  const isAttention = (i: IssueWithStatus) => attentionAgents.includes(i);
 
+  const liveAgents = agents.filter((i) => !isAttention(i) && WS_STATUS_CONFIG[i.workspaceSummary?.main?.status ?? ""]?.tier === "live");
+  const backgroundAgents = agents.filter((i) => !isAttention(i) && WS_STATUS_CONFIG[i.workspaceSummary?.main?.status ?? ""]?.tier !== "live");
+
+  const attentionCount = attentionAgents.length;
   const liveCount = liveAgents.length;
   const reviewingCount = backgroundAgents.filter((i) => i.workspaceSummary?.main?.status === "reviewing").length;
   const idleCount = backgroundAgents.filter((i) => i.workspaceSummary?.main?.status === "idle").length;
 
-  const featuredMinPx = liveAgents.length <= 2 ? 320 : liveAgents.length <= 4 ? 280 : 240;
+  const featuredCount = Math.max(attentionAgents.length, liveAgents.length);
+  const featuredMinPx = featuredCount <= 2 ? 320 : featuredCount <= 4 ? 280 : 240;
   const compactMinPx = backgroundAgents.length <= 6 ? 220 : backgroundAgents.length <= 12 ? 190 : 165;
 
   return (
     <div className="flex flex-col gap-0 h-full overflow-y-auto">
       <div className="flex items-center gap-3 text-xs text-gray-500 dark:text-gray-400 shrink-0 px-4 py-2 border-b border-gray-100 dark:border-gray-800 bg-white/80 dark:bg-gray-900/80 backdrop-blur-sm sticky top-0 z-10">
         <span className="font-semibold text-gray-700 dark:text-gray-300">{agents.length} workspace{agents.length !== 1 ? "s" : ""}</span>
+        {attentionCount > 0 && (
+          <span className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-semibold">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+            {attentionCount} need{attentionCount !== 1 ? "" : "s"} action
+          </span>
+        )}
         {liveCount > 0 && (
           <span className="flex items-center gap-1 text-green-600 dark:text-green-400 font-medium">
             <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
@@ -392,6 +420,32 @@ export function AgentGrid({ columns, liveActivity, liveStats, sessionTodos, onIs
       </div>
 
       <div className="flex flex-col gap-4 p-4">
+        {attentionAgents.length > 0 && (
+          <section>
+            <h3 className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+              Needs Attention
+            </h3>
+            <div
+              className="grid gap-3"
+              style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${featuredMinPx}px, 1fr))` }}
+            >
+              {attentionAgents.map((issue) => (
+                <FeaturedCard
+                  key={issue.id}
+                  issue={issue}
+                  activityHistory={historyRef.current.get(issue.id) ?? []}
+                  liveStats={liveStats[issue.id]}
+                  todos={sessionTodos[issue.id]}
+                  attention={issue.workspaceSummary?.main?.conflicts?.hasConflicts ? "conflict" : "merge"}
+                  onIssueClick={onIssueClick}
+                  onWorkspaceClick={onWorkspaceClick}
+                />
+              ))}
+            </div>
+          </section>
+        )}
+
         {liveAgents.length > 0 && (
           <section>
             <h3 className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-2 flex items-center gap-1.5">
