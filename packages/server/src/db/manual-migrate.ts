@@ -30,7 +30,14 @@ export async function applyMigrations(client: Client): Promise<void> {
     throw new Error(`Migration journal not found at ${journalPath}`);
   }
 
-  const journal = JSON.parse(readFileSync(journalPath, "utf8"));
+  const journalRaw = readFileSync(journalPath, "utf8");
+  if (journalRaw.includes("<<<<<<<")) {
+    throw new Error(
+      `[startup] FATAL: ${journalPath} contains git conflict markers — the repository is mid-merge. ` +
+      `Run 'git merge --abort' in the main checkout to recover, then restart the server.`,
+    );
+  }
+  const journal = JSON.parse(journalRaw);
   const entries: Array<{ tag: string; when: number; breakpoints: boolean }> = journal.entries;
 
   // Create drizzle's migration tracking table
