@@ -1087,9 +1087,12 @@ Server: http://localhost:${serverPort}`;
           issueId: issues.id,
           issueTitle: issues.title,
           issueNumber: issues.issueNumber,
+          issueStatusName: projectStatuses.name,
+          baseBranch: workspaces.baseBranch,
         })
         .from(workspaces)
         .innerJoin(issues, eq(workspaces.issueId, issues.id))
+        .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
         .where(sql`${workspaces.status} != 'closed' AND ${issues.statusId} IN (${sql.join(activeStatusIds.map(id => sql`${id}`), sql`, `)})`);
 
       for (const ws of candidates) {
@@ -1140,6 +1143,18 @@ Server: http://localhost:${serverPort}`;
               logMonitorAction("mark_idle", ws.wsId, ws.issueId);
               console.log(`[monitor] Workspace ${ws.wsId} has ${sessionCount} sessions — flagged as stuck, closing`);
               boardEvents.broadcast(ws.projectId, "board_changed");
+            } else if (sessionCount >= 5 && ws.issueStatusName === "In Review") {
+              // Health check: workspace with many sessions stuck in review loop.
+              // Close it to stop the cycle — the work is committed, it needs merge or human action.
+              await db.update(workspaces).set({ status: "closed", updatedAt: new Date().toISOString() }).where(eq(workspaces.id, ws.wsId)).catch(() => {});
+              logMonitorAction("mark_idle", ws.wsId, ws.issueId);
+              console.log(`[monitor] Workspace ${ws.wsId} has ${sessionCount} sessions with issue in review — closing to break review loop (merge or create new workspace)`);
+              boardEvents.broadcast(ws.projectId, "board_changed");
+            } else if (ws.issueStatusName === "In Review") {
+              // Workspace is idle but issue is already in review — don't relaunch.
+              // The workspace has committed work awaiting review/merge. Relaunching would
+              // start a blind implementation session that overwrites or duplicates work.
+              console.log(`[monitor] Skipping relaunch for idle workspace ${ws.wsId} — issue #${ws.issueNumber} is in review (committed work awaiting merge)`);
             } else {
             // Relaunch idle workspaces
             const baseUrl = `http://localhost:${serverPort}`;
