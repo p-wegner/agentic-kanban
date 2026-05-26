@@ -71,64 +71,19 @@ The app's built-in monitor handles: idle→relaunch, reviewing→merge, active+s
 
 **Only run this section manually if `auto_monitor` preference is `false`.**
 
-### Completion-first priority
-
-**Goal: close tickets, not open new ones.** Process columns in this exact order:
-
-1. **In Review** → merge or unblock first. These are closest to Done.
-2. **In Progress (idle/stuck)** → relaunch or escalate. Agents already did work — salvage it.
-3. **In Progress (active, running)** → nudge if stuck, leave alone if fresh.
-4. **Auto-start new work** → only after everything above is handled and WIP allows.
-
-Never start new work while reviews or idle agents are piling up.
-
-### Stuck-review escalation
-
-Track consecutive cycles a workspace stays stuck. Use a simple counter stored in the agent prompt context (re-read board state each cycle to detect staleness).
-
-| Stuck cycles | Action |
-|---|---|
-| 1 cycle | Normal: relaunch idle or merge reviewing |
-| 2 cycles | Re-merge or re-relaunch with a follow-up turn: `POST /api/workspaces/:id/turn` with `"Please finish now — summarize what you have and commit."` |
-| 3+ cycles | **Escalate**: spawn a subagent (Agent tool, `general-purpose` type) to investigate the session and resolve it. See escalation protocol below. |
-
-**Escalation protocol (3+ cycles stuck):**
-Spawn a subagent with this prompt structure:
-```
-Investigate kanban workspace <wsId> for issue #<N> "<title>".
-
-The workspace has been stuck for <X> consecutive monitor cycles.
-Current state: workspace status=<status>, session status=<sessionStatus>.
-
-Steps:
-1. Read the session output: GET http://localhost:3001/api/sessions/<sessionId>/output
-2. Read the diff: GET http://localhost:3001/api/workspaces/<wsId>/diff
-3. Determine why it's stuck (merge conflict? agent error? incomplete work? ghost workspace?)
-4. Take the appropriate action:
-   - If the diff has real, complete changes: manually merge the branch to master, then DELETE the workspace and move the issue to Done
-   - If the diff is empty or broken: DELETE the workspace, move the issue back to Todo
-   - If there's a merge conflict: resolve it on the feature branch, commit, then retry the merge
-   - If the agent left unfinished work: commit what exists, merge if it's safe, otherwise move back to Todo
-5. Report what you found and what you did
-
-Use `curl` for API calls. For git operations, work in the worktree directory.
-```
-
-The subagent has full autonomy to resolve the stuck state — merge, delete, move, or fix.
-
 Get the board:
 ```powershell
 $proj = "<active-project-id>"  # read from GET /api/preferences/active-project if unknown
 $board = Invoke-RestMethod "http://localhost:3001/api/projects/$proj/board" -TimeoutSec 10
 ```
 
-For each issue in `In Review` and `In Progress` columns (in that order), check `workspaceSummary.main`:
+For each issue in `In Progress` and `In Review` columns, check `workspaceSummary.main`:
 
 | Workspace status | Session status | Action |
 |---|---|---|
+| `idle` | any | **Relaunch**: `POST /api/workspaces/:id/launch` |
 | `reviewing`, workingDir empty | — | **Ghost**: delete workspace, reset issue to In Progress, create fresh workspace |
 | `reviewing` | `stopped` | **Merge**: `POST /api/workspaces/:id/merge` (60s timeout) |
-| `idle` | any | **Relaunch**: `POST /api/workspaces/:id/launch` |
 | `active` | `stopped` | Mark idle: `PATCH /api/workspaces/:id` `{"status":"idle"}` |
 | `active` | `running`, age >5min | **Nudge**: `POST /api/workspaces/:id/turn` `{"message": "Please continue with the task..."}` |
 | `active` | `running`, age ≤5min | Leave alone — too fresh |
@@ -138,7 +93,7 @@ For each issue in `In Review` and `In Progress` columns (in that order), check `
 2. If conflicts: cherry-pick the feature commit to master manually, resolve conflicts, commit, then delete the workspace and mark issue Done
 3. If no conflicts but still timing out: check `workingDir` field — empty = ghost workspace.
 
-**Auto-start:** Only if fewer than WIP-limit issues In Progress, start the highest-priority Todo:
+**Auto-start:** If fewer than 3 issues In Progress, start the highest-priority Todo:
 ```powershell
 $slug = ($issue.title -replace '[^a-zA-Z0-9\s]','' -replace '\s+','-').ToLower().Substring(0, [Math]::Min(40, $issue.title.Length))
 $branch = "feature/ak-$($issue.issueNumber)-$slug"
