@@ -1219,6 +1219,7 @@ export function BoardPage() {
               columns={columns}
               onIssueClick={handleIssueClick}
               searchQuery={searchQuery}
+              onRefresh={() => refetchBoard()}
             />
           </BoardErrorBoundary>
         )}
