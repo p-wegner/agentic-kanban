@@ -3,6 +3,7 @@ import { eq, inArray, sql, desc } from "drizzle-orm";
 import type { Database } from "../db/index.js";
 import { getDiffShortstat, detectConflicts } from "./git.service.js";
 import type { ProviderName } from "./agent-provider.js";
+import { isAnalyticsNoise } from "./session-filter.js";
 
 // Limit concurrent background git operations to avoid hammering the filesystem
 let _bgGitRunning = 0;
@@ -247,8 +248,18 @@ export async function buildWorkspaceSummaryMap(
       .orderBy(sessions.startedAt);
 
     const latestByWs = new Map<string, { id: string; status: string; startedAt: string; endedAt: string | null; stats: string | null; triggerType: string | null }>();
+    const latestNoiseByWs = new Map<string, { id: string; status: string; startedAt: string; endedAt: string | null; stats: string | null; triggerType: string | null }>();
     for (const s of sessionRows) {
-      latestByWs.set(s.workspaceId, { id: s.id, status: s.status, startedAt: s.startedAt, endedAt: s.endedAt, stats: s.stats, triggerType: s.triggerType ?? null });
+      const entry = { id: s.id, status: s.status, startedAt: s.startedAt, endedAt: s.endedAt, stats: s.stats, triggerType: s.triggerType ?? null };
+      if (isAnalyticsNoise(s)) {
+        latestNoiseByWs.set(s.workspaceId, entry);
+      } else {
+        latestByWs.set(s.workspaceId, entry);
+      }
+    }
+    // Fall back to noise sessions only for workspaces with no real sessions
+    for (const [wsId, noiseSession] of latestNoiseByWs) {
+      if (!latestByWs.has(wsId)) latestByWs.set(wsId, noiseSession);
     }
 
     const latestSessionIds = [...latestByWs.values()].map(s => s.id);
