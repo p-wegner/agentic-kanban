@@ -83,15 +83,28 @@ For each issue in `In Progress` and `In Review` columns, check `workspaceSummary
 |---|---|---|
 | `idle` | any | **Relaunch**: `POST /api/workspaces/:id/launch` |
 | `reviewing`, workingDir empty | — | **Ghost**: delete workspace, reset issue to In Progress, create fresh workspace |
-| `reviewing` | `stopped` | **Merge**: `POST /api/workspaces/:id/merge` (60s timeout) |
+| `reviewing` | `stopped` | **Merge**: `POST /api/workspaces/:id/merge` (60s timeout) — see "Merging branches safely" below |
 | `active` | `stopped` | Mark idle: `PATCH /api/workspaces/:id` `{"status":"idle"}` |
 | `active` | `running`, age >5min | **Nudge**: `POST /api/workspaces/:id/turn` `{"message": "Please continue with the task..."}` |
 | `active` | `running`, age ≤5min | Leave alone — too fresh |
 
-**If merge times out repeatedly (3+ attempts):**
-1. Check `GET /api/workspaces/:id/conflicts` — `hasConflicts: true` means branch diverged
-2. If conflicts: cherry-pick the feature commit to master manually, resolve conflicts, commit, then delete the workspace and mark issue Done
-3. If no conflicts but still timing out: check `workingDir` field — empty = ghost workspace.
+### Merging branches safely
+
+**The app owns all merging. Never run `git merge`, `git cherry-pick`, `git rebase`, `git checkout`, `git reset`, or `git stash` in the main checkout to land a branch.** Manual git in the main repo is what corrupts the database and abandons half-finished merges (see "Why manual merges are banned" below). The endpoints below do the same work safely, in the worktree, without touching the main checkout's working tree.
+
+**Procedure — always this order:**
+1. **Merge**: `POST /api/workspaces/:id/merge`.
+   - **200** → merged. Done.
+   - **409** with `conflictingFiles` → the branch conflicts with the base. Go to step 2. (The endpoint leaves the repo clean — there is no dangling merge to finish or abort.)
+   - **5xx / timeout** → transient. Retry once. If it still fails, check `workingDir` — empty = ghost workspace (see Known patterns), otherwise report under "Needs attention" and move on. Do **not** fall back to manual git.
+2. **Resolve in the worktree, not the main repo**: `POST /api/workspaces/:id/fix-and-merge` with `{ "mergeError": "<the 409 message / conflicting files>" }`. This launches an agent **inside the workspace's worktree** to rebase/resolve and merge. It returns `201` with a `sessionId`.
+3. **Wait for that session**, then re-check the workspace next cycle. If `fix-and-merge` succeeds the workspace closes itself; if it stalls, surface it under "Needs attention" with the conflicting files — never resolve by hand.
+
+**Optional before merging a long-lived branch:** `POST /api/workspaces/:id/update-base` `{ "mode": "rebase" }` brings the branch up to date with the base first, shrinking the conflict surface. If a rebase gets stuck, `POST /api/workspaces/:id/abort-rebase`.
+
+**Never leave a merge half-finished.** If you somehow find yourself mid-merge (a `.git/MERGE_HEAD` exists or files contain `<<<<<<<` markers in the main checkout), that is a bug to clean up immediately: either complete it or `git merge --abort` — never end a cycle with a dangling merge.
+
+**Two branches editing the same file** (e.g. both add a section to `CLAUDE.md`) will conflict even though neither is "wrong". `fix-and-merge` handles these; when both sides are additive (docs, tables, lists), the correct resolution is almost always to **keep both**, not pick one side.
 
 **Auto-start:** If fewer than 3 issues In Progress, start the highest-priority Todo:
 ```powershell
@@ -143,8 +156,20 @@ Rules:
 |---|---|---|
 | **ZAI / glm-5.1** | Session stops immediately, `exitCode: null` | Relaunch immediately every cycle |
 | **Ghost workspace** | `status: reviewing`, `workingDir: ""`, merge fails "not something we can merge" | Delete workspace, reset issue to In Progress, create fresh workspace |
-| **Merge timeout** | No conflicts detected but merge times out | Retry once; if branch diverged badly, cherry-pick to master and close workspace |
+| **Merge conflict (409)** | `POST /merge` returns 409 `conflictingFiles` | Use `POST /fix-and-merge` (resolves in the worktree) — never resolve by hand in the main checkout |
+| **Merge timeout** | No conflicts detected but merge times out | Retry once; if still failing, report under "Needs attention" — do NOT fall back to manual git |
 | **tsx conflict injection** | `<<<<<<< HEAD` appears in .ts/.tsx files after a cherry-pick | Section 1 auto-fix; then check if shared package needs rebuild (`pnpm --filter @agentic-kanban/shared build`) |
 | **React blank page** | HTTP 200 but `main` is empty; no console errors | Missing useState declarations — check recent conflict resolutions in BoardPage.tsx |
 | **`scheduledRuns` not exported** | Server crash: `SyntaxError: does not provide an export named 'scheduledRuns'` | Run `pnpm --filter @agentic-kanban/shared build` to rebuild shared package dist |
 | **Active project not set** | Board shows "No projects registered" despite projects existing | `GET /api/preferences/active-project` to check; `PUT /api/preferences` `{"active_project": "<id>"}` to fix |
+
+---
+
+## Why manual merges are banned
+
+On 2026-05-26 the monitor hit a merge conflict and fell back to manual `git merge` / `git checkout` / `git reset` in the main checkout. Two failures resulted:
+
+1. **Database corruption + full reset.** Git operations touched the live SQLite sidecar files the running server had open, corrupting `kanban.db` ("disk image is malformed"). Recovery escalated to a full DB reset and lost data. (Root cause: the WAL/SHM files were tracked in git — now fixed — but the trigger was running git mutations in the main checkout while the server was live.)
+2. **Abandoned half-finished merge.** A `git merge` of two branches that both edited `CLAUDE.md` conflicted and was left with `MERGE_HEAD` + conflict markers when the cycle ended, leaving the repo in a broken state for the next session to clean up.
+
+Both are impossible if you only ever merge through the app endpoints (`/merge` → `/fix-and-merge`), which operate in the worktree and never leave dangling state. That is why manual git merging is prohibited above.
