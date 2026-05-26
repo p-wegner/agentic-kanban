@@ -1,9 +1,8 @@
 import { Hono } from "hono";
-import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { createScheduledRunService, ScheduledRunError } from "../services/scheduled-run.service.js";
 
-export function createScheduledRunsRoute(database: Database = db, serverPort?: number) {
+export function createScheduledRunsRoute(database: Database, serverPort?: number) {
   const router = new Hono();
   const service = createScheduledRunService({ database, serverPort });
 
