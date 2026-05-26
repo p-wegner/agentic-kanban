@@ -4,12 +4,10 @@ import { useTheme } from "../hooks/useTheme.js";
 import { GraphView } from "../components/GraphView.js";
 import { TableView } from "../components/TableView.js";
 import { AgentGrid } from "../components/AgentGrid.js";
-import { BoardColumn } from "../components/BoardColumn.js";
 import { BoardErrorBoundary } from "../components/BoardErrorBoundary.js";
-import { CompletedGrid } from "../components/CompletedGrid.js";
+import { BoardKanbanView } from "../components/BoardKanbanView.js";
 import { BoardStats } from "../components/BoardStats.js";
 import { BoardToolbar, type ViewMode } from "../components/BoardToolbar.js";
-import { CreateIssueForm } from "../components/CreateIssueForm.js";
 import { CreateIssuePanel } from "../components/CreateIssuePanel.js";
 import type { CreateIssueFormState } from "../components/CreateIssueForm.js";
 import { IssueDetailPanel } from "../components/IssueDetailPanel.js";
@@ -548,6 +546,14 @@ export function BoardPage() {
     }));
     e.dataTransfer.effectAllowed = "move";
   }
+
+  const handleBoardDragStart = useCallback((e: React.DragEvent, issue: IssueWithStatus) => {
+    (window as unknown as Record<string, unknown>).__dragData = {
+      issueId: issue.id,
+      sourceStatusId: issue.statusId,
+    };
+    handleDragStart(e, issue);
+  }, []);
 
   async function handleDrop(targetStatusId: string, sortOrder?: number) {
     try {
@@ -1175,122 +1181,73 @@ export function BoardPage() {
         />
         {viewMode === "graph" && activeProjectId ? (
           <div className="flex-1 min-h-0">
-            <GraphView
-              columns={columns}
-              projectId={activeProjectId}
-              onIssueClick={handleIssueClick}
-              searchQuery={searchQuery}
-            />
+            <BoardErrorBoundary columnName="Graph View">
+              <GraphView
+                columns={columns}
+                projectId={activeProjectId}
+                onIssueClick={handleIssueClick}
+                searchQuery={searchQuery}
+              />
+            </BoardErrorBoundary>
           </div>
         ) : null}
         {viewMode === "table" && (
-          <TableView
-            columns={columns}
-            onIssueClick={handleIssueClick}
-            searchQuery={searchQuery}
-          />
+          <BoardErrorBoundary columnName="Table View">
+            <TableView
+              columns={columns}
+              onIssueClick={handleIssueClick}
+              searchQuery={searchQuery}
+            />
+          </BoardErrorBoundary>
         )}
         {viewMode === "agents" && (
-          <AgentGrid
-            columns={columns}
-            liveActivity={sessionActivity}
+          <BoardErrorBoundary columnName="Agents View">
+            <AgentGrid
+              columns={columns}
+              liveActivity={sessionActivity}
+              liveStats={liveStats}
+              sessionTodos={sessionTodos}
+              onIssueClick={handleIssueClick}
+              onWorkspaceClick={handleManageWorkspaces}
+            />
+          </BoardErrorBoundary>
+        )}
+        {viewMode === "kanban" && (
+          <BoardKanbanView
+            activeColumns={activeColumns}
+            archiveColumns={archiveColumns}
+            allColumns={columns}
+            projectId={activeProjectId}
+            columnWidths={columnWidths}
+            dynamicColumnScaling={dynamicColumnScaling}
+            creatingInColumnId={creatingInColumnId}
+            searchQuery={searchQuery}
+            sessionActivity={sessionActivity}
             liveStats={liveStats}
             sessionTodos={sessionTodos}
+            pendingWorkspaceIssueIds={pendingWorkspaceIssueIds}
+            collapsedArchive={collapsedGroups.has("archive")}
+            canStartWorkspace={canStartWorkspace}
+            onToggleArchive={() => toggleGroup("archive")}
+            onCreateClick={setCreatingInColumnId}
+            onCreateCancel={() => setCreatingInColumnId(null)}
             onIssueClick={handleIssueClick}
             onWorkspaceClick={handleManageWorkspaces}
+            onStartWorkspace={handleStartWorkspace}
+            onDragStart={handleBoardDragStart}
+            onDrop={handleDrop}
+            onMoveToNext={handleMoveToNext}
+            onColumnResizeStart={handleColumnResizeStart}
+            onColumnResizeReset={(colId) => setColumnWidths((prev) => {
+              const next = { ...prev };
+              delete next[colId];
+              try { localStorage.setItem("kanban-column-widths", JSON.stringify(next)); } catch {}
+              return next;
+            })}
+            onCreateIssue={handleCreateIssue}
+            onExpandCreate={(statusId, statusName, state) => setExpandedCreatePanel({ statusId, statusName, state })}
           />
         )}
-        {viewMode === "kanban" && activeColumns.length > 1 && (
-          <div className="flex sm:hidden gap-1 overflow-x-auto scrollbar-hide shrink-0">
-            {activeColumns.map((col) => (
-              <button
-                key={col.id}
-                onClick={() => {
-                  document.getElementById(`column-${col.id}`)?.scrollIntoView({ behavior: "smooth", inline: "start", block: "nearest" });
-                }}
-                className="shrink-0 px-3 py-1 text-xs rounded-full border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-600 dark:text-gray-400 hover:bg-blue-50 dark:hover:bg-blue-950 hover:border-blue-300 hover:text-blue-700 transition-colors"
-              >
-                {col.name}
-                <span className="ml-1 text-gray-400 dark:text-gray-500">{col.issues.length}</span>
-              </button>
-            ))}
-          </div>
-        )}
-        {viewMode === "kanban" && <div className="flex gap-0 flex-1 min-h-0 overflow-x-auto board-columns-scroll">
-          {activeColumns.map((col, colIdx) => (
-            <BoardErrorBoundary key={col.id} columnName={col.name}>
-              <BoardColumn
-                column={col}
-                style={
-                  columnWidths[col.id]
-                    ? undefined
-                    : dynamicColumnScaling
-                      ? { flexGrow: Math.max(1, col.issues.length) }
-                      : colIdx === activeColumns.length - 1 && Object.keys(columnWidths).length === 0
-                        ? { flexGrow: 1 }
-                        : undefined
-                }
-                width={columnWidths[col.id]}
-                onResizeStart={colIdx < activeColumns.length - 1 ? (e) => handleColumnResizeStart(col.id, e) : undefined}
-                onResizeReset={colIdx < activeColumns.length - 1 ? () => setColumnWidths((prev) => {
-                  const next = { ...prev };
-                  delete next[col.id];
-                  try { localStorage.setItem("kanban-column-widths", JSON.stringify(next)); } catch {}
-                  return next;
-                }) : undefined}
-                projectId={activeProjectId}
-                creatingInColumn={creatingInColumnId}
-                onCreateClick={setCreatingInColumnId}
-                onCreateCancel={() => setCreatingInColumnId(null)}
-                onIssueClick={handleIssueClick}
-                onWorkspaceClick={handleManageWorkspaces}
-                onStartWorkspace={handleStartWorkspace}
-                onDragStart={(e, issue) => {
-                  (window as unknown as Record<string, unknown>).__dragData = {
-                    issueId: issue.id,
-                    sourceStatusId: issue.statusId,
-                  };
-                  handleDragStart(e, issue);
-                }}
-                onDrop={handleDrop}
-                onMoveToNext={handleMoveToNext}
-                allColumns={columns}
-                searchQuery={searchQuery}
-                sessionActivity={sessionActivity}
-                liveStats={liveStats}
-                sessionTodos={sessionTodos}
-                pendingWorkspaceIssueIds={pendingWorkspaceIssueIds}
-              >
-                <CreateIssueForm
-                  projectId={activeProjectId}
-                  statusId={col.id}
-                  onSubmit={handleCreateIssue}
-                  onCancel={() => setCreatingInColumnId(null)}
-                  canStartWorkspace={canStartWorkspace}
-                  onExpand={(state) => {
-                    setCreatingInColumnId(null);
-                    setExpandedCreatePanel({ statusId: col.id, statusName: col.name, state });
-                  }}
-                />
-              </BoardColumn>
-            </BoardErrorBoundary>
-          ))}
-        </div>}
-        {viewMode === "kanban" && <CompletedGrid
-          columns={archiveColumns}
-          collapsed={collapsedGroups.has("archive")}
-          onToggle={() => toggleGroup("archive")}
-          onIssueClick={handleIssueClick}
-          onDragStart={(e, issue) => {
-            (window as unknown as Record<string, unknown>).__dragData = {
-              issueId: issue.id,
-              sourceStatusId: issue.statusId,
-            };
-            handleDragStart(e, issue);
-          }}
-          onDrop={handleDrop}
-          searchQuery={searchQuery}
-        />}
       </div>
       {selectedIssue && (
         <IssueDetailPanel
