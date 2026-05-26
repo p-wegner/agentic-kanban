@@ -4,17 +4,6 @@ import type { Database } from "../db/index.js";
 import type { BoardEvents } from "../services/board-events.js";
 import { analyzeDependencies, enhanceIssue } from "../services/issue-ai.service.js";
 import { IssueError, createIssueService } from "../services/issue.service.js";
-import {
-  getIssuesByProject,
-  getIssueSummary,
-  getIssueTags,
-  getOutgoingDependencies,
-  getIncomingDependencies,
-  getIssueArtifacts,
-  assignTag,
-  removeTag,
-  deleteArtifact,
-} from "../repositories/issue.repository.js";
 
 export function createIssuesRoute(database: Database = db, options?: { boardEvents?: BoardEvents }) {
   const router = new Hono();
@@ -26,10 +15,9 @@ export function createIssuesRoute(database: Database = db, options?: { boardEven
     const projectId = c.req.query("projectId");
     if (!projectId) return c.json({ error: "projectId query parameter required" }, 400);
     const issueNumberParam = c.req.query("issueNumber");
-    const result = await getIssuesByProject(
+    const result = await issueService.listIssues(
       projectId,
       issueNumberParam ? Number(issueNumberParam) : undefined,
-      database,
     );
     return c.json(result);
   });
@@ -119,7 +107,7 @@ export function createIssuesRoute(database: Database = db, options?: { boardEven
   // GET /api/issues/:id/summary
   router.get("/:id/summary", async (c) => {
     const idParam = c.req.param("id");
-    const result = await getIssueSummary(idParam, database);
+    const result = await issueService.getIssueSummary(idParam);
     if (!result) return c.json({ error: "Issue not found" }, 404);
     return c.json(result);
   });
@@ -148,7 +136,7 @@ export function createIssuesRoute(database: Database = db, options?: { boardEven
   // GET /api/issues/:id/tags
   router.get("/:id/tags", async (c) => {
     const issueId = c.req.param("id");
-    return c.json(await getIssueTags(issueId, database));
+    return c.json(await issueService.getTags(issueId));
   });
 
   // POST /api/issues/:id/tags
@@ -156,7 +144,7 @@ export function createIssuesRoute(database: Database = db, options?: { boardEven
     const issueId = c.req.param("id");
     const body = await c.req.json();
     if (!body.tagId) return c.json({ error: "tagId is required" }, 400);
-    const result = await assignTag(issueId, body.tagId, database);
+    const result = await issueService.assignTag(issueId, body.tagId);
     return c.json(result, 201);
   });
 
@@ -164,18 +152,14 @@ export function createIssuesRoute(database: Database = db, options?: { boardEven
   router.delete("/:id/tags/:tagId", async (c) => {
     const issueId = c.req.param("id");
     const tagId = c.req.param("tagId");
-    await removeTag(issueId, tagId, database);
+    await issueService.removeTag(issueId, tagId);
     return c.json({ success: true });
   });
 
   // GET /api/issues/:id/dependencies
   router.get("/:id/dependencies", async (c) => {
     const issueId = c.req.param("id");
-    const [outgoing, incoming] = await Promise.all([
-      getOutgoingDependencies(issueId, database),
-      getIncomingDependencies(issueId, database),
-    ]);
-    return c.json({ dependencies: [...outgoing, ...incoming] });
+    return c.json(await issueService.getDependencies(issueId));
   });
 
   // POST /api/issues/:id/dependencies
@@ -207,7 +191,7 @@ export function createIssuesRoute(database: Database = db, options?: { boardEven
   // GET /api/issues/:id/artifacts
   router.get("/:id/artifacts", async (c) => {
     const issueId = c.req.param("id");
-    return c.json(await getIssueArtifacts(issueId, database));
+    return c.json(await issueService.getArtifacts(issueId));
   });
 
   // POST /api/issues/:id/artifacts
@@ -234,11 +218,11 @@ export function createIssuesRoute(database: Database = db, options?: { boardEven
   router.delete("/:id/artifacts/:artifactId", async (c) => {
     const issueId = c.req.param("id");
     const artifactId = c.req.param("artifactId");
-    await deleteArtifact(issueId, artifactId, database);
+    await issueService.deleteArtifact(issueId, artifactId);
     return c.json({ success: true });
   });
 
   return router;
 }
 
-export const issuesRoute = createIssuesRoute();
+export const issuesRoute = createIssuesRoute();
