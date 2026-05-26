@@ -93,12 +93,21 @@ export function BoardPage() {
   const pendingGRef = useRef(false);
   const pendingGTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [expandedCreatePanel, setExpandedCreatePanel] = useState<{ statusId: string; statusName: string; state: Partial<CreateIssueFormState> } | null>(null);
-  const [viewMode, setViewMode] = useState<ViewMode>("kanban");
+  const [viewMode, setViewMode] = useState<ViewMode>(() => {
+    const stored = localStorage.getItem("kanban-board-view");
+    const validViews: ViewMode[] = ["kanban", "graph", "table", "agents", "timeline"];
+    return validViews.includes(stored as ViewMode) ? (stored as ViewMode) : "kanban";
+  });
   const [dynamicColumnScaling, setDynamicColumnScaling] = useState(false);
   const [columnWidths, setColumnWidths] = useState<Record<string, number>>(() => {
     try { return JSON.parse(localStorage.getItem("kanban-column-widths") ?? "{}"); } catch { return {}; }
   });
   const resizingRef = useRef<{ colId: string; startX: number; startWidth: number } | null>(null);
+
+  const handleViewModeChange = useCallback((mode: ViewMode) => {
+    setViewMode(mode);
+    localStorage.setItem("kanban-board-view", mode);
+  }, []);
 
   const handleColumnResizeStart = useCallback((colId: string, e: React.MouseEvent) => {
     e.preventDefault();
@@ -805,7 +814,7 @@ export function BoardPage() {
         pendingGTimerRef.current = setTimeout(() => {
           if (pendingGRef.current) {
             pendingGRef.current = false;
-            setViewMode("graph");
+            handleViewModeChange("graph");
           }
         }, 400);
         return;
@@ -822,10 +831,10 @@ export function BoardPage() {
         const target = e.target as HTMLElement;
         if (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT") return;
         e.preventDefault();
-        if (e.key === "b") setViewMode("kanban");
-        else if (e.key === "t") setViewMode("table");
-        else if (e.key === "l") setViewMode("agents");
-        else if (e.key === "f") setViewMode("timeline");
+        if (e.key === "b") handleViewModeChange("kanban");
+        else if (e.key === "t") handleViewModeChange("table");
+        else if (e.key === "l") handleViewModeChange("agents");
+        else if (e.key === "f") handleViewModeChange("timeline");
         return;
       }
       // "a" to toggle All Workspaces panel
@@ -860,7 +869,7 @@ export function BoardPage() {
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [searchQuery, showCommandPalette, showAllWorkspaces, showWorktreeOverview, showShortcutHelp, showQuickTasks, filteredColumns, columns, setViewMode, setShowQuickTasks, setShowSettings]);
+  }, [searchQuery, showCommandPalette, showAllWorkspaces, showWorktreeOverview, showShortcutHelp, showQuickTasks, filteredColumns, columns, handleViewModeChange, setShowQuickTasks, setShowSettings]);
 
   // Register command palette actions
   useEffect(() => {
@@ -969,7 +978,7 @@ export function BoardPage() {
       icon: "⊟",
       shortcut: "b",
       category: "navigation",
-      handler: () => setViewMode("kanban"),
+      handler: () => handleViewModeChange("kanban"),
     }));
 
     unregisters.push(registerAction({
@@ -979,7 +988,7 @@ export function BoardPage() {
       icon: "⬡",
       shortcut: "g",
       category: "navigation",
-      handler: () => setViewMode("graph"),
+      handler: () => handleViewModeChange("graph"),
     }));
 
     unregisters.push(registerAction({
@@ -989,7 +998,7 @@ export function BoardPage() {
       icon: "⚡",
       shortcut: "l",
       category: "navigation",
-      handler: () => setViewMode("agents"),
+      handler: () => handleViewModeChange("agents"),
     }));
 
     unregisters.push(registerAction({
@@ -999,7 +1008,7 @@ export function BoardPage() {
       icon: "☰",
       shortcut: "t",
       category: "navigation",
-      handler: () => setViewMode("table"),
+      handler: () => handleViewModeChange("table"),
     }));
 
     unregisters.push(registerAction({
@@ -1009,7 +1018,7 @@ export function BoardPage() {
       icon: "⏱",
       shortcut: "f",
       category: "navigation",
-      handler: () => setViewMode("timeline"),
+      handler: () => handleViewModeChange("timeline"),
     }));
 
     // Register "Go to: [column]" for each column
@@ -1189,7 +1198,7 @@ export function BoardPage() {
             setWorkspaceInitial({ workspaceId, sessionId: "" });
           }}
           viewMode={viewMode}
-          onViewModeChange={setViewMode}
+          onViewModeChange={handleViewModeChange}
         />
         {viewMode === "graph" && activeProjectId ? (
           <div className="flex-1 min-h-0">
