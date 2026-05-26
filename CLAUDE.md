@@ -44,7 +44,7 @@ All git operations live in `packages/shared/src/lib/git-service.ts`. Both `packa
 - **Always use `127.0.0.1`, never `localhost`** — on Windows, `localhost` resolves to `::1` (IPv6) but Playwright and the server listen on `127.0.0.1`. Using `localhost` causes silent ECONNREFUSED failures that are extremely hard to debug.
 - **Playwright browsers are pre-installed** — do NOT run `playwright install` or `playwright install chromium` in agent sessions. The headless-shell binary is already at `%LOCALAPPDATA%\ms-playwright\chromium_headless_shell-1217\`. Running install again wastes time and may corrupt the lock file. If you see "Executable not found", check `packages/e2e/playwright.config.ts` — it auto-detects the binary path.
 - **E2E locator specificity**: `page.locator("text=X")` can match multiple elements — use scoped selectors: `page.locator("label", { hasText: "X" })` or `.first()`.
-- **E2E test data cleanup**: Use `test.afterAll` to reset preferences/settings state. Use `Date.now()` suffixes for edited titles — hardcoded titles accumulate across runs. Known flaky: `board.test.ts` "edit issue from detail panel".
+- **E2E test data cleanup**: Use `test.afterAll` to reset preferences/settings state. Use `Date.now()` suffixes for edited titles — hardcoded titles accumulate across runs.
 - **Pre-existing test failures**: Never dismiss as "pre-existing" without investigating root cause (data accumulation, race condition, API change). Fix if straightforward; document if not.
 - **E2E session/workspace tests**: Use retry loops (3 attempts, 500ms–1s delays) for setup and output fetching instead of `test.skip()`.
 
@@ -59,6 +59,29 @@ All git operations live in `packages/shared/src/lib/git-service.ts`. Both `packa
 | `test.skip()` for flaky setup | Hides real failures, silently skips coverage | Use retry loops (3 attempts, 500ms–1s delays) |
 | Dismissing failures as "pre-existing" | Root cause stays unfixed (data accumulation, race, API change) | Always investigate; fix or document |
 | Hardcoded port numbers | Wrong port in worktrees → connection errors | Read `$env:KANBAN_CLIENT_PORT` / `$env:KANBAN_SERVER_PORT` |
+
+### Known Flaky Test Suites
+
+When a test in the table below fails and you haven't touched the relevant code, treat it as a **false failure** and do not waste time debugging it. Investigate only if you changed the underlying source files.
+
+| File | Test(s) | Root Cause | Workaround |
+|------|---------|-----------|-----------|
+| `packages/e2e/tests/ui/board.test.ts` | "edit issue from detail panel" | Race condition: Edit panel open timing + `.first()` selector ambiguity + 10 s hard timeout | Re-run; increase timeout; use specific aria/placeholder selectors |
+| `packages/e2e/tests/ui/board.test.ts` | "drag issue between columns" | `page.waitForTimeout(1000)` fixed sleep before verifying drop target | Re-run; replace with `waitForFunction()` checking board state |
+| `packages/e2e/tests/ui/workspace.test.ts` | "View Diff button", "Merge button" | Backdrop overlay close uses `waitForTimeout(300)`; setup retry uses fixed 500 ms delays; setup failure silently skips | Re-run; replace fixed sleeps with `await expect(backdrop).toBeHidden()` |
+| `packages/e2e/tests/ui/session-history.test.ts` | Multiple | 2-second hard sleep waiting for session completion (`setTimeout(resolve, 2000)`) | Re-run; replace with polling loop checking session `exit_code` |
+| `packages/e2e/tests/ui/workspace-chat.test.ts` | Multiple | Many fixed 500 ms–1 s delays + `test.skip()` on setup failure silently hides errors | Re-run; add exponential-backoff helper; log skip reasons |
+| `packages/e2e/tests/api/board-events.test.ts` | WebSocket event tests | Race condition: no wait for `readyState === 1`; 500 ms fixed delay before create; no timeout wrapper on WS promise | Re-run; wrap WS promise in `Promise.race()` with 5 s timeout |
+| `packages/e2e/tests/ui/board-realtime.test.ts` | "board updates when issue created via API" | `projects[0]` access without validating array is non-empty | Re-run; use `getE2EProjectId()` helper instead |
+| `packages/e2e/tests/ui/all-workspaces-panel.test.ts` | Multiple | Multiple `waitForTimeout(300)` calls + active-project state dependency across runs | Re-run; replace sleeps with condition-based waits |
+| `packages/e2e/tests/api/workspace-lifecycle.test.ts` | Multiple | `projects[0]` without validation; state from prior run can leak | Re-run; use `getE2EProjectId()` helper |
+| `packages/server/src/__tests__/git.service.test.ts` | All | Real filesystem + git operations; Windows file-locking on temp dirs; no per-test timeout | **Only run when touching `packages/shared/src/lib/git-service.ts`**; add `test.setTimeout(30000)` |
+
+**Recurring root causes to watch for:**
+- `page.waitForTimeout()` / `setTimeout(r, N)` fixed sleeps — replace with explicit condition waits or retry loops
+- `.first()` on broad selectors — use `[aria-label]`, `[placeholder]`, or scoped parent locators
+- `projects[0]` array access — use `getE2EProjectId()` (reads active-project preference)
+- `test.skip()` on setup failure — log the reason; prefer a clear error over a silent skip
 
 ### Unit testing
 - **For refactoring: use `--related`** — run only tests that cover the files you changed, not the full suite:
