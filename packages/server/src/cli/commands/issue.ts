@@ -5,6 +5,7 @@ import { eq, inArray, sql, and, desc } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { parseSessionSummary, formatDurationStr } from "@agentic-kanban/shared";
 import { runMigrations, getActiveProjectId } from "../shared.js";
+import { isAnalyticsNoise } from "../../services/session-filter.js";
 
 export function registerIssueCommand(program: Command) {
   const issueCmd = program.command("issue").description("Manage issues on the board.\n\nSubcommands: list, create, move, summary, dependency");
@@ -301,7 +302,7 @@ Examples:
           .where(inArray(sessions.workspaceId, wsIds))
           .orderBy(desc(sessions.startedAt));
 
-        const latestSession = sessionRows[0] ?? null;
+        const latestSession = sessionRows.find(s => !isAnalyticsNoise(s)) ?? sessionRows[0] ?? null;
         const matchingWs = latestSession ? wsRows.find(w => w.id === latestSession.workspaceId) : wsRows[0];
 
         let lastAgentMsg: string | null = null;
@@ -479,8 +480,10 @@ Examples:
           .where(inArray(sessions.workspaceId, wsIds))
           .orderBy(desc(sessions.startedAt));
 
-        const completedSession = sessionRows.find(s => s.status === "completed" || s.status === "stopped")
-          ?? sessionRows[0]
+        const nonNoiseSessions = sessionRows.filter(s => !isAnalyticsNoise(s));
+        const relevantSessions = nonNoiseSessions.length > 0 ? nonNoiseSessions : sessionRows;
+        const completedSession = relevantSessions.find(s => s.status === "completed" || s.status === "stopped")
+          ?? relevantSessions[0]
           ?? null;
 
         if (!completedSession) {
