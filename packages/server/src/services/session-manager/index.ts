@@ -458,6 +458,7 @@ function createSessionManager(
     state.sessionContextTokens.delete(sessionId);
     state.sessionLastTool.delete(sessionId);
     state.sessionAgentToolUseIds.delete(sessionId);
+    state.sessionProviders.delete(sessionId);
     const now = new Date().toISOString();
     await db.update(sessions).set({ status: "stopped", endedAt: now }).where(eq(sessions.id, sessionId));
     const sessionRows = await db.select({ workspaceId: sessions.workspaceId }).from(sessions).where(eq(sessions.id, sessionId)).limit(1);
