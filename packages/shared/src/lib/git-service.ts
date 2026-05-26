@@ -561,6 +561,20 @@ export async function abortMerge(worktreePath: string): Promise<void> {
   await execGit(["merge", "--abort"], worktreePath);
 }
 
+/**
+ * Return a list of staged or unstaged changes to tracked files in repoPath.
+ * Untracked (new) files are excluded because they do not block `git merge`.
+ * An empty array means the working tree is clean and safe to merge into.
+ */
+export async function getUncommittedTrackedChanges(repoPath: string): Promise<string[]> {
+  try {
+    const output = await execGit(["status", "--porcelain", "--untracked-files=no"], repoPath);
+    return output.trim().split("\n").filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
 /** Check if a rebase is in progress in the worktree. */
 export async function isRebaseInProgress(worktreePath: string): Promise<boolean> {
   try {
