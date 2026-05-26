@@ -5,6 +5,18 @@ import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import type { AgentOutputMessage, SessionSummary } from "@agentic-kanban/shared";
 
+export async function getSessionWorkspaceId(
+  sessionId: string,
+  database: Database = db,
+): Promise<string | null> {
+  const rows = await database
+    .select({ workspaceId: sessions.workspaceId })
+    .from(sessions)
+    .where(eq(sessions.id, sessionId))
+    .limit(1);
+  return rows[0]?.workspaceId ?? null;
+}
+
 export async function findRunningSession(
   workspaceId: string,
   database: Database = db,
