@@ -5,6 +5,7 @@ import {
   getAllTags,
   createTag,
   getTagById,
+  getTagByName,
   updateTag,
   deleteTag,
   getTagsByIds,
@@ -18,7 +19,7 @@ import {
 export class TagError extends Error {
   constructor(
     message: string,
-    public readonly code: "NOT_FOUND" | "BAD_REQUEST" | "FORBIDDEN",
+    public readonly code: "NOT_FOUND" | "BAD_REQUEST" | "FORBIDDEN" | "CONFLICT",
   ) {
     super(message);
   }
@@ -30,6 +31,13 @@ export function createTagService({ database }: { database: Database }) {
   }
 
   async function createNewTag(name: string, color: string | null) {
+    const existing = await getTagByName(name, database);
+    if (existing) {
+      if (existing.isBuiltin) {
+        throw new TagError(`A built-in tag named "${name}" already exists and cannot be replaced`, "CONFLICT");
+      }
+      throw new TagError(`A tag named "${name}" already exists`, "CONFLICT");
+    }
     return createTag(name, color, database);
   }
 
