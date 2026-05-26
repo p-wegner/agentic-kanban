@@ -1,9 +1,7 @@
 import { Hono } from "hono";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
-import { listBranches } from "../services/git.service.js";
 import { ProjectError, createProjectService } from "../services/project.service.js";
-import { getProjectById, getProjectStatuses, getAllProjects, createProjectStatus, deleteProjectStatus } from "../repositories/project.repository.js";
 
 export function createProjectsRoute(database: Database = db) {
   const router = new Hono();
@@ -12,7 +10,7 @@ export function createProjectsRoute(database: Database = db) {
 
   // GET /api/projects
   router.get("/", async (c) => {
-    const result = await getAllProjects(database);
+    const result = await projectService.listProjects();
     return c.json(result);
   });
 
@@ -87,10 +85,10 @@ export function createProjectsRoute(database: Database = db) {
     if (!body.projectId) return c.json({ error: "projectId is required" }, 400);
 
     try {
-      const setupScript = await import("../services/project-setup.service.js").then(m => m.generateSetupScript(body.projectId!, database));
+      const setupScript = await projectService.generateSetupScript(body.projectId);
       return c.json({ setupScript });
     } catch (err: any) {
-      if (err.statusCode === 404) return c.json({ error: "Project not found" }, 404);
+      if (err instanceof ProjectError) return c.json({ error: err.message }, 404);
       const parts: string[] = [];
       if (err.message) parts.push(err.message);
       if (err.stderr) parts.push(String(err.stderr).trim());
@@ -111,10 +109,10 @@ export function createProjectsRoute(database: Database = db) {
     if (!body.projectId) return c.json({ error: "projectId is required" }, 400);
 
     try {
-      const teardownScript = await import("../services/project-setup.service.js").then(m => m.generateTeardownScript(body.projectId!, database));
+      const teardownScript = await projectService.generateTeardownScript(body.projectId);
       return c.json({ teardownScript });
     } catch (err: any) {
-      if (err.statusCode === 404) return c.json({ error: "Project not found" }, 404);
+      if (err instanceof ProjectError) return c.json({ error: err.message }, 404);
       const parts: string[] = [];
       if (err.message) parts.push(err.message);
       if (err.stderr) parts.push(String(err.stderr).trim());
@@ -127,7 +125,7 @@ export function createProjectsRoute(database: Database = db) {
   // GET /api/projects/:id/statuses
   router.get("/:id/statuses", async (c) => {
     const projectId = c.req.param("id");
-    const result = await getProjectStatuses(projectId, database);
+    const result = await projectService.listStatuses(projectId);
     return c.json(result);
   });
 
@@ -135,7 +133,7 @@ export function createProjectsRoute(database: Database = db) {
   router.post("/:id/statuses", async (c) => {
     const projectId = c.req.param("id");
     const body = await c.req.json();
-    const result = await createProjectStatus(projectId, body.name, body.sortOrder ?? 0, database);
+    const result = await projectService.addStatus(projectId, body.name, body.sortOrder ?? 0);
     return c.json(result, 201);
   });
 
@@ -143,20 +141,25 @@ export function createProjectsRoute(database: Database = db) {
   router.delete("/:id/statuses/:statusId", async (c) => {
     const projectId = c.req.param("id");
     const statusId = c.req.param("statusId");
-    const result = await deleteProjectStatus(projectId, statusId, database);
-    if ("error" in result) return c.json({ error: result.error }, result.status as 404 | 409);
-    return c.json(result);
+    try {
+      const result = await projectService.removeStatus(projectId, statusId);
+      return c.json(result);
+    } catch (err) {
+      if (err instanceof ProjectError) {
+        return c.json({ error: err.message }, err.code === "NOT_FOUND" ? 404 : 409);
+      }
+      throw err;
+    }
   });
 
   // GET /api/projects/:id/branches
   router.get("/:id/branches", async (c) => {
     const projectId = c.req.param("id");
-    const project = await getProjectById(projectId, database);
-    if (!project) return c.json({ error: "Project not found" }, 404);
     try {
-      const branches = await listBranches(project.repoPath);
+      const branches = await projectService.getBranches(projectId);
       return c.json(branches);
     } catch (err) {
+      if (err instanceof ProjectError) return c.json({ error: err.message }, 404);
       return c.json(
         { error: `Failed to list branches: ${err instanceof Error ? err.message : String(err)}` },
         500,
