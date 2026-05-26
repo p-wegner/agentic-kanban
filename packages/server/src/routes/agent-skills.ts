@@ -1,9 +1,8 @@
 import { Hono } from "hono";
-import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { createAgentSkillService, AgentSkillError } from "../services/agent-skill.service.js";
 
-export function createAgentSkillsRoute(database: Database = db) {
+export function createAgentSkillsRoute(database: Database) {
   const router = new Hono();
   const agentSkillService = createAgentSkillService({ database });
 
@@ -129,5 +128,3 @@ export function createAgentSkillsRoute(database: Database = db) {
 
   return router;
 }
-
-export const agentSkillsRoute = createAgentSkillsRoute();
