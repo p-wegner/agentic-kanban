@@ -15,7 +15,7 @@ vi.mock("node:fs", () => ({
 }));
 
 // Import after mocking
-import { launch, kill, killAll, sendInput, closeStdin, isStdinOpen, getProcess } from "../services/agent.service.js";
+import { launch, kill, killAll, sendInput, closeStdin, isStdinOpen, getProcess, agentState } from "../services/agent.service.js";
 import { spawn as spawnMock } from "node:child_process";
 
 function createMockProc(overrides: Partial<ChildProcess> = {}): ChildProcess {
@@ -56,11 +56,11 @@ describe("agent.service", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     process.env.AGENT_COMMAND = "mock-test-agent";
-    killAll();
+    agentState.reset();
   });
 
   afterEach(() => {
-    killAll();
+    agentState.reset();
     if (originalAgentCommand !== undefined) {
       process.env.AGENT_COMMAND = originalAgentCommand;
     } else {
