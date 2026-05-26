@@ -32,11 +32,19 @@ const STATUS_CLASS: Record<string, string> = {
 
 const ARCHIVE_STATUSES = new Set(["Done", "Cancelled"]);
 
-type SortKey = "number" | "title" | "status" | "type" | "estimate" | "updated";
+type SortKey = "number" | "title" | "status" | "priority" | "type" | "estimate" | "updated";
 type SortDir = "asc" | "desc";
 
 const ISSUE_TYPE_ORDER: Record<string, number> = { bug: 0, feature: 1, task: 2, chore: 3 };
 const ESTIMATE_ORDER: Record<string, number> = { XS: 0, S: 1, M: 2, L: 3, XL: 4 };
+const PRIORITY_ORDER: Record<string, number> = { urgent: 0, high: 1, medium: 2, low: 3 };
+const PRIORITY_LABEL: Record<string, string> = { urgent: "Urgent", high: "High", medium: "Medium", low: "Low" };
+const PRIORITY_CLASS: Record<string, string> = {
+  urgent: "text-red-700 bg-red-50",
+  high: "text-orange-700 bg-orange-50",
+  medium: "text-yellow-700 bg-yellow-50",
+  low: "text-gray-500 bg-gray-100",
+};
 
 const TAG_COLORS: Record<string, string> = {
   blue: "bg-blue-100 text-blue-700",
@@ -80,6 +88,7 @@ export function TableView({ columns, onIssueClick, searchQuery }: TableViewProps
       case "number": cmp = (a.issueNumber ?? 0) - (b.issueNumber ?? 0); break;
       case "title": cmp = a.title.localeCompare(b.title); break;
       case "status": cmp = a.statusName.localeCompare(b.statusName); break;
+      case "priority": cmp = (PRIORITY_ORDER[a.priority ?? "medium"] ?? 2) - (PRIORITY_ORDER[b.priority ?? "medium"] ?? 2); break;
       case "type": cmp = (ISSUE_TYPE_ORDER[a.issueType ?? "task"] ?? 2) - (ISSUE_TYPE_ORDER[b.issueType ?? "task"] ?? 2); break;
       case "estimate": cmp = (ESTIMATE_ORDER[a.estimate ?? ""] ?? 99) - (ESTIMATE_ORDER[b.estimate ?? ""] ?? 99); break;
       case "updated": cmp = new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime(); break;
@@ -121,6 +130,7 @@ export function TableView({ columns, onIssueClick, searchQuery }: TableViewProps
                   ["number", "#"],
                   ["title", "Title"],
                   ["status", "Status"],
+                  ["priority", "Priority"],
                   ["type", "Type"],
                   ["estimate", "Estimate"],
                   ["updated", "Updated"],
@@ -142,7 +152,7 @@ export function TableView({ columns, onIssueClick, searchQuery }: TableViewProps
           <tbody>
             {sorted.length === 0 && (
               <tr>
-                <td colSpan={7} className="text-center text-gray-400 dark:text-gray-500 text-sm py-12">No issues found</td>
+                <td colSpan={8} className="text-center text-gray-400 dark:text-gray-500 text-sm py-12">No issues found</td>
               </tr>
             )}
             {sorted.map((issue) => (
@@ -160,6 +170,11 @@ export function TableView({ columns, onIssueClick, searchQuery }: TableViewProps
                 <td className="px-3 py-1.5 whitespace-nowrap">
                   <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_CLASS[issue.statusName] ?? "text-gray-600 bg-gray-100"}`}>
                     {issue.statusName}
+                  </span>
+                </td>
+                <td className="px-3 py-1.5 whitespace-nowrap">
+                  <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${PRIORITY_CLASS[issue.priority ?? "medium"] ?? PRIORITY_CLASS.medium}`}>
+                    {PRIORITY_LABEL[issue.priority ?? "medium"] ?? issue.priority ?? "medium"}
                   </span>
                 </td>
                 <td className="px-3 py-1.5 whitespace-nowrap">
