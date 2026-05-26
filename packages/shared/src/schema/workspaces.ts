@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, integer, index } from "drizzle-orm/sqlite-core";
 import { relations } from "drizzle-orm";
 import { issues } from "./issues.js";
 import { agentSkills } from "./agent-skills.js";
@@ -32,7 +32,10 @@ export const workspaces = sqliteTable("workspaces", {
   diffStatCacheFilesChanged: integer("diff_stat_cache_files_changed"),
   diffStatCacheInsertions: integer("diff_stat_cache_insertions"),
   diffStatCacheDeletions: integer("diff_stat_cache_deletions"),
-});
+}, (table) => ({
+  statusIdx: index("idx_workspaces_status").on(table.status),
+  createdAtIdx: index("idx_workspaces_created_at").on(table.createdAt),
+}));
 
 export const workspacesRelations = relations(workspaces, ({ one, many }) => ({
   issue: one(issues, {

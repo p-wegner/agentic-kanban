@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, integer, index } from "drizzle-orm/sqlite-core";
 import { relations } from "drizzle-orm";
 import { sessions } from "./sessions.js";
 
@@ -9,7 +9,10 @@ export const sessionMessages = sqliteTable("session_messages", {
   data: text("data"),
   exitCode: text("exit_code"),
   createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
-});
+}, (table) => ({
+  sessionIdIdx: index("idx_session_messages_session_id").on(table.sessionId),
+  createdAtIdx: index("idx_session_messages_created_at").on(table.createdAt),
+}));
 
 export const sessionMessagesRelations = relations(sessionMessages, ({ one }) => ({
   session: one(sessions, {
