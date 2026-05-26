@@ -40,6 +40,7 @@ type WorkspaceSummary = {
     lastTool?: string | null;
     lastAssistantMessage?: string | null;
     pendingPlanPath?: string | null;
+    planOnlyWarning?: boolean;
   };
 };
 
@@ -139,6 +140,7 @@ export async function buildWorkspaceSummaryMap(
       readyForMerge: mainWs.readyForMerge,
       planMode: mainWs.planMode,
       pendingPlanPath: mainWs.pendingPlanPath,
+      planOnlyWarning: false,
     };
 
     if (mainWs.workingDir && mainWs.status !== "closed") {
@@ -154,6 +156,16 @@ export async function buildWorkspaceSummaryMap(
             insertions: mainWs.diffStatCacheInsertions ?? 0,
             deletions: mainWs.diffStatCacheDeletions ?? 0,
           };
+        }
+      }
+
+      // Detect plan-only sessions: idle workspace with 0 diff changes that wasn't explicitly in plan mode
+      if (mainWs.status === "idle" && !mainWs.planMode && mainWs.diffStatCacheCheckedAt) {
+        const hasChanges = (mainWs.diffStatCacheFilesChanged ?? 0) > 0
+          || (mainWs.diffStatCacheInsertions ?? 0) > 0
+          || (mainWs.diffStatCacheDeletions ?? 0) > 0;
+        if (!hasChanges) {
+          mainRef.planOnlyWarning = true;
         }
       }
 
