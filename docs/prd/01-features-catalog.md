@@ -1,6 +1,6 @@
 # PRD-01: Features Catalog
 
-<!-- last-synced: 2026-05-23T16:00:00+02:00 | commit: d7cb8b6 -->
+<!-- last-synced: 2026-05-26T00:00:00+02:00 | commit: baac823 -->
 
 Complete inventory of features, organized by category. Status reflects the current implementation (Stages 0–14 complete).
 
@@ -12,6 +12,7 @@ Complete inventory of features, organized by category. Status reflects the curre
 - Auto-incrementing issue numbers per project (#1, #2, #3)
 - AI enhancement: "Enhance with AI" button spawns Claude CLI to improve title/description
 - **Copy issue reference**: clipboard button in detail panel header copies `#N Title` reference string
+- **Issue type**: Task, Bug, Feature, Chore — shown as badge in detail panel; used as filter legend in Timeline view
 - **Status: DONE**
 
 ### F-TASK-02: Kanban Board View
@@ -226,14 +227,17 @@ Complete inventory of features, organized by category. Status reflects the curre
 ### F-UI-04: Keyboard Shortcuts
 - `/` to search, `Escape` to close/clear, `?` for help overlay
 - `Ctrl+K` for command palette, `Ctrl+Enter` to send chat message to agent
-- `c` to create issue, `w` to create issue + start workspace, `t` to open Tasks panel
+- `c` to create issue, `w` to create issue + start workspace
+- `q` to open Quick Tasks panel
+- `b` to switch to Board view, `g` to switch to Graph view, `t` to switch to Table view
 - `g + s` to open Settings
 - Help overlay (`?`) lists all shortcuts
 - **Status: DONE**
 
 ### F-UI-05: Dark/Light Theme
-- Theme switching
-- **Status: NOT PLANNED** — single theme
+- Moon icon button in header toggles between dark and light mode
+- Preference persisted across sessions
+- **Status: DONE**
 
 ### F-UI-06: Notifications
 - OS notifications via Tauri (session_completed, workspace_merged)
@@ -254,10 +258,10 @@ Complete inventory of features, organized by category. Status reflects the curre
 ### F-UI-09: Settings Panel
 - Tabbed modal (gear icon in header), 9 tabs:
   - **Agent**: agent command/binary, Claude profile (--settings flag), additional CLI args
-  - **Workflow**: pipeline visualization (Agent runs → AI Review → Auto-fix → Auto-merge → Merge); auto code review, auto-fix, auto-merge toggles; "Use new profile on resume" toggle — starts a fresh session with the current Claude profile instead of resuming the previous session; **Board Monitoring** feature also surfaces in the board header toolbar (next to Backlog/Tasks buttons) as a "Monitor" toggle button and a "Run monitor now and reset timer" play button
+  - **Workflow**: pipeline visualization (Agent runs → AI Review → Auto-fix → Auto-merge → Merge); auto code review, auto-fix, auto-merge toggles; "Use new profile on resume" toggle — starts a fresh session with the current Claude profile instead of resuming the previous session; **Board Monitoring** feature also surfaces in the board header toolbar (next to Backlog/Tasks buttons) as a "Monitor" toggle button and a "Run monitor now and reset timer" play button; Persistent agent (warm pool) toggle; "Auto-continue after plan (Codex)" checkbox — when Codex plan-mode run finishes, saves to PLAN.md; if on, auto-starts implementation turn; if off, waits for "Accept & Implement"; "Require manual approval before review" checkbox — gates AI review on human sign-off; "Visual verification timing" dropdown — "Before merge (default)" or "After merge"; controls when UI changes are verified via browser snapshot; **Learning steps** section with 3 checkboxes: "Learning step after agent (parallel)", "Learning step after review (parallel)", "Learning step before merge (blocking)"
   - **Skills**: list of global + project-scoped skills with install status; Edit buttons
   - **MCP Tools**: MCP server configuration and tool list
-  - **UI**: output parsing mode (Minimal/Full), Dynamic column scaling toggle, Persistent agent (warm pool) toggle
+  - **UI**: output parsing mode (Minimal/Full), Dynamic column scaling toggle
   - **Project**: projects base directory, setup script (textarea + AI-generate button)
   - **Tags**: manage tags (rename, delete, merge); Add new tag
   - **Schedule**: configure recurring agent runs — name, prompt, interval in minutes; list of scheduled runs; empty state text
@@ -265,9 +269,11 @@ Complete inventory of features, organized by category. Status reflects the curre
 - **Status: DONE**
 
 ### F-UI-10: Board Views
-- Three view modes: Board (kanban columns), Graph (dependency DAG), Table (flat sortable list)
+- Five view modes: Board (kanban columns), Graph (dependency DAG), Table (flat sortable list), Agents, Timeline
 - Table view: sortable columns (#, Title, Status, Priority, Estimate, Updated, Tags); **Active only** default filter (dropdown: Active only, All); row click opens detail panel
 - Graph view: nodes colored by status, dependency arrows, "Show completed" toggle, zoom controls (+/−/reset), status legend
+- Agents view: shows live agent activity across all active workspaces; "No active agents" empty state when none running
+- Timeline view: Gantt-style chart grouped by status; zoom controls (−/100%/+); tag type legend (Task, Bug, Feature, Chore) to filter bars; "N issues across M statuses" header; horizontal scrollbar for time range; bars positioned by created/updated date
 - View toggle buttons in board header
 - **Status: DONE**
 
@@ -300,6 +306,23 @@ Complete inventory of features, organized by category. Status reflects the curre
 - Search input: filter by title or branch name
 - Status filter tabs: All, Active, Running, Idle, Reviewing, Fixing, Closed
 - Empty state with helpful prompt
+- **Status: DONE**
+
+### F-UI-16: Agents View
+- 4th board view tab (after Table)
+- Shows live agent activity across all running workspaces
+- "No active agents" empty state with link to start a workspace
+- **Status: DONE**
+
+### F-UI-17: Timeline View
+- 5th board view tab (after Agents)
+- Gantt-style chart of all issues grouped by status (e.g. Backlog, Done)
+- Each issue shown as a horizontal bar on a time axis
+- Header: "N issues across M statuses"
+- Zoom controls: −/100%/+
+- Tag type legend: Task, Bug, Feature, Chore (filter bars by type)
+- "Today" marker on time axis
+- Horizontal scrollbar for navigating time range
 - **Status: DONE**
 
 ### F-UI-15: Backlog Panel
