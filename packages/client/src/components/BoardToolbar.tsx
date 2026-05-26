@@ -3,7 +3,7 @@ import { BacklogPanel } from "./BacklogPanel.js";
 import { MonitorPopover, type MonitorStatus } from "./MonitorPopover.js";
 import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
 
-export type ViewMode = "kanban" | "graph" | "table" | "agents";
+export type ViewMode = "kanban" | "graph" | "table" | "agents" | "timeline";
 
 interface BoardToolbarProps {
   backlogColumn: StatusWithIssues | undefined;
@@ -163,6 +163,17 @@ export function BoardToolbar({
             <circle cx="12" cy="8" r="1.5" fill="currentColor" stroke="none" />
           </svg>
           Agents
+        </button>
+        <button
+          onClick={() => onViewModeChange("timeline")}
+          className={`px-2.5 py-1 text-xs rounded flex items-center gap-1.5 transition-colors ${viewMode === "timeline" ? "bg-blue-600 text-white" : "text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700"}`}
+          title="Timeline view (f)"
+        >
+          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M3 6h18M3 10h12M3 14h8M3 18h5" />
+            <circle cx="20" cy="6" r="1.5" fill="currentColor" stroke="none" />
+          </svg>
+          Timeline
         </button>
       </div>
     </div>
