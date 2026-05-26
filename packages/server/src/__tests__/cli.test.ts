@@ -13,7 +13,7 @@ import { tmpdir } from "node:os";
 import { pathToFileURL } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const CLI_PATH = resolve(__dirname, "../cli.ts");
+const CLI_PATH = resolve(__dirname, "../cli/index.ts");
 const PKG_DIR = resolve(__dirname, "../..");
 
 const TSX_LOADER = pathToFileURL(
