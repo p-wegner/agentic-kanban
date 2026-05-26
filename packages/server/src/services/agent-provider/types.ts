@@ -27,6 +27,8 @@ export interface ProviderLaunchOptions {
   claudeProfile?: string;
   /** Provider-tagged profile selection (replaces bare claudeProfile string). */
   profile?: { provider: ProviderName; name: string };
+  /** Claude model tier (e.g. "opus"/"sonnet"/"haiku") passed via `--model`. Claude-only. */
+  model?: string;
   keepAlive?: boolean;
   permissionPromptTool?: string;
   planMode?: boolean;
