@@ -11,7 +11,7 @@ import type { BoardEvents } from "./board-events.js";
 import type { ProviderName } from "./agent-provider.js";
 import * as gitService from "./git.service.js";
 import { runSetupScript } from "./setup-script.js";
-import { writeAgentSkillFile, readLocalSkillPrompt } from "@agentic-kanban/shared/lib/agent-skill-files";
+import { writeAgentSkillFile, readLocalSkillPrompt, copySkillToWorktree } from "@agentic-kanban/shared/lib/agent-skill-files";
 import { resolveAgentSettings, toExecutorProvider } from "./agent-settings.service.js";
 import { moveIssueToInProgress, resolveProjectRepo, resolveProjectId, resolveProjectFull, moveIssueToDone, getWorkspaceById, updateWorkspaceStatus, getWorkspaceDetails } from "../repositories/workspace.repository.js";
 import { killProcessesInDir } from "./process-cleanup.js";
@@ -89,6 +89,8 @@ export interface CreateWorkspaceInput {
   skipSetup?: boolean;
   customPrompt?: string;
   skillId?: string;
+  /** Name of a disk-only skill (no DB entry) — used when id starts with "disk:" */
+  skillName?: string;
   profile?: { provider?: string; name?: string };
   claudeProfile?: string;
   /** Claude model tier (e.g. "opus"). Falls back to the default_model preference when omitted. */
@@ -245,17 +247,24 @@ export function createWorkspaceService(deps: {
 
   async function resolveSkillFile(
     skillId: string | null,
+    diskSkillName: string | null,
     worktreePath: string,
     repoPath: string,
   ): Promise<string | null> {
-    if (!skillId) return null;
-    const skillRows = await database.select().from(agentSkills).where(eq(agentSkills.id, skillId)).limit(1);
-    if (skillRows.length === 0) return null;
-    const skill = skillRows[0];
-    const localPrompt = await readLocalSkillPrompt(repoPath, skill.name);
-    const effectiveSkill = localPrompt ? { ...skill, prompt: localPrompt } : skill;
-    await writeAgentSkillFile(worktreePath, effectiveSkill);
-    return skill.name;
+    if (skillId) {
+      const skillRows = await database.select().from(agentSkills).where(eq(agentSkills.id, skillId)).limit(1);
+      if (skillRows.length === 0) return null;
+      const skill = skillRows[0];
+      const localPrompt = await readLocalSkillPrompt(repoPath, skill.name);
+      const effectiveSkill = localPrompt ? { ...skill, prompt: localPrompt } : skill;
+      await writeAgentSkillFile(worktreePath, effectiveSkill);
+      return skill.name;
+    }
+    if (diskSkillName) {
+      const copied = await copySkillToWorktree(repoPath, diskSkillName, worktreePath);
+      return copied ? diskSkillName : null;
+    }
+    return null;
   }
 
   async function buildAgentConfig(input: Pick<CreateWorkspaceInput, "profile" | "claudeProfile" | "model">): Promise<{
@@ -479,7 +488,7 @@ export function createWorkspaceService(deps: {
       const agentPrompt = buildAgentPrompt(issue, { ...input, includeVisualProof }, input.issueId);
 
       const skillName = worktreePath
-        ? await resolveSkillFile(skillId, worktreePath, project.repoPath)
+        ? await resolveSkillFile(skillId, input.skillName ?? null, worktreePath, project.repoPath)
         : null;
 
       const agentConfig = await buildAgentConfig(input);
