@@ -13,11 +13,13 @@ import { setupProcessHandlers } from "./startup/process-handlers.js";
 import { setupRoutes } from "./startup/route-setup.js";
 import { setupScheduledTasks } from "./startup/scheduled-tasks.js";
 import { runStartupTasks } from "./startup/startup-tasks.js";
+import { domainErrorHandler } from "./middleware/error-handler.js";
 
 export async function startServer(port?: number, hostname?: string) {
   const app = new Hono();
   app.use("/api/*", cors());
   app.get("/health", (c) => c.json({ status: "ok" }));
+  app.onError(domainErrorHandler);
 
   const { injectWebSocket, upgradeWebSocket } = createNodeWebSocket({ app });
   const boardEvents = createBoardEvents(upgradeWebSocket);
