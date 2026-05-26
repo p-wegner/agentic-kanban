@@ -1,93 +1,17 @@
 import { Hono } from "hono";
 import { db } from "../db/index.js";
-import { projects, projectStatuses, issues, workspaces, preferences, tags, issueTags, scheduledRuns, agentSkills, repos } from "@agentic-kanban/shared/schema";
-import { eq, sql, and, inArray } from "drizzle-orm";
+import { projects, projectStatuses, issues } from "@agentic-kanban/shared/schema";
+import { eq, and } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
-import { execSync } from "node:child_process";
-import { existsSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
-import { branchExists, detectRepoInfo, getProjectGitStats } from "../services/git-info.service.js";
-import { listBranches, listWorktrees, getDiffShortstat, removeWorktree } from "../services/git.service.js";
 import type { Database } from "../db/index.js";
-import { resolve, sep, join } from "node:path";
-import { buildWorkspaceSummaryMap, buildBlockedMap, buildTagMap, buildGraphEdges } from "../services/board-aggregation.service.js";
-import { deleteWorkspaceCascade } from "../repositories/workspace.repository.js";
-import { generateSetupScript, generateTeardownScript } from "../services/project-setup.service.js";
-import { initializeProjectStatuses } from "../repositories/issue.repository.js";
-
-const GITIGNORE_TEMPLATES: Record<string, string> = {
-  node: `node_modules/
-dist/
-build/
-.env
-.env.local
-*.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-.DS_Store
-`,
-  python: `__pycache__/
-*.py[cod]
-*.egg-info/
-dist/
-build/
-.venv/
-venv/
-.env
-*.log
-.DS_Store
-`,
-  java: `target/
-*.class
-*.jar
-*.war
-*.ear
-.gradle/
-build/
-.env
-*.log
-.DS_Store
-`,
-  go: `*.exe
-*.exe~
-*.dll
-*.so
-*.dylib
-*.test
-*.out
-vendor/
-.env
-.DS_Store
-`,
-  rust: `target/
-Cargo.lock
-*.pdb
-.env
-.DS_Store
-`,
-  ruby: `.bundle/
-vendor/bundle/
-*.gem
-*.rbc
-.env
-log/
-tmp/
-.DS_Store
-`,
-  dotnet: `bin/
-obj/
-*.user
-*.suo
-.vs/
-*.nupkg
-.env
-.DS_Store
-`,
-};
-
+import { listBranches } from "../services/git.service.js";
+import { ProjectError, createProjectService } from "../services/project.service.js";
+import { getProjectById, getProjectStatuses } from "../repositories/project.repository.js";
 
 export function createProjectsRoute(database: Database = db) {
   const router = new Hono();
+
+  const projectService = createProjectService({ database });
 
   // GET /api/projects
   router.get("/", async (c) => {
@@ -98,240 +22,61 @@ export function createProjectsRoute(database: Database = db) {
   // POST /api/projects
   router.post("/", async (c) => {
     const body = await c.req.json();
-    const now = new Date().toISOString();
-    const id = randomUUID();
-
-    if (!body.repoPath) {
-      return c.json({ error: "repoPath is required" }, 400);
-    }
-
-    let repoInfo;
     try {
-      repoInfo = await detectRepoInfo(body.repoPath);
+      const result = await projectService.registerProject(body);
+      return c.json(result, 201);
     } catch (err) {
-      return c.json(
-        { error: `Invalid repo: ${err instanceof Error ? err.message : String(err)}` },
-        400,
-      );
-    }
-
-    const name = body.name || repoInfo.repoName;
-
-    // Reject duplicate repo paths
-    const existing = await database
-      .select({ id: projects.id, name: projects.name })
-      .from(projects)
-      .where(eq(projects.repoPath, repoInfo.repoPath))
-      .limit(1);
-    if (existing.length > 0) {
-      return c.json({ error: `Project "${existing[0].name}" is already registered at this path` }, 409);
-    }
-
-    await database.insert(projects).values({
-      id,
-      name,
-      description: body.description ?? null,
-      color: body.color ?? null,
-      repoPath: repoInfo.repoPath,
-      repoName: repoInfo.repoName,
-      defaultBranch: repoInfo.defaultBranch,
-      remoteUrl: repoInfo.remoteUrl,
-      createdAt: now,
-      updatedAt: now,
-    });
-
-    await initializeProjectStatuses(id, now, database);
-
-    // Write optional .gitignore
-    if (body.gitignoreTemplate && GITIGNORE_TEMPLATES[body.gitignoreTemplate]) {
-      const gitignorePath = join(repoInfo.repoPath, ".gitignore");
-      if (!existsSync(gitignorePath)) {
-        try {
-          writeFileSync(gitignorePath, GITIGNORE_TEMPLATES[body.gitignoreTemplate], "utf8");
-        } catch { /* non-fatal */ }
+      if (err instanceof ProjectError) {
+        const code = err.code === "CONFLICT" ? 409 : 400;
+        return c.json({ error: err.message }, code);
       }
+      throw err;
     }
-
-    // Write optional README.md
-    if (body.generateReadme) {
-      const readmePath = join(repoInfo.repoPath, "README.md");
-      if (!existsSync(readmePath)) {
-        try {
-          writeFileSync(readmePath, `# ${name}\n`, "utf8");
-        } catch { /* non-fatal */ }
-      }
-    }
-
-    return c.json({ id, name, repoPath: repoInfo.repoPath, defaultBranch: repoInfo.defaultBranch }, 201);
   });
 
   // POST /api/projects/create — create a new directory as a git repo and register it
   router.post("/create", async (c) => {
     const body = await c.req.json();
-    if (!body.name || !body.name.trim()) {
-      return c.json({ error: "name is required" }, 400);
-    }
-
-    const name = body.name.trim();
-
-    // Resolve target path: explicit path override or baseDir/name
-    let targetPath: string;
-    if (body.path && body.path.trim()) {
-      targetPath = resolve(body.path.trim());
-    } else {
-      // Validate folder name when deriving path from name
-      if (/[/\\<>:"|?*\x00]/.test(name)) {
-        return c.json({ error: 'Project name contains invalid characters. Avoid: / \\ < > : " | ? *' }, 400);
-      }
-
-      // Read projects_base_path from preferences
-      const baseDirRows = await database
-        .select({ value: preferences.value })
-        .from(preferences)
-        .where(eq(preferences.key, "projects_base_path"))
-        .limit(1);
-      const baseDir = baseDirRows[0]?.value?.trim();
-      if (!baseDir) {
-        return c.json({ error: "No base directory configured. Set 'Projects base directory' in Settings › Project, or provide an explicit path." }, 400);
-      }
-      targetPath = resolve(join(baseDir, name));
-
-      // Guard against path traversal (e.g. name = "../other")
-      const resolvedBase = resolve(baseDir);
-      if (!targetPath.startsWith(resolvedBase + sep) && targetPath !== resolvedBase) {
-        return c.json({ error: `Invalid project name: "${name}" would escape the base directory.` }, 400);
-      }
-    }
-
-    // Error if the directory already exists — use the Import tab for existing repos
-    if (existsSync(targetPath)) {
-      return c.json({ error: `Directory already exists: ${targetPath}. To use an existing directory, use "Import existing" instead.` }, 409);
-    }
-
     try {
-      mkdirSync(targetPath, { recursive: true });
+      const result = await projectService.createProject(body);
+      return c.json(result, 201);
     } catch (err) {
-      return c.json({ error: `Failed to create directory: ${err instanceof Error ? err.message : String(err)}` }, 400);
+      if (err instanceof ProjectError) {
+        const code = err.code === "CONFLICT" ? 409 : 400;
+        return c.json({ error: err.message }, code);
+      }
+      throw err;
     }
-
-    // Run git init
-    try {
-      execSync("git init", { cwd: targetPath, stdio: "pipe" });
-    } catch (err: any) {
-      try { rmSync(targetPath, { recursive: true, force: true }); } catch {}
-      return c.json({ error: `git init failed: ${err.stderr ? String(err.stderr).trim() : String(err)}` }, 400);
-    }
-
-    // Check for duplicate registration
-    const existing = await database
-      .select({ id: projects.id, name: projects.name })
-      .from(projects)
-      .where(eq(projects.repoPath, targetPath))
-      .limit(1);
-    if (existing.length > 0) {
-      return c.json({ error: `Project "${existing[0].name}" is already registered at this path` }, 409);
-    }
-
-    let repoInfo;
-    try {
-      repoInfo = await detectRepoInfo(targetPath);
-    } catch (err) {
-      return c.json({ error: `Failed to read repo info: ${err instanceof Error ? err.message : String(err)}` }, 400);
-    }
-
-    const now = new Date().toISOString();
-    const id = randomUUID();
-    const projectName = body.name?.trim() || repoInfo.repoName;
-
-    await database.insert(projects).values({
-      id,
-      name: projectName,
-      description: body.description ?? null,
-      color: body.color ?? null,
-      repoPath: repoInfo.repoPath,
-      repoName: repoInfo.repoName,
-      defaultBranch: repoInfo.defaultBranch,
-      remoteUrl: repoInfo.remoteUrl,
-      createdAt: now,
-      updatedAt: now,
-    });
-
-    await initializeProjectStatuses(id, now, database);
-
-    return c.json({ id, name: projectName, repoPath: repoInfo.repoPath, defaultBranch: repoInfo.defaultBranch }, 201);
   });
 
   // PATCH /api/projects/:id — update project fields
   router.patch("/:id", async (c) => {
     const id = c.req.param("id");
     const body = await c.req.json();
-    const now = new Date().toISOString();
-
-    const updates: Record<string, unknown> = { updatedAt: now };
-    if (body.name !== undefined) updates.name = body.name;
-    if (body.description !== undefined) updates.description = body.description;
-    if (body.color !== undefined) updates.color = body.color;
-    if (body.setupScript !== undefined) updates.setupScript = body.setupScript || null;
-    if (body.setupBlocking !== undefined) updates.setupBlocking = !!body.setupBlocking;
-    if (body.setupEnabled !== undefined) updates.setupEnabled = !!body.setupEnabled;
-    if (body.teardownScript !== undefined) updates.teardownScript = body.teardownScript || null;
-    if (body.defaultBranch !== undefined) {
-      const projectRows = await database
-        .select({ repoPath: projects.repoPath })
-        .from(projects)
-        .where(eq(projects.id, id))
-        .limit(1);
-      if (projectRows.length === 0) {
-        return c.json({ error: "Project not found" }, 404);
+    try {
+      const result = await projectService.updateProject(id, body);
+      return c.json(result);
+    } catch (err) {
+      if (err instanceof ProjectError) {
+        const code = err.code === "NOT_FOUND" ? 404 : 400;
+        return c.json({ error: err.message }, code);
       }
-
-      const nextDefaultBranch = typeof body.defaultBranch === "string"
-        ? body.defaultBranch.trim()
-        : null;
-      if (nextDefaultBranch) {
-        const exists = await branchExists(projectRows[0].repoPath, nextDefaultBranch);
-        if (!exists) {
-          return c.json({ error: `Branch "${nextDefaultBranch}" does not exist in this repo` }, 400);
-        }
-        updates.defaultBranch = nextDefaultBranch;
-      } else {
-        updates.defaultBranch = null;
-      }
+      throw err;
     }
-
-    await database.update(projects).set(updates).where(eq(projects.id, id));
-    return c.json({ id });
   });
 
   // DELETE /api/projects/:id — unregister a project (cascade deletes all associated data)
   router.delete("/:id", async (c) => {
     const projectId = c.req.param("id");
-
-    const projectRows = await database.select({ id: projects.id }).from(projects).where(eq(projects.id, projectId));
-    if (projectRows.length === 0) {
-      return c.json({ error: "Project not found" }, 404);
-    }
-
-    const projectIssues = await database.select({ id: issues.id }).from(issues).where(eq(issues.projectId, projectId));
-    if (projectIssues.length > 0) {
-      const issueIds = projectIssues.map((i) => i.id);
-      await database.delete(issueTags).where(inArray(issueTags.issueId, issueIds));
-      const wsRows = await database.select({ id: workspaces.id }).from(workspaces).where(inArray(workspaces.issueId, issueIds));
-      for (const ws of wsRows) {
-        await deleteWorkspaceCascade(ws.id, database);
+    try {
+      await projectService.deleteProject(projectId);
+      return c.json({ success: true });
+    } catch (err) {
+      if (err instanceof ProjectError) {
+        return c.json({ error: err.message }, 404);
       }
-      await database.delete(issues).where(inArray(issues.id, issueIds));
+      throw err;
     }
-
-    await database.delete(scheduledRuns).where(eq(scheduledRuns.projectId, projectId));
-    await database.delete(agentSkills).where(eq(agentSkills.projectId, projectId));
-    await database.delete(repos).where(eq(repos.projectId, projectId));
-    await database.delete(projectStatuses).where(eq(projectStatuses.projectId, projectId));
-    // Clear active-project preference if it points to this project
-    await database.delete(preferences).where(and(eq(preferences.key, "activeProjectId"), eq(preferences.value, projectId)));
-    await database.delete(projects).where(eq(projects.id, projectId));
-
-    return c.json({ success: true });
   });
 
   // POST /api/projects/generate-setup-script — AI-generate a setup script for a project
@@ -346,9 +91,9 @@ export function createProjectsRoute(database: Database = db) {
       return c.json({ error: "projectId is required" }, 400);
     }
 
-    let setupScript: string;
     try {
-      setupScript = await generateSetupScript(body.projectId, database);
+      const setupScript = await import("../services/project-setup.service.js").then(m => m.generateSetupScript(body.projectId!, database));
+      return c.json({ setupScript });
     } catch (err: any) {
       if (err.statusCode === 404) return c.json({ error: "Project not found" }, 404);
       const parts: string[] = [];
@@ -358,7 +103,6 @@ export function createProjectsRoute(database: Database = db) {
       console.error("[generate-setup-script] claude error:", msg);
       return c.json({ error: "AI generation failed", detail: msg }, 500);
     }
-    return c.json({ setupScript });
   });
 
   // POST /api/projects/generate-teardown-script — AI-generate a teardown script for a project
@@ -373,9 +117,9 @@ export function createProjectsRoute(database: Database = db) {
       return c.json({ error: "projectId is required" }, 400);
     }
 
-    let teardownScript: string;
     try {
-      teardownScript = await generateTeardownScript(body.projectId, database);
+      const teardownScript = await import("../services/project-setup.service.js").then(m => m.generateTeardownScript(body.projectId!, database));
+      return c.json({ teardownScript });
     } catch (err: any) {
       if (err.statusCode === 404) return c.json({ error: "Project not found" }, 404);
       const parts: string[] = [];
@@ -385,17 +129,12 @@ export function createProjectsRoute(database: Database = db) {
       console.error("[generate-teardown-script] claude error:", msg);
       return c.json({ error: "AI generation failed", detail: msg }, 500);
     }
-    return c.json({ teardownScript });
   });
 
   // GET /api/projects/:id/statuses
   router.get("/:id/statuses", async (c) => {
     const projectId = c.req.param("id");
-    const result = await database
-      .select()
-      .from(projectStatuses)
-      .where(eq(projectStatuses.projectId, projectId))
-      .orderBy(projectStatuses.sortOrder);
+    const result = await getProjectStatuses(projectId, database);
     return c.json(result);
   });
 
@@ -431,7 +170,6 @@ export function createProjectsRoute(database: Database = db) {
       return c.json({ error: "Status not found" }, 404);
     }
 
-    // Prevent deleting a status that has issues
     const linkedIssues = await database
       .select({ id: issues.id })
       .from(issues)
@@ -450,15 +188,12 @@ export function createProjectsRoute(database: Database = db) {
   // GET /api/projects/:id/branches
   router.get("/:id/branches", async (c) => {
     const projectId = c.req.param("id");
-    const projectRows = await database
-      .select({ id: projects.id, repoPath: projects.repoPath })
-      .from(projects)
-      .where(eq(projects.id, projectId));
-    if (projectRows.length === 0) {
+    const project = await getProjectById(projectId, database);
+    if (!project) {
       return c.json({ error: "Project not found" }, 404);
     }
     try {
-      const branches = await listBranches(projectRows[0].repoPath);
+      const branches = await listBranches(project.repoPath);
       return c.json(branches);
     } catch (err) {
       return c.json(
@@ -468,126 +203,33 @@ export function createProjectsRoute(database: Database = db) {
     }
   });
 
-  // GET /api/projects/:id/stats — lightweight project stats (commit count, recent commits, issue counts)
+  // GET /api/projects/:id/stats — lightweight project stats
   router.get("/:id/stats", async (c) => {
     const projectId = c.req.param("id");
-    const projectRows = await database
-      .select({ id: projects.id, repoPath: projects.repoPath, defaultBranch: projects.defaultBranch })
-      .from(projects)
-      .where(eq(projects.id, projectId));
-    if (projectRows.length === 0) return c.json({ error: "Project not found" }, 404);
-    const { repoPath, defaultBranch } = projectRows[0];
-
-    const { commitCount, recentCommits, detectedBranch } = getProjectGitStats(repoPath, defaultBranch);
-
-    // Issue counts by status name
-    const issueRows = await database
-      .select({ statusName: projectStatuses.name, count: sql<number>`count(*)` })
-      .from(issues)
-      .leftJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
-      .where(eq(issues.projectId, projectId))
-      .groupBy(projectStatuses.name);
-    const issueCounts: Record<string, number> = {};
-    for (const row of issueRows) if (row.statusName != null) issueCounts[row.statusName] = Number(row.count);
-
-    return c.json({ commitCount, recentCommits, issueCounts, detectedBranch });
+    try {
+      const result = await projectService.getStats(projectId);
+      return c.json(result);
+    } catch (err) {
+      if (err instanceof ProjectError) {
+        return c.json({ error: err.message }, 404);
+      }
+      throw err;
+    }
   });
 
   // GET /api/projects/:id/worktrees
   router.get("/:id/worktrees", async (c) => {
     const projectId = c.req.param("id");
-
-    const projectRows = await database
-      .select({ repoPath: projects.repoPath, defaultBranch: projects.defaultBranch })
-      .from(projects)
-      .where(eq(projects.id, projectId));
-    if (projectRows.length === 0) {
-      return c.json({ error: "Project not found" }, 404);
-    }
-
-    const { repoPath, defaultBranch } = projectRows[0];
-
-    let gitWorktrees: { path: string; branch: string }[];
     try {
-      gitWorktrees = await listWorktrees(repoPath);
+      const result = await projectService.getWorktrees(projectId);
+      return c.json(result);
     } catch (err) {
-      return c.json(
-        { error: `Failed to list worktrees: ${err instanceof Error ? err.message : String(err)}` },
-        500,
-      );
-    }
-
-    // Fetch all non-closed workspaces for this project, join with issues for info
-    const projectWorkspaces = await database
-      .select({
-        id: workspaces.id,
-        issueId: workspaces.issueId,
-        branch: workspaces.branch,
-        workingDir: workspaces.workingDir,
-        baseBranch: workspaces.baseBranch,
-        isDirect: workspaces.isDirect,
-        status: workspaces.status,
-        issueNumber: issues.issueNumber,
-        issueTitle: issues.title,
-      })
-      .from(workspaces)
-      .innerJoin(issues, eq(workspaces.issueId, issues.id))
-      .where(eq(issues.projectId, projectId));
-
-    // Index workspaces by workingDir (normalized path)
-    const wsByDir = new Map<string, typeof projectWorkspaces[number]>();
-    for (const ws of projectWorkspaces) {
-      if (ws.workingDir) {
-        wsByDir.set(ws.workingDir.replace(/\//g, sep), ws);
+      if (err instanceof ProjectError) {
+        const code = err.code === "NOT_FOUND" ? 404 : 500;
+        return c.json({ error: err.message }, code);
       }
+      return c.json({ error: `Failed to list worktrees: ${err instanceof Error ? err.message : String(err)}` }, 500);
     }
-
-    const result = await Promise.all(
-      gitWorktrees.map(async (wt, index) => {
-        // First worktree is always the primary checkout (git guarantee)
-        const isMain = index === 0;
-        const normalizedWtPath = wt.path.replace(/\//g, sep);
-
-        // Match workspace by exact path, or by direct workspace whose workingDir is inside this worktree
-        let ws = wsByDir.get(normalizedWtPath);
-        if (!ws && isMain) {
-          for (const [, candidate] of wsByDir) {
-            if (candidate.isDirect && candidate.workingDir && candidate.workingDir.startsWith(normalizedWtPath)) {
-              ws = candidate;
-              break;
-            }
-          }
-        }
-
-        let diffStats: { filesChanged: number; insertions: number; deletions: number } | undefined;
-        if (!isMain) {
-          const base = ws?.baseBranch || defaultBranch;
-          if (base) {
-            diffStats = await getDiffShortstat(wt.path, base);
-            if (diffStats.filesChanged === 0 && diffStats.insertions === 0 && diffStats.deletions === 0) {
-              diffStats = undefined;
-            }
-          }
-        }
-
-        return {
-          path: wt.path,
-          branch: isMain ? (defaultBranch ?? (wt.branch.replace(/^refs\/heads\//, "") || "(unset)")) : wt.branch.replace(/^refs\/heads\//, ""),
-          isMain,
-          workspace: ws ? {
-            id: ws.id,
-            status: ws.status,
-            isDirect: ws.isDirect,
-            issueId: ws.issueId,
-            issueNumber: ws.issueNumber,
-            issueTitle: ws.issueTitle,
-          } : undefined,
-          diffStats,
-        };
-      }),
-    );
-
-    return c.json(result);
   });
 
   // DELETE /api/projects/:id/worktrees — remove a worktree (and optionally its workspace)
@@ -599,46 +241,16 @@ export function createProjectsRoute(database: Database = db) {
       return c.json({ error: "path or workspaceId is required" }, 400);
     }
 
-    const projectRows = await database
-      .select({ repoPath: projects.repoPath })
-      .from(projects)
-      .where(eq(projects.id, projectId));
-    if (projectRows.length === 0) {
-      return c.json({ error: "Project not found" }, 404);
-    }
-
-    const { repoPath } = projectRows[0];
-    let removedPath = body.path;
-
-    // If workspaceId given, look up the workspace to find its workingDir
-    if (body.workspaceId) {
-      const wsRows = await database
-        .select({ id: workspaces.id, workingDir: workspaces.workingDir })
-        .from(workspaces)
-        .where(eq(workspaces.id, body.workspaceId))
-        .limit(1);
-
-      if (wsRows.length === 0) {
-        return c.json({ error: "Workspace not found" }, 404);
+    try {
+      await projectService.removeWorktreeById(projectId, body);
+      return c.json({ success: true });
+    } catch (err) {
+      if (err instanceof ProjectError) {
+        const code = err.code === "NOT_FOUND" ? 404 : 400;
+        return c.json({ error: err.message }, code);
       }
-
-      const ws = wsRows[0];
-      if (ws.workingDir) removedPath = ws.workingDir;
-
-      // Cascade delete: diff comments → session messages → sessions → workspace
-      await deleteWorkspaceCascade(ws.id, database);
+      throw err;
     }
-
-    // Remove git worktree
-    if (removedPath) {
-      try {
-        await removeWorktree(repoPath, removedPath);
-      } catch {
-        // Best effort — worktree may already be removed
-      }
-    }
-
-    return c.json({ success: true });
   });
 
   // POST /api/projects/:id/worktrees/open — open a worktree folder in the OS file explorer
@@ -667,176 +279,36 @@ export function createProjectsRoute(database: Database = db) {
 
   // GET /api/projects/all/workspaces — cross-project workspace summary (all projects)
   router.get("/all/workspaces", async (c) => {
-    const allProjects = await database.select().from(projects);
-
-    const results = await Promise.all(
-      allProjects.map(async (project) => {
-        const statuses = await database
-          .select()
-          .from(projectStatuses)
-          .where(eq(projectStatuses.projectId, project.id))
-          .orderBy(projectStatuses.sortOrder);
-
-        const projectIssues = await database
-          .select({
-            id: issues.id,
-            issueNumber: issues.issueNumber,
-            title: issues.title,
-            priority: issues.priority,
-            issueType: issues.issueType,
-            sortOrder: issues.sortOrder,
-            statusId: issues.statusId,
-            projectId: issues.projectId,
-            createdAt: issues.createdAt,
-            updatedAt: issues.updatedAt,
-            statusName: projectStatuses.name,
-          })
-          .from(issues)
-          .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
-          .where(eq(issues.projectId, project.id))
-          .orderBy(issues.sortOrder);
-
-        const issueIds = projectIssues.map((i) => i.id);
-        const workspaceSummaryMap = await buildWorkspaceSummaryMap(issueIds, project.defaultBranch, database);
-
-        const issuesWithWorkspaces = projectIssues
-          .map((issue) => {
-            const wsSummary = workspaceSummaryMap.get(issue.id);
-            return { ...issue, workspaceSummary: wsSummary };
-          })
-          .filter((i) => i.workspaceSummary && i.workspaceSummary.total > 0);
-
-        return {
-          projectId: project.id,
-          projectName: project.name,
-          issues: issuesWithWorkspaces,
-        };
-      })
-    );
-
-    return c.json(results);
+    const result = await projectService.getCrossProjectWorkspaces();
+    return c.json(result);
   });
 
   // GET /api/projects/:id/board
   router.get("/:id/board", async (c) => {
     const projectId = c.req.param("id");
-
-    const projectRows = await database
-      .select({ id: projects.id, defaultBranch: projects.defaultBranch })
-      .from(projects)
-      .where(eq(projects.id, projectId));
-    if (projectRows.length === 0) {
-      return c.json({ error: "Project not found" }, 404);
+    try {
+      const result = await projectService.getBoard(projectId);
+      return c.json(result);
+    } catch (err) {
+      if (err instanceof ProjectError) {
+        return c.json({ error: err.message }, 404);
+      }
+      throw err;
     }
-
-    const statuses = await database
-      .select()
-      .from(projectStatuses)
-      .where(eq(projectStatuses.projectId, projectId))
-      .orderBy(projectStatuses.sortOrder);
-
-    const projectIssues = await database
-      .select({
-        id: issues.id,
-        issueNumber: issues.issueNumber,
-        title: issues.title,
-        description: issues.description,
-        priority: issues.priority,
-        issueType: issues.issueType,
-        sortOrder: issues.sortOrder,
-        statusId: issues.statusId,
-        projectId: issues.projectId,
-        createdAt: issues.createdAt,
-        updatedAt: issues.updatedAt,
-        statusChangedAt: issues.statusChangedAt,
-        statusName: projectStatuses.name,
-        skipAutoReview: issues.skipAutoReview,
-        estimate: issues.estimate,
-      })
-      .from(issues)
-      .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
-      .where(eq(issues.projectId, projectId))
-      .orderBy(issues.sortOrder);
-
-    // Fetch workspace summaries, blocked status, and tags via aggregation service
-    const issueIds = projectIssues.map((i) => i.id);
-    const defaultBranch = projectRows[0].defaultBranch;
-
-    const [workspaceSummaryMap, blockedMap, issueTagMap] = await Promise.all([
-      buildWorkspaceSummaryMap(issueIds, defaultBranch, database),
-      buildBlockedMap(issueIds, database),
-      buildTagMap(issueIds, database),
-    ]);
-
-    const issuesWithBlocked = projectIssues.map((issue) => {
-      const wsSummary = workspaceSummaryMap.get(issue.id);
-      const blocked = blockedMap.get(issue.id);
-      return {
-        ...issue,
-        ...(wsSummary ? { workspaceSummary: wsSummary } : {}),
-        ...(blocked ? { isBlocked: blocked.isBlocked, dependencyCount: blocked.dependencyCount } : {}),
-      };
-    });
-
-    const result = statuses.map((s) => ({
-      id: s.id,
-      name: s.name,
-      projectId: s.projectId,
-      sortOrder: s.sortOrder,
-      issues: issuesWithBlocked.filter((i) => i.statusId === s.id).map((i) => ({
-        ...i,
-        tags: issueTagMap.get(i.id) ?? [],
-      })),
-    }));
-
-    return c.json(result);
   });
 
   // GET /api/projects/:id/graph — all issues + all dependencies for graph view
   router.get("/:id/graph", async (c) => {
     const projectId = c.req.param("id");
-
-    const projectRows = await database
-      .select({ id: projects.id })
-      .from(projects)
-      .where(eq(projects.id, projectId));
-    if (projectRows.length === 0) return c.json({ error: "Project not found" }, 404);
-
-    const projectIssues = await database
-      .select({
-        id: issues.id,
-        issueNumber: issues.issueNumber,
-        title: issues.title,
-        description: issues.description,
-        priority: issues.priority,
-        issueType: issues.issueType,
-        sortOrder: issues.sortOrder,
-        statusId: issues.statusId,
-        projectId: issues.projectId,
-        createdAt: issues.createdAt,
-        updatedAt: issues.updatedAt,
-        statusChangedAt: issues.statusChangedAt,
-        statusName: projectStatuses.name,
-        skipAutoReview: issues.skipAutoReview,
-        estimate: issues.estimate,
-      })
-      .from(issues)
-      .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
-      .where(eq(issues.projectId, projectId))
-      .orderBy(issues.sortOrder);
-
-    const issueIds = projectIssues.map((i) => i.id);
-    const edges = await buildGraphEdges(issueIds, database);
-
-    const blockedIds = new Set(
-      edges
-        .filter((e) => e.type === "depends_on" || e.type === "blocked_by")
-        .map((e) => e.issueId)
-    );
-
-    const nodes = projectIssues.map((i) => ({ ...i, isBlocked: blockedIds.has(i.id) }));
-
-    return c.json({ nodes, edges });
+    try {
+      const result = await projectService.getGraph(projectId);
+      return c.json(result);
+    } catch (err) {
+      if (err instanceof ProjectError) {
+        return c.json({ error: err.message }, 404);
+      }
+      throw err;
+    }
   });
 
   return router;

@@ -1,12 +1,13 @@
 import { Hono } from "hono";
 import { db } from "../db/index.js";
-import { workspaces, issues } from "@agentic-kanban/shared/schema";
+import { workspaces } from "@agentic-kanban/shared/schema";
 import { eq } from "drizzle-orm";
 import type { SessionManager } from "../services/session.manager.js";
 import type { BoardEvents } from "../services/board-events.js";
 import type { Database } from "../db/index.js";
 import { createWorkspaceService, WorkspaceError } from "../services/workspace.service.js";
 import type { CreateWorkspaceInput } from "../services/workspace.service.js";
+import { getWorkspaceDetails } from "../repositories/workspace.repository.js";
 
 export function createWorkspacesRoute(
   database: Database = db,
@@ -58,54 +59,11 @@ export function createWorkspacesRoute(
   // GET /api/workspaces/:id
   router.get("/:id", async (c) => {
     const id = c.req.param("id");
-
-    const result = await database
-      .select({
-        id: workspaces.id,
-        issueId: workspaces.issueId,
-        branch: workspaces.branch,
-        workingDir: workspaces.workingDir,
-        baseBranch: workspaces.baseBranch,
-        isDirect: workspaces.isDirect,
-        planMode: workspaces.planMode,
-        includeVisualProof: workspaces.includeVisualProof,
-        readyForMerge: workspaces.readyForMerge,
-        status: workspaces.status,
-        claudeProfile: workspaces.claudeProfile,
-        agentCommand: workspaces.agentCommand,
-        provider: workspaces.provider,
-        createdAt: workspaces.createdAt,
-        updatedAt: workspaces.updatedAt,
-        issueTitle: issues.title,
-        issuePriority: issues.priority,
-      })
-      .from(workspaces)
-      .innerJoin(issues, eq(workspaces.issueId, issues.id))
-      .where(eq(workspaces.id, id));
-
-    if (result.length === 0) {
+    const details = await getWorkspaceDetails(id, database);
+    if (!details) {
       return c.json({ error: "Workspace not found" }, 404);
     }
-
-    const row = result[0];
-    return c.json({
-      id: row.id,
-      issueId: row.issueId,
-      branch: row.branch,
-      workingDir: row.workingDir,
-      baseBranch: row.baseBranch,
-      isDirect: row.isDirect,
-      planMode: row.planMode,
-      includeVisualProof: row.includeVisualProof,
-      readyForMerge: row.readyForMerge,
-      status: row.status,
-      claudeProfile: row.claudeProfile,
-      agentCommand: row.agentCommand,
-      provider: row.provider,
-      createdAt: row.createdAt,
-      updatedAt: row.updatedAt,
-      issue: { title: row.issueTitle, priority: row.issuePriority },
-    });
+    return c.json(details);
   });
 
   // PATCH /api/workspaces/:id
