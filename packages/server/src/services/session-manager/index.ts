@@ -293,8 +293,21 @@ function createSessionManager(
       }
     }
 
+    // Inject HANDOFF.md context if available and not using provider resume or plan mode
+    let effectivePrompt = prompt;
+    if (effectiveWorkingDir && !planMode && !providerSessionId) {
+      try {
+        const { readHandoffFile } = await import("../handoff.service.js");
+        const handoff = await readHandoffFile(effectiveWorkingDir);
+        if (handoff) {
+          effectivePrompt = `[SESSION HANDOFF — previous session context for this workspace. Use it to avoid re-reading files you already explored.]\n\n${handoff}\n---\n\n${prompt}`;
+          console.log(`[session] HANDOFF.md injected: workspaceId=${workspaceId} size=${handoff.length}`);
+        }
+      } catch { /* handoff not available — proceed without it */ }
+    }
+
     try {
-      const proc = agentService.launch(effectiveWorkingDir, sessionId, prompt, effectiveAgentArgs, (event) => {
+      const proc = agentService.launch(effectiveWorkingDir, sessionId, effectivePrompt, effectiveAgentArgs, (event) => {
         const message: AgentOutputMessage = event;
         broadcast(sessionId, message);
 
@@ -365,6 +378,19 @@ function createSessionManager(
                 }
               } catch (err) {
                 console.error(`[session] plan completion handling failed: workspaceId=${workspaceId}`, err);
+              }
+            })();
+          }
+
+          // Write HANDOFF.md for next session on this workspace
+          if (effectiveWorkingDir) {
+            void (async () => {
+              try {
+                const { writeHandoffFile } = await import("../handoff.service.js");
+                await writeHandoffFile(effectiveWorkingDir, sessionId, db, workspace.baseBranch);
+                console.log(`[session] HANDOFF.md written: workspaceId=${workspaceId} sessionId=${sessionId}`);
+              } catch (err) {
+                console.warn(`[session] HANDOFF.md write failed: sessionId=${sessionId}`, err);
               }
             })();
           }
