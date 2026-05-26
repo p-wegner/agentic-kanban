@@ -13,6 +13,19 @@ The active project is "agentic-kanban" — always use this for board monitor cyc
 ## What This Is
 Cleanroom reimplementation of [vibe-kanban](https://github.com/BloopAI/vibe-kanban) — a kanban board for managing AI-driven coding tasks. Personal use only, single user, local-first.
 
+## Scope Constraints
+
+**Keep changes minimal and focused on the original task.** Agents tend to expand scope during refactoring — resist this.
+
+- **Only change what the task requires.** If you're fixing a bug, fix only that bug. If you're refactoring a function, refactor only that function.
+- **Don't fix pre-existing issues** unless they are directly blocking your task or tightly coupled to the code you're changing.
+- **Don't rename, restructure, or reformat** code outside the immediate scope — even if it "looks messy".
+- **Don't add features while refactoring.** Refactors should be behavior-preserving by definition.
+- **When you notice other issues**, create a kanban ticket for them instead of fixing them inline. Use `mcp__agentic-kanban__create_issue` or `pnpm cli -- issue create`.
+- **Stop and verify scope before committing.** Run `git diff --stat HEAD` and check: does every changed file relate directly to the task? If not, revert the unrelated changes.
+
+> **Signal of scope creep**: touching more than 3–4 files for a task that sounds like a small change, or changing files whose names don't appear in the ticket description.
+
 ## Key Constraints
 - **Claude Code only** as the AI agent (no multi-agent support)
 - **Local only** — no cloud, no multi-tenant, no OAuth
