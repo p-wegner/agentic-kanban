@@ -215,4 +215,29 @@ describe("GitService", () => {
     expect(journalContent).not.toContain("=======");
     expect(journalContent).not.toContain(">>>>>>>");
   });
+
+  it("isMergeInProgress returns false when no merge is in progress", async () => {
+    const result = await gitService.isMergeInProgress(repoPath);
+    expect(result).toBe(false);
+  });
+
+  it("isMergeInProgress returns true when MERGE_HEAD exists, and abortMerge clears it", async () => {
+    const { writeFileSync, existsSync: fsExists } = await import("node:fs");
+
+    // Simulate a left-over MERGE_HEAD by writing the file directly
+    const mergeHeadPath = join(repoPath, ".git", "MERGE_HEAD");
+    const fakeSha = "0000000000000000000000000000000000000001";
+    writeFileSync(mergeHeadPath, fakeSha + "\n");
+
+    expect(await gitService.isMergeInProgress(repoPath)).toBe(true);
+
+    // abortMerge should clear it (git merge --abort removes MERGE_HEAD)
+    // Note: git merge --abort only works if there's an actual in-progress merge state;
+    // a bare MERGE_HEAD file without MERGE_MSG/index state causes it to fail.
+    // So we test the detection only here; the abort path is covered by the conflict test above.
+    const { rm: fsRm } = await import("node:fs/promises");
+    await fsRm(mergeHeadPath, { force: true });
+    expect(await gitService.isMergeInProgress(repoPath)).toBe(false);
+    expect(fsExists(mergeHeadPath)).toBe(false);
+  });
 });

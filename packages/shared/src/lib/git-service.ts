@@ -572,3 +572,14 @@ export async function isRebaseInProgress(worktreePath: string): Promise<boolean>
     return false;
   }
 }
+
+/** Check if a merge is in progress (MERGE_HEAD exists). */
+export async function isMergeInProgress(repoPath: string): Promise<boolean> {
+  try {
+    const dir = (await execGit(["rev-parse", "--git-dir"], repoPath)).trim();
+    const { join: pathJoin } = await import("node:path");
+    return existsSync(pathJoin(repoPath, dir, "MERGE_HEAD"));
+  } catch {
+    return false;
+  }
+}
