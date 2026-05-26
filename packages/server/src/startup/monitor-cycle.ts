@@ -20,6 +20,7 @@ export interface WorkspaceCandidate {
   issueNumber: number | null;
   issueStatusName: string;
   baseBranch: string | null;
+  readyForMerge: boolean;
 }
 
 export interface ProcessWorkspaceDeps {
@@ -55,6 +56,21 @@ export async function processWorkspaceCandidates(candidates: WorkspaceCandidate[
           if (doneStatusRow.length > 0) await db.update(issues).set({ statusId: doneStatusRow[0].id, updatedAt: now }).where(eq(issues.id, ws.issueId)).catch(() => {});
           logAction("merge", ws.wsId, ws.issueId);
           console.log(`[monitor] Closed stale direct workspace ${ws.wsId}  issue moved to Done`);
+          deps.boardEvents.broadcast(ws.projectId, "board_changed");
+        } else if (ws.readyForMerge) {
+          const mergeRes = await fetch(`http://localhost:${deps.serverPort}/api/workspaces/${ws.wsId}/merge`, { method: "POST" }).catch(() => null);
+          if (!mergeRes || !mergeRes.ok) {
+            const body = mergeRes ? await mergeRes.json().catch(() => ({})) : {};
+            const mergeError = (body as Record<string, string>)?.message || "merge failed";
+            await fetch(`http://localhost:${deps.serverPort}/api/workspaces/${ws.wsId}/fix-and-merge`, {
+              method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mergeError }),
+            }).catch(() => {});
+            console.log(`[monitor] Merge conflict for idle+readyForMerge workspace ${ws.wsId}  triggered fix-and-merge`);
+          } else {
+            console.log(`[monitor] Triggered merge for idle+readyForMerge workspace ${ws.wsId}`);
+          }
+          stats.merged++;
+          logAction("merge", ws.wsId, ws.issueId);
           deps.boardEvents.broadcast(ws.projectId, "board_changed");
         } else if (sessionCount >= MAX_SESSIONS) {
           const needsReviewSt = await db.select({ id: projectStatuses.id }).from(projectStatuses).where(sql`${projectStatuses.name} = 'Needs Review' AND ${projectStatuses.projectId} = ${ws.projectId}`).limit(1);
