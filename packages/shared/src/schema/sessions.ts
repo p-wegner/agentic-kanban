@@ -17,6 +17,7 @@ export const sessions = sqliteTable("sessions", {
   pid: integer("pid"),
   triggerType: text("trigger_type"),
 }, (table) => ({
+  workspaceIdIdx: index("idx_sessions_workspace_id").on(table.workspaceId),
   statusIdx: index("idx_sessions_status").on(table.status),
   startedAtIdx: index("idx_sessions_started_at").on(table.startedAt),
 }));
