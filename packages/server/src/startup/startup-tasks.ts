@@ -65,6 +65,14 @@ export async function killOrphanedServers(): Promise<void> {
 
 /** Run database migrations, seed built-in tags and skills, deduplicate projects, and disable auto_monitor. */
 export async function runMigrations(): Promise<void> {
+  // Cheap insurance: a verified snapshot before any schema change.
+  try {
+    const { createBackup } = await import("../db/backup.js");
+    await createBackup("pre-migration");
+  } catch (err) {
+    console.warn("[backup] pre-migration backup failed (non-fatal):", err instanceof Error ? err.message : String(err));
+  }
+
   try {
     await applyMigrations(rawClient);
   } catch (err: unknown) {

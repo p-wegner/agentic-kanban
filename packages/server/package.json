@@ -32,6 +32,7 @@
     "db:seed": "tsx src/db/seed.ts",
     "db:reset": "tsx src/scripts/db-reset.ts && drizzle-kit migrate && tsx src/db/seed.ts",
     "db:repair": "tsx src/scripts/db-repair.ts",
+    "db:restore": "tsx src/scripts/db-restore.ts",
     "test": "vitest run"
   },
   "dependencies": {
