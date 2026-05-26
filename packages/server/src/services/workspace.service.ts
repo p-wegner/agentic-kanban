@@ -119,202 +119,367 @@ export function createWorkspaceService(deps: {
 }) {
   const { database, getSessionManager, boardEvents } = deps;
 
+  // --- createWorkspace helpers ---
+
+  async function resolveIssueAndProject(issueId: string): Promise<{
+    issue: { projectId: string; title: string; description: string | null };
+    project: { repoPath: string; defaultBranch: string | null };
+    setupConfig: { setupScript: string | null; setupBlocking: boolean; setupEnabled: boolean };
+  }> {
+    const issueRows = await database
+      .select({ projectId: issues.projectId, title: issues.title, description: issues.description })
+      .from(issues)
+      .where(eq(issues.id, issueId))
+      .limit(1);
+
+    if (issueRows.length === 0) {
+      throw new WorkspaceError("Issue not found", "NOT_FOUND");
+    }
+
+    const issue = issueRows[0];
+
+    const projectRows = await database
+      .select({ repoPath: projects.repoPath, defaultBranch: projects.defaultBranch, setupScript: projects.setupScript, setupBlocking: projects.setupBlocking, setupEnabled: projects.setupEnabled })
+      .from(projects)
+      .where(eq(projects.id, issue.projectId))
+      .limit(1);
+
+    if (projectRows.length === 0) {
+      throw new WorkspaceError("Project not found", "NOT_FOUND");
+    }
+
+    const projectRow = projectRows[0];
+    return {
+      issue,
+      project: { repoPath: projectRow.repoPath, defaultBranch: projectRow.defaultBranch },
+      setupConfig: {
+        setupScript: projectRow.setupScript ?? null,
+        setupBlocking: projectRow.setupBlocking ?? true,
+        setupEnabled: projectRow.setupEnabled ?? true,
+      },
+    };
+  }
+
+  async function setupWorktree(
+    isDirect: boolean,
+    repoPath: string,
+    defaultBranch: string | null,
+    input: Pick<CreateWorkspaceInput, "branch" | "baseBranch" | "skipSetup">,
+    setupConfig: { setupScript: string | null; setupBlocking: boolean; setupEnabled: boolean },
+    workspaceId: string,
+  ): Promise<{ branch: string; worktreePath: string; baseBranch: string | null; baseCommitSha: string | null }> {
+    let branch: string;
+    let worktreePath: string;
+    let baseBranch: string | null;
+    let baseCommitSha: string | null;
+
+    if (isDirect) {
+      branch = await gitService.getCurrentBranch(repoPath);
+      worktreePath = repoPath;
+      baseBranch = null;
+      baseCommitSha = await gitService.getHeadCommitSha(repoPath);
+    } else {
+      baseBranch = input.baseBranch || defaultBranch;
+      if (!baseBranch) {
+        throw new WorkspaceError(
+          "No default branch configured for this project. Set a default branch in project settings or choose a base branch.",
+          "BAD_REQUEST",
+        );
+      }
+      branch = input.branch ?? "";
+      worktreePath = await gitService.createWorktree(repoPath, branch, baseBranch);
+      baseCommitSha = null;
+    }
+
+    const { setupScript, setupBlocking, setupEnabled } = setupConfig;
+    if (!isDirect && setupScript && setupEnabled && !input.skipSetup) {
+      if (setupBlocking) {
+        try {
+          const result = await runSetupScript(worktreePath, setupScript);
+          if (result.exitCode === 0) {
+            console.log(`[workspaces] setup complete: workspaceId=${workspaceId}`);
+          } else {
+            console.warn(`[workspaces] setup failed (exit ${result.exitCode}): ${result.stderr || result.stdout}`);
+          }
+        } catch (err) {
+          console.warn(`[workspaces] setup error: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      } else {
+        runSetupScript(worktreePath, setupScript).then(result => {
+          if (result.exitCode === 0) {
+            console.log(`[workspaces] parallel setup complete: workspaceId=${workspaceId}`);
+          } else {
+            console.warn(`[workspaces] parallel setup failed (exit ${result.exitCode}): ${result.stderr || result.stdout}`);
+          }
+        }).catch(err => {
+          console.warn(`[workspaces] parallel setup error: ${err instanceof Error ? err.message : String(err)}`);
+        });
+      }
+    }
+
+    return { branch, worktreePath, baseBranch, baseCommitSha };
+  }
+
+  function buildAgentPrompt(
+    issue: { title: string; description: string | null },
+    input: Pick<CreateWorkspaceInput, "customPrompt" | "includeVisualProof">,
+    issueId: string,
+  ): string {
+    let prompt: string;
+    if (input.customPrompt) {
+      prompt = input.customPrompt;
+    } else {
+      prompt = issue.title;
+      if (issue.description) {
+        prompt += `\n\n${issue.description}`;
+      }
+    }
+    if (input.includeVisualProof) {
+      const serverPort = process.env.KANBAN_SERVER_PORT || process.env.PORT || "3001";
+      prompt += `\n\nAfter completing the implementation, attach visual proof to this ticket. Use the playwright-cli skill to open the running app, take a screenshot of the working result, and post it as an artifact:\nPOST http://localhost:${serverPort}/api/issues/${issueId}/artifacts\nBody: { "type": "image", "mimeType": "image/png", "content": "<base64 data URL>", "caption": "Screenshot of the working result" }`;
+    }
+    return prompt;
+  }
+
+  async function resolveSkillFile(
+    skillId: string | null,
+    worktreePath: string,
+    repoPath: string,
+  ): Promise<string | null> {
+    if (!skillId) return null;
+    const skillRows = await database.select().from(agentSkills).where(eq(agentSkills.id, skillId)).limit(1);
+    if (skillRows.length === 0) return null;
+    const skill = skillRows[0];
+    const localPrompt = await readLocalSkillPrompt(repoPath, skill.name);
+    const effectiveSkill = localPrompt ? { ...skill, prompt: localPrompt } : skill;
+    await writeAgentSkillFile(worktreePath, effectiveSkill);
+    return skill.name;
+  }
+
+  async function buildAgentConfig(input: Pick<CreateWorkspaceInput, "profile" | "claudeProfile">): Promise<{
+    agentCommand: string | undefined;
+    agentArgs: string | undefined;
+    claudeProfile: string | undefined;
+    resolvedProfile: string | undefined;
+    resolvedProvider: ProviderName;
+    resolvedProfileSelection: { provider: ProviderName; name: string } | undefined;
+    permissionPromptTool: string | undefined;
+  }> {
+    const prefRows = await database.select().from(preferences);
+    const prefMap = new Map(prefRows.map(r => [r.key, r.value]));
+
+    const profileOverride = input.profile;
+    const legacyProfileOverride = input.claudeProfile;
+    if (profileOverride?.name) {
+      if (profileOverride.provider === "codex") {
+        prefMap.set("codex_profile", profileOverride.name);
+        prefMap.set("provider", "codex");
+      } else if (profileOverride.provider === "copilot") {
+        prefMap.set("copilot_profile", profileOverride.name);
+        prefMap.set("provider", "copilot");
+      } else {
+        prefMap.set("claude_profile", profileOverride.name);
+        prefMap.set("provider", "claude");
+      }
+    } else if (legacyProfileOverride) {
+      prefMap.set("claude_profile", legacyProfileOverride);
+      prefMap.set("provider", "claude");
+    }
+
+    const { agentCommand, agentArgs, claudeProfile: resolvedProfile, profile: resolvedProfileSelection, provider, permissionPromptTool } = resolveAgentSettings(prefMap);
+    const claudeProfile = resolvedProfileSelection?.name || legacyProfileOverride || prefMap.get("claude_profile") || undefined;
+
+    return { agentCommand, agentArgs, claudeProfile, resolvedProfile, resolvedProvider: provider, resolvedProfileSelection, permissionPromptTool };
+  }
+
+  async function insertWorkspaceRecord(params: {
+    id: string;
+    issueId: string;
+    branch: string;
+    worktreePath: string | null;
+    baseBranch: string | null;
+    isDirect: boolean;
+    baseCommitSha: string | null;
+    requiresReview: boolean;
+    thoroughReview: boolean;
+    planMode: boolean;
+    includeVisualProof: boolean;
+    skillId: string | null;
+    claudeProfile: string | undefined;
+    agentCommand: string | undefined;
+    resolvedProvider: ProviderName;
+    now: string;
+  }): Promise<void> {
+    await database.insert(workspaces).values({
+      id: params.id,
+      issueId: params.issueId,
+      branch: params.branch,
+      workingDir: params.worktreePath,
+      baseBranch: params.baseBranch,
+      isDirect: params.isDirect,
+      baseCommitSha: params.baseCommitSha,
+      requiresReview: params.requiresReview,
+      thoroughReview: params.thoroughReview,
+      planMode: params.planMode,
+      includeVisualProof: params.includeVisualProof,
+      skillId: params.skillId,
+      status: "active",
+      claudeProfile: params.claudeProfile ?? null,
+      agentCommand: params.agentCommand ?? null,
+      provider: params.resolvedProvider,
+      createdAt: params.now,
+      updatedAt: params.now,
+    });
+  }
+
+  async function launchAgent(params: {
+    workspaceId: string;
+    branch: string;
+    isDirect: boolean;
+    agentPrompt: string;
+    agentCommand: string | undefined;
+    agentArgs: string | undefined;
+    resolvedProfile: string | undefined;
+    permissionPromptTool: string | undefined;
+    planMode: boolean;
+    resolvedProvider: ProviderName;
+    resolvedProfileSelection: { provider: ProviderName; name: string } | undefined;
+    skillName: string | null;
+  }): Promise<string | undefined> {
+    if (!getSessionManager) return undefined;
+    const truncatedPrompt = params.agentPrompt.length > 80 ? params.agentPrompt.slice(0, 80) + "..." : params.agentPrompt;
+    console.log(`[workspaces] auto-launch: workspaceId=${params.workspaceId} branch=${params.branch} isDirect=${params.isDirect} prompt="${truncatedPrompt}" agentCommand=${params.agentCommand ?? "default"}`);
+    const executorProvider = toExecutorProvider(params.resolvedProvider);
+    return getSessionManager().startSession({
+      workspaceId: params.workspaceId,
+      prompt: params.agentPrompt,
+      agentCommand: params.agentCommand,
+      agentArgs: params.agentArgs,
+      claudeProfile: params.resolvedProfile,
+      permissionPromptTool: params.permissionPromptTool,
+      planMode: params.planMode,
+      provider: executorProvider,
+      triggerType: params.skillName ? `skill:${params.skillName}` : "agent",
+      profile: params.resolvedProfileSelection,
+    });
+  }
+
+  async function handleCreateFailure(err: unknown, params: {
+    id: string;
+    issueId: string;
+    branch: string;
+    worktreePath: string | null;
+    baseBranch: string | null;
+    isDirect: boolean;
+    baseCommitSha: string | null;
+    requiresReview: boolean;
+    thoroughReview: boolean;
+    planMode: boolean;
+    includeVisualProof: boolean;
+    claudeProfile: string | undefined;
+    agentCommand: string | undefined;
+    resolvedProvider: ProviderName;
+    now: string;
+  }): Promise<CreateWorkspaceResult> {
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    console.error(`[workspaces] create failed: ${errorMsg}`);
+
+    try {
+      await database.insert(workspaces).values({
+        id: params.id,
+        issueId: params.issueId,
+        branch: params.branch,
+        workingDir: params.worktreePath,
+        baseBranch: params.baseBranch,
+        isDirect: params.isDirect,
+        baseCommitSha: params.baseCommitSha,
+        requiresReview: params.requiresReview,
+        thoroughReview: params.thoroughReview,
+        planMode: params.planMode,
+        includeVisualProof: params.includeVisualProof,
+        status: "active",
+        claudeProfile: params.claudeProfile ?? null,
+        agentCommand: params.agentCommand ?? null,
+        provider: params.resolvedProvider,
+        createdAt: params.now,
+        updatedAt: params.now,
+      });
+    } catch {
+      // DB insert may fail if worktree creation itself failed
+    }
+
+    return {
+      id: params.id,
+      issueId: params.issueId,
+      branch: params.branch,
+      workingDir: params.worktreePath,
+      baseBranch: params.baseBranch,
+      isDirect: params.isDirect,
+      planMode: params.planMode,
+      includeVisualProof: params.includeVisualProof,
+      status: "active",
+      provider: params.resolvedProvider,
+      createdAt: params.now,
+      updatedAt: params.now,
+      error: errorMsg,
+    };
+  }
+
   async function createWorkspace(input: CreateWorkspaceInput): Promise<CreateWorkspaceResult> {
     const isDirect = input.isDirect === true;
     const requiresReview = input.requiresReview === true;
     const thoroughReview = input.thoroughReview === true;
     const planMode = input.planMode === true;
     const includeVisualProof = input.includeVisualProof === true;
+    const skillId = input.skillId || null;
     const now = new Date().toISOString();
     const id = randomUUID();
-    let sessionId: string | undefined;
+
+    // Mutable state for error recovery
+    let branch = input.branch ?? "";
     let worktreePath: string | null = null;
     let baseBranch: string | null = null;
     let baseCommitSha: string | null = null;
-    let branch: string = input.branch ?? "";
     let claudeProfile: string | undefined;
     let agentCommand: string | undefined;
     let resolvedProvider: ProviderName = "claude";
 
     try {
-      // Resolve issue → project
-      const issueRows = await database
-        .select({ projectId: issues.projectId, title: issues.title, description: issues.description })
-        .from(issues)
-        .where(eq(issues.id, input.issueId))
-        .limit(1);
+      const { issue, project, setupConfig } = await resolveIssueAndProject(input.issueId);
 
-      if (issueRows.length === 0) {
-        throw new WorkspaceError("Issue not found", "NOT_FOUND");
-      }
+      ({ branch, worktreePath, baseBranch, baseCommitSha } = await setupWorktree(
+        isDirect, project.repoPath, project.defaultBranch, input, setupConfig, id,
+      ));
 
-      const issue = issueRows[0];
+      const agentPrompt = buildAgentPrompt(issue, { ...input, includeVisualProof }, input.issueId);
 
-      const projectRows = await database
-        .select({ repoPath: projects.repoPath, defaultBranch: projects.defaultBranch })
-        .from(projects)
-        .where(eq(projects.id, issue.projectId))
-        .limit(1);
+      const skillName = worktreePath
+        ? await resolveSkillFile(skillId, worktreePath, project.repoPath)
+        : null;
 
-      if (projectRows.length === 0) {
-        throw new WorkspaceError("Project not found", "NOT_FOUND");
-      }
+      const agentConfig = await buildAgentConfig(input);
+      claudeProfile = agentConfig.claudeProfile;
+      agentCommand = agentConfig.agentCommand;
+      resolvedProvider = agentConfig.resolvedProvider;
 
-      const project = projectRows[0];
-
-      // Fetch setup script config
-      const setupConfigRows = await database
-        .select({ setupScript: projects.setupScript, setupBlocking: projects.setupBlocking, setupEnabled: projects.setupEnabled })
-        .from(projects)
-        .where(eq(projects.id, issue.projectId))
-        .limit(1);
-      const setupScript = setupConfigRows[0]?.setupScript;
-      const setupBlocking = setupConfigRows[0]?.setupBlocking ?? true;
-      const setupEnabled = setupConfigRows[0]?.setupEnabled ?? true;
-
-      if (isDirect) {
-        branch = await gitService.getCurrentBranch(project.repoPath);
-        worktreePath = project.repoPath;
-        baseBranch = null;
-        baseCommitSha = await gitService.getHeadCommitSha(project.repoPath);
-      } else {
-        baseBranch = input.baseBranch || project.defaultBranch;
-        if (!baseBranch) {
-          throw new WorkspaceError(
-            "No default branch configured for this project. Set a default branch in project settings or choose a base branch.",
-            "BAD_REQUEST",
-          );
-        }
-        worktreePath = await gitService.createWorktree(project.repoPath, branch, baseBranch ?? undefined);
-      }
-
-      // Run setup script for isolated git worktrees only
-      if (!isDirect && setupScript && worktreePath && setupEnabled && !input.skipSetup) {
-        if (setupBlocking) {
-          try {
-            const result = await runSetupScript(worktreePath, setupScript);
-            if (result.exitCode === 0) {
-              console.log(`[workspaces] setup complete: workspaceId=${id}`);
-            } else {
-              console.warn(`[workspaces] setup failed (exit ${result.exitCode}): ${result.stderr || result.stdout}`);
-            }
-          } catch (err) {
-            console.warn(`[workspaces] setup error: ${err instanceof Error ? err.message : String(err)}`);
-          }
-        } else {
-          runSetupScript(worktreePath, setupScript).then(result => {
-            if (result.exitCode === 0) {
-              console.log(`[workspaces] parallel setup complete: workspaceId=${id}`);
-            } else {
-              console.warn(`[workspaces] parallel setup failed (exit ${result.exitCode}): ${result.stderr || result.stdout}`);
-            }
-          }).catch(err => {
-            console.warn(`[workspaces] parallel setup error: ${err instanceof Error ? err.message : String(err)}`);
-          });
-        }
-      }
-
-      // Build agent prompt
-      let agentPrompt: string;
-      if (input.customPrompt) {
-        agentPrompt = input.customPrompt;
-      } else {
-        agentPrompt = issue.title;
-        if (issue.description) {
-          agentPrompt += `\n\n${issue.description}`;
-        }
-      }
-      if (includeVisualProof) {
-        const serverPort = process.env.KANBAN_SERVER_PORT || process.env.PORT || "3001";
-        agentPrompt += `\n\nAfter completing the implementation, attach visual proof to this ticket. Use the playwright-cli skill to open the running app, take a screenshot of the working result, and post it as an artifact:\nPOST http://localhost:${serverPort}/api/issues/${input.issueId}/artifacts\nBody: { "type": "image", "mimeType": "image/png", "content": "<base64 data URL>", "caption": "Screenshot of the working result" }`;
-      }
-
-      // Write skill file for progressive disclosure
-      const skillId: string | null = input.skillId || null;
-      let skillName: string | null = null;
-      if (skillId && worktreePath) {
-        const skillRows = await database.select().from(agentSkills).where(eq(agentSkills.id, skillId)).limit(1);
-        if (skillRows.length > 0) {
-          const skill = skillRows[0];
-          skillName = skill.name;
-          const localPrompt = await readLocalSkillPrompt(project.repoPath, skill.name);
-          const effectiveSkill = localPrompt ? { ...skill, prompt: localPrompt } : skill;
-          await writeAgentSkillFile(worktreePath, effectiveSkill);
-        }
-      }
-
-      // Resolve agent settings from preferences + body overrides
-      const prefRows = await database.select().from(preferences);
-      const prefMap = new Map(prefRows.map(r => [r.key, r.value]));
-
-      const profileOverride = input.profile;
-      const legacyProfileOverride = input.claudeProfile;
-      if (profileOverride?.name) {
-        if (profileOverride.provider === "codex") {
-          prefMap.set("codex_profile", profileOverride.name);
-          prefMap.set("provider", "codex");
-        } else if (profileOverride.provider === "copilot") {
-          prefMap.set("copilot_profile", profileOverride.name);
-          prefMap.set("provider", "copilot");
-        } else {
-          prefMap.set("claude_profile", profileOverride.name);
-          prefMap.set("provider", "claude");
-        }
-      } else if (legacyProfileOverride) {
-        prefMap.set("claude_profile", legacyProfileOverride);
-        prefMap.set("provider", "claude");
-      }
-
-      const { agentCommand: resolvedCommand, agentArgs, claudeProfile: resolvedProfile, profile: resolvedProfileSelection, provider, permissionPromptTool } = resolveAgentSettings(prefMap);
-      resolvedProvider = provider;
-      agentCommand = resolvedCommand;
-      claudeProfile = resolvedProfileSelection?.name || legacyProfileOverride || prefMap.get("claude_profile") || undefined;
-
-      // Insert workspace DB record
-      await database.insert(workspaces).values({
-        id,
-        issueId: input.issueId,
-        branch,
-        workingDir: worktreePath,
-        baseBranch,
-        isDirect,
-        baseCommitSha,
-        requiresReview,
-        thoroughReview,
-        planMode,
-        includeVisualProof,
-        skillId,
-        status: "active",
-        claudeProfile: claudeProfile ?? null,
-        agentCommand: agentCommand ?? null,
-        provider: resolvedProvider,
-        createdAt: now,
-        updatedAt: now,
+      await insertWorkspaceRecord({
+        id, issueId: input.issueId, branch, worktreePath, baseBranch, isDirect,
+        baseCommitSha, requiresReview, thoroughReview, planMode, includeVisualProof,
+        skillId, claudeProfile, agentCommand, resolvedProvider, now,
       });
 
-      // Auto-move issue to "In Progress"
       await moveIssueToInProgress(input.issueId, issue.projectId, now, database);
 
-      // Auto-launch agent
-      if (getSessionManager) {
-        const truncatedPrompt = agentPrompt.length > 80 ? agentPrompt.slice(0, 80) + "..." : agentPrompt;
-        console.log(`[workspaces] auto-launch: workspaceId=${id} branch=${branch} isDirect=${isDirect} prompt="${truncatedPrompt}" agentCommand=${agentCommand ?? "default"}`);
-        const executorProvider = toExecutorProvider(resolvedProvider);
-        sessionId = await getSessionManager().startSession({
-          workspaceId: id,
-          prompt: agentPrompt,
-          agentCommand,
-          agentArgs,
-          claudeProfile: resolvedProfile,
-          permissionPromptTool,
-          planMode,
-          provider: executorProvider,
-          triggerType: skillName ? `skill:${skillName}` : "agent",
-          profile: resolvedProfileSelection,
-        });
-      }
+      const sessionId = await launchAgent({
+        workspaceId: id, branch, isDirect, agentPrompt,
+        agentCommand, agentArgs: agentConfig.agentArgs,
+        resolvedProfile: agentConfig.resolvedProfile,
+        permissionPromptTool: agentConfig.permissionPromptTool,
+        planMode, resolvedProvider,
+        resolvedProfileSelection: agentConfig.resolvedProfileSelection,
+        skillName,
+      });
 
-      // Broadcast board event
       boardEvents?.broadcast(issue.projectId, "workspace_created");
 
       return {
@@ -333,53 +498,12 @@ export function createWorkspaceService(deps: {
         updatedAt: now,
       };
     } catch (err) {
-      const errorMsg = err instanceof Error ? err.message : String(err);
-
-      // Re-throw domain errors (NOT_FOUND, BAD_REQUEST) — these are intentional
       if (err instanceof WorkspaceError) throw err;
-
-      // Unexpected errors: still save workspace record with error info
-      console.error(`[workspaces] create failed: ${errorMsg}`);
-
-      try {
-        await database.insert(workspaces).values({
-          id,
-          issueId: input.issueId,
-          branch,
-          workingDir: worktreePath,
-          baseBranch,
-          isDirect,
-          baseCommitSha,
-          requiresReview,
-          thoroughReview,
-          planMode,
-          includeVisualProof,
-          status: "active",
-          claudeProfile: claudeProfile ?? null,
-          agentCommand: agentCommand ?? null,
-          provider: resolvedProvider,
-          createdAt: now,
-          updatedAt: now,
-        });
-      } catch {
-        // DB insert may fail if worktree creation itself failed
-      }
-
-      return {
-        id,
-        issueId: input.issueId,
-        branch,
-        workingDir: worktreePath,
-        baseBranch,
-        isDirect,
-        planMode,
-        includeVisualProof,
-        status: "active",
-        provider: resolvedProvider,
-        createdAt: now,
-        updatedAt: now,
-        error: errorMsg,
-      };
+      return handleCreateFailure(err, {
+        id, issueId: input.issueId, branch, worktreePath, baseBranch, isDirect,
+        baseCommitSha, requiresReview, thoroughReview, planMode, includeVisualProof,
+        claudeProfile, agentCommand, resolvedProvider, now,
+      });
     }
   }
 
