@@ -63,25 +63,44 @@ interface TooltipState {
 
 const COMPLETED_STATUSES = new Set(["Done", "Cancelled"]);
 
+const ALL_TYPES = Object.keys(TYPE_COLORS);
+
 export function TimelineView({ columns, onIssueClick, searchQuery }: TimelineViewProps) {
   const [tooltip, setTooltip] = useState<TooltipState | null>(null);
   const [zoom, setZoom] = useState(1);
   const [showCompleted, setShowCompleted] = useState(true);
+  const [activeTypes, setActiveTypes] = useState<Set<string>>(new Set(ALL_TYPES));
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const q = searchQuery?.toLowerCase() ?? "";
+
+  function toggleType(type: string) {
+    setActiveTypes((prev) => {
+      const next = new Set(prev);
+      if (next.has(type)) {
+        // Prevent deactivating the last active type — reset to all instead
+        if (next.size === 1) return new Set(ALL_TYPES);
+        next.delete(type);
+      } else {
+        next.add(type);
+      }
+      return next;
+    });
+  }
 
   const lanes = useMemo(() =>
     columns
       .filter((col) => showCompleted || !COMPLETED_STATUSES.has(col.name))
       .map((col) => ({
         name: col.name,
-        issues: col.issues.filter((i) =>
-          !q || i.title.toLowerCase().includes(q) || (i.description ?? "").toLowerCase().includes(q)
-        ),
+        issues: col.issues.filter((i) => {
+          const type = i.issueType ?? "task";
+          if (!activeTypes.has(type)) return false;
+          return !q || i.title.toLowerCase().includes(q) || (i.description ?? "").toLowerCase().includes(q);
+        }),
       }))
       .filter((lane) => lane.issues.length > 0),
-    [columns, q, showCompleted]
+    [columns, q, showCompleted, activeTypes]
   );
 
   const allIssues = useMemo(() => lanes.flatMap((l) => l.issues), [lanes]);
@@ -177,14 +196,33 @@ export function TimelineView({ columns, onIssueClick, searchQuery }: TimelineVie
             className="w-6 h-6 text-xs flex items-center justify-center rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-300"
           >+</button>
         </div>
-        {/* Legend */}
-        <div className="flex items-center gap-4">
-          {Object.entries(TYPE_COLORS).map(([type, cls]) => (
-            <span key={type} className={`flex items-center gap-1.5 text-xs ${cls.text}`}>
-              <span className="w-2.5 h-2.5 rounded border" style={{ background: cls.dot + "33", borderColor: cls.dot + "99" }} />
-              {type.charAt(0).toUpperCase() + type.slice(1)}
-            </span>
-          ))}
+        {/* Legend (interactive filter) */}
+        <div className="flex items-center gap-1">
+          {Object.entries(TYPE_COLORS).map(([type, cls]) => {
+            const isActive = activeTypes.has(type);
+            return (
+              <button
+                key={type}
+                onClick={() => toggleType(type)}
+                title={isActive ? `Hide ${type}s` : `Show ${type}s`}
+                className={`flex items-center gap-1.5 px-2 h-6 text-xs rounded border transition-all select-none ${
+                  isActive
+                    ? `${cls.bg} ${cls.border} ${cls.text} hover:brightness-95 dark:hover:brightness-110`
+                    : "bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700 text-gray-400 dark:text-gray-600 opacity-50 hover:opacity-75"
+                }`}
+              >
+                <span
+                  className="w-2.5 h-2.5 rounded border shrink-0"
+                  style={
+                    isActive
+                      ? { background: cls.dot + "33", borderColor: cls.dot + "99" }
+                      : { background: "transparent", borderColor: "currentColor" }
+                  }
+                />
+                {type.charAt(0).toUpperCase() + type.slice(1)}
+              </button>
+            );
+          })}
         </div>
       </div>
 
