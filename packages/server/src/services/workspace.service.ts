@@ -112,6 +112,10 @@ export interface CreateWorkspaceResult {
   error?: string;
 }
 
+// --- Merge serialization: one active merge per repo at a time ---
+
+const activeMerges = new Map<string, Promise<unknown>>();
+
 // --- Service factory ---
 
 export function createWorkspaceService(deps: {
@@ -683,6 +687,31 @@ export function createWorkspaceService(deps: {
     if (!workspace) throw new WorkspaceError("Workspace not found", "NOT_FOUND");
 
     const { project, repoPath, defaultBranch } = await resolveProjectFull(id, database);
+
+    // Serialize merges per repo: reject with 409 if one is already in flight for this repo
+    if (activeMerges.has(repoPath)) {
+      throw new WorkspaceError(
+        "A merge is already in progress for this repository. Please wait for it to complete.",
+        "CONFLICT",
+      );
+    }
+
+    const mergePromise = doMerge(id, workspace, project, repoPath, defaultBranch);
+    activeMerges.set(repoPath, mergePromise);
+    try {
+      return await mergePromise;
+    } finally {
+      activeMerges.delete(repoPath);
+    }
+  }
+
+  async function doMerge(
+    id: string,
+    workspace: typeof workspaces.$inferSelect,
+    project: typeof projects.$inferSelect | null,
+    repoPath: string,
+    defaultBranch: string | null,
+  ) {
 
     // Pre-merge cleanup: kill processes and run teardown script
     if (workspace.workingDir && !workspace.isDirect) {
