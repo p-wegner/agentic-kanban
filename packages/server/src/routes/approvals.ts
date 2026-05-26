@@ -1,9 +1,9 @@
 import { Hono } from "hono";
 import { createApproval, getApproval, resolveApproval, deleteApproval, type ApprovalDecision } from "../services/approvals.js";
 import type { BoardEvents } from "../services/board-events.js";
-import { db } from "../db/index.js";
-import { sessions, workspaces, issues } from "@agentic-kanban/shared/schema";
-import { eq } from "drizzle-orm";
+import { getSessionWorkspaceId } from "../repositories/session.repository.js";
+import { getWorkspaceById } from "../repositories/workspace.repository.js";
+import { getIssueProjectId } from "../repositories/issue.repository.js";
 
 export function createApprovalsRoute(boardEvents: BoardEvents) {
   const app = new Hono();
@@ -16,24 +16,11 @@ export function createApprovalsRoute(boardEvents: BoardEvents) {
     let projectId: string | undefined;
     let workspaceId: string | undefined;
     try {
-      const sessionRows = await db.select({ workspaceId: sessions.workspaceId })
-        .from(sessions)
-        .where(eq(sessions.id, body.sessionId))
-        .limit(1);
-      if (sessionRows.length > 0) {
-        workspaceId = sessionRows[0].workspaceId;
-        if (workspaceId) {
-          const wsRows = await db.select({ issueId: workspaces.issueId })
-            .from(workspaces)
-            .where(eq(workspaces.id, workspaceId))
-            .limit(1);
-          if (wsRows.length > 0) {
-            const issueRows = await db.select({ projectId: issues.projectId })
-              .from(issues)
-              .where(eq(issues.id, wsRows[0].issueId))
-              .limit(1);
-            if (issueRows.length > 0) projectId = issueRows[0].projectId;
-          }
+      workspaceId = await getSessionWorkspaceId(body.sessionId) ?? undefined;
+      if (workspaceId) {
+        const ws = await getWorkspaceById(workspaceId);
+        if (ws) {
+          projectId = await getIssueProjectId(ws.issueId) ?? undefined;
         }
       }
     } catch {
