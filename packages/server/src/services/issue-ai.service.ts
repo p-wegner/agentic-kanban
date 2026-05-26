@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { issues, projectStatuses, issueDependencies, agentSkills } from "@agentic-kanban/shared/schema";
 import { eq, and, inArray, sql } from "drizzle-orm";
 import type { DependencyType } from "@agentic-kanban/shared/schema";
+import type { IssueEstimate } from "@agentic-kanban/shared";
 import type { Database } from "../db/index.js";
 import { invokeClaudePrompt } from "./claude-cli.service.js";
 import { NotFoundError } from "../errors/index.js";
@@ -159,4 +160,44 @@ Only include genuinely useful dependencies, not just topical similarity.`;
   }
 
   return { dependencies: created, total: created.length };
+}
+
+export interface AiEstimateResult {
+  estimate: IssueEstimate;
+  reasoning: string;
+}
+
+const VALID_ESTIMATES: IssueEstimate[] = ["XS", "S", "M", "L", "XL"];
+
+export async function aiEstimateIssue(
+  issueId: string,
+  database: Database,
+): Promise<AiEstimateResult> {
+  const issueRows = await database
+    .select({ title: issues.title, description: issues.description })
+    .from(issues)
+    .where(eq(issues.id, issueId))
+    .limit(1);
+  if (issueRows.length === 0) {
+    throw new NotFoundError("Issue not found");
+  }
+  const { title, description } = issueRows[0];
+
+  const prompt = `You are a software project estimator. Given a kanban issue, suggest a T-shirt size estimate.
+Sizes: XS (< 1 hour), S (half day), M (1-2 days), L (3-5 days), XL (> 1 week).
+Respond ONLY with valid JSON — no markdown, no explanation:
+{"estimate": "XS|S|M|L|XL", "reasoning": "one sentence"}
+
+Issue title: ${title}
+${description ? `Description:\n${description}` : ""}`;
+
+  const stdout = await invokeClaudePrompt(prompt, { database, model: "claude-haiku-4-5" });
+  const cleaned = stdout.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
+  const parsed = JSON.parse(cleaned) as { estimate?: string; reasoning?: string };
+
+  const estimate = parsed.estimate?.trim().toUpperCase() as IssueEstimate;
+  if (!VALID_ESTIMATES.includes(estimate)) {
+    throw new Error(`AI returned invalid estimate: ${parsed.estimate}`);
+  }
+  return { estimate, reasoning: parsed.reasoning?.trim() ?? "" };
 }
