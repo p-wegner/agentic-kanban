@@ -369,6 +369,7 @@ export function createWorkspaceService(deps: {
     issueId: string;
     branch: string;
     worktreePath: string | null;
+    repoPath: string | null;
     baseBranch: string | null;
     isDirect: boolean;
     baseCommitSha: string | null;
@@ -383,6 +384,16 @@ export function createWorkspaceService(deps: {
   }): Promise<CreateWorkspaceResult> {
     const errorMsg = err instanceof Error ? err.message : String(err);
     console.error(`[workspaces] create failed: ${errorMsg}`);
+
+    // Clean up orphaned worktree if one was created before the failure
+    if (!params.isDirect && params.worktreePath && params.repoPath) {
+      try {
+        await gitService.removeWorktree(params.repoPath, params.worktreePath);
+        console.log(`[workspaces] cleaned up orphaned worktree: ${params.worktreePath}`);
+      } catch (cleanupErr) {
+        console.warn(`[workspaces] failed to remove worktree after create error: ${cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr)}`);
+      }
+    }
 
     try {
       await database.insert(workspaces).values({
@@ -438,6 +449,7 @@ export function createWorkspaceService(deps: {
     // Mutable state for error recovery
     let branch = input.branch ?? "";
     let worktreePath: string | null = null;
+    let repoPath: string | null = null;
     let baseBranch: string | null = null;
     let baseCommitSha: string | null = null;
     let claudeProfile: string | undefined;
@@ -446,6 +458,7 @@ export function createWorkspaceService(deps: {
 
     try {
       const { issue, project, setupConfig } = await resolveIssueAndProject(input.issueId);
+      repoPath = project.repoPath;
 
       ({ branch, worktreePath, baseBranch, baseCommitSha } = await setupWorktree(
         isDirect, project.repoPath, project.defaultBranch, input, setupConfig, id,
@@ -500,7 +513,7 @@ export function createWorkspaceService(deps: {
     } catch (err) {
       if (err instanceof WorkspaceError) throw err;
       return handleCreateFailure(err, {
-        id, issueId: input.issueId, branch, worktreePath, baseBranch, isDirect,
+        id, issueId: input.issueId, branch, worktreePath, repoPath, baseBranch, isDirect,
         baseCommitSha, requiresReview, thoroughReview, planMode, includeVisualProof,
         claudeProfile, agentCommand, resolvedProvider, now,
       });
