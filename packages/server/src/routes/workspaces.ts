@@ -1,5 +1,4 @@
 import { Hono } from "hono";
-import { db } from "../db/index.js";
 import type { SessionManager } from "../services/session.manager.js";
 import type { BoardEvents } from "../services/board-events.js";
 import type { Database } from "../db/index.js";
@@ -7,7 +6,7 @@ import { createWorkspaceService, WorkspaceError } from "../services/workspace.se
 import type { CreateWorkspaceInput } from "../services/workspace.service.js";
 
 export function createWorkspacesRoute(
-  database: Database = db,
+  database: Database,
   getSessionManager?: () => SessionManager,
   options?: { boardEvents?: BoardEvents },
 ) {
@@ -101,5 +100,3 @@ export function createWorkspacesRoute(
 
   return router;
 }
-
-export const workspacesRoute = createWorkspacesRoute();
