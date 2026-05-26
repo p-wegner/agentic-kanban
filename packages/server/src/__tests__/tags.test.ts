@@ -488,7 +488,7 @@ describe("ensureBuiltinTags", () => {
     }
   });
 
-  it("is idempotent � running twice does not create duplicate tags", async () => {
+  it("is idempotent - running twice does not create duplicate tags", async () => {
     const { ensureBuiltinTags } = await import("../db/seed.js");
     const { db: database } = createTestDb();
 
