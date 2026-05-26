@@ -315,9 +315,10 @@ export interface AgentGridProps {
   sessionTodos: Record<string, TodoItem[]>;
   onIssueClick: (issue: IssueWithStatus) => void;
   onWorkspaceClick: (issue: IssueWithStatus, workspaceId?: string) => void;
+  onGoToBoard?: () => void;
 }
 
-export function AgentGrid({ columns, liveActivity, liveStats, sessionTodos, onIssueClick, onWorkspaceClick }: AgentGridProps) {
+export function AgentGrid({ columns, liveActivity, liveStats, sessionTodos, onIssueClick, onWorkspaceClick, onGoToBoard }: AgentGridProps) {
   const historyRef = useRef<Map<string, string[]>>(new Map());
   const [, setHistoryTick] = useState(0);
 
@@ -364,7 +365,15 @@ export function AgentGrid({ columns, liveActivity, liveStats, sessionTodos, onIs
             <circle cx="12" cy="12" r="10" /><path d="M8 12h.01M12 12h.01M16 12h.01" />
           </svg>
           <p className="text-sm font-medium">No active agents</p>
-          <p className="text-xs mt-1">Start a workspace to see live agent activity here</p>
+          <p className="text-xs mt-1 mb-3">Create an issue and start a workspace to see agents here</p>
+          {onGoToBoard && (
+            <button
+              onClick={onGoToBoard}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md bg-blue-600 hover:bg-blue-700 text-white transition-colors"
+            >
+              Go to Board
+            </button>
+          )}
         </div>
       </div>
     );
