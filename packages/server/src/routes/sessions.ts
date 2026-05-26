@@ -1,9 +1,8 @@
 import { Hono } from "hono";
-import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { createSessionReadService, SessionReadError } from "../services/session-read.service.js";
 
-export function createSessionsRoute(database: Database = db) {
+export function createSessionsRoute(database: Database) {
   const router = new Hono();
   const sessionReadService = createSessionReadService({ database });
 

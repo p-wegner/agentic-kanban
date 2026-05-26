@@ -1,9 +1,8 @@
 import { Hono } from "hono";
-import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { createPreferenceService } from "../services/preference.service.js";
 
-export function createPreferencesRoute(database: Database = db) {
+export function createPreferencesRoute(database: Database) {
   const router = new Hono();
   const preferenceService = createPreferenceService({ database });
 
@@ -49,5 +48,3 @@ export function createPreferencesRoute(database: Database = db) {
 
   return router;
 }
-
-export const preferencesRoute = createPreferencesRoute();
