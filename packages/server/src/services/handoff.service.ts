@@ -10,6 +10,7 @@ import type { Database } from "../db/index.js";
 const HANDOFF_FILENAME = "HANDOFF.md";
 const MAX_FILES = 20;
 const MAX_COMMANDS = 10;
+const MAX_ERRORS = 5;
 const MAX_SUMMARY_CHARS = 500;
 const MAX_HANDOFF_BYTES = 4096;
 
@@ -19,6 +20,7 @@ interface HandoffData {
   agentSummary: string | null;
   filesModified: string[];
   commandsRun: string[];
+  errors: string[];
   model: string;
   durationMs: number;
   costUsd: number;
@@ -60,6 +62,7 @@ export async function generateHandoff(
     agentSummary: truncateText(summary.agentSummary || (parsedStats.agentSummary as string) || null, MAX_SUMMARY_CHARS),
     filesModified: [...new Set([...summary.filesEdited, ...summary.filesWritten])],
     commandsRun: summary.commandsRun,
+    errors: summary.errors,
     model: summary.model || (parsedStats.model as string) || "",
     durationMs: (parsedStats.durationMs as number) || 0,
     costUsd: (parsedStats.totalCostUsd as number) || 0,
@@ -101,6 +104,17 @@ function buildHandoffMarkdown(data: HandoffData): string {
     }
     if (data.commandsRun.length > MAX_COMMANDS) {
       lines.push(`- ... and ${data.commandsRun.length - MAX_COMMANDS} more`);
+    }
+    lines.push("");
+  }
+
+  if (data.errors.length > 0) {
+    lines.push("## Known Errors");
+    for (const err of truncateList(data.errors, MAX_ERRORS)) {
+      lines.push(`- ${err}`);
+    }
+    if (data.errors.length > MAX_ERRORS) {
+      lines.push(`- ... and ${data.errors.length - MAX_ERRORS} more`);
     }
     lines.push("");
   }
