@@ -3,7 +3,7 @@ import { BacklogPanel } from "./BacklogPanel.js";
 import { MonitorPopover, type MonitorStatus } from "./MonitorPopover.js";
 import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
 
-export type ViewMode = "kanban" | "graph" | "table" | "agents" | "timeline";
+export type ViewMode = "kanban" | "graph" | "table" | "agents" | "timeline" | "metrics" | "butler";
 
 interface BoardToolbarProps {
   backlogColumn: StatusWithIssues | undefined;
@@ -174,6 +174,26 @@ export function BoardToolbar({
             <circle cx="20" cy="6" r="1.5" fill="currentColor" stroke="none" />
           </svg>
           Timeline
+        </button>
+        <button
+          onClick={() => onViewModeChange("metrics")}
+          className={`px-2.5 py-1 text-xs rounded flex items-center gap-1.5 transition-colors ${viewMode === "metrics" ? "bg-blue-600 text-white" : "text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700"}`}
+          title="Metrics view (m)"
+        >
+          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+          </svg>
+          Metrics
+        </button>
+        <button
+          onClick={() => onViewModeChange("butler")}
+          className={`px-2.5 py-1 text-xs rounded flex items-center gap-1.5 transition-colors ${viewMode === "butler" ? "bg-blue-600 text-white" : "text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700"}`}
+          title="Butler chat (i)"
+        >
+          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M8.625 12a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H8.25m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H12m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0h-.375M21 12c0 4.556-4.03 8.25-9 8.25a9.764 9.764 0 01-2.555-.337A5.972 5.972 0 015.41 20.97a5.969 5.969 0 01-.474-.065 4.48 4.48 0 00.978-2.025c.09-.457-.133-.901-.467-1.226C3.93 16.178 3 14.189 3 12c0-4.556 4.03-8.25 9-8.25s9 3.694 9 8.25z" />
+          </svg>
+          Butler
         </button>
       </div>
     </div>

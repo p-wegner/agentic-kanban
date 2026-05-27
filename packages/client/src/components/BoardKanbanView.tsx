@@ -65,9 +65,22 @@ export function BoardKanbanView({
   onCreateIssue,
   onExpandCreate,
 }: BoardKanbanViewProps) {
+  function handleMobileCreateClick(statusId: string) {
+    if (typeof window !== "undefined" && window.innerWidth < 640) {
+      const col = activeColumns.find((c) => c.id === statusId);
+      if (col) {
+        onExpandCreate(statusId, col.name, {});
+        return;
+      }
+    }
+    onCreateClick(statusId);
+  }
+
+  const archiveIssueCount = archiveColumns.reduce((s, c) => s + c.issues.length, 0);
+
   return (
     <>
-      {activeColumns.length > 1 && (
+      {(activeColumns.length > 1 || archiveIssueCount > 0) && (
         <div className="flex sm:hidden gap-1 overflow-x-auto scrollbar-hide shrink-0">
           {activeColumns.map((col) => (
             <button
@@ -81,6 +94,19 @@ export function BoardKanbanView({
               <span className="ml-1 text-gray-400 dark:text-gray-500">{col.issues.length}</span>
             </button>
           ))}
+          {archiveIssueCount > 0 && (
+            <button
+              onClick={onToggleArchive}
+              className={`shrink-0 px-3 py-1 text-xs rounded-full border transition-colors ${
+                !collapsedArchive
+                  ? "border-green-300 dark:border-green-700 bg-green-50 dark:bg-green-950 text-green-700 dark:text-green-400"
+                  : "border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-600 dark:text-gray-400 hover:bg-green-50 dark:hover:bg-green-950 hover:border-green-300 hover:text-green-700 dark:hover:text-green-400"
+              }`}
+            >
+              ✓ Done
+              <span className="ml-1 text-gray-400 dark:text-gray-500">{archiveIssueCount}</span>
+            </button>
+          )}
         </div>
       )}
       <div className="flex gap-0 flex-1 min-h-0 overflow-x-auto board-columns-scroll">
@@ -102,7 +128,7 @@ export function BoardKanbanView({
               onResizeReset={colIdx < activeColumns.length - 1 ? () => onColumnResizeReset(col.id) : undefined}
               projectId={projectId}
               creatingInColumn={creatingInColumnId}
-              onCreateClick={onCreateClick}
+              onCreateClick={handleMobileCreateClick}
               onCreateCancel={onCreateCancel}
               onIssueClick={onIssueClick}
               onWorkspaceClick={onWorkspaceClick}
