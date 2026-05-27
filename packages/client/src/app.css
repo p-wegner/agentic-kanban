@@ -6,6 +6,28 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* Butler markdown (`prose`) inline-code polish.
+   @tailwindcss/typography injects literal backtick quotes around inline code
+   (code::before/::after { content: "`" }) and gives it no background, so paths
+   and identifiers render as `like this` with stray backticks. Strip the quotes
+   and add a subtle GitHub-style pill so inline code reads cleanly. Fenced code
+   blocks (pre > code) keep the plugin's own styling. */
+.prose :where(code):not(pre code) {
+  background-color: rgb(0 0 0 / 0.06);
+  padding: 0.1em 0.35em;
+  border-radius: 0.3rem;
+  font-weight: 500;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.prose :where(code):not(pre code)::before,
+.prose :where(code):not(pre code)::after {
+  content: none;
+}
+.dark .prose :where(code):not(pre code) {
+  background-color: rgb(255 255 255 / 0.1);
+}
+
 html, body {
   margin: 0;
   padding: 0;
