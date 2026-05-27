@@ -89,6 +89,10 @@ agent model used for board tasks. It runs in-process via the Claude Agent SDK
 - `permissionMode: "bypassPermissions"` (+ `allowDangerouslySkipPermissions`) —
   there is no human in the chat loop to approve tool prompts.
 
-**Caution:** running a second dev server (e.g. a worktree server) against the same
-`kanban.db` causes SQLite lock contention and can crash the primary server. Stop
-the worktree server after testing.
+**Caution — worktree DB resolution:** a git worktree has no `packages/server/kanban.db`
+(the file is gitignored, so it is never checked out into a fresh worktree). `data-dir.ts`
+resolves the DB by file existence, so a worktree dev server finds no local db and falls
+through to `~/.agentic-kanban/kanban.db` — a *separate* database from the main checkout,
+with its own projects/IDs. A worktree server therefore runs against **different data**
+than the main board, not the main DB (there is no shared file, hence no lock contention).
+To point a worktree server at a specific DB, set `AGENTIC_KANBAN_DIR` or `DB_URL`.
