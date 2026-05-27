@@ -757,7 +757,7 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
                   disabled={sending}
                   rows={1}
                   placeholder="Message the butler... (Enter to send, Shift+Enter for new line, / for commands)"
-                  className="w-full resize-none rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-4 py-2.5 pr-10 text-sm text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-600 transition-all disabled:opacity-50"
+                  className="block w-full resize-none rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-4 py-2.5 pr-10 text-sm text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-600 transition-all disabled:opacity-50"
                   style={{ minHeight: "42px", maxHeight: "160px", overflowY: "auto" }}
                   onInput={(e) => {
                     const t = e.target as HTMLTextAreaElement;
