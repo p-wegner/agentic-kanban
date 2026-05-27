@@ -18,6 +18,7 @@ export const issues = sqliteTable("issues", {
   statusChangedAt: text("status_changed_at"),
   skipAutoReview: integer("skip_auto_review", { mode: "boolean" }).notNull().default(false),
   estimate: text("estimate"),
+  dueDate: text("due_date"),
 }, (table) => ({
   projectIdIdx: index("idx_issues_project_id").on(table.projectId),
   statusIdIdx: index("idx_issues_status_id").on(table.statusId),
