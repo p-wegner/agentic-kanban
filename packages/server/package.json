@@ -27,11 +27,12 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
-    "start": "node dist/cli.js dev",
+    "start": "node dist/cli/index.js dev",
     "db:migrate": "drizzle-kit migrate",
     "db:seed": "tsx src/db/seed.ts",
     "db:reset": "tsx src/scripts/db-reset.ts && drizzle-kit migrate && tsx src/db/seed.ts",
     "db:repair": "tsx src/scripts/db-repair.ts",
+    "db:restore": "tsx src/scripts/db-restore.ts",
     "test": "vitest run"
   },
   "dependencies": {

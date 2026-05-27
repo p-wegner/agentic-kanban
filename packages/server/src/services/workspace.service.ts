@@ -10,8 +10,9 @@ import type { SessionManager } from "./session.manager.js";
 import type { BoardEvents } from "./board-events.js";
 import type { ProviderName } from "./agent-provider.js";
 import * as gitService from "./git.service.js";
+import { createBackup } from "../db/backup.js";
 import { runSetupScript } from "./setup-script.js";
-import { writeAgentSkillFile, readLocalSkillPrompt } from "@agentic-kanban/shared/lib/agent-skill-files";
+import { writeAgentSkillFile, readLocalSkillPrompt, copySkillToWorktree } from "@agentic-kanban/shared/lib/agent-skill-files";
 import { resolveAgentSettings, toExecutorProvider } from "./agent-settings.service.js";
 import { moveIssueToInProgress, resolveProjectRepo, resolveProjectId, resolveProjectFull, moveIssueToDone, getWorkspaceById, updateWorkspaceStatus, getWorkspaceDetails } from "../repositories/workspace.repository.js";
 import { killProcessesInDir } from "./process-cleanup.js";
@@ -89,6 +90,8 @@ export interface CreateWorkspaceInput {
   skipSetup?: boolean;
   customPrompt?: string;
   skillId?: string;
+  /** Name of a disk-only skill (no DB entry) — used when id starts with "disk:" */
+  skillName?: string;
   profile?: { provider?: string; name?: string };
   claudeProfile?: string;
   /** Claude model tier (e.g. "opus"). Falls back to the default_model preference when omitted. */
@@ -111,6 +114,10 @@ export interface CreateWorkspaceResult {
   updatedAt: string;
   error?: string;
 }
+
+// --- Merge serialization: one active merge per repo at a time ---
+
+const activeMerges = new Map<string, Promise<unknown>>();
 
 // --- Service factory ---
 
@@ -245,17 +252,24 @@ export function createWorkspaceService(deps: {
 
   async function resolveSkillFile(
     skillId: string | null,
+    diskSkillName: string | null,
     worktreePath: string,
     repoPath: string,
   ): Promise<string | null> {
-    if (!skillId) return null;
-    const skillRows = await database.select().from(agentSkills).where(eq(agentSkills.id, skillId)).limit(1);
-    if (skillRows.length === 0) return null;
-    const skill = skillRows[0];
-    const localPrompt = await readLocalSkillPrompt(repoPath, skill.name);
-    const effectiveSkill = localPrompt ? { ...skill, prompt: localPrompt } : skill;
-    await writeAgentSkillFile(worktreePath, effectiveSkill);
-    return skill.name;
+    if (skillId) {
+      const skillRows = await database.select().from(agentSkills).where(eq(agentSkills.id, skillId)).limit(1);
+      if (skillRows.length === 0) return null;
+      const skill = skillRows[0];
+      const localPrompt = await readLocalSkillPrompt(repoPath, skill.name);
+      const effectiveSkill = localPrompt ? { ...skill, prompt: localPrompt } : skill;
+      await writeAgentSkillFile(worktreePath, effectiveSkill);
+      return skill.name;
+    }
+    if (diskSkillName) {
+      const copied = await copySkillToWorktree(repoPath, diskSkillName, worktreePath);
+      return copied ? diskSkillName : null;
+    }
+    return null;
   }
 
   async function buildAgentConfig(input: Pick<CreateWorkspaceInput, "profile" | "claudeProfile" | "model">): Promise<{
@@ -479,7 +493,7 @@ export function createWorkspaceService(deps: {
       const agentPrompt = buildAgentPrompt(issue, { ...input, includeVisualProof }, input.issueId);
 
       const skillName = worktreePath
-        ? await resolveSkillFile(skillId, worktreePath, project.repoPath)
+        ? await resolveSkillFile(skillId, input.skillName ?? null, worktreePath, project.repoPath)
         : null;
 
       const agentConfig = await buildAgentConfig(input);
@@ -684,6 +698,31 @@ export function createWorkspaceService(deps: {
 
     const { project, repoPath, defaultBranch } = await resolveProjectFull(id, database);
 
+    // Serialize merges per repo: reject with 409 if one is already in flight for this repo
+    if (activeMerges.has(repoPath)) {
+      throw new WorkspaceError(
+        "A merge is already in progress for this repository. Please wait for it to complete.",
+        "CONFLICT",
+      );
+    }
+
+    const mergePromise = doMerge(id, workspace, project, repoPath, defaultBranch);
+    activeMerges.set(repoPath, mergePromise);
+    try {
+      return await mergePromise;
+    } finally {
+      activeMerges.delete(repoPath);
+    }
+  }
+
+  async function doMerge(
+    id: string,
+    workspace: typeof workspaces.$inferSelect,
+    project: typeof projects.$inferSelect | null,
+    repoPath: string,
+    defaultBranch: string | null,
+  ) {
+
     // Pre-merge cleanup: kill processes and run teardown script
     if (workspace.workingDir && !workspace.isDirect) {
       try {
@@ -732,6 +771,21 @@ export function createWorkspaceService(deps: {
       }
     }
 
+    // Guard: refuse merge if main checkout has uncommitted tracked changes.
+    // git merge --no-ff will abort if tracked files are dirty, leaving the repo in an error
+    // state and potentially overwriting the caller's work. Fail fast with a clear message.
+    const uncommittedInMain = await gitService.getUncommittedTrackedChanges(repoPath);
+    if (uncommittedInMain.length > 0) {
+      const preview = uncommittedInMain.slice(0, 10).join("\n");
+      const suffix = uncommittedInMain.length > 10 ? `\n…and ${uncommittedInMain.length - 10} more` : "";
+      throw new WorkspaceError(
+        `Cannot merge: the main checkout has ${uncommittedInMain.length} uncommitted tracked change(s). ` +
+          `Commit or stash these before merging:\n${preview}${suffix}`,
+        "CONFLICT",
+        { uncommittedFiles: uncommittedInMain },
+      );
+    }
+
     console.log(`[workspace-service] merge: workspaceId=${id} branch=${workspace.branch} repoPath=${repoPath}`);
 
     // Sync branch ref to HEAD before merging
@@ -740,6 +794,13 @@ export function createWorkspaceService(deps: {
       if (synced) {
         console.log(`[workspace-service] synced branch ${workspace.branch} to worktree HEAD`);
       }
+    }
+
+    // Mandatory pre-merge backup. Non-fatal: backup trouble must not block a legit merge.
+    try {
+      await createBackup("pre-merge");
+    } catch (err) {
+      console.warn("[backup] pre-merge backup failed (non-fatal):", err instanceof Error ? err.message : String(err));
     }
 
     const result = await gitService.mergeBranch(repoPath, workspace.branch);

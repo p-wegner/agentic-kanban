@@ -14,6 +14,7 @@ export const SETTINGS_KEYS = [
   "learning_step_after_review", "learning_step_before_merge", "auto_monitor",
   "auto_monitor_interval", "nudge_auto_start", "projects_base_path", "plan_auto_continue",
   "visual_verification_mode", "after_merge_verify_agent",
+  "backup_interval_min", "backup_keep_last",
 ];
 
 export function createPreferenceService({ database }: { database: Database }) {

@@ -32,6 +32,7 @@
     "db:seed": "pnpm --filter agentic-kanban db:seed",
     "db:reset": "pnpm --filter agentic-kanban db:reset",
     "db:repair": "pnpm --filter agentic-kanban db:repair",
+    "db:restore": "pnpm --filter agentic-kanban db:restore",
     "db:setup": "pnpm db:migrate && pnpm db:seed && pnpm cli -- register .",
     "dev:desktop": "concurrently \"pnpm --filter agentic-kanban dev\" \"pnpm --filter client dev\" \"pnpm --filter @agentic-kanban/desktop dev\"",
     "version": "changeset version",

@@ -202,6 +202,7 @@ export async function getIssuesByProject(
       statusChangedAt: issues.statusChangedAt,
       skipAutoReview: issues.skipAutoReview,
       estimate: issues.estimate,
+      dueDate: issues.dueDate,
       statusName: projectStatuses.name,
     })
     .from(issues)

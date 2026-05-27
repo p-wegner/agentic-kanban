@@ -65,6 +65,14 @@ export async function killOrphanedServers(): Promise<void> {
 
 /** Run database migrations, seed built-in tags and skills, deduplicate projects, and disable auto_monitor. */
 export async function runMigrations(): Promise<void> {
+  // Cheap insurance: a verified snapshot before any schema change.
+  try {
+    const { createBackup } = await import("../db/backup.js");
+    await createBackup("pre-migration");
+  } catch (err) {
+    console.warn("[backup] pre-migration backup failed (non-fatal):", err instanceof Error ? err.message : String(err));
+  }
+
   try {
     await applyMigrations(rawClient);
   } catch (err: unknown) {
@@ -183,10 +191,32 @@ export async function pruneStaleWorktrees(): Promise<void> {
   }
 }
 
-/** Combined startup sequence: kill orphans, migrate, seed, dedup, clean sessions/worktrees. */
+/** Abort any in-progress merges in all registered project repos (self-healing after hot-reload kills a merge mid-operation). */
+export async function abortStaleMerges(): Promise<void> {
+  try {
+    const projectRows = await db.select({ repoPath: projects.repoPath }).from(projects);
+    for (const { repoPath } of projectRows) {
+      try {
+        const inMerge = await gitService.isMergeInProgress(repoPath);
+        if (inMerge) {
+          console.log(`[startup] MERGE_HEAD detected in ${repoPath} — running git merge --abort to self-heal`);
+          await gitService.abortMerge(repoPath);
+          console.log(`[startup] merge --abort succeeded for ${repoPath}`);
+        }
+      } catch (err) {
+        console.warn(`[startup] abortStaleMerges: failed for ${repoPath}:`, err instanceof Error ? err.message : String(err));
+      }
+    }
+  } catch (err) {
+    console.warn("[startup] abortStaleMerges failed (non-fatal):", err instanceof Error ? err.message : String(err));
+  }
+}
+
+/** Combined startup sequence: kill orphans, migrate, seed, dedup, abort stale merges, clean sessions/worktrees. */
 export async function runStartupTasks(sessionManager: SessionManager, _deps?: { agentService?: typeof agentServiceType }): Promise<void> {
   await killOrphanedServers();
   await runMigrations();
+  await abortStaleMerges();
   await cleanupStaleSessions(sessionManager);
   await pruneStaleWorktrees();
 }

@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import type { BoardEvents } from "../services/board-events.js";
-import { analyzeDependencies, enhanceIssue } from "../services/issue-ai.service.js";
+import { analyzeDependencies, enhanceIssue, aiEstimateIssue } from "../services/issue-ai.service.js";
 import { createIssueService } from "../services/issue.service.js";
 import { parseJsonBody } from "../middleware/parse-body.js";
 import { createRouter } from "../middleware/create-router.js";
@@ -39,6 +39,13 @@ export function createIssuesRoute(database: Database = db, options?: { boardEven
     const result = await wrapAiOperation("analyze-deps", () => analyzeDependencies(body.issueId, body.projectId, database));
     if (result.total > 0) options?.boardEvents?.broadcast(body.projectId, "dependency_added");
     return c.json(result);
+  });
+
+  // POST /api/issues/ai-estimate — AI-suggest a T-shirt size estimate for an issue
+  router.post("/ai-estimate", async (c) => {
+    const body = await parseJsonBody<{ issueId: string }>(c);
+    if (!body.issueId) return c.json({ error: "issueId is required" }, 400);
+    return c.json(await wrapAiOperation("ai-estimate", () => aiEstimateIssue(body.issueId, database)));
   });
 
   // POST /api/issues

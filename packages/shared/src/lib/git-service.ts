@@ -227,12 +227,25 @@ export async function deleteBranch(
   await execGit(["branch", "-d", branch], repoPath);
 }
 
-/** Merge a branch into the current HEAD of the repo. */
+/** Merge a branch into the current HEAD of the repo.
+ * On conflict or any failure, automatically aborts the merge so the checkout is never left mid-merge.
+ */
 export async function mergeBranch(
   repoPath: string,
   branch: string,
 ): Promise<string> {
-  return execGit(["merge", "--no-ff", branch, "-m", `Merge branch '${branch}'`], repoPath);
+  try {
+    return await execGit(["merge", "--no-ff", branch, "-m", `Merge branch '${branch}'`], repoPath);
+  } catch (err) {
+    // Abort any in-progress merge to restore a clean state before re-throwing
+    try {
+      await execGit(["merge", "--abort"], repoPath);
+      console.log(`[git] merge --abort completed after conflict in ${repoPath}`);
+    } catch {
+      // No merge in progress or abort failed — best effort
+    }
+    throw err;
+  }
 }
 
 /**
@@ -548,6 +561,20 @@ export async function abortMerge(worktreePath: string): Promise<void> {
   await execGit(["merge", "--abort"], worktreePath);
 }
 
+/**
+ * Return a list of staged or unstaged changes to tracked files in repoPath.
+ * Untracked (new) files are excluded because they do not block `git merge`.
+ * An empty array means the working tree is clean and safe to merge into.
+ */
+export async function getUncommittedTrackedChanges(repoPath: string): Promise<string[]> {
+  try {
+    const output = await execGit(["status", "--porcelain", "--untracked-files=no"], repoPath);
+    return output.trim().split("\n").filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
 /** Check if a rebase is in progress in the worktree. */
 export async function isRebaseInProgress(worktreePath: string): Promise<boolean> {
   try {
@@ -555,6 +582,17 @@ export async function isRebaseInProgress(worktreePath: string): Promise<boolean>
     const { existsSync } = await import("node:fs");
     const { join: pathJoin } = await import("node:path");
     return existsSync(pathJoin(worktreePath, dir, "rebase-merge")) || existsSync(pathJoin(worktreePath, dir, "rebase-apply"));
+  } catch {
+    return false;
+  }
+}
+
+/** Check if a merge is in progress (MERGE_HEAD exists). */
+export async function isMergeInProgress(repoPath: string): Promise<boolean> {
+  try {
+    const dir = (await execGit(["rev-parse", "--git-dir"], repoPath)).trim();
+    const { join: pathJoin } = await import("node:path");
+    return existsSync(pathJoin(repoPath, dir, "MERGE_HEAD"));
   } catch {
     return false;
   }

@@ -6,6 +6,7 @@ import { db } from "../db/index.js";
 import { MOCK_AGENT_COMMAND, isMockProfile, toExecutorProvider } from "../services/agent-settings.service.js";
 import { createBoardEvents } from "../services/board-events.js";
 import * as gitService from "../services/git.service.js";
+import { createBackup } from "../db/backup.js";
 import { killProcessesInDir } from "../services/process-cleanup.js";
 import { runScript } from "../services/script-runner.js";
 import { createSessionManager } from "../services/session.manager.js";
@@ -101,6 +102,22 @@ export function createAutoMerge({ sessionManager, boardEvents, learningSessionId
             }
           }
           await tagIfNeedsVisualVerification(repoPath, workspace.branch, workspace.baseBranch, issueId, now);
+          // Mandatory pre-merge backup. Non-fatal: must not block a legit auto-merge.
+          try {
+            await createBackup("pre-merge");
+          } catch (err) {
+            console.warn("[backup] pre-merge backup failed (non-fatal):", err instanceof Error ? err.message : String(err));
+          }
+          // Guard: refuse merge if main checkout has uncommitted tracked changes.
+          const uncommittedInMain = await gitService.getUncommittedTrackedChanges(repoPath);
+          if (uncommittedInMain.length > 0) {
+            const preview = uncommittedInMain.slice(0, 5).join(", ");
+            const suffix = uncommittedInMain.length > 5 ? ` (and ${uncommittedInMain.length - 5} more)` : "";
+            console.error(`[workflow] auto-merge blocked: main checkout has ${uncommittedInMain.length} uncommitted tracked change(s): ${preview}${suffix}`);
+            boardEvents.broadcast(projectId, "workflow_error");
+            throw new Error(`Main checkout has ${uncommittedInMain.length} uncommitted tracked change(s) — cannot merge workspace ${workspace.id}. Commit or stash those changes first.`);
+          }
+
           await gitService.mergeBranch(repoPath, workspace.branch);
           if (workspace.workingDir) {
             try { await gitService.removeWorktree(repoPath, workspace.workingDir); } catch {}
