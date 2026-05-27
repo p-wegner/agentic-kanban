@@ -1,6 +1,16 @@
 {
   "name": "agentic-kanban",
-  "private": true,
+  "private": false,
+  "description": "Kanban board for managing AI-driven coding tasks — each card is a Claude Code session with built-in diff review and merge",
+  "keywords": [
+    "kanban",
+    "ai",
+    "claude",
+    "claude-code",
+    "agent",
+    "project-management",
+    "mcp"
+  ],
   "packageManager": "pnpm@10.12.1",
   "pnpm": {
     "onlyBuiltDependencies": [
