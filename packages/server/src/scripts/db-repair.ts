@@ -20,14 +20,14 @@
 import { createClient } from "@libsql/client";
 import { drizzle } from "drizzle-orm/libsql";
 import { migrate } from "drizzle-orm/libsql/migrator";
-import { resolve, dirname, join } from "node:path";
+import { resolve, dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { existsSync, statSync, mkdirSync, copyFileSync, readdirSync, unlinkSync, writeFileSync, renameSync } from "node:fs";
+import { existsSync, statSync, unlinkSync, writeFileSync, renameSync } from "node:fs";
 import { getMigrationsFolder } from "../db/migrations.js";
+import { createBackup, backupDir } from "../db/backup.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DB_PATH = resolve(__dirname, "../../kanban.db");
-const BACKUP_DIR = resolve(__dirname, "../../.db-backups");
 const SIDECARS = ["", "-wal", "-shm"] as const;
 
 const force = process.argv.includes("--force") || process.env.ALLOW_DB_DESTROY === "1";
@@ -66,38 +66,6 @@ function assertNotLocked() {
   }
 }
 
-/** Copy db + sidecars to a timestamped backup. Returns the backup dir, or null if nothing to back up. */
-function backup(): string | null {
-  if (!existsSync(DB_PATH) || statSync(DB_PATH).size === 0) return null;
-  mkdirSync(BACKUP_DIR, { recursive: true });
-  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-  for (const s of SIDECARS) {
-    const src = DB_PATH + s;
-    if (existsSync(src)) copyFileSync(src, join(BACKUP_DIR, `kanban-${stamp}.db${s}`));
-  }
-  pruneBackups(10);
-  return BACKUP_DIR;
-}
-
-function pruneBackups(keep: number) {
-  try {
-    const stamps = new Set<string>();
-    for (const f of readdirSync(BACKUP_DIR)) {
-      const m = f.match(/^kanban-(.+?)\.db(?:-wal|-shm)?$/);
-      if (m) stamps.add(m[1]);
-    }
-    const sorted = [...stamps].sort();
-    for (const stamp of sorted.slice(0, Math.max(0, sorted.length - keep))) {
-      for (const s of SIDECARS) {
-        const f = join(BACKUP_DIR, `kanban-${stamp}.db${s}`);
-        if (existsSync(f)) unlinkSync(f);
-      }
-    }
-  } catch {
-    /* non-fatal */
-  }
-}
-
 function dbUrl(): string {
   return pathToFileURL(DB_PATH).href;
 }
@@ -125,9 +93,16 @@ async function runMigrations(): Promise<void> {
 async function main() {
   log(`target: ${DB_PATH}`);
 
-  // 1. Back up first, always.
-  const backupDir = backup();
-  log(backupDir ? `backup written to ${backupDir}` : "no backup needed (db missing or empty).");
+  // 1. Back up first, always — single, verified, consistent backup primitive.
+  try {
+    const result = await createBackup("pre-repair");
+    log(result ? `backup written to ${result.path} (${result.bytes} bytes, verified)` : "no backup needed (db missing or empty).");
+  } catch (err) {
+    // A failing VACUUM INTO often means the db is unusable/locked — keep going so
+    // the diagnosis below can report the real problem, but warn loudly.
+    log(`WARNING: pre-repair backup failed: ${err instanceof Error ? err.message : String(err)}`);
+    log(`(backup dir: ${backupDir()})`);
+  }
 
   // 2. Diagnose validity.
   const exists = existsSync(DB_PATH);

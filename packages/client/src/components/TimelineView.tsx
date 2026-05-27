@@ -63,44 +63,73 @@ interface TooltipState {
 
 const COMPLETED_STATUSES = new Set(["Done", "Cancelled"]);
 
+const ALL_TYPES = Object.keys(TYPE_COLORS);
+
+const DAY_MS = 86_400_000;
+const WEEK_MS = 7 * DAY_MS;
+const MONTH_MS = 30 * DAY_MS;
+
 export function TimelineView({ columns, onIssueClick, searchQuery }: TimelineViewProps) {
   const [tooltip, setTooltip] = useState<TooltipState | null>(null);
   const [zoom, setZoom] = useState(1);
+  const [panOffsetMs, setPanOffsetMs] = useState(0);
   const [showCompleted, setShowCompleted] = useState(true);
+  const [activeTypes, setActiveTypes] = useState<Set<string>>(new Set(ALL_TYPES));
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const q = searchQuery?.toLowerCase() ?? "";
+
+  function toggleType(type: string) {
+    setActiveTypes((prev) => {
+      const next = new Set(prev);
+      if (next.has(type)) {
+        // Prevent deactivating the last active type — reset to all instead
+        if (next.size === 1) return new Set(ALL_TYPES);
+        next.delete(type);
+      } else {
+        next.add(type);
+      }
+      return next;
+    });
+  }
 
   const lanes = useMemo(() =>
     columns
       .filter((col) => showCompleted || !COMPLETED_STATUSES.has(col.name))
       .map((col) => ({
         name: col.name,
-        issues: col.issues.filter((i) =>
-          !q || i.title.toLowerCase().includes(q) || (i.description ?? "").toLowerCase().includes(q)
-        ),
+        issues: col.issues.filter((i) => {
+          const type = i.issueType ?? "task";
+          if (!activeTypes.has(type)) return false;
+          return !q || i.title.toLowerCase().includes(q) || (i.description ?? "").toLowerCase().includes(q);
+        }),
       }))
       .filter((lane) => lane.issues.length > 0),
-    [columns, q, showCompleted]
+    [columns, q, showCompleted, activeTypes]
   );
 
   const allIssues = useMemo(() => lanes.flatMap((l) => l.issues), [lanes]);
 
-  const range = useMemo(() => {
+  const baseRange = useMemo(() => {
     if (allIssues.length === 0) {
       const now = Date.now();
-      return { min: now - 7 * 86_400_000, max: now };
+      return { min: now - 7 * DAY_MS, max: now };
     }
     const dates = allIssues.flatMap((i) => [
       new Date(i.createdAt).getTime(),
-      new Date(i.updatedAt).getTime(),
+      i.dueDate ? new Date(i.dueDate).getTime() : new Date(i.updatedAt).getTime(),
     ]);
     const rawMin = Math.min(...dates);
     const rawMax = Math.max(...dates, Date.now());
-    const span = Math.max(rawMax - rawMin, 86_400_000); // at least 1 day
+    const span = Math.max(rawMax - rawMin, DAY_MS); // at least 1 day
     const pad = span * 0.04;
     return { min: rawMin - pad, max: rawMax + pad };
   }, [allIssues]);
+
+  const range = useMemo(() => ({
+    min: baseRange.min + panOffsetMs,
+    max: baseRange.max + panOffsetMs,
+  }), [baseRange, panOffsetMs]);
 
   const ticks = useMemo(() => {
     const span = range.max - range.min;
@@ -163,6 +192,34 @@ export function TimelineView({ columns, onIssueClick, searchQuery }: TimelineVie
           Show completed
         </button>
         <div className="ml-auto flex items-center gap-1">
+          {/* Pan navigation */}
+          <span className="text-xs text-gray-400 dark:text-gray-500 mr-1">Navigate</span>
+          <button
+            onClick={() => setPanOffsetMs((o) => o - MONTH_MS)}
+            className="w-6 h-6 text-xs flex items-center justify-center rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-300"
+            title="Back 1 month"
+          >«</button>
+          <button
+            onClick={() => setPanOffsetMs((o) => o - WEEK_MS)}
+            className="w-6 h-6 text-xs flex items-center justify-center rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-300"
+            title="Back 1 week"
+          >‹</button>
+          <button
+            onClick={() => setPanOffsetMs(0)}
+            className={`px-1.5 h-6 text-xs flex items-center justify-center rounded border bg-white dark:bg-gray-900 hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-300 min-w-[40px] ${panOffsetMs !== 0 ? "border-blue-400 dark:border-blue-600" : "border-gray-200 dark:border-gray-700"}`}
+            title="Reset to today"
+          >Today</button>
+          <button
+            onClick={() => setPanOffsetMs((o) => o + WEEK_MS)}
+            className="w-6 h-6 text-xs flex items-center justify-center rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-300"
+            title="Forward 1 week"
+          >›</button>
+          <button
+            onClick={() => setPanOffsetMs((o) => o + MONTH_MS)}
+            className="w-6 h-6 text-xs flex items-center justify-center rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-300"
+            title="Forward 1 month"
+          >»</button>
+          <span className="text-xs text-gray-400 dark:text-gray-500 mx-2">|</span>
           <span className="text-xs text-gray-400 dark:text-gray-500 mr-1">Zoom</span>
           <button
             onClick={() => setZoom((z) => Math.max(0.5, +(z - 0.25).toFixed(2)))}
@@ -177,14 +234,33 @@ export function TimelineView({ columns, onIssueClick, searchQuery }: TimelineVie
             className="w-6 h-6 text-xs flex items-center justify-center rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-300"
           >+</button>
         </div>
-        {/* Legend */}
-        <div className="flex items-center gap-4">
-          {Object.entries(TYPE_COLORS).map(([type, cls]) => (
-            <span key={type} className={`flex items-center gap-1.5 text-xs ${cls.text}`}>
-              <span className="w-2.5 h-2.5 rounded border" style={{ background: cls.dot + "33", borderColor: cls.dot + "99" }} />
-              {type.charAt(0).toUpperCase() + type.slice(1)}
-            </span>
-          ))}
+        {/* Legend (interactive filter) */}
+        <div className="flex items-center gap-1">
+          {Object.entries(TYPE_COLORS).map(([type, cls]) => {
+            const isActive = activeTypes.has(type);
+            return (
+              <button
+                key={type}
+                onClick={() => toggleType(type)}
+                title={isActive ? `Hide ${type}s` : `Show ${type}s`}
+                className={`flex items-center gap-1.5 px-2 h-6 text-xs rounded border transition-all select-none ${
+                  isActive
+                    ? `${cls.bg} ${cls.border} ${cls.text} hover:brightness-95 dark:hover:brightness-110`
+                    : "bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700 text-gray-400 dark:text-gray-600 opacity-50 hover:opacity-75"
+                }`}
+              >
+                <span
+                  className="w-2.5 h-2.5 rounded border shrink-0"
+                  style={
+                    isActive
+                      ? { background: cls.dot + "33", borderColor: cls.dot + "99" }
+                      : { background: "transparent", borderColor: "currentColor" }
+                  }
+                />
+                {type.charAt(0).toUpperCase() + type.slice(1)}
+              </button>
+            );
+          })}
         </div>
       </div>
 
@@ -253,7 +329,9 @@ export function TimelineView({ columns, onIssueClick, searchQuery }: TimelineVie
               {/* Issue rows */}
               {lane.issues.map((issue) => {
                 const start = new Date(issue.createdAt).getTime();
-                const end = new Date(issue.updatedAt).getTime();
+                const end = issue.dueDate
+                  ? new Date(issue.dueDate).getTime()
+                  : new Date(issue.updatedAt).getTime();
                 const startP = pct(start);
                 const spanP = Math.max(0, pct(end) - startP);
                 const type = issue.issueType ?? "task";
@@ -345,6 +423,14 @@ export function TimelineView({ columns, onIssueClick, searchQuery }: TimelineVie
               <span className="w-14 shrink-0 text-gray-400">Updated</span>
               {fmtTooltipDate(new Date(tooltip.issue.updatedAt))}
             </div>
+            {tooltip.issue.dueDate && (
+              <div className="flex gap-2">
+                <span className="w-14 shrink-0 text-gray-400">Due</span>
+                <span className={new Date(tooltip.issue.dueDate) < new Date(new Date().toDateString()) ? "text-red-500 font-medium" : ""}>
+                  {fmtTooltipDate(new Date(tooltip.issue.dueDate))}
+                </span>
+              </div>
+            )}
             <div className="flex gap-2">
               <span className="w-14 shrink-0 text-gray-400">Type</span>
               <span className="capitalize">{tooltip.issue.issueType ?? "task"}</span>

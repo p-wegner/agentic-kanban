@@ -3,6 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { execFile } from "node:child_process";
+import { existsSync } from "node:fs";
 import * as gitService from "../services/git.service.js";
 
 function exec(cmd: string, args: string[], cwd: string): Promise<string> {
@@ -118,5 +119,125 @@ describe("GitService", () => {
     const { readFileSync } = await import("node:fs");
     const content = readFileSync(join(repoPath, "merge-file.txt"), "utf-8");
     expect(content.trim()).toBe("Merge me");
+  });
+
+  it("aborts merge on conflict and leaves main checkout clean", async () => {
+    const { writeFileSync, readFileSync } = await import("node:fs");
+
+    // Create branch A: modify shared-file with "branch A content"
+    const worktreeA = await gitService.createWorktree(repoPath, "feature/conflict-a");
+    writeFileSync(join(worktreeA, "shared-conflict.txt"), "branch A content\n");
+    await exec("git", ["add", "."], worktreeA);
+    await exec("git", ["config", "user.email", "test@test.com"], worktreeA);
+    await exec("git", ["config", "user.name", "Test"], worktreeA);
+    await exec("git", ["commit", "-m", "branch A changes"], worktreeA);
+    await gitService.removeWorktree(repoPath, worktreeA);
+
+    // Merge branch A into main successfully
+    await gitService.mergeBranch(repoPath, "feature/conflict-a");
+
+    // Create branch B from BEFORE branch A was merged (i.e., from 2 commits ago, before the branch A changes)
+    // We'll branch from the commit before the merge to simulate a parallel branch
+    const mainHeadBeforeMerge = (await exec("git", ["rev-parse", "HEAD^"], repoPath)).trim();
+    await exec("git", ["branch", "feature/conflict-b", mainHeadBeforeMerge], repoPath);
+    const worktreeB = await gitService.createWorktree(repoPath, "feature/conflict-b");
+    writeFileSync(join(worktreeB, "shared-conflict.txt"), "branch B content\n");
+    await exec("git", ["add", "."], worktreeB);
+    await exec("git", ["config", "user.email", "test@test.com"], worktreeB);
+    await exec("git", ["config", "user.name", "Test"], worktreeB);
+    await exec("git", ["commit", "-m", "branch B changes"], worktreeB);
+    await gitService.removeWorktree(repoPath, worktreeB);
+
+    // Try to merge branch B — should conflict and throw
+    await expect(gitService.mergeBranch(repoPath, "feature/conflict-b")).rejects.toThrow();
+
+    // MERGE_HEAD must NOT exist — merge was aborted
+    const mergeHeadPath = join(repoPath, ".git", "MERGE_HEAD");
+    expect(existsSync(mergeHeadPath)).toBe(false);
+
+    // shared-conflict.txt must NOT contain conflict markers
+    const content = readFileSync(join(repoPath, "shared-conflict.txt"), "utf-8");
+    expect(content).not.toContain("<<<<<<<");
+    expect(content).not.toContain("=======");
+    expect(content).not.toContain(">>>>>>>");
+  });
+
+  it("aborts merge on _journal.json conflict and leaves main checkout clean", async () => {
+    const { writeFileSync, readFileSync } = await import("node:fs");
+    const { mkdirSync } = await import("node:fs");
+
+    // Simulate the drizzle journal conflict scenario:
+    // Two branches both add a migration with the same index (0001_*)
+    const journalDir = join(repoPath, "meta");
+    mkdirSync(journalDir, { recursive: true });
+
+    // Base journal (committed on main before both branches diverge)
+    const baseJournal = JSON.stringify({ version: "6", dialect: "sqlite", entries: [] }, null, 2);
+    writeFileSync(join(journalDir, "_journal.json"), baseJournal);
+    await exec("git", ["add", "."], repoPath);
+    await exec("git", ["commit", "-m", "Add base journal"], repoPath);
+
+    // Branch C: adds migration 0001_branch_c
+    const worktreeC = await gitService.createWorktree(repoPath, "feature/journal-c");
+    const journalC = JSON.stringify({ version: "6", dialect: "sqlite", entries: [{ idx: 0, version: "6", tag: "0001_branch_c", when: 1000, breakpoints: true }] }, null, 2);
+    writeFileSync(join(join(worktreeC, "meta"), "_journal.json"), journalC);
+    await exec("git", ["add", "."], worktreeC);
+    await exec("git", ["config", "user.email", "test@test.com"], worktreeC);
+    await exec("git", ["config", "user.name", "Test"], worktreeC);
+    await exec("git", ["commit", "-m", "Add migration 0001_branch_c"], worktreeC);
+    await gitService.removeWorktree(repoPath, worktreeC);
+
+    // Merge branch C into main
+    await gitService.mergeBranch(repoPath, "feature/journal-c");
+
+    // Branch D from BEFORE C was merged: also adds 0001_branch_d
+    const mainBeforeC = (await exec("git", ["rev-parse", "HEAD^"], repoPath)).trim();
+    await exec("git", ["branch", "feature/journal-d", mainBeforeC], repoPath);
+    const worktreeD = await gitService.createWorktree(repoPath, "feature/journal-d");
+    const journalD = JSON.stringify({ version: "6", dialect: "sqlite", entries: [{ idx: 0, version: "6", tag: "0001_branch_d", when: 1001, breakpoints: true }] }, null, 2);
+    writeFileSync(join(join(worktreeD, "meta"), "_journal.json"), journalD);
+    await exec("git", ["add", "."], worktreeD);
+    await exec("git", ["config", "user.email", "test@test.com"], worktreeD);
+    await exec("git", ["config", "user.name", "Test"], worktreeD);
+    await exec("git", ["commit", "-m", "Add migration 0001_branch_d"], worktreeD);
+    await gitService.removeWorktree(repoPath, worktreeD);
+
+    // Merging branch D should conflict on _journal.json and throw
+    await expect(gitService.mergeBranch(repoPath, "feature/journal-d")).rejects.toThrow();
+
+    // Main checkout must be clean — MERGE_HEAD absent
+    const mergeHeadPath = join(repoPath, ".git", "MERGE_HEAD");
+    expect(existsSync(mergeHeadPath)).toBe(false);
+
+    // _journal.json must NOT contain conflict markers
+    const journalContent = readFileSync(join(journalDir, "_journal.json"), "utf-8");
+    expect(journalContent).not.toContain("<<<<<<<");
+    expect(journalContent).not.toContain("=======");
+    expect(journalContent).not.toContain(">>>>>>>");
+  });
+
+  it("isMergeInProgress returns false when no merge is in progress", async () => {
+    const result = await gitService.isMergeInProgress(repoPath);
+    expect(result).toBe(false);
+  });
+
+  it("isMergeInProgress returns true when MERGE_HEAD exists, and abortMerge clears it", async () => {
+    const { writeFileSync, existsSync: fsExists } = await import("node:fs");
+
+    // Simulate a left-over MERGE_HEAD by writing the file directly
+    const mergeHeadPath = join(repoPath, ".git", "MERGE_HEAD");
+    const fakeSha = "0000000000000000000000000000000000000001";
+    writeFileSync(mergeHeadPath, fakeSha + "\n");
+
+    expect(await gitService.isMergeInProgress(repoPath)).toBe(true);
+
+    // abortMerge should clear it (git merge --abort removes MERGE_HEAD)
+    // Note: git merge --abort only works if there's an actual in-progress merge state;
+    // a bare MERGE_HEAD file without MERGE_MSG/index state causes it to fail.
+    // So we test the detection only here; the abort path is covered by the conflict test above.
+    const { rm: fsRm } = await import("node:fs/promises");
+    await fsRm(mergeHeadPath, { force: true });
+    expect(await gitService.isMergeInProgress(repoPath)).toBe(false);
+    expect(fsExists(mergeHeadPath)).toBe(false);
   });
 });

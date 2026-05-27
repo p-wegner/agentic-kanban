@@ -45,6 +45,17 @@ export function createSessionLifecycle(
     const effectiveWorkingDir = workingDirOverride ?? workspace.workingDir;
     if (!effectiveWorkingDir) throw new Error("Workspace has no working directory; run setup first");
 
+    // Diagnostic: warn when a feature-branch workspace runs in a path that looks like the
+    // main checkout (does not contain '.worktrees'). This can happen if the worktree was
+    // never created or was cleaned up, and is the most common cause of agent work leaking
+    // into the main checkout.
+    if (!workspace.isDirect && !effectiveWorkingDir.includes(".worktrees") && !workingDirOverride) {
+      console.warn(
+        `[session] WARNING: non-direct workspace ${workspaceId} has workingDir outside .worktrees: ${effectiveWorkingDir}. ` +
+          `Agent writes will go to this path, which may be the main checkout.`,
+      );
+    }
+
     // Look up issue's projectId for activity broadcasting
     const issueRows = await db
       .select({ projectId: issues.projectId })
