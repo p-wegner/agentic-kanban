@@ -9,6 +9,9 @@ interface ButlerState {
   active: boolean;
   sessionId: string | null;
   contextTokens?: number;
+  model?: string;
+  contextWindow?: number;
+  mcpConnected?: boolean;
 }
 
 /** Event shape emitted by the server butler SSE stream (butler-sdk.service.ts). */
@@ -20,7 +23,19 @@ type ButlerEvent =
   | { type: "tool"; name: string }
   | { type: "result"; text?: string; isError?: boolean }
   | { type: "usage"; contextTokens: number }
+  | { type: "meta"; model?: string; contextWindow?: number; mcpConnected?: boolean }
   | { type: "error"; message: string };
+
+/** Trim a model id to something compact for the chip (e.g. "claude-opus-4-7" -> "opus-4-7"). */
+function shortModel(model?: string): string {
+  if (!model) return "";
+  return model.replace(/^(claude-|anthropic\.|us\.anthropic\.)/i, "").replace(/-v\d+:\d+$/, "").replace(/-\d{8}$/, "");
+}
+
+/** Format a context-window size: 1000000 -> "1M", 200000 -> "200k". */
+function formatWindow(n: number): string {
+  return n >= 1_000_000 ? `${(n / 1_000_000).toFixed(n % 1_000_000 === 0 ? 0 : 1)}M` : `${Math.round(n / 1000)}k`;
+}
 
 interface ChatMessage {
   id: string;
@@ -147,6 +162,9 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
   const [input, setInput] = useState("");
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [contextTokens, setContextTokens] = useState(0);
+  const [model, setModel] = useState<string | undefined>(undefined);
+  const [contextWindow, setContextWindow] = useState<number | undefined>(undefined);
+  const [mcpConnected, setMcpConnected] = useState<boolean | undefined>(undefined);
   const [customizeOpen, setCustomizeOpen] = useState(false);
   const [customizePrompt, setCustomizePrompt] = useState("");
   const [customizeBusy, setCustomizeBusy] = useState(false);
@@ -178,6 +196,11 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
         break;
       case "usage":
         setContextTokens(e.contextTokens);
+        break;
+      case "meta":
+        if (e.model) setModel(e.model);
+        if (e.contextWindow) setContextWindow(e.contextWindow);
+        if (e.mcpConnected !== undefined) setMcpConnected(e.mcpConnected);
         break;
       case "turn-start":
         setSending(true);
@@ -228,6 +251,9 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
     setChatMessages([]);
     setSending(false);
     setContextTokens(0);
+    setModel(undefined);
+    setContextWindow(undefined);
+    setMcpConnected(undefined);
     setCustomizeOpen(false);
     assistantBufRef.current = "";
     assistantMsgIdRef.current = null;
@@ -238,6 +264,9 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
       .then(async (state) => {
         setButlerState(state);
         setContextTokens(state.contextTokens ?? 0);
+        setModel(state.model);
+        setContextWindow(state.contextWindow);
+        setMcpConnected(state.mcpConnected);
         if (state.active) {
           // Restore prior conversation (the SSE stream only carries new events).
           try {
@@ -428,12 +457,29 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
         <>
           {/* Butler toolbar: context usage + clear + customize */}
           <div className="shrink-0 flex items-center justify-end gap-2 border-b border-gray-100 dark:border-gray-800 px-4 py-1.5 text-xs">
-            <span
-              className="text-gray-400 dark:text-gray-500 mr-auto"
-              title="Approximate context-window tokens used by the butler's conversation"
+            <div
+              className="flex items-center gap-2 mr-auto text-gray-400 dark:text-gray-500 min-w-0"
+              title={[
+                model ? `Model: ${model}` : null,
+                contextWindow ? `Context window: ${(contextWindow / 1000).toFixed(0)}k tokens` : null,
+                contextTokens ? `Used this turn: ${contextTokens.toLocaleString()} tokens` : null,
+                mcpConnected !== undefined ? `Board MCP: ${mcpConnected ? "connected" : "not connected"}` : null,
+              ].filter(Boolean).join("\n")}
             >
-              {contextTokens > 0 ? `${(contextTokens / 1000).toFixed(1)}k context` : "warm session"}
-            </span>
+              {model && (
+                <span className="font-medium text-gray-500 dark:text-gray-400 truncate max-w-[160px]">{shortModel(model)}</span>
+              )}
+              {mcpConnected !== undefined && (
+                <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${mcpConnected ? "bg-green-500" : "bg-gray-300 dark:bg-gray-600"}`} title={mcpConnected ? "Board MCP connected" : "Board MCP not connected"} />
+              )}
+              <span className="shrink-0">
+                {contextTokens > 0
+                  ? contextWindow
+                    ? `${(contextTokens / 1000).toFixed(1)}k / ${formatWindow(contextWindow)} (${Math.round((contextTokens / contextWindow) * 100)}%)`
+                    : `${(contextTokens / 1000).toFixed(1)}k context`
+                  : "warm session"}
+              </span>
+            </div>
             <button
               onClick={openCustomize}
               className="px-2 py-1 rounded text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"

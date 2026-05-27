@@ -116,7 +116,14 @@ export function createButlerRoute(
     const projectId = c.req.param("id");
     const state = getButlerSession(projectId);
     const persisted = (await getPreference(butlerSessionPrefKey(projectId), database)) || null;
-    return c.json({ active: state.active, sessionId: state.sessionId ?? persisted, contextTokens: state.contextTokens });
+    return c.json({
+      active: state.active,
+      sessionId: state.sessionId ?? persisted,
+      contextTokens: state.contextTokens,
+      model: state.model,
+      contextWindow: state.contextWindow,
+      mcpConnected: state.mcpConnected,
+    });
   });
 
   // GET /api/projects/:id/butler/messages — conversation history for the active session,

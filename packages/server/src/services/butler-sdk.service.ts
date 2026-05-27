@@ -24,6 +24,7 @@ export type ButlerEvent =
   | { type: "tool"; name: string }
   | { type: "result"; text?: string; isError?: boolean }
   | { type: "usage"; contextTokens: number }
+  | { type: "meta"; model?: string; contextWindow?: number; mcpConnected?: boolean }
   | { type: "error"; message: string };
 
 type Listener = (e: ButlerEvent) => void;
@@ -84,6 +85,9 @@ interface ButlerSession {
   busy: boolean;
   contextTokens: number;
   transcript: ButlerTurn[];
+  model?: string;
+  contextWindow?: number;
+  mcpConnected?: boolean;
 }
 
 const sessions = new Map<string, ButlerSession>();
@@ -110,9 +114,9 @@ function buildButlerSystemPrompt(projectName: string, repoPath: string): string 
   ].join("\n");
 }
 
-export function getButlerSession(projectId: string): { sessionId?: string; active: boolean; contextTokens: number } {
+export function getButlerSession(projectId: string): { sessionId?: string; active: boolean; contextTokens: number; model?: string; contextWindow?: number; mcpConnected?: boolean } {
   const s = sessions.get(projectId);
-  return { sessionId: s?.sessionId, active: !!s, contextTokens: s?.contextTokens ?? 0 };
+  return { sessionId: s?.sessionId, active: !!s, contextTokens: s?.contextTokens ?? 0, model: s?.model, contextWindow: s?.contextWindow, mcpConnected: s?.mcpConnected };
 }
 
 /** Conversation history for the active session (empty if none) — replayed by the UI on reload. */
@@ -125,6 +129,7 @@ export function subscribeButler(projectId: string, listener: Listener): () => vo
   if (!s) return () => {};
   s.listeners.add(listener);
   if (s.sessionId) listener({ type: "session", sessionId: s.sessionId });
+  if (s.model || s.contextWindow || s.mcpConnected !== undefined) listener({ type: "meta", model: s.model, contextWindow: s.contextWindow, mcpConnected: s.mcpConnected });
   if (s.contextTokens) listener({ type: "usage", contextTokens: s.contextTokens });
   return () => {
     s.listeners.delete(listener);
@@ -182,11 +187,15 @@ async function runLoop(session: ButlerSession, input: Pushable<SDKUserMessage>, 
     for await (const msg of q as AsyncIterable<Record<string, unknown>>) {
       const type = msg.type as string;
       if (type === "system" && (msg as { subtype?: string }).subtype === "init") {
-        const sid = (msg as { session_id?: string }).session_id;
-        if (sid) {
-          session.sessionId = sid;
-          broadcast(session, { type: "session", sessionId: sid });
+        const init = msg as { session_id?: string; model?: string; mcp_servers?: { name: string; status: string }[] };
+        if (init.session_id) {
+          session.sessionId = init.session_id;
+          broadcast(session, { type: "session", sessionId: init.session_id });
         }
+        if (init.model) session.model = init.model;
+        const kanbanMcp = init.mcp_servers?.find((s) => s.name === "agentic-kanban");
+        if (kanbanMcp) session.mcpConnected = kanbanMcp.status === "connected";
+        broadcast(session, { type: "meta", model: session.model, contextWindow: session.contextWindow, mcpConnected: session.mcpConnected });
       } else if (type === "stream_event") {
         const ev = (msg as { event?: { type?: string; delta?: { type?: string; text?: string } } }).event;
         if (ev?.type === "content_block_delta" && ev.delta?.type === "text_delta" && ev.delta.text) {
@@ -208,6 +217,15 @@ async function runLoop(session: ButlerSession, input: Pushable<SDKUserMessage>, 
           if (ctx > 0) {
             session.contextTokens = ctx;
             broadcast(session, { type: "usage", contextTokens: ctx });
+          }
+        }
+        // Real context-window max comes from the per-model usage breakdown.
+        const modelUsage = (msg as { modelUsage?: Record<string, { contextWindow?: number }> }).modelUsage;
+        if (modelUsage) {
+          const cw = Math.max(0, ...Object.values(modelUsage).map((u) => u.contextWindow ?? 0));
+          if (cw > 0 && cw !== session.contextWindow) {
+            session.contextWindow = cw;
+            broadcast(session, { type: "meta", model: session.model, contextWindow: cw, mcpConnected: session.mcpConnected });
           }
         }
         if (subtype === "success" && result) {
