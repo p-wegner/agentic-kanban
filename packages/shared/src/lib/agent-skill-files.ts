@@ -1,4 +1,4 @@
-import { access, lstat, mkdir, readFile, symlink, unlink, writeFile } from "node:fs/promises";
+import { access, lstat, mkdir, readFile, readdir, symlink, unlink, writeFile } from "node:fs/promises";
 import { join, relative } from "node:path";
 
 export type AgentSkillFile = {
@@ -85,6 +85,83 @@ export async function readLocalSkillPrompt(repoPath: string, skillName: string):
 export async function isSkillInstalledLocally(repoPath: string, skillName: string): Promise<boolean> {
   try {
     await access(localSkillFilePath(repoPath, skillName));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export type DiskSkillEntry = {
+  name: string;
+  description: string;
+  model: string | null;
+  prompt: string;
+};
+
+/**
+ * Parse a SKILL.md file's frontmatter into a DiskSkillEntry.
+ * Frontmatter fields recognised: name, description, model.
+ * Everything after the closing `---` is the prompt.
+ */
+function parseDiskSkillMarkdown(content: string, fallbackName: string): DiskSkillEntry {
+  const frontmatterMatch = content.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
+  if (!frontmatterMatch) {
+    return { name: fallbackName, description: "", model: null, prompt: content.trim() };
+  }
+  const front = frontmatterMatch[1];
+  const prompt = frontmatterMatch[2].trim();
+  const nameMatch = front.match(/^name:\s*(.+)$/m);
+  const descMatch = front.match(/^description:\s*(.+)$/m);
+  const modelMatch = front.match(/^model:\s*(.+)$/m);
+  return {
+    name: nameMatch?.[1].trim() || fallbackName,
+    description: descMatch?.[1].trim() || "",
+    model: modelMatch?.[1].trim() || null,
+    prompt,
+  };
+}
+
+/**
+ * Scan .claude/skills/ inside a project repo and return every SKILL.md found.
+ * Skills with invalid names (path traversal) are silently skipped.
+ */
+export async function scanLocalSkills(repoPath: string): Promise<DiskSkillEntry[]> {
+  const skillsDir = join(repoPath, ".claude", "skills");
+  let entries: Awaited<ReturnType<typeof readdir>>;
+  try {
+    entries = await readdir(skillsDir, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  const skills: DiskSkillEntry[] = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    if (/[/\\]/.test(entry.name) || entry.name === ".." || entry.name === ".") continue;
+    try {
+      const content = await readFile(join(skillsDir, entry.name, "SKILL.md"), "utf-8");
+      skills.push(parseDiskSkillMarkdown(content, entry.name));
+    } catch {
+      // skip unreadable skill files
+    }
+  }
+  return skills;
+}
+
+/**
+ * Copy a SKILL.md verbatim from the project repo to the worktree.
+ * Used when launching a disk-only skill that has no DB entry.
+ */
+export async function copySkillToWorktree(repoPath: string, skillName: string, worktreePath: string): Promise<boolean> {
+  // Reject names that could escape the skills directory via path traversal
+  if (/[/\\]/.test(skillName) || skillName === ".." || skillName === "." || skillName.includes("\0")) {
+    return false;
+  }
+  const src = localSkillFilePath(repoPath, skillName);
+  const destDir = join(worktreePath, ".claude", "skills", skillName);
+  try {
+    const content = await readFile(src, "utf-8");
+    await mkdir(destDir, { recursive: true });
+    await writeFile(join(destDir, "SKILL.md"), content, "utf-8");
     return true;
   } catch {
     return false;
