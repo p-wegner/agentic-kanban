@@ -1,6 +1,6 @@
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
-import { writeAgentSkillFile, isSkillInstalledLocally } from "@agentic-kanban/shared/lib/agent-skill-files";
+import { writeAgentSkillFile, isSkillInstalledLocally, scanLocalSkills } from "@agentic-kanban/shared/lib/agent-skill-files";
 import { invokeClaudePrompt } from "./claude-cli.service.js";
 import {
   listAgentSkills,
@@ -10,6 +10,7 @@ import {
   updateAgentSkill,
   deleteAgentSkill,
   getActiveProjectRepoPath,
+  getProjectRepoPath,
 } from "../repositories/agent-skill.repository.js";
 
 export class AgentSkillError extends Error {
@@ -25,7 +26,34 @@ const INVALID_NAME_PATTERN = /[\/\\]|\.\./;
 
 export function createAgentSkillService({ database }: { database: Database }) {
   async function listSkills(projectId?: string, globalOnly?: boolean) {
-    return listAgentSkills(projectId, globalOnly ?? false, database);
+    const dbSkills = await listAgentSkills(projectId, globalOnly ?? false, database);
+    const dbResult = dbSkills.map(s => ({ ...s, source: "db" as const }));
+
+    // Only merge disk skills when scoped to a project (and not filtering global-only)
+    if (!projectId || globalOnly) return dbResult;
+
+    const repoPath = await getProjectRepoPath(projectId, database);
+    if (!repoPath) return dbResult;
+
+    const diskSkills = await scanLocalSkills(repoPath);
+    const dbNames = new Set(dbSkills.map(s => s.name));
+
+    const diskOnly = diskSkills
+      .filter(d => !dbNames.has(d.name))
+      .map(d => ({
+        id: `disk:${d.name}`,
+        name: d.name,
+        description: d.description,
+        model: d.model,
+        prompt: d.prompt,
+        projectId: projectId,
+        isBuiltin: false,
+        createdAt: null,
+        updatedAt: null,
+        source: "disk" as const,
+      }));
+
+    return [...dbResult, ...diskOnly].sort((a, b) => a.name.localeCompare(b.name));
   }
 
   async function getSkill(id: string) {
