@@ -41,7 +41,7 @@ const shared = {
 await build({
   ...shared,
   entryPoints: [resolve(root, "packages/server/src/cli/index.ts")],
-  outfile: resolve(root, "packages/server/dist/cli/index.js"),
+  outfile: resolve(root, "packages/server/dist/cli.js"),
   // CLI is the main bin entry — needs shebang; source file has its own which esbuild strips
   banner: {
     js: "#!/usr/bin/env node\n" + shared.banner.js,
@@ -50,8 +50,7 @@ await build({
   plugins: [{
     name: "strip-shebang",
     setup(build) {
-      const cliPath = resolve(root, "packages/server/src/cli/index.ts").replace(/\\/g, "/");
-      build.onLoad({ filter: /cli[\/\\]index\.ts$/ }, async (args) => {
+      build.onLoad({ filter: /index\.ts$/ }, async (args) => {
         const normalized = args.path.replace(/\\/g, "/");
         if (!normalized.includes("server/src/cli/index.ts")) return null;
         const fs = await import("node:fs/promises");
