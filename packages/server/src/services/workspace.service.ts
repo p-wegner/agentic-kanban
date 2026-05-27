@@ -771,6 +771,21 @@ export function createWorkspaceService(deps: {
       }
     }
 
+    // Guard: refuse merge if main checkout has uncommitted tracked changes.
+    // git merge --no-ff will abort if tracked files are dirty, leaving the repo in an error
+    // state and potentially overwriting the caller's work. Fail fast with a clear message.
+    const uncommittedInMain = await gitService.getUncommittedTrackedChanges(repoPath);
+    if (uncommittedInMain.length > 0) {
+      const preview = uncommittedInMain.slice(0, 10).join("\n");
+      const suffix = uncommittedInMain.length > 10 ? `\n…and ${uncommittedInMain.length - 10} more` : "";
+      throw new WorkspaceError(
+        `Cannot merge: the main checkout has ${uncommittedInMain.length} uncommitted tracked change(s). ` +
+          `Commit or stash these before merging:\n${preview}${suffix}`,
+        "CONFLICT",
+        { uncommittedFiles: uncommittedInMain },
+      );
+    }
+
     console.log(`[workspace-service] merge: workspaceId=${id} branch=${workspace.branch} repoPath=${repoPath}`);
 
     // Sync branch ref to HEAD before merging

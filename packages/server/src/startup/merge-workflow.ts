@@ -108,6 +108,16 @@ export function createAutoMerge({ sessionManager, boardEvents, learningSessionId
           } catch (err) {
             console.warn("[backup] pre-merge backup failed (non-fatal):", err instanceof Error ? err.message : String(err));
           }
+          // Guard: refuse merge if main checkout has uncommitted tracked changes.
+          const uncommittedInMain = await gitService.getUncommittedTrackedChanges(repoPath);
+          if (uncommittedInMain.length > 0) {
+            const preview = uncommittedInMain.slice(0, 5).join(", ");
+            const suffix = uncommittedInMain.length > 5 ? ` (and ${uncommittedInMain.length - 5} more)` : "";
+            console.error(`[workflow] auto-merge blocked: main checkout has ${uncommittedInMain.length} uncommitted tracked change(s): ${preview}${suffix}`);
+            boardEvents.broadcast(projectId, "workflow_error");
+            throw new Error(`Main checkout has ${uncommittedInMain.length} uncommitted tracked change(s) — cannot merge workspace ${workspace.id}. Commit or stash those changes first.`);
+          }
+
           await gitService.mergeBranch(repoPath, workspace.branch);
           if (workspace.workingDir) {
             try { await gitService.removeWorktree(repoPath, workspace.workingDir); } catch {}
