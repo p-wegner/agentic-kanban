@@ -15,6 +15,7 @@ const SHORTCUTS = [
   { keys: ["t"], description: "Switch to Table view" },
   { keys: ["f"], description: "Switch to Timeline view" },
   { keys: ["l"], description: "Switch to Agents view" },
+  { keys: ["m"], description: "Switch to Metrics view" },
   { keys: ["a"], description: "Toggle All Workspaces panel" },
   { keys: ["g", "s"], description: "Open settings" },
 ];
