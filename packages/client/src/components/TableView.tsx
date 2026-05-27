@@ -383,7 +383,7 @@ export function TableView({ columns, onIssueClick, searchQuery, onRefresh }: Tab
           <tbody>
             {sorted.length === 0 && (
               <tr>
-                <td colSpan={9} className="text-center text-gray-400 dark:text-gray-500 text-sm py-12">No issues found</td>
+                <td colSpan={10} className="text-center text-gray-400 dark:text-gray-500 text-sm py-12">No issues found</td>
               </tr>
             )}
             {sorted.map((issue) => (
