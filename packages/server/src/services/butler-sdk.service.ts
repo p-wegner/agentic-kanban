@@ -121,6 +121,10 @@ export function ensureButlerSession(opts: {
   projectName: string;
   claudeProfile?: string;
   resumeSessionId?: string;
+  /** System-prompt text appended to the claude_code preset. When omitted, a built-in
+   *  default is used. Callers (butler route) resolve this from the editable `butler`
+   *  agent skill so users can customize the butler's behavior. */
+  systemPromptAppend?: string;
 }): ButlerSession {
   const existing = sessions.get(opts.projectId);
   if (existing) return existing;
@@ -143,7 +147,7 @@ export function ensureButlerSession(opts: {
     allowDangerouslySkipPermissions: true,
     env: env as Options["env"],
     abortController: session.abort,
-    systemPrompt: { type: "preset", preset: "claude_code", append: buildButlerSystemPrompt(opts.projectName, opts.repoPath) },
+    systemPrompt: { type: "preset", preset: "claude_code", append: opts.systemPromptAppend ?? buildButlerSystemPrompt(opts.projectName, opts.repoPath) },
     mcpServers: getMcpServersConfig(),
     ...(opts.resumeSessionId ? { resume: opts.resumeSessionId } : {}),
   };

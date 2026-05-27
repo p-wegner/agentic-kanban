@@ -1,8 +1,8 @@
 import type { SessionManager } from "../services/session.manager.js";
 import type { BoardEvents } from "../services/board-events.js";
 import type { Database } from "../db/index.js";
-import { projects } from "@agentic-kanban/shared/schema";
-import { eq } from "drizzle-orm";
+import { projects, agentSkills } from "@agentic-kanban/shared/schema";
+import { eq, sql, desc } from "drizzle-orm";
 import { streamSSE } from "hono/streaming";
 import { createRouter } from "../middleware/create-router.js";
 import { parseJsonBody } from "../middleware/parse-body.js";
@@ -18,6 +18,25 @@ import {
 function butlerSessionPrefKey(projectId: string): string {
   return `butler_session_${projectId}`;
 }
+
+/** Fallback butler instructions, used when the editable `butler` agent skill is absent.
+ *  Kept in sync with the `butler` entry in builtin-skills.ts / seed.ts. Supports the
+ *  {{projectName}}, {{repoPath}}, {{serverPort}} placeholders. */
+const DEFAULT_BUTLER_PROMPT = [
+  `You are the project butler for "{{projectName}}" — a persistent, warm assistant embedded in the agentic-kanban board.`,
+  ``,
+  `Your role:`,
+  `- Answer questions about the project, codebase, and active work`,
+  `- Help with quick analysis, research, and code questions`,
+  `- Give status overviews of the board and active agent sessions when asked`,
+  ``,
+  `For anything about the board (issues, statuses, counts, workspaces, sessions), use the "agentic-kanban" MCP tools (e.g. list_issues, get_board_status, get_issue) — they are authoritative. Do NOT guess board state or scrape it via curl.`,
+  ``,
+  `Project location: {{repoPath}}`,
+  `Board API: http://localhost:{{serverPort}}/api`,
+  ``,
+  `Be concise and helpful; avoid unnecessary preamble. You have full read access to the project files and standard tools.`,
+].join("\n");
 
 /**
  * Butler routes — a persistent, warm Claude assistant per project, backed by the
@@ -40,11 +59,29 @@ export function createButlerRoute(
     return rows[0] ?? null;
   }
 
+  /** Resolve the butler's system prompt from the editable `butler` agent skill
+   *  (project-scoped overrides global), falling back to DEFAULT_BUTLER_PROMPT, then
+   *  substitute the {{projectName}}/{{repoPath}}/{{serverPort}} placeholders. */
+  async function resolveButlerPrompt(projectId: string, projectName: string, repoPath: string): Promise<string> {
+    const rows = await database
+      .select({ prompt: agentSkills.prompt })
+      .from(agentSkills)
+      .where(sql`${agentSkills.name} = 'butler' AND (${agentSkills.projectId} = ${projectId} OR ${agentSkills.projectId} IS NULL)`)
+      .orderBy(desc(agentSkills.projectId))
+      .limit(1);
+    const serverPort = process.env.KANBAN_SERVER_PORT || process.env.PORT || "3001";
+    return (rows[0]?.prompt ?? DEFAULT_BUTLER_PROMPT)
+      .replace(/\{\{projectName}}/g, projectName)
+      .replace(/\{\{repoPath}}/g, repoPath)
+      .replace(/\{\{serverPort}}/g, serverPort);
+  }
+
   async function startSession(projectId: string) {
     const project = await resolveProject(projectId);
     if (!project) return null;
     const claudeProfile = (await getPreference("claude_profile", database)) || undefined;
     const resumeSessionId = (await getPreference(butlerSessionPrefKey(projectId), database)) || undefined;
+    const systemPromptAppend = await resolveButlerPrompt(projectId, project.name, project.repoPath);
     const wasActive = getButlerSession(projectId).active;
     const session = ensureButlerSession({
       projectId,
@@ -52,6 +89,7 @@ export function createButlerRoute(
       projectName: project.name,
       claudeProfile,
       resumeSessionId,
+      systemPromptAppend,
     });
     // Persist the SDK session id (for resume across restarts) once, on first creation.
     if (!wasActive) {
@@ -153,9 +191,14 @@ export function createButlerRoute(
     });
   });
 
-  // DELETE /api/projects/:id/butler — stop the warm session
+  // DELETE /api/projects/:id/butler — stop the warm session and forget the resume id.
+  // Clearing the persisted session id means the NEXT ensure starts a fresh session,
+  // which re-reads the (possibly customized) butler skill — so "stop butler" is how
+  // users apply skill/behavior changes.
   router.delete("/:id/butler", async (c) => {
-    stopButlerSession(c.req.param("id"));
+    const projectId = c.req.param("id");
+    stopButlerSession(projectId);
+    await setPreference(butlerSessionPrefKey(projectId), "", database);
     return c.json({ ok: true });
   });
 
