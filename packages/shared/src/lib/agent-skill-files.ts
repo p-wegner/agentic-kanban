@@ -127,12 +127,8 @@ function parseDiskSkillMarkdown(content: string, fallbackName: string): DiskSkil
  */
 export async function scanLocalSkills(repoPath: string): Promise<DiskSkillEntry[]> {
   const skillsDir = join(repoPath, ".claude", "skills");
-  let entries: Awaited<ReturnType<typeof readdir>>;
-  try {
-    entries = await readdir(skillsDir, { withFileTypes: true });
-  } catch {
-    return [];
-  }
+  const entries = await readdir(skillsDir, { withFileTypes: true }).catch(() => null);
+  if (!entries) return [];
   const skills: DiskSkillEntry[] = [];
   for (const entry of entries) {
     if (!entry.isDirectory()) continue;
