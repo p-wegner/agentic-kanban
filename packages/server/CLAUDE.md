@@ -78,14 +78,50 @@ agent model used for board tasks. It runs in-process via the Claude Agent SDK
 - **Why SDK, not CLI:** keeping a CLI `claude.exe` warm with stdin open does not
   stream on Windows (it buffers stdout until stdin closes). The SDK is a library
   call with a native async iterator — no stdio/TTY buffering, true streaming.
-- **Auth/model:** reuse the active Claude profile env via `buildSpawnEnv(profile)`
+- **Auth/profile:** reuse a Claude profile env via `buildSpawnEnv(profile)`
   (`options.env`), so the butler authenticates the same way as the rest of the app
-  (CLI login / API key / Bedrock). Verified working with the `anth` profile.
+  (CLI login / API key / Bedrock). Per-project pref `butler_profile_<projectId>`
+  overrides the global `claude_profile`. Switching profile **restarts** the session
+  (different endpoint can't resume) — `POST /:id/butler/profile`.
+- **Model:** per-project pref `butler_model_<projectId>` (values from
+  `CLAUDE_MODEL_OPTIONS` — "", opus, sonnet, haiku). Switching model is **live, no
+  restart**, via the SDK `query.setModel()` control request (`POST /:id/butler/model`),
+  so conversation context is preserved.
 - **Routes** (`butler.ts`, mounted under `/projects`): `POST /:id/butler/ensure`
-  (start warm session), `POST /:id/butler/message` (push a turn), `GET
-  /:id/butler/stream` (SSE of `ButlerEvent`s), `DELETE /:id/butler` (stop). The
-  SDK `session_id` is persisted to preference `butler_session_<projectId>` and
-  passed as `resume` on next ensure, so the butler survives server restarts.
+  (start), `POST /:id/butler/message` (push a turn), `GET /:id/butler/stream`
+  (SSE of `ButlerEvent`s), `DELETE /:id/butler` (stop + forget resume), `POST
+  /:id/butler/interrupt` (stop the in-flight turn via `query.interrupt()`, session
+  stays warm), `POST /:id/butler/model`, `POST /:id/butler/profile`, `GET
+  /:id/butler/commands` (slash-command autocomplete), `GET /:id/butler/profiles`,
+  `GET|PUT /:id/butler/skill`, `POST /:id/butler/ask` (synchronous — CLI/MCP).
+  `GET /:id/butler` returns state incl. `selectedModel`/`selectedProfile`. The SDK
+  `session_id` is persisted to `butler_session_<projectId>` and passed as `resume`
+  on next ensure, so the butler survives server restarts.
+- **SSE listeners are project-keyed, NOT per-session** (`listenersByProject` in
+  `butler-sdk.service.ts`). "Clear context" and profile-switch stop+recreate the
+  session; if listeners lived on the session, a stream reconnecting in that gap
+  would attach to nothing and go dead. Keep them decoupled.
+- **Context usage = `query.getContextUsage()`** (`totalTokens`/`maxTokens`), the
+  real occupancy — NOT a sum of a turn's usage counts. `cache_read_input_tokens`
+  accumulates across every tool round-trip in a turn, so summing balloons far past
+  the true context size (saw 400k for a ~30k context).
+- **Slash commands:** `GET /:id/butler/commands` merges the live SDK
+  `supportedCommands()` with the repo's own `.claude/skills/*/SKILL.md`
+  (`scanLocalSkills`), deduped — so repo skills are suggested even before the SDK
+  finishes discovery / for a cold session.
+- **Board orchestration:** the butler starts work via the one-step `POST
+  /api/workspaces` flow (worktree + move to In Progress + launch agent). It must
+  NOT use the `start_workspace` MCP tool to launch (bare worktree only), nor raw
+  `git worktree`, and must never report success it hasn't verified via
+  `get_issue`/`get_board_status`.
+- **Bundled board guide:** `butler/board-guide.ts` ships a user-facing UI how-to as
+  a string; `ensureBoardGuideFile()` writes it to a temp path each session start and
+  the prompt references it via the `{{boardGuidePath}}` placeholder so the butler
+  reads it on demand for "how do I…" questions (progressive disclosure — it stays
+  out of every turn's context).
+- **Markdown:** butler replies render via `@tailwindcss/typography` (enabled with
+  `@plugin` in `app.css`; v4 has no `tailwind.config`). A `.prose` override strips
+  the plugin's literal backtick pseudo-elements around inline code and adds a pill.
 - `permissionMode: "bypassPermissions"` (+ `allowDangerouslySkipPermissions`) —
   there is no human in the chat loop to approve tool prompts.
 

@@ -173,6 +173,40 @@ Complete inventory of features, organized by category. Status reflects the curre
 - Skills tab in Settings panel
 - **Status: DONE**
 
+## Category: Butler Assistant (CORE)
+
+### F-BUTLER-01: Warm Project Assistant
+- Persistent, warm Claude assistant per project via the Claude Agent SDK (`@anthropic-ai/claude-agent-sdk`), in-process — distinct from the CLI-spawn task agents
+- One session per project; turns fed into a single `query()` via a `Pushable` queue so context stays warm (no `--resume` respawn)
+- SDK `session_id` persisted to `butler_session_<projectId>` → survives server restarts
+- agentic-kanban MCP tools wired in (`options.mcpServers`); `bypassPermissions` (no human in the chat loop)
+- Reached via the **Butler** view (press `i`); also `POST .../butler/ask` (synchronous) for CLI/MCP
+- **Status: DONE**
+
+### F-BUTLER-02: Chat, Streaming & Markdown
+- SSE stream of `ButlerEvent`s (text deltas, tool activity, results, usage, errors); listeners are project-keyed so the stream survives clear-context / profile restart
+- Replies render as GitHub-flavored Markdown (tables, lists, headings, inline-code pills) via `@tailwindcss/typography`
+- Live context-usage indicator from the SDK's `getContextUsage()` (true occupancy, not the cache-inflated turn sum)
+- Conversation persists across reloads; **Clear context** starts fresh
+- **Status: DONE**
+
+### F-BUTLER-03: Model & Profile Pickers
+- Per-project **model** picker (`CLAUDE_MODEL_OPTIONS`: Profile default / Opus / Sonnet / Haiku) — switches live via `query.setModel()` with no restart, preserving context (`butler_model_<projectId>`)
+- Per-project **profile** picker (e.g. zai) — switching restarts the session fresh (`butler_profile_<projectId>`, falls back to the global `claude_profile`)
+- **Stop** button interrupts the in-flight turn (`query.interrupt()`) without tearing down the session
+- **Customize** edits the project's butler skill prompt inline
+- **Status: DONE**
+
+### F-BUTLER-04: Slash-Command Autocomplete
+- Typing `/` suggests the session's available commands — the live SDK `supportedCommands()` merged with the repo's `.claude/skills/*/SKILL.md`, deduped
+- Keyboard navigable (↑/↓, Enter/Tab, Esc); inserts the `/name` token
+- **Status: DONE**
+
+### F-BUTLER-05: Board Orchestration & On-Demand Guide
+- Acts on the board for the user via the one-step `POST /api/workspaces` launch (worktree + move to In Progress + agent), never the bare `start_workspace` tool, and verifies before reporting (never fabricates success)
+- Bundled, user-facing board-usage **UI guide** (`butler/board-guide.ts`) written to disk and referenced via the `{{boardGuidePath}}` prompt placeholder — read on demand so "how do I…" answers describe UI clicks, kept out of every turn's context
+- **Status: DONE**
+
 ## Category: Data & Sync
 
 ### F-DATA-01: SQLite Persistence
