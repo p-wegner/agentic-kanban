@@ -28,6 +28,13 @@ export type ButlerEvent =
 
 type Listener = (e: ButlerEvent) => void;
 
+/** A persisted conversation turn, replayed when the chat UI reloads. */
+export interface ButlerTurn {
+  role: "user" | "assistant";
+  text: string;
+  ts: number;
+}
+
 /** Queue-backed AsyncIterable: push() enqueues a turn, end() closes the stream. */
 class Pushable<T> implements AsyncIterable<T> {
   private queue: T[] = [];
@@ -76,6 +83,7 @@ interface ButlerSession {
   abort: AbortController;
   busy: boolean;
   contextTokens: number;
+  transcript: ButlerTurn[];
 }
 
 const sessions = new Map<string, ButlerSession>();
@@ -105,6 +113,11 @@ function buildButlerSystemPrompt(projectName: string, repoPath: string): string 
 export function getButlerSession(projectId: string): { sessionId?: string; active: boolean; contextTokens: number } {
   const s = sessions.get(projectId);
   return { sessionId: s?.sessionId, active: !!s, contextTokens: s?.contextTokens ?? 0 };
+}
+
+/** Conversation history for the active session (empty if none) — replayed by the UI on reload. */
+export function getButlerTranscript(projectId: string): ButlerTurn[] {
+  return sessions.get(projectId)?.transcript ?? [];
 }
 
 export function subscribeButler(projectId: string, listener: Listener): () => void {
@@ -140,6 +153,7 @@ export function ensureButlerSession(opts: {
     abort: new AbortController(),
     busy: false,
     contextTokens: 0,
+    transcript: [],
   };
   sessions.set(opts.projectId, session);
 
@@ -196,6 +210,9 @@ async function runLoop(session: ButlerSession, input: Pushable<SDKUserMessage>, 
             broadcast(session, { type: "usage", contextTokens: ctx });
           }
         }
+        if (subtype === "success" && result) {
+          session.transcript.push({ role: "assistant", text: result, ts: Date.now() });
+        }
         broadcast(session, { type: "result", text: subtype === "success" ? result : undefined, isError: subtype !== "success" });
       }
     }
@@ -213,6 +230,7 @@ export function sendButlerTurn(projectId: string, content: string): boolean {
   const s = sessions.get(projectId);
   if (!s) return false;
   s.busy = true;
+  s.transcript.push({ role: "user", text: content, ts: Date.now() });
   broadcast(s, { type: "turn-start" });
   s.input.push({ type: "user", message: { role: "user", content }, parent_tool_use_id: null });
   return true;
