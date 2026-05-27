@@ -9,8 +9,8 @@ import type { Database } from "../db/index.js";
 import type { SessionManager } from "./session.manager.js";
 import type { BoardEvents } from "./board-events.js";
 import type { ProviderName } from "./agent-provider.js";
-import * as gitService from "./git.service.js";
-import { createBackup } from "../db/backup.js";
+import * as realGitService from "./git.service.js";
+import { createBackup as realCreateBackup } from "../db/backup.js";
 import { runSetupScript } from "./setup-script.js";
 import { writeAgentSkillFile, readLocalSkillPrompt, copySkillToWorktree } from "@agentic-kanban/shared/lib/agent-skill-files";
 import { resolveAgentSettings, toExecutorProvider } from "./agent-settings.service.js";
@@ -121,12 +121,21 @@ const activeMerges = new Map<string, Promise<unknown>>();
 
 // --- Service factory ---
 
+/** Subset of the git service that workspace.service depends on. Injectable for tests. */
+export type GitService = typeof realGitService;
+
 export function createWorkspaceService(deps: {
   database: Database;
   getSessionManager?: () => SessionManager;
   boardEvents?: BoardEvents;
+  /** Injectable git service (defaults to the real module). Tests pass a fake. */
+  gitService?: GitService;
+  /** Injectable pre-merge backup hook (defaults to the real VACUUM-INTO backup). Tests pass a no-op. */
+  createBackup?: (reason: string) => Promise<unknown>;
 }) {
   const { database, getSessionManager, boardEvents } = deps;
+  const gitService = deps.gitService ?? realGitService;
+  const createBackup = deps.createBackup ?? realCreateBackup;
 
   // --- createWorkspace helpers ---
 
