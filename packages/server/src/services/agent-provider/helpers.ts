@@ -4,6 +4,7 @@ import { basename, delimiter, dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import type { FileSystem } from "./types.js";
 import { PLAN_BEGIN_MARKER, PLAN_END_MARKER } from "./types.js";
+import { getDbUrl } from "../../db/data-dir.js";
 
 export const nodeFileSystem: FileSystem = {
   existsSync,
@@ -86,6 +87,26 @@ export function getMcpConfigPath(fs: FileSystem = nodeFileSystem): string {
   claudeMcpConfigPath = path;
   console.log(`[agent] Claude MCP config written to ${path}`);
   return path;
+}
+
+/**
+ * The agentic-kanban MCP server as an in-memory stdio config, for the Claude Agent
+ * SDK's `options.mcpServers` (the butler). Mirrors `getMcpConfigPath` but returns the
+ * object the SDK expects rather than a config-file path. `SERVER_PORT` is forwarded so
+ * the MCP server's tools can call back to this server.
+ */
+export function getMcpServersConfig(): Record<string, { command: string; args: string[]; env?: Record<string, string> }> {
+  const serverPort = process.env.KANBAN_SERVER_PORT || process.env.SERVER_PORT || process.env.PORT || "3001";
+  // Pin the spawned MCP server to the SAME database this server uses. Without this it
+  // re-runs data-dir resolution under a different cwd and can fall back to
+  // ~/.agentic-kanban (a different DB), so the butler would answer about the wrong board.
+  return {
+    "agentic-kanban": {
+      command: "node",
+      args: ["--import", TSX_URL, MCP_SERVER_PATH],
+      env: { SERVER_PORT: serverPort, DB_URL: getDbUrl() },
+    },
+  };
 }
 
 // --- Environment building ---

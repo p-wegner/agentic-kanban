@@ -14,7 +14,7 @@
  * reusing `buildSpawnEnv` so the butler behaves like the rest of the agents.
  */
 import { query, type Options, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
-import { buildSpawnEnv } from "./agent-provider/helpers.js";
+import { buildSpawnEnv, getMcpServersConfig } from "./agent-provider/helpers.js";
 
 export type ButlerEvent =
   | { type: "ready" }
@@ -95,6 +95,7 @@ function buildButlerSystemPrompt(projectName: string, repoPath: string): string 
     `Project location: ${repoPath}`,
     `Board API: http://localhost:${serverPort}/api`,
     `Answer questions about the project, codebase, and active work. Help with quick analysis, research, and code questions.`,
+    `For anything about the board (issues, statuses, counts, workspaces, sessions), use the "agentic-kanban" MCP tools (e.g. list_issues, get_board_status, get_issue) — they are authoritative. Do NOT guess board state or scrape it via curl.`,
     `Be concise and helpful; avoid unnecessary preamble. You have full read access to the project files and standard tools.`,
   ].join("\n");
 }
@@ -143,6 +144,7 @@ export function ensureButlerSession(opts: {
     env: env as Options["env"],
     abortController: session.abort,
     systemPrompt: { type: "preset", preset: "claude_code", append: buildButlerSystemPrompt(opts.projectName, opts.repoPath) },
+    mcpServers: getMcpServersConfig(),
     ...(opts.resumeSessionId ? { resume: opts.resumeSessionId } : {}),
   };
 
