@@ -60,6 +60,7 @@ export function registerGetBoardStatus(server: McpServer) {
             issueNumber: schema.issues.issueNumber,
             title: schema.issues.title,
             priority: schema.issues.priority,
+            issueType: schema.issues.issueType,
             statusId: schema.issues.statusId,
             statusName: schema.projectStatuses.name,
           })
@@ -153,6 +154,7 @@ export function registerGetBoardStatus(server: McpServer) {
             issueId: issue.id,
             title: issue.title,
             priority: issue.priority,
+            issueType: issue.issueType,
             statusName: issue.statusName,
             workspace: mainWs ? {
               id: mainWs.id, branch: mainWs.branch, status: mainWs.status,
@@ -167,6 +169,7 @@ export function registerGetBoardStatus(server: McpServer) {
             conflicts: null,
             lastActivity: null,
             lastOutput: [],
+            lastAgentMessage: null,
           };
 
           // For non-closed workspaces with a workingDir: compute diff stats + last output
