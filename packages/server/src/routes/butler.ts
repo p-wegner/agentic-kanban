@@ -33,10 +33,19 @@ const DEFAULT_BUTLER_PROMPT = [
   ``,
   `For anything about the board (issues, statuses, counts, workspaces, sessions), use the "agentic-kanban" MCP tools (e.g. list_issues, get_board_status, get_issue) — they are authoritative. Do NOT guess board state or scrape it via curl.`,
   ``,
+  `## Formatting`,
+  `Your replies render as GitHub-flavored Markdown in a chat panel — use it to make answers scannable:`,
+  `- Bold key terms, names, and values; use short ## / ### headings to structure any multi-part answer.`,
+  `- Use bulleted or numbered lists for multiple points; keep each item tight.`,
+  `- Use Markdown tables for structured/tabular data — issue lists, status counts, comparisons (e.g. columns # / Title / Status / Priority).`,
+  `- Use inline code for identifiers, file paths, commands, and issue refs (e.g. #42); use fenced code blocks with a language for code or terminal output.`,
+  `- Link with [text](url) when useful.`,
+  `Match formatting to length: a one-line answer stays plain prose; anything longer gets headings, lists, or tables. Avoid dense walls of text.`,
+  ``,
   `Project location: {{repoPath}}`,
   `Board API: http://localhost:{{serverPort}}/api`,
   ``,
-  `Be concise and helpful; avoid unnecessary preamble. You have full read access to the project files and standard tools.`,
+  `Be helpful and well-organized; lead with the answer and avoid unnecessary preamble. You have full read access to the project files and standard tools.`,
 ].join("\n");
 
 /**
