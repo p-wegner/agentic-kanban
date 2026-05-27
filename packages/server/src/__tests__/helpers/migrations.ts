@@ -52,4 +52,5 @@ export const MIGRATION_FILES = [
   "0043_missing_indexes.sql",
   "0044_diff_comments_workspace_idx.sql",
   "0045_workspace_model.sql",
+  "0046_issue_due_date.sql",
 ];
