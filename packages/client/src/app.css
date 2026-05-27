@@ -1,4 +1,8 @@
 @import "tailwindcss";
+/* Enables the `prose` / `prose-invert` classes used to render butler markdown
+   (tables, lists, headings). Without it those classes are no-ops and markdown
+   renders unstyled (borderless tables, bullet-less lists). */
+@plugin "@tailwindcss/typography";
 
 @custom-variant dark (&:is(.dark *));
 
