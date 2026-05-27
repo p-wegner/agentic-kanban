@@ -121,6 +121,14 @@ MIT
 
 ---
 
+**Building agentic workflows for your team?** Peter Wegner consults on AI-driven development practices — [get in touch](https://github.com/p-wegner).
+
+## Support
+
+If this tool saves you time, consider [sponsoring development](https://github.com/sponsors/p-wegner).
+
+---
+
 [README.de.md](README.de.md) — Deutsche Version
 [README.fr.md](README.fr.md) — Version française
 [README.it.md](README.it.md) — Versione italiana
