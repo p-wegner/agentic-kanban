@@ -32,7 +32,7 @@ const STATUS_CLASS: Record<string, string> = {
 
 const ARCHIVE_STATUSES = new Set(["Done", "Cancelled"]);
 
-type SortKey = "number" | "title" | "status" | "priority" | "type" | "estimate" | "updated";
+type SortKey = "number" | "title" | "status" | "priority" | "type" | "estimate" | "updated" | "dueDate";
 type SortDir = "asc" | "desc";
 
 const ISSUE_TYPE_ORDER: Record<string, number> = { bug: 0, feature: 1, task: 2, chore: 3 };
@@ -92,6 +92,12 @@ export function TableView({ columns, onIssueClick, searchQuery }: TableViewProps
       case "type": cmp = (ISSUE_TYPE_ORDER[a.issueType ?? "task"] ?? 2) - (ISSUE_TYPE_ORDER[b.issueType ?? "task"] ?? 2); break;
       case "estimate": cmp = (ESTIMATE_ORDER[a.estimate ?? ""] ?? 99) - (ESTIMATE_ORDER[b.estimate ?? ""] ?? 99); break;
       case "updated": cmp = new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime(); break;
+      case "dueDate": {
+        const aTime = a.dueDate ? new Date(a.dueDate).getTime() : Infinity;
+        const bTime = b.dueDate ? new Date(b.dueDate).getTime() : Infinity;
+        cmp = aTime - bTime;
+        break;
+      }
     }
     return sort.dir === "asc" ? cmp : -cmp;
   });
@@ -134,6 +140,7 @@ export function TableView({ columns, onIssueClick, searchQuery }: TableViewProps
                   ["type", "Type"],
                   ["estimate", "Estimate"],
                   ["updated", "Updated"],
+                  ["dueDate", "Due Date"],
                 ] as [SortKey, string][]
               ).map(([key, label]) => (
                 <th
@@ -187,6 +194,17 @@ export function TableView({ columns, onIssueClick, searchQuery }: TableViewProps
                 </td>
                 <td className="px-3 py-1.5 whitespace-nowrap text-xs text-gray-500 dark:text-gray-400">
                   {formatDate(issue.updatedAt)}
+                </td>
+                <td className="px-3 py-1.5 whitespace-nowrap text-xs">
+                  {issue.dueDate ? (() => {
+                    const overdue = new Date(issue.dueDate) < new Date(new Date().toDateString()) &&
+                      issue.statusName !== "Done" && issue.statusName !== "Cancelled";
+                    return (
+                      <span className={overdue ? "text-red-600 font-medium" : "text-gray-500 dark:text-gray-400"}>
+                        {formatDate(issue.dueDate)}
+                      </span>
+                    );
+                  })() : <span className="text-gray-300 dark:text-gray-600">—</span>}
                 </td>
                 <td className="px-3 py-1.5">
                   <div className="flex flex-wrap gap-1">
