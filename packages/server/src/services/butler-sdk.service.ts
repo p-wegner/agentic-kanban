@@ -165,6 +165,26 @@ export async function setButlerModel(projectId: string, model: string): Promise<
   return true;
 }
 
+/**
+ * Interrupt the butler's in-flight turn (the SDK's `query.interrupt()` control request),
+ * without tearing down the warm session — the next turn can still be sent. Returns false
+ * if there is no active session/query. Broadcasts a result so the UI leaves its "thinking"
+ * state even if the SDK does not emit its own interrupt result.
+ */
+export async function interruptButler(projectId: string): Promise<boolean> {
+  const s = sessions.get(projectId);
+  if (!s?.query) return false;
+  try {
+    await s.query.interrupt();
+  } catch (err) {
+    console.warn(`[butler-sdk] interrupt failed: project=${projectId} ${err instanceof Error ? err.message : err}`);
+    return false;
+  }
+  s.busy = false;
+  broadcast(s, { type: "result", isError: false });
+  return true;
+}
+
 /** Conversation history for the active session (empty if none) — replayed by the UI on reload. */
 export function getButlerTranscript(projectId: string): ButlerTurn[] {
   return sessions.get(projectId)?.transcript ?? [];

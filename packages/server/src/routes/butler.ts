@@ -19,6 +19,7 @@ import {
   getButlerTranscript,
   getButlerCommands,
   setButlerModel,
+  interruptButler,
 } from "../services/butler-sdk.service.js";
 
 function butlerSessionPrefKey(projectId: string): string {
@@ -282,6 +283,12 @@ export function createButlerRoute(
     const session = await startSession(projectId);
     if (!session) return c.json({ error: "Project not found" }, 404);
     return c.json({ active: true, sessionId: session.sessionId ?? null }, 201);
+  });
+
+  // POST /api/projects/:id/butler/interrupt — stop the in-flight turn (keeps the session warm)
+  router.post("/:id/butler/interrupt", async (c) => {
+    const ok = await interruptButler(c.req.param("id"));
+    return c.json({ ok });
   });
 
   // POST /api/projects/:id/butler/message — send a turn to the warm session
