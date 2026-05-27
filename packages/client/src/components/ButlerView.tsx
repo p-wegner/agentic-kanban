@@ -235,10 +235,26 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
     eventSourceRef.current = null;
 
     apiFetch<ButlerState>(`/api/projects/${projectId}/butler`)
-      .then((state) => {
+      .then(async (state) => {
         setButlerState(state);
         setContextTokens(state.contextTokens ?? 0);
-        if (state.active) openStream();
+        if (state.active) {
+          // Restore prior conversation (the SSE stream only carries new events).
+          try {
+            const { messages } = await apiFetch<{ messages: { role: "user" | "assistant"; text: string; ts: number }[] }>(
+              `/api/projects/${projectId}/butler/messages`,
+            );
+            if (messages.length) {
+              setChatMessages(messages.map((m, i) => ({
+                id: `hist-${i}-${m.ts}`,
+                role: m.role,
+                text: m.text,
+                ts: m.ts,
+              })));
+            }
+          } catch { /* no history available */ }
+          openStream();
+        }
       })
       .catch(() => setButlerState({ active: false, sessionId: null }))
       .finally(() => setLoadingState(false));

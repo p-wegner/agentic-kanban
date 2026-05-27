@@ -14,6 +14,7 @@ import {
   subscribeButler,
   stopButlerSession,
   getButlerSession,
+  getButlerTranscript,
 } from "../services/butler-sdk.service.js";
 
 function butlerSessionPrefKey(projectId: string): string {
@@ -116,6 +117,12 @@ export function createButlerRoute(
     const state = getButlerSession(projectId);
     const persisted = (await getPreference(butlerSessionPrefKey(projectId), database)) || null;
     return c.json({ active: state.active, sessionId: state.sessionId ?? persisted, contextTokens: state.contextTokens });
+  });
+
+  // GET /api/projects/:id/butler/messages — conversation history for the active session,
+  // so the chat UI can restore prior messages after a page reload.
+  router.get("/:id/butler/messages", (c) => {
+    return c.json({ messages: getButlerTranscript(c.req.param("id")) });
   });
 
   // GET /api/projects/:id/butler/skill — the editable butler prompt + whether a
