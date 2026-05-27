@@ -13,8 +13,21 @@
  * Auth/model come from the active Claude profile env (Bedrock/z.ai/API key),
  * reusing `buildSpawnEnv` so the butler behaves like the rest of the agents.
  */
-import { query, type Options, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
+import { query, type Options, type Query, type SDKUserMessage, type ModelInfo, type SlashCommand } from "@anthropic-ai/claude-agent-sdk";
 import { buildSpawnEnv, getMcpServersConfig } from "./agent-provider/helpers.js";
+
+/** Compact model descriptor surfaced to the UI model picker. */
+export interface ButlerModelOption {
+  value: string;
+  displayName: string;
+}
+
+/** Compact slash-command descriptor surfaced to the UI autocomplete. */
+export interface ButlerCommand {
+  name: string;
+  description: string;
+  argumentHint?: string;
+}
 
 export type ButlerEvent =
   | { type: "ready" }
@@ -88,6 +101,14 @@ interface ButlerSession {
   model?: string;
   contextWindow?: number;
   mcpConnected?: boolean;
+  /** The active Claude profile this session was started with (per-project override or global). */
+  claudeProfile?: string;
+  /** Live Query handle — exposes control requests (setModel, supportedModels, supportedCommands). */
+  query?: Query;
+  /** Models available to this session, fetched once after init (for the UI picker). */
+  models?: ButlerModelOption[];
+  /** Slash commands available to this session, fetched once after init (for the UI autocomplete). */
+  commands?: ButlerCommand[];
 }
 
 const sessions = new Map<string, ButlerSession>();
@@ -114,9 +135,34 @@ function buildButlerSystemPrompt(projectName: string, repoPath: string): string 
   ].join("\n");
 }
 
-export function getButlerSession(projectId: string): { sessionId?: string; active: boolean; contextTokens: number; model?: string; contextWindow?: number; mcpConnected?: boolean } {
+export function getButlerSession(projectId: string): { sessionId?: string; active: boolean; contextTokens: number; model?: string; contextWindow?: number; mcpConnected?: boolean; claudeProfile?: string } {
   const s = sessions.get(projectId);
-  return { sessionId: s?.sessionId, active: !!s, contextTokens: s?.contextTokens ?? 0, model: s?.model, contextWindow: s?.contextWindow, mcpConnected: s?.mcpConnected };
+  return { sessionId: s?.sessionId, active: !!s, contextTokens: s?.contextTokens ?? 0, model: s?.model, contextWindow: s?.contextWindow, mcpConnected: s?.mcpConnected, claudeProfile: s?.claudeProfile };
+}
+
+/** Models the active session reported as available (empty if none/not yet fetched). */
+export function getButlerModels(projectId: string): ButlerModelOption[] {
+  return sessions.get(projectId)?.models ?? [];
+}
+
+/** Slash commands the active session reported as available (empty if none/not yet fetched). */
+export function getButlerCommands(projectId: string): ButlerCommand[] {
+  return sessions.get(projectId)?.commands ?? [];
+}
+
+/**
+ * Switch the model for subsequent turns WITHOUT restarting — uses the SDK's
+ * `query.setModel()` control request, so conversation context is preserved.
+ * Returns false if there is no active session. An empty string clears the
+ * override (back to the profile/CLI default).
+ */
+export async function setButlerModel(projectId: string, model: string): Promise<boolean> {
+  const s = sessions.get(projectId);
+  if (!s?.query) return false;
+  await s.query.setModel(model || undefined);
+  s.model = model || undefined;
+  broadcast(s, { type: "meta", model: s.model, contextWindow: s.contextWindow, mcpConnected: s.mcpConnected });
+  return true;
 }
 
 /** Conversation history for the active session (empty if none) — replayed by the UI on reload. */
@@ -142,6 +188,8 @@ export function ensureButlerSession(opts: {
   projectName: string;
   claudeProfile?: string;
   resumeSessionId?: string;
+  /** Model alias/id for the session (e.g. "opus", "sonnet"). Empty/omitted = profile/CLI default. */
+  model?: string;
   /** System-prompt text appended to the claude_code preset. When omitted, a built-in
    *  default is used. Callers (butler route) resolve this from the editable `butler`
    *  agent skill so users can customize the butler's behavior. */
@@ -159,6 +207,8 @@ export function ensureButlerSession(opts: {
     busy: false,
     contextTokens: 0,
     transcript: [],
+    claudeProfile: opts.claudeProfile,
+    model: opts.model || undefined,
   };
   sessions.set(opts.projectId, session);
 
@@ -172,6 +222,7 @@ export function ensureButlerSession(opts: {
     abortController: session.abort,
     systemPrompt: { type: "preset", preset: "claude_code", append: opts.systemPromptAppend ?? buildButlerSystemPrompt(opts.projectName, opts.repoPath) },
     mcpServers: getMcpServersConfig(),
+    ...(opts.model ? { model: opts.model } : {}),
     ...(opts.resumeSessionId ? { resume: opts.resumeSessionId } : {}),
   };
 
@@ -180,10 +231,29 @@ export function ensureButlerSession(opts: {
   return session;
 }
 
+/** Pull the available models + slash commands from the live session (best-effort). */
+async function fetchSessionCapabilities(session: ButlerSession, q: Query): Promise<void> {
+  try {
+    const models: ModelInfo[] = await q.supportedModels();
+    session.models = models.map((m) => ({ value: m.value, displayName: m.displayName }));
+  } catch (err) {
+    console.warn(`[butler-sdk] supportedModels failed: project=${session.projectId} ${err instanceof Error ? err.message : err}`);
+  }
+  try {
+    const commands: SlashCommand[] = await q.supportedCommands();
+    session.commands = commands.map((c) => ({ name: c.name, description: c.description, argumentHint: c.argumentHint }));
+  } catch (err) {
+    console.warn(`[butler-sdk] supportedCommands failed: project=${session.projectId} ${err instanceof Error ? err.message : err}`);
+  }
+}
+
 async function runLoop(session: ButlerSession, input: Pushable<SDKUserMessage>, options: Options): Promise<void> {
   try {
     const q = query({ prompt: input, options });
+    session.query = q;
     broadcast(session, { type: "ready" });
+    // Fetch the live model + slash-command lists once (control requests, non-fatal).
+    void fetchSessionCapabilities(session, q);
     for await (const msg of q as AsyncIterable<Record<string, unknown>>) {
       const type = msg.type as string;
       if (type === "system" && (msg as { subtype?: string }).subtype === "init") {
@@ -240,6 +310,7 @@ async function runLoop(session: ButlerSession, input: Pushable<SDKUserMessage>, 
     console.error(`[butler-sdk] session error: project=${session.projectId} ${message}`);
     broadcast(session, { type: "error", message });
   } finally {
+    session.query = undefined;
     sessions.delete(session.projectId);
   }
 }

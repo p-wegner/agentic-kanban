@@ -12,6 +12,19 @@ interface ButlerState {
   model?: string;
   contextWindow?: number;
   mcpConnected?: boolean;
+  selectedModel?: string;
+  selectedProfile?: string;
+}
+
+interface ModelOption {
+  value: string;
+  displayName: string;
+}
+
+interface ButlerCommand {
+  name: string;
+  description: string;
+  argumentHint?: string;
 }
 
 /** Event shape emitted by the server butler SSE stream (butler-sdk.service.ts). */
@@ -25,12 +38,6 @@ type ButlerEvent =
   | { type: "usage"; contextTokens: number }
   | { type: "meta"; model?: string; contextWindow?: number; mcpConnected?: boolean }
   | { type: "error"; message: string };
-
-/** Trim a model id to something compact for the chip (e.g. "claude-opus-4-7" -> "opus-4-7"). */
-function shortModel(model?: string): string {
-  if (!model) return "";
-  return model.replace(/^(claude-|anthropic\.|us\.anthropic\.)/i, "").replace(/-v\d+:\d+$/, "").replace(/-\d{8}$/, "");
-}
 
 /** Format a context-window size: 1000000 -> "1M", 200000 -> "200k". */
 function formatWindow(n: number): string {
@@ -168,6 +175,16 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
   const [customizeOpen, setCustomizeOpen] = useState(false);
   const [customizePrompt, setCustomizePrompt] = useState("");
   const [customizeBusy, setCustomizeBusy] = useState(false);
+  // Model picker (switches in-place, no context loss) + profile picker (restarts fresh).
+  const [models, setModels] = useState<ModelOption[]>([]);
+  const [selectedModel, setSelectedModel] = useState("");
+  const [profiles, setProfiles] = useState<string[]>([]);
+  const [selectedProfile, setSelectedProfile] = useState("");
+  const [globalProfile, setGlobalProfile] = useState("");
+  const [switchingProfile, setSwitchingProfile] = useState(false);
+  // Slash-command autocomplete.
+  const [commands, setCommands] = useState<ButlerCommand[]>([]);
+  const [commandIndex, setCommandIndex] = useState(0);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
@@ -244,6 +261,27 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
     eventSourceRef.current = es;
   }
 
+  // Fetch the model/profile/command lists. The server fetches models+commands from
+  // the live SDK session just after init, so retry once if they aren't ready yet.
+  async function loadCapabilities(attempt = 0) {
+    try {
+      const [modelData, cmdData, profData] = await Promise.all([
+        apiFetch<{ models: ModelOption[]; selected: string }>(`/api/projects/${projectId}/butler/models`),
+        apiFetch<{ commands: ButlerCommand[] }>(`/api/projects/${projectId}/butler/commands`),
+        apiFetch<{ profiles: string[]; selected: string; globalDefault: string }>(`/api/projects/${projectId}/butler/profiles`),
+      ]);
+      setModels(modelData.models);
+      setSelectedModel(modelData.selected);
+      setCommands(cmdData.commands);
+      setProfiles(profData.profiles);
+      setSelectedProfile(profData.selected);
+      setGlobalProfile(profData.globalDefault);
+      if ((modelData.models.length === 0 || cmdData.commands.length === 0) && attempt < 2) {
+        setTimeout(() => void loadCapabilities(attempt + 1), 2000);
+      }
+    } catch { /* capabilities are best-effort */ }
+  }
+
   // Load butler state on mount / project change, and open the stream if active.
   useEffect(() => {
     setLoadingState(true);
@@ -255,6 +293,13 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
     setContextWindow(undefined);
     setMcpConnected(undefined);
     setCustomizeOpen(false);
+    setModels([]);
+    setSelectedModel("");
+    setProfiles([]);
+    setSelectedProfile("");
+    setGlobalProfile("");
+    setCommands([]);
+    setCommandIndex(0);
     assistantBufRef.current = "";
     assistantMsgIdRef.current = null;
     eventSourceRef.current?.close();
@@ -283,6 +328,7 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
             }
           } catch { /* no history available */ }
           openStream();
+          void loadCapabilities();
         }
       })
       .catch(() => setButlerState({ active: false, sessionId: null }))
@@ -309,6 +355,7 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
       );
       setButlerState({ active: true, sessionId: result.sessionId });
       openStream();
+      void loadCapabilities();
     } catch (err) {
       console.error("Failed to start butler", err);
     } finally {
@@ -331,6 +378,48 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
     assistantMsgIdRef.current = null;
     setButlerState({ active: true, sessionId: null });
     openStream();
+  }
+
+  // Switch model without restarting — the server uses the SDK setModel control
+  // request, so the conversation context is preserved.
+  async function handleModelChange(value: string) {
+    setSelectedModel(value);
+    try {
+      await apiFetch(`/api/projects/${projectId}/butler/model`, {
+        method: "POST",
+        body: JSON.stringify({ model: value }),
+      });
+    } catch (err) {
+      console.error("Failed to switch butler model", err);
+    }
+  }
+
+  // Switch Claude profile — this changes auth/endpoint, so the butler is restarted
+  // fresh (new instance, new context). We mirror that by wiping the local chat.
+  async function handleProfileChange(value: string) {
+    if (sending || switchingProfile) return;
+    setSelectedProfile(value);
+    setSwitchingProfile(true);
+    eventSourceRef.current?.close();
+    eventSourceRef.current = null;
+    try {
+      await apiFetch(`/api/projects/${projectId}/butler/profile`, {
+        method: "POST",
+        body: JSON.stringify({ profile: value }),
+      });
+      setChatMessages([]);
+      setContextTokens(0);
+      setModel(undefined);
+      assistantBufRef.current = "";
+      assistantMsgIdRef.current = null;
+      setButlerState({ active: true, sessionId: null });
+      openStream();
+      void loadCapabilities();
+    } catch (err) {
+      console.error("Failed to switch butler profile", err);
+    } finally {
+      setSwitchingProfile(false);
+    }
   }
 
   async function openCustomize() {
@@ -390,7 +479,55 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
     }
   }
 
+  // Slash-command autocomplete: active when the token at the cursor (start of input
+  // or after whitespace) begins with "/". Matches the leading "/<partial>".
+  const slashMatch = /(?:^|\s)\/([\w:-]*)$/.exec(input);
+  const commandQuery = slashMatch?.[1] ?? "";
+  const filteredCommands = slashMatch && commands.length > 0
+    ? commands.filter((cmd) => cmd.name.toLowerCase().includes(commandQuery.toLowerCase())).slice(0, 8)
+    : [];
+  const commandMenuOpen = filteredCommands.length > 0;
+
+  // Keep the highlighted suggestion in range as the query narrows.
+  useEffect(() => {
+    setCommandIndex(0);
+  }, [commandQuery, commandMenuOpen]);
+
+  // Replace the trailing "/<partial>" with the chosen "/name " token.
+  function applyCommand(name: string) {
+    const m = /(?:^|\s)\/([\w:-]*)$/.exec(input);
+    if (!m) return;
+    const slashStart = m.index + m[0].length - (m[1].length + 1); // position of the "/"
+    const next = `${input.slice(0, slashStart)}/${name} `;
+    setInput(next);
+    setCommandIndex(0);
+    requestAnimationFrame(() => inputRef.current?.focus());
+  }
+
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (commandMenuOpen) {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setCommandIndex((i) => (i + 1) % filteredCommands.length);
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setCommandIndex((i) => (i - 1 + filteredCommands.length) % filteredCommands.length);
+        return;
+      }
+      if (e.key === "Enter" || e.key === "Tab") {
+        e.preventDefault();
+        applyCommand(filteredCommands[commandIndex].name);
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        // Collapse the menu without clearing the input by appending a space.
+        setInput((v) => `${v} `);
+        return;
+      }
+    }
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       handleSend();
@@ -466,9 +603,7 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
                 mcpConnected !== undefined ? `Board MCP: ${mcpConnected ? "connected" : "not connected"}` : null,
               ].filter(Boolean).join("\n")}
             >
-              {model && (
-                <span className="font-medium text-gray-500 dark:text-gray-400 truncate max-w-[160px]">{shortModel(model)}</span>
-              )}
+              {/* Resolved model shown via the picker below; the dot reflects MCP status. */}
               {mcpConnected !== undefined && (
                 <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${mcpConnected ? "bg-green-500" : "bg-gray-300 dark:bg-gray-600"}`} title={mcpConnected ? "Board MCP connected" : "Board MCP not connected"} />
               )}
@@ -480,6 +615,35 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
                   : "warm session"}
               </span>
             </div>
+            {/* Model picker — switches in place, no context loss. */}
+            <label className="flex items-center gap-1 text-gray-500 dark:text-gray-400" title="Model for the butler. Switches without losing context.">
+              <span className="hidden sm:inline text-[11px]">Model</span>
+              <select
+                value={selectedModel}
+                onChange={(e) => void handleModelChange(e.target.value)}
+                className="rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-1.5 py-0.5 text-xs text-gray-700 dark:text-gray-300 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              >
+                <option value="">Default</option>
+                {models.map((m) => (
+                  <option key={m.value} value={m.value}>{m.displayName}</option>
+                ))}
+              </select>
+            </label>
+            {/* Profile picker — changes auth/endpoint, so it restarts the butler fresh. */}
+            <label className="flex items-center gap-1 text-gray-500 dark:text-gray-400" title="Claude profile (auth/endpoint, e.g. zai). Switching restarts the butler with a fresh context.">
+              <span className="hidden sm:inline text-[11px]">Profile</span>
+              <select
+                value={selectedProfile}
+                onChange={(e) => void handleProfileChange(e.target.value)}
+                disabled={switchingProfile || sending}
+                className="rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-1.5 py-0.5 text-xs text-gray-700 dark:text-gray-300 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-50"
+              >
+                <option value="">{globalProfile ? `Default (${globalProfile})` : "Default"}</option>
+                {profiles.map((p) => (
+                  <option key={p} value={p}>{p}</option>
+                ))}
+              </select>
+            </label>
             <button
               onClick={openCustomize}
               className="px-2 py-1 rounded text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
@@ -552,6 +716,24 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
           <div className="shrink-0 border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-4 py-3">
             <div className="max-w-3xl mx-auto flex items-end gap-2">
               <div className="flex-1 relative">
+                {commandMenuOpen && (
+                  <div className="absolute bottom-full mb-2 left-0 right-0 max-h-60 overflow-y-auto rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-lg z-10 py-1">
+                    <div className="px-3 py-1 text-[10px] uppercase tracking-wide text-gray-400 dark:text-gray-500">Commands</div>
+                    {filteredCommands.map((cmd, i) => (
+                      <button
+                        key={cmd.name}
+                        type="button"
+                        onMouseDown={(e) => { e.preventDefault(); applyCommand(cmd.name); }}
+                        onMouseEnter={() => setCommandIndex(i)}
+                        className={`w-full text-left px-3 py-1.5 flex items-baseline gap-2 ${i === commandIndex ? "bg-blue-50 dark:bg-blue-900/30" : "hover:bg-gray-50 dark:hover:bg-gray-700/50"}`}
+                      >
+                        <span className="text-sm font-mono text-blue-600 dark:text-blue-400 shrink-0">/{cmd.name}</span>
+                        {cmd.argumentHint && <span className="text-[11px] text-gray-400 dark:text-gray-500 shrink-0">{cmd.argumentHint}</span>}
+                        {cmd.description && <span className="text-xs text-gray-500 dark:text-gray-400 truncate">{cmd.description}</span>}
+                      </button>
+                    ))}
+                  </div>
+                )}
                 <textarea
                   ref={inputRef}
                   value={input}
@@ -559,7 +741,7 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
                   onKeyDown={handleKeyDown}
                   disabled={sending}
                   rows={1}
-                  placeholder="Message the butler... (Enter to send, Shift+Enter for new line)"
+                  placeholder="Message the butler... (Enter to send, Shift+Enter for new line, / for commands)"
                   className="w-full resize-none rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-4 py-2.5 pr-10 text-sm text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-600 transition-all disabled:opacity-50"
                   style={{ minHeight: "42px", maxHeight: "160px", overflowY: "auto" }}
                   onInput={(e) => {
