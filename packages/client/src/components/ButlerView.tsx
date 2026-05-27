@@ -1,15 +1,23 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { apiFetch } from "../lib/api.js";
-import { useWebSocket } from "../lib/useWebSocket.js";
 import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
 import type { LiveSessionStats } from "../lib/useBoardEvents.js";
 
 interface ButlerState {
-  workspaceId: string | null;
+  active: boolean;
   sessionId: string | null;
-  status: string;
 }
+
+/** Event shape emitted by the server butler SSE stream (butler-sdk.service.ts). */
+type ButlerEvent =
+  | { type: "ready" }
+  | { type: "session"; sessionId: string }
+  | { type: "turn-start" }
+  | { type: "text"; text: string }
+  | { type: "tool"; name: string }
+  | { type: "result"; text?: string; isError?: boolean }
+  | { type: "error"; message: string };
 
 interface ChatMessage {
   id: string;
@@ -33,6 +41,17 @@ function formatRelativeTs(ts: number): string {
   if (mins < 60) return `${mins}m ago`;
   const hrs = Math.floor(mins / 60);
   return `${hrs}h ago`;
+}
+
+function formatToolLabel(name: string): string {
+  if (name === "Read") return "📄 Reading a file";
+  if (name === "Write" || name === "Edit") return "✏️ Editing a file";
+  if (name === "Bash") return "⚡ Running a command";
+  if (name === "Glob" || name === "Grep") return "🔎 Searching the project";
+  if (name === "WebSearch" || name === "WebFetch") return "🔍 Searching the web";
+  if (name.includes("list_issues")) return "📋 Listing board issues";
+  if (name.includes("get_board_status")) return "📊 Checking board status";
+  return `🔧 ${name.replace(/^mcp__[^_]+__/, "").replace(/_/g, " ")}`;
 }
 
 function ActivityStrip({ columns, liveActivity, liveStats, onIssueClick }: Omit<ButlerViewProps, "projectId">) {
@@ -124,33 +143,98 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
   const [sending, setSending] = useState(false);
   const [input, setInput] = useState("");
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
-  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
-  const [sessionOver, setSessionOver] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
-  const msgIdxRef = useRef(0);
-  const currentAssistantBufRef = useRef("");
-  const lastAssistantMsgIdRef = useRef<string | null>(null);
+  const eventSourceRef = useRef<EventSource | null>(null);
+  const assistantBufRef = useRef("");
+  const assistantMsgIdRef = useRef<string | null>(null);
 
-  const { messages: wsMessages } = useWebSocket(activeSessionId);
+  // Append/replace the streaming assistant bubble as text deltas arrive.
+  function appendAssistantText(delta: string) {
+    assistantBufRef.current += delta;
+    const text = assistantBufRef.current;
+    setChatMessages((prev) => {
+      const last = prev[prev.length - 1];
+      if (last && last.id === assistantMsgIdRef.current) {
+        return [...prev.slice(0, -1), { ...last, text }];
+      }
+      const id = `asst-${Date.now()}-${Math.random()}`;
+      assistantMsgIdRef.current = id;
+      return [...prev, { id, role: "assistant", text, ts: Date.now() }];
+    });
+  }
 
-  // Load butler state on mount / project change
+  function handleButlerEvent(e: ButlerEvent) {
+    switch (e.type) {
+      case "session":
+        setButlerState((prev) => ({ active: true, sessionId: e.sessionId }));
+        break;
+      case "turn-start":
+        setSending(true);
+        assistantBufRef.current = "";
+        assistantMsgIdRef.current = null;
+        break;
+      case "text":
+        appendAssistantText(e.text);
+        break;
+      case "tool":
+        setChatMessages((prev) => [...prev, { id: `act-${Date.now()}-${Math.random()}`, role: "activity", text: formatToolLabel(e.name), ts: Date.now() }]);
+        break;
+      case "result":
+        assistantBufRef.current = "";
+        assistantMsgIdRef.current = null;
+        setSending(false);
+        break;
+      case "error":
+        setChatMessages((prev) => [...prev, { id: `err-${Date.now()}`, role: "activity", text: `Error: ${e.message}`, ts: Date.now() }]);
+        setSending(false);
+        break;
+      case "ready":
+      default:
+        break;
+    }
+  }
+
+  function openStream() {
+    eventSourceRef.current?.close();
+    const es = new EventSource(`/api/projects/${projectId}/butler/stream`);
+    es.onmessage = (ev) => {
+      try {
+        handleButlerEvent(JSON.parse(ev.data) as ButlerEvent);
+      } catch {
+        // ignore non-JSON (heartbeat pings use a named event, not onmessage)
+      }
+    };
+    es.onerror = () => {
+      // EventSource auto-reconnects; nothing to do.
+    };
+    eventSourceRef.current = es;
+  }
+
+  // Load butler state on mount / project change, and open the stream if active.
   useEffect(() => {
     setLoadingState(true);
     setButlerState(null);
     setChatMessages([]);
-    setActiveSessionId(null);
-    setSessionOver(false);
-    msgIdxRef.current = 0;
+    setSending(false);
+    assistantBufRef.current = "";
+    assistantMsgIdRef.current = null;
+    eventSourceRef.current?.close();
+    eventSourceRef.current = null;
+
     apiFetch<ButlerState>(`/api/projects/${projectId}/butler`)
       .then((state) => {
         setButlerState(state);
-        if (state.sessionId && state.status === "running") {
-          setActiveSessionId(state.sessionId);
-        }
+        if (state.active) openStream();
       })
-      .catch(() => setButlerState({ workspaceId: null, sessionId: null, status: "idle" }))
+      .catch(() => setButlerState({ active: false, sessionId: null }))
       .finally(() => setLoadingState(false));
+
+    return () => {
+      eventSourceRef.current?.close();
+      eventSourceRef.current = null;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
 
   // Auto-scroll on new messages
@@ -158,120 +242,15 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [chatMessages]);
 
-  // Parse WebSocket messages into chat messages
-  useEffect(() => {
-    if (!wsMessages.length) return;
-
-    const newMessages = wsMessages.slice(msgIdxRef.current);
-    if (!newMessages.length) return;
-    msgIdxRef.current = wsMessages.length;
-
-    for (const msg of newMessages) {
-      if (msg.type === "exit") {
-        // Flush any pending assistant text
-        if (currentAssistantBufRef.current.trim()) {
-          const text = currentAssistantBufRef.current.trim();
-          setChatMessages((prev) => {
-            const last = prev[prev.length - 1];
-            if (last && last.id === lastAssistantMsgIdRef.current) {
-              return [...prev.slice(0, -1), { ...last, text }];
-            }
-            return prev;
-          });
-          currentAssistantBufRef.current = "";
-          lastAssistantMsgIdRef.current = null;
-        }
-        setSessionOver(true);
-        setActiveSessionId(null);
-        setSending(false);
-        continue;
-      }
-
-      if (msg.type !== "stdout" || !msg.data) continue;
-
-      // Try to parse as JSON (claude stream-json format)
-      try {
-        const obj = JSON.parse(msg.data);
-
-        if (obj.type === "assistant" && Array.isArray(obj.message?.content)) {
-          for (const block of obj.message.content) {
-            if (block.type === "text" && block.text) {
-              currentAssistantBufRef.current += block.text;
-              const text = currentAssistantBufRef.current;
-              setChatMessages((prev) => {
-                const last = prev[prev.length - 1];
-                if (last && last.id === lastAssistantMsgIdRef.current) {
-                  return [...prev.slice(0, -1), { ...last, text }];
-                }
-                const id = `msg-${Date.now()}-${Math.random()}`;
-                lastAssistantMsgIdRef.current = id;
-                return [...prev, { id, role: "assistant", text, ts: Date.now() }];
-              });
-            } else if (block.type === "tool_use" && block.name) {
-              const actId = `act-${Date.now()}-${Math.random()}`;
-              const toolLabel = formatToolLabel(block.name, block.input);
-              setChatMessages((prev) => [...prev, { id: actId, role: "activity", text: toolLabel, ts: Date.now() }]);
-            }
-          }
-        } else if (obj.type === "result") {
-          // Session complete — flush buffer
-          if (currentAssistantBufRef.current.trim()) {
-            const text = currentAssistantBufRef.current.trim();
-            setChatMessages((prev) => {
-              const last = prev[prev.length - 1];
-              if (last && last.id === lastAssistantMsgIdRef.current) {
-                return [...prev.slice(0, -1), { ...last, text }];
-              }
-              return prev;
-            });
-            currentAssistantBufRef.current = "";
-            lastAssistantMsgIdRef.current = null;
-          }
-          setSending(false);
-        }
-      } catch {
-        // Non-JSON raw output — treat as activity/text
-      }
-    }
-  }, [wsMessages]);
-
-  function formatToolLabel(name: string, input: unknown): string {
-    if (name === "Read" || name === "read_file") {
-      const path = (input as Record<string, string>)?.file_path || (input as Record<string, string>)?.path || "";
-      return `📄 Reading ${path || "file"}`;
-    }
-    if (name === "Write" || name === "write_file") {
-      const path = (input as Record<string, string>)?.file_path || (input as Record<string, string>)?.path || "";
-      return `✏️ Writing ${path || "file"}`;
-    }
-    if (name === "Bash" || name === "bash" || name === "execute_command") {
-      const cmd = (input as Record<string, string>)?.command || "";
-      return `⚡ ${cmd ? cmd.slice(0, 60) : "Running command"}`;
-    }
-    if (name === "WebSearch" || name === "web_search") {
-      const q = (input as Record<string, string>)?.query || "";
-      return `🔍 Searching: ${q.slice(0, 50)}`;
-    }
-    if (name === "mcp__agentic-kanban__list_issues" || name === "list_issues") {
-      return "📋 Listing board issues";
-    }
-    if (name === "mcp__agentic-kanban__get_board_status" || name === "get_board_status") {
-      return "📊 Checking board status";
-    }
-    return `🔧 ${name.replace(/_/g, " ")}`;
-  }
-
   async function handleStart() {
     setStarting(true);
     try {
-      const result = await apiFetch<{ workspaceId: string; sessionId: string | null; created: boolean }>(
+      const result = await apiFetch<ButlerState>(
         `/api/projects/${projectId}/butler/ensure`,
         { method: "POST", body: "{}" },
       );
-      setButlerState({ workspaceId: result.workspaceId, sessionId: result.sessionId, status: result.sessionId ? "running" : "idle" });
-      if (result.sessionId) {
-        setActiveSessionId(result.sessionId);
-      }
+      setButlerState({ active: true, sessionId: result.sessionId });
+      openStream();
     } catch (err) {
       console.error("Failed to start butler", err);
     } finally {
@@ -281,26 +260,20 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
 
   async function handleSend() {
     const content = input.trim();
-    if (!content || sending || !butlerState?.workspaceId) return;
+    if (!content || sending || !butlerState?.active) return;
 
-    // Optimistically add user message
     const userMsg: ChatMessage = { id: `user-${Date.now()}`, role: "user", text: content, ts: Date.now() };
     setChatMessages((prev) => [...prev, userMsg]);
     setInput("");
     setSending(true);
-    setSessionOver(false);
-    currentAssistantBufRef.current = "";
-    lastAssistantMsgIdRef.current = null;
+    assistantBufRef.current = "";
+    assistantMsgIdRef.current = null;
 
     try {
-      const result = await apiFetch<{ ok: boolean; sessionId?: string; resumed?: boolean }>(
+      await apiFetch<{ ok: boolean }>(
         `/api/projects/${projectId}/butler/message`,
         { method: "POST", body: JSON.stringify({ content }) },
       );
-      if (result.sessionId) {
-        setActiveSessionId(result.sessionId);
-        msgIdxRef.current = 0; // reset index for new session
-      }
     } catch (err) {
       setChatMessages((prev) => [...prev, {
         id: `err-${Date.now()}`,
@@ -319,7 +292,7 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
     }
   }
 
-  const hasButler = butlerState?.workspaceId != null;
+  const hasButler = butlerState?.active === true;
 
   if (loadingState) {
     return (
@@ -337,11 +310,9 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
 
   return (
     <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
-      {/* Active agents strip */}
       <ActivityStrip columns={columns} liveActivity={liveActivity} liveStats={liveStats} onIssueClick={onIssueClick} />
 
       {!hasButler ? (
-        // Splash / start screen
         <div className="flex-1 flex items-center justify-center p-8">
           <div className="text-center max-w-sm">
             <div className="w-14 h-14 mx-auto mb-4 rounded-2xl bg-gradient-to-br from-blue-500 to-violet-600 flex items-center justify-center shadow-lg">
@@ -379,7 +350,6 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
         </div>
       ) : (
         <>
-          {/* Chat messages */}
           <div className="flex-1 min-h-0 overflow-y-auto px-4 py-4">
             {chatMessages.length === 0 && (
               <div className="flex items-center justify-center h-full text-center">
@@ -406,7 +376,6 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
             </div>
           </div>
 
-          {/* Input area */}
           <div className="shrink-0 border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-4 py-3">
             <div className="max-w-3xl mx-auto flex items-end gap-2">
               <div className="flex-1 relative">
@@ -447,10 +416,8 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
                   </svg>
                   Butler is thinking...
                 </span>
-              ) : sessionOver ? (
-                "Session completed — send a new message to continue"
               ) : (
-                "Persistent butler · runs in your project repo · Enter to send"
+                "Persistent warm butler · runs in your project repo · Enter to send"
               )}
             </p>
           </div>
