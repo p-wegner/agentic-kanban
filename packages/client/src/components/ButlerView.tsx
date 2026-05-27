@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { apiFetch } from "../lib/api.js";
+import { CLAUDE_MODEL_OPTIONS } from "@agentic-kanban/shared";
 import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
 import type { LiveSessionStats } from "../lib/useBoardEvents.js";
 
@@ -14,11 +15,6 @@ interface ButlerState {
   mcpConnected?: boolean;
   selectedModel?: string;
   selectedProfile?: string;
-}
-
-interface ModelOption {
-  value: string;
-  displayName: string;
 }
 
 interface ButlerCommand {
@@ -176,7 +172,6 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
   const [customizePrompt, setCustomizePrompt] = useState("");
   const [customizeBusy, setCustomizeBusy] = useState(false);
   // Model picker (switches in-place, no context loss) + profile picker (restarts fresh).
-  const [models, setModels] = useState<ModelOption[]>([]);
   const [selectedModel, setSelectedModel] = useState("");
   const [profiles, setProfiles] = useState<string[]>([]);
   const [selectedProfile, setSelectedProfile] = useState("");
@@ -261,22 +256,21 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
     eventSourceRef.current = es;
   }
 
-  // Fetch the model/profile/command lists. The server fetches models+commands from
-  // the live SDK session just after init, so retry once if they aren't ready yet.
+  // Fetch the command + profile lists. Commands come from the live SDK session
+  // (merged with the repo's .claude/skills server-side), so retry once if the
+  // session hasn't finished discovery yet. The model list is static (the basic
+  // Claude Code tiers, CLAUDE_MODEL_OPTIONS) — only the selection is server state.
   async function loadCapabilities(attempt = 0) {
     try {
-      const [modelData, cmdData, profData] = await Promise.all([
-        apiFetch<{ models: ModelOption[]; selected: string }>(`/api/projects/${projectId}/butler/models`),
+      const [cmdData, profData] = await Promise.all([
         apiFetch<{ commands: ButlerCommand[] }>(`/api/projects/${projectId}/butler/commands`),
         apiFetch<{ profiles: string[]; selected: string; globalDefault: string }>(`/api/projects/${projectId}/butler/profiles`),
       ]);
-      setModels(modelData.models);
-      setSelectedModel(modelData.selected);
       setCommands(cmdData.commands);
       setProfiles(profData.profiles);
       setSelectedProfile(profData.selected);
       setGlobalProfile(profData.globalDefault);
-      if ((modelData.models.length === 0 || cmdData.commands.length === 0) && attempt < 2) {
+      if (cmdData.commands.length === 0 && attempt < 2) {
         setTimeout(() => void loadCapabilities(attempt + 1), 2000);
       }
     } catch { /* capabilities are best-effort */ }
@@ -293,7 +287,6 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
     setContextWindow(undefined);
     setMcpConnected(undefined);
     setCustomizeOpen(false);
-    setModels([]);
     setSelectedModel("");
     setProfiles([]);
     setSelectedProfile("");
@@ -312,6 +305,7 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
         setModel(state.model);
         setContextWindow(state.contextWindow);
         setMcpConnected(state.mcpConnected);
+        setSelectedModel(state.selectedModel ?? "");
         if (state.active) {
           // Restore prior conversation (the SSE stream only carries new events).
           try {
@@ -623,9 +617,8 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
                 onChange={(e) => void handleModelChange(e.target.value)}
                 className="rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-1.5 py-0.5 text-xs text-gray-700 dark:text-gray-300 focus:outline-none focus:ring-1 focus:ring-blue-500"
               >
-                <option value="">Default</option>
-                {models.map((m) => (
-                  <option key={m.value} value={m.value}>{m.displayName}</option>
+                {CLAUDE_MODEL_OPTIONS.map((m) => (
+                  <option key={m.value} value={m.value}>{m.label}</option>
                 ))}
               </select>
             </label>
