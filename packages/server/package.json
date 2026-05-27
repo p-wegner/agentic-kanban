@@ -1,8 +1,8 @@
 {
   "name": "agentic-kanban",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "type": "module",
-  "description": "Kanban board for managing AI-driven coding tasks",
+  "description": "Kanban board for AI-driven coding tasks — each card is a Claude Code session with built-in diff review and merge. Local-first, MCP-enabled, zero config.",
   "license": "MIT",
   "homepage": "https://github.com/p-wegner/agentic-kanban#readme",
   "repository": {
