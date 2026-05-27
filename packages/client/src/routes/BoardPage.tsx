@@ -1180,14 +1180,18 @@ export function BoardPage() {
         </div>
       )}
       <div className="flex flex-col gap-2 p-4 h-full overflow-hidden">
-        <BoardStats
-          activeColumns={activeColumns}
-          archiveColumns={archiveColumns}
-          searchQuery={searchQuery}
-          projectId={activeProjectId}
-          showBlocked={showBlocked}
-          onToggleBlocked={() => setShowBlocked((v) => !v)}
-        />
+        {/* The board summary (ticket/done/commit badges + progress bar) is irrelevant in
+            the Butler chat view — hide it there to give the conversation more vertical room. */}
+        {viewMode !== "butler" && (
+          <BoardStats
+            activeColumns={activeColumns}
+            archiveColumns={archiveColumns}
+            searchQuery={searchQuery}
+            projectId={activeProjectId}
+            showBlocked={showBlocked}
+            onToggleBlocked={() => setShowBlocked((v) => !v)}
+          />
+        )}
         <BoardToolbar
           backlogColumn={backlogColumn}
           activeColumns={activeColumns}
