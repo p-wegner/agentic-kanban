@@ -17,6 +17,7 @@ export default defineConfig({
     host: clientHost,
     port: clientPort,
     strictPort: true,
+    allowedHosts: [".ts.net"],
     proxy: {
       "/api": `http://localhost:${serverPort}`,
       "/health": `http://localhost:${serverPort}`,
