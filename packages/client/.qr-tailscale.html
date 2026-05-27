@@ -1,0 +1,27 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Kanban — Tailscale QR</title>
+<script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+<style>
+  body { font-family: system-ui, sans-serif; background:#0f172a; color:#e2e8f0;
+         display:flex; flex-direction:column; align-items:center; justify-content:center;
+         min-height:100vh; margin:0; gap:20px; }
+  #qr { background:#fff; padding:20px; border-radius:16px; }
+  a { color:#38bdf8; font-size:18px; word-break:break-all; text-align:center; }
+  h1 { font-weight:600; }
+</style>
+</head>
+<body>
+  <h1>📋 Agentic Kanban</h1>
+  <div id="qr"></div>
+  <a id="url" href="">loading…</a>
+  <script>
+    var url = "http://ao-pf38z8r8.tail865b95.ts.net:5173/";
+    new QRCode(document.getElementById("qr"), { text: url, width: 280, height: 280 });
+    var a = document.getElementById("url");
+    a.textContent = url; a.href = url;
+  </script>
+</body>
+</html>
