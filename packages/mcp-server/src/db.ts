@@ -5,16 +5,22 @@ import { drizzle } from "drizzle-orm/libsql";
 import { createClient } from "@libsql/client";
 import * as schema from "@agentic-kanban/shared/schema";
 
-// Resolve DB path: prefer env var, then ~/.agentic-kanban/, then monorepo dev, then CWD
+// Resolve DB path: prefer env var, then monorepo dev DB, then ~/.agentic-kanban/.
+// NOTE: the monorepo dev DB (../../server/kanban.db) must take precedence over the
+// ~/.agentic-kanban fallback. Otherwise, when both exist, an MCP server spawned during
+// monorepo development reads the stale published DB instead of the dev DB the main
+// server uses — causing tools to report the wrong board (see butler #45 investigation).
+// `import.meta.dirname` only resolves to a real dev path inside the monorepo, so this is
+// a no-op for published installs (devPath won't exist → falls through to publishedPath).
 function resolveDbPath(): string {
   if (process.env.DB_URL) return process.env.DB_URL;
-  // Published default: ~/.agentic-kanban/kanban.db
   const dataDir = process.env.AGENTIC_KANBAN_DIR || join(homedir(), ".agentic-kanban");
   const publishedPath = resolve(dataDir, "kanban.db");
-  if (existsSync(publishedPath)) return publishedPath;
-  // Monorepo dev: ../../server/kanban.db relative to this file
+  // Monorepo dev: ../../server/kanban.db relative to this file — prefer it when present.
   const devPath = resolve(import.meta.dirname, "../../server/kanban.db");
   if (existsSync(devPath)) return devPath;
+  // Published default: ~/.agentic-kanban/kanban.db
+  if (existsSync(publishedPath)) return publishedPath;
   // Fallback: create ~/.agentic-kanban/ and use it
   if (!existsSync(dataDir)) mkdirSync(dataDir, { recursive: true });
   return publishedPath;
