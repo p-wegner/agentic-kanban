@@ -1231,6 +1231,7 @@ export function BoardPage() {
               sessionTodos={sessionTodos}
               onIssueClick={handleIssueClick}
               onWorkspaceClick={handleManageWorkspaces}
+              onGoToBoard={() => setViewMode("kanban")}
             />
           </BoardErrorBoundary>
         )}
