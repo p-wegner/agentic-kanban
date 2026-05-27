@@ -128,11 +128,18 @@ export function createButlerRoute(
     });
 
     const customPrompt = buildButlerPrompt(project.name, project.repoPath);
-    const ws = await workspaceService.createWorkspace({
-      issueId,
-      isDirect: true,
-      customPrompt,
-    });
+    let ws;
+    try {
+      ws = await workspaceService.createWorkspace({
+        issueId,
+        isDirect: true,
+        customPrompt,
+      });
+    } catch (err) {
+      // Roll back the issue we just inserted to avoid orphaned butler issues
+      await database.delete(issues).where(eq(issues.id, issueId));
+      throw err;
+    }
 
     await setPreference(butlerPrefKey(projectId), ws.id, database);
 
