@@ -5,6 +5,7 @@ import { GraphView } from "../components/GraphView.js";
 import { TableView } from "../components/TableView.js";
 import { AgentGrid } from "../components/AgentGrid.js";
 import { TimelineView } from "../components/TimelineView.js";
+import { ButlerView } from "../components/ButlerView.js";
 import { BoardErrorBoundary } from "../components/BoardErrorBoundary.js";
 import { BoardKanbanView } from "../components/BoardKanbanView.js";
 import { BoardStats } from "../components/BoardStats.js";
@@ -95,7 +96,7 @@ export function BoardPage() {
   const [expandedCreatePanel, setExpandedCreatePanel] = useState<{ statusId: string; statusName: string; state: Partial<CreateIssueFormState> } | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>(() => {
     const stored = localStorage.getItem("kanban-board-view");
-    const validViews: ViewMode[] = ["kanban", "graph", "table", "agents", "timeline"];
+    const validViews: ViewMode[] = ["kanban", "graph", "table", "agents", "timeline", "butler"];
     return validViews.includes(stored as ViewMode) ? (stored as ViewMode) : "kanban";
   });
   const [dynamicColumnScaling, setDynamicColumnScaling] = useState(false);
@@ -828,7 +829,7 @@ export function BoardPage() {
         setShowSettings(true);
         return;
       }
-      if ((e.key === "b" || e.key === "t" || e.key === "l" || e.key === "f") && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      if ((e.key === "b" || e.key === "t" || e.key === "l" || e.key === "f" || e.key === "i") && !e.ctrlKey && !e.metaKey && !e.altKey) {
         const target = e.target as HTMLElement;
         if (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT") return;
         e.preventDefault();
@@ -836,6 +837,7 @@ export function BoardPage() {
         else if (e.key === "t") handleViewModeChange("table");
         else if (e.key === "l") handleViewModeChange("agents");
         else if (e.key === "f") handleViewModeChange("timeline");
+        else if (e.key === "i") handleViewModeChange("butler");
         return;
       }
       // "a" to toggle All Workspaces panel
@@ -1020,6 +1022,16 @@ export function BoardPage() {
       shortcut: "f",
       category: "navigation",
       handler: () => handleViewModeChange("timeline"),
+    }));
+
+    unregisters.push(registerAction({
+      id: "view-butler",
+      label: "Switch to Butler View",
+      description: "Chat with the persistent project butler agent",
+      icon: "💬",
+      shortcut: "i",
+      category: "navigation",
+      handler: () => handleViewModeChange("butler"),
     }));
 
     // Register "Go to: [column]" for each column
@@ -1242,6 +1254,17 @@ export function BoardPage() {
               columns={columns}
               onIssueClick={handleIssueClick}
               searchQuery={searchQuery}
+            />
+          </BoardErrorBoundary>
+        )}
+        {viewMode === "butler" && activeProjectId && (
+          <BoardErrorBoundary columnName="Butler View">
+            <ButlerView
+              projectId={activeProjectId}
+              columns={columns}
+              liveActivity={sessionActivity}
+              liveStats={liveStats}
+              onIssueClick={handleIssueClick}
             />
           </BoardErrorBoundary>
         )}
