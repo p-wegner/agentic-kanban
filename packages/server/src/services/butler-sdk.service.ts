@@ -86,7 +86,6 @@ class Pushable<T> implements AsyncIterable<T> {
 interface ButlerSession {
   projectId: string;
   input: Pushable<SDKUserMessage>;
-  listeners: Set<Listener>;
   sessionId?: string;
   abort: AbortController;
   busy: boolean;
@@ -105,8 +104,20 @@ interface ButlerSession {
 
 const sessions = new Map<string, ButlerSession>();
 
+/**
+ * SSE listeners keyed by projectId, kept SEPARATE from the session lifecycle. A
+ * stream connects once and must keep receiving events across "clear context" and
+ * profile switches, which stop+recreate the underlying session. If listeners lived
+ * on the session, reconnecting the stream while no session exists (the gap between
+ * stop and the next message) would silently drop the listener and the stream would
+ * go dead. Keeping them here means a stream stays attached regardless.
+ */
+const listenersByProject = new Map<string, Set<Listener>>();
+
 function broadcast(s: ButlerSession, e: ButlerEvent): void {
-  for (const l of s.listeners) {
+  const ls = listenersByProject.get(s.projectId);
+  if (!ls) return;
+  for (const l of ls) {
     try {
       l(e);
     } catch (err) {
@@ -158,14 +169,24 @@ export function getButlerTranscript(projectId: string): ButlerTurn[] {
 }
 
 export function subscribeButler(projectId: string, listener: Listener): () => void {
+  let ls = listenersByProject.get(projectId);
+  if (!ls) {
+    ls = new Set();
+    listenersByProject.set(projectId, ls);
+  }
+  ls.add(listener);
+  // Replay current state so a freshly-connected stream is immediately in sync.
   const s = sessions.get(projectId);
-  if (!s) return () => {};
-  s.listeners.add(listener);
-  if (s.sessionId) listener({ type: "session", sessionId: s.sessionId });
-  if (s.model || s.contextWindow || s.mcpConnected !== undefined) listener({ type: "meta", model: s.model, contextWindow: s.contextWindow, mcpConnected: s.mcpConnected });
-  if (s.contextTokens) listener({ type: "usage", contextTokens: s.contextTokens });
+  if (s) {
+    if (s.sessionId) listener({ type: "session", sessionId: s.sessionId });
+    if (s.model || s.contextWindow || s.mcpConnected !== undefined) listener({ type: "meta", model: s.model, contextWindow: s.contextWindow, mcpConnected: s.mcpConnected });
+    if (s.contextTokens) listener({ type: "usage", contextTokens: s.contextTokens });
+  }
   return () => {
-    s.listeners.delete(listener);
+    const set = listenersByProject.get(projectId);
+    if (!set) return;
+    set.delete(listener);
+    if (set.size === 0) listenersByProject.delete(projectId);
   };
 }
 
@@ -189,7 +210,6 @@ export function ensureButlerSession(opts: {
   const session: ButlerSession = {
     projectId: opts.projectId,
     input,
-    listeners: new Set(),
     abort: new AbortController(),
     busy: false,
     contextTokens: 0,
@@ -228,13 +248,41 @@ async function fetchSessionCapabilities(session: ButlerSession, q: Query): Promi
   }
 }
 
+/**
+ * Broadcast the *true* context-window occupancy via the SDK's own accounting
+ * (`getContextUsage().totalTokens` / `maxTokens`) — the same number Claude Code's
+ * /context shows. This is NOT the same as summing a turn's usage token counts:
+ * `cache_read_input_tokens` accumulates across every tool round-trip in a turn, so
+ * that sum balloons far past the real context size (e.g. 400k for a 30k context).
+ */
+async function broadcastContextUsage(session: ButlerSession, q: Query): Promise<void> {
+  try {
+    const usage = await (q as unknown as {
+      getContextUsage: () => Promise<{ totalTokens?: number; maxTokens?: number; rawMaxTokens?: number }>;
+    }).getContextUsage();
+    const total = usage.totalTokens ?? 0;
+    const max = usage.maxTokens ?? usage.rawMaxTokens;
+    if (total > 0) {
+      session.contextTokens = total;
+      broadcast(session, { type: "usage", contextTokens: total });
+    }
+    if (max && max !== session.contextWindow) {
+      session.contextWindow = max;
+      broadcast(session, { type: "meta", model: session.model, contextWindow: max, mcpConnected: session.mcpConnected });
+    }
+  } catch (err) {
+    console.warn(`[butler-sdk] getContextUsage failed: project=${session.projectId} ${err instanceof Error ? err.message : err}`);
+  }
+}
+
 async function runLoop(session: ButlerSession, input: Pushable<SDKUserMessage>, options: Options): Promise<void> {
   try {
     const q = query({ prompt: input, options });
     session.query = q;
     broadcast(session, { type: "ready" });
-    // Fetch the live slash-command list once (control request, non-fatal).
+    // Fetch the live slash-command list + baseline context usage once (control requests).
     void fetchSessionCapabilities(session, q);
+    void broadcastContextUsage(session, q);
     for await (const msg of q as AsyncIterable<Record<string, unknown>>) {
       const type = msg.type as string;
       if (type === "system" && (msg as { subtype?: string }).subtype === "init") {
@@ -261,28 +309,12 @@ async function runLoop(session: ButlerSession, input: Pushable<SDKUserMessage>, 
         session.busy = false;
         const subtype = (msg as { subtype?: string }).subtype;
         const result = (msg as { result?: string }).result;
-        // Context-window size proxy: tokens fed into the last turn (fresh input + cache reads).
-        const usage = (msg as { usage?: { input_tokens?: number; cache_read_input_tokens?: number; cache_creation_input_tokens?: number; output_tokens?: number } }).usage;
-        if (usage) {
-          const ctx = (usage.input_tokens ?? 0) + (usage.cache_read_input_tokens ?? 0) + (usage.cache_creation_input_tokens ?? 0) + (usage.output_tokens ?? 0);
-          if (ctx > 0) {
-            session.contextTokens = ctx;
-            broadcast(session, { type: "usage", contextTokens: ctx });
-          }
-        }
-        // Real context-window max comes from the per-model usage breakdown.
-        const modelUsage = (msg as { modelUsage?: Record<string, { contextWindow?: number }> }).modelUsage;
-        if (modelUsage) {
-          const cw = Math.max(0, ...Object.values(modelUsage).map((u) => u.contextWindow ?? 0));
-          if (cw > 0 && cw !== session.contextWindow) {
-            session.contextWindow = cw;
-            broadcast(session, { type: "meta", model: session.model, contextWindow: cw, mcpConnected: session.mcpConnected });
-          }
-        }
         if (subtype === "success" && result) {
           session.transcript.push({ role: "assistant", text: result, ts: Date.now() });
         }
         broadcast(session, { type: "result", text: subtype === "success" ? result : undefined, isError: subtype !== "success" });
+        // Report the true context-window occupancy (not the cache-inflated turn usage sum).
+        void broadcastContextUsage(session, q);
       }
     }
     console.log(`[butler-sdk] session loop ended: project=${session.projectId}`);
