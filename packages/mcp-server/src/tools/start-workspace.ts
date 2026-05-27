@@ -11,7 +11,10 @@ import { writeAgentSkillFile } from "@agentic-kanban/shared/lib/agent-skill-file
 export function registerStartWorkspace(server: McpServer) {
   server.tool(
     "start_workspace",
-    "Create a workspace for an issue: creates a git worktree and returns workspace info",
+    "Create a worktree-only workspace record for an issue (no agent, no status change). " +
+      "This does NOT launch an agent or move the issue to In Progress. To actually START work on an " +
+      "issue (worktree + move to In Progress + launch the agent in one step), POST to the board's " +
+      "/api/workspaces endpoint instead. Use this tool only when you explicitly want a bare worktree.",
     {
       issueId: z.string().describe("The issue ID to create a workspace for"),
       repoPath: z.string().optional().describe("Absolute path to the git repository (auto-detected from project if omitted)"),
