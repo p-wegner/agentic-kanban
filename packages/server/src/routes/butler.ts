@@ -93,6 +93,45 @@ export function createButlerRoute(
     return c.json({ ok });
   });
 
+  // POST /api/projects/:id/butler/ask — synchronous: send a turn, wait for the full
+  // answer, and return it in one response. This is the primitive used by the CLI and
+  // MCP tool (separate processes that cannot read the server's in-memory SSE stream).
+  router.post("/:id/butler/ask", async (c) => {
+    const projectId = c.req.param("id");
+    const body = await parseJsonBody<{ content: string; timeoutMs?: number }>(c);
+    if (!body.content?.trim()) {
+      return c.json({ error: "content is required" }, 400);
+    }
+    if (!getButlerSession(projectId).active) {
+      const session = await startSession(projectId);
+      if (!session) return c.json({ error: "Project not found" }, 404);
+    }
+    const timeoutMs = typeof body.timeoutMs === "number" && body.timeoutMs > 0 ? body.timeoutMs : 120_000;
+    const answer = await new Promise<{ text: string; isError: boolean }>((resolve) => {
+      let buf = "";
+      let settled = false;
+      const finish = (text: string, isError: boolean) => {
+        if (settled) return;
+        settled = true;
+        unsubscribe();
+        clearTimeout(timer);
+        resolve({ text, isError });
+      };
+      const unsubscribe = subscribeButler(projectId, (e) => {
+        if (e.type === "text") buf += e.text;
+        else if (e.type === "result") finish(e.text ?? buf, e.isError ?? false);
+        else if (e.type === "error") finish(e.message, true);
+      });
+      const timer = setTimeout(() => finish(buf || "(timed out waiting for butler response)", true), timeoutMs);
+      sendButlerTurn(projectId, body.content);
+    });
+    return c.json({
+      sessionId: getButlerSession(projectId).sessionId ?? null,
+      text: answer.text,
+      isError: answer.isError,
+    });
+  });
+
   // GET /api/projects/:id/butler/stream — SSE stream of butler events
   router.get("/:id/butler/stream", (c) => {
     const projectId = c.req.param("id");

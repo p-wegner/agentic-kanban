@@ -37,6 +37,7 @@ import { registerExportAgentSkills } from "./tools/export-agent-skills.js";
 import { registerApproveToolUse } from "./tools/approve-tool-use.js";
 import { registerRelaunchWorkspace } from "./tools/relaunch-workspace.js";
 import { registerReviewWorkspace } from "./tools/review-workspace.js";
+import { registerAskButler } from "./tools/ask-butler.js";
 
 const TOOL_REGISTRARS: Record<string, (server: McpServer) => void> = {
   get_context: registerGetContext,
@@ -72,6 +73,7 @@ const TOOL_REGISTRARS: Record<string, (server: McpServer) => void> = {
   approve_tool_use: registerApproveToolUse,
   relaunch_workspace: registerRelaunchWorkspace,
   review_workspace: registerReviewWorkspace,
+  ask_butler: registerAskButler,
 };
 
 async function getDisabledTools(): Promise<Set<string>> {

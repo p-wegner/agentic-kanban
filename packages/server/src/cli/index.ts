@@ -14,6 +14,7 @@ import { registerIssueCommand } from "./commands/issue.js";
 import { registerWorkspaceCommand } from "./commands/workspace.js";
 import { registerSkillCommand } from "./commands/skill.js";
 import { registerSessionCommand } from "./commands/session.js";
+import { registerButlerCommand } from "./commands/butler.js";
 import { registerSystemCommands } from "./commands/system.js";
 import { runMigrations, logDefaultBranch } from "./shared.js";
 
@@ -45,12 +46,13 @@ registerIssueCommand(program);
 registerWorkspaceCommand(program);
 registerSkillCommand(program);
 registerSessionCommand(program);
+registerButlerCommand(program);
 registerSystemCommands(program);
 
 // ── Default action (no subcommand): auto-init + auto-register + start server ──
 const subcommands = [
   "register", "create", "preferences", "unregister", "list", "cleanup",
-  "status", "issue", "workspace", "delete-status", "skill", "session",
+  "status", "issue", "workspace", "delete-status", "skill", "session", "butler",
   "init", "install-skill", "dev", "session-history", "sh", "help",
 ];
 const hasSubcommand = process.argv.length > 2 && subcommands.includes(process.argv[2]);
