@@ -12,88 +12,54 @@ import { writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-export const BOARD_GUIDE = `# Using the Agentic Kanban Board
+export const BOARD_GUIDE = `# Using the Agentic Kanban Board (UI guide)
 
-Reference for the **project butler** on operating the agentic-kanban board on the
-user's behalf. Read this when the user asks how to do something on the board, or
-when you are unsure how an operation works — do not guess board mechanics.
+How the **user** operates the board — they work in the app by clicking, so answer
+"how do I…" questions with simple UI steps (which tab/button to click), NOT API
+calls, endpoints, or tool names. Keep answers short. \`#N\` = a kanban issue number.
 
-Prefer the MCP tools (\`mcp__agentic-kanban__*\`); they are authoritative. Fall back
-to the REST API (\`http://localhost:<serverPort>/api\`) only for the actions noted
-below that have no MCP tool. \`#N\` always means a kanban issue number, never a
-GitHub PR.
+## Getting around
+A tab bar at the top switches views: **Board** (the kanban columns), **Graph**,
+**Table**, **Agents** (everything running), **Timeline**, **Metrics**, and
+**Butler** (this chat). The project dropdown and a search box are top-left; the
+**Settings** gear and dark-mode toggle are top-right.
 
-## The core loop
-Register repo → create issue → start work (one step: branch + worktree + agent) →
-review → merge. Issues flow through statuses:
-**Backlog → Todo → In Progress → In Review → AI Reviewed → Done** (plus Cancelled).
+## The columns
+Issues move left→right through: **Backlog → Todo → In Progress → In Review →
+AI Reviewed → Done** (plus Cancelled). Drag a card to another column to change its
+status, or use the small status buttons on the card.
 
-## Seeing what's happening
-- \`get_board_status\` — comprehensive overview: every active agent, workspace state,
-  diff stats, session stats, last output. Use this first for "what's happening".
-- \`list_issues\` — filter by status / priority / tag.
-- \`get_issue\` (by issueNumber) — full detail incl. workspaces + dependencies.
-- \`get_context\` — project info + issue counts.
+## Create an issue
+On the **Board**, click the **+** at the top of a column (usually Backlog) and type
+a title. Click the card to open its panel and add a description, tags, priority, or
+dependencies.
 
-## Creating & editing issues
-- \`create_issue\` — returns the new issueNumber.
-- \`update_issue\` / \`move_issue\` — change status/priority/description; move columns.
-- Improve a vague ticket: \`POST /api/issues/enhance\` (AI-powered) — don't hand-rewrite.
-- Suggest dependencies: \`POST /api/issues/analyze-dependencies\`.
+## Start work on an issue (launch an agent)
+Click the issue card to open its panel, then click **+ New Workspace**. That creates
+the branch + worktree, moves the issue to **In Progress**, and launches the agent —
+all in one click. The card then shows the live agent.
 
-## Starting work on an issue (the workflow)
-Use the board's ONE-STEP flow so the whole workflow runs — it creates the worktree,
-moves the issue to **In Progress**, AND launches the agent:
+## Watch / talk to the agent
+The issue panel streams the agent's output. Type in its chat box to send a follow-up
+message. The **Agents** tab and **All Workspaces** (top bar) list everything active.
 
-    POST http://localhost:<serverPort>/api/workspaces
-    body: { "issueId": "<the issue id>", "branch": "feature/ak-<issueNumber>-<short-kebab-slug>" }
+## Review, see changes, merge
+Open the issue's workspace (in its panel) to find these buttons:
+- **Review** — runs the board's AI reviewer on the branch (a dropdown offers a more
+  thorough review). It posts findings as comments.
+- **View Diff** — shows the file changes; **VS Code** opens the worktree to edit.
+- **Update Base** — rebases the workspace onto the latest base branch.
+- **Merge** — merges the branch into the project's default branch and closes the
+  workspace. (If it conflicts, the board offers a fix-and-retry.)
 
-The 201 response includes the new workspace and a \`sessionId\` — that is your
-confirmation the agent actually launched.
+## Settings (gear, top-right)
+Agent profile + default model, and workflow automation: auto-review, auto-merge, and
+board monitoring (relaunch/merge/nudge). Toggle these to control how hands-off the
+board runs.
 
-Do NOT use the \`start_workspace\` MCP tool to launch work — it only creates a bare
-worktree (no agent, no status change). Never create worktrees/branches with raw
-\`git worktree\`, and never run \`claude\` yourself.
-
-## Talking to a running agent
-- Send a follow-up turn: \`POST /api/workspaces/:id/turn\` (returns 409 if the agent
-  is still processing the previous turn).
-
-## Reviewing & merging
-- Review a branch: \`POST /api/workspaces/:id/review\` — use the board's reviewer;
-  don't critique the diff yourself.
-- Inspect changes before merging: \`get_workspace_diff\`.
-- Merge: \`merge_workspace\` (or \`POST /api/workspaces/:id/merge\`) — merges into the
-  project's default branch and closes the workspace.
-- Conflicts: \`POST /api/workspaces/:id/fix-and-merge\` (resolve + retry).
-- Rebase onto latest base: \`POST /api/workspaces/:id/update-base\`.
-
-## Tags & skills
-- \`list_tags\`, \`create_tag\`.
-- \`list_agent_skills\`, \`get_agent_skill\` — skills are reusable prompt templates an
-  agent can apply when launched.
-
-## Verify — never fabricate
-After any state-changing action, re-check with \`get_issue\` / \`get_board_status\` and
-report the ACTUAL result. Never claim an agent launched, an issue moved, or a merge
-happened unless the board confirms it.
-
-## MCP tool quick reference
-| Task | Tool / endpoint |
-|---|---|
-| Board overview | \`get_board_status\` |
-| List / filter issues | \`list_issues\` |
-| Issue detail | \`get_issue\` |
-| Project info + counts | \`get_context\` |
-| Create issue | \`create_issue\` |
-| Update / move issue | \`update_issue\` / \`move_issue\` |
-| Start work (launch agent) | \`POST /api/workspaces\` |
-| Follow-up to running agent | \`POST /api/workspaces/:id/turn\` |
-| Inspect diff | \`get_workspace_diff\` |
-| Review a branch | \`POST /api/workspaces/:id/review\` |
-| Merge | \`merge_workspace\` |
-| Tags | \`list_tags\` / \`create_tag\` |
-| Skills | \`list_agent_skills\` / \`get_agent_skill\` |
+## Tips
+- Press \`/\` to search issues; the **Butler** tab is where you can just ask me to do
+  things ("start work on #34", "what's the board status") and I'll handle it.
 `;
 
 let cachedPath: string | null = null;
