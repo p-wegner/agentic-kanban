@@ -9,6 +9,7 @@ import { createRouter } from "../middleware/create-router.js";
 import { parseJsonBody } from "../middleware/parse-body.js";
 import { getPreference, setPreference } from "../repositories/preferences.repository.js";
 import { preferenceService } from "../services/preference.service.js";
+import { scanLocalSkills } from "@agentic-kanban/shared/lib/agent-skill-files";
 import {
   ensureButlerSession,
   sendButlerTurn,
@@ -162,10 +163,28 @@ export function createButlerRoute(
     return c.json({ models: getButlerModels(projectId), selected });
   });
 
-  // GET /api/projects/:id/butler/commands — slash commands the live session reports
-  // (configured skills / project commands), for the input autocomplete.
-  router.get("/:id/butler/commands", (c) => {
-    return c.json({ commands: getButlerCommands(c.req.param("id")) });
+  // GET /api/projects/:id/butler/commands — slash commands for the input autocomplete.
+  // Merges what the live SDK session reports with the repo's own .claude/skills/*/SKILL.md
+  // (so repo skills are always suggested, even before the SDK finishes discovery or for
+  // a project whose session isn't warm yet), deduped by name.
+  router.get("/:id/butler/commands", async (c) => {
+    const projectId = c.req.param("id");
+    const byName = new Map<string, { name: string; description: string; argumentHint?: string }>();
+    for (const cmd of getButlerCommands(projectId)) {
+      if (!byName.has(cmd.name)) byName.set(cmd.name, cmd);
+    }
+    const project = await resolveProject(projectId);
+    if (project) {
+      const diskSkills = await scanLocalSkills(project.repoPath);
+      for (const skill of diskSkills) {
+        const existing = byName.get(skill.name);
+        // Add disk skills not yet known; backfill a description if the SDK entry lacked one.
+        if (!existing) byName.set(skill.name, { name: skill.name, description: skill.description });
+        else if (!existing.description && skill.description) existing.description = skill.description;
+      }
+    }
+    const commands = [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));
+    return c.json({ commands });
   });
 
   // GET /api/projects/:id/butler/profiles — available Claude profiles + the butler's
