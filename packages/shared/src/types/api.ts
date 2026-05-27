@@ -78,6 +78,7 @@ export interface UpdateIssueRequest {
   sortOrder?: number;
   estimate?: IssueEstimate | null;
   skipAutoReview?: boolean;
+  dueDate?: string | null;
 }
 
 export interface MainWorkspaceInfo {
@@ -130,6 +131,7 @@ export interface IssueWithStatus {
   isBlocked?: boolean;
   skipAutoReview?: boolean;
   estimate?: string | null;
+  dueDate?: string | null;
   tags?: { id: string; name: string; color: string | null }[];
 }
 
