@@ -38,7 +38,7 @@ export function registerGetWorkspaceDiff(server: McpServer) {
               .from(schema.projects)
               .where(eq(schema.projects.id, issueRows[0].projectId))
               .limit(1);
-            resolvedBaseBranch = projectRows[0]?.defaultBranch ?? undefined;
+            resolvedBaseBranch = projectRows[0]?.defaultBranch ?? null;
           }
         }
         if (!resolvedBaseBranch) {
