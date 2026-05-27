@@ -1,9 +1,10 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { db, schema } from "../db.js";
 import { eq } from "drizzle-orm";
+import { prodDeps, type ToolDeps } from "./deps.js";
 
-export function registerGetIssue(server: McpServer) {
+export function registerGetIssue(server: McpServer, deps: ToolDeps = prodDeps) {
+  const { db, schema } = deps;
   server.tool(
     "get_issue",
     "Get detailed information about a specific issue, including workspaces and dependencies. Accepts either a UUID issue ID or a numeric issue number (e.g. 42).",

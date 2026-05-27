@@ -1,11 +1,11 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { db, schema } from "../db.js";
 import { eq, sql } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
-import { notifyBoard } from "../notify.js";
+import { prodDeps, type ToolDeps } from "./deps.js";
 
-export function registerCreateIssue(server: McpServer) {
+export function registerCreateIssue(server: McpServer, deps: ToolDeps = prodDeps) {
+  const { db, schema, notifyBoard } = deps;
   server.tool(
     "create_issue",
     "Create a new issue on the kanban board",

@@ -1,17 +1,30 @@
-import { db } from "../../db/index.js";
+import { db as realDb } from "../../db/index.js";
+import type { Database } from "../../db/index.js";
 import { sessions, workspaces, issues, preferences } from "@agentic-kanban/shared/schema";
 import { eq } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
-import * as agentService from "../agent.service.js";
+import * as realAgentService from "../agent.service.js";
 import { extractPlan, writePlanFile, buildImplementPrompt } from "../plan-mode.service.js";
 import type { AgentOutputMessage } from "@agentic-kanban/shared";
 import type { SessionManagerOptions, SessionState, StartSessionOptions } from "./types.js";
+
+/** Subset of agent.service that the lifecycle depends on. Injectable for tests. */
+export type AgentService = typeof realAgentService;
+
+/** Injectable dependencies for the session lifecycle (default to the real singletons). */
+export interface SessionLifecycleDeps {
+  db?: Database;
+  agentService?: AgentService;
+}
 
 export function createSessionLifecycle(
   state: SessionState,
   options: SessionManagerOptions | undefined,
   broadcast: (sessionId: string, message: AgentOutputMessage) => void,
+  deps: SessionLifecycleDeps = {},
 ) {
+  const db = deps.db ?? realDb;
+  const agentService = deps.agentService ?? realAgentService;
   /** Create a session DB row and launch the agent process. */
   async function startSession(opts: StartSessionOptions): Promise<string> {
     const {
