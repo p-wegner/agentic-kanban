@@ -64,3 +64,31 @@ When launching auto-review/manual-review from `index.ts`, read `claude_profile` 
 
 ## Shared package must be rebuilt after schema changes
 `@agentic-kanban/shared` consumed via compiled `dist/` output. `tsx watch` does NOT rebuild the shared package. After adding columns to `packages/shared/src/schema/*.ts`, run `pnpm --filter @agentic-kanban/shared build` before restarting server.
+
+## Butler (warm Claude Agent SDK session)
+
+The project butler is a persistent, warm Claude assistant — **not** the CLI-spawn
+agent model used for board tasks. It runs in-process via the Claude Agent SDK
+(`@anthropic-ai/claude-agent-sdk`), one warm session per project.
+
+- `butler-sdk.service.ts` owns a `Map<projectId, ButlerSession>`. Each session
+  feeds turns into a single `query({ prompt: AsyncIterable<SDKUserMessage> })` via
+  a `Pushable` queue, so conversation context stays warm in-process across turns
+  (no `--resume` respawn). Token deltas are emitted as `ButlerEvent`s to listeners.
+- **Why SDK, not CLI:** keeping a CLI `claude.exe` warm with stdin open does not
+  stream on Windows (it buffers stdout until stdin closes). The SDK is a library
+  call with a native async iterator — no stdio/TTY buffering, true streaming.
+- **Auth/model:** reuse the active Claude profile env via `buildSpawnEnv(profile)`
+  (`options.env`), so the butler authenticates the same way as the rest of the app
+  (CLI login / API key / Bedrock). Verified working with the `anth` profile.
+- **Routes** (`butler.ts`, mounted under `/projects`): `POST /:id/butler/ensure`
+  (start warm session), `POST /:id/butler/message` (push a turn), `GET
+  /:id/butler/stream` (SSE of `ButlerEvent`s), `DELETE /:id/butler` (stop). The
+  SDK `session_id` is persisted to preference `butler_session_<projectId>` and
+  passed as `resume` on next ensure, so the butler survives server restarts.
+- `permissionMode: "bypassPermissions"` (+ `allowDangerouslySkipPermissions`) —
+  there is no human in the chat loop to approve tool prompts.
+
+**Caution:** running a second dev server (e.g. a worktree server) against the same
+`kanban.db` causes SQLite lock contention and can crash the primary server. Stop
+the worktree server after testing.
