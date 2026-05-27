@@ -190,13 +190,18 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
   function appendAssistantText(delta: string) {
     assistantBufRef.current += delta;
     const text = assistantBufRef.current;
+    // Decide the bubble id OUTSIDE the state updater. Mutating the ref inside the
+    // updater makes it impure, so React StrictMode's double-invocation runs it twice
+    // and spawns a duplicate (orphan) bubble. Setting the id here keeps the updater pure.
+    if (!assistantMsgIdRef.current) {
+      assistantMsgIdRef.current = `asst-${Date.now()}-${Math.random()}`;
+    }
+    const id = assistantMsgIdRef.current;
     setChatMessages((prev) => {
       const last = prev[prev.length - 1];
-      if (last && last.id === assistantMsgIdRef.current) {
+      if (last && last.id === id) {
         return [...prev.slice(0, -1), { ...last, text }];
       }
-      const id = `asst-${Date.now()}-${Math.random()}`;
-      assistantMsgIdRef.current = id;
       return [...prev, { id, role: "assistant", text, ts: Date.now() }];
     });
   }
@@ -498,6 +503,18 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
     requestAnimationFrame(() => inputRef.current?.focus());
   }
 
+  // Stop the butler's in-flight turn (interrupt) without clearing the conversation.
+  async function handleStop() {
+    if (!sending) return;
+    try {
+      await apiFetch(`/api/projects/${projectId}/butler/interrupt`, { method: "POST", body: "{}" });
+    } catch (err) {
+      console.error("Failed to stop butler", err);
+    }
+    // The interrupt broadcasts a result which flips `sending` off; reset locally too.
+    setSending(false);
+  }
+
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (commandMenuOpen) {
       if (e.key === "ArrowDown") {
@@ -586,10 +603,11 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
         </div>
       ) : (
         <>
-          {/* Butler toolbar: context usage + clear + customize */}
-          <div className="shrink-0 flex items-center justify-end gap-2 border-b border-gray-100 dark:border-gray-800 px-4 py-1.5 text-xs">
+          {/* Butler toolbar: status pill (left) · config selects + actions (right) */}
+          <div className="shrink-0 flex items-center justify-between gap-3 border-b border-gray-100 dark:border-gray-800 px-4 py-1.5 text-xs">
+            {/* Left group — session status: MCP health + context usage, as one pill. */}
             <div
-              className="flex items-center gap-2 mr-auto text-gray-400 dark:text-gray-500 min-w-0"
+              className="flex items-center gap-1.5 shrink-0 rounded-full border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/60 px-2.5 py-1 text-gray-500 dark:text-gray-400 min-w-0"
               title={[
                 model ? `Model: ${model}` : null,
                 contextWindow ? `Context window: ${(contextWindow / 1000).toFixed(0)}k tokens` : null,
@@ -597,7 +615,6 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
                 mcpConnected !== undefined ? `Board MCP: ${mcpConnected ? "connected" : "not connected"}` : null,
               ].filter(Boolean).join("\n")}
             >
-              {/* Resolved model shown via the picker below; the dot reflects MCP status. */}
               {mcpConnected !== undefined && (
                 <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${mcpConnected ? "bg-green-500" : "bg-gray-300 dark:bg-gray-600"}`} title={mcpConnected ? "Board MCP connected" : "Board MCP not connected"} />
               )}
@@ -609,49 +626,54 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
                   : "warm session"}
               </span>
             </div>
-            {/* Model picker — switches in place, no context loss. */}
-            <label className="flex items-center gap-1 text-gray-500 dark:text-gray-400" title="Model for the butler. Switches without losing context.">
-              <span className="hidden sm:inline text-[11px]">Model</span>
-              <select
-                value={selectedModel}
-                onChange={(e) => void handleModelChange(e.target.value)}
-                className="rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-1.5 py-0.5 text-xs text-gray-700 dark:text-gray-300 focus:outline-none focus:ring-1 focus:ring-blue-500"
+
+            {/* Right group — config selects, a divider, then actions. */}
+            <div className="flex items-center gap-2 shrink-0">
+              {/* Model picker — switches in place, no context loss. */}
+              <label className="flex items-center gap-1 text-gray-500 dark:text-gray-400" title="Model for the butler. Switches without losing context.">
+                <span className="hidden sm:inline text-[11px]">Model</span>
+                <select
+                  value={selectedModel}
+                  onChange={(e) => void handleModelChange(e.target.value)}
+                  className="rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-1.5 py-0.5 text-xs text-gray-700 dark:text-gray-300 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                >
+                  {CLAUDE_MODEL_OPTIONS.map((m) => (
+                    <option key={m.value} value={m.value}>{m.label}</option>
+                  ))}
+                </select>
+              </label>
+              {/* Profile picker — changes auth/endpoint, so it restarts the butler fresh. */}
+              <label className="flex items-center gap-1 text-gray-500 dark:text-gray-400" title="Claude profile (auth/endpoint, e.g. zai). Switching restarts the butler with a fresh context.">
+                <span className="hidden sm:inline text-[11px]">Profile</span>
+                <select
+                  value={selectedProfile}
+                  onChange={(e) => void handleProfileChange(e.target.value)}
+                  disabled={switchingProfile || sending}
+                  className="rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-1.5 py-0.5 text-xs text-gray-700 dark:text-gray-300 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-50"
+                >
+                  <option value="">{globalProfile ? `Default (${globalProfile})` : "Default"}</option>
+                  {profiles.map((p) => (
+                    <option key={p} value={p}>{p}</option>
+                  ))}
+                </select>
+              </label>
+              <span className="h-4 w-px bg-gray-200 dark:bg-gray-700" aria-hidden />
+              <button
+                onClick={openCustomize}
+                className="px-2 py-1 rounded text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                title="Customize the butler's behavior (edits the project's butler skill)"
               >
-                {CLAUDE_MODEL_OPTIONS.map((m) => (
-                  <option key={m.value} value={m.value}>{m.label}</option>
-                ))}
-              </select>
-            </label>
-            {/* Profile picker — changes auth/endpoint, so it restarts the butler fresh. */}
-            <label className="flex items-center gap-1 text-gray-500 dark:text-gray-400" title="Claude profile (auth/endpoint, e.g. zai). Switching restarts the butler with a fresh context.">
-              <span className="hidden sm:inline text-[11px]">Profile</span>
-              <select
-                value={selectedProfile}
-                onChange={(e) => void handleProfileChange(e.target.value)}
-                disabled={switchingProfile || sending}
-                className="rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-1.5 py-0.5 text-xs text-gray-700 dark:text-gray-300 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-50"
+                ⚙ Customize
+              </button>
+              <button
+                onClick={handleClearContext}
+                disabled={sending}
+                className="px-2 py-1 rounded text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors disabled:opacity-40"
+                title="Clear the butler's conversation context and start fresh"
               >
-                <option value="">{globalProfile ? `Default (${globalProfile})` : "Default"}</option>
-                {profiles.map((p) => (
-                  <option key={p} value={p}>{p}</option>
-                ))}
-              </select>
-            </label>
-            <button
-              onClick={openCustomize}
-              className="px-2 py-1 rounded text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
-              title="Customize the butler's behavior (edits the project's butler skill)"
-            >
-              ⚙ Customize
-            </button>
-            <button
-              onClick={handleClearContext}
-              disabled={sending}
-              className="px-2 py-1 rounded text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors disabled:opacity-40"
-              title="Clear the butler's conversation context and start fresh"
-            >
-              🧹 Clear context
-            </button>
+                🧹 Clear context
+              </button>
+            </div>
           </div>
 
           {customizeOpen && (
@@ -744,16 +766,29 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
                   }}
                 />
               </div>
-              <button
-                onClick={handleSend}
-                disabled={!input.trim() || sending}
-                className="shrink-0 p-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors shadow-sm"
-                title="Send message"
-              >
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5" />
-                </svg>
-              </button>
+              {sending ? (
+                <button
+                  onClick={handleStop}
+                  className="shrink-0 p-2.5 rounded-xl bg-red-600 hover:bg-red-700 text-white transition-colors shadow-sm"
+                  title="Stop the butler"
+                >
+                  {/* stop (filled square) */}
+                  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                    <rect x="6" y="6" width="12" height="12" rx="2" />
+                  </svg>
+                </button>
+              ) : (
+                <button
+                  onClick={handleSend}
+                  disabled={!input.trim()}
+                  className="shrink-0 p-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors shadow-sm"
+                  title="Send message"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5" />
+                  </svg>
+                </button>
+              )}
             </div>
             <p className="max-w-3xl mx-auto mt-1 text-[10px] text-gray-400 dark:text-gray-500">
               {sending ? (
