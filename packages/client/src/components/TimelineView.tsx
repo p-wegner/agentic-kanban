@@ -112,7 +112,7 @@ export function TimelineView({ columns, onIssueClick, searchQuery }: TimelineVie
     }
     const dates = allIssues.flatMap((i) => [
       new Date(i.createdAt).getTime(),
-      new Date(i.updatedAt).getTime(),
+      i.dueDate ? new Date(i.dueDate).getTime() : new Date(i.updatedAt).getTime(),
     ]);
     const rawMin = Math.min(...dates);
     const rawMax = Math.max(...dates, Date.now());
@@ -291,7 +291,9 @@ export function TimelineView({ columns, onIssueClick, searchQuery }: TimelineVie
               {/* Issue rows */}
               {lane.issues.map((issue) => {
                 const start = new Date(issue.createdAt).getTime();
-                const end = new Date(issue.updatedAt).getTime();
+                const end = issue.dueDate
+                  ? new Date(issue.dueDate).getTime()
+                  : new Date(issue.updatedAt).getTime();
                 const startP = pct(start);
                 const spanP = Math.max(0, pct(end) - startP);
                 const type = issue.issueType ?? "task";
@@ -383,6 +385,14 @@ export function TimelineView({ columns, onIssueClick, searchQuery }: TimelineVie
               <span className="w-14 shrink-0 text-gray-400">Updated</span>
               {fmtTooltipDate(new Date(tooltip.issue.updatedAt))}
             </div>
+            {tooltip.issue.dueDate && (
+              <div className="flex gap-2">
+                <span className="w-14 shrink-0 text-gray-400">Due</span>
+                <span className={new Date(tooltip.issue.dueDate) < new Date(new Date().toDateString()) ? "text-red-500 font-medium" : ""}>
+                  {fmtTooltipDate(new Date(tooltip.issue.dueDate))}
+                </span>
+              </div>
+            )}
             <div className="flex gap-2">
               <span className="w-14 shrink-0 text-gray-400">Type</span>
               <span className="capitalize">{tooltip.issue.issueType ?? "task"}</span>
