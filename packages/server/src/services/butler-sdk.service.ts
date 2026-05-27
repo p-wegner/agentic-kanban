@@ -13,14 +13,8 @@
  * Auth/model come from the active Claude profile env (Bedrock/z.ai/API key),
  * reusing `buildSpawnEnv` so the butler behaves like the rest of the agents.
  */
-import { query, type Options, type Query, type SDKUserMessage, type ModelInfo, type SlashCommand } from "@anthropic-ai/claude-agent-sdk";
+import { query, type Options, type Query, type SDKUserMessage, type SlashCommand } from "@anthropic-ai/claude-agent-sdk";
 import { buildSpawnEnv, getMcpServersConfig } from "./agent-provider/helpers.js";
-
-/** Compact model descriptor surfaced to the UI model picker. */
-export interface ButlerModelOption {
-  value: string;
-  displayName: string;
-}
 
 /** Compact slash-command descriptor surfaced to the UI autocomplete. */
 export interface ButlerCommand {
@@ -103,10 +97,8 @@ interface ButlerSession {
   mcpConnected?: boolean;
   /** The active Claude profile this session was started with (per-project override or global). */
   claudeProfile?: string;
-  /** Live Query handle — exposes control requests (setModel, supportedModels, supportedCommands). */
+  /** Live Query handle — exposes control requests (setModel, supportedCommands). */
   query?: Query;
-  /** Models available to this session, fetched once after init (for the UI picker). */
-  models?: ButlerModelOption[];
   /** Slash commands available to this session, fetched once after init (for the UI autocomplete). */
   commands?: ButlerCommand[];
 }
@@ -138,11 +130,6 @@ function buildButlerSystemPrompt(projectName: string, repoPath: string): string 
 export function getButlerSession(projectId: string): { sessionId?: string; active: boolean; contextTokens: number; model?: string; contextWindow?: number; mcpConnected?: boolean; claudeProfile?: string } {
   const s = sessions.get(projectId);
   return { sessionId: s?.sessionId, active: !!s, contextTokens: s?.contextTokens ?? 0, model: s?.model, contextWindow: s?.contextWindow, mcpConnected: s?.mcpConnected, claudeProfile: s?.claudeProfile };
-}
-
-/** Models the active session reported as available (empty if none/not yet fetched). */
-export function getButlerModels(projectId: string): ButlerModelOption[] {
-  return sessions.get(projectId)?.models ?? [];
 }
 
 /** Slash commands the active session reported as available (empty if none/not yet fetched). */
@@ -231,14 +218,8 @@ export function ensureButlerSession(opts: {
   return session;
 }
 
-/** Pull the available models + slash commands from the live session (best-effort). */
+/** Pull the available slash commands from the live session (best-effort). */
 async function fetchSessionCapabilities(session: ButlerSession, q: Query): Promise<void> {
-  try {
-    const models: ModelInfo[] = await q.supportedModels();
-    session.models = models.map((m) => ({ value: m.value, displayName: m.displayName }));
-  } catch (err) {
-    console.warn(`[butler-sdk] supportedModels failed: project=${session.projectId} ${err instanceof Error ? err.message : err}`);
-  }
   try {
     const commands: SlashCommand[] = await q.supportedCommands();
     session.commands = commands.map((c) => ({ name: c.name, description: c.description, argumentHint: c.argumentHint }));
@@ -252,7 +233,7 @@ async function runLoop(session: ButlerSession, input: Pushable<SDKUserMessage>, 
     const q = query({ prompt: input, options });
     session.query = q;
     broadcast(session, { type: "ready" });
-    // Fetch the live model + slash-command lists once (control requests, non-fatal).
+    // Fetch the live slash-command list once (control request, non-fatal).
     void fetchSessionCapabilities(session, q);
     for await (const msg of q as AsyncIterable<Record<string, unknown>>) {
       const type = msg.type as string;

@@ -17,7 +17,6 @@ import {
   stopButlerSession,
   getButlerSession,
   getButlerTranscript,
-  getButlerModels,
   getButlerCommands,
   setButlerModel,
 } from "../services/butler-sdk.service.js";
@@ -153,14 +152,6 @@ export function createButlerRoute(
       selectedModel,
       selectedProfile,
     });
-  });
-
-  // GET /api/projects/:id/butler/models — models the live session reports as available,
-  // plus the user's saved selection. Falls back to an empty list if not yet fetched.
-  router.get("/:id/butler/models", async (c) => {
-    const projectId = c.req.param("id");
-    const selected = (await getPreference(butlerModelPrefKey(projectId), database)) || "";
-    return c.json({ models: getButlerModels(projectId), selected });
   });
 
   // GET /api/projects/:id/butler/commands — slash commands for the input autocomplete.
