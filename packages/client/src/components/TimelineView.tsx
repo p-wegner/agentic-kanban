@@ -65,9 +65,14 @@ const COMPLETED_STATUSES = new Set(["Done", "Cancelled"]);
 
 const ALL_TYPES = Object.keys(TYPE_COLORS);
 
+const DAY_MS = 86_400_000;
+const WEEK_MS = 7 * DAY_MS;
+const MONTH_MS = 30 * DAY_MS;
+
 export function TimelineView({ columns, onIssueClick, searchQuery }: TimelineViewProps) {
   const [tooltip, setTooltip] = useState<TooltipState | null>(null);
   const [zoom, setZoom] = useState(1);
+  const [panOffsetMs, setPanOffsetMs] = useState(0);
   const [showCompleted, setShowCompleted] = useState(true);
   const [activeTypes, setActiveTypes] = useState<Set<string>>(new Set(ALL_TYPES));
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -105,10 +110,10 @@ export function TimelineView({ columns, onIssueClick, searchQuery }: TimelineVie
 
   const allIssues = useMemo(() => lanes.flatMap((l) => l.issues), [lanes]);
 
-  const range = useMemo(() => {
+  const baseRange = useMemo(() => {
     if (allIssues.length === 0) {
       const now = Date.now();
-      return { min: now - 7 * 86_400_000, max: now };
+      return { min: now - 7 * DAY_MS, max: now };
     }
     const dates = allIssues.flatMap((i) => [
       new Date(i.createdAt).getTime(),
@@ -116,10 +121,15 @@ export function TimelineView({ columns, onIssueClick, searchQuery }: TimelineVie
     ]);
     const rawMin = Math.min(...dates);
     const rawMax = Math.max(...dates, Date.now());
-    const span = Math.max(rawMax - rawMin, 86_400_000); // at least 1 day
+    const span = Math.max(rawMax - rawMin, DAY_MS); // at least 1 day
     const pad = span * 0.04;
     return { min: rawMin - pad, max: rawMax + pad };
   }, [allIssues]);
+
+  const range = useMemo(() => ({
+    min: baseRange.min + panOffsetMs,
+    max: baseRange.max + panOffsetMs,
+  }), [baseRange, panOffsetMs]);
 
   const ticks = useMemo(() => {
     const span = range.max - range.min;
@@ -182,6 +192,34 @@ export function TimelineView({ columns, onIssueClick, searchQuery }: TimelineVie
           Show completed
         </button>
         <div className="ml-auto flex items-center gap-1">
+          {/* Pan navigation */}
+          <span className="text-xs text-gray-400 dark:text-gray-500 mr-1">Navigate</span>
+          <button
+            onClick={() => setPanOffsetMs((o) => o - MONTH_MS)}
+            className="w-6 h-6 text-xs flex items-center justify-center rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-300"
+            title="Back 1 month"
+          >«</button>
+          <button
+            onClick={() => setPanOffsetMs((o) => o - WEEK_MS)}
+            className="w-6 h-6 text-xs flex items-center justify-center rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-300"
+            title="Back 1 week"
+          >‹</button>
+          <button
+            onClick={() => setPanOffsetMs(0)}
+            className={`px-1.5 h-6 text-xs flex items-center justify-center rounded border bg-white dark:bg-gray-900 hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-300 min-w-[40px] ${panOffsetMs !== 0 ? "border-blue-400 dark:border-blue-600" : "border-gray-200 dark:border-gray-700"}`}
+            title="Reset to today"
+          >Today</button>
+          <button
+            onClick={() => setPanOffsetMs((o) => o + WEEK_MS)}
+            className="w-6 h-6 text-xs flex items-center justify-center rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-300"
+            title="Forward 1 week"
+          >›</button>
+          <button
+            onClick={() => setPanOffsetMs((o) => o + MONTH_MS)}
+            className="w-6 h-6 text-xs flex items-center justify-center rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-300"
+            title="Forward 1 month"
+          >»</button>
+          <span className="text-xs text-gray-400 dark:text-gray-500 mx-2">|</span>
           <span className="text-xs text-gray-400 dark:text-gray-500 mr-1">Zoom</span>
           <button
             onClick={() => setZoom((z) => Math.max(0.5, +(z - 0.25).toFixed(2)))}
