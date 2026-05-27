@@ -53,7 +53,7 @@ export function CompletedGrid({
     return (
       <button
         onClick={onToggle}
-        className="w-full bg-gray-50 dark:bg-gray-950 border border-gray-200 dark:border-gray-700 rounded-lg px-4 py-2 flex items-center gap-3 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors text-left"
+        className="shrink-0 w-full bg-gray-50 dark:bg-gray-950 border border-gray-200 dark:border-gray-700 rounded-lg px-4 py-3 flex items-center gap-3 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors text-left"
       >
         <svg
           className="w-4 h-4 text-gray-400 dark:text-gray-500 shrink-0"
@@ -106,7 +106,7 @@ export function CompletedGrid({
   }
 
   return (
-    <div className="shrink-0 max-h-[40vh] overflow-y-auto scrollbar-hide">
+    <div className="shrink-0 max-h-[50vh] sm:max-h-[40vh] overflow-y-auto scrollbar-hide">
       <button
         onClick={onToggle}
         className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 mb-2 transition-colors"
@@ -135,7 +135,7 @@ export function CompletedGrid({
       >
         <div
           className="grid gap-2"
-          style={{ gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))" }}
+          style={{ gridTemplateColumns: "repeat(auto-fill, minmax(min(220px, 100%), 1fr))" }}
         >
           {allIssues.map((issue) => (
             <CompletedCard

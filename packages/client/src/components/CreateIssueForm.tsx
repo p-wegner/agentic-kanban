@@ -244,7 +244,7 @@ export function CreateIssueForm({
           )}
         </div>
       )}
-      <div className="flex gap-2 items-center">
+      <div className="flex gap-1.5 items-center flex-wrap">
         <button
           type="submit"
           disabled={!title.trim() || submitting}
