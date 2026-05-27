@@ -23,6 +23,7 @@ export type ButlerEvent =
   | { type: "text"; text: string }
   | { type: "tool"; name: string }
   | { type: "result"; text?: string; isError?: boolean }
+  | { type: "usage"; contextTokens: number }
   | { type: "error"; message: string };
 
 type Listener = (e: ButlerEvent) => void;
@@ -74,6 +75,7 @@ interface ButlerSession {
   sessionId?: string;
   abort: AbortController;
   busy: boolean;
+  contextTokens: number;
 }
 
 const sessions = new Map<string, ButlerSession>();
@@ -100,9 +102,9 @@ function buildButlerSystemPrompt(projectName: string, repoPath: string): string 
   ].join("\n");
 }
 
-export function getButlerSession(projectId: string): { sessionId?: string; active: boolean } {
+export function getButlerSession(projectId: string): { sessionId?: string; active: boolean; contextTokens: number } {
   const s = sessions.get(projectId);
-  return { sessionId: s?.sessionId, active: !!s };
+  return { sessionId: s?.sessionId, active: !!s, contextTokens: s?.contextTokens ?? 0 };
 }
 
 export function subscribeButler(projectId: string, listener: Listener): () => void {
@@ -110,6 +112,7 @@ export function subscribeButler(projectId: string, listener: Listener): () => vo
   if (!s) return () => {};
   s.listeners.add(listener);
   if (s.sessionId) listener({ type: "session", sessionId: s.sessionId });
+  if (s.contextTokens) listener({ type: "usage", contextTokens: s.contextTokens });
   return () => {
     s.listeners.delete(listener);
   };
@@ -136,6 +139,7 @@ export function ensureButlerSession(opts: {
     listeners: new Set(),
     abort: new AbortController(),
     busy: false,
+    contextTokens: 0,
   };
   sessions.set(opts.projectId, session);
 
@@ -183,6 +187,15 @@ async function runLoop(session: ButlerSession, input: Pushable<SDKUserMessage>, 
         session.busy = false;
         const subtype = (msg as { subtype?: string }).subtype;
         const result = (msg as { result?: string }).result;
+        // Context-window size proxy: tokens fed into the last turn (fresh input + cache reads).
+        const usage = (msg as { usage?: { input_tokens?: number; cache_read_input_tokens?: number; cache_creation_input_tokens?: number; output_tokens?: number } }).usage;
+        if (usage) {
+          const ctx = (usage.input_tokens ?? 0) + (usage.cache_read_input_tokens ?? 0) + (usage.cache_creation_input_tokens ?? 0) + (usage.output_tokens ?? 0);
+          if (ctx > 0) {
+            session.contextTokens = ctx;
+            broadcast(session, { type: "usage", contextTokens: ctx });
+          }
+        }
         broadcast(session, { type: "result", text: subtype === "success" ? result : undefined, isError: subtype !== "success" });
       }
     }

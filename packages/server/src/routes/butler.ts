@@ -3,6 +3,7 @@ import type { BoardEvents } from "../services/board-events.js";
 import type { Database } from "../db/index.js";
 import { projects, agentSkills } from "@agentic-kanban/shared/schema";
 import { eq, sql, desc } from "drizzle-orm";
+import { randomUUID } from "node:crypto";
 import { streamSSE } from "hono/streaming";
 import { createRouter } from "../middleware/create-router.js";
 import { parseJsonBody } from "../middleware/parse-body.js";
@@ -105,7 +106,43 @@ export function createButlerRoute(
     const projectId = c.req.param("id");
     const state = getButlerSession(projectId);
     const persisted = (await getPreference(butlerSessionPrefKey(projectId), database)) || null;
-    return c.json({ active: state.active, sessionId: state.sessionId ?? persisted });
+    return c.json({ active: state.active, sessionId: state.sessionId ?? persisted, contextTokens: state.contextTokens });
+  });
+
+  // GET /api/projects/:id/butler/skill — the editable butler prompt + whether a
+  // project-scoped override exists (vs the global default).
+  router.get("/:id/butler/skill", async (c) => {
+    const projectId = c.req.param("id");
+    const override = await database.select({ prompt: agentSkills.prompt }).from(agentSkills)
+      .where(sql`${agentSkills.name} = 'butler' AND ${agentSkills.projectId} = ${projectId}`).limit(1);
+    if (override[0]) return c.json({ prompt: override[0].prompt, isOverride: true });
+    const global = await database.select({ prompt: agentSkills.prompt }).from(agentSkills)
+      .where(sql`${agentSkills.name} = 'butler' AND ${agentSkills.projectId} IS NULL`).limit(1);
+    return c.json({ prompt: global[0]?.prompt ?? DEFAULT_BUTLER_PROMPT, isOverride: false });
+  });
+
+  // PUT /api/projects/:id/butler/skill — upsert the project-scoped butler override.
+  // An empty prompt removes the override (revert to the global default).
+  router.put("/:id/butler/skill", async (c) => {
+    const projectId = c.req.param("id");
+    const body = await parseJsonBody<{ prompt: string }>(c);
+    const existing = await database.select({ id: agentSkills.id }).from(agentSkills)
+      .where(sql`${agentSkills.name} = 'butler' AND ${agentSkills.projectId} = ${projectId}`).limit(1);
+    const now = new Date().toISOString();
+    if (!body.prompt?.trim()) {
+      if (existing[0]) await database.delete(agentSkills).where(eq(agentSkills.id, existing[0].id));
+      return c.json({ ok: true, isOverride: false });
+    }
+    if (existing[0]) {
+      await database.update(agentSkills).set({ prompt: body.prompt, updatedAt: now }).where(eq(agentSkills.id, existing[0].id));
+    } else {
+      await database.insert(agentSkills).values({
+        id: randomUUID(), name: "butler", projectId,
+        description: "Project butler behavior override", prompt: body.prompt,
+        isBuiltin: false, createdAt: now, updatedAt: now,
+      });
+    }
+    return c.json({ ok: true, isOverride: true });
   });
 
   // POST /api/projects/:id/butler/ensure — start the warm session if not running

@@ -7,6 +7,7 @@ import type { LiveSessionStats } from "../lib/useBoardEvents.js";
 interface ButlerState {
   active: boolean;
   sessionId: string | null;
+  contextTokens?: number;
 }
 
 /** Event shape emitted by the server butler SSE stream (butler-sdk.service.ts). */
@@ -17,6 +18,7 @@ type ButlerEvent =
   | { type: "text"; text: string }
   | { type: "tool"; name: string }
   | { type: "result"; text?: string; isError?: boolean }
+  | { type: "usage"; contextTokens: number }
   | { type: "error"; message: string };
 
 interface ChatMessage {
@@ -143,6 +145,10 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
   const [sending, setSending] = useState(false);
   const [input, setInput] = useState("");
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [contextTokens, setContextTokens] = useState(0);
+  const [customizeOpen, setCustomizeOpen] = useState(false);
+  const [customizePrompt, setCustomizePrompt] = useState("");
+  const [customizeBusy, setCustomizeBusy] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
@@ -167,7 +173,10 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
   function handleButlerEvent(e: ButlerEvent) {
     switch (e.type) {
       case "session":
-        setButlerState((prev) => ({ active: true, sessionId: e.sessionId }));
+        setButlerState({ active: true, sessionId: e.sessionId });
+        break;
+      case "usage":
+        setContextTokens(e.contextTokens);
         break;
       case "turn-start":
         setSending(true);
@@ -217,6 +226,8 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
     setButlerState(null);
     setChatMessages([]);
     setSending(false);
+    setContextTokens(0);
+    setCustomizeOpen(false);
     assistantBufRef.current = "";
     assistantMsgIdRef.current = null;
     eventSourceRef.current?.close();
@@ -225,6 +236,7 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
     apiFetch<ButlerState>(`/api/projects/${projectId}/butler`)
       .then((state) => {
         setButlerState(state);
+        setContextTokens(state.contextTokens ?? 0);
         if (state.active) openStream();
       })
       .catch(() => setButlerState({ active: false, sessionId: null }))
@@ -255,6 +267,53 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
       console.error("Failed to start butler", err);
     } finally {
       setStarting(false);
+    }
+  }
+
+  // Clear the butler's conversation context: stop+forget the session, wipe the chat.
+  // The next message starts a fresh session (also re-reads any customized skill).
+  async function handleClearContext() {
+    if (sending) return;
+    eventSourceRef.current?.close();
+    eventSourceRef.current = null;
+    try {
+      await apiFetch(`/api/projects/${projectId}/butler`, { method: "DELETE" });
+    } catch { /* ignore */ }
+    setChatMessages([]);
+    setContextTokens(0);
+    assistantBufRef.current = "";
+    assistantMsgIdRef.current = null;
+    setButlerState({ active: true, sessionId: null });
+    openStream();
+  }
+
+  async function openCustomize() {
+    setCustomizeOpen(true);
+    setCustomizeBusy(true);
+    try {
+      const r = await apiFetch<{ prompt: string; isOverride: boolean }>(`/api/projects/${projectId}/butler/skill`);
+      setCustomizePrompt(r.prompt);
+    } catch {
+      setCustomizePrompt("");
+    } finally {
+      setCustomizeBusy(false);
+    }
+  }
+
+  async function saveCustomize() {
+    setCustomizeBusy(true);
+    try {
+      await apiFetch(`/api/projects/${projectId}/butler/skill`, {
+        method: "PUT",
+        body: JSON.stringify({ prompt: customizePrompt }),
+      });
+      setCustomizeOpen(false);
+      // Apply immediately: a fresh session re-reads the skill.
+      await handleClearContext();
+    } catch (err) {
+      console.error("Failed to save butler customization", err);
+    } finally {
+      setCustomizeBusy(false);
     }
   }
 
@@ -350,6 +409,57 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
         </div>
       ) : (
         <>
+          {/* Butler toolbar: context usage + clear + customize */}
+          <div className="shrink-0 flex items-center justify-end gap-2 border-b border-gray-100 dark:border-gray-800 px-4 py-1.5 text-xs">
+            <span
+              className="text-gray-400 dark:text-gray-500 mr-auto"
+              title="Approximate context-window tokens used by the butler's conversation"
+            >
+              {contextTokens > 0 ? `${(contextTokens / 1000).toFixed(1)}k context` : "warm session"}
+            </span>
+            <button
+              onClick={openCustomize}
+              className="px-2 py-1 rounded text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+              title="Customize the butler's behavior (edits the project's butler skill)"
+            >
+              ⚙ Customize
+            </button>
+            <button
+              onClick={handleClearContext}
+              disabled={sending}
+              className="px-2 py-1 rounded text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors disabled:opacity-40"
+              title="Clear the butler's conversation context and start fresh"
+            >
+              🧹 Clear context
+            </button>
+          </div>
+
+          {customizeOpen && (
+            <div className="shrink-0 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/60 px-4 py-3">
+              <div className="max-w-3xl mx-auto">
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="text-xs font-medium text-gray-600 dark:text-gray-300">Butler behavior (project override)</span>
+                  <span className="text-[10px] text-gray-400 dark:text-gray-500">Placeholders: {"{{projectName}}"}, {"{{repoPath}}"}, {"{{serverPort}}"}</span>
+                </div>
+                <textarea
+                  value={customizePrompt}
+                  onChange={(e) => setCustomizePrompt(e.target.value)}
+                  disabled={customizeBusy}
+                  rows={8}
+                  className="w-full resize-y rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-xs font-mono text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+                  placeholder="Leave empty to revert to the default butler behavior."
+                />
+                <div className="flex items-center justify-end gap-2 mt-2">
+                  <button onClick={() => setCustomizeOpen(false)} disabled={customizeBusy} className="px-3 py-1.5 text-xs rounded-lg text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-50">Cancel</button>
+                  <button onClick={saveCustomize} disabled={customizeBusy} className="px-3 py-1.5 text-xs rounded-lg bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-50">
+                    {customizeBusy ? "Saving…" : "Save & apply"}
+                  </button>
+                </div>
+                <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-1">Saving clears the current context so the new behavior takes effect immediately.</p>
+              </div>
+            </div>
+          )}
+
           <div className="flex-1 min-h-0 overflow-y-auto px-4 py-4">
             {chatMessages.length === 0 && (
               <div className="flex items-center justify-center h-full text-center">
