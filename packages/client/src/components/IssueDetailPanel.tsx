@@ -97,6 +97,7 @@ export function IssueDetailPanel({
   const depInputRef = useRef<HTMLInputElement>(null);
   const [enhancing, setEnhancing] = useState(false);
   const [preEnhanceSnapshot, setPreEnhanceSnapshot] = useState<{ title: string; description: string } | null>(null);
+  const [estimating, setEstimating] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [actionsOpen, setActionsOpen] = useState(false);
   const [togglingVisualVerify, setTogglingVisualVerify] = useState(false);
@@ -219,6 +220,28 @@ export function IssueDetailPanel({
     setTitle(preEnhanceSnapshot.title);
     setDescription(preEnhanceSnapshot.description);
     setPreEnhanceSnapshot(null);
+  }
+
+  async function handleQuickEstimate(value: string) {
+    const newEstimate = (value === issue.estimate ? null : value) as UpdateIssueRequest["estimate"];
+    await onUpdate(issue.id, { estimate: newEstimate });
+  }
+
+  async function handleAiEstimate() {
+    if (estimating) return;
+    setEstimating(true);
+    try {
+      const result = await apiFetch<{ estimate: string; reasoning: string }>("/api/issues/ai-estimate", {
+        method: "POST",
+        body: JSON.stringify({ issueId: issue.id }),
+      });
+      await onUpdate(issue.id, { estimate: result.estimate as UpdateIssueRequest["estimate"] });
+      showToast(`AI suggested: ${result.estimate}${result.reasoning ? ` — ${result.reasoning}` : ""}`, "success");
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "AI estimate failed", "error");
+    } finally {
+      setEstimating(false);
+    }
   }
 
   async function handleAnalyzeDeps() {
@@ -793,12 +816,43 @@ export function IssueDetailPanel({
                 <option value="L">L</option>
                 <option value="XL">XL</option>
               </select>
-            ) : issue.estimate ? (
-              <span className="inline-block text-xs font-medium px-1.5 py-0.5 rounded bg-teal-100 text-teal-700">
-                {issue.estimate}
-              </span>
             ) : (
-              <span className="text-xs text-gray-400 dark:text-gray-500">—</span>
+              <div className="flex items-center gap-1 flex-wrap">
+                {(["XS", "S", "M", "L", "XL"] as const).map((size) => (
+                  <button
+                    key={size}
+                    type="button"
+                    onClick={() => handleQuickEstimate(size)}
+                    title={issue.estimate === size ? `Clear estimate` : `Set estimate to ${size}`}
+                    className={`text-xs font-medium px-1.5 py-0.5 rounded transition-colors ${
+                      issue.estimate === size
+                        ? "bg-teal-600 text-white"
+                        : "bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-teal-100 hover:text-teal-700 dark:hover:bg-teal-900 dark:hover:text-teal-300"
+                    }`}
+                  >
+                    {size}
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  onClick={handleAiEstimate}
+                  disabled={estimating}
+                  title="Estimate with AI (Haiku)"
+                  className="ml-1 text-xs text-purple-600 dark:text-purple-400 hover:text-purple-800 dark:hover:text-purple-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-0.5"
+                >
+                  {estimating ? (
+                    <svg className="animate-spin h-3 w-3" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+                    </svg>
+                  ) : (
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 3l1.5 3.5L10 8l-3.5 1.5L5 13l-1.5-3.5L0 8l3.5-1.5L5 3zM19 11l1 2.5L22.5 14l-2.5 1L19 17.5l-1-2.5L15.5 14l2.5-1L19 11z" />
+                    </svg>
+                  )}
+                  {estimating ? "..." : "AI"}
+                </button>
+              </div>
             )}
           </div>
 
