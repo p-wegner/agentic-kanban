@@ -41,7 +41,10 @@ const shared = {
 await build({
   ...shared,
   entryPoints: [resolve(root, "packages/server/src/cli/index.ts")],
-  outfile: resolve(root, "packages/server/dist/cli.js"),
+  // Output NESTED (dist/cli/index.js) to match package.json "files" (dist/cli/),
+  // bin/cli.js (`import("../dist/cli/index.js")`), and the version-read path
+  // (`../../package.json`). A flat dist/cli.js breaks all three on a real install.
+  outfile: resolve(root, "packages/server/dist/cli/index.js"),
   // CLI is the main bin entry — needs shebang; source file has its own which esbuild strips
   banner: {
     js: "#!/usr/bin/env node\n" + shared.banner.js,
@@ -62,7 +65,7 @@ await build({
   }],
 });
 
-console.log("Built: packages/server/dist/cli.js");
+console.log("Built: packages/server/dist/cli/index.js");
 
 await build({
   ...shared,
