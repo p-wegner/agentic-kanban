@@ -126,7 +126,7 @@ export function createSessionLifecycle(
 
     // Determine skip_permissions: explicit opt takes priority over global preference.
     const skipPermRows = await db.select().from(preferences).where(eq(preferences.key, "skip_permissions")).limit(1);
-    const dbSkipPerms = skipPermRows.length > 0 && skipPermRows[0].value === "true";
+    const dbSkipPerms = skipPermRows.length === 0 || skipPermRows[0].value !== "false";
     const skipPermissions = skipPermissionsOpt !== undefined ? skipPermissionsOpt : dbSkipPerms;
 
     // For Claude only: skip-permissions is conveyed via --dangerously-skip-permissions in agentArgs.

@@ -27,7 +27,7 @@ Issue ID: {{issueId}}
 Workspace ID: {{workspaceId}}`;
 
 export function buildReviewArgs(prefMap: Map<string, string>, provider: ProviderName): string | undefined {
-  const skipPerms = prefMap.get("skip_permissions") === "true" && provider === "claude";
+  const skipPerms = prefMap.get("skip_permissions") !== "false" && provider === "claude";
   const baseArgs = prefMap.get("agent_args") || "";
   if (skipPerms) {
     return baseArgs ? baseArgs + " --dangerously-skip-permissions" : "--dangerously-skip-permissions";
