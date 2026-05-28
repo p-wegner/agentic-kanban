@@ -31,6 +31,20 @@ export interface AgentQuestion {
   recommendation?: AgentQuestionRecommendation | null;
 }
 
+export type StalenessReason =
+  | "workspace-merged"
+  | "issue-done"
+  | "superseded"
+  | "older-than-24h";
+
+export interface Staleness {
+  reason: StalenessReason;
+  /** Human-readable label, e.g. "stale — workspace merged". */
+  label: string;
+  /** Relevant timestamp for the tooltip. */
+  at: string | null;
+}
+
 export interface PendingQuestionSet {
   toolUseId: string;
   workspaceId: string;
@@ -40,6 +54,8 @@ export interface PendingQuestionSet {
   issueTitle: string;
   questions: AgentQuestion[];
   askedAt: string | null;
+  /** Set when the question is likely no longer actionable; null/undefined when fresh. */
+  staleness?: Staleness | null;
 }
 
 interface Props {
@@ -51,6 +67,42 @@ interface Props {
 interface AnswerState {
   selectedLabels: string[];
   freeText: string;
+}
+
+/** Compact "Xh ago" / "Xm ago" / "Xd ago" for the collapsed card header. */
+function formatAgo(iso: string | null): string {
+  if (!iso) return "";
+  const diff = Date.now() - new Date(iso).getTime();
+  if (!Number.isFinite(diff) || diff < 0) return "";
+  const mins = Math.floor(diff / 60_000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.floor(hrs / 24)}d ago`;
+}
+
+/** One-line summary for the collapsed card header. The first question drives the
+ *  summary (most asks have one); a multi-question ask appends "+N more". */
+function collapsedSummary(set: PendingQuestionSet): string {
+  const q = set.questions[0];
+  const parts: string[] = [];
+  const issueRef = set.issueNumber !== null ? `#${set.issueNumber} ${set.issueTitle}` : set.issueTitle;
+  parts.push(issueRef);
+  if (q?.header) parts.push(q.header);
+  else if (q?.question) parts.push(q.question.length > 60 ? `${q.question.slice(0, 60)}…` : q.question);
+  const rec = q?.recommendation;
+  if (rec) {
+    const recLabels = rec.recommendedOptionIndexes.map((i) => q.options[i]?.label).filter(Boolean);
+    if (recLabels.length > 0) parts.push(`Butler recommends: "${recLabels.join(", ")}"`);
+    else if (rec.freeText) parts.push(`Butler recommends: "${rec.freeText.slice(0, 40)}"`);
+  }
+  const optCount = q?.options.length ?? 0;
+  if (optCount > 0) parts.push(`${optCount} option${optCount === 1 ? "" : "s"}`);
+  if (set.questions.length > 1) parts.push(`+${set.questions.length - 1} more`);
+  const ago = formatAgo(set.askedAt);
+  if (ago) parts.push(ago);
+  return parts.join(" · ");
 }
 
 function emptyAnswers(qs: AgentQuestion[]): AnswerState[] {
@@ -67,13 +119,35 @@ function emptyAnswers(qs: AgentQuestion[]): AnswerState[] {
   });
 }
 
+/** Muted-gray staleness badge with a tooltip showing the exact reason + timestamp. */
+function StalenessBadge({ staleness }: { staleness: Staleness }) {
+  const ts = staleness.at ? new Date(staleness.at).toLocaleString() : null;
+  const tooltip = ts ? `${staleness.label} (${ts})` : staleness.label;
+  return (
+    <span
+      className="inline-flex items-center gap-1 rounded-full bg-gray-200 dark:bg-gray-700 text-gray-500 dark:text-gray-400 text-[10px] font-medium px-1.5 py-0.5"
+      title={tooltip}
+      data-testid="staleness-badge"
+      data-staleness-reason={staleness.reason}
+    >
+      {staleness.label}
+    </span>
+  );
+}
+
 function QuestionCard({
   set,
+  expanded,
+  onToggle,
   onAnswered,
+  onDismiss,
   onError,
 }: {
   set: PendingQuestionSet;
+  expanded: boolean;
+  onToggle: () => void;
   onAnswered: () => void;
+  onDismiss: () => void;
   onError: (msg: string) => void;
 }) {
   const [answers, setAnswers] = useState<AnswerState[]>(() => emptyAnswers(set.questions));
@@ -151,25 +225,46 @@ function QuestionCard({
     }
   }
 
+  const staleness = set.staleness ?? null;
+
   return (
-    <div className="rounded-xl border border-amber-200 dark:border-amber-700/50 bg-amber-50/60 dark:bg-amber-900/10 p-4 shadow-sm" data-testid={`agent-question-${set.toolUseId}`}>
-      <div className="flex items-center justify-between mb-3">
-        <div className="flex items-center gap-2 text-sm">
-          <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-amber-500 text-white text-[11px] font-semibold">?</span>
-          <span className="font-medium text-gray-900 dark:text-gray-100">Agent waiting on your answers</span>
-          <span className="text-gray-500 dark:text-gray-400">·</span>
-          <span className="text-gray-600 dark:text-gray-400">
-            #{set.issueNumber} {set.issueTitle}
-          </span>
-        </div>
-        {set.askedAt && (
-          <span className="text-[11px] text-gray-400 dark:text-gray-500">
-            asked {new Date(set.askedAt).toLocaleString()}
-          </span>
-        )}
+    <div className="rounded-xl border border-amber-200 dark:border-amber-700/50 bg-amber-50/60 dark:bg-amber-900/10 shadow-sm" data-testid={`agent-question-${set.toolUseId}`}>
+      {/* Collapsed header — click anywhere on the row (except the X) to expand. */}
+      <div className="flex items-center gap-2 px-3 py-2">
+        <button
+          type="button"
+          onClick={onToggle}
+          className="flex-1 flex items-center gap-2 text-left min-w-0"
+          aria-expanded={expanded}
+          data-testid={`agent-question-toggle-${set.toolUseId}`}
+        >
+          <svg
+            className={`w-3.5 h-3.5 shrink-0 text-gray-400 dark:text-gray-500 transition-transform ${expanded ? "rotate-90" : ""}`}
+            fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+          </svg>
+          <span className="text-xs text-gray-700 dark:text-gray-300 truncate">{collapsedSummary(set)}</span>
+          {staleness && <StalenessBadge staleness={staleness} />}
+        </button>
+        <button
+          type="button"
+          onClick={onDismiss}
+          disabled={submitting}
+          className="shrink-0 p-1 rounded text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-200/60 dark:hover:bg-gray-700 transition-colors disabled:opacity-40"
+          title="Dismiss this question (the agent is not notified)"
+          aria-label="Dismiss question"
+          data-testid={`agent-question-dismiss-${set.toolUseId}`}
+        >
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
       </div>
 
-      <div className="space-y-4">
+      {!expanded ? null : (
+      <div className="px-4 pb-4">
+        <div className="space-y-4">
         {set.questions.map((q, qIdx) => {
           const multi = !!q.multiSelect;
           const rec = q.recommendation;
@@ -256,18 +351,20 @@ function QuestionCard({
             </div>
           );
         })}
-      </div>
+        </div>
 
-      <div className="flex items-center justify-end gap-2 mt-3">
-        <button
-          type="button"
-          onClick={submit}
-          disabled={!canSubmit || submitting}
-          className="px-3 py-1.5 text-xs rounded-lg bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-40 disabled:cursor-not-allowed"
-        >
-          {submitting ? "Sending..." : "Send answers to agent"}
-        </button>
+        <div className="flex items-center justify-end gap-2 mt-3">
+          <button
+            type="button"
+            onClick={submit}
+            disabled={!canSubmit || submitting}
+            className="px-3 py-1.5 text-xs rounded-lg bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            {submitting ? "Sending..." : "Send answers to agent"}
+          </button>
+        </div>
       </div>
+      )}
     </div>
   );
 }
@@ -284,6 +381,10 @@ export function AgentQuestionsPanel({ projectId, onCountChange }: Props) {
   const [sets, setSets] = useState<PendingQuestionSet[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Cards are collapsed by default; this set tracks the ones the user has expanded.
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [confirmDismissAll, setConfirmDismissAll] = useState(false);
+  const [dismissingAll, setDismissingAll] = useState(false);
 
   async function load() {
     try {
@@ -302,6 +403,8 @@ export function AgentQuestionsPanel({ projectId, onCountChange }: Props) {
   useEffect(() => {
     setLoading(true);
     setError(null);
+    setExpanded(new Set());
+    setConfirmDismissAll(false);
     void load();
     // Poll every 15s — questions only arrive when sessions complete.
     const interval = setInterval(() => void load(), 15_000);
@@ -309,35 +412,129 @@ export function AgentQuestionsPanel({ projectId, onCountChange }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
 
+  function removeSet(toolUseId: string) {
+    setSets((prev) => {
+      const next = prev.filter((s) => s.toolUseId !== toolUseId);
+      onCountChange?.(next.length);
+      return next;
+    });
+    setExpanded((prev) => {
+      if (!prev.has(toolUseId)) return prev;
+      const next = new Set(prev);
+      next.delete(toolUseId);
+      return next;
+    });
+  }
+
+  function toggle(toolUseId: string) {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(toolUseId)) next.delete(toolUseId);
+      else next.add(toolUseId);
+      return next;
+    });
+  }
+
+  // DELETE the question server-side, then drop it from the list. The agent is not notified.
+  async function dismissOne(toolUseId: string) {
+    removeSet(toolUseId);
+    try {
+      await apiFetch(`/api/projects/${projectId}/agent-questions/${encodeURIComponent(toolUseId)}`, { method: "DELETE" });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to dismiss question");
+      void load(); // reconcile — the card may still be pending server-side.
+    }
+  }
+
+  async function dismissAll() {
+    setDismissingAll(true);
+    const ids = sets.map((s) => s.toolUseId);
+    try {
+      await Promise.all(
+        ids.map((id) => apiFetch(`/api/projects/${projectId}/agent-questions/${encodeURIComponent(id)}`, { method: "DELETE" })),
+      );
+      setSets([]);
+      setExpanded(new Set());
+      onCountChange?.(0);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to dismiss questions");
+      void load();
+    } finally {
+      setDismissingAll(false);
+      setConfirmDismissAll(false);
+    }
+  }
+
   if (loading && sets.length === 0) return null;
   if (sets.length === 0 && !error) return null;
 
   return (
-    <div className="shrink-0 border-b border-amber-200 dark:border-amber-700/50 bg-amber-50/40 dark:bg-amber-900/10 px-4 py-3 max-h-[60vh] overflow-y-auto" data-testid="agent-questions-panel">
-      <div className="max-w-3xl mx-auto space-y-3">
-        <div className="flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-amber-800 dark:text-amber-300">
+    <div className="shrink-0 border-t border-amber-200 dark:border-amber-700/50 bg-amber-50/40 dark:bg-amber-900/10" data-testid="agent-questions-panel">
+      <div className="max-w-3xl mx-auto px-4 py-2">
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="text-xs font-semibold text-amber-800 dark:text-amber-300">
             {sets.length} pending agent question{sets.length === 1 ? "" : "s"}
           </h3>
+          {sets.length >= 2 && (
+            <button
+              type="button"
+              onClick={() => setConfirmDismissAll(true)}
+              disabled={dismissingAll}
+              className="text-[11px] text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 underline-offset-2 hover:underline disabled:opacity-40"
+              data-testid="dismiss-all-questions"
+            >
+              Dismiss all
+            </button>
+          )}
         </div>
         {error && (
-          <div className="text-xs text-red-600 dark:text-red-400">{error}</div>
+          <div className="text-xs text-red-600 dark:text-red-400 mb-2">{error}</div>
         )}
-        {sets.map((set) => (
-          <QuestionCard
-            key={set.toolUseId}
-            set={set}
-            onAnswered={() => {
-              setSets((prev) => {
-                const next = prev.filter((s) => s.toolUseId !== set.toolUseId);
-                onCountChange?.(next.length);
-                return next;
-              });
-            }}
-            onError={(msg) => setError(msg)}
-          />
-        ))}
+        {/* Hard max-height keeps the chat above this panel anchored visible. */}
+        <div className="space-y-2 overflow-y-auto pr-1" style={{ maxHeight: "min(30vh, 400px)" }}>
+          {sets.map((set) => (
+            <QuestionCard
+              key={set.toolUseId}
+              set={set}
+              expanded={expanded.has(set.toolUseId)}
+              onToggle={() => toggle(set.toolUseId)}
+              onAnswered={() => removeSet(set.toolUseId)}
+              onDismiss={() => void dismissOne(set.toolUseId)}
+              onError={(msg) => setError(msg)}
+            />
+          ))}
+        </div>
       </div>
+
+      {confirmDismissAll && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" data-testid="dismiss-all-modal">
+          <div className="w-full max-w-sm rounded-xl bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-xl p-5">
+            <h4 className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-1">Dismiss all pending questions?</h4>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mb-4">
+              This clears all {sets.length} questions from your inbox. The agents are <strong>not</strong> notified and their workspaces are left untouched.
+            </p>
+            <div className="flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setConfirmDismissAll(false)}
+                disabled={dismissingAll}
+                className="px-3 py-1.5 text-xs rounded-lg text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void dismissAll()}
+                disabled={dismissingAll}
+                className="px-3 py-1.5 text-xs rounded-lg bg-red-600 hover:bg-red-700 text-white disabled:opacity-50"
+                data-testid="confirm-dismiss-all"
+              >
+                {dismissingAll ? "Dismissing…" : "Dismiss all"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -18,6 +18,7 @@ import { createWorkspaceService } from "../services/workspace.service.js";
 import {
   listPendingQuestionsForProject,
   markAnswered,
+  markDismissed,
   formatAnswerMessage,
   recommendQuestionsForSet,
   setCachedRecommendations,
@@ -67,6 +68,17 @@ export function createAgentQuestionsRoute(
       console.error(`[agent-questions] failed to send answer: workspace=${body.workspaceId} ${message}`);
       return c.json({ error: message }, 500);
     }
+  });
+
+  // DELETE /api/projects/:id/agent-questions/:toolUseId
+  // Dismiss a pending question. Records `{ dismissed: true, dismissedAt }` under the
+  // answered pref key (keeps the row for audit) so it drops out of the pending list.
+  // The corresponding workspace is intentionally NOT relaunched or notified.
+  router.delete("/:id/agent-questions/:toolUseId", async (c) => {
+    const toolUseId = c.req.param("toolUseId");
+    const dismissedAt = new Date().toISOString();
+    await markDismissed(toolUseId, dismissedAt, database);
+    return c.json({ ok: true, dismissed: true, dismissedAt });
   });
 
   // POST /api/projects/:id/agent-questions/:toolUseId/recommend
