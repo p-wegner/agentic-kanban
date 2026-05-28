@@ -69,15 +69,15 @@ Some workspaces have `isDirect: true` — the agent is working directly on the p
 
 ### 5. Run tests and commit your changes
 **This is mandatory before finishing.** After implementation is complete:
-1. **Run tests** — for refactoring tasks, run only the tests relevant to changed files:
+1. **Run tests with `pnpm test:mine` while iterating** — it runs only the reliably-green unit suites and skips the known-flaky / pre-existing-broken ones (see CLAUDE.md → "Known Flaky Test Suites"), so you don't waste turns chasing false failures. For refactoring tasks, narrow it to the changed files:
    ```
-   pnpm --filter agentic-kanban test -- --related <changed-files>
+   pnpm test:mine -- --related <changed-files>
    ```
    Pass the changed source files explicitly, or derive them from git:
    ```
-   pnpm --filter agentic-kanban test -- --related $(git diff --name-only HEAD)
+   pnpm test:mine -- --related $(git diff --name-only HEAD)
    ```
-   Only run the full suite (`pnpm --filter agentic-kanban test`) when cross-cutting changes may affect unrelated tests, or as a final pre-commit check.
+   Run the full suite (`pnpm --filter agentic-kanban test`) **once before mark-ready** (or when cross-cutting changes may affect unrelated tests) — but treat the documented known-flaky failures as false; don't debug them unless you touched their source. Do not run the full suite mid-iteration: in a worktree the flaky suites fail and will derail you.
 2. Stage and commit all changed files with a descriptive message
 3. The commit message should summarize the what and why
 4. Reference the issue in the commit if appropriate
@@ -218,4 +218,4 @@ Shorthand for "review #N and merge if fine" — same workflow as above.
 7. **Description is a shared log** — write progress notes so the user can follow along without reading code.
 8. **Done means done** — code committed, tests green, review passed, no loose ends, no open questions.
 9. **Cancelled is not failure** — use it freely when scope changes.
-10. **Targeted tests for refactoring** — use `vitest --related <changed-files>` instead of the full suite when refactoring. It's faster and proves the changed code is covered without re-running unrelated tests.
+10. **Fast tests while iterating** — use `pnpm test:mine` (optionally with `-- --related <changed-files>`) instead of the full suite while working. It skips the known-flaky suites so you don't chase false failures, and `--related` proves the changed code is covered without re-running unrelated tests. Run the full `pnpm --filter agentic-kanban test` once before mark-ready.

@@ -75,6 +75,8 @@ All git operations live in `packages/shared/src/lib/git-service.ts`. Both `packa
 
 ### Known Flaky Test Suites
 
+> **Use `pnpm test:mine` to skip these.** It runs only the unit suites that are reliably green in any environment (main checkout or worktree) — the unit-tests-marked-flaky below are excluded, so it's the fast, no-false-failures loop for day-to-day iteration. Use the full `pnpm test` only before mark-ready / for CI. Vitest args pass through: `pnpm test:mine -- --related <files>`.
+
 When a test in the table below fails and you haven't touched the relevant code, treat it as a **false failure** and do not waste time debugging it. Investigate only if you changed the underlying source files.
 
 | File | Test(s) | Root Cause | Workaround |
@@ -88,7 +90,10 @@ When a test in the table below fails and you haven't touched the relevant code, 
 | `packages/e2e/tests/ui/board-realtime.test.ts` | "board updates when issue created via API" | `projects[0]` access without validating array is non-empty | Re-run; use `getE2EProjectId()` helper instead |
 | `packages/e2e/tests/ui/all-workspaces-panel.test.ts` | Multiple | Multiple `waitForTimeout(300)` calls + active-project state dependency across runs | Re-run; replace sleeps with condition-based waits |
 | `packages/e2e/tests/api/workspace-lifecycle.test.ts` | Multiple | `projects[0]` without validation; state from prior run can leak | Re-run; use `getE2EProjectId()` helper |
-| `packages/server/src/__tests__/git.service.test.ts` | All | Real filesystem + git operations; Windows file-locking on temp dirs; no per-test timeout | **Only run when touching `packages/shared/src/lib/git-service.ts`**; add `test.setTimeout(30000)` |
+| `packages/server/src/__tests__/git.service.test.ts` | All | Real filesystem + git operations; Windows file-locking on temp dirs; no per-test timeout | **Only run when touching `packages/shared/src/lib/git-service.ts`**; add `test.setTimeout(30000)`. Excluded by `pnpm test:mine`. |
+| `packages/server/src/__tests__/cli.test.ts` | All | Spawn-based CLI integration test; in a worktree `packages/shared/dist` isn't built and the inline migration list is stale → `ERR_MODULE_NOT_FOUND` / "Failed query" | Pre-existing-broken in worktrees — don't debug if you didn't touch the CLI. Excluded by `pnpm test:mine`. |
+| `packages/server/src/__tests__/cli-butler.test.ts` | All | Spawn-based CLI integration test; same worktree root causes as `cli.test.ts` | Pre-existing-broken in worktrees. Excluded by `pnpm test:mine`. |
+| `packages/mcp-server/src/__tests__/mcp-tools.test.ts` | All | Spawn-based MCP integration test; stale inline `MIGRATION_FILES` (0000–0024 only) + worktree DB resolution → "Failed query" / missing "Default Project" | Run the in-process unit tests in `packages/mcp-server/src/__tests__/tools/` instead. Excluded by `pnpm test:mine`. |
 
 **Recurring root causes to watch for:**
 - `page.waitForTimeout()` / `setTimeout(r, N)` fixed sleeps — replace with explicit condition waits or retry loops
@@ -203,7 +208,8 @@ The **Butler** is a warm, per-project Claude assistant (Agent SDK, in-process) �
 ## Monorepo Commands
 - `pnpm dev` — start server + client (auto-detects worktree ports; default: server 3001, client 5173)
 - `pnpm dev:desktop` — start server + client + Tauri native window
-- `pnpm --filter agentic-kanban test` — Vitest unit tests (full suite)
+- `pnpm test:mine` — **fast iteration loop**: runs only reliably-green unit suites (server + mcp-server), skipping the known-flaky ones (see "Known Flaky Test Suites"). Use this while iterating; run the full suite once before mark-ready. Vitest args pass through: `pnpm test:mine -- --related <files>`.
+- `pnpm --filter agentic-kanban test` — Vitest unit tests (full suite — server package only)
 - `pnpm --filter agentic-kanban test -- --related <files>` — **targeted**: run only tests covering the listed source files (use for refactoring)
 - `pnpm test:e2e` — Playwright E2E tests
 - `pnpm db:migrate && pnpm db:seed` — initialize DB

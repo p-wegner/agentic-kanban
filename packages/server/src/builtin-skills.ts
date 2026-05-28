@@ -327,14 +327,18 @@ Use the description field as a shared progress log — update with blockers, dec
 No separate branch — changes go directly to the default branch. You must still move issue status. The system does NOT auto-review direct workspaces — run a self-review subagent before marking Done.
 
 ### 4. Run tests and commit your changes
-Mandatory before finishing. For refactoring tasks, run only the tests that cover changed files:
+Mandatory before finishing. While iterating, prefer a fast or filtered test
+command so you don't chase false failures: if the project defines a script that
+skips known-flaky suites (check its CLAUDE.md / README / package.json scripts),
+use that; otherwise run the tests that cover only your changed files, e.g.:
 \`\`\`
-# targeted (preferred for refactoring):
-pnpm --filter agentic-kanban test -- --related <changed-files>
-# or derive from git:
-pnpm --filter agentic-kanban test -- --related $(git diff --name-only HEAD)
+# targeted (preferred for refactoring) — adjust the runner to the project:
+<test command> --related <changed-files>
+# or derive the changed files from git:
+<test command> --related $(git diff --name-only HEAD)
 \`\`\`
-Use the full suite only when cross-cutting changes may affect unrelated tests.
+Run the project's full test suite once before you mark work ready (or when
+cross-cutting changes may affect unrelated tests).
 Stage and commit all changed files with a descriptive message.
 
 **Commit checkpoint — commit the moment the core is green.** The instant \`tsc -b --noEmit\` passes for the packages you touched AND the directly-related test file(s) pass (\`pnpm --filter agentic-kanban test -- --related <changed-files>\`), **commit immediately**. Then continue any polish, extra tests, or flaky-suite debugging in follow-up commits. Do NOT batch a multi-step diff into one final end-of-task commit — an interruption (crash, hot-reload, timeout) loses all of it. A branch that does meaningful work should normally show two or more commits, not one.

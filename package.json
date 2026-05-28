@@ -24,6 +24,7 @@
     "dev:client": "pnpm --filter client dev",
     "build": "pnpm --filter shared build && node scripts/build-server.mjs && node scripts/build-mcp.mjs && pnpm --filter client build && node scripts/copy-assets.mjs",
     "test": "pnpm --filter agentic-kanban test",
+    "test:mine": "node scripts/test-mine.mjs",
     "test:e2e": "pnpm --filter e2e test",
     "cli": "pnpm --filter agentic-kanban exec tsx src/cli/index.ts",
     "sh": "node -e \"const {execFileSync}=require('child_process'),a=process.argv.slice(2).filter(x=>x!=='--');execFileSync(process.execPath,['./node_modules/tsx/dist/cli.mjs','src/cli/index.ts','session-history',...a],{cwd:'packages/server',stdio:'inherit'})\"",
