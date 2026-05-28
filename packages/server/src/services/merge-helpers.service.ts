@@ -1,10 +1,39 @@
 import { sessions } from "@agentic-kanban/shared/schema";
 import { eq } from "drizzle-orm";
 import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import type { Database } from "../db/index.js";
 import type { SessionManager } from "./session.manager.js";
 import { resolveAgentSettings, toExecutorProvider } from "./agent-settings.service.js";
 import { PREF_LEARNING_STEP_BEFORE_MERGE } from "../constants/preference-keys.js";
+
+const execFileAsync = promisify(execFile);
+
+/**
+ * If a merge changed files under packages/shared/src/**, rebuild the shared
+ * package's dist/ so tsx-watch hot-reload doesn't crash on stale exports.
+ */
+export async function rebuildSharedIfChanged(
+  repoPath: string,
+  changedFiles: string[],
+): Promise<void> {
+  const sharedChanged = changedFiles.some((f) =>
+    f.replace(/\\/g, "/").startsWith("packages/shared/src/"),
+  );
+  if (!sharedChanged) return;
+  try {
+    console.log("[merge-helpers] packages/shared/src/** changed — rebuilding shared/dist");
+    await execFileAsync("pnpm", ["--filter", "@agentic-kanban/shared", "build"], {
+      cwd: repoPath,
+      timeout: 60_000,
+      shell: process.platform === "win32",
+      windowsHide: true,
+    });
+    console.log("[merge-helpers] shared/dist rebuild complete");
+  } catch (err) {
+    console.warn("[merge-helpers] shared/dist rebuild failed (non-fatal):", err instanceof Error ? err.message : String(err));
+  }
+}
 
 /** Returns conflicting file paths from an in-progress merge/rebase (git diff --name-only --diff-filter=U). */
 export async function getConflictingFiles(workingDir: string): Promise<string[]> {

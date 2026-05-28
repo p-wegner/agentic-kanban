@@ -575,6 +575,25 @@ export async function getUncommittedTrackedChanges(repoPath: string): Promise<st
   }
 }
 
+/** List files changed between two refs (uses `git diff --name-only A..B`). */
+export async function getChangedFilesBetween(
+  repoPath: string,
+  fromRef: string,
+  toRef: string,
+): Promise<string[]> {
+  try {
+    const output = await execGit(["diff", "--name-only", `${fromRef}..${toRef}`], repoPath);
+    return output.trim().split("\n").filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+/** Resolve a ref to its commit SHA (e.g. "HEAD"). */
+export async function revParse(repoPath: string, ref: string): Promise<string> {
+  return (await execGit(["rev-parse", ref], repoPath)).trim();
+}
+
 /** Check if a rebase is in progress in the worktree. */
 export async function isRebaseInProgress(worktreePath: string): Promise<boolean> {
   try {
