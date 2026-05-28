@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { issues, issueTags, issueDependencies, issueArtifacts, workspaces } from "@agentic-kanban/shared/schema";
-import { eq, and } from "drizzle-orm";
+import { issues, issueTags, issueDependencies, issueArtifacts, workspaces, projectStatuses } from "@agentic-kanban/shared/schema";
+import { eq, and, sql, inArray } from "drizzle-orm";
 import type { Database } from "../db/index.js";
 import type { BoardEvents } from "./board-events.js";
 import type { DependencyType } from "@agentic-kanban/shared/schema";
@@ -86,6 +86,67 @@ export function createIssueService(deps: {
     if (input.projectId) boardEvents?.broadcast(input.projectId, "issue_created");
 
     return { id, issueNumber, title: input.title };
+  }
+
+  async function createIssuesBatch(
+    projectId: string,
+    inputs: Omit<CreateIssueInput, "projectId">[],
+  ): Promise<CreateIssueResult[]> {
+    if (inputs.length === 0) return [];
+
+    for (let i = 0; i < inputs.length; i++) {
+      if (!inputs[i].title || !inputs[i].title.trim()) {
+        const err = new IssueError(`issues[${i}].title is required`, "BAD_REQUEST") as any;
+        err.index = i;
+        throw err;
+      }
+    }
+
+    const results: CreateIssueResult[] = await database.transaction(async (tx) => {
+      const maxRow = await tx
+        .select({ maxNum: sql<number | null>`max(${issues.issueNumber})` })
+        .from(issues)
+        .where(eq(issues.projectId, projectId));
+      let nextNumber = (maxRow[0]?.maxNum ?? 0) + 1;
+
+      const defaultStatusRows = await tx
+        .select({ id: projectStatuses.id })
+        .from(projectStatuses)
+        .where(eq(projectStatuses.projectId, projectId))
+        .limit(1);
+      if (defaultStatusRows.length === 0) {
+        const err = new IssueError("No statuses found for project", "BAD_REQUEST");
+        throw err;
+      }
+      const defaultStatusId = defaultStatusRows[0].id;
+
+      const now = new Date().toISOString();
+      const out: CreateIssueResult[] = [];
+      for (const input of inputs) {
+        const id = randomUUID();
+        const issueNumber = nextNumber++;
+        await tx.insert(issues).values({
+          id,
+          issueNumber,
+          title: input.title,
+          description: input.description ?? null,
+          priority: input.priority ?? "medium",
+          issueType: input.issueType ?? "task",
+          skipAutoReview: input.skipAutoReview ?? false,
+          estimate: input.estimate ?? null,
+          sortOrder: input.sortOrder ?? 0,
+          statusId: input.statusId ?? defaultStatusId,
+          projectId,
+          createdAt: now,
+          updatedAt: now,
+        });
+        out.push({ id, issueNumber, title: input.title });
+      }
+      return out;
+    });
+
+    boardEvents?.broadcast(projectId, "issue_created");
+    return results;
   }
 
   async function updateIssue(
@@ -195,6 +256,161 @@ export function createIssueService(deps: {
     return projectId;
   }
 
+  async function updateDependenciesBatch(
+    edges: { issueId: string; dependsOnId: string; type?: string; action: "add" | "remove" }[],
+  ): Promise<{
+    added: number;
+    removed: number;
+    skipped: { edge: typeof edges[number]; reason: string }[];
+    projectIds: string[];
+  }> {
+    const VALID_TYPES = ["depends_on", "blocked_by", "related_to", "duplicates", "parent_of", "child_of"];
+    const DIRECTIONAL = new Set(["depends_on", "blocked_by", "parent_of", "child_of"]);
+
+    for (let i = 0; i < edges.length; i++) {
+      const e = edges[i];
+      if (!e.issueId || !e.dependsOnId) {
+        const err = new IssueError(`edges[${i}]: issueId and dependsOnId are required`, "BAD_REQUEST") as any;
+        err.index = i;
+        throw err;
+      }
+      if (e.action !== "add" && e.action !== "remove") {
+        const err = new IssueError(`edges[${i}]: action must be 'add' or 'remove'`, "BAD_REQUEST") as any;
+        err.index = i;
+        throw err;
+      }
+      if (e.action === "add" && e.issueId === e.dependsOnId) {
+        const err = new IssueError(`edges[${i}]: an issue cannot depend on itself`, "BAD_REQUEST") as any;
+        err.index = i;
+        throw err;
+      }
+      if (e.type && !VALID_TYPES.includes(e.type)) {
+        const err = new IssueError(`edges[${i}]: invalid type`, "BAD_REQUEST") as any;
+        err.index = i;
+        throw err;
+      }
+    }
+
+    const skipped: { edge: typeof edges[number]; reason: string }[] = [];
+    const touchedProjectIds = new Set<string>();
+    let added = 0;
+    let removed = 0;
+
+    await database.transaction(async (tx) => {
+      const issueIds = [...new Set(edges.flatMap(e => [e.issueId, e.dependsOnId]))];
+      const issueRows = issueIds.length === 0 ? [] : await tx
+        .select({ id: issues.id, projectId: issues.projectId })
+        .from(issues)
+        .where(inArray(issues.id, issueIds));
+      const projectByIssue = new Map(issueRows.map(r => [r.id, r.projectId]));
+
+      const projectIds = [...new Set(issueRows.map(r => r.projectId))];
+      const allDepRows = projectIds.length === 0
+        ? []
+        : await tx
+            .select({
+              id: issueDependencies.id,
+              issueId: issueDependencies.issueId,
+              dependsOnId: issueDependencies.dependsOnId,
+              type: issueDependencies.type,
+              projectId: issues.projectId,
+            })
+            .from(issueDependencies)
+            .innerJoin(issues, eq(issueDependencies.issueId, issues.id))
+            .where(inArray(issues.projectId, projectIds));
+
+      const adjByProject = new Map<string, Map<string, Set<string>>>();
+      const edgeKeyToRow = new Map<string, { id: string; projectId: string }>();
+      for (const dep of allDepRows) {
+        if (DIRECTIONAL.has(dep.type)) {
+          let adj = adjByProject.get(dep.projectId);
+          if (!adj) { adj = new Map(); adjByProject.set(dep.projectId, adj); }
+          let set = adj.get(dep.issueId);
+          if (!set) { set = new Set(); adj.set(dep.issueId, set); }
+          set.add(dep.dependsOnId);
+        }
+        edgeKeyToRow.set(`${dep.issueId}|${dep.dependsOnId}|${dep.type}`, { id: dep.id, projectId: dep.projectId });
+      }
+
+      const hasPath = (adj: Map<string, Set<string>>, from: string, to: string): boolean => {
+        const visited = new Set<string>();
+        const stack = [from];
+        while (stack.length) {
+          const cur = stack.pop()!;
+          if (cur === to) return true;
+          if (visited.has(cur)) continue;
+          visited.add(cur);
+          const ns = adj.get(cur);
+          if (ns) for (const n of ns) stack.push(n);
+        }
+        return false;
+      };
+
+      for (let i = 0; i < edges.length; i++) {
+        const e = edges[i];
+        const type = e.type ?? "depends_on";
+        const srcProj = projectByIssue.get(e.issueId);
+        const tgtProj = projectByIssue.get(e.dependsOnId);
+
+        if (e.action === "add") {
+          if (!srcProj) { skipped.push({ edge: e, reason: "source issue not found" }); continue; }
+          if (!tgtProj) { skipped.push({ edge: e, reason: "target issue not found" }); continue; }
+          if (srcProj !== tgtProj) { skipped.push({ edge: e, reason: "cross-project dependency" }); continue; }
+
+          const key = `${e.issueId}|${e.dependsOnId}|${type}`;
+          if (edgeKeyToRow.has(key)) { skipped.push({ edge: e, reason: "already exists" }); continue; }
+
+          if (DIRECTIONAL.has(type)) {
+            let adj = adjByProject.get(srcProj);
+            if (!adj) { adj = new Map(); adjByProject.set(srcProj, adj); }
+            // Would adding issueId -> dependsOnId create a cycle? Cycle iff path dependsOnId -> issueId already.
+            if (hasPath(adj, e.dependsOnId, e.issueId)) {
+              const err = new IssueError(
+                `edges[${i}]: adding dependency ${e.issueId} -> ${e.dependsOnId} would create a cycle`,
+                "CONFLICT",
+              ) as any;
+              err.index = i;
+              throw err;
+            }
+            let set = adj.get(e.issueId);
+            if (!set) { set = new Set(); adj.set(e.issueId, set); }
+            set.add(e.dependsOnId);
+          }
+
+          const id = randomUUID();
+          await tx.insert(issueDependencies).values({
+            id,
+            issueId: e.issueId,
+            dependsOnId: e.dependsOnId,
+            type: type as DependencyType,
+            createdAt: new Date().toISOString(),
+          });
+          edgeKeyToRow.set(key, { id, projectId: srcProj });
+          touchedProjectIds.add(srcProj);
+          added++;
+        } else {
+          const key = `${e.issueId}|${e.dependsOnId}|${type}`;
+          const row = edgeKeyToRow.get(key);
+          if (!row) { skipped.push({ edge: e, reason: "dependency does not exist" }); continue; }
+          await tx.delete(issueDependencies).where(eq(issueDependencies.id, row.id));
+          edgeKeyToRow.delete(key);
+          if (DIRECTIONAL.has(type)) {
+            const adj = adjByProject.get(row.projectId);
+            adj?.get(e.issueId)?.delete(e.dependsOnId);
+          }
+          touchedProjectIds.add(row.projectId);
+          removed++;
+        }
+      }
+    });
+
+    for (const pid of touchedProjectIds) {
+      boardEvents?.broadcast(pid, added > 0 ? "dependency_added" : "dependency_removed");
+    }
+
+    return { added, removed, skipped, projectIds: [...touchedProjectIds] };
+  }
+
   async function addArtifact(
     issueId: string,
     body: { type: string; mimeType?: string; content: string; caption?: string; workspaceId?: string },
@@ -270,6 +486,8 @@ export function createIssueService(deps: {
 
   return {
     createIssue,
+    createIssuesBatch,
+    updateDependenciesBatch,
     updateIssue,
     deleteIssue,
     addDependency,

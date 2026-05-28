@@ -48,6 +48,46 @@ export function createIssuesRoute(database: Database = db, options?: { boardEven
     return c.json(await wrapAiOperation("ai-estimate", () => aiEstimateIssue(body.issueId, database)));
   });
 
+  // POST /api/issues/batch — create N issues atomically
+  router.post("/batch", async (c) => {
+    const body = await parseJsonBody<{ projectId: string; issues: any[] }>(c);
+    if (!body.projectId) return c.json({ error: "projectId is required" }, 400);
+    if (!Array.isArray(body.issues)) return c.json({ error: "issues must be an array" }, 400);
+    try {
+      const result = await issueService.createIssuesBatch(body.projectId, body.issues);
+      return c.json({ issues: result }, 201);
+    } catch (err: any) {
+      if (err.code === "BAD_REQUEST") {
+        const payload: any = { error: err.message };
+        if (typeof err.index === "number") payload.index = err.index;
+        return c.json(payload, 400);
+      }
+      throw err;
+    }
+  });
+
+  // POST /api/issues/dependencies/batch — add/remove N dependency edges atomically
+  router.post("/dependencies/batch", async (c) => {
+    const body = await parseJsonBody<{ edges: any[] }>(c);
+    if (!Array.isArray(body.edges)) return c.json({ error: "edges must be an array" }, 400);
+    try {
+      const result = await issueService.updateDependenciesBatch(body.edges);
+      return c.json({ added: result.added, removed: result.removed, skipped: result.skipped });
+    } catch (err: any) {
+      if (err.code === "BAD_REQUEST") {
+        const payload: any = { error: err.message };
+        if (typeof err.index === "number") payload.index = err.index;
+        return c.json(payload, 400);
+      }
+      if (err.code === "CONFLICT") {
+        const payload: any = { error: err.message };
+        if (typeof err.index === "number") payload.index = err.index;
+        return c.json(payload, 400);
+      }
+      throw err;
+    }
+  });
+
   // POST /api/issues
   router.post("/", async (c) => {
     const body = await parseJsonBody(c);
