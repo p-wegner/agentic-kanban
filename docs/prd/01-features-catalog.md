@@ -147,7 +147,7 @@ Complete inventory of features, organized by category. Status reflects the curre
 
 ### F-MCP-01: MCP Server
 - Model Context Protocol server for Claude Code integration
-- 27 tools via stdio JSON-RPC transport
+- 35 tools via stdio JSON-RPC transport
 - Connected to same SQLite DB as web server
 - Tools include: full CRUD + agent skills + board status + dependency management + session output + diff comments
 - **Status: DONE**

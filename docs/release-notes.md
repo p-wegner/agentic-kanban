@@ -61,7 +61,7 @@ This document captures the feature set at the current snapshot. Future release n
 - `w` shortcut: New Issue + Start Workspace quick command
 - `/` to focus search, Escape to clear
 
-#### MCP Server (27 tools)
+#### MCP Server (35 tools)
 - `get_board_status` — comprehensive overview of all agents, workspaces, diff stats, session stats
 - `list_issues`, `get_issue`, `create_issue`, `update_issue`, `move_issue` — issue management (supports `#N` format)
 - `start_workspace`, `merge_workspace`, `get_workspace_diff` — workspace lifecycle

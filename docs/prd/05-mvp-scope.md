@@ -26,7 +26,7 @@ A local web application where you can:
 | Direct workspaces | DONE | Work on main checkout without worktree |
 | Claude Code execution | DONE | Subprocess CLI with stream-json parsing |
 | Diff viewer | DONE | Unified + split view with inline comments |
-| MCP server | DONE | 27 tools: full CRUD + agent skills + board status |
+| MCP server | DONE | 35 tools: full CRUD + agent skills + board status |
 | CLI | DONE | register, issue list/create/move, workspace list/create, skill list/get/create, status |
 | SQLite persistence | DONE | Local DB, 13 tables, 20 migrations |
 | Tags | DONE | CRUD API, colored badges, 4 seed tags |
