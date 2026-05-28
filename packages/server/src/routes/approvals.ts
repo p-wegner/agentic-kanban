@@ -1,5 +1,6 @@
 import { createApproval, getApproval, resolveApproval, deleteApproval, resolveApprovalContext, type ApprovalDecision } from "../services/approvals.js";
 import type { BoardEvents } from "../services/board-events.js";
+import { emitButlerSystemEvent } from "../services/butler-event-feed.js";
 import { createRouter } from "../middleware/create-router.js";
 import { parseJsonBody } from "../middleware/parse-body.js";
 
@@ -16,6 +17,7 @@ export function createApprovalsRoute(boardEvents: BoardEvents) {
 
     if (projectId) {
       boardEvents.broadcastApprovalRequest(projectId, approval);
+      emitButlerSystemEvent({ projectId, kind: "permission_pending", workspaceId, text: `Agent in workspace ${workspaceId ?? "?"} is requesting permission for tool "${body.toolName}" — needs user approval.` });
     }
 
     return c.json({ id: approval.id });
