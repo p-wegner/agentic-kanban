@@ -16,6 +16,7 @@
 import { query, type Options, type Query, type SDKUserMessage, type SlashCommand } from "@anthropic-ai/claude-agent-sdk";
 import { buildSpawnEnv, getMcpServersConfig } from "./agent-provider/helpers.js";
 import { ensureBoardGuideFile } from "../butler/board-guide.js";
+import { isTransientNetworkError } from "../startup/transient-errors.js";
 
 /** Compact slash-command descriptor surfaced to the UI autocomplete. */
 export interface ButlerCommand {
@@ -345,8 +346,15 @@ async function runLoop(session: ButlerSession, input: Pushable<SDKUserMessage>, 
     console.log(`[butler-sdk] session loop ended: project=${session.projectId}`);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    console.error(`[butler-sdk] session error: project=${session.projectId} ${message}`);
-    broadcast(session, { type: "error", message });
+    if (isTransientNetworkError(err)) {
+      // Anthropic HTTPS socket got killed (tsx hot-reload, network blip, manual stop).
+      // Don't propagate or surface as a hard error — the dev loop must keep running and
+      // the next ensureButlerSession() call will reopen a warm connection.
+      console.warn(`[butler-sdk] transient network error (ignored): project=${session.projectId} ${message}`);
+    } else {
+      console.error(`[butler-sdk] session error: project=${session.projectId} ${message}`);
+      broadcast(session, { type: "error", message });
+    }
   } finally {
     session.query = undefined;
     sessions.delete(session.projectId);
