@@ -10,6 +10,8 @@
 import type { Database } from "../db/index.js";
 import type { SessionManager } from "../services/session.manager.js";
 import type { BoardEvents } from "../services/board-events.js";
+import { issues } from "@agentic-kanban/shared/schema";
+import { eq } from "drizzle-orm";
 import { createRouter } from "../middleware/create-router.js";
 import { parseJsonBody } from "../middleware/parse-body.js";
 import { createWorkspaceService } from "../services/workspace.service.js";
@@ -17,6 +19,8 @@ import {
   listPendingQuestionsForProject,
   markAnswered,
   formatAnswerMessage,
+  recommendQuestionsForSet,
+  setCachedRecommendations,
   type AgentQuestion,
 } from "../services/agent-questions.service.js";
 
@@ -61,6 +65,46 @@ export function createAgentQuestionsRoute(
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.error(`[agent-questions] failed to send answer: workspace=${body.workspaceId} ${message}`);
+      return c.json({ error: message }, 500);
+    }
+  });
+
+  // POST /api/projects/:id/agent-questions/:toolUseId/recommend
+  // Force-refresh the butler recommendation for a pending question set (bypasses cache).
+  // Useful for manual re-trigger and tests. The background path inside listAgentQuestions
+  // already fires recommendations automatically when none is cached, so a client usually
+  // does not need to call this.
+  router.post("/:id/agent-questions/:toolUseId/recommend", async (c) => {
+    const projectId = c.req.param("id");
+    const toolUseId = c.req.param("toolUseId");
+    const sets = await listPendingQuestionsForProject(projectId, database);
+    const target = sets.find((s) => s.toolUseId === toolUseId);
+    if (!target) return c.json({ error: "pending question set not found" }, 404);
+    try {
+      // Strip any cached recommendation from the questions before recomputing.
+      const bareQuestions = target.questions.map(({ recommendation: _r, ...q }) => q);
+      const issueRows = await database
+        .select({ description: issues.description })
+        .from(issues)
+        .where(eq(issues.id, target.issueId))
+        .limit(1);
+      const recommendations = await recommendQuestionsForSet(
+        projectId,
+        {
+          toolUseId,
+          issueId: target.issueId,
+          issueNumber: target.issueNumber,
+          issueTitle: target.issueTitle,
+          issueDescription: issueRows[0]?.description ?? null,
+          questions: bareQuestions,
+        },
+        database,
+      );
+      await setCachedRecommendations(toolUseId, recommendations, database);
+      return c.json({ ok: true, recommendations });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`[agent-questions] recommend failed: toolUseId=${toolUseId} ${message}`);
       return c.json({ error: message }, 500);
     }
   });

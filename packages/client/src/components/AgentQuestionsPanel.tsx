@@ -8,7 +8,7 @@
  * Rendered inline above the Butler chat so the user gets one place to clear
  * agent-blocking questions.
  */
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { apiFetch } from "../lib/api.js";
 
 export interface AgentQuestionOption {
@@ -16,11 +16,19 @@ export interface AgentQuestionOption {
   description?: string;
 }
 
+export interface AgentQuestionRecommendation {
+  recommendedOptionIndexes: number[];
+  freeText?: string;
+  rationale: string;
+}
+
 export interface AgentQuestion {
   question: string;
   header?: string;
   multiSelect?: boolean;
   options: AgentQuestionOption[];
+  /** Butler-recommended answer. undefined = not yet computed; null = failed (graceful degrade). */
+  recommendation?: AgentQuestionRecommendation | null;
 }
 
 export interface PendingQuestionSet {
@@ -46,7 +54,17 @@ interface AnswerState {
 }
 
 function emptyAnswers(qs: AgentQuestion[]): AnswerState[] {
-  return qs.map(() => ({ selectedLabels: [], freeText: "" }));
+  return qs.map((q) => {
+    const rec = q.recommendation;
+    if (!rec) return { selectedLabels: [], freeText: "" };
+    const selectedLabels: string[] = [];
+    for (const idx of rec.recommendedOptionIndexes) {
+      const opt = q.options[idx];
+      if (opt) selectedLabels.push(opt.label);
+    }
+    const freeText = selectedLabels.length === 0 && rec.freeText ? rec.freeText : "";
+    return { selectedLabels, freeText };
+  });
 }
 
 function QuestionCard({
@@ -60,8 +78,37 @@ function QuestionCard({
 }) {
   const [answers, setAnswers] = useState<AnswerState[]>(() => emptyAnswers(set.questions));
   const [submitting, setSubmitting] = useState(false);
+  /** Tracks whether the user has manually edited any answer for a given question — once true,
+   *  we never overwrite that answer with a late-arriving butler recommendation. */
+  const userEdited = useRef<boolean[]>(set.questions.map(() => false));
+
+  // When a recommendation arrives on a later poll, apply it to questions the user
+  // hasn't touched yet. Recommendations that fail (null) or are still pending (undefined)
+  // are ignored — we keep whatever the user has, or the empty default.
+  useEffect(() => {
+    setAnswers((prev) => {
+      let changed = false;
+      const next = prev.map((a, qIdx) => {
+        if (userEdited.current[qIdx]) return a;
+        const q = set.questions[qIdx];
+        const rec = q?.recommendation;
+        if (!rec) return a;
+        const selectedLabels: string[] = [];
+        for (const idx of rec.recommendedOptionIndexes) {
+          const opt = q.options[idx];
+          if (opt) selectedLabels.push(opt.label);
+        }
+        const freeText = selectedLabels.length === 0 && rec.freeText ? rec.freeText : a.freeText;
+        if (selectedLabels.join(" ") === a.selectedLabels.join(" ") && freeText === a.freeText) return a;
+        changed = true;
+        return { selectedLabels, freeText };
+      });
+      return changed ? next : prev;
+    });
+  }, [set.questions]);
 
   function toggleOption(qIdx: number, label: string, multi: boolean) {
+    userEdited.current[qIdx] = true;
     setAnswers((prev) => {
       const next = prev.map((a) => ({ ...a, selectedLabels: [...a.selectedLabels] }));
       const cur = next[qIdx].selectedLabels;
@@ -75,6 +122,7 @@ function QuestionCard({
   }
 
   function setFreeText(qIdx: number, text: string) {
+    userEdited.current[qIdx] = true;
     setAnswers((prev) => {
       const next = prev.map((a) => ({ ...a, selectedLabels: [...a.selectedLabels] }));
       next[qIdx].freeText = text;
@@ -124,18 +172,33 @@ function QuestionCard({
       <div className="space-y-4">
         {set.questions.map((q, qIdx) => {
           const multi = !!q.multiSelect;
+          const rec = q.recommendation;
+          const recPending = rec === undefined;
+          const recommendedIdxs = new Set(rec?.recommendedOptionIndexes ?? []);
           return (
             <div key={qIdx} className="rounded-lg bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 p-3">
               {q.header && (
                 <div className="text-[11px] uppercase tracking-wide text-amber-600 dark:text-amber-400 font-semibold mb-1">{q.header}</div>
               )}
               <div className="text-sm text-gray-800 dark:text-gray-200 mb-2 whitespace-pre-wrap">{q.question}</div>
-              <div className="text-[11px] text-gray-400 dark:text-gray-500 mb-2">
-                {multi ? "Select one or more" : "Select one"}
+              <div className="flex items-center justify-between mb-2">
+                <div className="text-[11px] text-gray-400 dark:text-gray-500">
+                  {multi ? "Select one or more" : "Select one"}
+                </div>
+                {recPending && (
+                  <div className="flex items-center gap-1.5 text-[11px] text-amber-600 dark:text-amber-400" data-testid="butler-reviewing">
+                    <svg className="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+                    </svg>
+                    <span>Butler is reviewing…</span>
+                  </div>
+                )}
               </div>
               <div className="space-y-1.5">
-                {q.options.map((opt) => {
+                {q.options.map((opt, optIdx) => {
                   const selected = answers[qIdx].selectedLabels.includes(opt.label);
+                  const recommended = recommendedIdxs.has(optIdx);
                   return (
                     <button
                       key={opt.label}
@@ -145,8 +208,11 @@ function QuestionCard({
                       className={`w-full text-left rounded-md border px-3 py-2 text-sm transition-colors ${
                         selected
                           ? "border-blue-500 bg-blue-50 dark:bg-blue-900/30 text-gray-900 dark:text-gray-100"
-                          : "border-gray-200 dark:border-gray-700 hover:border-blue-300 dark:hover:border-blue-600 text-gray-700 dark:text-gray-300"
+                          : recommended
+                            ? "border-amber-400 dark:border-amber-500/70 ring-1 ring-amber-300 dark:ring-amber-600/50 bg-amber-50/50 dark:bg-amber-900/10 text-gray-800 dark:text-gray-200 hover:border-amber-500"
+                            : "border-gray-200 dark:border-gray-700 hover:border-blue-300 dark:hover:border-blue-600 text-gray-700 dark:text-gray-300"
                       } disabled:opacity-50`}
+                      data-recommended={recommended ? "1" : undefined}
                     >
                       <div className="flex items-start gap-2">
                         <span className={`mt-0.5 shrink-0 inline-flex items-center justify-center w-4 h-4 ${multi ? "rounded" : "rounded-full"} border ${selected ? "bg-blue-600 border-blue-600 text-white" : "border-gray-300 dark:border-gray-600"}`}>
@@ -156,8 +222,15 @@ function QuestionCard({
                             </svg>
                           )}
                         </span>
-                        <div className="min-w-0">
-                          <div className="font-medium">{opt.label}</div>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <div className="font-medium">{opt.label}</div>
+                            {recommended && (
+                              <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 dark:bg-amber-800/40 text-amber-700 dark:text-amber-300 text-[10px] font-semibold px-1.5 py-0.5 uppercase tracking-wide">
+                                Butler recommends
+                              </span>
+                            )}
+                          </div>
                           {opt.description && (
                             <div className="text-[12px] text-gray-500 dark:text-gray-400 mt-0.5">{opt.description}</div>
                           )}
@@ -167,6 +240,11 @@ function QuestionCard({
                   );
                 })}
               </div>
+              {rec && rec.rationale && (
+                <div className="mt-2 text-[11px] text-amber-700 dark:text-amber-300/90 italic" data-testid="butler-rationale">
+                  Butler: {rec.rationale}
+                </div>
+              )}
               <textarea
                 value={answers[qIdx].freeText}
                 onChange={(e) => setFreeText(qIdx, e.target.value)}
