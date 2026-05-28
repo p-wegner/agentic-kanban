@@ -40,6 +40,9 @@ interface Settings {
   plan_auto_continue?: string;
   visual_verification_mode?: string;
   after_merge_verify_agent?: string;
+  "harness.codex.plan_auto_continue"?: string;
+  "harness.copilot.plan_auto_continue"?: string;
+  "harness.claude.plan_auto_continue"?: string;
 }
 
 const DEFAULT_SETTINGS: Settings = {
@@ -744,10 +747,16 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                     <div className="text-[11px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">Agent behaviour</div>
                     <div className="space-y-3">
                       <Toggle
-                        checked={settings.plan_auto_continue !== "false"}
-                        onChange={setBool("plan_auto_continue")}
+                        checked={(settings["harness.codex.plan_auto_continue"] ?? settings.plan_auto_continue) !== "false"}
+                        onChange={setBool("harness.codex.plan_auto_continue")}
                         label="Auto-continue after plan (Codex)"
                         hint="When a Codex plan-mode run finishes, the plan is saved to PLAN.md. If on, an implementation turn starts automatically. If off, the workspace waits for you to review the plan and click Accept & Implement."
+                      />
+                      <Toggle
+                        checked={(settings["harness.copilot.plan_auto_continue"] ?? settings.plan_auto_continue) !== "false"}
+                        onChange={setBool("harness.copilot.plan_auto_continue")}
+                        label="Auto-continue after plan (Copilot)"
+                        hint="Same as the Codex setting, but for Copilot plan-mode runs."
                       />
                       <Toggle
                         checked={settings.resume_with_new_model === "true"}
