@@ -54,6 +54,14 @@ create_issue(title="Step 1: …", description="…", priority="medium")
 ```
 Move each sub-issue to **In Progress** when you start it, **Done** when you finish.
 
+**When creating tickets, always include a `## Files touched` section** in the description listing the likely-affected paths. This lets the user (or batch-launcher) spot file-overlap between sibling tickets before launching them in parallel — branches editing the same component never merge cleanly. If you don't know exact paths yet, list the component / module names. Example:
+
+```
+## Files touched
+- packages/client/src/components/AgentQuestionsPanel.tsx
+- packages/server/src/services/agent-questions.service.ts
+```
+
 ### 4. Update description with progress notes
 Use `update_issue` to log blockers, decisions, or scope changes in the description field — this is the only shared state between you and the user:
 ```
