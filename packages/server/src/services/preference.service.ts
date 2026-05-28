@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { getPreference, setPreference, getAllPreferences, setPreferences } from "../repositories/preferences.repository.js";
+import { allHarnessSettingKeys } from "./harness-settings.js";
 
 export const SETTINGS_KEYS = [
   "agent_command", "agent_args", "output_parser", "skip_permissions", "claude_profile",
@@ -15,6 +16,7 @@ export const SETTINGS_KEYS = [
   "auto_monitor_interval", "nudge_auto_start", "projects_base_path", "plan_auto_continue",
   "visual_verification_mode", "after_merge_verify_agent",
   "backup_interval_min", "backup_keep_last",
+  ...allHarnessSettingKeys(),
 ];
 
 export function createPreferenceService({ database }: { database: Database }) {

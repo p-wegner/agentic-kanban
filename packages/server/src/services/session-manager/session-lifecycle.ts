@@ -5,6 +5,7 @@ import { eq } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import * as realAgentService from "../agent.service.js";
 import { extractPlan, writePlanFile, buildImplementPrompt } from "../plan-mode.service.js";
+import { getHarnessBoolSetting } from "../harness-settings.js";
 import type { AgentOutputMessage } from "@agentic-kanban/shared";
 import type { SessionManagerOptions, SessionState, StartSessionOptions } from "./types.js";
 
@@ -229,8 +230,10 @@ export function createSessionLifecycle(
                 const planPath = writePlanFile(workspace.workingDir!, plan);
                 await db.update(workspaces).set({ planMode: false, updatedAt: new Date().toISOString() }).where(eq(workspaces.id, workspaceId));
 
-                const prefRows = await db.select().from(preferences).where(eq(preferences.key, "plan_auto_continue"));
-                const autoContinue = prefRows.length === 0 || prefRows[0].value !== "false";
+                const harness = provider === "codex" ? "codex" : "copilot";
+                const prefRows = await db.select().from(preferences);
+                const prefMap = new Map(prefRows.map((r) => [r.key, r.value]));
+                const autoContinue = getHarnessBoolSetting(prefMap, harness, "plan_auto_continue");
 
                 if (autoContinue) {
                   console.log(`[session] plan ready (${planPath}) — auto-continuing to implementation: workspaceId=${workspaceId}`);
