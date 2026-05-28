@@ -565,9 +565,9 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
   return (
     <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
       <ActivityStrip columns={columns} liveActivity={liveActivity} liveStats={liveStats} onIssueClick={onIssueClick} />
-      <AgentQuestionsPanel projectId={projectId} />
 
       {!hasButler ? (
+        <>
         <div className="flex-1 flex items-center justify-center p-8">
           <div className="text-center max-w-sm">
             <div className="w-14 h-14 mx-auto mb-4 rounded-2xl bg-gradient-to-br from-blue-500 to-violet-600 flex items-center justify-center shadow-lg">
@@ -603,6 +603,8 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
             </button>
           </div>
         </div>
+        <AgentQuestionsPanel projectId={projectId} />
+        </>
       ) : (
         <>
           {/* Butler toolbar: status pill (left) · config selects + actions (right) */}
@@ -806,6 +808,9 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
               )}
             </p>
           </div>
+
+          {/* Pending agent questions — secondary inbox, anchored below the chat. */}
+          <AgentQuestionsPanel projectId={projectId} />
         </>
       )}
     </div>
