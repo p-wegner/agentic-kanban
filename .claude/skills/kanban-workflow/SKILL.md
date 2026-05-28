@@ -54,14 +54,6 @@ create_issue(title="Step 1: …", description="…", priority="medium")
 ```
 Move each sub-issue to **In Progress** when you start it, **Done** when you finish.
 
-**When creating tickets, always include a `## Files touched` section** in the description listing the likely-affected paths. This lets the user (or batch-launcher) spot file-overlap between sibling tickets before launching them in parallel — branches editing the same component never merge cleanly. If you don't know exact paths yet, list the component / module names. Example:
-
-```
-## Files touched
-- packages/client/src/components/AgentQuestionsPanel.tsx
-- packages/server/src/services/agent-questions.service.ts
-```
-
 ### 4. Update description with progress notes
 Use `update_issue` to log blockers, decisions, or scope changes in the description field — this is the only shared state between you and the user:
 ```
@@ -91,18 +83,6 @@ Some workspaces have `isDirect: true` — the agent is working directly on the p
 4. Reference the issue in the commit if appropriate
 
 Do NOT leave uncommitted changes in the worktree. If you have made changes, commit them before moving to the next step.
-
-#### Commit checkpoint — commit the moment the core is green
-The instant **both** of these hold, **commit immediately** — do not keep iterating before the first commit:
-- `tsc -b --noEmit` passes for the packages you touched, **and**
-- the directly-related test file(s) pass — run only those:
-  ```
-  pnpm --filter agentic-kanban test -- --related <changed-files>
-  ```
-
-Then continue any polish, extra tests, flaky-suite debugging, or follow-up cleanup in **follow-up commits**. Do **not** batch a multi-step diff into one final commit at the very end — an interruption (server crash, hot-reload, timeout) loses *all* of it, forcing a full redo.
-
-Concretely: if the in-scope suite goes green at turn 80 but you still have 50 turns of polish queued, the commit happens at turn 80 — not turn 130. The green checkpoint is its own commit; the polish is the next one. A branch that does meaningful work should normally show **two or more commits**, not one.
 
 ### 6. Run a code review
 **Every workspace must be reviewed before closing — no exceptions.** How the review happens depends on the workspace type:
@@ -234,9 +214,8 @@ Shorthand for "review #N and merge if fine" — same workflow as above.
 3. **Board reflects reality** — move to In Review while the review runs, move to Done only after review passes. Never skip In Review for direct workspaces.
 4. **Complete the full ticket** — if the ticket lists steps, do all of them. Do not ask the user for permission to skip checklist items. If blocked, note it in the description and stop — don't mark Done.
 5. **Commit before review** — never trigger review with uncommitted changes.
-6. **Commit at the green checkpoint** — the moment `tsc -b --noEmit` is clean and the directly-related tests pass, commit. Queued polish goes in follow-up commits. Never batch a multi-step diff into one end-of-task commit — an interruption loses all of it.
-7. **One status transition per logical checkpoint** — don't batch-move issues after the fact.
-8. **Description is a shared log** — write progress notes so the user can follow along without reading code.
-9. **Done means done** — code committed, tests green, review passed, no loose ends, no open questions.
-10. **Cancelled is not failure** — use it freely when scope changes.
-11. **Targeted tests for refactoring** — use `vitest --related <changed-files>` instead of the full suite when refactoring. It's faster and proves the changed code is covered without re-running unrelated tests.
+6. **One status transition per logical checkpoint** — don't batch-move issues after the fact.
+7. **Description is a shared log** — write progress notes so the user can follow along without reading code.
+8. **Done means done** — code committed, tests green, review passed, no loose ends, no open questions.
+9. **Cancelled is not failure** — use it freely when scope changes.
+10. **Targeted tests for refactoring** — use `vitest --related <changed-files>` instead of the full suite when refactoring. It's faster and proves the changed code is covered without re-running unrelated tests.
