@@ -122,6 +122,17 @@ export function createWorkspaceMergeService(deps: {
       }
     }
 
+    const targetBranch = requireBaseBranch(workspace.baseBranch || defaultBranch);
+    const currentHeadBranch = await gitService.getCurrentBranch(repoPath);
+    if (currentHeadBranch !== targetBranch) {
+      throw new WorkspaceError(
+        `Cannot merge: main checkout HEAD is on '${currentHeadBranch}' but this workspace targets '${targetBranch}'. ` +
+          `Check out '${targetBranch}' in the main checkout before merging, or the merge would silently land on the wrong branch.`,
+        "CONFLICT",
+        { currentBranch: currentHeadBranch, targetBranch },
+      );
+    }
+
     const uncommittedInMain = await gitService.getUncommittedTrackedChanges(repoPath);
     if (uncommittedInMain.length > 0) {
       const preview = uncommittedInMain.slice(0, 10).join("\n");
