@@ -212,5 +212,25 @@ describe("workspace.service", () => {
       const wsRows = await db.select().from(workspaces).where(eq(workspaces.id, wsId));
       expect(wsRows[0].status).toBe("active");
     });
+
+    it("refuses to merge when main checkout HEAD is not on the workspace's base branch", async () => {
+      const { projectId, issueId } = await seedProjectAndIssue(db);
+      const wsId = await seedWorkspaceForMerge(projectId, issueId);
+      // Main checkout sits on some unrelated feature branch — merging would silently land there
+      const gitService = createFakeGitService({
+        getCurrentBranch: vi.fn(async () => "feature/some-other-thing"),
+      });
+
+      const service = createWorkspaceService({ database: db, gitService });
+
+      await expect(service.mergeWorkspace(wsId)).rejects.toMatchObject({
+        code: "CONFLICT",
+        data: { currentBranch: "feature/some-other-thing", targetBranch: "main" },
+      });
+      expect(gitService.mergeBranch).not.toHaveBeenCalled();
+
+      const wsRows = await db.select().from(workspaces).where(eq(workspaces.id, wsId));
+      expect(wsRows[0].status).toBe("active");
+    });
   });
 });
