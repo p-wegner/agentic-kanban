@@ -7,8 +7,57 @@ const SERVER_PORT = Number(process.env.SERVER_PORT) || Number(process.env.KANBAN
 
 async function resolveProjectId(explicit?: string): Promise<string | null> {
   if (explicit) return explicit;
-  const rows = await db.select().from(preferences).where(eq(preferences.key, "active_project")).limit(1);
+  // Match the rest of the CLI (shared.ts uses "activeProjectId"); the previous
+  // butler-ask used "active_project" which never matched anything written by `register`.
+  const rows = await db.select().from(preferences).where(eq(preferences.key, "activeProjectId")).limit(1);
   return rows[0]?.value || null;
+}
+
+async function withProject<T>(
+  options: { project?: string },
+  fn: (projectId: string) => Promise<T>,
+): Promise<void> {
+  const projectId = await resolveProjectId(options.project);
+  if (!projectId) {
+    console.error("No active project. Pass --project <id> or set an active project first.");
+    process.exit(1);
+  }
+  try {
+    await fn(projectId);
+  } finally {
+    process.exit(0);
+  }
+}
+
+/** Issue an HTTP request to a butler endpoint and print JSON or exit on error. */
+async function callButler(
+  projectId: string,
+  path: string,
+  init: { method?: "GET" | "POST" | "PUT" | "DELETE"; body?: unknown } = {},
+): Promise<unknown> {
+  const url = `http://127.0.0.1:${SERVER_PORT}/api/projects/${projectId}/butler${path}`;
+  try {
+    const res = await fetch(url, {
+      method: init.method ?? "GET",
+      headers: init.body !== undefined ? { "Content-Type": "application/json" } : undefined,
+      body: init.body !== undefined ? JSON.stringify(init.body) : undefined,
+    });
+    const data = (await res.json()) as { error?: string } & Record<string, unknown>;
+    if (!res.ok) {
+      console.error(`Butler error (${res.status}): ${data.error ?? res.statusText}`);
+      process.exit(1);
+    }
+    return data;
+  } catch (err) {
+    console.error(`Failed to reach the butler — is the dev server running on port ${SERVER_PORT}?`);
+    console.error(`  ${err instanceof Error ? err.message : String(err)}`);
+    process.exit(1);
+  }
+}
+
+function printJsonOrSummary(data: unknown, summary: string, json?: boolean) {
+  if (json) console.log(JSON.stringify(data, null, 2));
+  else console.log(summary);
 }
 
 interface AskResponse {
@@ -29,45 +78,168 @@ export function registerButlerCommand(program: Command) {
     .option("-p, --project <id>", "Project ID (defaults to active project)")
     .option("-t, --timeout <seconds>", "Max seconds to wait for the answer", "120")
     .option("--json", "Output the raw JSON response")
-    .addHelpText("after", `
-Examples:
-  $ agentic-kanban butler ask "What does this project do?"
-  $ agentic-kanban butler ask "Summarize the open issues" --json
-`)
     .action(async (question: string[], options: { project?: string; timeout?: string; json?: boolean }) => {
-      const projectId = await resolveProjectId(options.project);
-      if (!projectId) {
-        console.error("No active project. Pass --project <id> or set an active project first.");
-        process.exit(1);
-      }
-      const content = question.join(" ").trim();
-      if (!content) {
-        console.error("Question is empty.");
-        process.exit(1);
-      }
-      const timeoutMs = (Number(options.timeout) || 120) * 1000;
-      try {
-        const res = await fetch(`http://127.0.0.1:${SERVER_PORT}/api/projects/${projectId}/butler/ask`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ content, timeoutMs }),
-        });
-        const data = (await res.json()) as AskResponse;
-        if (!res.ok) {
-          console.error(`Butler error: ${data.error ?? res.statusText}`);
+      await withProject(options, async (projectId) => {
+        const content = question.join(" ").trim();
+        if (!content) {
+          console.error("Question is empty.");
           process.exit(1);
         }
+        const timeoutMs = (Number(options.timeout) || 120) * 1000;
+        const data = (await callButler(projectId, "/ask", {
+          method: "POST",
+          body: { content, timeoutMs },
+        })) as AskResponse;
+        if (options.json) console.log(JSON.stringify(data, null, 2));
+        else console.log(data.text);
+      });
+    });
+
+  butler
+    .command("ensure")
+    .description("Start the butler's warm session if not already running.")
+    .option("-p, --project <id>", "Project ID (defaults to active project)")
+    .option("--json", "Output the raw JSON response")
+    .action(async (options: { project?: string; json?: boolean }) => {
+      await withProject(options, async (projectId) => {
+        const data = (await callButler(projectId, "/ensure", { method: "POST", body: {} })) as {
+          active: boolean;
+          sessionId: string | null;
+        };
+        printJsonOrSummary(data, `Butler active (sessionId: ${data.sessionId ?? "n/a"})`, options.json);
+      });
+    });
+
+  butler
+    .command("stop")
+    .description("Stop the butler's warm session and forget the resume id (next ensure starts fresh).")
+    .option("-p, --project <id>", "Project ID (defaults to active project)")
+    .option("--json", "Output the raw JSON response")
+    .action(async (options: { project?: string; json?: boolean }) => {
+      await withProject(options, async (projectId) => {
+        const data = await callButler(projectId, "", { method: "DELETE" });
+        printJsonOrSummary(data, "Butler stopped.", options.json);
+      });
+    });
+
+  butler
+    .command("interrupt")
+    .description("Interrupt the butler's in-flight turn (session stays warm).")
+    .option("-p, --project <id>", "Project ID (defaults to active project)")
+    .option("--json", "Output the raw JSON response")
+    .action(async (options: { project?: string; json?: boolean }) => {
+      await withProject(options, async (projectId) => {
+        const data = (await callButler(projectId, "/interrupt", { method: "POST", body: {} })) as { ok: boolean };
+        printJsonOrSummary(data, `Interrupt: ${data.ok ? "sent" : "no-op (nothing in flight)"}`, options.json);
+      });
+    });
+
+  butler
+    .command("model <name>")
+    .description('Switch the butler\'s model live (pass an empty string "" to revert to the profile default).')
+    .option("-p, --project <id>", "Project ID (defaults to active project)")
+    .option("--json", "Output the raw JSON response")
+    .action(async (name: string, options: { project?: string; json?: boolean }) => {
+      await withProject(options, async (projectId) => {
+        const data = (await callButler(projectId, "/model", { method: "POST", body: { model: name } })) as {
+          ok: boolean; model: string; applied: boolean;
+        };
+        printJsonOrSummary(
+          data,
+          `Model set to "${data.model || "(default)"}" — ${data.applied ? "applied live" : "saved (no live session)"}.`,
+          options.json,
+        );
+      });
+    });
+
+  butler
+    .command("profile <name>")
+    .description('Switch the butler\'s Claude profile. Restarts the session. Pass "" to inherit the global default.')
+    .option("-p, --project <id>", "Project ID (defaults to active project)")
+    .option("--json", "Output the raw JSON response")
+    .action(async (name: string, options: { project?: string; json?: boolean }) => {
+      await withProject(options, async (projectId) => {
+        const data = (await callButler(projectId, "/profile", { method: "POST", body: { profile: name } })) as {
+          ok: boolean; profile: string; active: boolean;
+        };
+        printJsonOrSummary(
+          data,
+          `Profile set to "${data.profile || "(global default)"}" — session restarted.`,
+          options.json,
+        );
+      });
+    });
+
+  butler
+    .command("state")
+    .description("Print the butler's current state (model, profile, context usage).")
+    .option("-p, --project <id>", "Project ID (defaults to active project)")
+    .option("--json", "Output the raw JSON response")
+    .action(async (options: { project?: string; json?: boolean }) => {
+      await withProject(options, async (projectId) => {
+        const data = (await callButler(projectId, "")) as {
+          active: boolean;
+          sessionId: string | null;
+          contextTokens?: number;
+          contextWindow?: number;
+          model?: string;
+          mcpConnected?: boolean;
+          selectedModel?: string;
+          selectedProfile?: string;
+        };
         if (options.json) {
           console.log(JSON.stringify(data, null, 2));
-        } else {
-          console.log(data.text);
+          return;
         }
-      } catch (err) {
-        console.error(`Failed to reach the butler — is the dev server running on port ${SERVER_PORT}?`);
-        console.error(`  ${err instanceof Error ? err.message : String(err)}`);
-        process.exit(1);
-      } finally {
-        process.exit(0);
-      }
+        const ctx = data.contextTokens != null && data.contextWindow
+          ? `${data.contextTokens}/${data.contextWindow}`
+          : "n/a";
+        console.log(`Active:           ${data.active}`);
+        console.log(`Session ID:       ${data.sessionId ?? "n/a"}`);
+        console.log(`Model (live):     ${data.model ?? "n/a"}`);
+        console.log(`Selected model:   ${data.selectedModel || "(profile default)"}`);
+        console.log(`Selected profile: ${data.selectedProfile || "(global default)"}`);
+        console.log(`Context usage:    ${ctx} tokens`);
+        console.log(`MCP connected:    ${data.mcpConnected ?? "n/a"}`);
+      });
+    });
+
+  const skill = butler
+    .command("skill")
+    .description("Read or write the project-scoped butler skill prompt.");
+
+  skill
+    .command("get")
+    .description("Print the butler's current prompt (project override if any, else the global default).")
+    .option("-p, --project <id>", "Project ID (defaults to active project)")
+    .option("--json", "Output the raw JSON response")
+    .action(async (options: { project?: string; json?: boolean }) => {
+      await withProject(options, async (projectId) => {
+        const data = (await callButler(projectId, "/skill")) as { prompt: string; isOverride: boolean };
+        if (options.json) {
+          console.log(JSON.stringify(data, null, 2));
+          return;
+        }
+        console.log(`# Butler skill (${data.isOverride ? "project override" : "global default"})\n`);
+        console.log(data.prompt);
+      });
+    });
+
+  skill
+    .command("set <prompt>")
+    .description("Set the project-scoped butler prompt. Pass an empty string to remove the override.")
+    .option("-p, --project <id>", "Project ID (defaults to active project)")
+    .option("--json", "Output the raw JSON response")
+    .action(async (prompt: string, options: { project?: string; json?: boolean }) => {
+      await withProject(options, async (projectId) => {
+        const data = (await callButler(projectId, "/skill", { method: "PUT", body: { prompt } })) as {
+          ok: boolean; isOverride: boolean;
+        };
+        printJsonOrSummary(
+          data,
+          data.isOverride ? "Project butler skill saved." : "Project butler override cleared (using global default).",
+          options.json,
+        );
+      });
     });
 }
