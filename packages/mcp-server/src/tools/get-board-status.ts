@@ -1,12 +1,12 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { db, schema } from "../db.js";
 import { eq, inArray, desc } from "drizzle-orm";
-import { getDiffShortstat } from "../git-service.js";
 import { extractMeaningfulOutput } from "@agentic-kanban/shared";
 import type { BoardStatusIssue } from "@agentic-kanban/shared";
+import { prodDeps, type ToolDeps } from "./deps.js";
 
-export function registerGetBoardStatus(server: McpServer) {
+export function registerGetBoardStatus(server: McpServer, deps: ToolDeps = prodDeps) {
+  const { db, schema, getDiffShortstat } = deps;
   server.tool(
     "get_board_status",
     "Get a comprehensive overview of all active/in-progress items on the board. Shows per-issue: workspace state, session status, diff stats, token/cost usage, and last agent output. This is the single best query to answer 'what are my agents doing right now?'",
