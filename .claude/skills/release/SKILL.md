@@ -92,7 +92,47 @@ playwright-cli close
 
 Expect: board content (Todo / In Progress / Backlog visible). Empty/missing → ABORT.
 
-### 1.8 Migrations apply cleanly
+### 1.8 Vulnerability scan (production deps)
+
+```bash
+pnpm audit --prod --json > /tmp/audit-prod.json 2>&1 || true
+node -e "const a=require('/tmp/audit-prod.json'); const m=a.metadata?.vulnerabilities||{}; const fail=(m.critical||0)+(m.high||0); console.log(JSON.stringify(m)); process.exit(fail>0?1:0);"
+```
+
+- **critical or high** in prod deps → **ABORT** and list the affected packages + advisories.
+- **moderate** → WARN, surface to the user, allow continue.
+- **low / info** → log and continue.
+
+Don't run `pnpm audit fix` automatically — let the user decide whether to upgrade vs. accept-and-document.
+
+### 1.9 SBOM generation (CycloneDX, attached to GitHub release)
+
+```bash
+# Generate a CycloneDX SBOM for the published server package
+mkdir -p /tmp/release-artifacts
+npx --yes @cyclonedx/cyclonedx-npm \
+  --package-lock-only \
+  --output-format json \
+  --output-file /tmp/release-artifacts/sbom-vX.Y.Z.cdx.json \
+  packages/server
+```
+
+The SBOM is uploaded as a release artifact in Stage 6 (gh release create --add-asset). Don't fail the release on SBOM generation failure — log a warning and continue (the npm publish doesn't require the SBOM, only the GitHub release attachment does).
+
+### 1.10 License audit
+
+```bash
+npx --yes license-checker --production --summary --excludePrivatePackages 2>&1 | head -30
+```
+
+Check for licenses incompatible with our use:
+- ABORT on: GPL-2.0 / GPL-3.0 / AGPL-3.0 (copyleft) in `dependencies` (not devDependencies).
+- WARN on: unknown / UNLICENSED — investigate before continuing.
+- OK: MIT, Apache-2.0, BSD-*, ISC, MPL-2.0, CC0, Unlicense.
+
+If unsure, prompt the user.
+
+### 1.11 Migrations apply cleanly
 
 ```bash
 pnpm db:migrate    # idempotent — should report 'No pending migrations' OR apply cleanly
@@ -215,8 +255,11 @@ git push origin vX.Y.Z
 gh release create vX.Y.Z \
   --title "vX.Y.Z" \
   --notes-file /tmp/release-notes-vX.Y.Z.md \
-  --target master
+  --target master \
+  /tmp/release-artifacts/sbom-vX.Y.Z.cdx.json
 ```
+
+The trailing positional argument(s) attach files to the release. If the SBOM generation in 1.9 was skipped (failure tolerated), omit the trailing path.
 
 ## Stage 7 — Verify
 
@@ -256,3 +299,6 @@ Print:
 - `gh release create` requires `gh auth status` to be green. Ask the user to `gh auth login` if it fails.
 - The npm token can be local (in `.npmrc`) or env (`NPM_TOKEN`). Don't print it.
 - A failing playwright smoke check often means the dev server is still hot-reloading from a recent merge — wait 10s and re-check before aborting.
+- `pnpm audit` against the npm public registry can be slow on cold cache; allow up to 60s before treating as a hang.
+- `@cyclonedx/cyclonedx-npm` needs a real `package-lock.json` or `pnpm-lock.yaml`; if both absent → fail open (skip SBOM, log warning), don't abort the release.
+- `license-checker` reports every transitive dep — focus on `dependencies` (the `--production` flag), not devDependencies. A GPL devDep is fine for a published library; a GPL runtime dep is not.
