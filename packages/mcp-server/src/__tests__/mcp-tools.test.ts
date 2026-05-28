@@ -6,41 +6,16 @@ import { mkdtempSync, rmSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
+import { migrationFilesInOrder } from "./helpers/test-db.js";
 
 const MONOREPO_ROOT = resolve(import.meta.dirname, "../../../..");
 const SHARED_DRIZZLE = resolve(MONOREPO_ROOT, "packages/shared/drizzle");
 
-const MIGRATION_FILES = [
-  "0000_flawless_trauma.sql",
-  "0001_magical_johnny_storm.sql",
-  "0002_bent_may_parker.sql",
-  "0003_tough_lightspeed.sql",
-  "0004_boring_wind_dancer.sql",
-  "0005_silky_frog_thor.sql",
-  "0006_wide_ogun.sql",
-  "0007_diff_comments.sql",
-  "0008_direct_workspace.sql",
-  "0009_requires_review.sql",
-  "0010_session_messages_cascade.sql",
-  "0011_timestamps.sql",
-  "0012_session_stats.sql",
-  "0013_plan_mode.sql",
-  "0014_issue_dependencies.sql",
-  "0015_ai_reviewed_status.sql",
-  "0016_skip_auto_review.sql",
-  "0017_agent_config.sql",
-  "0018_agent_skills.sql",
-  "0019_workspace_skill.sql",
-  "0023_dependency_types.sql",
-  "0020_setup_script.sql",
-  "0021_project_skills.sql",
-  "0022_teardown_script.sql",
-  "0024_setup_enabled.sql",
-];
-
+// Read the migration order from the drizzle journal so this never goes stale as
+// migrations are added (the old hardcoded list froze at 0024 and broke the suite).
 function createTestDb(dbPath: string): void {
   const db = new DatabaseSync(dbPath);
-  for (const file of MIGRATION_FILES) {
+  for (const file of migrationFilesInOrder()) {
     const sql = readFileSync(join(SHARED_DRIZZLE, file), "utf-8");
     const statements = sql
       .split("--> statement-breakpoint")
@@ -51,6 +26,21 @@ function createTestDb(dbPath: string): void {
     }
   }
   db.close();
+}
+
+/** Seed a project with the standard status columns; optionally make it the active project. */
+function seedProject(db: InstanceType<typeof DatabaseSync>, opts: { id: string; name: string; active?: boolean }): void {
+  const now = new Date().toISOString();
+  db.exec(`INSERT INTO projects (id, name, repo_path, repo_name, default_branch, created_at, updated_at)
+    VALUES ('${opts.id}', '${opts.name}', '/tmp/${opts.id}', '${opts.name}', 'main', '${now}', '${now}')`);
+  const statuses = ["Backlog", "Todo", "In Progress", "In Review", "AI Reviewed", "Done", "Cancelled"];
+  statuses.forEach((name, i) => {
+    db.exec(`INSERT INTO project_statuses (id, project_id, name, sort_order, is_default, created_at)
+      VALUES ('${randomUUID()}', '${opts.id}', '${name}', ${i}, ${name === "Backlog" ? 1 : 0}, '${now}')`);
+  });
+  if (opts.active) {
+    db.exec(`INSERT INTO preferences (key, value, updated_at) VALUES ('activeProjectId', '${opts.id}', '${now}')`);
+  }
 }
 
 let messageId = 0;
@@ -91,12 +81,21 @@ function sendAndReceive(proc: ChildProcess, request: string): Promise<any> {
 describe("MCP Server Tools", () => {
   let proc: ChildProcess;
   let projectId: string;
+  let tmpDir: string;
 
   beforeAll(async () => {
+    // Spawn the server against an isolated, seeded temp DB — never the real dev DB.
+    tmpDir = mkdtempSync(join(tmpdir(), "mcp-test-tools-"));
+    const dbPath = join(tmpDir, "test.db");
+    createTestDb(dbPath);
+    const db = new DatabaseSync(dbPath);
+    seedProject(db, { id: randomUUID(), name: "Default Project", active: true });
+    db.close();
+
     proc = spawn("pnpm", ["--filter", "@agentic-kanban/mcp-server", "dev"], {
       cwd: MONOREPO_ROOT,
       stdio: ["pipe", "pipe", "pipe"],
-      env: { ...process.env },
+      env: { ...process.env, DB_URL: `file:${dbPath}` },
     });
 
     await new Promise<void>((resolve, reject) => {
@@ -120,9 +119,8 @@ describe("MCP Server Tools", () => {
   });
 
   afterAll(() => {
-    if (proc) {
-      proc.kill();
-    }
+    if (proc) proc.kill();
+    try { rmSync(tmpDir, { recursive: true }); } catch { /* ignore */ }
   });
 
   it("get_context returns project info", async () => {
