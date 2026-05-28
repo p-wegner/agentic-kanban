@@ -19,6 +19,7 @@ import {
   buildConflictResolutionPrompt,
   buildFixAndMergePrompt,
   runLearningStep,
+  rebuildSharedIfChanged,
 } from "./merge-helpers.service.js";
 import { PREF_AUTO_START_FOLLOWUP } from "../constants/preference-keys.js";
 import { autoStartFollowups } from "./followup-workspace.service.js";
@@ -30,6 +31,17 @@ import {
   activeMerges,
   type GitService,
 } from "./workspace-internals.js";
+
+/** Best-effort kill of any process whose cwd/cmdline lives inside the worktree (e.g. leaked dev.mjs). */
+async function killWorktreeProcesses(workingDir: string | null | undefined, label: string): Promise<void> {
+  if (!workingDir) return;
+  try {
+    const killed = await killProcessesInDir(workingDir);
+    if (killed > 0) console.log(`[workspace-merge] ${label}: killed ${killed} leftover process(es) in ${workingDir}`);
+  } catch (err) {
+    console.warn(`[workspace-merge] ${label}: killWorktreeProcesses failed (non-fatal):`, err instanceof Error ? err.message : String(err));
+  }
+}
 
 export function createWorkspaceMergeService(deps: {
   database: Database;
@@ -57,11 +69,13 @@ export function createWorkspaceMergeService(deps: {
 
     const mergePromise = doMerge(id, workspace, project, repoPath, defaultBranch);
     activeMerges.set(repoPath, mergePromise);
-    try {
-      return await mergePromise;
-    } finally {
+    // Always clear the lock — both on success and on rejection — so a crashed
+    // merge never strands the repo behind a stale in-memory lock.
+    mergePromise.finally(() => {
       activeMerges.delete(repoPath);
-    }
+    }).catch(() => { /* swallow: caller awaits mergePromise below */ });
+
+    return await mergePromise;
   }
 
   async function doMerge(
@@ -72,10 +86,7 @@ export function createWorkspaceMergeService(deps: {
     defaultBranch: string | null,
   ) {
     if (workspace.workingDir && !workspace.isDirect) {
-      try {
-        const killed = await killProcessesInDir(workspace.workingDir);
-        if (killed > 0) console.log(`[workspace-service] killed ${killed} process(es) in ${workspace.workingDir}`);
-      } catch { /* ignore */ }
+      await killWorktreeProcesses(workspace.workingDir, "merge:pre");
       if (project?.teardownScript && project.setupEnabled !== false) {
         try {
           const r = await runScript(project.teardownScript, workspace.workingDir, `teardown:${id}`);
@@ -95,12 +106,9 @@ export function createWorkspaceMergeService(deps: {
       return { id, mergeOutput: "Direct workspace closed (no merge needed)" };
     }
 
-    const prefRows = await database.select().from(preferences);
-    const prefMap = new Map(prefRows.map(r => [r.key, r.value]));
-
-    if (workspace.workingDir && getSessionManager) {
-      await runLearningStep(id, prefMap, database, getSessionManager!);
-    }
+    const prefMap = new Map<string, string>(
+      (await database.select().from(preferences)).map((r) => [r.key, r.value]),
+    );
 
     if (workspace.workingDir) {
       const baseBranch = requireBaseBranch(workspace.baseBranch || defaultBranch);
@@ -141,9 +149,15 @@ export function createWorkspaceMergeService(deps: {
       console.warn("[backup] pre-merge backup failed (non-fatal):", err instanceof Error ? err.message : String(err));
     }
 
+    // Capture pre-merge HEAD so we can diff afterwards to know what landed.
+    let preMergeHead = "";
+    try { preMergeHead = await gitService.revParse(repoPath, "HEAD"); } catch { /* tolerate */ }
+
     const result = await gitService.mergeBranch(repoPath, workspace.branch);
 
+    // Kill any agent-spawned processes (e.g. leaked dev.mjs) before removing the worktree.
     if (workspace.workingDir) {
+      await killWorktreeProcesses(workspace.workingDir, "merge:post");
       try { await gitService.removeWorktree(repoPath, workspace.workingDir); } catch { /* best effort */ }
     }
 
@@ -159,15 +173,52 @@ export function createWorkspaceMergeService(deps: {
     const projectId = await resolveProjectId(id, database);
     if (projectId) boardEvents?.broadcast(projectId, "workspace_merged");
 
-    try {
-      if (prefMap.get(PREF_AUTO_START_FOLLOWUP) === "true" && projectId) {
-        await autoStartFollowups(workspace.issueId, projectId, database, getSessionManager!, prefMap, { boardEvents });
-      }
-    } catch (err) {
-      console.warn("[workspace-service] auto_start_followup check failed:", err);
-    }
+    // Post-merge tasks that don't affect the merge result — run in background so /merge returns promptly.
+    void runPostMergeTasks({
+      workspaceId: id,
+      issueId: workspace.issueId,
+      repoPath,
+      preMergeHead,
+      prefMap,
+      projectId,
+    });
 
     return { id, mergeOutput: result };
+  }
+
+  async function runPostMergeTasks(args: {
+    workspaceId: string;
+    issueId: string;
+    repoPath: string;
+    preMergeHead: string;
+    prefMap: Map<string, string>;
+    projectId: string | null;
+  }) {
+    const { workspaceId, issueId, repoPath, preMergeHead, prefMap, projectId } = args;
+    try {
+      if (preMergeHead) {
+        const changedFiles = await gitService.getChangedFilesBetween(repoPath, preMergeHead, "HEAD");
+        await rebuildSharedIfChanged(repoPath, changedFiles);
+      }
+    } catch (err) {
+      console.warn("[workspace-merge] post-merge shared rebuild failed:", err);
+    }
+
+    try {
+      if (getSessionManager) {
+        await runLearningStep(workspaceId, prefMap, database, getSessionManager);
+      }
+    } catch (err) {
+      console.warn("[workspace-merge] post-merge learning step failed:", err);
+    }
+
+    try {
+      if (prefMap.get(PREF_AUTO_START_FOLLOWUP) === "true" && projectId && getSessionManager) {
+        await autoStartFollowups(issueId, projectId, database, getSessionManager, prefMap, { boardEvents });
+      }
+    } catch (err) {
+      console.warn("[workspace-merge] auto_start_followup check failed:", err);
+    }
   }
 
   async function updateBase(id: string, mode: "rebase" | "merge") {
@@ -183,12 +234,18 @@ export function createWorkspaceMergeService(deps: {
     const { defaultBranch } = await resolveProjectRepo(id, database);
     const baseBranch = requireBaseBranch(workspace.baseBranch || defaultBranch);
 
+    // Stop any processes the agent left running in the worktree before we rewrite history.
+    await killWorktreeProcesses(workspace.workingDir, `update-base:pre`);
+
     let result: { success: boolean; conflictingFiles?: string[]; error?: string };
     if (mode === "merge") {
       result = await gitService.mergeBaseIntoBranch(workspace.workingDir, baseBranch);
     } else {
       result = await gitService.rebaseOntoBase(workspace.workingDir, baseBranch, workspace.branch);
     }
+
+    // And again after — rebase/merge can spawn helpers (hook scripts, editors) that linger.
+    await killWorktreeProcesses(workspace.workingDir, `update-base:post`);
 
     console.log(`[workspace-service] update-base: workspaceId=${id} mode=${mode} success=${result.success} conflicts=${result.conflictingFiles?.length ?? 0}`);
 
@@ -206,6 +263,7 @@ export function createWorkspaceMergeService(deps: {
     }
 
     await gitService.abortRebase(workspace.workingDir);
+    await killWorktreeProcesses(workspace.workingDir, "abort-rebase");
     const projectId = await resolveProjectId(id, database);
     if (projectId) boardEvents?.broadcast(projectId, "board_changed");
     return { ok: true };
@@ -217,6 +275,9 @@ export function createWorkspaceMergeService(deps: {
     if (!workspace.workingDir) throw new WorkspaceError("Workspace not set up", "BAD_REQUEST");
     if (workspace.status === "fixing") throw new WorkspaceError("Conflict resolution already in progress", "CONFLICT");
     if (!getSessionManager) throw new WorkspaceError("Session manager not available", "BAD_REQUEST");
+
+    // Kill leftover worktree processes before spawning the resolution agent.
+    await killWorktreeProcesses(workspace.workingDir, "resolve-conflicts");
 
     const conflictingFiles = await getConflictingFiles(workspace.workingDir);
     const { defaultBranch } = await resolveProjectRepo(id, database);
@@ -245,6 +306,9 @@ export function createWorkspaceMergeService(deps: {
     if (!workspace.workingDir) throw new WorkspaceError("Workspace not set up", "BAD_REQUEST");
     if (workspace.status === "fixing") throw new WorkspaceError("Fix already in progress", "CONFLICT");
     if (!getSessionManager) throw new WorkspaceError("Session manager not available", "BAD_REQUEST");
+
+    // Kill leftover worktree processes (e.g. dev.mjs from the prior agent) before spawning the fix agent.
+    await killWorktreeProcesses(workspace.workingDir, "fix-and-merge");
 
     const errorMessage = mergeError || "Unknown merge error";
     const { defaultBranch } = await resolveProjectRepo(id, database);
