@@ -16,8 +16,14 @@ export const SETTINGS_KEYS = [
   "auto_monitor_interval", "nudge_auto_start", "projects_base_path", "plan_auto_continue",
   "visual_verification_mode", "after_merge_verify_agent",
   "backup_interval_min", "backup_keep_last",
+  "butler_event_feed", "butler_event_feed_min_interval_ms",
   ...allHarnessSettingKeys(),
 ];
+
+/** Per-project override keys (no fixed list — project IDs are dynamic). */
+function isAllowedDynamicKey(key: string): boolean {
+  return /^butler_event_feed_[0-9a-f-]+$/.test(key);
+}
 
 export function createPreferenceService({ database }: { database: Database }) {
   async function getActiveProjectId() {
@@ -32,7 +38,7 @@ export function createPreferenceService({ database }: { database: Database }) {
     const rows = await getAllPreferences(database);
     const settings: Record<string, string> = {};
     for (const row of rows) {
-      if (SETTINGS_KEYS.includes(row.key)) {
+      if (SETTINGS_KEYS.includes(row.key) || isAllowedDynamicKey(row.key)) {
         settings[row.key] = row.value;
       }
     }
@@ -41,7 +47,7 @@ export function createPreferenceService({ database }: { database: Database }) {
 
   async function updateSettings(body: Record<string, string>) {
     const entries = Object.entries(body)
-      .filter(([key]) => SETTINGS_KEYS.includes(key))
+      .filter(([key]) => SETTINGS_KEYS.includes(key) || isAllowedDynamicKey(key))
       .map(([key, value]) => ({ key, value: value ?? "" }));
     await setPreferences(entries, database);
   }

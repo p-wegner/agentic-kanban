@@ -3,6 +3,7 @@ import { desc, eq, sql, or, isNull, notInArray, and } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { createBoardEvents } from "../services/board-events.js";
 import { sendMonitorNudge, type MonitorActionName } from "../services/monitor-nudge.js";
+import { emitButlerSystemEvent } from "../services/butler-event-feed.js";
 import type { createSessionManager } from "../services/session.manager.js";
 import type { MonitorAction } from "./monitor-helpers.js";
 import { NOISE_TRIGGER_TYPES } from "../services/session-filter.js";
@@ -156,6 +157,7 @@ export async function processWorkspaceCandidates(candidates: WorkspaceCandidate[
               continue;
             }
             if (excerpts.length > 0) console.log(`[monitor] Re-nudging workspace ${ws.wsId}  last agent excerpt: "${excerpts[0]?.slice(0, 100)}..."`);
+            emitButlerSystemEvent({ projectId: ws.projectId, kind: "stuck_agent", workspaceId: ws.wsId, issueNumber: ws.issueNumber ?? undefined, text: `Agent on workspace ${ws.wsId} (issue #${ws.issueNumber ?? "?"} "${ws.issueTitle}") has been stuck without progress; monitor re-nudged.` });
           }
           const nudged = sendMonitorNudge({
             sessionManager: deps.sessionManager,

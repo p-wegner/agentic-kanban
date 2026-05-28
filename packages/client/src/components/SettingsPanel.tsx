@@ -40,6 +40,8 @@ interface Settings {
   plan_auto_continue?: string;
   visual_verification_mode?: string;
   after_merge_verify_agent?: string;
+  butler_event_feed?: string;
+  butler_event_feed_min_interval_ms?: string;
   "harness.codex.plan_auto_continue"?: string;
   "harness.copilot.plan_auto_continue"?: string;
   "harness.claude.plan_auto_continue"?: string;
@@ -74,6 +76,8 @@ const DEFAULT_SETTINGS: Settings = {
   projects_base_path: "",
   plan_auto_continue: "true",
   visual_verification_mode: "before_merge",
+  butler_event_feed: "false",
+  butler_event_feed_min_interval_ms: "30000",
 };
 
 type Tab = "agent" | "workflow" | "skills" | "mcp" | "ui" | "project" | "tags" | "advanced" | "schedule";
@@ -872,6 +876,44 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                         label="Auto-start follow-up tasks after merge"
                         hint="When a workspace is merged and the issue has outgoing 'depends_on' or 'child_of' dependencies, automatically create workspaces for unblocked follow-up issues."
                       />
+                      <Toggle
+                        checked={settings.butler_event_feed === "true"}
+                        onChange={setBool("butler_event_feed")}
+                        label="Butler event feed"
+                        hint="Notify the butler about critical board events (merge failures, agent crashes, stuck workspaces, permission requests). The butler receives them as tagged [system event] messages and can react when next addressed. Rate-limited per project."
+                      />
+                      {settings.butler_event_feed === "true" && (
+                        <div className="pl-5 flex items-center gap-2">
+                          <label className="text-xs text-gray-600 dark:text-gray-400">Min interval</label>
+                          <input
+                            type="number"
+                            min="1000"
+                            step="1000"
+                            value={settings.butler_event_feed_min_interval_ms || "30000"}
+                            onChange={(e) => set("butler_event_feed_min_interval_ms")(e.target.value)}
+                            className="w-24 px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                          />
+                          <span className="text-xs text-gray-500 dark:text-gray-400">ms (bursts collapse into a summary)</span>
+                        </div>
+                      )}
+                      {activeProjectId && (
+                        <div className="pl-5">
+                          <Field
+                            label="Per-project override"
+                            hint="Override the global setting for this project. 'Inherit' uses the global toggle above."
+                          >
+                            <select
+                              value={settings[`butler_event_feed_${activeProjectId}` as keyof Settings] ?? ""}
+                              onChange={(e) => setSettings((s) => ({ ...s, [`butler_event_feed_${activeProjectId}`]: e.target.value } as Settings))}
+                              className="px-3 py-1.5 text-xs border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
+                            >
+                              <option value="">Inherit (global)</option>
+                              <option value="true">Force on for this project</option>
+                              <option value="false">Force off for this project</option>
+                            </select>
+                          </Field>
+                        </div>
+                      )}
                     </div>
                   </div>
 
