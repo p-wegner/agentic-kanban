@@ -17,6 +17,7 @@ Each task card on the board is backed by a git worktree and a live Claude Code s
 - **Multi-project** — register multiple git repos and switch between them
 - **Session history** — browse past agent sessions per workspace without leaving context
 - **Worktree overview** — see all git worktrees across workspaces with diff stats and status badges
+- **Butler assistant** — a warm, persistent Claude (Agent SDK) per project (press `i`): chat for board/codebase guidance, per-project model & profile pickers, slash-command autocomplete, a Stop button, and it can orchestrate board work for you
 
 ## Tech Stack
 

@@ -41,6 +41,7 @@ A local web application where you can:
 | AI code review | DONE | Auto-review on session exit, manual review, auto-fix |
 | Live session stats | DONE | Real-time model name + token count on cards |
 | Agent skills | DONE | 4 built-in skills + custom skills via DB |
+| Butler assistant | DONE | Warm in-process Claude SDK session per project; model/profile pickers, slash-command autocomplete, Stop, context-usage, board orchestration + on-demand UI guide |
 | Agent task progress | DONE | TodoWrite progress on issue cards via WebSocket |
 | Worktree overview | DONE | Branch icon, slide-in panel with diff stats |
 | Desktop app | DONE | Tauri v2 with system tray + OS notifications |

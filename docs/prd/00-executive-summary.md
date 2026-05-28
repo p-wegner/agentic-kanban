@@ -19,10 +19,12 @@ We need a **focused, testable** tool that does one thing well.
 ## Core Value Proposition
 > A kanban board where each task card IS a Claude Code session, with built-in diff review and merge.
 
+Alongside the per-task agents, a warm **Butler** assistant lives in each project — a persistent in-process Claude (Agent SDK) you chat with to ask questions, get board/codebase guidance, and have it orchestrate work on your behalf.
+
 ## What We Keep / Skip
 
 See [docs/competitors/our-positioning.md](../competitors/our-positioning.md) for the full competitor analysis and positioning. Key decisions:
-- **Keep**: Kanban board, workspace isolation, MCP server, real-time updates, diff review, Tauri desktop
+- **Keep**: Kanban board, workspace isolation, MCP server, real-time updates, diff review, Tauri desktop, the warm Butler assistant
 - **Skip**: Multi-tenant, cloud deployment, multi-agent, OAuth/billing, relay tunnels
 
 ## Tech Stack

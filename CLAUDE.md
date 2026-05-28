@@ -196,6 +196,10 @@ When the user references `#N` (e.g., "review #70", "merge #65", "what's the stat
 
 **Only fall back to REST API** when no MCP tool or CLI equivalent exists.
 
+### Ask the Butler
+
+The **Butler** is a warm, per-project Claude assistant (Agent SDK, in-process) — distinct from the per-task workspace agents. Users reach it in the UI via the **Butler** view (press `i`); it can answer project/board questions and orchestrate board work (it launches via `POST /api/workspaces`, never the bare `start_workspace`). For a one-shot question without the UI: MCP `ask_butler` (`{ projectId, question }`) or `pnpm cli -- butler ask "<question>"`. Implementation/ops detail: `packages/server/CLAUDE.md` ("Butler" section); architecture rationale: `docs/decisions/003-butler-architecture-agent-sdk-vs-cli.md`.
+
 ## Monorepo Commands
 - `pnpm dev` — start server + client (auto-detects worktree ports; default: server 3001, client 5173)
 - `pnpm dev:desktop` — start server + client + Tauri native window
