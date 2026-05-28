@@ -11,6 +11,7 @@ import * as realGitService from "./git.service.js";
 import { runSetupScript } from "./setup-script.js";
 import { writeAgentSkillFile, readLocalSkillPrompt, copySkillToWorktree } from "@agentic-kanban/shared/lib/agent-skill-files";
 import { resolveAgentSettings, toExecutorProvider } from "./agent-settings.service.js";
+import { emitButlerSystemEvent } from "./butler-event-feed.js";
 import {
   moveIssueToInProgress,
   resolveProjectRepo,
@@ -320,6 +321,13 @@ export function createWorkspaceCrudService(deps: {
   }): Promise<CreateWorkspaceResult> {
     const errorMsg = err instanceof Error ? err.message : String(err);
     console.error(`[workspaces] create failed: ${errorMsg}`);
+
+    try {
+      const issueRows = await database.select({ projectId: issues.projectId }).from(issues).where(eq(issues.id, params.issueId)).limit(1);
+      if (issueRows.length > 0) {
+        emitButlerSystemEvent({ projectId: issueRows[0].projectId, kind: "workspace_error", workspaceId: params.id, text: `Workspace creation failed for issue ${params.issueId} (branch ${params.branch}): ${errorMsg.slice(0, 200)}` });
+      }
+    } catch { /* best-effort */ }
 
     if (!params.isDirect && params.worktreePath && params.repoPath) {
       try {

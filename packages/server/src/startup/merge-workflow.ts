@@ -5,6 +5,7 @@ import { promisify } from "node:util";
 import { db } from "../db/index.js";
 import { MOCK_AGENT_COMMAND, isMockProfile, toExecutorProvider } from "../services/agent-settings.service.js";
 import { createBoardEvents } from "../services/board-events.js";
+import { emitButlerSystemEvent } from "../services/butler-event-feed.js";
 import * as gitService from "../services/git.service.js";
 import { createBackup } from "../db/backup.js";
 import { killProcessesInDir } from "../services/process-cleanup.js";
@@ -115,6 +116,7 @@ export function createAutoMerge({ sessionManager, boardEvents, learningSessionId
             const suffix = uncommittedInMain.length > 5 ? ` (and ${uncommittedInMain.length - 5} more)` : "";
             console.error(`[workflow] auto-merge blocked: main checkout has ${uncommittedInMain.length} uncommitted tracked change(s): ${preview}${suffix}`);
             boardEvents.broadcast(projectId, "workflow_error");
+            emitButlerSystemEvent({ projectId, kind: "merge_failed", workspaceId: workspace.id, text: `Auto-merge blocked for workspace ${workspace.id} (branch ${workspace.branch}): main checkout has ${uncommittedInMain.length} uncommitted tracked change(s).` });
             throw new Error(`Main checkout has ${uncommittedInMain.length} uncommitted tracked change(s) — cannot merge workspace ${workspace.id}. Commit or stash those changes first.`);
           }
 
@@ -166,6 +168,8 @@ Server: http://localhost:${serverPort}`;
     } catch (err) {
       console.error("[workflow] auto-merge failed:", err);
       boardEvents.broadcast(projectId, "workflow_error");
+      const msg = err instanceof Error ? err.message : String(err);
+      emitButlerSystemEvent({ projectId, kind: "merge_failed", workspaceId: workspace.id, text: `Auto-merge failed for workspace ${workspace.id} (branch ${workspace.branch}): ${msg.slice(0, 200)}` });
     }
   };
 }
