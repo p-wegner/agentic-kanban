@@ -49,15 +49,14 @@ registerSessionCommand(program);
 registerButlerCommand(program);
 registerSystemCommands(program);
 
-// ── Default action (no subcommand): auto-init + auto-register + start server ──
-const subcommands = [
-  "register", "create", "preferences", "unregister", "list", "cleanup",
-  "status", "issue", "workspace", "delete-status", "skill", "session", "butler",
-  "init", "install-skill", "dev", "session-history", "sh", "help",
-];
-const hasSubcommand = process.argv.length > 2 && subcommands.includes(process.argv[2]);
+// ── Default action: the bare `agentic-kanban` invocation (no args) auto-inits,
+// auto-registers the cwd repo, and starts the server. ANY args — a subcommand OR a
+// flag like --help / --version — are handed to commander instead. (Previously this
+// matched against a hand-maintained subcommand list, so --help/--version weren't
+// recognized and wrongly fell through to starting the server.)
+const hasArgs = process.argv.length > 2;
 
-if (!hasSubcommand) {
+if (!hasArgs) {
   (async () => {
     try {
       const { dbExists, ensureDataDir } = await import("../db/data-dir.js");
