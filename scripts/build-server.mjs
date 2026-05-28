@@ -22,6 +22,11 @@ const external = [
   "@libsql/client",
   "commander",
   "@modelcontextprotocol/sdk",
+  // Must stay external: the Agent SDK (the butler) loads a platform-native CLI binary
+  // (e.g. claude-agent-sdk-win32-x64/claude.exe) via runtime resolution. Bundling it
+  // breaks that lookup ("Native CLI binary for <platform> not found"). It's a runtime
+  // dependency, so npx installs it + the right native binary for the user's platform.
+  "@anthropic-ai/claude-agent-sdk",
   "zod",
 ];
 
