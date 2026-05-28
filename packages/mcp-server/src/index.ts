@@ -28,6 +28,8 @@ import { registerGetDiffComments } from "./tools/get-diff-comments.js";
 import { registerCreateDiffComment } from "./tools/create-diff-comment.js";
 import { registerAddDependency } from "./tools/add-dependency.js";
 import { registerRemoveDependency } from "./tools/remove-dependency.js";
+import { registerCreateIssuesBatch } from "./tools/create-issues-batch.js";
+import { registerUpdateDependenciesBatch } from "./tools/update-dependencies-batch.js";
 import { registerGetBoardStatus } from "./tools/get-board-status.js";
 import { registerGetIssueSummary } from "./tools/get-issue-summary.js";
 import { registerListAgentSkills } from "./tools/list-agent-skills.js";
@@ -68,6 +70,8 @@ const TOOL_REGISTRARS: Record<string, (server: McpServer) => void> = {
   create_diff_comment: registerCreateDiffComment,
   add_dependency: registerAddDependency,
   remove_dependency: registerRemoveDependency,
+  create_issues_batch: registerCreateIssuesBatch,
+  update_dependencies_batch: registerUpdateDependenciesBatch,
   get_board_status: registerGetBoardStatus,
   get_issue_summary: registerGetIssueSummary,
   list_agent_skills: registerListAgentSkills,
