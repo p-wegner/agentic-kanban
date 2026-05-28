@@ -250,7 +250,7 @@ These are stored in the database and configurable via the Settings panel or API:
 
 ## MCP Server for Claude Code
 
-The MCP server provides 27 tools for Claude Code to interact with the kanban board via stdio JSON-RPC.
+The MCP server provides 35 tools for Claude Code to interact with the kanban board via stdio JSON-RPC.
 
 ### Configuration
 

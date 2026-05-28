@@ -11,7 +11,7 @@ Each task card on the board is backed by a git worktree and a live Claude Code s
 - **Workspace lifecycle** — one-step creation: branch + git worktree + auto-launch Claude Code. Supports direct workspaces (no worktree) for quick tasks
 - **Live agent output** — real-time streaming via WebSocket, chat-like input with Send/Stop, `--resume` support for session continuity
 - **Diff viewer** — unified and split views with inline comments, diff stats, merge and close actions
-- **MCP server** — 10 tools for AI agent integration (list issues, create workspaces, merge branches, etc.)
+- **MCP server** — 35 tools for AI agent integration (board status, issues, workspaces, review/merge, dependencies, skills, etc.)
 - **Real-time board updates** — WebSocket push + polling fallback for cross-tab and MCP-driven changes
 - **Command palette** — Ctrl+K action search with keyboard navigation
 - **Multi-project** — register multiple git repos and switch between them
@@ -25,7 +25,7 @@ Each task card on the board is backed by a git worktree and a live Claude Code s
 |-------|-----------|
 | Backend | Hono (Node.js), Drizzle ORM, SQLite |
 | Frontend | React, TypeScript, Tailwind CSS, Vite |
-| Agent | Claude Code via subprocess |
+| Agent | Claude Code — per-task CLI subprocess, plus a warm in-process Butler (Agent SDK) |
 | Integration | MCP SDK (stdio JSON-RPC) |
 | Testing | Vitest (unit), Playwright (E2E) |
 | Monorepo | pnpm workspaces |
@@ -71,20 +71,20 @@ pnpm cli -- cleanup             # show stale worktrees for closed workspaces
 
 ## MCP Server
 
-The MCP server exposes 10 tools for AI agent integration via stdio JSON-RPC:
+The MCP server exposes 35 tools for AI agent integration via stdio JSON-RPC. A representative subset (tool names are snake_case):
 
 | Tool | Description |
 |------|-------------|
-| `getContext` | Get current project context and issue counts |
-| `listIssues` | List issues with optional status filter |
-| `getIssue` | Get detailed issue information |
-| `createIssue` | Create a new issue |
-| `updateIssue` | Update issue title, description, status, or priority |
-| `listWorkspaces` | List workspaces with optional issue filter |
-| `startWorkspace` | Create workspace with git worktree and start agent |
-| `getWorkspaceDiff` | Get the git diff for a workspace |
-| `mergeWorkspace` | Merge workspace branch and close |
-| `closeWorkspace` | Close workspace without merging |
+| `get_context` | Current project context and issue counts |
+| `get_board_status` | Comprehensive overview: active agents, workspace state, diff/session stats |
+| `list_issues` / `get_issue` | List/filter issues; full issue detail with workspaces + dependencies |
+| `create_issue` / `update_issue` / `move_issue` | Create, edit, and move issues |
+| `start_workspace` | Create a bare git worktree for an issue (does **not** move the issue or launch an agent — to actually start work, the board's one-step `POST /api/workspaces` is used) |
+| `review_workspace` | Run the AI code review on a workspace branch |
+| `get_workspace_diff` / `merge_workspace` | Inspect the diff; merge the branch and close |
+| `add_dependency` / `remove_dependency` | Manage typed issue dependencies |
+| `list_agent_skills` / `get_agent_skill` / `create_agent_skill` | Manage agent skills |
+| `ask_butler` | Ask the project Butler a question synchronously |
 
 Run the MCP server:
 
@@ -106,7 +106,7 @@ packages/
 ├── server/        # Hono API server, SQLite DB, session manager, CLI
 ├── client/        # React frontend (Vite + Tailwind)
 ├── shared/        # Drizzle schemas, migrations, shared types
-├── mcp-server/    # MCP server (stdio JSON-RPC, 10 tools)
+├── mcp-server/    # MCP server (stdio JSON-RPC, 35 tools)
 └── e2e/           # Playwright end-to-end tests
 ```
 

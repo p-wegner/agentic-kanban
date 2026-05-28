@@ -18,7 +18,7 @@ The MCP server connects directly to the same SQLite database as the web server, 
 
 ## MCP Tools
 
-27 tools via stdio JSON-RPC transport using `@modelcontextprotocol/sdk`.
+35 tools via stdio JSON-RPC transport using `@modelcontextprotocol/sdk`.
 
 ### Two agent integration paths
 1. **Workspace agents** (this document) — one Claude Code **CLI subprocess** per task, isolated in a git worktree, resumable via `--resume`. This is the bulk of the doc.
