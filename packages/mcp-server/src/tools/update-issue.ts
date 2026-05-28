@@ -1,10 +1,10 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { db, schema } from "../db.js";
 import { eq } from "drizzle-orm";
-import { notifyBoard } from "../notify.js";
+import { prodDeps, type ToolDeps } from "./deps.js";
 
-export function registerUpdateIssue(server: McpServer) {
+export function registerUpdateIssue(server: McpServer, deps: ToolDeps = prodDeps) {
+  const { db, schema, notifyBoard } = deps;
   server.tool(
     "update_issue",
     "Update an existing issue (title, description, status, priority, type)",

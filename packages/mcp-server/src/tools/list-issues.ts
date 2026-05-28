@@ -1,9 +1,10 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { db, schema } from "../db.js";
 import { eq, inArray, and } from "drizzle-orm";
+import { prodDeps, type ToolDeps } from "./deps.js";
 
-export function registerListIssues(server: McpServer) {
+export function registerListIssues(server: McpServer, deps: ToolDeps = prodDeps) {
+  const { db, schema } = deps;
   server.tool(
     "list_issues",
     "List all issues for a project, optionally filtered by status name, priority, tag, blocked status, or issue number",
