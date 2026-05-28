@@ -16,7 +16,7 @@ export type TestDb = ReturnType<typeof drizzle<typeof schema>>;
 interface JournalEntry { tag: string }
 
 /** Migration tags in journal apply-order — NOT lexical (e.g. 0023 runs before 0020). */
-function migrationFilesInOrder(): string[] {
+export function migrationFilesInOrder(): string[] {
   const journal = JSON.parse(readFileSync(resolve(MIGRATIONS_DIR, "meta/_journal.json"), "utf-8")) as { entries: JournalEntry[] };
   return journal.entries.map((e) => `${e.tag}.sql`);
 }
