@@ -212,11 +212,41 @@ export async function abortStaleMerges(): Promise<void> {
   }
 }
 
+/**
+ * Abort any orphaned interactive rebases left behind in active worktrees.
+ * A rebase interrupted by a hot-reload (or by killing a mid-flight merge agent)
+ * leaves `.git/rebase-merge` or `.git/rebase-apply` in the worktree, which
+ * blocks subsequent operations.
+ */
+export async function abortStaleRebases(): Promise<void> {
+  try {
+    const wsRows = await db.select({ workingDir: workspaces.workingDir }).from(workspaces);
+    const seen = new Set<string>();
+    for (const { workingDir } of wsRows) {
+      if (!workingDir || seen.has(workingDir)) continue;
+      seen.add(workingDir);
+      try {
+        const inRebase = await gitService.isRebaseInProgress(workingDir);
+        if (inRebase) {
+          console.log(`[startup] orphan rebase detected in ${workingDir} — running git rebase --abort to self-heal`);
+          await gitService.abortRebase(workingDir);
+          console.log(`[startup] rebase --abort succeeded for ${workingDir}`);
+        }
+      } catch (err) {
+        console.warn(`[startup] abortStaleRebases: failed for ${workingDir}:`, err instanceof Error ? err.message : String(err));
+      }
+    }
+  } catch (err) {
+    console.warn("[startup] abortStaleRebases failed (non-fatal):", err instanceof Error ? err.message : String(err));
+  }
+}
+
 /** Combined startup sequence: kill orphans, migrate, seed, dedup, abort stale merges, clean sessions/worktrees. */
 export async function runStartupTasks(sessionManager: SessionManager, _deps?: { agentService?: typeof agentServiceType }): Promise<void> {
   await killOrphanedServers();
   await runMigrations();
   await abortStaleMerges();
+  await abortStaleRebases();
   await cleanupStaleSessions(sessionManager);
   await pruneStaleWorktrees();
 }
