@@ -91,7 +91,7 @@ export function resolveAgentSettings(
 
   // `--dangerously-skip-permissions` is Claude-specific. Codex and Copilot get
   // provider-native permission handling in their providers and reject Claude flags.
-  const skipPerms = prefMap.get(PREF_SKIP_PERMISSIONS) === "true" && provider === "claude";
+  const skipPerms = prefMap.get(PREF_SKIP_PERMISSIONS) !== "false" && provider === "claude";
   const baseArgs = prefMap.get(PREF_AGENT_ARGS) || "";
   const agentArgs = skipPerms
     ? (baseArgs ? baseArgs + " --dangerously-skip-permissions" : "--dangerously-skip-permissions")
