@@ -11,10 +11,11 @@
  * as structured records, and tracks per-`tool_use_id` "answered" markers in the
  * preferences table so answered questions stop appearing.
  */
-import { sessions, sessionMessages, workspaces, issues } from "@agentic-kanban/shared/schema";
-import { eq, and, desc } from "drizzle-orm";
+import { sessions, sessionMessages, workspaces, issues, projects } from "@agentic-kanban/shared/schema";
+import { eq, desc } from "drizzle-orm";
 import type { Database } from "../db/index.js";
 import { getPreference, setPreference } from "../repositories/preferences.repository.js";
+import { ensureButlerSession, sendButlerTurn, subscribeButler, getButlerSession } from "./butler-sdk.service.js";
 
 export interface AgentQuestionOption {
   label: string;
@@ -26,6 +27,15 @@ export interface AgentQuestion {
   header?: string;
   multiSelect?: boolean;
   options: AgentQuestionOption[];
+  /** Butler's recommended answer for this question. Attached server-side when available;
+   *  null = recommendation attempted and failed (don't retry); undefined = not yet computed. */
+  recommendation?: AgentQuestionRecommendation | null;
+}
+
+export interface AgentQuestionRecommendation {
+  recommendedOptionIndexes: number[];
+  freeText?: string;
+  rationale: string;
 }
 
 export interface PendingQuestionSet {
@@ -45,6 +55,10 @@ function answeredPrefKey(toolUseId: string): string {
   return `agent_question_answered_${toolUseId}`;
 }
 
+function recommendationPrefKey(toolUseId: string): string {
+  return `agent_question_recommendation_${toolUseId}`;
+}
+
 /** Returns true if this AskUserQuestion ask has already been answered (and re-sent). */
 export async function isAnswered(toolUseId: string, db: Database): Promise<boolean> {
   return (await getPreference(answeredPrefKey(toolUseId), db)) === "1";
@@ -52,6 +66,31 @@ export async function isAnswered(toolUseId: string, db: Database): Promise<boole
 
 export async function markAnswered(toolUseId: string, db: Database): Promise<void> {
   await setPreference(answeredPrefKey(toolUseId), "1", db);
+}
+
+/** Cached recommendation array, one entry per sub-question. A null entry = couldn't recommend
+ *  (e.g. butler returned malformed JSON); the *outer* return is null = not yet computed. */
+export async function getCachedRecommendations(
+  toolUseId: string,
+  db: Database,
+): Promise<Array<AgentQuestionRecommendation | null> | null> {
+  const raw = await getPreference(recommendationPrefKey(toolUseId), db);
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as { recommendations?: Array<AgentQuestionRecommendation | null> };
+    if (!Array.isArray(parsed.recommendations)) return null;
+    return parsed.recommendations;
+  } catch {
+    return null;
+  }
+}
+
+export async function setCachedRecommendations(
+  toolUseId: string,
+  recommendations: Array<AgentQuestionRecommendation | null>,
+  db: Database,
+): Promise<void> {
+  await setPreference(recommendationPrefKey(toolUseId), JSON.stringify({ recommendations }), db);
 }
 
 /**
@@ -100,6 +139,7 @@ export async function listPendingQuestionsForProject(
       issueId: issues.id,
       issueNumber: issues.issueNumber,
       issueTitle: issues.title,
+      issueDescription: issues.description,
     })
     .from(workspaces)
     .innerJoin(issues, eq(workspaces.issueId, issues.id))
@@ -128,6 +168,23 @@ export async function listPendingQuestionsForProject(
     const extracted = extractQuestionsFromSession(msgs);
     for (const { toolUseId, questions } of extracted) {
       if (await isAnswered(toolUseId, db)) continue;
+      // Attach cached recommendation (if any) to each question; kick off a background
+      // recommend call when not yet cached (and not already in flight).
+      const cached = await getCachedRecommendations(toolUseId, db);
+      const questionsWithRec = questions.map((q, i) => ({
+        ...q,
+        recommendation: cached ? (cached[i] ?? null) : undefined,
+      }));
+      if (!cached) {
+        scheduleBackgroundRecommendation(projectId, {
+          toolUseId,
+          issueId: ws.issueId,
+          issueNumber: ws.issueNumber,
+          issueTitle: ws.issueTitle,
+          issueDescription: ws.issueDescription,
+          questions,
+        }, db);
+      }
       results.push({
         toolUseId,
         workspaceId: ws.workspaceId,
@@ -135,13 +192,169 @@ export async function listPendingQuestionsForProject(
         issueId: ws.issueId,
         issueNumber: ws.issueNumber,
         issueTitle: ws.issueTitle,
-        questions,
+        questions: questionsWithRec,
         askedAt: sess.endedAt,
       });
     }
   }
 
   return results;
+}
+
+/** In-flight recommendation calls, keyed by toolUseId — prevents duplicate butler turns
+ *  when multiple list pollers race. */
+const inFlightRecommendations = new Set<string>();
+
+interface RecommendInput {
+  toolUseId: string;
+  issueId: string;
+  issueNumber: number | null;
+  issueTitle: string;
+  issueDescription: string | null;
+  questions: AgentQuestion[];
+}
+
+function scheduleBackgroundRecommendation(projectId: string, input: RecommendInput, db: Database): void {
+  if (inFlightRecommendations.has(input.toolUseId)) return;
+  inFlightRecommendations.add(input.toolUseId);
+  void (async () => {
+    try {
+      const recs = await recommendQuestionsForSet(projectId, input, db);
+      await setCachedRecommendations(input.toolUseId, recs, db);
+    } catch (err) {
+      console.error(`[agent-questions] background recommend failed: toolUseId=${input.toolUseId} ${err instanceof Error ? err.message : err}`);
+      // Cache nulls so we don't re-poll on every list call.
+      await setCachedRecommendations(input.toolUseId, input.questions.map(() => null), db);
+    } finally {
+      inFlightRecommendations.delete(input.toolUseId);
+    }
+  })();
+}
+
+function buildRecommendationPrompt(input: RecommendInput): string {
+  const issueRef = input.issueNumber !== null ? `#${input.issueNumber}: ${input.issueTitle}` : input.issueTitle;
+  const desc = (input.issueDescription ?? "").slice(0, 500).trim();
+  const lines: string[] = [
+    `You are helping the user answer a question that an agent paused on.`,
+    ``,
+    `Issue ${issueRef}`,
+  ];
+  if (desc) lines.push(``, desc);
+  lines.push(``, `The agent asked:`);
+  input.questions.forEach((q, i) => {
+    const header = q.header ? `${q.header}: ` : "";
+    lines.push(`Question ${i + 1}: ${header}${q.question}`);
+    lines.push(`  multiSelect: ${q.multiSelect ? "yes" : "no"}`);
+    lines.push(`  Options:`);
+    q.options.forEach((opt, j) => {
+      const dsc = opt.description ? ` — ${opt.description}` : "";
+      lines.push(`    [${j}] ${opt.label}${dsc}`);
+    });
+  });
+  lines.push(
+    ``,
+    `Recommend an answer for each question. Reply with ONLY a JSON array (no prose, no code fences), one entry per question, in order:`,
+    `[{"recommendedOptionIndexes":[0],"rationale":"short reason under 120 chars"}, ...]`,
+    ``,
+    `Rules:`,
+    `- Use option indexes (0-based) from the Options list above.`,
+    `- For single-select questions: exactly one index in recommendedOptionIndexes (or [] if none fit).`,
+    `- For multi-select: zero or more indexes.`,
+    `- If none of the options fit, set "freeText" to a short suggested reply and leave recommendedOptionIndexes as [].`,
+    `- Keep each rationale under 120 characters and grounded in the ticket if relevant.`,
+  );
+  return lines.join("\n");
+}
+
+/** Strip code fences / leading prose and extract the first JSON array in the text. */
+export function extractJsonArray(text: string): unknown {
+  if (!text) throw new Error("empty butler response");
+  let s = text.trim();
+  // Strip ```json ... ``` or ``` ... ```
+  const fence = s.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (fence) s = fence[1].trim();
+  // Find first '[' and last ']' to tolerate leading/trailing prose.
+  const start = s.indexOf("[");
+  const end = s.lastIndexOf("]");
+  if (start === -1 || end === -1 || end <= start) throw new Error("no JSON array found in butler response");
+  return JSON.parse(s.slice(start, end + 1));
+}
+
+export function coerceRecommendation(raw: unknown, optionCount: number, multi: boolean): AgentQuestionRecommendation | null {
+  if (!raw || typeof raw !== "object") return null;
+  const r = raw as { recommendedOptionIndexes?: unknown; freeText?: unknown; rationale?: unknown };
+  const rationale = typeof r.rationale === "string" ? r.rationale.trim().slice(0, 240) : "";
+  const idxArr = Array.isArray(r.recommendedOptionIndexes) ? r.recommendedOptionIndexes : [];
+  const indexes: number[] = [];
+  for (const v of idxArr) {
+    if (typeof v === "number" && Number.isInteger(v) && v >= 0 && v < optionCount) {
+      indexes.push(v);
+    }
+  }
+  // Enforce single-select cardinality.
+  const finalIndexes = multi ? indexes : indexes.slice(0, 1);
+  const freeText = typeof r.freeText === "string" && r.freeText.trim() ? r.freeText.trim() : undefined;
+  if (finalIndexes.length === 0 && !freeText && !rationale) return null;
+  return { recommendedOptionIndexes: finalIndexes, rationale: rationale || (freeText ? "Butler suggests a free-text reply." : "Butler's pick."), ...(freeText ? { freeText } : {}) };
+}
+
+/** Run one short butler turn for this question set and return per-question recommendations.
+ *  Uses the warm SDK session if present, starting it on demand. The call is a one-shot
+ *  prompt — listeners are attached, the turn pushed, and we resolve on the next `result`. */
+export async function recommendQuestionsForSet(
+  projectId: string,
+  input: RecommendInput,
+  db: Database,
+): Promise<Array<AgentQuestionRecommendation | null>> {
+  // Ensure a butler session exists; if not, start one from the project record so the
+  // recommender works even before the user opens the Butler view.
+  if (!getButlerSession(projectId).active) {
+    const projRows = await db.select().from(projects).where(eq(projects.id, projectId)).limit(1);
+    const project = projRows[0];
+    if (!project) throw new Error(`project not found: ${projectId}`);
+    const claudeProfile = (await getPreference(`butler_profile_${projectId}`, db))
+      || (await getPreference("claude_profile", db))
+      || undefined;
+    const model = (await getPreference(`butler_model_${projectId}`, db)) || undefined;
+    const resumeSessionId = (await getPreference(`butler_session_${projectId}`, db)) || undefined;
+    ensureButlerSession({
+      projectId,
+      repoPath: project.repoPath,
+      projectName: project.name,
+      claudeProfile,
+      model,
+      resumeSessionId,
+    });
+  }
+
+  const prompt = buildRecommendationPrompt(input);
+  const timeoutMs = 45_000;
+  const answer = await new Promise<{ text: string; isError: boolean }>((resolve) => {
+    let buf = "";
+    let settled = false;
+    const finish = (text: string, isError: boolean) => {
+      if (settled) return;
+      settled = true;
+      unsubscribe();
+      clearTimeout(timer);
+      resolve({ text, isError });
+    };
+    const unsubscribe = subscribeButler(projectId, (e) => {
+      if (e.type === "text") buf += e.text;
+      else if (e.type === "result") finish(e.text ?? buf, e.isError ?? false);
+      else if (e.type === "error") finish(e.message, true);
+    });
+    const timer = setTimeout(() => finish(buf || "(timed out)", true), timeoutMs);
+    sendButlerTurn(projectId, prompt);
+  });
+
+  if (answer.isError) {
+    throw new Error(`butler returned error: ${answer.text.slice(0, 200)}`);
+  }
+
+  const parsed = extractJsonArray(answer.text);
+  if (!Array.isArray(parsed)) throw new Error("butler response was not a JSON array");
+  return input.questions.map((q, i) => coerceRecommendation(parsed[i], q.options.length, !!q.multiSelect));
 }
 
 /**
