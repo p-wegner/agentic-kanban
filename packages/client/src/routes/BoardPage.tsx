@@ -7,6 +7,7 @@ import { AgentGrid } from "../components/AgentGrid.js";
 import { TimelineView } from "../components/TimelineView.js";
 import { MetricsView } from "../components/MetricsView.js";
 import { ButlerView } from "../components/ButlerView.js";
+import { useAgentQuestionsCount } from "../components/AgentQuestionsPanel.js";
 import { BoardErrorBoundary } from "../components/BoardErrorBoundary.js";
 import { BoardKanbanView } from "../components/BoardKanbanView.js";
 import { BoardStats } from "../components/BoardStats.js";
@@ -101,6 +102,7 @@ export function BoardPage() {
     return validViews.includes(stored as ViewMode) ? (stored as ViewMode) : "kanban";
   });
   const [dynamicColumnScaling, setDynamicColumnScaling] = useState(false);
+  const agentQuestionsCount = useAgentQuestionsCount(activeProjectId);
   const [columnWidths, setColumnWidths] = useState<Record<string, number>>(() => {
     try { return JSON.parse(localStorage.getItem("kanban-column-widths") ?? "{}"); } catch { return {}; }
   });
@@ -1218,6 +1220,7 @@ export function BoardPage() {
           }}
           viewMode={viewMode}
           onViewModeChange={handleViewModeChange}
+          butlerBadgeCount={agentQuestionsCount}
         />
         {viewMode === "graph" && activeProjectId ? (
           <div className="flex-1 min-h-0">

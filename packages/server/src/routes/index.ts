@@ -9,6 +9,7 @@ import { createAgentSkillsRoute } from "./agent-skills.js";
 import { createApprovalsRoute } from "./approvals.js";
 import { createScheduledRunsRoute } from "./scheduled-runs.js";
 import { createButlerRoute } from "./butler.js";
+import { createAgentQuestionsRoute } from "./agent-questions.js";
 import type { Database } from "../db/index.js";
 import type { SessionManager } from "../services/session.manager.js";
 import type { BoardEvents } from "../services/board-events.js";
@@ -25,6 +26,7 @@ export function createRoutes(database: Database, getSessionManager: () => Sessio
   const routes = createRouter();
   routes.route("/projects", createProjectsRoute(database));
   routes.route("/projects", createButlerRoute(database, getSessionManager, options));
+  routes.route("/projects", createAgentQuestionsRoute(database, getSessionManager, options));
   routes.route("/issues", createIssuesRoute(database, options));
   routes.route("/workspaces", createWorkspacesRoute(database, getSessionManager, options));
   routes.route("/workspaces", createWorkspaceActionsRoute(getSessionManager, database, options));

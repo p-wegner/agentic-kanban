@@ -5,6 +5,7 @@ import { apiFetch } from "../lib/api.js";
 import { CLAUDE_MODEL_OPTIONS } from "@agentic-kanban/shared";
 import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
 import type { LiveSessionStats } from "../lib/useBoardEvents.js";
+import { AgentQuestionsPanel } from "./AgentQuestionsPanel.js";
 
 interface ButlerState {
   active: boolean;
@@ -564,6 +565,7 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
   return (
     <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
       <ActivityStrip columns={columns} liveActivity={liveActivity} liveStats={liveStats} onIssueClick={onIssueClick} />
+      <AgentQuestionsPanel projectId={projectId} />
 
       {!hasButler ? (
         <div className="flex-1 flex items-center justify-center p-8">
