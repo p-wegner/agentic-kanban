@@ -250,6 +250,8 @@ Preference {
 
 **Known keys**: `activeProjectId`, `agent_command`, `agent_args`, `output_parser`, `mock_agent`, `auto_merge`, `review_auto_fix`, `claude_profile`
 
+**Per-project butler keys** (dynamic, suffixed with the projectId): `butler_session_<projectId>` (persisted SDK session id for warm resume), `butler_model_<projectId>` (model override; "" = profile/CLI default), `butler_profile_<projectId>` (Claude profile override; "" = inherit the global `claude_profile`).
+
 ## Schema Evolution
 
 Migrations are managed via Drizzle Kit. SQL files in `packages/shared/drizzle/*.sql` with journal entries in `packages/shared/drizzle/meta/_journal.json`.

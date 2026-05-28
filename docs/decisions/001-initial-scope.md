@@ -45,5 +45,5 @@
 
 ## Resolved
 - [x] ~~Python or TypeScript?~~ -> TypeScript
-- [ ] Use Claude Agent SDK directly, or subprocess Claude Code CLI?
+- [x] ~~Use Claude Agent SDK directly, or subprocess Claude Code CLI?~~ -> both: CLI subprocess for task agents, Agent SDK for the Butler (see [003-butler-architecture-agent-sdk-vs-cli.md](003-butler-architecture-agent-sdk-vs-cli.md))
 - [ ] Use Docker for workspace isolation, or bare metal?

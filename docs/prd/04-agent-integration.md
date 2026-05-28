@@ -20,6 +20,10 @@ The MCP server connects directly to the same SQLite database as the web server, 
 
 27 tools via stdio JSON-RPC transport using `@modelcontextprotocol/sdk`.
 
+### Two agent integration paths
+1. **Workspace agents** (this document) — one Claude Code **CLI subprocess** per task, isolated in a git worktree, resumable via `--resume`. This is the bulk of the doc.
+2. **Butler** — a single **warm, in-process** Claude per project via the Claude Agent SDK (`@anthropic-ai/claude-agent-sdk`), not a subprocess. Conversation context persists across turns; the same MCP tools are wired in via the SDK's `options.mcpServers`. Per-project model picker (live `query.setModel()`) and profile selector (restart), slash-command autocomplete, Stop via `query.interrupt()`, context usage via `getContextUsage()`. It orchestrates board work through the one-step `POST /api/workspaces` launch (never the bare `start_workspace` tool) and reads a bundled on-demand UI guide. Implementation details live in `packages/server/CLAUDE.md` (the "Butler" section).
+
 ### Board & Issue Management
 | Tool | Input | Output | Purpose |
 |------|-------|--------|---------|
