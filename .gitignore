@@ -27,3 +27,4 @@ bash.exe.stackdump
 .claude/settings.local.json
 *.log
 HANDOFF.md
+CLAUDE.local.md
