@@ -121,6 +121,39 @@ async function seedIssue(dbPath: string, projectId: string, overrides: { title?:
   return { id, issueNumber };
 }
 
+// ── dispatch gate (regression: AK-47) ─────────────────────────────────────────
+// `pnpm cli -- <subcommand>` must dispatch to commander, not fall through to the
+// default action (auto-init + start server). Regression for AK-47, where the
+// hand-maintained subcommand list missed --help/--version and other args.
+
+describe("CLI dispatch gate", () => {
+  let ctx: ReturnType<typeof createTestDb>;
+
+  beforeEach(() => { ctx = createTestDb(); });
+  afterEach(() => { ctx.cleanup(); });
+
+  it("does not start the server when a subcommand is passed", () => {
+    const result = runCli(["list"], ctx.dbPath);
+    expect(result.status).toBe(0);
+    // Server startup banner from cli/index.ts default action — must NOT appear.
+    expect(result.stdout).not.toContain("Agentic Kanban is running");
+    expect(result.stdout).not.toContain("UI:  http://");
+  });
+
+  it("--help prints help and exits without starting the server", () => {
+    const result = runCli(["--help"], ctx.dbPath);
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("Usage:");
+    expect(result.stdout).not.toContain("Agentic Kanban is running");
+  });
+
+  it("--version prints version and exits without starting the server", () => {
+    const result = runCli(["--version"], ctx.dbPath);
+    expect(result.status).toBe(0);
+    expect(result.stdout).not.toContain("Agentic Kanban is running");
+  });
+});
+
 // ── register ──────────────────────────────────────────────────────────────────
 
 describe("CLI register", () => {
