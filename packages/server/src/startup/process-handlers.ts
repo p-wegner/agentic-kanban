@@ -1,6 +1,7 @@
 import type * as agentService from "../services/agent.service.js";
 import { rawClient } from "../db/index.js";
 import { createBackup } from "../db/backup.js";
+import { isTransientNetworkError } from "./transient-errors.js";
 
 /** Checkpoint the WAL and take a verified shutdown backup, bounded so it can't hang exit. */
 async function checkpointAndBackup(): Promise<void> {
@@ -27,10 +28,23 @@ export function setupProcessHandlers(server: { close: (cb: () => void) => void }
       console.error("[fatal] Port already in use — exiting:", err.message);
       process.exit(1);
     }
+    if (isTransientNetworkError(err)) {
+      // Common during tsx hot-reload teardown: warm butler Anthropic HTTPS
+      // socket gets killed mid-read, surfacing as `read ECONNRESET` on
+      // TCP.onStreamRead. Swallow with a warning so the dev loop survives.
+      console.warn(`[warn] Transient network error (ignored): ${err.code ?? "?"} ${err.message}`);
+      return;
+    }
     console.error("[error] Uncaught exception (recoverable):", err);
   });
 
   process.on("unhandledRejection", (reason) => {
+    if (isTransientNetworkError(reason)) {
+      const code = (reason as NodeJS.ErrnoException).code ?? "?";
+      const msg = reason instanceof Error ? reason.message : String(reason);
+      console.warn(`[warn] Transient network rejection (ignored): ${code} ${msg}`);
+      return;
+    }
     console.error("[error] Unhandled rejection (suppressed):", reason);
   });
 
