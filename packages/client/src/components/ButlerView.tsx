@@ -607,31 +607,45 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
         </>
       ) : (
         <>
-          {/* Butler toolbar: status pill (left) · config selects + actions (right) */}
-          <div className="shrink-0 flex items-center justify-between gap-3 border-b border-gray-100 dark:border-gray-800 px-4 py-1.5 text-xs">
-            {/* Left group — session status: MCP health + context usage, as one pill. */}
-            <div
-              className="flex items-center gap-1.5 shrink-0 rounded-full border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/60 px-2.5 py-1 text-gray-500 dark:text-gray-400 min-w-0"
-              title={[
-                model ? `Model: ${model}` : null,
-                contextWindow ? `Context window: ${(contextWindow / 1000).toFixed(0)}k tokens` : null,
-                contextTokens ? `Context used: ${contextTokens.toLocaleString()} tokens` : null,
-                mcpConnected !== undefined ? `Board MCP: ${mcpConnected ? "connected" : "not connected"}` : null,
-              ].filter(Boolean).join("\n")}
-            >
-              {mcpConnected !== undefined && (
-                <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${mcpConnected ? "bg-green-500" : "bg-gray-300 dark:bg-gray-600"}`} title={mcpConnected ? "Board MCP connected" : "Board MCP not connected"} />
-              )}
-              <span className="shrink-0">
-                {contextTokens > 0
-                  ? contextWindow
-                    ? `${(contextTokens / 1000).toFixed(1)}k / ${formatWindow(contextWindow)} (${Math.round((contextTokens / contextWindow) * 100)}%)`
-                    : `${(contextTokens / 1000).toFixed(1)}k context`
-                  : "warm session"}
-              </span>
+          {/* Butler toolbar: context pill + clear (left, grouped) · config selects + Customize (right) */}
+          <div className="shrink-0 flex items-center justify-between gap-3 border-b border-gray-200 dark:border-gray-800 bg-gray-50/60 dark:bg-gray-900/40 px-4 py-2 text-xs">
+            {/* Left group — context status pill with an attached "clear" icon button.
+                Grouping them makes it obvious that the button resets the value shown in the pill. */}
+            <div className="flex items-center shrink-0 min-w-0 rounded-full border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 overflow-hidden">
+              <div
+                className="flex items-center gap-1.5 px-3 py-1 text-gray-600 dark:text-gray-300 min-w-0"
+                title={[
+                  model ? `Model: ${model}` : null,
+                  contextWindow ? `Context window: ${(contextWindow / 1000).toFixed(0)}k tokens` : null,
+                  contextTokens ? `Context used: ${contextTokens.toLocaleString()} tokens` : null,
+                  mcpConnected !== undefined ? `Board MCP: ${mcpConnected ? "connected" : "not connected"}` : null,
+                ].filter(Boolean).join("\n")}
+              >
+                {mcpConnected !== undefined && (
+                  <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${mcpConnected ? "bg-green-500" : "bg-gray-300 dark:bg-gray-600"}`} title={mcpConnected ? "Board MCP connected" : "Board MCP not connected"} />
+                )}
+                <span className="shrink-0 font-medium">
+                  {contextTokens > 0
+                    ? contextWindow
+                      ? `${(contextTokens / 1000).toFixed(1)}k / ${formatWindow(contextWindow)} (${Math.round((contextTokens / contextWindow) * 100)}%)`
+                      : `${(contextTokens / 1000).toFixed(1)}k context`
+                    : "warm session"}
+                </span>
+              </div>
+              <button
+                onClick={handleClearContext}
+                disabled={sending}
+                className="inline-flex items-center gap-1 border-l border-gray-200 dark:border-gray-700 px-2.5 py-1 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 hover:text-gray-900 dark:hover:text-gray-100 transition-colors disabled:opacity-40 disabled:hover:bg-transparent"
+                title="Clear the butler's conversation context and start fresh"
+              >
+                <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6h14z" />
+                </svg>
+                <span>Clear</span>
+              </button>
             </div>
 
-            {/* Right group — config selects, a divider, then actions. */}
+            {/* Right group — config selects, then a clearly-styled Customize button. */}
             <div className="flex items-center gap-2 shrink-0">
               {/* Model picker — switches in place, no context loss. */}
               <label className="flex items-center gap-1 text-gray-500 dark:text-gray-400" title="Model for the butler. Switches without losing context.">
@@ -639,7 +653,7 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
                 <select
                   value={selectedModel}
                   onChange={(e) => void handleModelChange(e.target.value)}
-                  className="rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-1.5 py-0.5 text-xs text-gray-700 dark:text-gray-300 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  className="rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-1.5 py-1 text-xs text-gray-700 dark:text-gray-200 focus:outline-none focus:ring-1 focus:ring-blue-500"
                 >
                   {CLAUDE_MODEL_OPTIONS.map((m) => (
                     <option key={m.value} value={m.value}>{m.label}</option>
@@ -653,7 +667,7 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
                   value={selectedProfile}
                   onChange={(e) => void handleProfileChange(e.target.value)}
                   disabled={switchingProfile || sending}
-                  className="rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-1.5 py-0.5 text-xs text-gray-700 dark:text-gray-300 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-50"
+                  className="rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-1.5 py-1 text-xs text-gray-700 dark:text-gray-200 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-50"
                 >
                   <option value="">{globalProfile ? `Default (${globalProfile})` : "Default"}</option>
                   {profiles.map((p) => (
@@ -661,21 +675,14 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
                   ))}
                 </select>
               </label>
-              <span className="h-4 w-px bg-gray-200 dark:bg-gray-700" aria-hidden />
+              <span className="h-5 w-px bg-gray-300 dark:bg-gray-700" aria-hidden />
               <button
                 onClick={openCustomize}
-                className="px-2 py-1 rounded text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                className="inline-flex items-center gap-1 px-2.5 py-1 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors shadow-sm"
                 title="Customize the butler's behavior (edits the project's butler skill)"
               >
-                ⚙ Customize
-              </button>
-              <button
-                onClick={handleClearContext}
-                disabled={sending}
-                className="px-2 py-1 rounded text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors disabled:opacity-40"
-                title="Clear the butler's conversation context and start fresh"
-              >
-                🧹 Clear context
+                <span aria-hidden>⚙</span>
+                <span>Customize</span>
               </button>
             </div>
           </div>
