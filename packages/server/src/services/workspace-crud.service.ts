@@ -10,6 +10,7 @@ import type { ProviderName } from "./agent-provider.js";
 import * as realGitService from "./git.service.js";
 import { runSetupScript } from "./setup-script.js";
 import { writeAgentSkillFile, readLocalSkillPrompt, copySkillToWorktree } from "@agentic-kanban/shared/lib/agent-skill-files";
+import { writeTicketContextFile } from "@agentic-kanban/shared/lib/ticket-context";
 import { resolveAgentSettings, toExecutorProvider } from "./agent-settings.service.js";
 import { emitButlerSystemEvent } from "./butler-event-feed.js";
 import {
@@ -37,12 +38,12 @@ export function createWorkspaceCrudService(deps: {
   const gitService = deps.gitService ?? realGitService;
 
   async function resolveIssueAndProject(issueId: string): Promise<{
-    issue: { projectId: string; title: string; description: string | null };
+    issue: { projectId: string; issueNumber: number | null; title: string; description: string | null };
     project: { repoPath: string; defaultBranch: string | null };
     setupConfig: { setupScript: string | null; setupBlocking: boolean; setupEnabled: boolean };
   }> {
     const issueRows = await database
-      .select({ projectId: issues.projectId, title: issues.title, description: issues.description })
+      .select({ projectId: issues.projectId, issueNumber: issues.issueNumber, title: issues.title, description: issues.description })
       .from(issues)
       .where(eq(issues.id, issueId))
       .limit(1);
@@ -405,6 +406,18 @@ export function createWorkspaceCrudService(deps: {
       ({ branch, worktreePath, baseBranch, baseCommitSha } = await setupWorktree(
         isDirect, project.repoPath, project.defaultBranch, input, setupConfig, id,
       ));
+
+      // Inject ticket details into the worktree as `CLAUDE.local.md` so the agent's
+      // first turn has the spec without foraging. Gitignored — never enters the merge.
+      // Best-effort: a write failure must not block workspace creation. Skipped for
+      // direct workspaces (workingDir is the user's real checkout root).
+      if (!isDirect && worktreePath) {
+        await writeTicketContextFile(worktreePath, {
+          issueNumber: issue.issueNumber,
+          title: issue.title,
+          description: issue.description,
+        });
+      }
 
       const agentPrompt = buildAgentPrompt(issue, { ...input, includeVisualProof }, input.issueId);
 

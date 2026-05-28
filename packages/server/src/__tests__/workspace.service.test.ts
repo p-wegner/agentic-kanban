@@ -1,5 +1,8 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { randomUUID } from "node:crypto";
+import { mkdtemp, rm, readFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { eq } from "drizzle-orm";
 import { projects, projectStatuses, issues, workspaces } from "@agentic-kanban/shared/schema";
 import { createTestDb, type TestDb } from "./helpers/test-db.js";
@@ -123,6 +126,33 @@ describe("workspace.service", () => {
       const issueRow = await db.select().from(issues).where(eq(issues.id, issueId));
       const statusRow = await db.select().from(projectStatuses).where(eq(projectStatuses.id, issueRow[0].statusId));
       expect(statusRow[0].name).toBe("In Progress");
+    });
+
+    it("injects the ticket context as CLAUDE.local.md into the worktree", async () => {
+      const worktreeDir = await mkdtemp(join(tmpdir(), "ak-ws-ctx-"));
+      try {
+        const { issueId } = await seedProjectAndIssue(db);
+        const gitService = createFakeGitService({
+          createWorktree: vi.fn(async () => worktreeDir),
+        });
+        const sessionManager = createMockSessionManager();
+
+        const service = createWorkspaceService({
+          database: db,
+          getSessionManager: () => sessionManager,
+          gitService,
+        });
+
+        const result = await service.createWorkspace({ issueId, branch: "feature/ak-1-test" });
+        expect(result.error).toBeUndefined();
+
+        const ctx = (await readFile(join(worktreeDir, "CLAUDE.local.md"), "utf-8")).trim();
+        // Seed issue: number 1, title "Implement feature", description "Do the thing"
+        expect(ctx).toContain("# Ticket #1: Implement feature");
+        expect(ctx).toContain("Do the thing");
+      } finally {
+        await rm(worktreeDir, { recursive: true, force: true });
+      }
     });
 
     it("rolls back the worktree and returns an error result when agent spawn fails", async () => {
