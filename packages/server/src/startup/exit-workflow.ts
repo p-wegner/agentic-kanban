@@ -4,6 +4,7 @@ import { execFile } from "node:child_process";
 import { db } from "../db/index.js";
 import { MOCK_AGENT_COMMAND, isMockProfile, toExecutorProvider } from "../services/agent-settings.service.js";
 import { createBoardEvents } from "../services/board-events.js";
+import { emitButlerSystemEvent } from "../services/butler-event-feed.js";
 import * as gitService from "../services/git.service.js";
 import { createSessionManager } from "../services/session.manager.js";
 import { buildReviewArgs, buildReviewPrompt, getEffectiveProfile, parseProviderPref } from "./review-helpers.js";
@@ -108,11 +109,15 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge }:
         } else {
           console.log(`[workflow] fix-and-merge session ${sessionId} exited with code ${exitCode}  not retrying merge`);
           boardEvents.broadcast(projectId, "workflow_error");
+          emitButlerSystemEvent({ projectId, kind: "merge_failed", workspaceId, text: `Fix-and-merge session for workspace ${workspaceId} exited with code ${exitCode}.` });
         }
         return;
       }
       if (learningSessionIds.has(sessionId)) { learningSessionIds.delete(sessionId); console.log(`[workflow] learning step session ${sessionId} completed  no further workflow action`); return; }
-      if (exitCode !== 0) return;
+      if (exitCode !== 0) {
+        emitButlerSystemEvent({ projectId, kind: "session_failed", workspaceId, text: `Agent session for workspace ${workspaceId} ended with non-zero exit code ${exitCode}.` });
+        return;
+      }
       if (reviewSessionIds.has(sessionId)) {
         reviewSessionIds.delete(sessionId);
         const currentIssueRows = await db.select({ statusId: issues.statusId }).from(issues).where(eq(issues.id, issueId)).limit(1);
