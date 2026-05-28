@@ -180,7 +180,9 @@ Update the parent issue description with:
   {
     name: "monitor-nudge",
     description: "Message sent to agents that have been running for more than 5 minutes without exiting — customize to change nudge behavior",
-    prompt: `Please continue with the task. If you are waiting for input or unsure how to proceed, use your best judgment and keep moving forward. Check the issue description and any open questions, then take the next logical step.`,
+    prompt: `Please continue with the task. If you are waiting for input or unsure how to proceed, use your best judgment and keep moving forward. Check the issue description and any open questions, then take the next logical step.
+
+**Commit checkpoint:** if \`tsc -b --noEmit\` already passes for the packages you touched and the directly-related tests pass, but you have NOT committed yet, **commit now** before doing anything else. Don't keep polishing on top of uncommitted green work — this nudge means you've been running a while, and an interruption would lose everything since your last commit. Push the polish into a follow-up commit.`,
     model: null,
   },
   {
@@ -335,6 +337,8 @@ pnpm --filter agentic-kanban test -- --related $(git diff --name-only HEAD)
 Use the full suite only when cross-cutting changes may affect unrelated tests.
 Stage and commit all changed files with a descriptive message.
 
+**Commit checkpoint — commit the moment the core is green.** The instant \`tsc -b --noEmit\` passes for the packages you touched AND the directly-related test file(s) pass (\`pnpm --filter agentic-kanban test -- --related <changed-files>\`), **commit immediately**. Then continue any polish, extra tests, or flaky-suite debugging in follow-up commits. Do NOT batch a multi-step diff into one final end-of-task commit — an interruption (crash, hot-reload, timeout) loses all of it. A branch that does meaningful work should normally show two or more commits, not one.
+
 ### 5. Review
 **Branched workspaces:** system auto-launches review after your session exits.
 **Direct workspaces:** you must spawn a review subagent yourself before marking Done.
@@ -389,10 +393,11 @@ Set priority to high and describe the blocker in the issue description.
 3. **Board reflects reality** — move statuses in real-time, don't batch.
 4. **Complete the full ticket** — if the ticket lists steps, do all of them.
 5. **Commit before review** — never trigger review with uncommitted changes.
-6. **Description is a shared log** — write progress notes so the user can follow along.
-7. **Done means done** — code committed, tests green, review passed, no loose ends.
-8. **Cancelled is not failure** — use it freely when scope changes.
-9. **Targeted tests for refactoring** — use \`vitest --related <changed-files>\` instead of the full suite when refactoring. Faster and proves the changed code is covered without re-running unrelated tests.`,
+6. **Commit at the green checkpoint** — the moment \`tsc -b --noEmit\` is clean and the directly-related tests pass, commit. Queued polish goes in follow-up commits. Never batch a multi-step diff into one end-of-task commit — an interruption loses all of it.
+7. **Description is a shared log** — write progress notes so the user can follow along.
+8. **Done means done** — code committed, tests green, review passed, no loose ends.
+9. **Cancelled is not failure** — use it freely when scope changes.
+10. **Targeted tests for refactoring** — use \`vitest --related <changed-files>\` instead of the full suite when refactoring. Faster and proves the changed code is covered without re-running unrelated tests.`,
     model: null,
   },
   {
