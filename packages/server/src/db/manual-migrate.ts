@@ -6,14 +6,23 @@ import type { Client } from "@libsql/client";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 export function getMigrationsFolder(): string {
-  // In bundled/published mode, migrations are adjacent to the JS file in ./migrations/
-  const published = resolve(__dirname, "./migrations");
-  // In dev mode, they're in ../../shared/drizzle from src/ (or dist/)
-  const dev = resolve(__dirname, "../../../shared/drizzle");
-  try {
-    if (existsSync(resolve(published, "meta/_journal.json"))) return published;
-  } catch { /* ignore */ }
-  return dev;
+  // Probe candidate locations and use the first that actually has the journal. This
+  // is robust to where the bundle entry lives: a FLAT bundle (dist/cli.js) finds
+  // migrations at ./migrations, a NESTED bundle (dist/cli/index.js) finds them at
+  // ../migrations, and dev/monorepo runs fall back to the shared drizzle dir.
+  // (A previous hardcoded "./migrations" broke the published CLI once it moved to
+  // dist/cli/index.js — it resolved to a non-existent dist/cli/migrations.)
+  const candidates = [
+    resolve(__dirname, "migrations"),       // flat bundle  → dist/migrations
+    resolve(__dirname, "../migrations"),    // nested bundle → dist/migrations
+    resolve(__dirname, "../../../shared/drizzle"), // dev / monorepo
+  ];
+  for (const candidate of candidates) {
+    try {
+      if (existsSync(resolve(candidate, "meta/_journal.json"))) return candidate;
+    } catch { /* ignore */ }
+  }
+  return candidates[candidates.length - 1];
 }
 
 /**
