@@ -11,7 +11,7 @@
  * as structured records, and tracks per-`tool_use_id` "answered" markers in the
  * preferences table so answered questions stop appearing.
  */
-import { sessions, sessionMessages, workspaces, issues, projects } from "@agentic-kanban/shared/schema";
+import { sessions, sessionMessages, workspaces, issues, projects, projectStatuses } from "@agentic-kanban/shared/schema";
 import { eq, desc } from "drizzle-orm";
 import type { Database } from "../db/index.js";
 import { getPreference, setPreference } from "../repositories/preferences.repository.js";
@@ -38,6 +38,22 @@ export interface AgentQuestionRecommendation {
   rationale: string;
 }
 
+/** Why a pending question is considered stale. `null` when the question is still fresh.
+ *  Muted-gray badge in the UI — not an error, just a hint the answer may no longer matter. */
+export type StalenessReason =
+  | "workspace-merged"
+  | "issue-done"
+  | "superseded"
+  | "older-than-24h";
+
+export interface Staleness {
+  reason: StalenessReason;
+  /** Human-readable label for the badge, e.g. "stale — workspace merged". */
+  label: string;
+  /** Relevant timestamp for the tooltip (workspace.closedAt, newer session start, or askedAt). */
+  at: string | null;
+}
+
 export interface PendingQuestionSet {
   /** The `tool_use_id` from the denied AskUserQuestion call — unique per ask. */
   toolUseId: string;
@@ -49,6 +65,8 @@ export interface PendingQuestionSet {
   questions: AgentQuestion[];
   /** When the session ended (session.endedAt). */
   askedAt: string | null;
+  /** Set when the question is likely no longer actionable; null when fresh. */
+  staleness: Staleness | null;
 }
 
 function answeredPrefKey(toolUseId: string): string {
@@ -59,13 +77,25 @@ function recommendationPrefKey(toolUseId: string): string {
   return `agent_question_recommendation_${toolUseId}`;
 }
 
-/** Returns true if this AskUserQuestion ask has already been answered (and re-sent). */
+/** Returns true if this AskUserQuestion ask has been resolved — either answered (and
+ *  re-sent) or dismissed. Both write the same `agent_question_answered_<id>` pref, so a
+ *  resolved question stops appearing in the pending list. The legacy value is the literal
+ *  string "1"; dismissals store a JSON object `{ dismissed: true, dismissedAt }`. */
 export async function isAnswered(toolUseId: string, db: Database): Promise<boolean> {
-  return (await getPreference(answeredPrefKey(toolUseId), db)) === "1";
+  return (await getPreference(answeredPrefKey(toolUseId), db)) !== null;
 }
 
 export async function markAnswered(toolUseId: string, db: Database): Promise<void> {
   await setPreference(answeredPrefKey(toolUseId), "1", db);
+}
+
+/** Mark a pending question dismissed by the user. The corresponding workspace is NOT
+ *  relaunched or notified — the row is kept (not deleted) for audit. Stores
+ *  `{ dismissed: true, dismissedAt }` under the same answered pref key so the question
+ *  disappears from the pending list. `dismissedAt` is passed in (callers stamp the time)
+ *  so the service stays free of `Date.now()`/`new Date()`. */
+export async function markDismissed(toolUseId: string, dismissedAt: string, db: Database): Promise<void> {
+  await setPreference(answeredPrefKey(toolUseId), JSON.stringify({ dismissed: true, dismissedAt }), db);
 }
 
 /** Cached recommendation array, one entry per sub-question. A null entry = couldn't recommend
@@ -124,6 +154,67 @@ export function extractQuestionsFromSession(
   return out;
 }
 
+/** Status names that mean the issue is finished — mirrors the client's ARCHIVE_STATUS_NAMES. */
+export const ARCHIVE_STATUS_NAMES = new Set(["Done", "Cancelled"]);
+
+const STALENESS_LABELS: Record<StalenessReason, string> = {
+  "workspace-merged": "stale — workspace merged",
+  "issue-done": "stale — issue done",
+  "superseded": "stale — superseded",
+  "older-than-24h": "stale — older than 24h",
+};
+
+export interface StalenessInput {
+  /** workspace.status — "closed" means merged/closed. */
+  workspaceStatus: string;
+  /** workspace.closedAt, if any. */
+  workspaceClosedAt: string | null;
+  /** workspace.readyForMerge flag. */
+  readyForMerge: boolean;
+  /** Name of the issue's current status column. */
+  issueStatusName: string | null;
+  /** Start time of the session that produced the question. */
+  questionSessionStartedAt: string | null;
+  /** Start time of the newest session for the workspace (may equal the question's). */
+  latestSessionStartedAt: string | null;
+  /** When the question was asked (session.endedAt). */
+  askedAt: string | null;
+  /** Current time, ISO string — passed in so the function stays free of Date.now(). */
+  now: string;
+}
+
+/**
+ * Decide whether a pending question is stale, and why. Priority order matches the
+ * ticket: workspace merged → issue done → superseded → older than 24h. Returns null
+ * when the question is still fresh. Pure (time passed in) so it is unit-testable.
+ */
+export function computeStaleness(input: StalenessInput): Staleness | null {
+  // 1. Workspace merged / closed.
+  if (input.workspaceStatus === "closed" || (input.readyForMerge && input.workspaceClosedAt)) {
+    return { reason: "workspace-merged", label: STALENESS_LABELS["workspace-merged"], at: input.workspaceClosedAt };
+  }
+  // 2. Issue moved to a terminal status (Done / Cancelled).
+  if (input.issueStatusName && ARCHIVE_STATUS_NAMES.has(input.issueStatusName)) {
+    return { reason: "issue-done", label: STALENESS_LABELS["issue-done"], at: null };
+  }
+  // 3. A newer session exists than the one that produced the question.
+  if (
+    input.questionSessionStartedAt &&
+    input.latestSessionStartedAt &&
+    input.latestSessionStartedAt > input.questionSessionStartedAt
+  ) {
+    return { reason: "superseded", label: STALENESS_LABELS["superseded"], at: input.latestSessionStartedAt };
+  }
+  // 4. Fallback: older than 24h.
+  if (input.askedAt) {
+    const ageMs = new Date(input.now).getTime() - new Date(input.askedAt).getTime();
+    if (Number.isFinite(ageMs) && ageMs > 24 * 60 * 60 * 1000) {
+      return { reason: "older-than-24h", label: STALENESS_LABELS["older-than-24h"], at: input.askedAt };
+    }
+  }
+  return null;
+}
+
 /**
  * List pending (unanswered) AskUserQuestion sets across all workspaces of a project.
  * Compute-on-read: scans the most recent completed session per workspace.
@@ -132,41 +223,55 @@ export async function listPendingQuestionsForProject(
   projectId: string,
   db: Database,
 ): Promise<PendingQuestionSet[]> {
-  // Pull all workspaces+issues for this project (one query).
+  // Pull all workspaces+issues for this project (one query). Includes the workspace
+  // status/closedAt/readyForMerge and the issue's status-column name so staleness can
+  // be computed per card without extra round-trips.
   const wsRows = await db
     .select({
       workspaceId: workspaces.id,
+      workspaceStatus: workspaces.status,
+      workspaceClosedAt: workspaces.closedAt,
+      readyForMerge: workspaces.readyForMerge,
       issueId: issues.id,
       issueNumber: issues.issueNumber,
       issueTitle: issues.title,
       issueDescription: issues.description,
+      issueStatusName: projectStatuses.name,
     })
     .from(workspaces)
     .innerJoin(issues, eq(workspaces.issueId, issues.id))
+    .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
     .where(eq(issues.projectId, projectId));
 
   const results: PendingQuestionSet[] = [];
+  const now = new Date().toISOString();
 
   for (const ws of wsRows) {
-    // Most-recent session (any status) for this workspace.
+    // Recent sessions (any status), newest first. We scan a few because a question
+    // asked in an older session is "superseded" once a newer session has run.
     const sessRows = await db
-      .select({ id: sessions.id, endedAt: sessions.endedAt, status: sessions.status })
+      .select({ id: sessions.id, startedAt: sessions.startedAt, endedAt: sessions.endedAt, status: sessions.status })
       .from(sessions)
       .where(eq(sessions.workspaceId, ws.workspaceId))
       .orderBy(desc(sessions.startedAt))
-      .limit(1);
-    const sess = sessRows[0];
-    if (!sess) continue;
-    // Only look at completed (or stopped) sessions — a running session may not have the result yet.
-    if (sess.status === "running") continue;
+      .limit(10);
+    if (sessRows.length === 0) continue;
+    const latestSession = sessRows[0];
 
-    const msgs = await db
-      .select({ type: sessionMessages.type, data: sessionMessages.data })
-      .from(sessionMessages)
-      .where(eq(sessionMessages.sessionId, sess.id));
+    // Find the newest non-running session that actually carries pending questions.
+    for (const sess of sessRows) {
+      // A running session may not have the result yet.
+      if (sess.status === "running") continue;
 
-    const extracted = extractQuestionsFromSession(msgs);
-    for (const { toolUseId, questions } of extracted) {
+      const msgs = await db
+        .select({ type: sessionMessages.type, data: sessionMessages.data })
+        .from(sessionMessages)
+        .where(eq(sessionMessages.sessionId, sess.id));
+
+      const extracted = extractQuestionsFromSession(msgs);
+      if (extracted.length === 0) continue;
+
+      for (const { toolUseId, questions } of extracted) {
       if (await isAnswered(toolUseId, db)) continue;
       // Attach cached recommendation (if any) to each question; kick off a background
       // recommend call when not yet cached (and not already in flight).
@@ -185,6 +290,16 @@ export async function listPendingQuestionsForProject(
           questions,
         }, db);
       }
+      const staleness = computeStaleness({
+        workspaceStatus: ws.workspaceStatus,
+        workspaceClosedAt: ws.workspaceClosedAt,
+        readyForMerge: ws.readyForMerge,
+        issueStatusName: ws.issueStatusName,
+        questionSessionStartedAt: sess.startedAt,
+        latestSessionStartedAt: latestSession.startedAt,
+        askedAt: sess.endedAt,
+        now,
+      });
       results.push({
         toolUseId,
         workspaceId: ws.workspaceId,
@@ -194,7 +309,11 @@ export async function listPendingQuestionsForProject(
         issueTitle: ws.issueTitle,
         questions: questionsWithRec,
         askedAt: sess.endedAt,
+        staleness,
       });
+      }
+      // The newest question-bearing session wins; older ones are superseded copies.
+      break;
     }
   }
 
