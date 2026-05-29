@@ -42,6 +42,7 @@ interface Settings {
   after_merge_verify_agent?: string;
   butler_event_feed?: string;
   butler_event_feed_min_interval_ms?: string;
+  skip_preflight?: string;
   "harness.codex.plan_auto_continue"?: string;
   "harness.copilot.plan_auto_continue"?: string;
   "harness.claude.plan_auto_continue"?: string;
@@ -808,6 +809,12 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                         onChange={setBool("require_manual_approval")}
                         label="Require manual approval before review"
                         hint="When enabled, issues must be manually approved before the AI review step is triggered. Useful for gating expensive review sessions on deliberate human sign-off."
+                      />
+                      <Toggle
+                        checked={settings.skip_preflight === "true"}
+                        onChange={setBool("skip_preflight")}
+                        label="Skip pre-flight check"
+                        hint="Disable the AI ticket sanity check that runs before 'Start workspace'. When enabled, workspaces are created immediately without checking if the ticket is clear, unambiguous, and not a duplicate."
                       />
                       <Field
                         label="Visual verification timing"

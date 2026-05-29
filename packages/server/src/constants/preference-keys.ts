@@ -13,3 +13,4 @@ export const PREF_PERMISSION_PROMPT_TOOL = "permission_prompt_tool";
 export const PREF_LEARNING_STEP_BEFORE_MERGE = "learning_step_before_merge";
 export const PREF_AUTO_START_FOLLOWUP = "auto_start_followup";
 export const PREF_PROJECTS_BASE_PATH = "projects_base_path";
+export const PREF_SKIP_PREFLIGHT = "skip_preflight";

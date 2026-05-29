@@ -3,6 +3,8 @@ import { apiFetch } from "../lib/api.js";
 import { suggestBranchName, sanitizeBranchName } from "../lib/branch.js";
 import type { IssueWithStatus, ProfileSelection, WorkspaceResponse } from "@agentic-kanban/shared";
 import { CLAUDE_MODEL_OPTIONS } from "@agentic-kanban/shared";
+import { PreflightModal } from "./PreflightModal.js";
+import type { PreflightResult } from "./PreflightModal.js";
 
 interface Project {
   id: string;
@@ -13,7 +15,6 @@ interface Project {
   remoteUrl: string | null;
   setupScript?: string | null;
 }
-
 interface CreateWorkspaceFormProps {
   issue: IssueWithStatus;
   project: Project | null;
@@ -68,6 +69,10 @@ export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCr
   const [selectedModel, setSelectedModel] = useState<string>("");
   const [localLoading, setLocalLoading] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
+  const [preflightResult, setPreflightResult] = useState<PreflightResult | null>(null);
+  const [preflightLoading, setPreflightLoading] = useState(false);
+  // When set, a pending launch payload is waiting for preflight confirmation
+  const [pendingLaunch, setPendingLaunch] = useState<Record<string, unknown> | null>(null);
 
   useEffect(() => {
     if (project) {
@@ -103,29 +108,11 @@ export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCr
       .catch(() => {});
   }, []);
 
-  async function handleSubmit() {
-    if (!isDirect && !branchName.trim()) return;
+  async function doLaunch(body: Record<string, unknown>) {
     setLocalLoading(true);
     setLocalError(null);
     onSubmitting?.();
     try {
-      const body: Record<string, unknown> = { issueId: issue.id, isDirect, requiresReview, planMode, skipSetup };
-      if (selectedSkillId) body.skillId = selectedSkillId;
-      if (selectedProfile) {
-        const colonIdx = selectedProfile.indexOf(":");
-        if (colonIdx !== -1) {
-          const provider = selectedProfile.slice(0, colonIdx) as AgentProvider;
-          const name = selectedProfile.slice(colonIdx + 1);
-          if ((provider === "claude" || provider === "codex" || provider === "copilot") && name) body.profile = { provider, name };
-        }
-      }
-      if (isClaudeSelected && selectedModel) body.model = selectedModel;
-      if (!isDirect) {
-        body.branch = branchName.trim();
-        if (baseBranch.trim()) {
-          body.baseBranch = baseBranch.trim();
-        }
-      }
       const result = await apiFetch<WorkspaceResponse & { sessionId?: string }>("/api/workspaces", {
         method: "POST",
         body: JSON.stringify(body),
@@ -134,6 +121,56 @@ export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCr
     } catch (err) {
       setLocalError(err instanceof Error ? err.message : "Failed to create workspace");
       setLocalLoading(false);
+    }
+  }
+
+  async function handleSubmit() {
+    if (!isDirect && !branchName.trim()) return;
+
+    const body: Record<string, unknown> = { issueId: issue.id, isDirect, requiresReview, planMode, skipSetup };
+    if (selectedSkillId) body.skillId = selectedSkillId;
+    if (selectedProfile) {
+      const colonIdx = selectedProfile.indexOf(":");
+      if (colonIdx !== -1) {
+        const provider = selectedProfile.slice(0, colonIdx) as AgentProvider;
+        const name = selectedProfile.slice(colonIdx + 1);
+        if ((provider === "claude" || provider === "codex" || provider === "copilot") && name) body.profile = { provider, name };
+      }
+    }
+    if (isClaudeSelected && selectedModel) body.model = selectedModel;
+    if (!isDirect) {
+      body.branch = branchName.trim();
+      if (baseBranch.trim()) {
+        body.baseBranch = baseBranch.trim();
+      }
+    }
+
+    // Skip preflight if opted out
+    if (prefs.skip_preflight === "true" || !project) {
+      await doLaunch(body);
+      return;
+    }
+
+    // Run pre-flight check
+    setPreflightLoading(true);
+    setLocalError(null);
+    try {
+      const result = await apiFetch<PreflightResult>(`/api/issues/${issue.id}/preflight`, {
+        method: "POST",
+        body: JSON.stringify({ projectId: issue.projectId }),
+      });
+      if (result.verdict === "ready") {
+        setPreflightLoading(false);
+        await doLaunch(body);
+      } else {
+        setPendingLaunch(body);
+        setPreflightResult(result);
+        setPreflightLoading(false);
+      }
+    } catch {
+      // If preflight fails (e.g. Claude unavailable), proceed with launch
+      setPreflightLoading(false);
+      await doLaunch(body);
     }
   }
 
@@ -147,7 +184,7 @@ export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCr
     onCancel();
   }
 
-  const isLoading = actionLoading || localLoading;
+  const isLoading = actionLoading || localLoading || preflightLoading;
   const isClaudeSelected = selectedProfile === ""
     ? (prefs.provider !== "codex" && prefs.provider !== "copilot")
     : selectedProfile.startsWith("claude:");
@@ -155,6 +192,7 @@ export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCr
   const cannotCreateWorktree = !isDirect && !baseBranch.trim() && !project?.defaultBranch;
 
   return (
+    <>
     <div className="border border-gray-200 dark:border-gray-700 rounded p-3 space-y-2">
       {localError && (
         <div className="p-2 bg-red-50 border border-red-200 rounded text-sm text-red-700">
@@ -319,7 +357,7 @@ export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCr
           disabled={isLoading || (!isDirect && !branchName.trim()) || cannotCreateWorktree}
           className="text-sm bg-blue-600 text-white px-3 py-1.5 rounded hover:bg-blue-700 disabled:opacity-50"
         >
-          {isLoading ? "Creating..." : isDirect ? "Create Direct & Launch" : "Create & Launch"}
+          {preflightLoading ? "Checking..." : isLoading ? "Creating..." : isDirect ? "Create Direct & Launch" : "Create & Launch"}
         </button>
         <button
           onClick={handleCancel}
@@ -329,5 +367,49 @@ export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCr
         </button>
       </div>
     </div>
+    {preflightResult && pendingLaunch && (
+      <PreflightModal
+        result={preflightResult}
+        issueId={issue.id}
+        projectId={issue.projectId}
+        issueTitle={issue.title}
+        issueDescription={issue.description ?? ""}
+        loading={preflightLoading || localLoading}
+        onLaunchAnyway={async () => {
+          setPreflightResult(null);
+          await doLaunch(pendingLaunch);
+          setPendingLaunch(null);
+        }}
+        onRetry={async (_updatedTitle, _updatedDescription) => {
+          // Re-run the preflight after the user saved edits
+          setPreflightLoading(true);
+          try {
+            const result = await apiFetch<PreflightResult>(`/api/issues/${issue.id}/preflight`, {
+              method: "POST",
+              body: JSON.stringify({ projectId: issue.projectId }),
+            });
+            if (result.verdict === "ready") {
+              setPreflightResult(null);
+              setPreflightLoading(false);
+              await doLaunch(pendingLaunch);
+              setPendingLaunch(null);
+            } else {
+              setPreflightResult(result);
+              setPreflightLoading(false);
+            }
+          } catch {
+            setPreflightResult(null);
+            setPreflightLoading(false);
+            await doLaunch(pendingLaunch);
+            setPendingLaunch(null);
+          }
+        }}
+        onCancel={() => {
+          setPreflightResult(null);
+          setPendingLaunch(null);
+        }}
+      />
+    )}
+    </>
   );
 }

@@ -3,6 +3,7 @@ import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import type { BoardEvents } from "../services/board-events.js";
 import { analyzeDependencies, enhanceIssue, aiEstimateIssue } from "../services/issue-ai.service.js";
+import { runTicketPreflight } from "../services/ticket-preflight.service.js";
 import { createIssueService } from "../services/issue.service.js";
 import { parseJsonBody } from "../middleware/parse-body.js";
 import { createRouter } from "../middleware/create-router.js";
@@ -107,6 +108,14 @@ export function createIssuesRoute(database: Database = db, options?: { boardEven
       workflowTemplateId: body.workflowTemplateId,
     });
     return c.json(result, 201);
+  });
+
+  // POST /api/issues/:id/preflight — AI ticket sanity check
+  router.post("/:id/preflight", async (c) => {
+    const issueId = c.req.param("id");
+    const body = await parseJsonBody<{ projectId: string }>(c);
+    if (!body.projectId) return c.json({ error: "projectId is required" }, 400);
+    return c.json(await wrapAiOperation("preflight", () => runTicketPreflight(issueId, body.projectId, database)));
   });
 
   // GET /api/issues/:id/summary
