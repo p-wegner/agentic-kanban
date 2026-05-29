@@ -1,5 +1,5 @@
 import { db } from "../db/index.js";
-import { projects, projectStatuses, issues, workspaces, sessions, sessionMessages, preferences } from "@agentic-kanban/shared/schema";
+import { projects, projectStatuses, issues, workspaces, sessions, sessionMessages, preferences, workflowNodes } from "@agentic-kanban/shared/schema";
 import { eq, inArray, desc } from "drizzle-orm";
 import { getDiffShortstat, detectConflicts } from "./git.service.js";
 import { extractMeaningfulOutput } from "@agentic-kanban/shared";
@@ -42,7 +42,7 @@ export async function getBoardStatus(
   if (projectRows.length === 0) throw new Error(`Project ${projectId} not found`);
   const project = projectRows[0];
 
-  // 2. Get statuses to identify terminal ones
+  // 2. Get statuses to identify terminal ones (legacy fallback for non-workflow issues)
   const statuses = await database
     .select({ id: projectStatuses.id, name: projectStatuses.name })
     .from(projectStatuses)
@@ -52,7 +52,8 @@ export async function getBoardStatus(
     statuses.filter(s => s.name === "Done" || s.name === "Cancelled").map(s => s.id),
   );
 
-  // 3. Get issues with status names
+  // 3. Get issues with status names + current workflow node type (LEFT JOIN so
+  //    non-workflow issues are still returned with nodeType = null).
   let projectIssues = await database
     .select({
       id: issues.id,
@@ -62,13 +63,18 @@ export async function getBoardStatus(
       issueType: issues.issueType,
       statusId: issues.statusId,
       statusName: projectStatuses.name,
+      currentNodeType: workflowNodes.nodeType,
     })
     .from(issues)
     .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
+    .leftJoin(workflowNodes, eq(issues.currentNodeId, workflowNodes.id))
     .where(eq(issues.projectId, projectId));
 
   if (!includeClosed) {
-    projectIssues = projectIssues.filter(i => !terminalStatusIds.has(i.statusId));
+    // Terminal = nodeType 'end' (workflow-driven) OR legacy Done/Cancelled status
+    projectIssues = projectIssues.filter(i =>
+      !(i.currentNodeType === "end" || terminalStatusIds.has(i.statusId)),
+    );
   }
 
   if (projectIssues.length === 0) {

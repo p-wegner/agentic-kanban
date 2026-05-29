@@ -1,5 +1,5 @@
-import { issueDependencies, issues, projectStatuses, workspaces } from "@agentic-kanban/shared/schema";
-import { eq, sql } from "drizzle-orm";
+import { issueDependencies, issues, projectStatuses, workflowNodes, workspaces } from "@agentic-kanban/shared/schema";
+import { eq, sql, inArray } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { createBoardEvents } from "../services/board-events.js";
 import type { MonitorActionName } from "../services/monitor-nudge.js";
@@ -70,9 +70,29 @@ export async function runAutoStart(prefMap: Map<string, string>, { serverPort, b
       const deps = await db.select({ dependsOnId: issueDependencies.dependsOnId }).from(issueDependencies)
         .where(sql`${issueDependencies.issueId} = ${issue.id} AND ${issueDependencies.type} = 'depends_on'`);
       if (deps.length > 0) {
-        const blockerIssues = await db.select({ statusId: issues.statusId }).from(issues)
-          .where(sql`${issues.id} IN (${sql.join(deps.map((d) => sql`${d.dependsOnId}`), sql`, `)})`);
-        const allResolved = blockerIssues.every((b) => b.statusId && doneStatusIds.has(b.statusId));
+        const blockerIds = deps.map((d) => d.dependsOnId);
+        const blockerIssues = await db
+          .select({ statusId: issues.statusId, currentNodeId: issues.currentNodeId })
+          .from(issues)
+          .where(inArray(issues.id, blockerIds));
+
+        // Fetch node types for blockers that have a currentNodeId
+        const nodeIds = blockerIssues.map((b) => b.currentNodeId).filter(Boolean) as string[];
+        const nodeTypeMap = new Map<string, string>();
+        if (nodeIds.length > 0) {
+          const nodes = await db
+            .select({ id: workflowNodes.id, nodeType: workflowNodes.nodeType })
+            .from(workflowNodes)
+            .where(inArray(workflowNodes.id, nodeIds));
+          for (const n of nodes) nodeTypeMap.set(n.id, n.nodeType);
+        }
+
+        const allResolved = blockerIssues.every((b) => {
+          // Resolved if on an 'end' node (workflow-driven terminal)
+          if (b.currentNodeId && nodeTypeMap.get(b.currentNodeId) === "end") return true;
+          // Fallback: check legacy Done/Cancelled status names
+          return b.statusId && doneStatusIds.has(b.statusId);
+        });
         if (!allResolved) continue;
       }
 
