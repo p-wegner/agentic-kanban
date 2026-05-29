@@ -3,6 +3,7 @@ import { z } from "zod";
 import { db, schema } from "../db.js";
 import { eq, and } from "drizzle-orm";
 import { notifyBoard } from "../notify.js";
+import { requireEntity, mcpError } from "../db-utils.js";
 
 export function registerRemoveDependency(server: McpServer) {
   server.tool(
@@ -20,7 +21,7 @@ export function registerRemoveDependency(server: McpServer) {
         .limit(1);
 
       if (depRows.length === 0) {
-        return { content: [{ type: "text" as const, text: "Error: Dependency not found" }] };
+        return mcpError("Error: Dependency not found");
       }
 
       await db.delete(schema.issueDependencies)
