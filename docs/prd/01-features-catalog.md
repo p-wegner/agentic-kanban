@@ -1,13 +1,13 @@
 # PRD-01: Features Catalog
 
-<!-- last-synced: 2026-05-29T12:00:00+02:00 | commit: 2d32aaa5 -->
+<!-- last-synced: 2026-05-29T12:00:00+02:00 | commit: fe07f97b -->
 
 Complete inventory of features, organized by category. Status reflects the current implementation (Stages 0–14 complete).
 
 ## Category: Task Management (CORE)
 
 ### F-TASK-01: Create/Update/Delete Issues
-- Issues have: title, description (markdown), priority, status
+- Issues have: title, description (markdown), priority, status, type, estimate, and an optional **due date** (shown and sortable in the Table view)
 - Priorities: Urgent, High, Medium, Low
 - Auto-incrementing issue numbers per project (#1, #2, #3)
 - AI enhancement: "Enhance with AI" button spawns Claude CLI to improve title/description
@@ -34,6 +34,7 @@ Complete inventory of features, organized by category. Status reflects the curre
 - Panel slide-in animations
 - Priority-based column sort: issues within each column sorted by priority
 - **IssueCard hover action row**: compact action row fades in at card bottom on hover — Resume, Start Workspace, and Move to next status buttons; card body click still opens detail panel
+- **Card badges on workspace cards**: workspace state (e.g. "AI Reviewing"), the agent-provider badge (Claude/Copilot/etc.), and a **"PR Quality Score: NN/100" badge** (e.g. "62/100") — a live 0–100 quality score computed for the workspace's changes (closed ticket #61)
 - **Status: DONE**
 
 ### F-TASK-03: Issue Filtering & Search
@@ -309,7 +310,9 @@ Complete inventory of features, organized by category. Status reflects the curre
 
 ### F-UI-07: Worktree Overview
 - Branch icon in header opens slide-in panel
-- Lists all git worktrees with branch, path, issue link, diff stats, status badges
+- Lists all git worktrees with branch, path, issue link, diff stats, status badges (incl. main/idle)
+- Per-row actions: **Open folder in explorer** and **Delete worktree**
+- Panel header has a **Select orphaned** button for bulk-selecting orphaned worktrees
 - Issue click opens detail panel and closes overview
 - **Status: DONE**
 
@@ -333,7 +336,7 @@ Complete inventory of features, organized by category. Status reflects the curre
 
 ### F-UI-10: Board Views
 - Eleven view modes, in order: Board (kanban columns), Graph (dependency DAG), Table (flat sortable list), Agents, Timeline, Metrics, Butler, Workflows, Insights, Swimlane, Flaky (see F-UI-18 through F-UI-22 and F-BUTLER-01 for the analytical/Butler views)
-- Table view: sortable columns (#, Title, Status, Priority, Type, Estimate, Updated, Tags); **Active only** default filter (dropdown: Active only, All); row click opens detail panel
+- Table view: sortable columns (#, Title, Status, Priority, Type, Estimate, **Due Date**, Updated, Tags), plus a leading **"Select all" checkbox column** and per-row checkboxes; status filter dropdown (Active only [default], All statuses, Backlog, Todo, In Progress, In Review, AI Reviewed, Done, Cancelled); row click opens detail panel. Selecting rows reveals a **bulk-action bar** ("N selected") with: Clear, **Move to status ▾**, **Add tag ▾**, and **Delete**
 - Graph view: nodes colored by status, dependency arrows, "Show completed" toggle, zoom controls (+/−/reset), status legend
 - Agents view: lists active agent sessions across workspaces
 - Timeline view: all issues as horizontal bars on a chronological timeline, grouped into per-status swim lanes; each bar spans createdAt->updatedAt; color-coded by issue type (task=blue, bug=red, feature=violet, chore=amber) with a priority-colored dot; sticky date axis with tick marks and a red 'Today' marker; zoom controls (50%-500%); hover tooltip showing #, created/updated dates, type, priority, tags; click a bar to open the issue detail panel; issue-type legend; empty state when no issues match; dark mode support
@@ -352,7 +355,7 @@ Complete inventory of features, organized by category. Status reflects the curre
 
 ### F-UI-12: Quick Tasks Panel
 - Slide-in panel listing all installed skills (board-navigator, code-review, dependency-analyzer, ticket-enhancer, ui-explorer, + custom)
-- Each skill shows name, description, and model badge (if haiku/non-default)
+- Each skill shows name, description, and model badge (if haiku/non-default); skills loaded from `.claude/skills/` on disk show a **"local" badge** (distinct from DB-stored skills)
 - Custom task prompt input (free-form agent prompt)
 - Context button to attach board context
 - **Status: DONE**
@@ -423,6 +426,7 @@ Complete inventory of features, organized by category. Status reflects the curre
 - Built-in workflows: Simple Ticket (default), Simple Bug (bug default), Hard Bug, Research Task, Migration with AI, Parallel Review
 - Example custom workflows: "AI Migration (Advanced)" (18 stages · 24 transitions), "Azure DevOps + AKS Bootstrap" (feature)
 - This is the UI surface for the configurable-workflow-graphs epic
+- **Visual graph (DAG) editor**: clicking Edit (custom) / View (built-in) opens an inline editor with a workflow-name textbox, a "Default for ticket type" dropdown, an "Add node" control, and a canvas. Nodes are stages (each mapped to a status + skill); you "Drag from a node's handle to connect. Click a node/edge to edit." to create/edit transitions. An "Auto layout" button arranges the graph; Save / Close buttons persist or dismiss
 - **Status: DONE**
 
 ### F-UI-21: Swimlane View
