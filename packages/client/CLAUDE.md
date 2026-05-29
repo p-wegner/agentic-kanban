@@ -47,5 +47,8 @@ Use `<SplitButton>` (`src/components/SplitButton.tsx`) whenever an action has on
 
 **When to apply:** Two separate buttons that do "the same thing but differently" (intensity, model, mode flag) should become one SplitButton. Unrelated actions stay as separate buttons.
 
+## Swimlane / side-by-side lane layouts
+When building grid-like layouts with a sticky label column (lane header) and scrollable data columns (cells row), the **outer lane row must have `display: flex`** (e.g. `className="flex ..."`). Without it, the header and cells stack vertically even if inner containers look correct. The bug appears as: lane label renders above all columns instead of beside them.
+
 ## Workspace panel status guards
 Don't gate session history, TerminalView, and session stats on `ws.status !== "closed"` — auto-merged workspaces set `workingDir: null` and `status: "closed"` but their history is still viewable. Only chat footer and action buttons (Review, Merge, etc.) should be gated on active status.
