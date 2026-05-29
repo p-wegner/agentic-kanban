@@ -72,7 +72,7 @@ function tagClass(color: string | null | undefined) {
 }
 
 function formatDate(iso: string) {
-  return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+  return new Date(iso).toLocaleDateString('en-US', { month: "short", day: "numeric", year: "numeric" });
 }
 
 export function TableView({ columns, onIssueClick, searchQuery, onRefresh }: TableViewProps) {
