@@ -12,6 +12,7 @@ import { createButlerRoute } from "./butler.js";
 import { createAgentQuestionsRoute } from "./agent-questions.js";
 import { createWorkflowsRoute } from "./workflows.js";
 import { createVoiceCaptureRoute } from "./voice-capture.js";
+import { createFlakyTestsRoute, createWorkspaceFlakyTestsRoute, createSessionFlakyTestsRoute } from "./flaky-tests.js";
 import { createWorkflowForkService } from "../services/workflow-fork.service.js";
 import type { Database } from "../db/index.js";
 import type { SessionManager } from "../services/session.manager.js";
@@ -47,6 +48,9 @@ export function createRoutes(database: Database, getSessionManager: () => Sessio
   routes.route("/tags", createTagsRoute(database));
   routes.route("/preferences", createPreferencesRoute(database));
   routes.route("/agent-skills", createAgentSkillsRoute(database));
+  routes.route("/projects", createFlakyTestsRoute(database));
+  routes.route("/workspaces", createWorkspaceFlakyTestsRoute(database));
+  routes.route("/sessions", createSessionFlakyTestsRoute(database));
   routes.route("/workflows", createWorkflowsRoute(database, { ...options, onWorkflowAdvanced }));
   routes.route("/scheduled-runs", createScheduledRunsRoute(database, getSessionManager, options?.boardEvents));
   if (options?.boardEvents) {
