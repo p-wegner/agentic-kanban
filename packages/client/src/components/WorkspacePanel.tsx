@@ -7,6 +7,7 @@ import { useWebSocket } from "../lib/useWebSocket.js";
 import { TerminalView } from "./TerminalView.js";
 import { CreateWorkspaceForm } from "./CreateWorkspaceForm.js";
 import { WorkspaceDiffPanel } from "./WorkspaceDiffPanel.js";
+import { FailurePatternHint } from "./FailurePatternHint.js";
 import TicketMentionInput from "./TicketMentionInput.js";
 import { useWorkspaceSession } from "../hooks/useWorkspaceSession.js";
 import { SessionReplay } from "./SessionReplay.js";
@@ -1535,6 +1536,17 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                         </div>
                       </div>
                     )}
+
+                    {(() => {
+                      const lastCompleted = completedSessions[completedSessions.length - 1];
+                      if (!lastCompleted || lastCompleted.status !== "stopped") return null;
+                      return (
+                        <FailurePatternHint
+                          workspaceId={ws.id}
+                          sessionId={lastCompleted.id}
+                        />
+                      );
+                    })()}
 
                     {ws.status !== "closed" && !isRunning && ws.workingDir && (() => {
                       const lastReview = completedSessions.filter(s => s.triggerType === "review").at(-1);

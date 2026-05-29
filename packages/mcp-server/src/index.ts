@@ -53,6 +53,7 @@ import {
   registerUpdateWorkflowTemplate,
   registerDeleteWorkflowTemplate,
 } from "./tools/workflow-templates.js";
+import { registerFindSimilarFailures } from "./tools/find-similar-failures.js";
 
 const TOOL_REGISTRARS: Record<string, (server: McpServer) => void> = {
   get_context: registerGetContext,
@@ -102,6 +103,7 @@ const TOOL_REGISTRARS: Record<string, (server: McpServer) => void> = {
   create_workflow_template: registerCreateWorkflowTemplate,
   update_workflow_template: registerUpdateWorkflowTemplate,
   delete_workflow_template: registerDeleteWorkflowTemplate,
+  find_similar_failures: registerFindSimilarFailures,
 };
 
 async function getDisabledTools(): Promise<Set<string>> {
