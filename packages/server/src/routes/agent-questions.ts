@@ -20,6 +20,7 @@ import {
   markAnswered,
   markDismissed,
   formatAnswerMessage,
+  writeAgentQuestionComment,
   recommendQuestionsForSet,
   setCachedRecommendations,
   type AgentQuestion,
@@ -63,6 +64,11 @@ export function createAgentQuestionsRoute(
       const result = await workspaceService.sendTurn(body.workspaceId, content);
       // Mark answered AFTER the turn is accepted, so a failure leaves it visible for retry.
       await markAnswered(toolUseId, database);
+      // Persist the Q&A as durable ticket history (best-effort).
+      await writeAgentQuestionComment(
+        { toolUseId, workspaceId: body.workspaceId, questions: body.questions, answers: body.answers, body: content, author: "user" },
+        database,
+      );
       if (result.type === "sent") return c.json({ ok: true, content });
       return c.json({ ok: true, sessionId: result.sessionId, resumed: true, content }, 201);
     } catch (err) {
