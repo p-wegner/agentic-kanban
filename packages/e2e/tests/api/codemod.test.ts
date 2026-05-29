@@ -7,8 +7,8 @@
  */
 
 import { test, expect } from "@playwright/test";
-import { mkdtemp, writeFile, mkdir, rm } from "node:fs/promises";
-import { join, dirname } from "node:path";
+import { mkdtemp, writeFile, rm } from "node:fs/promises";
+import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { SERVER_URL as BASE } from "../helpers/port.js";
 import { getE2EProjectId } from "../helpers/e2e-project.js";
@@ -118,9 +118,40 @@ test.describe("Codemod Factory API", () => {
 
   test("POST /api/codemods/apply returns 400 with empty changes array", async ({ request }) => {
     const res = await request.post(`${BASE}/api/codemods/apply`, {
-      data: { changes: [] },
+      data: { projectId, changes: [] },
     });
     expect(res.status()).toBe(400);
+  });
+
+  test("POST /api/codemods/apply returns 400 without projectId", async ({ request }) => {
+    const res = await request.post(`${BASE}/api/codemods/apply`, {
+      data: { changes: [{ filePath: join(tmpDir, "x.ts"), modified: "x" }] },
+    });
+    expect(res.status()).toBe(400);
+    const body = await res.json();
+    expect(body.error).toMatch(/projectId/i);
+  });
+
+  test("POST /api/codemods/apply refuses to write outside the project", async ({ request }) => {
+    // tmpDir is outside the project repo — the server must reject the write.
+    const escapeFile = join(tmpDir, "escape.ts");
+    await writeFile(escapeFile, "export const z = 0;\n", "utf8");
+
+    const res = await request.post(`${BASE}/api/codemods/apply`, {
+      data: {
+        projectId,
+        changes: [{ filePath: escapeFile, modified: "export const z = 666;\n" }],
+        selectedFiles: [escapeFile],
+      },
+    });
+    expect(res.status()).toBe(400);
+    const body = await res.json();
+    expect(body.error).toMatch(/outside the project/i);
+
+    // The file must be unchanged.
+    const { readFile } = await import("node:fs/promises");
+    const after = await readFile(escapeFile, "utf8");
+    expect(after).toBe("export const z = 0;\n");
   });
 
   test("POST /api/codemods creates a saved codemod", async ({ request }) => {
@@ -184,50 +215,62 @@ test.describe("Codemod Factory API", () => {
   });
 
   test("POST /api/codemods/apply writes selected files", async ({ request }) => {
-    // Write a new temp file to apply a change to
-    const tmpFile = join(tmpDir, "apply-test.ts");
+    // Apply writes only inside the project repo, so the target file must live there.
+    const { unlink } = await import("node:fs/promises");
+    const tmpFile = join(originalProjectRepoPath, `.codemod-apply-test-${Date.now().toString(36)}.ts`);
     await writeFile(tmpFile, "export const x = 1;\n", "utf8");
 
-    const res = await request.post(`${BASE}/api/codemods/apply`, {
-      data: {
-        changes: [
-          {
-            filePath: tmpFile,
-            modified: "export const x = 42;\n",
-          },
-        ],
-        selectedFiles: [tmpFile],
-      },
-    });
-    expect(res.ok()).toBeTruthy();
-    const body = await res.json();
-    expect(body.applied).toContain(tmpFile);
-    expect(body.skipped).toHaveLength(0);
+    try {
+      const res = await request.post(`${BASE}/api/codemods/apply`, {
+        data: {
+          projectId,
+          changes: [
+            {
+              filePath: tmpFile,
+              modified: "export const x = 42;\n",
+            },
+          ],
+          selectedFiles: [tmpFile],
+        },
+      });
+      expect(res.ok()).toBeTruthy();
+      const body = await res.json();
+      expect(body.applied).toContain(tmpFile);
+      expect(body.skipped).toHaveLength(0);
 
-    // Verify file was written
-    const { readFile } = await import("node:fs/promises");
-    const written = await readFile(tmpFile, "utf8");
-    expect(written).toBe("export const x = 42;\n");
+      // Verify file was written
+      const { readFile } = await import("node:fs/promises");
+      const written = await readFile(tmpFile, "utf8");
+      expect(written).toBe("export const x = 42;\n");
+    } finally {
+      await unlink(tmpFile).catch(() => {});
+    }
   });
 
   test("POST /api/codemods/apply skips files not in selectedFiles", async ({ request }) => {
-    const tmpFile = join(tmpDir, "skip-test.ts");
+    const { unlink } = await import("node:fs/promises");
+    const tmpFile = join(originalProjectRepoPath, `.codemod-skip-test-${Date.now().toString(36)}.ts`);
     await writeFile(tmpFile, "export const y = 'original';\n", "utf8");
 
-    const res = await request.post(`${BASE}/api/codemods/apply`, {
-      data: {
-        changes: [
-          {
-            filePath: tmpFile,
-            modified: "export const y = 'modified';\n",
-          },
-        ],
-        selectedFiles: [], // empty = skip all? No: empty means apply all. Let's test with a different path
-      },
-    });
-    expect(res.ok()).toBeTruthy();
-    // Empty selectedFiles = apply all
-    const body = await res.json();
-    expect(body.applied.length + body.skipped.length).toBe(1);
+    try {
+      const res = await request.post(`${BASE}/api/codemods/apply`, {
+        data: {
+          projectId,
+          changes: [
+            {
+              filePath: tmpFile,
+              modified: "export const y = 'modified';\n",
+            },
+          ],
+          selectedFiles: [], // empty = apply all
+        },
+      });
+      expect(res.ok()).toBeTruthy();
+      // Empty selectedFiles = apply all
+      const body = await res.json();
+      expect(body.applied.length + body.skipped.length).toBe(1);
+    } finally {
+      await unlink(tmpFile).catch(() => {});
+    }
   });
 });
