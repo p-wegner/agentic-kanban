@@ -10,6 +10,7 @@ import {
   updateScheduledRun,
   deleteScheduledRun,
 } from "../repositories/scheduled-run.repository.js";
+import type { CreateWorkspaceInput, CreateWorkspaceResult } from "./workspace-internals.js";
 
 export class ScheduledRunError extends Error {
   constructor(
@@ -20,8 +21,11 @@ export class ScheduledRunError extends Error {
   }
 }
 
-export function createScheduledRunService(deps: { database: Database; serverPort?: number }) {
-  const { database, serverPort } = deps;
+export function createScheduledRunService(deps: {
+  database: Database;
+  createWorkspace: (input: CreateWorkspaceInput) => Promise<CreateWorkspaceResult>;
+}) {
+  const { database, createWorkspace } = deps;
 
   async function list(projectId: string) {
     return getScheduledRunsByProject(projectId, database);
@@ -99,8 +103,6 @@ export function createScheduledRunService(deps: { database: Database; serverPort
     const run = await getScheduledRunById(id, database);
     if (!run) throw new ScheduledRunError("Not found", "NOT_FOUND");
 
-    const port = serverPort ?? Number(process.env.PORT) ?? 3001;
-
     // Resolve effective prompt (skill overrides custom prompt)
     let effectivePrompt = run.prompt ?? "";
     if (run.skillId) {
@@ -132,26 +134,22 @@ export function createScheduledRunService(deps: { database: Database; serverPort
     }
 
     // Create a direct workspace with the custom prompt
-    const wsRes = await fetch(`http://127.0.0.1:${port}/api/workspaces`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ issueId: systemIssueId, isDirect: true, customPrompt: effectivePrompt, skipSetup: true }),
+    const workspace = await createWorkspace({
+      issueId: systemIssueId,
+      isDirect: true,
+      customPrompt: effectivePrompt,
+      skipSetup: true,
     });
-
-    const wsBody = await wsRes.json() as { id?: string; error?: string };
-    if (!wsRes.ok) {
-      throw new Error(wsBody.error ?? `workspace creation failed: ${wsRes.status}`);
-    }
 
     const now = new Date().toISOString();
     await updateScheduledRun(id, {
       lastRunAt: now,
       lastRunStatus: "running",
-      lastRunWorkspaceId: wsBody.id ?? null,
+      lastRunWorkspaceId: workspace.id,
       updatedAt: now,
     }, database);
 
-    return { workspaceId: wsBody.id };
+    return { workspaceId: workspace.id };
   }
 
   async function createSystemIssue(projectId: string, name: string): Promise<string | null> {
