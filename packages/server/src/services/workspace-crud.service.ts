@@ -448,6 +448,9 @@ exit 1
     let claudeProfile: string | undefined;
     let agentCommand: string | undefined;
     let resolvedProvider: ProviderName = "claude";
+    // Hoisted so it is in scope in the catch block's failure handler. The real
+    // value (priority-derived default or explicit input) is assigned inside try.
+    let planMode = input.planMode === true;
     // Tracks whether the workspace row was committed to the DB. Used to decide
     // between rollback-and-throw (post-insert failure) vs insert-then-return-error
     // (pre-insert failure) in the catch block.
@@ -460,7 +463,7 @@ exit 1
       // Default plan mode on for high/critical priority when not explicitly set.
       // This ensures expensive misunderstandings are caught before implementation begins.
       const isHighPriority = issue.priority === "high" || issue.priority === "critical";
-      const planMode = input.planMode !== undefined ? input.planMode === true : isHighPriority;
+      planMode = input.planMode !== undefined ? input.planMode === true : isHighPriority;
 
       ({ branch, worktreePath, baseBranch, baseCommitSha } = await setupWorktree(
         isDirect, project.repoPath, project.defaultBranch, input, setupConfig, id,
