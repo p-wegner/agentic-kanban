@@ -152,6 +152,7 @@ export function CodemodPanel({ onClose, activeProjectId }: CodemodPanelProps) {
       const result = await apiFetch<{ applied: string[]; skipped: string[] }>("/api/codemods/apply", {
         method: "POST",
         body: JSON.stringify({
+          projectId: activeProjectId,
           changes: preview.files.map((f) => ({ filePath: f.filePath, modified: f.modified })),
           selectedFiles: Array.from(selectedFiles),
         }),
