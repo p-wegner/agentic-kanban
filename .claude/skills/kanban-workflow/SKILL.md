@@ -84,6 +84,8 @@ Some workspaces have `isDirect: true` — the agent is working directly on the p
 3. The commit message should summarize the what and why
 4. Reference the issue in the commit if appropriate
 
+**Commit checkpoint — commit the moment the core is green.** The instant `tsc -b --noEmit` passes for the packages you touched AND the directly-related tests pass, **commit immediately**. Then continue any polish, extra tests, or flaky-suite debugging in follow-up commits. Do NOT batch a multi-step diff into one final end-of-task commit — an interruption (crash, hot-reload, timeout) loses all of it.
+
 Do NOT leave uncommitted changes in the worktree. If you have made changes, commit them before moving to the next step.
 
 ### 6. Run a code review

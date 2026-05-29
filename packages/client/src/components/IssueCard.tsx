@@ -230,6 +230,23 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
             </span>
           )
         )}
+        {ws?.showdown && (
+          <span
+            className={`inline-flex items-center gap-1 text-xs font-medium px-1.5 py-0.5 rounded ${
+              ws.showdown.status === "decided"
+                ? "bg-green-100 text-green-700 dark:bg-green-900/50 dark:text-green-300"
+                : ws.showdown.doneCount === ws.showdown.total
+                ? "bg-amber-100 text-amber-700 dark:bg-amber-900/50 dark:text-amber-300"
+                : "bg-indigo-100 text-indigo-700 dark:bg-indigo-900/50 dark:text-indigo-300"
+            }`}
+            title={`Showdown: ${ws.showdown.doneCount}/${ws.showdown.total} done`}
+          >
+            ⚔️
+            {ws.showdown.status === "decided"
+              ? "Decided"
+              : `${ws.showdown.doneCount}/${ws.showdown.total} done`}
+          </span>
+        )}
       </div>
       {ws && ws.main && (
         <div
