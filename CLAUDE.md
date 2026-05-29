@@ -211,6 +211,7 @@ The **Butler** is a warm, per-project Claude assistant (Agent SDK, in-process) �
 - `pnpm test:mine` — **fast iteration loop**: runs only reliably-green unit suites (server + mcp-server), skipping the known-flaky ones (see "Known Flaky Test Suites"). Use this while iterating; run the full suite once before mark-ready. Vitest args pass through: `pnpm test:mine -- --related <files>`.
 - `pnpm --filter agentic-kanban test` — Vitest unit tests (full suite — server package only)
 - `pnpm --filter agentic-kanban test -- --related <files>` — **targeted**: run only tests covering the listed source files (use for refactoring)
+- `pnpm --filter "@agentic-kanban/client" exec tsc --noEmit` — TypeScript check for the **client** package (note: scoped package name requires quotes)
 - `pnpm test:e2e` — Playwright E2E tests
 - `pnpm db:migrate && pnpm db:seed` — initialize DB
 - `pnpm cli -- register <path>` — register a git repo as a project
