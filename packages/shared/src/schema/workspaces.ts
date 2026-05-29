@@ -32,6 +32,10 @@ export const workspaces = sqliteTable("workspaces", {
   forkNodeId: text("fork_node_id"),
   forkJoinNodeId: text("fork_join_node_id"),
   forkStatus: text("fork_status"),
+  // Showdown: group multiple sibling workspaces competing on the same issue
+  showdownId: text("showdown_id"),
+  /** Slot label for this contestant: 'a', 'b', 'c', 'd' */
+  showdownLabel: text("showdown_label"),
   includeVisualProof: integer("include_visual_proof", { mode: "boolean" }).notNull().default(false),
   createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
   updatedAt: text("updated_at").notNull().$defaultFn(() => new Date().toISOString()),
@@ -53,6 +57,7 @@ export const workspaces = sqliteTable("workspaces", {
   statusIdx: index("idx_workspaces_status").on(table.status),
   createdAtIdx: index("idx_workspaces_created_at").on(table.createdAt),
   parentWorkspaceIdIdx: index("idx_workspaces_parent_workspace_id").on(table.parentWorkspaceId),
+  showdownIdIdx: index("idx_workspaces_showdown_id").on(table.showdownId),
 }));
 
 export const workspacesRelations = relations(workspaces, ({ one, many }) => ({
