@@ -9,6 +9,7 @@ import { WorkflowProgress } from "./WorkflowProgress.js";
 import { EpicDecomposerModal } from "./EpicDecomposerModal.js";
 import { ShowdownDialog } from "./ShowdownDialog.js";
 import { ShowdownPanel } from "./ShowdownPanel.js";
+import { usePanelLayout } from "../hooks/usePanelLayout.js";
 
 // Some issues were created via MCP/CLI calls whose JSON descriptions ended up
 // with literal `\n` / `\t` sequences rather than real newlines. Unescape when
@@ -88,7 +89,20 @@ export function IssueDetailPanel({
 }: IssueDetailPanelProps) {
   const [editing, setEditing] = useState(false);
   const [descriptionMode, setDescriptionMode] = useState<"edit" | "preview">("edit");
-  const [panelMode, setPanelMode] = useState<"sidebar" | "modal" | "fullscreen">("sidebar");
+  const {
+    mode: panelMode,
+    setMode: setPanelMode,
+    cycleMode: cyclePanelMode,
+    sidebarWidth,
+    startResize,
+    resizing,
+  } = usePanelLayout({
+    storageKey: "issueDetail",
+    modes: ["sidebar", "modal", "fullscreen"],
+    defaultWidth: 560,
+    minWidth: 360,
+    maxWidth: 1100,
+  });
   const [sidebarSide, setSidebarSide] = useState<"left" | "right">("right");
   const [dragPos, setDragPos] = useState<{ x: number; y: number } | null>(null);
   const [snapZone, setSnapZone] = useState<"left" | "right" | null>(null);
@@ -541,10 +555,10 @@ export function IssueDetailPanel({
     <>
       {/* Snap zone indicators shown while dragging */}
       {snapZone === "left" && (
-        <div className="fixed left-0 top-0 h-full w-[min(384px,100vw)] z-40 bg-brand-500/20 border-r-2 border-brand-400 pointer-events-none transition-opacity" />
+        <div style={{ width: `min(${sidebarWidth}px, 100vw)` }} className="fixed left-0 top-0 h-full z-40 bg-brand-500/20 border-r-2 border-brand-400 pointer-events-none transition-opacity" />
       )}
       {snapZone === "right" && (
-        <div className="fixed right-0 top-0 h-full w-[min(384px,100vw)] z-40 bg-brand-500/20 border-l-2 border-brand-400 pointer-events-none transition-opacity" />
+        <div style={{ width: `min(${sidebarWidth}px, 100vw)` }} className="fixed right-0 top-0 h-full z-40 bg-brand-500/20 border-l-2 border-brand-400 pointer-events-none transition-opacity" />
       )}
       {/* Backdrop */}
       <div
@@ -554,23 +568,35 @@ export function IssueDetailPanel({
       {/* Panel */}
       <div
         data-panel
-        className={`fixed bg-surface-raised dark:bg-surface-raised-dark shadow-xl z-50 flex flex-col animate-slide-in-right ${
+        className={`fixed bg-surface-raised dark:bg-surface-raised-dark shadow-xl z-50 flex flex-col animate-slide-in-right ${resizing ? "select-none" : ""} ${
           panelMode === "fullscreen"
             ? "inset-0"
             : panelMode === "modal"
             ? `w-[min(800px,96vw)] h-[90vh] rounded-lg border border-gray-200 dark:border-gray-700${dragPos ? "" : " top-[5vh] left-1/2 -translate-x-1/2"}`
             : sidebarSide === "left"
-            ? "left-0 top-0 h-full border-r border-gray-200 dark:border-gray-700 w-[min(384px,100vw)]"
-            : "right-0 top-0 h-full border-l border-gray-200 dark:border-gray-700 w-[min(384px,100vw)]"
+            ? "left-0 top-0 h-full border-r border-gray-200 dark:border-gray-700"
+            : "right-0 top-0 h-full border-l border-gray-200 dark:border-gray-700"
         }`}
         style={
           dragPos && panelMode === "modal"
             ? { position: "fixed", left: dragPos.x, top: dragPos.y, transform: "none" }
             : panelMode === "sidebar" && dragPos
-            ? { right: "auto", left: dragPos.x, top: dragPos.y, height: "min(90vh, 100vh)" }
+            ? { right: "auto", left: dragPos.x, top: dragPos.y, height: "min(90vh, 100vh)", width: `min(${sidebarWidth}px, 100vw)` }
+            : panelMode === "sidebar"
+            ? { width: `min(${sidebarWidth}px, 100vw)` }
             : undefined
         }
       >
+        {/* Resize handle — only in sidebar mode, on the panel's inner edge */}
+        {panelMode === "sidebar" && (
+          <div
+            onMouseDown={(e) => startResize(e, sidebarSide)}
+            title="Drag to resize"
+            className={`absolute top-0 bottom-0 ${sidebarSide === "right" ? "left-0 -ml-1" : "right-0 -mr-1"} w-2 cursor-col-resize z-10 group`}
+          >
+            <div className="absolute inset-y-0 left-1/2 -translate-x-1/2 w-px bg-transparent group-hover:bg-brand-400 transition-colors" />
+          </div>
+        )}
         <div
           className={`flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-gray-700 ${panelMode === "sidebar" || panelMode === "modal" ? "cursor-grab active:cursor-grabbing" : ""} ${panelMode === "modal" ? "rounded-t-lg" : ""}`}
           onMouseDown={panelMode === "sidebar" || panelMode === "modal" ? handleHeaderMouseDown : undefined}
@@ -651,10 +677,8 @@ export function IssueDetailPanel({
             )}
             <button
               onClick={() => {
-                setPanelMode((m) => {
-                  if (m === "fullscreen") setSidebarSide("right");
-                  return m === "sidebar" ? "modal" : m === "modal" ? "fullscreen" : "sidebar";
-                });
+                if (panelMode === "fullscreen") setSidebarSide("right");
+                cyclePanelMode();
                 setDragPos(null);
               }}
               title={panelMode === "sidebar" ? "Expand to modal" : panelMode === "modal" ? "Expand to fullscreen" : "Collapse to sidebar"}
@@ -780,7 +804,7 @@ export function IssueDetailPanel({
               <textarea
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
-                rows={panelMode !== "sidebar" ? 16 : 4}
+                rows={panelMode !== "sidebar" ? 16 : 10}
                 className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500 resize-none"
                 placeholder="Add a description... (paste screenshots with Ctrl+V)"
                 onPaste={(e) => {
@@ -1571,6 +1595,8 @@ export function IssueDetailPanel({
             setShowDecomposeModal(false);
             onIssueUpdate(issue);
           }}
+        />
+      )}
       {showShowdownDialog && (
         <ShowdownDialog
           issue={issue}

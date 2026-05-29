@@ -10,6 +10,7 @@ import { WorkspaceDiffPanel } from "./WorkspaceDiffPanel.js";
 import { FailurePatternHint } from "./FailurePatternHint.js";
 import TicketMentionInput from "./TicketMentionInput.js";
 import { useWorkspaceSession } from "../hooks/useWorkspaceSession.js";
+import { usePanelLayout } from "../hooks/usePanelLayout.js";
 import { SessionReplay } from "./SessionReplay.js";
 import type {
   AgentOutputMessage,
@@ -283,7 +284,19 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
   const [quickDropdownOpen, setQuickDropdownOpen] = useState(false);
   const [selectedWorkspace, setSelectedWorkspace] = useState<string | null>(initialWorkspaceId ?? null);
   const [activeSession, setActiveSession] = useState<string | null>(initialSessionId || null);
-  const [panelMode, setPanelMode] = useState<"sidebar" | "modal">("sidebar");
+  const {
+    mode: panelMode,
+    setMode: setPanelMode,
+    sidebarWidth,
+    startResize,
+    resizing,
+  } = usePanelLayout({
+    storageKey: "workspace",
+    modes: ["sidebar", "modal"],
+    defaultWidth: 720,
+    minWidth: 460,
+    maxWidth: 1200,
+  });
   const [sidebarSide, setSidebarSide] = useState<"left" | "right">("right");
   const [dragPos, setDragPos] = useState<{ x: number; y: number } | null>(null);
   const [snapZone, setSnapZone] = useState<"left" | "right" | null>(null);
@@ -1042,7 +1055,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
     dragStartRef.current = { mouseX: e.clientX, mouseY: e.clientY, panelX: rect.left, panelY: rect.top };
 
     const EDGE_SNAP_THRESHOLD = 80;
-    let currentDragMode: "sidebar" | "modal" = panelMode;
+    let currentDragMode: "sidebar" | "modal" = panelMode === "modal" ? "modal" : "sidebar";
     let cleanup: (() => void) | null = null;
 
     if (currentDragMode === "sidebar") {
@@ -1110,27 +1123,39 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
   return (
     <>
       {snapZone === "left" && (
-        <div className="fixed left-0 top-0 h-full w-[min(560px,100vw)] z-40 bg-blue-500/20 border-r-2 border-blue-400 pointer-events-none" />
+        <div style={{ width: `min(${sidebarWidth}px, 100vw)` }} className="fixed left-0 top-0 h-full z-40 bg-blue-500/20 border-r-2 border-blue-400 pointer-events-none" />
       )}
       {snapZone === "right" && (
-        <div className="fixed right-0 top-0 h-full w-[min(560px,100vw)] z-40 bg-blue-500/20 border-l-2 border-blue-400 pointer-events-none" />
+        <div style={{ width: `min(${sidebarWidth}px, 100vw)` }} className="fixed right-0 top-0 h-full z-40 bg-blue-500/20 border-l-2 border-blue-400 pointer-events-none" />
       )}
       <div className="fixed inset-0 bg-black/30 z-40" onClick={onClose} />
       <div
         data-panel
-        className={`fixed bg-surface-raised dark:bg-surface-raised-dark shadow-xl z-50 flex flex-col animate-slide-in-right ${
+        className={`fixed bg-surface-raised dark:bg-surface-raised-dark shadow-xl z-50 flex flex-col animate-slide-in-right ${resizing ? "select-none" : ""} ${
           panelMode === "modal"
             ? "top-[5vh] left-1/2 -translate-x-1/2 w-[min(560px,96vw)] h-[90vh] rounded-lg border border-gray-200 dark:border-gray-700"
             : sidebarSide === "left"
-            ? "left-0 top-0 h-full border-r border-gray-200 dark:border-gray-700 w-[min(560px,100vw)]"
-            : "right-0 top-0 h-full border-l border-gray-200 dark:border-gray-700 w-[min(560px,100vw)]"
+            ? "left-0 top-0 h-full border-r border-gray-200 dark:border-gray-700"
+            : "right-0 top-0 h-full border-l border-gray-200 dark:border-gray-700"
         }`}
         style={
           dragPos && panelMode === "modal"
             ? { position: "fixed", left: dragPos.x, top: dragPos.y, transform: "none" }
+            : panelMode === "sidebar"
+            ? { width: `min(${sidebarWidth}px, 100vw)` }
             : undefined
         }
       >
+        {/* Resize handle — only in sidebar mode, on the panel's inner edge */}
+        {panelMode === "sidebar" && (
+          <div
+            onMouseDown={(e) => startResize(e, sidebarSide)}
+            title="Drag to resize"
+            className={`absolute top-0 bottom-0 ${sidebarSide === "right" ? "left-0 -ml-1" : "right-0 -mr-1"} w-2 cursor-col-resize z-10 group`}
+          >
+            <div className="absolute inset-y-0 left-1/2 -translate-x-1/2 w-px bg-transparent group-hover:bg-blue-400 transition-colors" />
+          </div>
+        )}
         <div
           className={`flex items-center gap-2 px-4 py-3 border-b border-gray-200 dark:border-gray-700 min-w-0 cursor-grab active:cursor-grabbing ${panelMode === "modal" ? "rounded-t-lg" : ""}`}
           onMouseDown={handleHeaderMouseDown}
@@ -1140,7 +1165,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
           </h2>
           <div className="flex items-center gap-2 shrink-0">
             <button
-              onClick={() => { setPanelMode(m => m === "sidebar" ? "modal" : "sidebar"); setDragPos(null); }}
+              onClick={() => { setPanelMode(panelMode === "sidebar" ? "modal" : "sidebar"); setDragPos(null); }}
               title={panelMode === "sidebar" ? "Detach to floating panel" : "Snap back to sidebar"}
               className="text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 p-0.5 rounded"
             >
