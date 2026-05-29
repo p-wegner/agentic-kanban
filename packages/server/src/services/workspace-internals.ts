@@ -62,6 +62,9 @@ export interface CreateWorkspaceInput {
   includeVisualProof?: boolean;
   skipSetup?: boolean;
   customPrompt?: string;
+  /** Markdown block of answered preflight clarifications, prepended to the agent's
+   *  initial context so it starts with the resolved Q&A. */
+  clarifications?: string;
   skillId?: string;
   /** Name of a disk-only skill (no DB entry) — used when id starts with "disk:" */
   skillName?: string;

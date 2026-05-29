@@ -16,6 +16,7 @@ import { eq, desc } from "drizzle-orm";
 import type { Database } from "../db/index.js";
 import { getPreference, setPreference } from "../repositories/preferences.repository.js";
 import { ensureButlerSession, sendButlerTurn, subscribeButler, getButlerSession } from "./butler-sdk.service.js";
+import { insertIssueComment } from "../repositories/issue-comments.repository.js";
 
 /** Function signature for sending a follow-up turn to a workspace — injected so this
  *  service does not depend on the session manager singleton directly. */
@@ -91,6 +92,49 @@ export async function isAnswered(toolUseId: string, db: Database): Promise<boole
 
 export async function markAnswered(toolUseId: string, db: Database): Promise<void> {
   await setPreference(answeredPrefKey(toolUseId), "1", db);
+}
+
+/**
+ * Persist an answered AskUserQuestion as a durable `agent-question` comment on the
+ * ticket, so the clarification becomes part of the issue's visible history (not just
+ * an opaque answered-pref marker). Resolves the issueId from the workspace. Best-effort:
+ * a failure here must never block the answer turn that already went through.
+ *
+ * @param author  "user" for a manual answer, "butler" for an auto-answer.
+ */
+export async function writeAgentQuestionComment(
+  params: {
+    toolUseId: string;
+    workspaceId: string;
+    questions: AgentQuestion[];
+    answers: { selectedLabels: string[]; freeText?: string }[];
+    body: string;
+    author: "user" | "butler";
+  },
+  db: Database,
+): Promise<void> {
+  try {
+    const wsRows = await db
+      .select({ issueId: workspaces.issueId })
+      .from(workspaces)
+      .where(eq(workspaces.id, params.workspaceId))
+      .limit(1);
+    const issueId = wsRows[0]?.issueId;
+    if (!issueId) return;
+    await insertIssueComment(
+      {
+        issueId,
+        workspaceId: params.workspaceId,
+        kind: "agent-question",
+        author: params.author,
+        body: params.body,
+        payload: { toolUseId: params.toolUseId, questions: params.questions, answers: params.answers },
+      },
+      db,
+    );
+  } catch (err) {
+    console.error(`[agent-questions] failed to write agent-question comment: toolUseId=${params.toolUseId} ${err instanceof Error ? err.message : err}`);
+  }
 }
 
 /** Mark a pending question dismissed by the user. The corresponding workspace is NOT
@@ -422,6 +466,10 @@ export async function tryAutoAnswer(
   try {
     await sendTurn(workspaceId, content);
     await markAnswered(toolUseId, db);
+    await writeAgentQuestionComment(
+      { toolUseId, workspaceId, questions, answers, body: content, author: "butler" },
+      db,
+    );
     const firstQ = questions[0]?.question ?? "(unknown)";
     console.info(
       `[agent-questions] auto-answered toolUseId=${toolUseId} workspaceId=${workspaceId} ` +

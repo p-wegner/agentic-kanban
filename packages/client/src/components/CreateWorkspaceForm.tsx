@@ -4,7 +4,7 @@ import { suggestBranchName, sanitizeBranchName } from "../lib/branch.js";
 import type { IssueWithStatus, ProfileSelection, WorkspaceResponse } from "@agentic-kanban/shared";
 import { CLAUDE_MODEL_OPTIONS } from "@agentic-kanban/shared";
 import { PreflightModal } from "./PreflightModal.js";
-import type { PreflightResult } from "./PreflightModal.js";
+import type { PreflightResult, PreflightClarification } from "./PreflightModal.js";
 
 interface Project {
   id: string;
@@ -416,6 +416,41 @@ export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCr
           setPreflightResult(null);
           await doLaunch(pendingLaunch);
           setPendingLaunch(null);
+        }}
+        onAnswerAndLaunch={async (clarifications: PreflightClarification[]) => {
+          // Re-run preflight with the answered clarifications. The server persists a
+          // `preflight-clarification` comment and returns the markdown block to inject
+          // into the launching agent's context.
+          setPreflightLoading(true);
+          try {
+            const result = await apiFetch<PreflightResult>(`/api/issues/${issue.id}/preflight`, {
+              method: "POST",
+              body: JSON.stringify({ projectId: issue.projectId, clarifications }),
+            });
+            const launchBody = { ...pendingLaunch, clarifications: result.clarificationsBlock };
+            if (result.verdict === "ready") {
+              setPreflightResult(null);
+              setPreflightLoading(false);
+              await doLaunch(launchBody);
+              setPendingLaunch(null);
+            } else {
+              // Still not ready — keep the (now answered) clarifications staged so a
+              // subsequent "Launch anyway" still carries the injected context.
+              setPendingLaunch(launchBody);
+              setPreflightResult(result);
+              setPreflightLoading(false);
+            }
+          } catch {
+            // Preflight unavailable — proceed with the answered clarifications injected.
+            const launchBody = {
+              ...pendingLaunch,
+              clarifications: clarifications.map((c) => `**Q:** ${c.question}\n**A:** ${c.answer}`).join("\n\n"),
+            };
+            setPreflightResult(null);
+            setPreflightLoading(false);
+            await doLaunch(launchBody);
+            setPendingLaunch(null);
+          }
         }}
         onRetry={async (_updatedTitle, _updatedDescription) => {
           // Re-run the preflight after the user saved edits
