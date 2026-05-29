@@ -2,7 +2,9 @@ import { Hono } from "hono";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import type { BoardEvents } from "../services/board-events.js";
-import { analyzeDependencies, enhanceIssue, aiEstimateIssue } from "../services/issue-ai.service.js";
+import { analyzeDependencies, enhanceIssue, aiEstimateIssue, analyzeTouchedFiles, checkIssueOverlap } from "../services/issue-ai.service.js";
+import { issues } from "@agentic-kanban/shared/schema";
+import { eq } from "drizzle-orm";
 import { createIssueService } from "../services/issue.service.js";
 import { parseJsonBody } from "../middleware/parse-body.js";
 import { createRouter } from "../middleware/create-router.js";
@@ -107,6 +109,23 @@ export function createIssuesRoute(database: Database = db, options?: { boardEven
       workflowTemplateId: body.workflowTemplateId,
     });
     return c.json(result, 201);
+  });
+
+  // GET /api/issues/:id/touched-files — return cached prediction only (no AI call)
+  router.get("/:id/touched-files", async (c) => {
+    const issueId = c.req.param("id");
+    const rows = await database.select({ touchedFilesJson: issues.touchedFilesJson }).from(issues).where(eq(issues.id, issueId)).limit(1);
+    if (rows.length === 0) return c.json({ error: "Issue not found" }, 404);
+    const json = rows[0].touchedFilesJson;
+    const files = json ? JSON.parse(json) : [];
+    return c.json({ files, cached: true });
+  });
+
+  // POST /api/issues/:id/analyze-touched-files — run (or re-run) AI prediction
+  router.post("/:id/analyze-touched-files", async (c) => {
+    const issueId = c.req.param("id");
+    const body = await parseJsonBody<{ refresh?: boolean }>(c).catch(() => ({ refresh: false }));
+    return c.json(await wrapAiOperation("analyze-touched-files", () => analyzeTouchedFiles(issueId, database, body?.refresh === true)));
   });
 
   // GET /api/issues/:id/summary

@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
-import { issues, projectStatuses, issueDependencies, agentSkills } from "@agentic-kanban/shared/schema";
+import { readdirSync, statSync } from "node:fs";
+import { join } from "node:path";
+import { issues, projectStatuses, issueDependencies, agentSkills, projects } from "@agentic-kanban/shared/schema";
 import { eq, and, inArray, sql } from "drizzle-orm";
 import type { DependencyType } from "@agentic-kanban/shared/schema";
 import type { IssueEstimate } from "@agentic-kanban/shared";
@@ -162,8 +164,145 @@ Only include genuinely useful dependencies, not just topical similarity.`;
   return { dependencies: created, total: created.length };
 }
 
-export interface AiEstimateResult {
-  estimate: IssueEstimate;
+export interface TouchedFile {
+  path: string;
+  reason: string;
+  confidence: "high" | "medium" | "low";
+}
+
+export interface AnalyzeTouchedFilesResult {
+  files: TouchedFile[];
+  cached: boolean;
+}
+
+function buildDirTree(rootPath: string, maxDepth = 3): string {
+  const lines: string[] = [];
+  function walk(dir: string, depth: number, prefix: string) {
+    if (depth > maxDepth) return;
+    let entries: string[];
+    try {
+      entries = readdirSync(dir).filter(e => !e.startsWith(".") && e !== "node_modules" && e !== "dist" && e !== "build");
+    } catch {
+      return;
+    }
+    entries.sort();
+    for (let i = 0; i < entries.length; i++) {
+      const entry = entries[i];
+      const fullPath = join(dir, entry);
+      const isLast = i === entries.length - 1;
+      const connector = isLast ? "└── " : "├── ";
+      let stat;
+      try { stat = statSync(fullPath); } catch { continue; }
+      if (stat.isDirectory()) {
+        lines.push(`${prefix}${connector}${entry}/`);
+        walk(fullPath, depth + 1, prefix + (isLast ? "    " : "│   "));
+      } else {
+        lines.push(`${prefix}${connector}${entry}`);
+      }
+    }
+  }
+  walk(rootPath, 0, "");
+  return lines.join("\n");
+}
+
+export async function analyzeTouchedFiles(
+  issueId: string,
+  database: Database,
+  forceRefresh = false,
+): Promise<AnalyzeTouchedFilesResult> {
+  const issueRows = await database
+    .select({
+      id: issues.id,
+      title: issues.title,
+      description: issues.description,
+      projectId: issues.projectId,
+      touchedFilesJson: issues.touchedFilesJson,
+    })
+    .from(issues)
+    .where(eq(issues.id, issueId))
+    .limit(1);
+  if (issueRows.length === 0) throw new NotFoundError("Issue not found");
+  const issue = issueRows[0];
+
+  if (!forceRefresh && issue.touchedFilesJson) {
+    try {
+      const cached = JSON.parse(issue.touchedFilesJson) as TouchedFile[];
+      return { files: cached, cached: true };
+    } catch {}
+  }
+
+  const projectRows = await database
+    .select({ repoPath: projects.repoPath })
+    .from(projects)
+    .where(eq(projects.id, issue.projectId))
+    .limit(1);
+  const repoPath = projectRows[0]?.repoPath ?? "";
+
+  let treeSection = "";
+  if (repoPath) {
+    try {
+      const tree = buildDirTree(repoPath, 3);
+      treeSection = tree ? `\nRepository directory structure:\n${tree}\n` : "";
+    } catch {}
+  }
+
+  const prompt = `You are a software engineer. Given a kanban issue title and description, predict which source files the implementation will likely modify.
+Focus on ${repoPath ? "the repository structure provided" : "the technologies mentioned in the issue"}.
+Cap your answer at 12 files. Only include files that will be directly modified (not just read).
+Respond ONLY with valid JSON — no markdown, no explanation:
+{"files": [{"path": "relative/path/to/file.ts", "reason": "one sentence", "confidence": "high|medium|low"}]}
+${treeSection}
+Issue title: ${issue.title}
+${issue.description ? `Description:\n${issue.description}` : ""}`;
+
+  const stdout = await invokeClaudePrompt(prompt, { database, model: "claude-haiku-4-5" });
+  const cleaned = stdout.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
+  const parsed = JSON.parse(cleaned) as { files?: TouchedFile[] };
+  const files: TouchedFile[] = (parsed.files ?? []).slice(0, 12).filter(
+    f => f.path && f.reason && ["high", "medium", "low"].includes(f.confidence),
+  );
+
+  await database
+    .update(issues)
+    .set({ touchedFilesJson: JSON.stringify(files) })
+    .where(eq(issues.id, issueId));
+
+  return { files, cached: false };
+}
+
+export interface CheckOverlapResult {
+  overlap: Record<string, string[]>;
+}
+
+export async function checkIssueOverlap(
+  issueIds: string[],
+  database: Database,
+): Promise<CheckOverlapResult> {
+  if (issueIds.length === 0) return { overlap: {} };
+
+  const rows = await database
+    .select({ id: issues.id, touchedFilesJson: issues.touchedFilesJson })
+    .from(issues)
+    .where(inArray(issues.id, issueIds));
+
+  const overlap: Record<string, string[]> = {};
+  for (const row of rows) {
+    if (!row.touchedFilesJson) continue;
+    let files: TouchedFile[];
+    try { files = JSON.parse(row.touchedFilesJson); } catch { continue; }
+    for (const f of files) {
+      if (!overlap[f.path]) overlap[f.path] = [];
+      if (!overlap[f.path].includes(row.id)) overlap[f.path].push(row.id);
+    }
+  }
+  // Keep only files touched by >1 issue
+  for (const path of Object.keys(overlap)) {
+    if (overlap[path].length < 2) delete overlap[path];
+  }
+  return { overlap };
+}
+
+export interface AiEstimateResult {  estimate: IssueEstimate;
   reasoning: string;
 }
 
