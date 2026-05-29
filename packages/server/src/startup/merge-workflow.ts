@@ -93,9 +93,9 @@ export function createAutoMerge({ sessionManager, boardEvents, learningSessionId
       }
 
       if (!workspace.isDirect) {
-        const projectRows = await db.select({ repoPath: projects.repoPath, teardownScript: projects.teardownScript }).from(projects).where(eq(projects.id, projectId)).limit(1);
+        const projectRows = await db.select({ repoPath: projects.repoPath, teardownScript: projects.teardownScript, defaultBranch: projects.defaultBranch }).from(projects).where(eq(projects.id, projectId)).limit(1);
         if (projectRows.length > 0) {
-          const { repoPath, teardownScript } = projectRows[0];
+        const { repoPath, teardownScript, defaultBranch } = projectRows[0];
           if (workspace.workingDir) {
             try { await killProcessesInDir(workspace.workingDir); } catch {}
             if (teardownScript) {
@@ -120,7 +120,8 @@ export function createAutoMerge({ sessionManager, boardEvents, learningSessionId
             throw new Error(`Main checkout has ${uncommittedInMain.length} uncommitted tracked change(s) — cannot merge workspace ${workspace.id}. Commit or stash those changes first.`);
           }
 
-          await gitService.mergeBranch(repoPath, workspace.branch);
+          const targetBranch = workspace.baseBranch || defaultBranch || "main";
+          await gitService.mergeBranch(repoPath, workspace.branch, targetBranch);
           if (workspace.workingDir) {
             try { await gitService.removeWorktree(repoPath, workspace.workingDir); } catch {}
           }
