@@ -63,9 +63,12 @@ async function parseTranscript(
   transcript: string,
   database: Database,
 ): Promise<{ title: string; description: string; priority: string }> {
+  // Use a clear delimiter instead of quoting the transcript to prevent prompt injection.
   const prompt = `You are a project manager assistant. A developer spoke the following voice note while coding. Structure it into a clean kanban ticket.
 
-Voice transcript: "${transcript}"
+<voice_transcript>
+${transcript}
+</voice_transcript>
 
 Rules:
 - title: concise, action-oriented, ≤80 chars
@@ -77,7 +80,18 @@ Respond ONLY with valid JSON (no markdown, no explanation):
 
   const stdout = await invokeClaudePrompt(prompt, { database, model: "claude-haiku-4-5" });
   const cleaned = stdout.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
-  const parsed = JSON.parse(cleaned) as { title?: string; description?: string; priority?: string };
+
+  let parsed: { title?: string; description?: string; priority?: string };
+  try {
+    parsed = JSON.parse(cleaned) as { title?: string; description?: string; priority?: string };
+  } catch {
+    // Claude returned non-JSON (e.g. explanation text). Fall back to raw transcript.
+    return {
+      title: transcript.slice(0, 80),
+      description: `Voice captured: ${transcript}`,
+      priority: "medium",
+    };
+  }
 
   const validPriorities = ["low", "medium", "high", "urgent"];
   const priority = validPriorities.includes(parsed.priority ?? "") ? (parsed.priority as string) : "medium";
