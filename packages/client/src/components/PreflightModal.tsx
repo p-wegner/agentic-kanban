@@ -9,6 +9,9 @@ export interface PreflightResult {
   summary: string;
   duplicateOfNumber?: number;
   blockedByNumber?: number;
+  /** True when the ticket looks like a non-trivial / multi-file feature. Combined with a
+   *  direct workspace, this surfaces a warning recommending an isolated worktree. */
+  looksComplex?: boolean;
   /** Markdown block of answered clarifications, returned when the re-check was run
    *  with clarifications. Caller prepends it to the launching agent's context. */
   clarificationsBlock?: string;
@@ -25,6 +28,9 @@ interface PreflightModalProps {
   projectId: string;
   issueTitle: string;
   issueDescription: string;
+  /** Whether the pending launch targets a direct workspace (edits the main checkout in place).
+   *  When true and the ticket looks complex, a non-blocking warning is shown. */
+  isDirect?: boolean;
   onLaunchAnyway: () => void;
   onRetry: (updatedTitle: string, updatedDescription: string) => void;
   /** Submit answered clarifications: persists a comment, injects the Q&A into the
@@ -49,6 +55,7 @@ export function PreflightModal({
   projectId,
   issueTitle,
   issueDescription,
+  isDirect,
   onLaunchAnyway,
   onRetry,
   onAnswerAndLaunch,
@@ -67,6 +74,11 @@ export function PreflightModal({
   const isBlocking = result.verdict !== "ready";
   const hasQuestions = result.questions.length > 0;
   const answeredCount = answers.filter((a) => a.trim()).length;
+  // Advisory (non-blocking) warning: a complex ticket being run directly on the main checkout.
+  const directRisk = Boolean(isDirect && result.looksComplex);
+  // The "Launch anyway" affordance is shown whenever the modal needs an explicit decision —
+  // either the verdict blocks, or there's a direct-workspace risk to acknowledge.
+  const showLaunchAnyway = isBlocking || directRisk;
 
   async function handleSaveAndRetry() {
     if (saving) return;
@@ -118,6 +130,21 @@ export function PreflightModal({
           {/* Summary */}
           {result.summary && (
             <p className="text-sm text-gray-600 dark:text-gray-400">{result.summary}</p>
+          )}
+
+          {/* Direct-workspace risk warning (non-blocking) */}
+          {directRisk && (
+            <div className="flex gap-2 px-3 py-2 rounded border border-amber-300 bg-amber-50 dark:border-amber-700 dark:bg-amber-900/20 text-sm text-amber-800 dark:text-amber-300">
+              <span className="font-bold mt-0.5">⚠</span>
+              <div>
+                <p className="font-medium">This looks like a complex feature for a direct workspace.</p>
+                <p className="mt-1 text-amber-700 dark:text-amber-400">
+                  Direct workspaces edit the main checkout in place (no isolated worktree), so a
+                  large or destructive change can contaminate the main repo and block other work.
+                  Consider unchecking “Work directly on main checkout” to use an isolated worktree instead.
+                </p>
+              </div>
+            </div>
           )}
 
           {/* Questions + per-question answer fields */}
@@ -206,7 +233,7 @@ export function PreflightModal({
             >
               Cancel
             </button>
-            {isBlocking && (
+            {showLaunchAnyway && (
               <button
                 onClick={onLaunchAnyway}
                 disabled={loading}
