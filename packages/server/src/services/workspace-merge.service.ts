@@ -115,6 +115,26 @@ export function createWorkspaceMergeService(deps: {
 
     if (workspace.workingDir) {
       const baseBranch = requireBaseBranch(workspace.baseBranch || defaultBranch);
+
+      // Auto-renumber any Drizzle migration the feature branch added that collides
+      // with one already on the base branch (parallel branches all pick the same
+      // "next" number). This rewrites the incoming branch in place so the merge
+      // below stays conflict-free. No-op when there's no migration collision.
+      try {
+        const renumber = await gitService.autoRenumberMigrations(workspace.workingDir, repoPath, baseBranch);
+        if (renumber.renumbered) {
+          console.log(
+            `[workspace-merge] auto-renumbered migrations on ${workspace.branch}: ` +
+              renumber.renames.map((r) => `${r.from}→${r.to}`).join(", "),
+          );
+        }
+      } catch (err) {
+        console.warn(
+          "[workspace-merge] migration auto-renumber failed (continuing to conflict check):",
+          err instanceof Error ? err.message : String(err),
+        );
+      }
+
       const conflicts = await gitService.detectConflicts(workspace.workingDir, baseBranch);
       if (conflicts.hasConflicts) {
         throw new WorkspaceError(
