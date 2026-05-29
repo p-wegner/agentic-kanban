@@ -25,13 +25,21 @@ export function createVoiceCaptureRoute(
       return c.json({ error: "transcript is required" }, 400);
     }
 
-    const result = await createVoiceCaptureIssue(
-      { projectId, transcript: body.transcript.trim() },
-      database,
-      options?.boardEvents,
-    );
-
-    return c.json(result, 201);
+    try {
+      const result = await createVoiceCaptureIssue(
+        { projectId, transcript: body.transcript.trim() },
+        database,
+        options?.boardEvents,
+      );
+      return c.json(result, 201);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Internal error";
+      if (message.includes("No statuses configured")) {
+        return c.json({ error: message }, 422);
+      }
+      console.error("[voice-capture] failed:", err);
+      return c.json({ error: "Failed to create voice capture issue" }, 500);
+    }
   });
 
   return router;
