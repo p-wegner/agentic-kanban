@@ -42,6 +42,9 @@ export const workspaces = sqliteTable("workspaces", {
   diffStatCacheFilesChanged: integer("diff_stat_cache_files_changed"),
   diffStatCacheInsertions: integer("diff_stat_cache_insertions"),
   diffStatCacheDeletions: integer("diff_stat_cache_deletions"),
+  scorecardScore: integer("scorecard_score"),
+  scorecardJson: text("scorecard_json"),
+  scorecardComputedAt: text("scorecard_computed_at"),
 }, (table) => ({
   issueIdIdx: index("idx_workspaces_issue_id").on(table.issueId),
   statusIdx: index("idx_workspaces_status").on(table.status),
