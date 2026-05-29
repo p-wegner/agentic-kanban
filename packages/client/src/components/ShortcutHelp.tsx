@@ -10,6 +10,7 @@ const SHORTCUTS: Array<{ keys: string[]; description: string; sequential?: boole
   { keys: ["c"], description: "Create new issue" },
   { keys: ["w"], description: "New issue + start workspace" },
   { keys: ["q"], description: "Open Quick Tasks panel" },
+  { keys: ["Shift", "V"], description: "Start voice inbox (record idea → Backlog issue)" },
   { keys: ["b"], description: "Switch to Board view" },
   { keys: ["g"], description: "Switch to Graph view" },
   { keys: ["t"], description: "Switch to Table view" },
