@@ -1,4 +1,4 @@
-import { workspaces, sessions, sessionMessages } from "@agentic-kanban/shared/schema";
+import { workspaces, sessions, sessionMessages, showdowns } from "@agentic-kanban/shared/schema";
 import { eq, inArray, sql, desc } from "drizzle-orm";
 import type { Database } from "../db/index.js";
 import { getDiffShortstat, detectConflicts } from "./git.service.js";
@@ -24,6 +24,12 @@ export type WorkspaceSummary = {
   idle: number;
   closed: number;
   branches: string[];
+  showdown?: {
+    id: string;
+    status: string;
+    total: number;
+    doneCount: number;
+  };
   main?: {
     id: string;
     branch: string;
@@ -111,12 +117,37 @@ export async function buildWorkspaceSummaryMap(
       diffStatCacheFilesChanged: workspaces.diffStatCacheFilesChanged,
       diffStatCacheInsertions: workspaces.diffStatCacheInsertions,
       diffStatCacheDeletions: workspaces.diffStatCacheDeletions,
-      scorecardScore: workspaces.scorecardScore,
+      scorecardScore: workspaces.scorecardScore,,
+            showdownId: workspaces.showdownId,
     })
     .from(workspaces)
     .where(inArray(workspaces.issueId, issueIds));
 
-  // Pick main workspace per issue: active > awaiting-plan-approval > idle > closed, tie-break by updatedAt
+  // Populate showdown summary — find issues that have showdown workspaces
+  const showdownIdsByIssue = new Map<string, string>();
+  for (const row of wsDetailRows) {
+    if (row.showdownId) showdownIdsByIssue.set(row.issueId, row.showdownId);
+  }
+  if (showdownIdsByIssue.size > 0) {
+    const allShowdownIds = [...new Set(showdownIdsByIssue.values())];
+    const showdownRows = await database
+      .select({ id: showdowns.id, status: showdowns.status })
+      .from(showdowns)
+      .where(inArray(showdowns.id, allShowdownIds));
+    const showdownStatusMap = new Map(showdownRows.map(r => [r.id, r.status]));
+
+    for (const [issueId, showdownId] of showdownIdsByIssue) {
+      const summary = workspaceSummaryMap.get(issueId);
+      if (!summary) continue;
+      const sdStatus = showdownStatusMap.get(showdownId) ?? "active";
+      const sdWorkspaces = wsDetailRows.filter(w => w.showdownId === showdownId);
+      const doneCount = sdWorkspaces.filter(w => w.status === "idle" || w.status === "closed").length;
+      summary.showdown = { id: showdownId, status: sdStatus, total: sdWorkspaces.length, doneCount };
+    }
+  }
+
+
+    // Pick main workspace per issue: active > awaiting-plan-approval > idle > closed, tie-break by updatedAt
   const statusPriority = (s: string) => s === "active" || s === "reviewing" || s === "fixing" ? 0 : s === "awaiting-plan-approval" ? 1 : s === "idle" ? 2 : 3;
   type MainWs = typeof wsDetailRows[number];
   const mainWorkspaceMap = new Map<string, MainWs>();
