@@ -1,9 +1,58 @@
 import type { WSContext } from "hono/ws";
 
+/**
+ * All typed board event reasons.
+ *
+ * Payload shape (all events):
+ *   { type: "board_changed", projectId: string, reason: BoardEventType }
+ *
+ * | Reason                    | Emitted by                                  |
+ * |---------------------------|---------------------------------------------|
+ * | board_changed             | monitor-cycle, monitor-auto-start,          |
+ * |                           | workspace-merge (rebase/abort)              |
+ * | issue_created             | issue.service (create / batch)              |
+ * | issue_updated             | issue.service, exit-workflow, review.service|
+ * | issue_deleted             | issue.service                               |
+ * | dependency_added          | issue.service                               |
+ * | dependency_removed        | issue.service                               |
+ * | session_completed         | exit-workflow (session exit)                |
+ * | session_launched          | workspace-session, workspace-merge          |
+ * | session_stopped           | workspace-session (stopWorkspace)           |
+ * | workspace_created         | workspace-crud (createWorkspace)            |
+ * | workspace_setup           | workspace-crud (setupWorkspace)             |
+ * | workspace_idle            | exit-workflow                               |
+ * | workspace_merged          | exit-workflow, merge-workflow,              |
+ * |                           | workspace-merge, followup-workspace         |
+ * | workspace_ready_for_merge | workspace-crud (markReadyForMerge)          |
+ * | workflow_error            | exit-workflow, merge-workflow               |
+ * | workflow_fork             | workflow-fork.service                       |
+ * | workflow_join             | workflow-fork.service                       |
+ * | internal_notify           | routes/index internal endpoint              |
+ */
+export type BoardEventType =
+  | "board_changed"
+  | "issue_created"
+  | "issue_updated"
+  | "issue_deleted"
+  | "dependency_added"
+  | "dependency_removed"
+  | "session_completed"
+  | "session_launched"
+  | "session_stopped"
+  | "workspace_created"
+  | "workspace_setup"
+  | "workspace_idle"
+  | "workspace_merged"
+  | "workspace_ready_for_merge"
+  | "workflow_error"
+  | "workflow_fork"
+  | "workflow_join"
+  | "internal_notify";
+
 interface BoardEventMessage {
   type: "board_changed";
   projectId: string;
-  reason: string;
+  reason: BoardEventType;
 }
 
 export interface SessionActivityMessage {
@@ -54,10 +103,9 @@ interface BoardEventSubscriber {
   ws: WSContext;
 }
 
-function createBoardEvents(
-  upgradeWebSocket: (callback: (c: any) => any) => any,
-) {
+function createBoardEvents() {
   const subscribers = new Map<string, Map<WSContext, BoardEventSubscriber>>();
+  let cleanupTimer: ReturnType<typeof setInterval> | null = null;
 
   function subscribe(projectId: string, ws: WSContext) {
     if (!subscribers.has(projectId)) {
@@ -78,7 +126,39 @@ function createBoardEvents(
     }
   }
 
-  function broadcast(projectId: string, reason: string) {
+  /** Remove dead WebSocket entries (readyState !== OPEN). */
+  function cleanupStaleConnections() {
+    for (const [projectId, subs] of subscribers) {
+      for (const [ws] of subs) {
+        if (ws.readyState !== 1) {
+          subs.delete(ws);
+        }
+      }
+      if (subs.size === 0) {
+        subscribers.delete(projectId);
+      }
+    }
+  }
+
+  /**
+   * Start a periodic cleanup timer that removes stale WebSocket connections.
+   * Call once at server startup. The timer is unref'd so it won't prevent process exit.
+   */
+  function startCleanup(intervalMs = 30_000) {
+    if (cleanupTimer !== null) return;
+    cleanupTimer = setInterval(cleanupStaleConnections, intervalMs);
+    (cleanupTimer as NodeJS.Timeout).unref?.();
+  }
+
+  /** Stop the cleanup timer (e.g. for testing or graceful shutdown). */
+  function stopCleanup() {
+    if (cleanupTimer !== null) {
+      clearInterval(cleanupTimer);
+      cleanupTimer = null;
+    }
+  }
+
+  function broadcast(projectId: string, reason: BoardEventType) {
     const subs = subscribers.get(projectId);
     if (!subs) return;
     const message: BoardEventMessage = { type: "board_changed", projectId, reason };
@@ -138,21 +218,18 @@ function createBoardEvents(
     }
   }
 
-  function wsRoute() {
-    return upgradeWebSocket((c: any) => {
-      const projectId = c.req.param("projectId");
-      return {
-        onOpen(_event: any, ws: WSContext) {
-          subscribe(projectId, ws);
-        },
-        onClose(_event: any, ws: WSContext) {
-          unsubscribe(projectId, ws);
-        },
-      };
-    });
-  }
-
-  return { subscribe, unsubscribe, broadcast, broadcastActivity, broadcastLiveStats, broadcastTodos, broadcastApprovalRequest, wsRoute };
+  return {
+    subscribe,
+    unsubscribe,
+    broadcast,
+    broadcastActivity,
+    broadcastLiveStats,
+    broadcastTodos,
+    broadcastApprovalRequest,
+    startCleanup,
+    stopCleanup,
+    cleanupStaleConnections,
+  };
 }
 
 export { createBoardEvents };

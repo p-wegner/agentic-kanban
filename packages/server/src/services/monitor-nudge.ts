@@ -1,3 +1,5 @@
+import type { BoardEventType } from "./board-events.js";
+
 export type MonitorActionName =
   | "relaunch"
   | "merge"
@@ -26,7 +28,7 @@ export function sendMonitorNudge({
   projectId: string;
   prompt: string;
   logAction: (action: MonitorActionName, workspaceId: string, issueId: string) => void;
-  broadcast: (projectId: string, event: "board_changed") => void;
+  broadcast: (projectId: string, event: BoardEventType) => void;
   logger?: Pick<typeof console, "log" | "warn">;
 }): boolean {
   const result = sessionManager.sendTurn(sessionId, prompt);
