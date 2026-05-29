@@ -6,6 +6,7 @@ import { randomUUID } from "node:crypto";
 import * as realAgentService from "../agent.service.js";
 import { extractPlan, writePlanFile, buildImplementPrompt } from "../plan-mode.service.js";
 import { getHarnessBoolSetting } from "../harness-settings.js";
+import { computeScorecard } from "../workspace-scorecard.service.js";
 import type { AgentOutputMessage } from "@agentic-kanban/shared";
 import type { SessionManagerOptions, SessionState, StartSessionOptions } from "./types.js";
 
@@ -189,6 +190,7 @@ export function createSessionLifecycle(
             .catch((err) => console.error("Failed to update session:", err));
           // Always fire the workflow callback — don't gate it on the DB update.
           options?.onSessionExit?.(workspaceId, sessionId, exitCode, planMode);
+          computeScorecard(workspaceId, db).catch(() => {});
 
           // Auto-resume: if ExitPlanMode was denied and workspace wasn't in plan-only mode,
           // start a new session with --resume and a "proceed" prompt

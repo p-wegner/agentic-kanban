@@ -104,6 +104,7 @@ export interface MainWorkspaceInfo {
   lastAssistantMessage?: string | null;
   /** True when a non-plan-mode session completed (idle) but produced no file changes. */
   planOnlyWarning?: boolean;
+  scorecard?: { score: number } | null;
 }
 
 export interface WorkspaceSummary {
