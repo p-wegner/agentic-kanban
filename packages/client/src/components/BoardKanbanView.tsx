@@ -88,7 +88,7 @@ export function BoardKanbanView({
               onClick={() => {
                 document.getElementById(`column-${col.id}`)?.scrollIntoView({ behavior: "smooth", inline: "start", block: "nearest" });
               }}
-              className="shrink-0 px-3 py-1 text-xs rounded-full border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-600 dark:text-gray-400 hover:bg-blue-50 dark:hover:bg-blue-950 hover:border-blue-300 hover:text-blue-700 transition-colors"
+              className="shrink-0 px-3 py-1 text-xs rounded-full border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-600 dark:text-gray-400 hover:bg-brand-50 dark:hover:bg-brand-950 hover:border-brand-300 hover:text-brand-700 transition-colors"
             >
               {col.name}
               <span className="ml-1 text-gray-400 dark:text-gray-500">{col.issues.length}</span>

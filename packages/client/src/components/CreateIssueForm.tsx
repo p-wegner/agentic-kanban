@@ -186,7 +186,7 @@ export function CreateIssueForm({
       onSubmit={handleSubmit}
       onKeyDown={handleKeyDown}
       onBlur={handleBlur}
-      className="bg-white dark:bg-gray-900 rounded-md shadow-sm p-3 border border-blue-200 dark:border-blue-800 space-y-2"
+      className="bg-surface-raised dark:bg-surface-raised-dark rounded-md shadow-sm p-3 border border-brand-200 dark:border-brand-700 space-y-2"
     >
       <textarea
         ref={titleRef}
@@ -196,7 +196,7 @@ export function CreateIssueForm({
         onKeyDown={handleTitleKeyDown}
         autoFocus
         rows={1}
-        className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none overflow-y-hidden dark:bg-gray-900 dark:text-gray-100"
+        className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500 resize-none overflow-y-hidden dark:bg-gray-900 dark:text-gray-100"
       />
       <TicketMentionInput
         inputRef={descRef}
@@ -204,12 +204,12 @@ export function CreateIssueForm({
         value={description}
         onChange={(val) => setDescription(val)}
         rows={2}
-        className="w-full text-xs border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none overflow-y-hidden dark:bg-gray-900 dark:text-gray-100"
+        className="w-full text-xs border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500 resize-none overflow-y-hidden dark:bg-gray-900 dark:text-gray-100"
       />
       <select
         value={issueType}
         onChange={(e) => setIssueType(e.target.value as CreateIssueRequest["issueType"])}
-        className="w-full text-xs border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:bg-gray-900 dark:text-gray-100"
+        className="w-full text-xs border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500 dark:bg-gray-900 dark:text-gray-100"
       >
         <option value="task">Task</option>
         <option value="bug">Bug</option>
@@ -224,7 +224,7 @@ export function CreateIssueForm({
           <select
             value={workflowTemplateId}
             onChange={(e) => setWorkflowTemplateId(e.target.value)}
-            className="flex-1 text-xs border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:bg-gray-900 dark:text-gray-100"
+            className="flex-1 text-xs border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500 dark:bg-gray-900 dark:text-gray-100"
           >
             {templates.map((t) => (
               <option key={t.id} value={t.id}>
@@ -240,19 +240,19 @@ export function CreateIssueForm({
             type="checkbox"
             checked={startWorkspace}
             onChange={(e) => setStartWorkspace(e.target.checked)}
-            className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+            className="rounded border-gray-300 text-brand-600 focus:ring-brand-500"
           />
           Start workspace
         </label>
       )}
       {canStartWorkspace && startWorkspace && (
-        <div className="pl-4 space-y-1 border-l-2 border-blue-100 dark:border-blue-800">
+        <div className="pl-4 space-y-1 border-l-2 border-brand-100 dark:border-brand-700">
           <label className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400 cursor-pointer">
             <input
               type="checkbox"
               checked={planMode}
               onChange={(e) => setPlanMode(e.target.checked)}
-              className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+              className="rounded border-gray-300 text-brand-600 focus:ring-brand-500"
             />
             Plan mode (agent plans before implementing)
           </label>
@@ -261,7 +261,7 @@ export function CreateIssueForm({
               type="checkbox"
               checked={skipAutoReview}
               onChange={(e) => setSkipAutoReview(e.target.checked)}
-              className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+              className="rounded border-gray-300 text-brand-600 focus:ring-brand-500"
             />
             Skip auto AI code review
           </label>
@@ -270,7 +270,7 @@ export function CreateIssueForm({
               type="checkbox"
               checked={isDirect}
               onChange={(e) => setIsDirect(e.target.checked)}
-              className="rounded border-gray-300 text-purple-600 focus:ring-purple-500"
+              className="rounded border-gray-300 text-brand-600 focus:ring-brand-500"
             />
             Work directly on current checkout (no worktree)
           </label>
@@ -280,7 +280,7 @@ export function CreateIssueForm({
               <select
                 value={skillId}
                 onChange={(e) => setSkillId(e.target.value)}
-                className="flex-1 text-xs border border-gray-300 dark:border-gray-600 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:bg-gray-900 dark:text-gray-100"
+                className="flex-1 text-xs border border-gray-300 dark:border-gray-600 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-brand-500 dark:bg-gray-900 dark:text-gray-100"
               >
                 <option value="">None</option>
                 {skills.map((s) => (
@@ -295,7 +295,7 @@ export function CreateIssueForm({
         <button
           type="submit"
           disabled={!title.trim() || submitting}
-          className="text-xs bg-blue-600 text-white px-3 py-1.5 rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+          className="text-xs bg-brand-600 text-white px-3 py-1.5 rounded hover:bg-brand-700 disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {submitting
             ? (startWorkspace ? "Creating..." : "Adding...")
@@ -313,7 +313,7 @@ export function CreateIssueForm({
           onClick={handleEnhance}
           disabled={!title.trim() || enhancing}
           title="Enhance with AI"
-          className="text-xs text-purple-600 px-2 py-1.5 hover:text-purple-800 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
+          className="text-xs text-brand-600 dark:text-brand-400 px-2 py-1.5 hover:text-brand-800 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
         >
           {enhancing ? (
             <svg className="animate-spin h-3.5 w-3.5" fill="none" viewBox="0 0 24 24">

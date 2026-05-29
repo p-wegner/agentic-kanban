@@ -125,7 +125,7 @@ function CommentBlock({
         <div className="flex flex-col gap-1">
           <button
             onClick={() => { onEdit?.(comment.id, editBody); setEditing(false); }}
-            className="text-xs px-2 py-0.5 bg-blue-500 text-white rounded hover:bg-blue-600"
+            className="text-xs px-2 py-0.5 bg-brand-500 text-white rounded hover:bg-brand-600"
           >
             Save
           </button>
@@ -186,7 +186,7 @@ function CommentInput({
   }, []);
 
   return (
-    <div className="bg-blue-50 border-l-2 border-blue-400 px-3 py-2">
+    <div className="bg-brand-50 border-l-2 border-brand-400 px-3 py-2">
       <textarea
         ref={textareaRef}
         value={body}
@@ -206,7 +206,7 @@ function CommentInput({
         <button
           onClick={() => { if (body.trim()) onSubmit(body.trim()); }}
           disabled={!body.trim()}
-          className="text-xs px-2 py-0.5 bg-blue-500 text-white rounded hover:bg-blue-600 disabled:opacity-50"
+          className="text-xs px-2 py-0.5 bg-brand-500 text-white rounded hover:bg-brand-600 disabled:opacity-50"
         >
           Comment
         </button>
@@ -270,7 +270,7 @@ function UnifiedFileView({
               {line.type === "add" ? "+" : line.type === "delete" ? "-" : " "}
               {line.type === "hunk" ? line.content : line.content || " "}
               {isCommentable && onCreateComment && lineComments.length === 0 && !isInputOpen && (
-                <span className="absolute right-1 top-1/2 -translate-y-1/2 opacity-0 group-hover/line:opacity-100 transition-opacity cursor-pointer select-none w-5 h-5 flex items-center justify-center rounded-full bg-gray-200 dark:bg-gray-700 hover:bg-blue-200 text-gray-500 dark:text-gray-400 hover:text-blue-600 text-sm leading-none">
+                <span className="absolute right-1 top-1/2 -translate-y-1/2 opacity-0 group-hover/line:opacity-100 transition-opacity cursor-pointer select-none w-5 h-5 flex items-center justify-center rounded-full bg-gray-200 dark:bg-gray-700 hover:bg-brand-200 text-gray-500 dark:text-gray-400 hover:text-brand-600 text-sm leading-none">
                   +
                 </span>
               )}

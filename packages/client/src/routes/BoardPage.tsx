@@ -1180,7 +1180,7 @@ export function BoardPage() {
       )}
       {mutating && (
         <div className="fixed bottom-4 right-4 z-50">
-          <div className="bg-blue-600 text-white rounded-lg px-4 py-2 flex items-center gap-2 shadow-lg">
+          <div className="bg-brand-600 text-white rounded-lg px-4 py-2 flex items-center gap-2 shadow-lg">
             <svg
               className="animate-spin h-4 w-4 text-white"
               viewBox="0 0 24 24"

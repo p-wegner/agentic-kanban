@@ -91,7 +91,7 @@ export function QuickTasksPanel({ projectId, onClose, onLaunched }: QuickTasksPa
               key={skill.id}
               disabled={!!launching}
               onClick={() => launch(skill, skill.description ?? skill.name)}
-              className="w-full text-left px-3 py-2.5 rounded-lg hover:bg-blue-50 dark:hover:bg-blue-900/30 border border-transparent hover:border-blue-200 dark:hover:border-blue-800 transition-colors disabled:opacity-50 group"
+              className="w-full text-left px-3 py-2.5 rounded-lg hover:bg-brand-50 dark:hover:bg-brand-900/30 border border-transparent hover:border-brand-200 dark:hover:border-brand-800 transition-colors disabled:opacity-50 group"
             >
               <div className="flex items-center justify-between">
                 <span className="text-sm font-medium text-gray-800 dark:text-gray-200">{skill.name}</span>
@@ -101,7 +101,7 @@ export function QuickTasksPanel({ projectId, onClose, onLaunched }: QuickTasksPa
                   )}
                   {skill.model && <span className="text-[10px] text-gray-400 dark:text-gray-500 bg-gray-100 dark:bg-gray-800 px-1.5 py-0.5 rounded">{skill.model}</span>}
                   {launching === skill.id
-                    ? <span className="text-xs text-blue-500">Launching...</span>
+                    ? <span className="text-xs text-brand-500">Launching...</span>
                     : <span className="text-xs text-gray-400 dark:text-gray-500 opacity-0 group-hover:opacity-100">▶ Run</span>}
                 </div>
               </div>
@@ -138,14 +138,14 @@ export function QuickTasksPanel({ projectId, onClose, onLaunched }: QuickTasksPa
                 onChange={(val) => setCustomPrompt(val)}
                 placeholder="Describe the task for the agent..."
                 rows={3}
-                className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none dark:bg-gray-900 dark:text-gray-100"
+                className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500 resize-none dark:bg-gray-900 dark:text-gray-100"
                 onKeyDown={(e) => { if (e.key === "Escape") setShowCustom(false); }}
               />
               <div className="flex gap-2">
                 <button
                   disabled={!customPrompt.trim() || !!launching}
                   onClick={() => launch(null, customPrompt)}
-                  className="text-sm bg-blue-600 text-white px-3 py-1.5 rounded hover:bg-blue-700 disabled:opacity-50"
+                  className="text-sm bg-brand-600 text-white px-3 py-1.5 rounded hover:bg-brand-700 disabled:opacity-50"
                 >
                   {launching === "custom" ? "Launching..." : "Run"}
                 </button>

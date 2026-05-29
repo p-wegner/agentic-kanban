@@ -135,6 +135,8 @@ Every feature with UI must be visually verified using the `playwright-cli` skill
 1. Determine ports: in a worktree, use `$env:KANBAN_CLIENT_PORT` / `$env:KANBAN_SERVER_PORT` — never hardcode 3001/5173. Check if server is already listening before starting `pnpm dev`.
 2. Use `/playwright-cli` to open `http://localhost:<KANBAN_CLIENT_PORT>` and confirm rendering.
 3. Clean up `.png` files and `.playwright-cli/` after. Delete test issues/workspaces via MCP tools — never `pnpm db:reset`.
+- **HMR lag**: After editing CSS/className files, do a hard `playwright-cli reload` and wait 5–7 s before checking computed styles. Vite HMR may not propagate before your first screenshot/eval.
+- **PowerShell npm noise**: Prefix playwright-cli invocations with `$env:npm_config_loglevel="silent"` to suppress npm warnings that PowerShell treats as errors via `$LASTEXITCODE`.
 
 ## Documentation Map
 - `.llm/workflows.md` — dev workflows: clean-start setup, DB reset, project registration, migration diagnosis
