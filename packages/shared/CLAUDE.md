@@ -10,4 +10,4 @@ Multi-statement SQL files require `--> statement-breakpoint` between each statem
 Drizzle orders migrations by `when` in `_journal.json`. A later migration with an earlier timestamp gets run first — `ALTER TABLE` fails silently because the table doesn't exist yet. Always use timestamps later than the previous entry.
 
 ## Migration test list
-The `MIGRATION_FILES` array in `packages/server/src/__tests__/api.test.ts` must include every migration SQL file. Missing entries cause test failures (missing columns).
+The `MIGRATION_FILES` array in `packages/server/src/__tests__/helpers/migrations.ts` must include every migration SQL file. Missing entries cause `SQLITE_ERROR: no such column` in test runs — even if your migration ran fine at runtime.
