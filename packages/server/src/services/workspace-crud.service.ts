@@ -46,12 +46,12 @@ export function createWorkspaceCrudService(deps: {
   const gitService = deps.gitService ?? realGitService;
 
   async function resolveIssueAndProject(issueId: string): Promise<{
-    issue: { projectId: string; issueNumber: number | null; title: string; description: string | null };
+    issue: { projectId: string; issueNumber: number | null; title: string; description: string | null; priority: string | null };
     project: { repoPath: string; defaultBranch: string | null };
     setupConfig: { setupScript: string | null; setupBlocking: boolean; setupEnabled: boolean };
   }> {
     const issueRows = await database
-      .select({ projectId: issues.projectId, issueNumber: issues.issueNumber, title: issues.title, description: issues.description })
+      .select({ projectId: issues.projectId, issueNumber: issues.issueNumber, title: issues.title, description: issues.description, priority: issues.priority })
       .from(issues)
       .where(eq(issues.id, issueId))
       .limit(1);
@@ -426,7 +426,6 @@ exit 1
     const isDirect = input.isDirect === true;
     const requiresReview = input.requiresReview === true;
     const thoroughReview = input.thoroughReview === true;
-    const planMode = input.planMode === true;
     const tddMode = input.tddMode === true;
     const includeVisualProof = input.includeVisualProof === true;
     const skillId = input.skillId || null;
@@ -449,6 +448,11 @@ exit 1
     try {
       const { issue, project, setupConfig } = await resolveIssueAndProject(input.issueId);
       repoPath = project.repoPath;
+
+      // Default plan mode on for high/critical priority when not explicitly set.
+      // This ensures expensive misunderstandings are caught before implementation begins.
+      const isHighPriority = issue.priority === "high" || issue.priority === "critical";
+      const planMode = input.planMode !== undefined ? input.planMode === true : isHighPriority;
 
       ({ branch, worktreePath, baseBranch, baseCommitSha } = await setupWorktree(
         isDirect, project.repoPath, project.defaultBranch, input, setupConfig, id,

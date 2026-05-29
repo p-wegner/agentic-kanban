@@ -236,6 +236,7 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
           className={`group/ws flex items-center gap-1.5 mt-1.5 text-xs cursor-pointer rounded px-1 py-0.5 -mx-1 border-t transition-colors ${
             ws.main.status === "reviewing" ? "border-accent-200 bg-accent-50 hover:bg-accent-100 dark:border-accent-700 dark:bg-accent-900/40" :
             ws.main.status === "fixing" ? "border-orange-100 bg-orange-50 hover:bg-orange-100" :
+            ws.main.status === "awaiting-plan-approval" ? "border-amber-200 bg-amber-50 hover:bg-amber-100" :
             ws.main.conflicts?.hasConflicts ? "border-red-100 bg-red-50 hover:bg-red-100" :
             "border-brand-100 bg-brand-50 hover:bg-brand-100 hover:border-brand-200"
           }`}
@@ -251,6 +252,11 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
             <>
               <span className="inline-block w-2 h-2 rounded-full shrink-0 bg-orange-500 animate-pulse" />
               <span className="font-medium text-orange-700">AI Fixing Conflicts</span>
+            </>
+          ) : ws.main.status === "awaiting-plan-approval" ? (
+            <>
+              <span className="inline-block w-2 h-2 rounded-full shrink-0 bg-amber-500" />
+              <span className="font-medium text-amber-700">Plan Awaiting Approval</span>
             </>
           ) : ws.main.conflicts?.hasConflicts ? (
             <>

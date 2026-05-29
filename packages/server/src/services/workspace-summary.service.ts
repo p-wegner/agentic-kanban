@@ -27,7 +27,7 @@ export type WorkspaceSummary = {
   main?: {
     id: string;
     branch: string;
-    status: "active" | "reviewing" | "fixing" | "idle" | "error" | "closed";
+    status: "active" | "reviewing" | "fixing" | "idle" | "awaiting-plan-approval" | "error" | "closed";
     claudeProfile: string | null;
     profile?: { provider: ProviderName; name: string } | null;
     model?: string | null;
@@ -74,7 +74,7 @@ export async function buildWorkspaceSummaryMap(
       workspaceSummaryMap.set(row.issueId, summary);
     }
     summary.total += row.count;
-    if (row.status === "active" || row.status === "reviewing" || row.status === "fixing") {
+    if (row.status === "active" || row.status === "reviewing" || row.status === "fixing" || row.status === "awaiting-plan-approval") {
       summary.active += row.count;
     } else if (row.status === "closed") {
       summary.closed += row.count;
@@ -116,8 +116,8 @@ export async function buildWorkspaceSummaryMap(
     .from(workspaces)
     .where(inArray(workspaces.issueId, issueIds));
 
-  // Pick main workspace per issue: active > idle > closed, tie-break by updatedAt
-  const statusPriority = (s: string) => s === "active" || s === "reviewing" || s === "fixing" ? 0 : s === "idle" ? 1 : 2;
+  // Pick main workspace per issue: active > awaiting-plan-approval > idle > closed, tie-break by updatedAt
+  const statusPriority = (s: string) => s === "active" || s === "reviewing" || s === "fixing" ? 0 : s === "awaiting-plan-approval" ? 1 : s === "idle" ? 2 : 3;
   type MainWs = typeof wsDetailRows[number];
   const mainWorkspaceMap = new Map<string, MainWs>();
   for (const row of wsDetailRows) {
@@ -138,7 +138,7 @@ export async function buildWorkspaceSummaryMap(
     summary.main = {
       id: mainWs.id,
       branch: mainWs.branch,
-      status: mainWs.status as "active" | "reviewing" | "fixing" | "idle" | "error" | "closed",
+      status: mainWs.status as "active" | "reviewing" | "fixing" | "idle" | "awaiting-plan-approval" | "error" | "closed",
       claudeProfile: mainWs.claudeProfile,
       profile: mainWs.claudeProfile ? { provider: (mainWs.provider as ProviderName) ?? "claude", name: mainWs.claudeProfile } : null,
       model: mainWs.model,
