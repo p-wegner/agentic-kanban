@@ -9,6 +9,7 @@ import {
   countNodeVisits,
   buildTransitionBlock,
   getStartNode,
+  evaluateCondition,
 } from "@agentic-kanban/shared/lib/workflow-engine";
 import { createTestDb, type TestDb } from "./helpers/test-db.js";
 import { ensureBuiltinSkills } from "../db/seed.js";
@@ -192,6 +193,58 @@ describe("workflow-engine", () => {
     const second = await proposeTransition(db as any, { workspaceId: wsId, toNodeName: "Loop" });
     expect(second.ok).toBe(false);
     expect(second.error).toContain("visit budget");
+  });
+
+  it("evaluateCondition handles the supported conditions", () => {
+    expect(evaluateCondition("manual", {})).toBe("manual");
+    expect(evaluateCondition("auto_on_exit_0", {})).toBe("fire");
+    expect(evaluateCondition("tests_pass", { testsPassed: true })).toBe("fire");
+    expect(evaluateCondition("tests_pass", { testsPassed: false })).toBe("block");
+    expect(evaluateCondition("tests_pass", {})).toBe("manual");
+    expect(evaluateCondition("tests_fail", { testsPassed: false })).toBe("fire");
+    expect(evaluateCondition("diff_clean", { diffFilesChanged: 0 })).toBe("fire");
+    expect(evaluateCondition("diff_clean", { diffFilesChanged: 3 })).toBe("block");
+    expect(evaluateCondition("diff_touches:packages/server/**", { diffFiles: ["packages/server/src/x.ts"] })).toBe("fire");
+    expect(evaluateCondition("diff_touches:packages/client/**", { diffFiles: ["packages/server/src/x.ts"] })).toBe("block");
+  });
+
+  it("auto-routes on a firing condition and gates a blocked explicit target", async () => {
+    // Build: Build -> Review (tests_pass), Build -> Fix (tests_fail)
+    const { projectId, statusIds } = await seedProject(db);
+    const now = new Date().toISOString();
+    const templateId = randomUUID();
+    await db.insert(schema.workflowTemplates).values({
+      id: templateId, projectId, name: "CI", isDefault: false, isBuiltin: false, createdAt: now, updatedAt: now,
+    });
+    const buildId = randomUUID();
+    const reviewId = randomUUID();
+    const fixId = randomUUID();
+    await db.insert(schema.workflowNodes).values([
+      { id: buildId, templateId, name: "Build", nodeType: "start", statusName: "In Progress", maxVisits: 0, posX: 0, posY: 0, sortOrder: 0, createdAt: now } as any,
+      { id: reviewId, templateId, name: "Review", nodeType: "normal", statusName: "In Review", maxVisits: 0, posX: 0, posY: 0, sortOrder: 1, createdAt: now } as any,
+      { id: fixId, templateId, name: "Fix", nodeType: "normal", statusName: "In Progress", maxVisits: 0, posX: 0, posY: 0, sortOrder: 2, createdAt: now } as any,
+    ]);
+    await db.insert(schema.workflowEdges).values([
+      { id: randomUUID(), templateId, fromNodeId: buildId, toNodeId: reviewId, condition: "tests_pass", sortOrder: 0, createdAt: now } as any,
+      { id: randomUUID(), templateId, fromNodeId: buildId, toNodeId: fixId, condition: "tests_fail", sortOrder: 1, createdAt: now } as any,
+    ]);
+    const issueId = await seedIssue(db, projectId, statusIds["Todo"], "task");
+    await db.update(schema.issues).set({ workflowTemplateId: templateId }).where(eq(schema.issues.id, issueId));
+    const wsId = await seedWorkspace(db, issueId);
+    await initWorkspaceWorkflow(db as any, { workspaceId: wsId, issueId });
+
+    // Auto-route with tests failing → Fix (no explicit target)
+    const auto = await proposeTransition(db as any, { workspaceId: wsId, signals: { testsPassed: false } });
+    expect(auto.ok).toBe(true);
+    expect(auto.toNode?.name).toBe("Fix");
+    expect(auto.autoResolved).toBe(true);
+
+    // Reset to Build for the gating check
+    await db.update(schema.workspaces).set({ currentNodeId: buildId }).where(eq(schema.workspaces.id, wsId));
+    // Explicitly try Review while tests failed → blocked
+    const blocked = await proposeTransition(db as any, { workspaceId: wsId, toNodeName: "Review", signals: { testsPassed: false } });
+    expect(blocked.ok).toBe(false);
+    expect(blocked.error).toContain("gated by condition");
   });
 
   it("builds a transition block embedding the workspace id", async () => {

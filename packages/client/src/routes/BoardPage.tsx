@@ -7,6 +7,7 @@ import { AgentGrid } from "../components/AgentGrid.js";
 import { TimelineView } from "../components/TimelineView.js";
 import { MetricsView } from "../components/MetricsView.js";
 import { ButlerView } from "../components/ButlerView.js";
+import { WorkflowsView } from "../components/WorkflowsView.js";
 import { useAgentQuestionsCount } from "../components/AgentQuestionsPanel.js";
 import { BoardErrorBoundary } from "../components/BoardErrorBoundary.js";
 import { BoardKanbanView } from "../components/BoardKanbanView.js";
@@ -1283,6 +1284,11 @@ export function BoardPage() {
               liveStats={liveStats}
               onIssueClick={handleIssueClick}
             />
+          </BoardErrorBoundary>
+        )}
+        {viewMode === "workflows" && activeProjectId && (
+          <BoardErrorBoundary columnName="Workflows View">
+            <WorkflowsView projectId={activeProjectId} />
           </BoardErrorBoundary>
         )}
         {viewMode === "kanban" && (

@@ -11,6 +11,7 @@ import { createScheduledRunsRoute } from "./scheduled-runs.js";
 import { createButlerRoute } from "./butler.js";
 import { createAgentQuestionsRoute } from "./agent-questions.js";
 import { createWorkflowsRoute } from "./workflows.js";
+import { createWorkflowForkService } from "../services/workflow-fork.service.js";
 import type { Database } from "../db/index.js";
 import type { SessionManager } from "../services/session.manager.js";
 import type { BoardEvents } from "../services/board-events.js";
@@ -25,6 +26,16 @@ interface RouteOptions {
 
 export function createRoutes(database: Database, getSessionManager: () => SessionManager, options?: RouteOptions) {
   const routes = createRouter();
+
+  // Parallel fork/join orchestrator (#82) — shared by the internal advance hook
+  // and the REST manual-transition route.
+  const forkService = createWorkflowForkService({
+    database,
+    getSessionManager,
+    boardEvents: options?.boardEvents,
+  });
+  const onWorkflowAdvanced = (workspaceId: string) => forkService.onWorkspaceEnteredNode(workspaceId);
+
   routes.route("/projects", createProjectsRoute(database));
   routes.route("/projects", createButlerRoute(database, getSessionManager, options));
   routes.route("/projects", createAgentQuestionsRoute(database, getSessionManager, options));
@@ -34,7 +45,7 @@ export function createRoutes(database: Database, getSessionManager: () => Sessio
   routes.route("/tags", createTagsRoute(database));
   routes.route("/preferences", createPreferencesRoute(database));
   routes.route("/agent-skills", createAgentSkillsRoute(database));
-  routes.route("/workflows", createWorkflowsRoute(database, options));
+  routes.route("/workflows", createWorkflowsRoute(database, { ...options, onWorkflowAdvanced }));
   routes.route("/scheduled-runs", createScheduledRunsRoute(database, options?.serverPort));
   if (options?.boardEvents) {
     routes.route("/approvals", createApprovalsRoute(options.boardEvents));
@@ -48,6 +59,18 @@ export function createRoutes(database: Database, getSessionManager: () => Sessio
     const body = await parseOptionalJsonBody<{ projectId?: string; reason?: string }>(c);
     if (body.projectId) {
       options.boardEvents.broadcast(body.projectId, body.reason ?? "internal_notify");
+    }
+    return c.json({ ok: true });
+  });
+
+  // Internal endpoint: a workflow transition happened (e.g. via the MCP
+  // propose_transition tool in the separate MCP process). Run fork/join
+  // orchestration in the main server, which owns the session manager + git.
+  routes.post("/internal/workflow-advanced", async (c) => {
+    const body = await parseOptionalJsonBody<{ workspaceId?: string }>(c);
+    if (body.workspaceId) {
+      // Fire-and-forget: orchestration can spawn/launch sessions and take time.
+      forkService.onWorkspaceEnteredNode(body.workspaceId).catch(() => {});
     }
     return c.json({ ok: true });
   });

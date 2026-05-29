@@ -205,6 +205,63 @@ export const BUILTIN_WORKFLOWS: BuiltinTemplateDef[] = [
     ],
   },
   {
+    builtinKey: "parallel-review",
+    name: "Parallel Review",
+    description:
+      "Implement, then two reviewers (correctness + security) examine the change in parallel sub-worktrees; consolidate their findings at the join, then done. Demonstrates fork/join.",
+    ticketType: null,
+    isDefault: false,
+    nodes: [
+      {
+        key: "implement",
+        name: "Implement",
+        nodeType: "start",
+        statusName: "In Progress",
+        guidance: "Implement the change described in the ticket and commit. Then advance to Split Reviews.",
+      },
+      {
+        key: "fork",
+        name: "Split Reviews",
+        nodeType: "parallel-fork",
+        statusName: "In Review",
+        guidance: "Fork point: two reviewers run concurrently in their own sub-worktrees.",
+      },
+      {
+        key: "reviewA",
+        name: "Correctness Review",
+        nodeType: "normal",
+        statusName: "In Review",
+        skillName: "code-review",
+        guidance: "Review the change for correctness bugs and edge cases. Note findings in a file or commit, then advance to Consolidate.",
+      },
+      {
+        key: "reviewB",
+        name: "Security Review",
+        nodeType: "normal",
+        statusName: "In Review",
+        skillName: "code-review-thorough",
+        guidance: "Review the change for security and architecture concerns. Note findings, then advance to Consolidate.",
+      },
+      {
+        key: "join",
+        name: "Consolidate",
+        nodeType: "parallel-join",
+        statusName: "In Review",
+        skillName: "code-review",
+        guidance: "Read WORKFLOW_FORK_ARTIFACTS.md, merge both reviewers' findings into the change on this branch, then advance to Done.",
+      },
+      { key: "done", name: "Done", nodeType: "end", statusName: "Done" },
+    ],
+    edges: [
+      { from: "implement", to: "fork", condition: "auto_on_exit_0", label: "committed" },
+      { from: "fork", to: "reviewA", condition: "manual", label: "correctness" },
+      { from: "fork", to: "reviewB", condition: "manual", label: "security" },
+      { from: "reviewA", to: "join", condition: "manual", label: "reviewed" },
+      { from: "reviewB", to: "join", condition: "manual", label: "reviewed" },
+      { from: "join", to: "done", condition: "manual", label: "consolidated" },
+    ],
+  },
+  {
     builtinKey: "migration-with-ai",
     name: "Migration with AI",
     description:

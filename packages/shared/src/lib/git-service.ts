@@ -436,6 +436,33 @@ export async function getDiffShortstat(
   }
 }
 
+/**
+ * List the changed file paths in a worktree (tracked changes vs baseBranch plus
+ * untracked files). Used to evaluate `diff_touches` / `diff_clean` workflow edge
+ * conditions. Returns [] when the dir is not a git working tree.
+ */
+export async function getChangedFileNames(
+  worktreePath: string,
+  baseBranch: string,
+): Promise<string[]> {
+  if (!isGitWorkingTree(worktreePath)) return [];
+  try {
+    const diffArgs = baseBranch === "HEAD"
+      ? ["diff", "--name-only", "HEAD"]
+      : ["diff", "--name-only", `${baseBranch}...HEAD`];
+    const tracked = await execGit(diffArgs, worktreePath);
+    const untracked = await execGit(["ls-files", "--others", "--exclude-standard"], worktreePath);
+    const files = new Set<string>();
+    for (const line of `${tracked}\n${untracked}`.split("\n")) {
+      const f = line.trim();
+      if (f) files.add(f);
+    }
+    return [...files];
+  } catch {
+    return [];
+  }
+}
+
 /** Get the latest commit SHA (short) and message on the current branch. Returns null when no commits exist. */
 export async function getLatestCommit(
   worktreePath: string,
