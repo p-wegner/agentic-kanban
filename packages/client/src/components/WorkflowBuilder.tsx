@@ -14,6 +14,7 @@ import {
 import "@xyflow/react/dist/style.css";
 import { apiFetch } from "../lib/api.js";
 import { showToast } from "./Toast.js";
+import { layoutGraph } from "../lib/workflowLayout.js";
 
 const NODE_TYPES = ["start", "normal", "parallel-fork", "parallel-join", "end"] as const;
 const EDGE_CONDITIONS = ["manual", "auto_on_exit_0", "tests_pass", "tests_fail", "diff_clean", "diff_touches"] as const;
@@ -78,31 +79,39 @@ export function WorkflowBuilder({
       setDescription(t.description ?? "");
       setTicketType(t.ticketType ?? "");
       setIsBuiltin(!!t.isBuiltin);
-      setNodes(
-        (t.nodes as any[]).map((n) => ({
-          id: n.id,
-          position: { x: n.posX ?? 0, y: n.posY ?? 0 },
-          data: {
-            label: n.name,
-            nodeType: n.nodeType,
-            statusName: n.statusName,
-            skillId: n.skillId,
-            skillName: n.skillName,
-            maxVisits: n.maxVisits ?? 0,
-            config: n.config,
-          },
-          style: nodeStyle(n.nodeType),
-        })),
-      );
-      setEdges(
-        (t.edges as any[]).map((e) => ({
-          id: e.id,
-          source: e.fromNodeId,
-          target: e.toNodeId,
-          label: edgeLabel(e.label, e.condition),
-          data: { label: e.label, condition: e.condition },
-        })),
-      );
+      const rawNodes = (t.nodes as any[]).map((n) => ({
+        id: n.id,
+        position: { x: n.posX ?? 0, y: n.posY ?? 0 },
+        data: {
+          label: n.name,
+          nodeType: n.nodeType,
+          statusName: n.statusName,
+          skillId: n.skillId,
+          skillName: n.skillName,
+          maxVisits: n.maxVisits ?? 0,
+          config: n.config,
+        },
+        style: nodeStyle(n.nodeType),
+      }));
+      const rawEdges = (t.edges as any[]).map((e) => ({
+        id: e.id,
+        source: e.fromNodeId,
+        target: e.toNodeId,
+        label: edgeLabel(e.label, e.condition),
+        data: { label: e.label, condition: e.condition },
+      }));
+      // Built-ins (and any graph saved before auto-layout) have all x=0 — lay them
+      // out hierarchically so the graph reads top-to-bottom instead of stacking.
+      const needsLayout = rawNodes.length > 0 && rawNodes.every((n) => n.position.x === 0);
+      if (needsLayout) {
+        const pos = layoutGraph(rawNodes, rawEdges);
+        for (const n of rawNodes) {
+          const p = pos.get(n.id);
+          if (p) n.position = p;
+        }
+      }
+      setNodes(rawNodes);
+      setEdges(rawEdges);
     }).catch(() => showToast("Failed to load workflow", "error"));
   }, [templateId, setNodes, setEdges]);
 
@@ -145,6 +154,16 @@ export function WorkflowBuilder({
       ),
     );
   }
+  function autoLayout() {
+    setNodes((nds) => {
+      const pos = layoutGraph(
+        nds.map((n) => ({ id: n.id })),
+        edges.map((e) => ({ source: e.source, target: e.target })),
+      );
+      return nds.map((n) => (pos.get(n.id) ? { ...n, position: pos.get(n.id)! } : n));
+    });
+  }
+
   function deleteSelected() {
     if (selectedNodeId) {
       setNodes((nds) => nds.filter((n) => n.id !== selectedNodeId));
@@ -225,6 +244,9 @@ export function WorkflowBuilder({
         </select>
         {isBuiltin && <span className="text-[11px] text-amber-600">built-in → saving creates an editable copy</span>}
         <div className="ml-auto flex items-center gap-2">
+          <button onClick={autoLayout} className="text-xs border border-gray-300 dark:border-gray-600 px-3 py-1.5 rounded hover:bg-gray-50 dark:hover:bg-gray-800 dark:text-gray-200" title="Arrange nodes top-to-bottom">
+            Auto layout
+          </button>
           <button onClick={save} disabled={saving} className="text-xs bg-blue-600 text-white px-3 py-1.5 rounded hover:bg-blue-700 disabled:opacity-50">
             {saving ? "Saving…" : "Save"}
           </button>
