@@ -69,12 +69,13 @@ Some workspaces have `isDirect: true` — the agent is working directly on the p
 
 ### 5. Run tests and commit your changes
 **This is mandatory before finishing.** After implementation is complete:
-1. **Run tests** — for targeted runs (vitest 4, `--related` is broken):
-   ```bash
-   # Changed git files (works through test:mine):
-   pnpm test:mine -- --changed HEAD
-   # Specific source file (from inside the package):
-   cd packages/server && pnpm exec vitest related src/services/foo.service.ts
+1. **Run tests** — for refactoring tasks, run only the tests relevant to changed files:
+   ```
+   pnpm --filter agentic-kanban test -- --related <changed-files>
+   ```
+   Pass the changed source files explicitly, or derive them from git:
+   ```
+   pnpm --filter agentic-kanban test -- --related $(git diff --name-only HEAD)
    ```
    Only run the full suite (`pnpm --filter agentic-kanban test`) when cross-cutting changes may affect unrelated tests, or as a final pre-commit check.
 2. Stage and commit all changed files with a descriptive message
@@ -217,4 +218,4 @@ Shorthand for "review #N and merge if fine" — same workflow as above.
 7. **Description is a shared log** — write progress notes so the user can follow along without reading code.
 8. **Done means done** — code committed, tests green, review passed, no loose ends, no open questions.
 9. **Cancelled is not failure** — use it freely when scope changes.
-10. **Targeted tests for refactoring** — vitest 4 removed `--related`. Use `pnpm test:mine -- --changed HEAD` for all git-changed files, or `cd packages/server && pnpm exec vitest related src/services/foo.ts` for a specific source file.
+10. **Targeted tests for refactoring** — use `vitest --related <changed-files>` instead of the full suite when refactoring. It's faster and proves the changed code is covered without re-running unrelated tests.
