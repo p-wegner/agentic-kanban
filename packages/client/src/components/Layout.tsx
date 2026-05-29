@@ -1,4 +1,4 @@
-﻿import { type ReactNode, useRef, useState } from "react";
+import { type ReactNode, useRef, useState } from "react";
 import { useTheme, type Theme } from "../hooks/useTheme.js";
 
 interface Project {
