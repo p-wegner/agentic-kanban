@@ -42,6 +42,7 @@ interface Settings {
   after_merge_verify_agent?: string;
   butler_event_feed?: string;
   butler_event_feed_min_interval_ms?: string;
+  auto_rebase_on_continue?: string;
   "harness.codex.plan_auto_continue"?: string;
   "harness.copilot.plan_auto_continue"?: string;
   "harness.claude.plan_auto_continue"?: string;
@@ -78,6 +79,7 @@ const DEFAULT_SETTINGS: Settings = {
   visual_verification_mode: "before_merge",
   butler_event_feed: "false",
   butler_event_feed_min_interval_ms: "30000",
+  auto_rebase_on_continue: "false",
 };
 
 type Tab = "agent" | "workflow" | "skills" | "mcp" | "ui" | "project" | "tags" | "advanced" | "schedule";
@@ -875,6 +877,12 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                         onChange={setBool("auto_start_followup")}
                         label="Auto-start follow-up tasks after merge"
                         hint="When a workspace is merged and the issue has outgoing 'depends_on' or 'child_of' dependencies, automatically create workspaces for unblocked follow-up issues."
+                      />
+                      <Toggle
+                        checked={settings.auto_rebase_on_continue === "true"}
+                        onChange={setBool("auto_rebase_on_continue")}
+                        label="Auto-rebase on continue"
+                        hint="Before resuming a workspace agent (via /turn or /launch), automatically rebase the feature branch onto the latest base branch. If rebase conflicts arise, the operation fails with a clear error rather than starting the agent on a stale base."
                       />
                       <Toggle
                         checked={settings.butler_event_feed === "true"}

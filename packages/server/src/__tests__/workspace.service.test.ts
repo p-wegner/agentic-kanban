@@ -4,10 +4,15 @@ import { mkdtemp, rm, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { eq } from "drizzle-orm";
-import { projects, projectStatuses, issues, workspaces } from "@agentic-kanban/shared/schema";
+import { projects, projectStatuses, issues, workspaces, preferences } from "@agentic-kanban/shared/schema";
 import { createTestDb, type TestDb } from "./helpers/test-db.js";
 import { createMockSessionManager } from "./helpers/mocks.js";
 import { createWorkspaceService, WorkspaceError, type GitService } from "../services/workspace.service.js";
+
+// Mock process-cleanup so killWorktreeProcesses doesn't run real wmic/lsof in unit tests.
+vi.mock("../services/process-cleanup.js", () => ({
+  killProcessesInDir: vi.fn(async () => 0),
+}));
 
 /**
  * Unit tests for workspace.service using an in-memory SQLite DB plus an injected
@@ -81,6 +86,8 @@ function createFakeGitService(overrides: Partial<GitService> = {}): GitService {
     syncBranchToHead: vi.fn(async () => true),
     mergeBranch: vi.fn(async () => "Merge made by the 'ort' strategy."),
     pruneWorktrees: vi.fn(async () => {}),
+    rebaseOntoBase: vi.fn(async () => ({ success: true })),
+    abortRebase: vi.fn(async () => {}),
     ...overrides,
   } as unknown as GitService;
 }
@@ -261,6 +268,231 @@ describe("workspace.service", () => {
 
       const wsRows = await db.select().from(workspaces).where(eq(workspaces.id, wsId));
       expect(wsRows[0].status).toBe("active");
+    });
+  });
+
+  describe("updateBase with HEAD guard", () => {
+    async function seedWorkspaceForUpdateBase(projectId: string, issueId: string): Promise<string> {
+      const now = new Date().toISOString();
+      const id = randomUUID();
+      await db.insert(workspaces).values({
+        id,
+        issueId,
+        branch: "feature/ak-1-test",
+        workingDir: "/tmp/test-repo/.worktrees/feature-1",
+        baseBranch: "main",
+        isDirect: false,
+        status: "active",
+        provider: "claude",
+        createdAt: now,
+        updatedAt: now,
+      });
+      return id;
+    }
+
+    it("refuses to update base when main checkout HEAD is on wrong branch", async () => {
+      const { projectId, issueId } = await seedProjectAndIssue(db);
+      const wsId = await seedWorkspaceForUpdateBase(projectId, issueId);
+      const gitService = createFakeGitService({
+        getCurrentBranch: vi.fn(async () => "feature/some-other-thing"),
+      });
+
+      const service = createWorkspaceService({ database: db, gitService });
+
+      await expect(service.updateBase(wsId, "rebase")).rejects.toMatchObject({
+        code: "CONFLICT",
+        data: { currentBranch: "feature/some-other-thing", targetBranch: "main" },
+      });
+    });
+
+    it("proceeds with update-base when HEAD is on the correct branch", async () => {
+      const { projectId, issueId } = await seedProjectAndIssue(db);
+      const wsId = await seedWorkspaceForUpdateBase(projectId, issueId);
+      const gitService = createFakeGitService({
+        getCurrentBranch: vi.fn(async () => "main"),
+        rebaseOntoBase: vi.fn(async () => ({ success: true })),
+      });
+
+      const service = createWorkspaceService({ database: db, gitService });
+      const result = await service.updateBase(wsId, "rebase");
+
+      expect(result.success).toBe(true);
+      expect(gitService.rebaseOntoBase).toHaveBeenCalled();
+    });
+  });
+
+  describe("fixAndMerge with HEAD guard", () => {
+    async function seedWorkspaceForFix(projectId: string, issueId: string): Promise<string> {
+      const now = new Date().toISOString();
+      const id = randomUUID();
+      await db.insert(workspaces).values({
+        id,
+        issueId,
+        branch: "feature/ak-1-test",
+        workingDir: "/tmp/test-repo/.worktrees/feature-1",
+        baseBranch: "main",
+        isDirect: false,
+        status: "active",
+        provider: "claude",
+        createdAt: now,
+        updatedAt: now,
+      });
+      return id;
+    }
+
+    it("refuses fix-and-merge when main checkout HEAD is on wrong branch", async () => {
+      const { projectId, issueId } = await seedProjectAndIssue(db);
+      const wsId = await seedWorkspaceForFix(projectId, issueId);
+      const gitService = createFakeGitService({
+        getCurrentBranch: vi.fn(async () => "feature/some-other-thing"),
+      });
+      const sessionManager = createMockSessionManager();
+
+      const service = createWorkspaceService({ database: db, gitService, getSessionManager: () => sessionManager });
+
+      await expect(service.fixAndMerge(wsId)).rejects.toMatchObject({
+        code: "CONFLICT",
+        data: { currentBranch: "feature/some-other-thing", targetBranch: "main" },
+      });
+      expect(sessionManager.startSession).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("sendTurn with auto_rebase_on_continue", () => {
+    async function seedWorkspaceWithSession(projectId: string, issueId: string): Promise<{ wsId: string; sessionId: string }> {
+      const now = new Date().toISOString();
+      const wsId = randomUUID();
+      const sessionId = randomUUID();
+      await db.insert(workspaces).values({
+        id: wsId,
+        issueId,
+        branch: "feature/ak-1-test",
+        workingDir: "/tmp/test-repo/.worktrees/feature-1",
+        baseBranch: "main",
+        isDirect: false,
+        status: "idle",
+        provider: "claude",
+        createdAt: now,
+        updatedAt: now,
+      });
+      // Seed a completed session so sendTurn finds a resumable session
+      const { sessions: sessionsTable } = await import("@agentic-kanban/shared/schema");
+      await db.insert(sessionsTable).values({
+        id: sessionId,
+        workspaceId: wsId,
+        status: "completed",
+        triggerType: "chat",
+        startedAt: now,
+        endedAt: now,
+        createdAt: now,
+        updatedAt: now,
+      });
+      return { wsId, sessionId };
+    }
+
+    it("auto-rebases before starting agent when auto_rebase_on_continue is true", async () => {
+      const { projectId, issueId } = await seedProjectAndIssue(db);
+      const { wsId } = await seedWorkspaceWithSession(projectId, issueId);
+
+      // Enable the preference
+      const now = new Date().toISOString();
+      await db.insert(preferences).values({ key: "auto_rebase_on_continue", value: "true", updatedAt: now })
+        .onConflictDoUpdate({ target: preferences.key, set: { value: "true", updatedAt: now } });
+
+      const gitService = createFakeGitService({
+        rebaseOntoBase: vi.fn(async () => ({ success: true })),
+      });
+      const sessionManager = createMockSessionManager();
+      const service = createWorkspaceService({ database: db, gitService, getSessionManager: () => sessionManager });
+
+      await service.sendTurn(wsId, "continue with the task");
+
+      expect(gitService.rebaseOntoBase).toHaveBeenCalledWith(
+        "/tmp/test-repo/.worktrees/feature-1",
+        "main",
+        "feature/ak-1-test",
+      );
+      expect(sessionManager.startSession).toHaveBeenCalledOnce();
+    });
+
+    it("skips auto-rebase when auto_rebase_on_continue is false (default)", async () => {
+      const { projectId, issueId } = await seedProjectAndIssue(db);
+      const { wsId } = await seedWorkspaceWithSession(projectId, issueId);
+
+      const gitService = createFakeGitService();
+      const sessionManager = createMockSessionManager();
+      const service = createWorkspaceService({ database: db, gitService, getSessionManager: () => sessionManager });
+
+      await service.sendTurn(wsId, "continue with the task");
+
+      expect(gitService.rebaseOntoBase).not.toHaveBeenCalled();
+      expect(sessionManager.startSession).toHaveBeenCalledOnce();
+    });
+
+    it("throws CONFLICT and aborts rebase when auto-rebase finds conflicts", async () => {
+      const { projectId, issueId } = await seedProjectAndIssue(db);
+      const { wsId } = await seedWorkspaceWithSession(projectId, issueId);
+
+      const now = new Date().toISOString();
+      await db.insert(preferences).values({ key: "auto_rebase_on_continue", value: "true", updatedAt: now })
+        .onConflictDoUpdate({ target: preferences.key, set: { value: "true", updatedAt: now } });
+
+      const gitService = createFakeGitService({
+        rebaseOntoBase: vi.fn(async () => ({ success: false, conflictingFiles: ["src/foo.ts"], error: "conflict" })),
+      });
+      const sessionManager = createMockSessionManager();
+      const service = createWorkspaceService({ database: db, gitService, getSessionManager: () => sessionManager });
+
+      await expect(service.sendTurn(wsId, "continue")).rejects.toMatchObject({
+        code: "CONFLICT",
+        data: { conflictingFiles: ["src/foo.ts"] },
+      });
+
+      // Abort should have been called to restore clean state
+      expect(gitService.abortRebase).toHaveBeenCalledWith("/tmp/test-repo/.worktrees/feature-1");
+      // Agent should NOT have been started
+      expect(sessionManager.startSession).not.toHaveBeenCalled();
+    });
+
+    it("skips auto-rebase for direct workspaces even when pref is true", async () => {
+      const now = new Date().toISOString();
+      const { projectId, issueId } = await seedProjectAndIssue(db);
+      const wsId = randomUUID();
+      const sessionId = randomUUID();
+      await db.insert(workspaces).values({
+        id: wsId,
+        issueId,
+        branch: "feature/ak-1-test",
+        workingDir: "/tmp/test-repo/.worktrees/feature-1",
+        baseBranch: "main",
+        isDirect: true, // direct workspace
+        status: "idle",
+        provider: "claude",
+        createdAt: now,
+        updatedAt: now,
+      });
+      const { sessions: sessionsTable } = await import("@agentic-kanban/shared/schema");
+      await db.insert(sessionsTable).values({
+        id: sessionId,
+        workspaceId: wsId,
+        status: "completed",
+        triggerType: "chat",
+        startedAt: now,
+        endedAt: now,
+        createdAt: now,
+        updatedAt: now,
+      });
+
+      await db.insert(preferences).values({ key: "auto_rebase_on_continue", value: "true", updatedAt: now })
+        .onConflictDoUpdate({ target: preferences.key, set: { value: "true", updatedAt: now } });
+
+      const gitService = createFakeGitService();
+      const sessionManager = createMockSessionManager();
+      const service = createWorkspaceService({ database: db, gitService, getSessionManager: () => sessionManager });
+
+      await service.sendTurn(wsId, "continue");
+
+      expect(gitService.rebaseOntoBase).not.toHaveBeenCalled();
     });
   });
 });

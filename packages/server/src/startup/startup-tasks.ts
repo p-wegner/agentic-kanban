@@ -244,6 +244,28 @@ export async function abortStaleRebases(): Promise<void> {
   }
 }
 
+/** Check if main checkout HEAD is on defaultBranch for each project; log a warning if drifted. */
+export async function checkMainCheckoutHeads(): Promise<void> {
+  try {
+    const projectRows = await db.select({ repoPath: projects.repoPath, defaultBranch: projects.defaultBranch, name: projects.name }).from(projects);
+    for (const { repoPath, defaultBranch, name } of projectRows) {
+      if (!defaultBranch) continue;
+      try {
+        const currentBranch = await gitService.getCurrentBranch(repoPath);
+        if (currentBranch !== defaultBranch) {
+          console.warn(`[startup] WARNING: main checkout HEAD for project '${name}' (${repoPath}) is on '${currentBranch}', expected '${defaultBranch}'. Merge-pipeline ops will be refused until HEAD is restored.`);
+        } else {
+          console.log(`[startup] main checkout HEAD for project '${name}': OK (on '${defaultBranch}')`);
+        }
+      } catch (err) {
+        console.warn(`[startup] checkMainCheckoutHeads: failed for ${repoPath}:`, err instanceof Error ? err.message : String(err));
+      }
+    }
+  } catch (err) {
+    console.warn("[startup] checkMainCheckoutHeads failed (non-fatal):", err instanceof Error ? err.message : String(err));
+  }
+}
+
 /** Combined startup sequence: kill orphans, migrate, seed, dedup, abort stale merges, clean sessions/worktrees. */
 export async function runStartupTasks(sessionManager: SessionManager, _deps?: { agentService?: typeof agentServiceType }): Promise<void> {
   await killOrphanedServers();
@@ -252,4 +274,5 @@ export async function runStartupTasks(sessionManager: SessionManager, _deps?: { 
   await abortStaleRebases();
   await cleanupStaleSessions(sessionManager);
   await pruneStaleWorktrees();
+  await checkMainCheckoutHeads();
 }
