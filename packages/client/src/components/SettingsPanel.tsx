@@ -42,6 +42,8 @@ interface Settings {
   after_merge_verify_agent?: string;
   butler_event_feed?: string;
   butler_event_feed_min_interval_ms?: string;
+  butler_auto_answer?: string;
+  butler_auto_answer_min_confidence?: string;
   "harness.codex.plan_auto_continue"?: string;
   "harness.copilot.plan_auto_continue"?: string;
   "harness.claude.plan_auto_continue"?: string;
@@ -78,6 +80,7 @@ const DEFAULT_SETTINGS: Settings = {
   visual_verification_mode: "before_merge",
   butler_event_feed: "false",
   butler_event_feed_min_interval_ms: "30000",
+  butler_auto_answer: "false",
 };
 
 type Tab = "agent" | "workflow" | "skills" | "mcp" | "ui" | "project" | "tags" | "advanced" | "schedule";
@@ -881,6 +884,12 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                         onChange={setBool("butler_event_feed")}
                         label="Butler event feed"
                         hint="Notify the butler about critical board events (merge failures, agent crashes, stuck workspaces, permission requests). The butler receives them as tagged [system event] messages and can react when next addressed. Rate-limited per project."
+                      />
+                      <Toggle
+                        checked={settings.butler_auto_answer === "true"}
+                        onChange={setBool("butler_auto_answer")}
+                        label="Butler auto-answer agent questions"
+                        hint="Butler will reply to agents without asking you first. Review the audit log to catch mistakes. Only applies when the butler has a confident recommendation for every sub-question."
                       />
                       {settings.butler_event_feed === "true" && (
                         <div className="pl-5 flex items-center gap-2">

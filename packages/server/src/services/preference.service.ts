@@ -17,6 +17,7 @@ export const SETTINGS_KEYS = [
   "visual_verification_mode", "after_merge_verify_agent",
   "backup_interval_min", "backup_keep_last",
   "butler_event_feed", "butler_event_feed_min_interval_ms",
+  "butler_auto_answer", "butler_auto_answer_min_confidence",
   ...allHarnessSettingKeys(),
 ];
 
