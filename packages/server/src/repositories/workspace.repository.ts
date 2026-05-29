@@ -184,6 +184,7 @@ export interface WorkspaceDetails {
   claudeProfile: string | null;
   agentCommand: string | null;
   provider: string | null;
+  contextPrimer: string | null;
   createdAt: string;
   updatedAt: string;
   issue: { title: string; priority: string | null };
@@ -208,6 +209,7 @@ export async function getWorkspaceDetails(
       claudeProfile: workspaces.claudeProfile,
       agentCommand: workspaces.agentCommand,
       provider: workspaces.provider,
+      contextPrimer: workspaces.contextPrimer,
       createdAt: workspaces.createdAt,
       updatedAt: workspaces.updatedAt,
       issueTitle: issues.title,
@@ -234,6 +236,7 @@ export async function getWorkspaceDetails(
     claudeProfile: row.claudeProfile,
     agentCommand: row.agentCommand,
     provider: row.provider,
+    contextPrimer: row.contextPrimer ?? null,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
     issue: { title: row.issueTitle, priority: row.issuePriority },
