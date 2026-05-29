@@ -236,6 +236,8 @@ describe("listPendingQuestionsForProject — dismiss + staleness integration", (
       closedAt: opts.workspaceClosedAt ?? null,
     });
     const sessionId = `sess-${opts.toolUseId}`;
+    const recentStartedAt = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+    const recentEndedAt = new Date(Date.now() - 30 * 60 * 1000).toISOString();
     await db.insert(sessions).values({
       id: sessionId,
       workspaceId,
