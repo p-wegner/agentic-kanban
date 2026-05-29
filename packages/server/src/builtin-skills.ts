@@ -631,6 +631,47 @@ Board API: http://localhost:{{serverPort}}/api
 Be helpful and well-organized; lead with the answer and avoid unnecessary preamble. You have full read access to the project files and standard tools.`,
     model: null,
   },
+  {
+    name: "tdd-mode",
+    description: "AC-driven test generation: write failing tests from acceptance criteria before implementing",
+    prompt: `You are working in TDD (Test-Driven Development) mode. This is a strict two-phase process.
+
+## Phase 1: Write Failing AC Tests
+
+Read the ticket (title + description in \`CLAUDE.local.md\`) and extract every acceptance criterion.
+
+For each criterion:
+1. Write a test (unit or E2E as appropriate) that encodes it verbatim
+2. The test must FAIL right now because the feature does not exist yet
+3. If you cannot make a test fail for the right reason, fix the test before proceeding
+
+Commit all tests together with the message: \`test: AC for #<issue-number>\`
+
+Run the tests immediately after committing to confirm they fail with meaningful errors (not syntax errors or import failures). If any test passes accidentally, investigate — the feature may already be implemented, or the test does not encode the criterion correctly.
+
+## Phase 2: Implement Until Tests Pass
+
+Now implement the feature. Work in small, committed increments:
+1. Make one or two tests pass
+2. Commit with a descriptive implementation message (e.g. \`feat: add TDD toggle to workspace form\`)
+3. Run the full test suite to check for regressions
+4. Repeat until all Phase 1 tests pass with no regressions
+
+## Rules
+
+- Do NOT write any implementation code in Phase 1
+- Do NOT modify Phase 1 tests in Phase 2 (fixing a test because it's hard to pass = gaming TDD)
+- If a Phase 1 test was wrong (wrong API, wrong expectation), fix it with a separate \`fix: AC test for #N\` commit explaining why
+- Tests that describe UI behavior should use real component/E2E tests, not mocks of the feature itself
+- Commit at every green checkpoint — never batch Phase 1 and Phase 2 into one commit
+
+## Commit Shape
+
+The worktree has a \`commit-msg\` hook that enforces this:
+- First commit on this branch must match \`test: AC for #<N>\`
+- Subsequent commits are unrestricted once the AC test commit exists`,
+    model: null,
+  },
 ] as const;
 
 export type BuiltinSkill = typeof BUILTIN_SKILLS[number];

@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { mkdirSync, writeFileSync, chmodSync } from "node:fs";
+import { join } from "node:path";
 import { eq, inArray } from "drizzle-orm";
 import {
   issues, projects, preferences, workspaces, sessions, sessionMessages, diffComments, agentSkills,
@@ -243,6 +245,7 @@ export function createWorkspaceCrudService(deps: {
     requiresReview: boolean;
     thoroughReview: boolean;
     planMode: boolean;
+    tddMode: boolean;
     includeVisualProof: boolean;
     skillId: string | null;
     claudeProfile: string | undefined;
@@ -262,6 +265,7 @@ export function createWorkspaceCrudService(deps: {
       requiresReview: params.requiresReview,
       thoroughReview: params.thoroughReview,
       planMode: params.planMode,
+      tddMode: params.tddMode,
       includeVisualProof: params.includeVisualProof,
       skillId: params.skillId,
       status: "active",
@@ -386,11 +390,44 @@ export function createWorkspaceCrudService(deps: {
     };
   }
 
+  function installTddHook(worktreePath: string): void {
+    try {
+      const hooksDir = join(worktreePath, ".git", "hooks");
+      mkdirSync(hooksDir, { recursive: true });
+      const hookPath = join(hooksDir, "commit-msg");
+      const hookScript = `#!/bin/sh
+# TDD mode: ensure AC test commit comes before implementation commits.
+MSG=$(cat "$1")
+# If this commit is the AC test commit, allow it.
+if echo "$MSG" | grep -qE '^test: AC for #[0-9]+'; then
+  exit 0
+fi
+# Check if an AC test commit already exists on this branch.
+if git log --oneline | grep -qE ' test: AC for #[0-9]+'; then
+  exit 0
+fi
+echo "TDD mode: write failing AC tests first." >&2
+echo "  Commit your tests with: git commit -m 'test: AC for #<issue-number>'" >&2
+exit 1
+`;
+      writeFileSync(hookPath, hookScript, { encoding: "utf-8" });
+      try {
+        chmodSync(hookPath, 0o755);
+      } catch {
+        // chmod may fail on Windows; hook still runs via Git for Windows bash
+      }
+      console.log(`[workspaces] TDD commit-msg hook installed: ${hookPath}`);
+    } catch (err) {
+      console.warn(`[workspaces] failed to install TDD hook: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
   async function createWorkspace(input: CreateWorkspaceInput): Promise<CreateWorkspaceResult> {
     const isDirect = input.isDirect === true;
     const requiresReview = input.requiresReview === true;
     const thoroughReview = input.thoroughReview === true;
     const planMode = input.planMode === true;
+    const tddMode = input.tddMode === true;
     const includeVisualProof = input.includeVisualProof === true;
     const skillId = input.skillId || null;
     const now = new Date().toISOString();
@@ -452,9 +489,13 @@ export function createWorkspaceCrudService(deps: {
 
       await insertWorkspaceRecord({
         id, issueId: input.issueId, branch, worktreePath, baseBranch, isDirect,
-        baseCommitSha, requiresReview, thoroughReview, planMode, includeVisualProof,
+        baseCommitSha, requiresReview, thoroughReview, planMode, tddMode, includeVisualProof,
         skillId: effectiveSkillId, claudeProfile, agentCommand, resolvedProvider, model: agentConfig.model, now,
       });
+
+      if (tddMode && worktreePath) {
+        installTddHook(worktreePath);
+      }
 
       // Place the workspace on the workflow start node + sync the derived status.
       // Falls back to the legacy "In Progress" move when the issue has no workflow.
