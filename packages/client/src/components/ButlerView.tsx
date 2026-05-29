@@ -628,7 +628,7 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
                 title={[
                   model ? `Model: ${model}` : null,
                   contextWindow ? `Context window: ${(contextWindow / 1000).toFixed(0)}k tokens` : null,
-                  contextTokens ? `Context used: ${contextTokens.toLocaleString()} tokens` : null,
+                  contextTokens ? `Context used: ${contextTokens.toLocaleString('en-US')} tokens` : null,
                   mcpConnected !== undefined ? `Board MCP: ${mcpConnected ? "connected" : "not connected"}` : null,
                 ].filter(Boolean).join("\n")}
               >

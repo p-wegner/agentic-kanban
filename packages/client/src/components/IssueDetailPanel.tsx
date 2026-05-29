@@ -886,7 +886,7 @@ export function IssueDetailPanel({
                 issue.statusName !== "Done" && issue.statusName !== "Cancelled";
               return (
                 <span className={`inline-block text-xs font-medium px-1.5 py-0.5 rounded ${overdue ? "bg-red-100 text-red-700" : "bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300"}`}>
-                  {new Date(issue.dueDate).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}
+                  {new Date(issue.dueDate).toLocaleDateString('en-US', { month: "short", day: "numeric", year: "numeric" })}
                   {overdue && " ⚠ overdue"}
                 </span>
               );

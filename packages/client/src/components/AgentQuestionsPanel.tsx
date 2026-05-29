@@ -121,7 +121,7 @@ function emptyAnswers(qs: AgentQuestion[]): AnswerState[] {
 
 /** Muted-gray staleness badge with a tooltip showing the exact reason + timestamp. */
 function StalenessBadge({ staleness }: { staleness: Staleness }) {
-  const ts = staleness.at ? new Date(staleness.at).toLocaleString() : null;
+  const ts = staleness.at ? new Date(staleness.at).toLocaleString('en-US') : null;
   const tooltip = ts ? `${staleness.label} (${ts})` : staleness.label;
   return (
     <span
