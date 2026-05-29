@@ -11,6 +11,11 @@ import * as realGitService from "./git.service.js";
 import { runSetupScript } from "./setup-script.js";
 import { writeAgentSkillFile, readLocalSkillPrompt, copySkillToWorktree } from "@agentic-kanban/shared/lib/agent-skill-files";
 import { writeTicketContextFile } from "@agentic-kanban/shared/lib/ticket-context";
+import {
+  resolveWorkflowStart,
+  initWorkspaceWorkflow,
+  buildTransitionBlock,
+} from "@agentic-kanban/shared/lib/workflow-engine";
 import { resolveAgentSettings, toExecutorProvider } from "./agent-settings.service.js";
 import { emitButlerSystemEvent } from "./butler-event-feed.js";
 import {
@@ -419,10 +424,24 @@ export function createWorkspaceCrudService(deps: {
         });
       }
 
-      const agentPrompt = buildAgentPrompt(issue, { ...input, includeVisualProof }, input.issueId);
+      let agentPrompt = buildAgentPrompt(issue, { ...input, includeVisualProof }, input.issueId);
+
+      // Resolve the issue's configurable workflow (if any). The start node's
+      // guidance + valid transitions are injected into the prompt, and its
+      // attached skill is used when the caller didn't pick one explicitly.
+      const workflowStart = await resolveWorkflowStart(database, input.issueId);
+      let effectiveSkillId = skillId;
+      let effectiveDiskSkill = input.skillName ?? null;
+      if (workflowStart) {
+        agentPrompt += `\n\n${buildTransitionBlock(workflowStart.node, workflowStart.transitions, id)}`;
+        if (!effectiveSkillId && !effectiveDiskSkill) {
+          effectiveSkillId = workflowStart.node.skillId ?? null;
+          effectiveDiskSkill = workflowStart.node.skillName ?? null;
+        }
+      }
 
       const skillName = worktreePath
-        ? await resolveSkillFile(skillId, input.skillName ?? null, worktreePath, project.repoPath)
+        ? await resolveSkillFile(effectiveSkillId, effectiveDiskSkill, worktreePath, project.repoPath)
         : null;
 
       const agentConfig = await buildAgentConfig(input);
@@ -433,10 +452,18 @@ export function createWorkspaceCrudService(deps: {
       await insertWorkspaceRecord({
         id, issueId: input.issueId, branch, worktreePath, baseBranch, isDirect,
         baseCommitSha, requiresReview, thoroughReview, planMode, includeVisualProof,
-        skillId, claudeProfile, agentCommand, resolvedProvider, model: agentConfig.model, now,
+        skillId: effectiveSkillId, claudeProfile, agentCommand, resolvedProvider, model: agentConfig.model, now,
       });
 
-      await moveIssueToInProgress(input.issueId, issue.projectId, now, database);
+      // Place the workspace on the workflow start node + sync the derived status.
+      // Falls back to the legacy "In Progress" move when the issue has no workflow.
+      if (workflowStart) {
+        await initWorkspaceWorkflow(database, { workspaceId: id, issueId: input.issueId }).catch(() =>
+          moveIssueToInProgress(input.issueId, issue.projectId, now, database),
+        );
+      } else {
+        await moveIssueToInProgress(input.issueId, issue.projectId, now, database);
+      }
 
       const sessionId = await launchAgent({
         workspaceId: id, branch, isDirect, agentPrompt,

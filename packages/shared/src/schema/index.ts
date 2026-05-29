@@ -13,3 +13,16 @@ export type { DependencyType } from "./issue-dependencies.js";
 export { agentSkills } from "./agent-skills.js";
 export { issueArtifacts, issueArtifactsRelations } from "./issue-artifacts.js";
 export { scheduledRuns } from "./scheduled-runs.js";
+export {
+  workflowTemplates,
+  workflowNodes,
+  workflowEdges,
+  workflowTransitions,
+  workflowTemplatesRelations,
+  workflowNodesRelations,
+  workflowEdgesRelations,
+  workflowTransitionsRelations,
+  WORKFLOW_NODE_TYPES,
+  WORKFLOW_EDGE_CONDITIONS,
+} from "./workflows.js";
+export type { WorkflowNodeType, WorkflowEdgeCondition } from "./workflows.js";

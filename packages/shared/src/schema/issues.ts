@@ -19,6 +19,10 @@ export const issues = sqliteTable("issues", {
   skipAutoReview: integer("skip_auto_review", { mode: "boolean" }).notNull().default(false),
   estimate: text("estimate"),
   dueDate: text("due_date"),
+  // Configurable workflow graph this issue flows through (null = legacy status-only flow).
+  workflowTemplateId: text("workflow_template_id"),
+  // The node the issue currently sits on; the board status is derived from it.
+  currentNodeId: text("current_node_id"),
 }, (table) => ({
   projectIdIdx: index("idx_issues_project_id").on(table.projectId),
   statusIdIdx: index("idx_issues_status_id").on(table.statusId),

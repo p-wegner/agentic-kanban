@@ -53,4 +53,5 @@ export const MIGRATION_FILES = [
   "0044_diff_comments_workspace_idx.sql",
   "0045_workspace_model.sql",
   "0046_issue_due_date.sql",
+  "0047_workflow_graphs.sql",
 ];
