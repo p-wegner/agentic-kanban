@@ -20,6 +20,7 @@ const SHORTCUTS: Array<{ keys: string[]; description: string; sequential?: boole
   { keys: ["i"], description: "Switch to Butler chat" },
   { keys: ["p"], description: "Switch to Swimlane view" },
   { keys: ["a"], description: "Toggle All Workspaces panel" },
+  { keys: ["x"], description: "Open Codemod Factory" },
   { keys: ["g", "s"], description: "Open settings", sequential: true },
 ];
 
