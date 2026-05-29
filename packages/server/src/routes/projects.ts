@@ -4,6 +4,7 @@ import { createProjectService } from "../services/project.service.js";
 import { parseJsonBody } from "../middleware/parse-body.js";
 import { createRouter } from "../middleware/create-router.js";
 import { wrapAiOperation } from "../middleware/ai-operation.js";
+import { checkIssueOverlap } from "../services/issue-ai.service.js";
 
 export function createProjectsRoute(database: Database = db) {
   const router = createRouter();
@@ -135,6 +136,15 @@ export function createProjectsRoute(database: Database = db) {
     const projectId = c.req.param("id");
     const result = await projectService.getBoard(projectId);
     return c.json(result);
+  });
+
+  // POST /api/projects/:id/check-overlap — check for file overlap between issues using cached predictions
+  router.post("/:id/check-overlap", async (c) => {
+    const body = await parseJsonBody<{ issueIds: string[] }>(c);
+    if (!Array.isArray(body.issueIds) || body.issueIds.length === 0) {
+      return c.json({ error: "issueIds array is required" }, 400);
+    }
+    return c.json(await checkIssueOverlap(body.issueIds, database));
   });
 
   // GET /api/projects/:id/graph
