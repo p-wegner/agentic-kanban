@@ -5,6 +5,8 @@ export type TicketContext = {
   issueNumber?: number | null;
   title: string;
   description?: string | null;
+  /** Optional context primer from the context-packer service. Appended after the description. */
+  contextPrimer?: string | null;
 };
 
 /**
@@ -34,6 +36,10 @@ export function buildTicketContextMarkdown(ctx: TicketContext): string {
     ctx.description?.trim() ? ctx.description.trim() : "_(No description provided.)_",
     "",
   ];
+  if (ctx.contextPrimer?.trim()) {
+    lines.push(ctx.contextPrimer.trim());
+    lines.push("");
+  }
   return lines.join("\n");
 }
 

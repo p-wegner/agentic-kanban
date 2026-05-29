@@ -35,6 +35,7 @@ import {
   type CreateWorkspaceResult,
   type GitService,
 } from "./workspace-internals.js";
+import { buildContextPrimer } from "./context-packer.service.js";
 
 export function createWorkspaceCrudService(deps: {
   database: Database;
@@ -252,6 +253,7 @@ export function createWorkspaceCrudService(deps: {
     agentCommand: string | undefined;
     resolvedProvider: ProviderName;
     model: string | undefined;
+    contextPrimer: string | null;
     now: string;
   }): Promise<void> {
     await database.insert(workspaces).values({
@@ -273,6 +275,7 @@ export function createWorkspaceCrudService(deps: {
       agentCommand: params.agentCommand ?? null,
       provider: params.resolvedProvider,
       model: params.model ?? null,
+      contextPrimer: params.contextPrimer,
       createdAt: params.now,
       updatedAt: params.now,
     });
@@ -458,15 +461,36 @@ exit 1
         isDirect, project.repoPath, project.defaultBranch, input, setupConfig, id,
       ));
 
-      // Inject ticket details into the worktree as `CLAUDE.local.md` so the agent's
-      // first turn has the spec without foraging. Gitignored — never enters the merge.
-      // Best-effort: a write failure must not block workspace creation. Skipped for
-      // direct workspaces (workingDir is the user's real checkout root).
+      // Run context packer (best-effort: never blocks workspace creation).
+      let contextPrimer: string | null = null;
+      if (!isDirect && !input.skipContextPacker) {
+        try {
+          const packed = await buildContextPrimer(
+            {
+              issueId: input.issueId,
+              issueTitle: issue.title,
+              issueDescription: issue.description,
+              projectId: issue.projectId,
+              repoPath: project.repoPath,
+            },
+            database,
+          );
+          if (packed.primer.trim()) contextPrimer = packed.primer;
+        } catch (err) {
+          console.warn(`[workspaces] context-packer failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+
+      // Inject ticket details (+ optional context primer) into the worktree as
+      // `CLAUDE.local.md` so the agent's first turn has the spec without foraging.
+      // Gitignored — never enters the merge. Best-effort: a write failure must not
+      // block workspace creation. Skipped for direct workspaces.
       if (!isDirect && worktreePath) {
         await writeTicketContextFile(worktreePath, {
           issueNumber: issue.issueNumber,
           title: issue.title,
           description: issue.description,
+          contextPrimer,
         });
       }
 
@@ -498,7 +522,8 @@ exit 1
       await insertWorkspaceRecord({
         id, issueId: input.issueId, branch, worktreePath, baseBranch, isDirect,
         baseCommitSha, requiresReview, thoroughReview, planMode, tddMode, includeVisualProof,
-        skillId: effectiveSkillId, claudeProfile, agentCommand, resolvedProvider, model: agentConfig.model, now,
+        skillId: effectiveSkillId, claudeProfile, agentCommand, resolvedProvider, model: agentConfig.model,
+        contextPrimer, now,
       });
       workspaceInserted = true;
 
