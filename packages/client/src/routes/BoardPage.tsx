@@ -8,6 +8,7 @@ import { TimelineView } from "../components/TimelineView.js";
 import { MetricsView } from "../components/MetricsView.js";
 import { ButlerView } from "../components/ButlerView.js";
 import { WorkflowsView } from "../components/WorkflowsView.js";
+import { InsightsPanel } from "../components/InsightsPanel.js";
 import { useAgentQuestionsCount } from "../components/AgentQuestionsPanel.js";
 import { BoardErrorBoundary } from "../components/BoardErrorBoundary.js";
 import { BoardKanbanView } from "../components/BoardKanbanView.js";
@@ -99,7 +100,7 @@ export function BoardPage() {
   const [expandedCreatePanel, setExpandedCreatePanel] = useState<{ statusId: string; statusName: string; state: Partial<CreateIssueFormState> } | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>(() => {
     const stored = localStorage.getItem("kanban-board-view");
-    const validViews: ViewMode[] = ["kanban", "graph", "table", "agents", "timeline", "metrics", "butler", "workflows"];
+    const validViews: ViewMode[] = ["kanban", "graph", "table", "agents", "timeline", "metrics", "butler", "workflows", "insights"];
     return validViews.includes(stored as ViewMode) ? (stored as ViewMode) : "kanban";
   });
   const [dynamicColumnScaling, setDynamicColumnScaling] = useState(false);
@@ -833,7 +834,7 @@ export function BoardPage() {
         setShowSettings(true);
         return;
       }
-      if ((e.key === "b" || e.key === "t" || e.key === "l" || e.key === "f" || e.key === "m" || e.key === "i") && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      if ((e.key === "b" || e.key === "t" || e.key === "l" || e.key === "f" || e.key === "m" || e.key === "i" || e.key === "n") && !e.ctrlKey && !e.metaKey && !e.altKey) {
         const target = e.target as HTMLElement;
         if (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT") return;
         e.preventDefault();
@@ -843,6 +844,7 @@ export function BoardPage() {
         else if (e.key === "f") handleViewModeChange("timeline");
         else if (e.key === "m") handleViewModeChange("metrics");
         else if (e.key === "i") handleViewModeChange("butler");
+        else if (e.key === "n") handleViewModeChange("insights");
         return;
       }
       // "a" to toggle All Workspaces panel
@@ -1045,6 +1047,16 @@ export function BoardPage() {
       shortcut: "i",
       category: "navigation",
       handler: () => handleViewModeChange("butler"),
+    }));
+
+    unregisters.push(registerAction({
+      id: "view-insights",
+      label: "Switch to Insights View",
+      description: "Show agent cost, token, success, and duration trends",
+      icon: "↗",
+      shortcut: "n",
+      category: "navigation",
+      handler: () => handleViewModeChange("insights"),
     }));
 
     // Register "Go to: [column]" for each column
@@ -1299,6 +1311,22 @@ export function BoardPage() {
         {viewMode === "workflows" && activeProjectId && (
           <BoardErrorBoundary columnName="Workflows View">
             <WorkflowsView projectId={activeProjectId} />
+          </BoardErrorBoundary>
+        )}
+        {viewMode === "insights" && activeProjectId && (
+          <BoardErrorBoundary columnName="Insights View">
+            <InsightsPanel
+              projectId={activeProjectId}
+              onSessionClick={(sessionId, workspaceId, issueId) => {
+                const issue = columns.flatMap(c => c.issues).find(i => i.id === issueId);
+                if (issue) {
+                  setSelectedIssue(null);
+                  setWorkspaceIssue(issue);
+                  setWorkspaceOpenCreate(false);
+                  setWorkspaceInitial({ workspaceId, sessionId });
+                }
+              }}
+            />
           </BoardErrorBoundary>
         )}
         {viewMode === "kanban" && (
