@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import type { BoardEvents } from "../services/board-events.js";
-import { analyzeDependencies, enhanceIssue, aiEstimateIssue } from "../services/issue-ai.service.js";
+import { analyzeDependencies, enhanceIssue, aiEstimateIssue, decomposeEpic, confirmEpicDecomposition } from "../services/issue-ai.service.js";
 import { createIssueService } from "../services/issue.service.js";
 import { parseJsonBody } from "../middleware/parse-body.js";
 import { createRouter } from "../middleware/create-router.js";
@@ -46,6 +46,29 @@ export function createIssuesRoute(database: Database = db, options?: { boardEven
     const body = await parseJsonBody<{ issueId: string }>(c);
     if (!body.issueId) return c.json({ error: "issueId is required" }, 400);
     return c.json(await wrapAiOperation("ai-estimate", () => aiEstimateIssue(body.issueId, database)));
+  });
+
+  // POST /api/issues/:id/decompose — AI-generate epic decomposition proposal
+  router.post("/:id/decompose", async (c) => {
+    const issueId = c.req.param("id");
+    const body = await parseJsonBody<{ projectId: string }>(c);
+    if (!body.projectId) return c.json({ error: "projectId is required" }, 400);
+    return c.json(await wrapAiOperation("decompose", () => decomposeEpic(issueId, body.projectId, database)));
+  });
+
+  // POST /api/issues/:id/decompose/confirm — confirm epic decomposition and create child issues
+  router.post("/:id/decompose/confirm", async (c) => {
+    const issueId = c.req.param("id");
+    const body = await parseJsonBody<{ projectId: string; children: any[]; dependencies: any[] }>(c);
+    if (!body.projectId) return c.json({ error: "projectId is required" }, 400);
+    if (!Array.isArray(body.children)) return c.json({ error: "children must be an array" }, 400);
+    if (!Array.isArray(body.dependencies)) return c.json({ error: "dependencies must be an array" }, 400);
+    const result = await confirmEpicDecomposition(
+      { issueId, projectId: body.projectId, children: body.children, dependencies: body.dependencies },
+      database,
+    );
+    options?.boardEvents?.broadcast(body.projectId, "issue_created");
+    return c.json(result, 201);
   });
 
   // POST /api/issues/batch — create N issues atomically

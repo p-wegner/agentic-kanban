@@ -7,6 +7,7 @@ import { eq, sql } from "drizzle-orm";
 /** Built-in tags that must always exist and cannot be deleted or renamed. */
 export const BUILTIN_TAGS = [
   { name: "needs-visual-verification", color: "#F59E0B" },
+  { name: "epic", color: "#8B5CF6" },
 ] as const;
 
 export async function ensureBuiltinTags(database: Database = db): Promise<void> {
