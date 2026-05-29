@@ -12,6 +12,7 @@ type RecordingState = "idle" | "recording" | "processing";
 // Web Speech API types (may not be in all TS lib versions)
 interface SpeechRecognitionEvent extends Event {
   results: SpeechRecognitionResultList;
+  resultIndex: number;
 }
 interface SpeechRecognitionResultList {
   readonly length: number;
