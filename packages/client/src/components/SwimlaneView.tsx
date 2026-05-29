@@ -238,13 +238,13 @@ export function SwimlaneView({ columns, onIssueClick, searchQuery = "" }: Swimla
           const collapsed = collapsedLanes.has(lane.key);
 
           return (
-            <div key={lane.key} className="border-b border-gray-200 dark:border-gray-700 last:border-b-0">
+            <div key={lane.key} className="flex border-b border-gray-200 dark:border-gray-700 last:border-b-0">
               {/* Lane header */}
               <button
                 onClick={() => toggleLane(lane.key)}
-                className={`flex items-center gap-2.5 px-3 py-2 sticky left-0 z-[5] w-full text-left
-                  ${lane.headerBg} border-b ${lane.headerBorder} transition-colors hover:brightness-95`}
-                style={{ width: LANE_HEADER_W, minWidth: LANE_HEADER_W, maxWidth: LANE_HEADER_W }}
+                className={`flex items-center gap-2.5 px-3 py-2 sticky left-0 z-[5] self-stretch text-left shrink-0
+                  ${lane.headerBg} border-r ${lane.headerBorder} transition-colors hover:brightness-95`}
+                style={{ width: LANE_HEADER_W, minWidth: LANE_HEADER_W }}
                 title={collapsed ? `Expand ${lane.label}` : `Collapse ${lane.label}`}
               >
                 <span className={`w-2 h-2 rounded-full shrink-0 ${lane.dot}`} />
@@ -267,7 +267,7 @@ export function SwimlaneView({ columns, onIssueClick, searchQuery = "" }: Swimla
 
               {/* Cells row */}
               {!collapsed && (
-                <div className="flex" style={{ marginLeft: LANE_HEADER_W }}>
+                <div className="flex flex-1">
                   {filteredColumns.map((col) => {
                     const issues = issuesByPriorityAndStatus[lane.key]?.[col.id] ?? [];
                     return (
