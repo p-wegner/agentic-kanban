@@ -1571,6 +1571,8 @@ export function IssueDetailPanel({
             setShowDecomposeModal(false);
             onIssueUpdate(issue);
           }}
+        />
+      )}
       {showShowdownDialog && (
         <ShowdownDialog
           issue={issue}
