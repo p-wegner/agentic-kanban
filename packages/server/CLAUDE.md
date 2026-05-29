@@ -1,5 +1,8 @@
 # Server Package — Architecture Patterns
 
+## Self-HTTP calls are an anti-pattern
+A service must never `fetch('http://127.0.0.1:PORT/api/...')` to call its own server. Instead, accept the target service function as a constructor/factory parameter (dependency injection). Self-HTTP calls: create a hard runtime dependency on port availability, bypass TypeScript types (JSON round-trip), are impossible to unit-test without a running server, and swallow errors through JSON re-parsing. The fix: pass `createWorkspace` (or similar) directly to the service that needs it.
+
 ## Circular imports
 Route modules that need services (e.g., `sessionManager`) should receive them via factory functions or lazy getters, not direct imports from `index.ts`.
 
