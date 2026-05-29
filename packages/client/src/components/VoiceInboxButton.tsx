@@ -222,8 +222,8 @@ export function VoiceInboxButton({ projectId, onIssueCreated }: VoiceInboxButton
           isRecording
             ? "bg-red-50 dark:bg-red-950 border-red-300 dark:border-red-700 text-red-700 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900"
             : isProcessing
-            ? "bg-violet-50 dark:bg-violet-950 border-violet-200 dark:border-violet-800 text-violet-600 dark:text-violet-400 opacity-80 cursor-wait"
-            : "bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed",
+            ? "bg-brand-50 dark:bg-brand-900/40 border-brand-200 dark:border-brand-700 text-brand-600 dark:text-brand-400 opacity-80 cursor-wait"
+            : "bg-surface-raised dark:bg-surface-raised-dark border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed",
         ].join(" ")}
       >
         {isProcessing ? (

@@ -185,7 +185,7 @@ export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCr
             value={branchName}
             onChange={(e) => setBranchName(sanitizeBranchName(e.target.value))}
             placeholder={suggestion}
-            className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:bg-gray-900 dark:text-gray-100"
+            className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500 dark:bg-gray-900 dark:text-gray-100"
           />
           <label className="text-xs font-medium text-gray-600 dark:text-gray-400 block mt-2">
             Base Branch
@@ -194,7 +194,7 @@ export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCr
             <select
               value={baseBranch}
               onChange={(e) => setBaseBranch(e.target.value)}
-              className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:bg-gray-900 dark:text-gray-100"
+              className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500 dark:bg-gray-900 dark:text-gray-100"
             >
               <option value="">Default ({defaultBranchLabel})</option>
               {branches.local.map((b) => (
@@ -214,7 +214,7 @@ export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCr
               value={baseBranch}
               onChange={(e) => setBaseBranch(e.target.value)}
               placeholder={project?.defaultBranch || "Choose a base branch"}
-              className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:bg-gray-900 dark:text-gray-100"
+              className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500 dark:bg-gray-900 dark:text-gray-100"
             />
           )}
           {cannotCreateWorktree && (
@@ -261,7 +261,7 @@ export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCr
           <select
             value={selectedSkillId}
             onChange={(e) => setSelectedSkillId(e.target.value)}
-            className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:bg-gray-900 dark:text-gray-100"
+            className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500 dark:bg-gray-900 dark:text-gray-100"
           >
             <option value="">None (default)</option>
             {availableSkills.map((s) => (
@@ -276,7 +276,7 @@ export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCr
           <select
             value={selectedProfile}
             onChange={(e) => setSelectedProfile(e.target.value)}
-            className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:bg-gray-900 dark:text-gray-100"
+            className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500 dark:bg-gray-900 dark:text-gray-100"
           >
             <option value="">Default ({defaultProfileLabel(prefs)})</option>
             {claudeProfiles.length > 0 && (
@@ -305,7 +305,7 @@ export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCr
           <select
             value={selectedModel}
             onChange={(e) => setSelectedModel(e.target.value)}
-            className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:bg-gray-900 dark:text-gray-100"
+            className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500 dark:bg-gray-900 dark:text-gray-100"
           >
             {CLAUDE_MODEL_OPTIONS.map((m) => (
               <option key={m.value} value={m.value}>{m.label}</option>
@@ -317,7 +317,7 @@ export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCr
         <button
           onClick={handleSubmit}
           disabled={isLoading || (!isDirect && !branchName.trim()) || cannotCreateWorktree}
-          className="text-sm bg-blue-600 text-white px-3 py-1.5 rounded hover:bg-blue-700 disabled:opacity-50"
+          className="text-sm bg-brand-600 text-white px-3 py-1.5 rounded hover:bg-brand-700 disabled:opacity-50"
         >
           {isLoading ? "Creating..." : isDirect ? "Create Direct & Launch" : "Create & Launch"}
         </button>

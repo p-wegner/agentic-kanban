@@ -302,15 +302,15 @@ function QuestionCard({
                       disabled={submitting}
                       className={`w-full text-left rounded-md border px-3 py-2 text-sm transition-colors ${
                         selected
-                          ? "border-blue-500 bg-blue-50 dark:bg-blue-900/30 text-gray-900 dark:text-gray-100"
+                          ? "border-brand-500 bg-brand-50 dark:bg-brand-900/30 text-gray-900 dark:text-gray-100"
                           : recommended
                             ? "border-amber-400 dark:border-amber-500/70 ring-1 ring-amber-300 dark:ring-amber-600/50 bg-amber-50/50 dark:bg-amber-900/10 text-gray-800 dark:text-gray-200 hover:border-amber-500"
-                            : "border-gray-200 dark:border-gray-700 hover:border-blue-300 dark:hover:border-blue-600 text-gray-700 dark:text-gray-300"
+                            : "border-gray-200 dark:border-gray-700 hover:border-brand-300 dark:hover:border-brand-600 text-gray-700 dark:text-gray-300"
                       } disabled:opacity-50`}
                       data-recommended={recommended ? "1" : undefined}
                     >
                       <div className="flex items-start gap-2">
-                        <span className={`mt-0.5 shrink-0 inline-flex items-center justify-center w-4 h-4 ${multi ? "rounded" : "rounded-full"} border ${selected ? "bg-blue-600 border-blue-600 text-white" : "border-gray-300 dark:border-gray-600"}`}>
+                        <span className={`mt-0.5 shrink-0 inline-flex items-center justify-center w-4 h-4 ${multi ? "rounded" : "rounded-full"} border ${selected ? "bg-brand-600 border-brand-600 text-white" : "border-gray-300 dark:border-gray-600"}`}>
                           {selected && (
                             <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
                               <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
@@ -346,7 +346,7 @@ function QuestionCard({
                 disabled={submitting}
                 rows={2}
                 placeholder="Optional: add a free-text note or use this instead of an option"
-                className="mt-2 w-full resize-y rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-2 py-1.5 text-xs text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-50"
+                className="mt-2 w-full resize-y rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-2 py-1.5 text-xs text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:opacity-50"
               />
             </div>
           );
@@ -358,7 +358,7 @@ function QuestionCard({
             type="button"
             onClick={submit}
             disabled={!canSubmit || submitting}
-            className="px-3 py-1.5 text-xs rounded-lg bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-40 disabled:cursor-not-allowed"
+            className="px-3 py-1.5 text-xs rounded-lg bg-brand-600 hover:bg-brand-700 text-white disabled:opacity-40 disabled:cursor-not-allowed"
           >
             {submitting ? "Sending..." : "Send answers to agent"}
           </button>

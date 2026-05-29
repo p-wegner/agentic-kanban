@@ -20,11 +20,11 @@ function TicketMentionChip({ issueId }: { issueId: string }) {
         e.stopPropagation();
         onMentionClick(issueId);
       }}
-      className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 text-xs font-medium hover:bg-blue-100 cursor-pointer border border-blue-200"
+      className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-brand-50 text-brand-700 dark:bg-brand-900/40 dark:text-brand-300 text-xs font-medium hover:bg-brand-100 cursor-pointer border border-brand-200 dark:border-brand-700"
       title={issue.title}
     >
       #{issue.issueNumber}
-      <span className="text-blue-500 font-normal truncate max-w-[120px]">
+      <span className="text-brand-500 dark:text-brand-400 font-normal truncate max-w-[120px]">
         {issue.title}
       </span>
     </button>

@@ -126,7 +126,7 @@ export function CompletedGrid({
 
       <div
         className={`rounded-lg p-3 transition-all ${
-          dragOver ? "ring-2 ring-blue-400 ring-offset-1 bg-blue-50/30" : "bg-gray-50/50 dark:bg-gray-950/50"
+          dragOver ? "ring-2 ring-brand-400 ring-offset-1 bg-brand-50/30" : "bg-gray-50/50 dark:bg-gray-950/50"
         }`}
         onDragEnter={handleDragEnter}
         onDragLeave={handleDragLeave}

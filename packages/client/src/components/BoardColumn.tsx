@@ -177,7 +177,7 @@ export function BoardColumn({
     <div
       id={`column-${column.id}`}
       className={`${width != null ? "" : "w-[calc(100vw-2rem)] sm:w-72 shrink-0"} bg-gray-100 dark:bg-gray-800 rounded-xl p-2 flex flex-col transition-all relative ${
-        dragOver ? "ring-2 ring-blue-400 ring-offset-1" : ""
+        dragOver ? "ring-2 ring-brand-400 ring-offset-1" : ""
       }`}
       style={columnStyle}
       onDragEnter={handleDragEnter}
@@ -194,7 +194,7 @@ export function BoardColumn({
             </span>
           </h2>
           {column.name === "AI Reviewed" && (
-            <span className="text-[10px] text-purple-500 font-medium">Awaiting manual merge</span>
+            <span className="text-[10px] text-accent-700 dark:text-accent-300 font-medium">Awaiting manual merge</span>
           )}
         </div>
         <div className="flex items-center gap-1">
@@ -202,7 +202,7 @@ export function BoardColumn({
             onClick={toggleSort}
             className={`text-xs rounded-md px-1.5 py-0.5 transition-colors ${
               sortMode === "type"
-                ? "bg-blue-100 text-blue-600 hover:bg-blue-200"
+                ? "bg-brand-100 text-brand-600 hover:bg-brand-200"
                 : "text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-white/60 dark:hover:bg-gray-800/60"
             }`}
             title={sortMode === "type" ? "Sorted by type — click for default" : "Sort by type"}
@@ -223,7 +223,7 @@ export function BoardColumn({
 
       <div className="relative flex-1 min-h-0 overflow-hidden rounded-lg">
         {(scrollState === "top" || scrollState === "middle") && (
-          <div className="absolute top-0 left-0 right-0 h-6 bg-gradient-to-b from-gray-100 dark:from-gray-800 to-transparent z-10 pointer-events-none rounded-t-lg" />
+          <div className="absolute top-0 left-0 right-0 h-6 bg-gradient-to-b from-surface-sunken dark:from-stone-800 to-transparent z-10 pointer-events-none rounded-t-lg" />
         )}
         <div
           ref={scrollRef}
@@ -267,7 +267,7 @@ export function BoardColumn({
           )}
         </div>
         {(scrollState === "bottom" || scrollState === "middle") && (
-          <div className="absolute bottom-0 left-0 right-0 h-6 bg-gradient-to-t from-gray-100 dark:from-gray-800 to-transparent z-10 pointer-events-none rounded-b-lg" />
+          <div className="absolute bottom-0 left-0 right-0 h-6 bg-gradient-to-t from-surface-sunken dark:from-stone-800 to-transparent z-10 pointer-events-none rounded-b-lg" />
         )}
       </div>
     </div>
@@ -278,7 +278,7 @@ export function BoardColumn({
         onDoubleClick={onResizeReset}
         title="Drag to resize · Double-click to reset"
       >
-        <div className="w-0.5 h-8 rounded-full bg-gray-300 dark:bg-gray-600 group-hover:bg-blue-400 transition-colors" />
+        <div className="w-0.5 h-8 rounded-full bg-gray-300 dark:bg-gray-600 group-hover:bg-brand-400 transition-colors" />
       </div>
     )}
     </div>
@@ -297,7 +297,7 @@ function DropGap({
     <div
       onDragOver={(e) => e.preventDefault()}
       onDrop={onDrop}
-      className="h-1 rounded bg-blue-400/50 my-1"
+      className="h-1 rounded bg-brand-400/50 my-1"
     />
   );
 }

@@ -10,7 +10,7 @@ interface TimelineViewProps {
 const TYPE_COLORS: Record<string, { bg: string; border: string; text: string; dot: string }> = {
   task:    { bg: "bg-blue-100 dark:bg-blue-900/50",    border: "border-blue-300 dark:border-blue-700",    text: "text-blue-800 dark:text-blue-200",    dot: "#3b82f6" },
   bug:     { bg: "bg-red-100 dark:bg-red-900/50",      border: "border-red-300 dark:border-red-700",      text: "text-red-800 dark:text-red-200",      dot: "#ef4444" },
-  feature: { bg: "bg-violet-100 dark:bg-violet-900/50", border: "border-violet-300 dark:border-violet-700", text: "text-violet-800 dark:text-violet-200", dot: "#8b5cf6" },
+  feature: { bg: "bg-brand-100 dark:bg-brand-900/50", border: "border-brand-300 dark:border-brand-700", text: "text-brand-800 dark:text-brand-200", dot: "#c25f36" },
   chore:   { bg: "bg-amber-100 dark:bg-amber-900/50",  border: "border-amber-300 dark:border-amber-700",  text: "text-amber-800 dark:text-amber-200",  dot: "#f59e0b" },
 };
 
@@ -24,8 +24,8 @@ const PRIORITY_COLORS: Record<string, string> = {
 const STATUS_BG: Record<string, string> = {
   "Todo":        "bg-gray-50 dark:bg-gray-900",
   "In Progress": "bg-blue-50/50 dark:bg-blue-950/20",
-  "In Review":   "bg-violet-50/50 dark:bg-violet-950/20",
-  "AI Reviewed": "bg-cyan-50/50 dark:bg-cyan-950/20",
+  "In Review":   "bg-accent-50/50 dark:bg-accent-950/20",
+  "AI Reviewed": "bg-accent-50/50 dark:bg-accent-950/20",
   "Done":        "bg-green-50/50 dark:bg-green-950/20",
   "Cancelled":   "bg-gray-100/50 dark:bg-gray-800/30",
 };
@@ -33,8 +33,8 @@ const STATUS_BG: Record<string, string> = {
 const STATUS_BADGE: Record<string, string> = {
   "Todo":        "text-gray-600 dark:text-gray-400",
   "In Progress": "text-blue-700 dark:text-blue-300",
-  "In Review":   "text-violet-700 dark:text-violet-300",
-  "AI Reviewed": "text-cyan-700 dark:text-cyan-300",
+  "In Review":   "text-accent-700 dark:text-accent-300",
+  "AI Reviewed": "text-accent-700 dark:text-accent-300",
   "Done":        "text-green-700 dark:text-green-300",
   "Cancelled":   "text-gray-500 dark:text-gray-500",
 };
@@ -206,7 +206,7 @@ export function TimelineView({ columns, onIssueClick, searchQuery }: TimelineVie
           >‹</button>
           <button
             onClick={() => setPanOffsetMs(0)}
-            className={`px-1.5 h-6 text-xs flex items-center justify-center rounded border bg-white dark:bg-gray-900 hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-300 min-w-[40px] ${panOffsetMs !== 0 ? "border-blue-400 dark:border-blue-600" : "border-gray-200 dark:border-gray-700"}`}
+            className={`px-1.5 h-6 text-xs flex items-center justify-center rounded border bg-white dark:bg-gray-900 hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-300 min-w-[40px] ${panOffsetMs !== 0 ? "border-brand-400 dark:border-brand-600" : "border-gray-200 dark:border-gray-700"}`}
             title="Reset to today"
           >Today</button>
           <button
@@ -267,12 +267,12 @@ export function TimelineView({ columns, onIssueClick, searchQuery }: TimelineVie
       {/* Timeline scroll area */}
       <div
         ref={scrollRef}
-        className="flex-1 overflow-auto rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900"
+        className="flex-1 overflow-auto rounded-lg border border-gray-200 dark:border-gray-700 bg-surface-raised dark:bg-surface-raised-dark"
       >
         <div style={{ minWidth }}>
 
           {/* Date axis row */}
-          <div className="flex sticky top-0 z-10 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700" style={{ height: AXIS_H }}>
+          <div className="flex sticky top-0 z-10 bg-surface-raised dark:bg-surface-raised-dark border-b border-gray-200 dark:border-gray-700" style={{ height: AXIS_H }}>
             <div style={{ width: LABEL_W, minWidth: LABEL_W }} className="border-r border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800" />
             <div className="flex-1 relative">
               {ticks.map((tick, i) => (
@@ -301,7 +301,7 @@ export function TimelineView({ columns, onIssueClick, searchQuery }: TimelineVie
 
           {/* Status lanes */}
           {lanes.map((lane, laneIdx) => (
-            <div key={lane.name} className={`${STATUS_BG[lane.name] ?? "bg-white dark:bg-gray-900"} ${laneIdx > 0 ? "border-t border-gray-200 dark:border-gray-700" : ""}`}>
+            <div key={lane.name} className={`${STATUS_BG[lane.name] ?? "bg-surface-raised dark:bg-surface-raised-dark"} ${laneIdx > 0 ? "border-t border-gray-200 dark:border-gray-700" : ""}`}>
               {/* Lane header */}
               <div className="flex items-center sticky top-[28px] z-[5]" style={{ height: 28 }}>
                 <div
@@ -403,7 +403,7 @@ export function TimelineView({ columns, onIssueClick, searchQuery }: TimelineVie
       {/* Floating tooltip */}
       {tooltip && (
         <div
-          className="fixed z-50 pointer-events-none bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-2xl p-3 text-xs max-w-xs"
+          className="fixed z-50 pointer-events-none bg-surface-raised dark:bg-surface-raised-dark border border-gray-200 dark:border-gray-700 rounded-xl shadow-2xl p-3 text-xs max-w-xs"
           style={{
             left: tooltip.x,
             top: tooltip.y - 12,
