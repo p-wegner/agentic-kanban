@@ -117,7 +117,10 @@ export function createIssuesRoute(database: Database = db, options?: { boardEven
     const rows = await database.select({ touchedFilesJson: issues.touchedFilesJson }).from(issues).where(eq(issues.id, issueId)).limit(1);
     if (rows.length === 0) return c.json({ error: "Issue not found" }, 404);
     const json = rows[0].touchedFilesJson;
-    const files = json ? JSON.parse(json) : [];
+    let files: unknown[] = [];
+    if (json) {
+      try { files = JSON.parse(json); } catch { files = []; }
+    }
     return c.json({ files, cached: true });
   });
 

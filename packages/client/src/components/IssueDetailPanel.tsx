@@ -314,7 +314,7 @@ export function IssueDetailPanel({
     showToast("Appended to description — save to persist");
   }
 
-
+  const VISUAL_VERIFY_TAG = "needs-visual-verification";
   const isVisualVerify = issueTags.some((t) => t.name === VISUAL_VERIFY_TAG);
 
   async function toggleVisualVerify() {
