@@ -253,7 +253,7 @@ function ActivityHeatmap({ issues }: { issues: IssueWithStatus[] }) {
       const month = week[0].date.getMonth();
       if (month !== lastMonth) {
         labels.push({
-          label: week[0].date.toLocaleDateString(undefined, { month: "short" }),
+          label: week[0].date.toLocaleDateString('en-US', { month: "short" }),
           weekIdx: wi,
         });
         lastMonth = month;
@@ -320,7 +320,7 @@ function ActivityHeatmap({ issues }: { issues: IssueWithStatus[] }) {
                     className={`rounded-sm cursor-default transition-opacity hover:opacity-80 ${!color ? "bg-gray-100 dark:bg-gray-800" : ""}`}
                     onMouseEnter={(e) => {
                       const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-                      const d = cell.date.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+                      const d = cell.date.toLocaleDateString('en-US', { month: "short", day: "numeric", year: "numeric" });
                       setTooltip({
                         text: `${cell.count} issue${cell.count !== 1 ? "s" : ""} · ${d}`,
                         x: rect.left + rect.width / 2,
@@ -507,7 +507,7 @@ export function MetricsView({ columns, onIssueClick }: MetricsViewProps) {
                         #{issue.issueNumber} {issue.title}
                       </p>
                       <p className="text-[10px] text-gray-400 dark:text-gray-500">
-                        {new Date(issue.updatedAt).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
+                        {new Date(issue.updatedAt).toLocaleDateString('en-US', { month: "short", day: "numeric" })}
                       </p>
                     </div>
                   </button>
