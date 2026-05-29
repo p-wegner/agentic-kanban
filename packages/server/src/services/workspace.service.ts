@@ -61,6 +61,8 @@ export function createWorkspaceService(deps: {
     sendTurn: session.sendTurn,
     stopWorkspace: session.stopWorkspace,
     implementPlan: session.implementPlan,
+    rejectPlan: session.rejectPlan,
+    getPlanContent: session.getPlanContent,
     openTerminal: session.openTerminal,
     openEditor: session.openEditor,
     getSessions: session.getSessions,

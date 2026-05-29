@@ -219,9 +219,9 @@ export function createSessionLifecycle(
             }
           }
 
-          // Codex/Copilot plan mode: a read-only plan run just finished. Persist the plan to PLAN.md,
+          // All-provider plan mode: a read-only plan run just finished. Persist the plan to PLAN.md,
           // leave plan mode, then either auto-continue or park awaiting human approval.
-          if (planMode && (provider === "codex" || provider === "copilot") && exitCode === 0 && workspace.workingDir && planText) {
+          if (planMode && exitCode === 0 && workspace.workingDir && planText) {
             void (async () => {
               try {
                 const plan = extractPlan(planText);
@@ -232,13 +232,14 @@ export function createSessionLifecycle(
                 const planPath = writePlanFile(workspace.workingDir!, plan);
                 await db.update(workspaces).set({ planMode: false, updatedAt: new Date().toISOString() }).where(eq(workspaces.id, workspaceId));
 
-                const harness = provider === "codex" ? "codex" : "copilot";
+                const harness = provider === "codex" ? "codex" : provider === "copilot" ? "copilot" : "claude";
                 const prefRows = await db.select().from(preferences);
                 const prefMap = new Map(prefRows.map((r) => [r.key, r.value]));
                 const autoContinue = getHarnessBoolSetting(prefMap, harness, "plan_auto_continue");
 
                 if (autoContinue) {
                   console.log(`[session] plan ready (${planPath}) — auto-continuing to implementation: workspaceId=${workspaceId}`);
+                  await db.update(workspaces).set({ status: "active", updatedAt: new Date().toISOString() }).where(eq(workspaces.id, workspaceId));
                   await startSession({
                     workspaceId,
                     prompt: buildImplementPrompt(),
@@ -253,7 +254,7 @@ export function createSessionLifecycle(
                   });
                 } else {
                   console.log(`[session] plan ready (${planPath}) — awaiting human approval: workspaceId=${workspaceId}`);
-                  await db.update(workspaces).set({ pendingPlanPath: planPath, updatedAt: new Date().toISOString() }).where(eq(workspaces.id, workspaceId));
+                  await db.update(workspaces).set({ pendingPlanPath: planPath, status: "awaiting-plan-approval", updatedAt: new Date().toISOString() }).where(eq(workspaces.id, workspaceId));
                 }
               } catch (err) {
                 console.error(`[session] plan completion handling failed: workspaceId=${workspaceId}`, err);
