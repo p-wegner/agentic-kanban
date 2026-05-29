@@ -2,13 +2,14 @@ import React, { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { apiFetch } from "../lib/api.js";
 import { formatRelativeTime } from "../lib/formatRelativeTime.js";
-import { getOutputFormatForAgent, getOutputFormatForProvider } from "../lib/agent-output-parser.js";
+import { getOutputFormatForAgent, getOutputFormatForProvider, type AgentOutputFormat } from "../lib/agent-output-parser.js";
 import { useWebSocket } from "../lib/useWebSocket.js";
 import { TerminalView } from "./TerminalView.js";
 import { CreateWorkspaceForm } from "./CreateWorkspaceForm.js";
 import { WorkspaceDiffPanel } from "./WorkspaceDiffPanel.js";
 import TicketMentionInput from "./TicketMentionInput.js";
 import { useWorkspaceSession } from "../hooks/useWorkspaceSession.js";
+import { SessionReplay } from "./SessionReplay.js";
 import type {
   AgentOutputMessage,
   IssueWithStatus,
@@ -226,6 +227,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
   const [conflictState, setConflictState] = useState<{ hasConflicts: boolean; conflictingFiles: string[] } | null>(null);
   const [expandedQuickActions, setExpandedQuickActions] = useState<Record<string, boolean>>({});
   const [mergeError, setMergeError] = useState<{ wsId: string; message: string } | null>(null);
+  const [replaySession, setReplaySession] = useState<{ id: string; label: string; outputFormat: string } | null>(null);
 
   const [latestCommits, setLatestCommits] = useState<Record<string, { sha: string; message: string } | null>>({});
   const [handoffContent, setHandoffContent] = useState<Record<string, string | null>>({});
@@ -1401,6 +1403,20 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                                 </span>
                                 <SessionStatsBadge stats={session.stats} />
                               </button>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  const outputFormat = ws.provider
+                                    ? getOutputFormatForProvider(ws.provider)
+                                    : getOutputFormatForAgent(ws.agentCommand ?? prefs.agent_command);
+                                  const label = getTriggerTypeLabel(session.triggerType, session.skillName)?.label ?? "Agent";
+                                  setReplaySession({ id: session.id, label: `${label} · ${formatRelativeTime(session.startedAt)}`, outputFormat });
+                                }}
+                                className="text-[10px] text-gray-400 dark:text-gray-500 hover:text-blue-500 dark:hover:text-blue-400 px-1.5 py-0.5 rounded hover:bg-blue-50 dark:hover:bg-blue-950/40 transition-colors shrink-0"
+                                title="Step through this session turn by turn"
+                              >
+                                ⏯ Replay
+                              </button>
                               {ws.status !== "closed" && (
                                 session.providerSessionId ? (
                                   <div className="flex shrink-0">
@@ -2089,6 +2105,14 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
           )}
         </div>
       </div>
+      {replaySession && (
+        <SessionReplay
+          sessionId={replaySession.id}
+          sessionLabel={replaySession.label}
+          outputFormat={replaySession.outputFormat as AgentOutputFormat}
+          onClose={() => setReplaySession(null)}
+        />
+      )}
     </>
   );
 }

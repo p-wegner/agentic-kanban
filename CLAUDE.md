@@ -75,7 +75,7 @@ All git operations live in `packages/shared/src/lib/git-service.ts`. Both `packa
 
 ### Known Flaky Test Suites
 
-> **Use `pnpm test:mine` to skip these.** It runs only the unit suites that are reliably green in any environment (main checkout or worktree) — the unit-tests-marked-flaky below are excluded, so it's the fast, no-false-failures loop for day-to-day iteration. Use the full `pnpm test` only before mark-ready / for CI. Vitest args pass through: `pnpm test:mine -- --related <files>`.
+> **Use `pnpm test:mine` to skip these.** It runs only the unit suites that are reliably green in any environment (main checkout or worktree) — the unit-tests-marked-flaky below are excluded, so it's the fast, no-false-failures loop for day-to-day iteration. Use the full `pnpm test` only before mark-ready / for CI. `--changed HEAD` passes through: `pnpm test:mine -- --changed HEAD`. (**Note**: vitest 4 removed `--related`; use `pnpm exec vitest related <file>` from inside the package instead.)
 
 When a test in the table below fails and you haven't touched the relevant code, treat it as a **false failure** and do not waste time debugging it. Investigate only if you changed the underlying source files.
 
@@ -102,16 +102,23 @@ When a test in the table below fails and you haven't touched the relevant code, 
 - `test.skip()` on setup failure — log the reason; prefer a clear error over a silent skip
 
 ### Unit testing
-- **For refactoring: use `--related`** — run only tests that cover the files you changed, not the full suite:
+- **`--related` is BROKEN in vitest 4** — `CACError: Unknown option '--related'`. Do not use it.
+- **For a specific source file**: use the `vitest related` subcommand (from inside the package dir):
   ```
-  pnpm --filter agentic-kanban test -- --related packages/server/src/services/foo.service.ts
+  cd packages/server
+  pnpm exec vitest related src/services/foo.service.ts
   ```
-- **Get changed files from git** and pass them directly:
+- **For all git-changed files**: use `--changed HEAD` (works through `test:mine`):
   ```
-  pnpm --filter agentic-kanban test -- --related $(git diff --name-only HEAD)
+  pnpm test:mine -- --changed HEAD
   ```
 - **Full suite** (`pnpm --filter agentic-kanban test`) should only be used before committing or when cross-cutting changes may affect unrelated tests.
-- `--related` works on source files — vitest resolves which test files import them transitively.
+- **`nowOverride` pattern for time-dependent services**: inject an optional `now?: string` parameter into any service function that calls `new Date()` for staleness/expiry logic. Tests pass `new Date().toISOString()` or a relative offset — never a hardcoded ISO string that ages out.
+
+## TypeScript type-checking in worktrees
+Worktrees do **not** have their own `node_modules` — the directory only exists in the main checkout (`C:\andrena\agentic-kanban`). Running `pnpm --filter @agentic-kanban/client exec tsc --noEmit` or `pnpm build` inside a worktree will produce `Cannot find module 'react'` / `JSX.IntrinsicElements` errors that are **not caused by your changes**. To validate your changes:
+- Run `pnpm install` once in the worktree root to create symlinks, OR
+- Accept that TS errors in the worktree are environment noise; verify correctness via the running dev server + Playwright instead.
 
 ## Visual Verification
 Every feature with UI must be visually verified using the `playwright-cli` skill.
@@ -174,6 +181,7 @@ When the user references `#N` (e.g., "review #70", "merge #65", "what's the stat
 | Rebase a workspace onto latest base | `POST /api/workspaces/:id/update-base` | Run `git rebase` directly |
 | Move an issue to a new status | MCP `move_issue` or CLI `issue move` | PATCH via REST unless no tool exists |
 | Send a follow-up message to a running agent | `POST /api/workspaces/:id/turn` | Spawn a new claude process |
+| Advance an issue's workflow state (e.g., to Review) | MCP `mcp__agentic-kanban__propose_transition` | `POST /api/workflows/workspaces/:id/transition` (note: NOT `/api/workspaces/:id/propose-transition` — that path returns 404) |
 
 ### MCP Tools are the primary interface
 
@@ -208,9 +216,9 @@ The **Butler** is a warm, per-project Claude assistant (Agent SDK, in-process) �
 ## Monorepo Commands
 - `pnpm dev` — start server + client (auto-detects worktree ports; default: server 3001, client 5173)
 - `pnpm dev:desktop` — start server + client + Tauri native window
-- `pnpm test:mine` — **fast iteration loop**: runs only reliably-green unit suites (server + mcp-server), skipping the known-flaky ones (see "Known Flaky Test Suites"). Use this while iterating; run the full suite once before mark-ready. Vitest args pass through: `pnpm test:mine -- --related <files>`.
+- `pnpm test:mine` — **fast iteration loop**: runs only reliably-green unit suites (server + mcp-server), skipping the known-flaky ones (see "Known Flaky Test Suites"). Use this while iterating; run the full suite once before mark-ready. `--changed HEAD` passes through: `pnpm test:mine -- --changed HEAD`.
 - `pnpm --filter agentic-kanban test` — Vitest unit tests (full suite — server package only)
-- `pnpm --filter agentic-kanban test -- --related <files>` — **targeted**: run only tests covering the listed source files (use for refactoring)
+- **targeted by source file** (vitest 4): `cd packages/server && pnpm exec vitest related src/services/foo.service.ts`
 - `pnpm test:e2e` — Playwright E2E tests
 - `pnpm db:migrate && pnpm db:seed` — initialize DB
 - `pnpm cli -- register <path>` — register a git repo as a project

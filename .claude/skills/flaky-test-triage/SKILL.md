@@ -57,12 +57,12 @@ You reach here if you touched the relevant source, or the test isn't in the tabl
 
 ## Step 4 — RE-RUN with the right strategy
 
-**Unit tests** — prefer targeted runs over the full suite:
+**Unit tests** — prefer targeted runs over the full suite (vitest 4: `--related` flag is broken — use `vitest related` subcommand or `--changed`):
 ```bash
-# Run only tests covering the files you changed
-pnpm --filter agentic-kanban test -- --related $(git diff --name-only HEAD)
-# Or name specific source files:
-pnpm --filter agentic-kanban test -- --related packages/server/src/services/foo.service.ts
+# Run tests for all git-changed files:
+pnpm test:mine -- --changed HEAD
+# Run tests for a specific source file (from inside the package):
+cd packages/server && pnpm exec vitest related src/services/foo.service.ts
 ```
 Use the **full suite** (`pnpm --filter agentic-kanban test`) only before committing or for cross-cutting changes.
 
