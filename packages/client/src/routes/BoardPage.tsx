@@ -99,7 +99,7 @@ export function BoardPage() {
   const [expandedCreatePanel, setExpandedCreatePanel] = useState<{ statusId: string; statusName: string; state: Partial<CreateIssueFormState> } | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>(() => {
     const stored = localStorage.getItem("kanban-board-view");
-    const validViews: ViewMode[] = ["kanban", "graph", "table", "agents", "timeline", "metrics", "butler"];
+    const validViews: ViewMode[] = ["kanban", "graph", "table", "agents", "timeline", "metrics", "butler", "workflows"];
     return validViews.includes(stored as ViewMode) ? (stored as ViewMode) : "kanban";
   });
   const [dynamicColumnScaling, setDynamicColumnScaling] = useState(false);
