@@ -102,16 +102,20 @@ When a test in the table below fails and you haven't touched the relevant code, 
 - `test.skip()` on setup failure — log the reason; prefer a clear error over a silent skip
 
 ### Unit testing
-- **For refactoring: use `--related`** — run only tests that cover the files you changed, not the full suite:
+- **For refactoring: use `vitest related`** — `--related` is NOT a `vitest run` flag; it is the `vitest related` subcommand. Must be invoked directly from the package directory:
   ```
-  pnpm --filter agentic-kanban test -- --related packages/server/src/services/foo.service.ts
+  cd packages/server && node node_modules/vitest/vitest.mjs related src/services/foo.service.ts
   ```
-- **Get changed files from git** and pass them directly:
+- **Narrow to a specific test file** — pass the test file path directly via test:mine (no flag needed):
   ```
-  pnpm --filter agentic-kanban test -- --related $(git diff --name-only HEAD)
+  pnpm test:mine -- src/__tests__/foo.test.ts
+  ```
+- **Get changed files from git** and pass to related:
+  ```
+  cd packages/server && node node_modules/vitest/vitest.mjs related $(git diff --name-only HEAD | grep packages/server | sed 's|packages/server/||')
   ```
 - **Full suite** (`pnpm --filter agentic-kanban test`) should only be used before committing or when cross-cutting changes may affect unrelated tests.
-- `--related` works on source files — vitest resolves which test files import them transitively.
+- `vitest related` takes **source** files and resolves which test files import them transitively.
 
 ## Visual Verification
 Every feature with UI must be visually verified using the `playwright-cli` skill.
@@ -208,9 +212,9 @@ The **Butler** is a warm, per-project Claude assistant (Agent SDK, in-process) �
 ## Monorepo Commands
 - `pnpm dev` — start server + client (auto-detects worktree ports; default: server 3001, client 5173)
 - `pnpm dev:desktop` — start server + client + Tauri native window
-- `pnpm test:mine` — **fast iteration loop**: runs only reliably-green unit suites (server + mcp-server), skipping the known-flaky ones (see "Known Flaky Test Suites"). Use this while iterating; run the full suite once before mark-ready. Vitest args pass through: `pnpm test:mine -- --related <files>`.
+- `pnpm test:mine` — **fast iteration loop**: runs only reliably-green unit suites (server + mcp-server), skipping the known-flaky ones (see "Known Flaky Test Suites"). Use this while iterating; run the full suite once before mark-ready. Pass a test file pattern to narrow: `pnpm test:mine -- src/__tests__/foo.test.ts`.
 - `pnpm --filter agentic-kanban test` — Vitest unit tests (full suite — server package only)
-- `pnpm --filter agentic-kanban test -- --related <files>` — **targeted**: run only tests covering the listed source files (use for refactoring)
+- `cd packages/server && node node_modules/vitest/vitest.mjs related <source-file>` — **targeted**: run only tests covering a source file. Note: `vitest related` is a subcommand, NOT a `--related` flag on `vitest run`.
 - `pnpm test:e2e` — Playwright E2E tests
 - `pnpm db:migrate && pnpm db:seed` — initialize DB
 - `pnpm cli -- register <path>` — register a git repo as a project
