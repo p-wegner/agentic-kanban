@@ -404,6 +404,10 @@ export function createWorkspaceCrudService(deps: {
     let claudeProfile: string | undefined;
     let agentCommand: string | undefined;
     let resolvedProvider: ProviderName = "claude";
+    // Tracks whether the workspace row was committed to the DB. Used to decide
+    // between rollback-and-throw (post-insert failure) vs insert-then-return-error
+    // (pre-insert failure) in the catch block.
+    let workspaceInserted = false;
 
     try {
       const { issue, project, setupConfig } = await resolveIssueAndProject(input.issueId);
@@ -455,6 +459,7 @@ export function createWorkspaceCrudService(deps: {
         baseCommitSha, requiresReview, thoroughReview, planMode, includeVisualProof,
         skillId: effectiveSkillId, claudeProfile, agentCommand, resolvedProvider, model: agentConfig.model, now,
       });
+      workspaceInserted = true;
 
       // Place the workspace on the workflow start node + sync the derived status.
       // Falls back to the legacy "In Progress" move when the issue has no workflow.
@@ -496,6 +501,27 @@ export function createWorkspaceCrudService(deps: {
       };
     } catch (err) {
       if (err instanceof WorkspaceError) throw err;
+      if (workspaceInserted) {
+        // The workspace row was committed but the agent failed to start.
+        // Atomically roll back: delete the row and remove the orphaned worktree,
+        // then re-throw so the route returns 500 instead of a misleading 201.
+        const errorMsg = err instanceof Error ? err.message : String(err);
+        console.error(`[workspaces] agent launch failed, rolling back workspace ${id}: ${errorMsg}`);
+        try {
+          await database.delete(workspaces).where(eq(workspaces.id, id));
+        } catch (dbErr) {
+          console.warn(`[workspaces] failed to delete workspace row during rollback: ${dbErr instanceof Error ? dbErr.message : String(dbErr)}`);
+        }
+        if (!isDirect && worktreePath && repoPath) {
+          try {
+            await gitService.removeWorktree(repoPath, worktreePath);
+            console.log(`[workspaces] cleaned up orphaned worktree during rollback: ${worktreePath}`);
+          } catch (cleanupErr) {
+            console.warn(`[workspaces] failed to remove worktree during rollback: ${cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr)}`);
+          }
+        }
+        throw err;
+      }
       return handleCreateFailure(err, {
         id, issueId: input.issueId, branch, worktreePath, repoPath, baseBranch, isDirect,
         baseCommitSha, requiresReview, thoroughReview, planMode, includeVisualProof,

@@ -155,7 +155,7 @@ describe("workspace.service", () => {
       }
     });
 
-    it("rolls back the worktree and returns an error result when agent spawn fails", async () => {
+    it("rolls back the DB row and the worktree when agent spawn fails, and throws", async () => {
       const { issueId } = await seedProjectAndIssue(db);
       const gitService = createFakeGitService();
       const sessionManager = createMockSessionManager();
@@ -168,12 +168,14 @@ describe("workspace.service", () => {
         gitService,
       });
 
-      const result = await service.createWorkspace({ issueId, branch: "feature/ak-1-fail" });
+      await expect(service.createWorkspace({ issueId, branch: "feature/ak-1-fail" })).rejects.toThrow("spawn ENOENT");
 
-      // Failure is surfaced via the error field, not a thrown exception
-      expect(result.error).toBe("spawn ENOENT");
       // Orphaned worktree was cleaned up
       expect(gitService.removeWorktree).toHaveBeenCalledWith("/tmp/test-repo", "/tmp/test-repo/.worktrees/feature-1");
+
+      // No workspace row must remain in the DB (atomic rollback)
+      const wsRows = await db.select().from(workspaces);
+      expect(wsRows).toHaveLength(0);
     });
   });
 
