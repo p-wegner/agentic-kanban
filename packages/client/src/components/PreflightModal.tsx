@@ -47,6 +47,7 @@ export function PreflightModal({
   const [editDescription, setEditDescription] = useState(issueDescription);
   const [isEditing, setIsEditing] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   const badge = verdictLabel(result.verdict);
   const isBlocking = result.verdict !== "ready";
@@ -54,6 +55,7 @@ export function PreflightModal({
   async function handleSaveAndRetry() {
     if (saving) return;
     setSaving(true);
+    setSaveError(null);
     try {
       await apiFetch(`/api/issues/${issueId}`, {
         method: "PATCH",
@@ -61,6 +63,8 @@ export function PreflightModal({
       });
       setIsEditing(false);
       onRetry(editTitle.trim(), editDescription);
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : "Failed to save ticket");
     } finally {
       setSaving(false);
     }
@@ -112,6 +116,9 @@ export function PreflightModal({
           {/* Inline editor */}
           {isEditing ? (
             <div className="space-y-2">
+              {saveError && (
+                <p className="text-xs text-red-600 dark:text-red-400">{saveError}</p>
+              )}
               <label className="text-xs font-medium text-gray-600 dark:text-gray-400 block">Title</label>
               <input
                 type="text"
@@ -135,7 +142,7 @@ export function PreflightModal({
           <div className="flex gap-2">
             {isBlocking && !isEditing && (
               <button
-                onClick={() => setIsEditing(true)}
+                onClick={() => { setIsEditing(true); setSaveError(null); }}
                 className="text-sm px-3 py-1.5 border border-gray-300 dark:border-gray-600 rounded text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
               >
                 Edit ticket
