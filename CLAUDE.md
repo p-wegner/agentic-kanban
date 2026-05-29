@@ -45,6 +45,8 @@ Cleanroom reimplementation of [vibe-kanban](https://github.com/BloopAI/vibe-kanb
 ### Cross-cutting / Windows
 - **Hook paths on Windows**: Use **forward slashes** in `settings.json` hook commands. `\\` gets mangled by Claude Code's hook runner → `MODULE_NOT_FOUND`. Relative paths like `.claude/hooks/...` also fail when CWD shifts. `$CLAUDE_PROJECT_DIR` is not expanded in hook command strings.
 - **Git tests on Windows**: Use `.trim()` for file content assertions (CRLF vs LF); test git output for keywords, not exact strings.
+- **`git stash` in worktrees is dangerous**: `git stash` + `git stash pop` can silently discard ALL tracked changes, leaving only untracked files. Always verify after pop: `git diff --stat HEAD`. Prefer a WIP commit (`git commit --amend`) over stashing in a worktree.
+- **Migration number collisions**: Parallel feature branches independently pick the same "next" migration number because each worktree starts from the same base. Before creating a migration, check the highest number in the **main checkout** (`C:\andrena\agentic-kanban\packages\shared\drizzle`), not the worktree — multiple branches in flight will all see the same last number. Use the kanban server's copy as ground truth.
 
 ### Git service — single source of truth
 All git operations live in `packages/shared/src/lib/git-service.ts`. Both `packages/server/src/services/git.service.ts` and `packages/mcp-server/src/git-service.ts` are thin re-exports — **edit only the shared file**.
