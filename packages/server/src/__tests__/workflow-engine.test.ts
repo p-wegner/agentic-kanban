@@ -10,6 +10,7 @@ import {
   buildTransitionBlock,
   getStartNode,
   evaluateCondition,
+  getJoinStrategy,
 } from "@agentic-kanban/shared/lib/workflow-engine";
 import { createTestDb, type TestDb } from "./helpers/test-db.js";
 import { ensureBuiltinSkills } from "../db/seed.js";
@@ -274,5 +275,15 @@ describe("workflow-engine", () => {
     expect(block).toContain("propose_transition");
     expect(block).toContain("ws-123");
     expect(block).toContain("Review");
+  });
+
+  it("parses join strategy from node config (defaults to artifacts)", () => {
+    expect(getJoinStrategy(null)).toBe("artifacts");
+    expect(getJoinStrategy("")).toBe("artifacts");
+    expect(getJoinStrategy("not json")).toBe("artifacts");
+    expect(getJoinStrategy(JSON.stringify({ guidance: "x" }))).toBe("artifacts");
+    expect(getJoinStrategy(JSON.stringify({ joinStrategy: "artifacts" }))).toBe("artifacts");
+    expect(getJoinStrategy(JSON.stringify({ joinStrategy: "merge" }))).toBe("merge");
+    expect(getJoinStrategy(JSON.stringify({ joinStrategy: "merge", guidance: "x" }))).toBe("merge");
   });
 });

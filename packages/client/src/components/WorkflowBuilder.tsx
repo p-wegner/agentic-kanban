@@ -338,6 +338,15 @@ export function WorkflowBuilder({
               <label className="block text-xs">Max visits (0 = unlimited)
                 <input type="number" min={0} value={selectedNode.data.maxVisits} onChange={(e) => patchNode(selectedNode.id, { maxVisits: Number(e.target.value) || 0 })} className="w-full mt-0.5 border rounded px-2 py-1 dark:bg-gray-800 dark:border-gray-600" />
               </label>
+              {selectedNode.data.nodeType === "parallel-join" && (
+                <label className="block text-xs">Join strategy
+                  <select value={readJoinStrategy(selectedNode.data.config)} onChange={(e) => patchNode(selectedNode.id, { config: writeJoinStrategy(selectedNode.data.config, e.target.value) })} className="w-full mt-0.5 border rounded px-2 py-1 dark:bg-gray-800 dark:border-gray-600">
+                    <option value="artifacts">Artifacts — agent merges branches by hand</option>
+                    <option value="merge">Auto-merge child branches into this branch</option>
+                  </select>
+                  <span className="block text-[10px] text-gray-400 mt-0.5">Auto-merge suits additive work (each child writes a different file). Conflicting merges are auto-aborted and left for the agent.</span>
+                </label>
+              )}
               <button onClick={deleteSelected} className="text-xs text-red-600 hover:text-red-700">Delete node</button>
             </div>
           ) : selectedEdge ? (
@@ -360,6 +369,20 @@ export function WorkflowBuilder({
       </div>
     </div>
   );
+}
+
+/** Read the join strategy from a node's JSON config (defaults to "artifacts"). */
+function readJoinStrategy(config: string | null): string {
+  if (!config) return "artifacts";
+  try { return (JSON.parse(config) as { joinStrategy?: string }).joinStrategy === "merge" ? "merge" : "artifacts"; }
+  catch { return "artifacts"; }
+}
+/** Write the join strategy into a node's JSON config, preserving other keys. */
+function writeJoinStrategy(config: string | null, strategy: string): string | null {
+  let obj: Record<string, unknown> = {};
+  if (config) { try { obj = JSON.parse(config) as Record<string, unknown>; } catch { obj = {}; } }
+  if (strategy === "merge") obj.joinStrategy = "merge"; else delete obj.joinStrategy;
+  return Object.keys(obj).length ? JSON.stringify(obj) : null;
 }
 
 function cap(s: string) { return s.charAt(0).toUpperCase() + s.slice(1).replace(/-/g, " "); }
