@@ -13,6 +13,10 @@ export const projects = sqliteTable("projects", {
   setupBlocking: integer("setup_blocking", { mode: "boolean" }).notNull().default(true),
   setupEnabled: integer("setup_enabled", { mode: "boolean" }).notNull().default(true),
   teardownScript: text("teardown_script"),
+  /** Auto-retry tests classified as flakes (uses flake-classifier). Default: true. */
+  autoRetryFlakes: integer("auto_retry_flakes", { mode: "boolean" }).default(true),
+  /** Maximum number of automatic retries for flake-classified test failures. Default: 2. */
+  maxRetries: integer("max_retries").default(2),
   createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
   updatedAt: text("updated_at").notNull().$defaultFn(() => new Date().toISOString()),
 });

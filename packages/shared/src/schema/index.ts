@@ -15,6 +15,12 @@ export { issueArtifacts, issueArtifactsRelations } from "./issue-artifacts.js";
 export { scheduledRuns } from "./scheduled-runs.js";
 export { failurePatterns } from "./failure-patterns.js";
 export {
+  flakyTests,
+  flakyTestsRelations,
+  testRetryDecisions,
+  testRetryDecisionsRelations,
+} from "./flaky-tests.js";
+export {
   workflowTemplates,
   workflowNodes,
   workflowEdges,
