@@ -2,6 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { db, schema } from "../db.js";
 import { eq } from "drizzle-orm";
+import { requireEntity } from "../db-utils.js";
 
 // Strip ANSI escape sequences
 function stripAnsi(str: string): string {
@@ -28,9 +29,8 @@ export function registerReadTerminal(server: McpServer) {
       const sessionRows = await db.select().from(schema.sessions)
         .where(eq(schema.sessions.id, sessionId))
         .limit(1);
-      if (sessionRows.length === 0) {
-        return { content: [{ type: "text" as const, text: `Session ${sessionId} not found` }] };
-      }
+      const r = requireEntity(sessionRows, sessionId, "Session");
+      if (!r.ok) return r.error;
 
       const rows = await db.select().from(schema.sessionMessages)
         .where(eq(schema.sessionMessages.sessionId, sessionId))
@@ -50,7 +50,7 @@ export function registerReadTerminal(server: McpServer) {
             sessionId,
             totalMessages: rows.length,
             returned: messages.length,
-            sessionStatus: sessionRows[0].status,
+            sessionStatus: r.value.status,
             messages,
           }, null, 2),
         }],

@@ -2,6 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { db, schema } from "../db.js";
 import { eq } from "drizzle-orm";
+import { requireEntity } from "../db-utils.js";
 
 export function registerGetContext(server: McpServer) {
   server.tool(
@@ -26,9 +27,8 @@ export function registerGetContext(server: McpServer) {
       }
 
       const project = await db.select().from(schema.projects).where(eq(schema.projects.id, pid)).limit(1);
-      if (project.length === 0) {
-        return { content: [{ type: "text" as const, text: `Project ${pid} not found` }] };
-      }
+      const rp = requireEntity(project, pid, "Project");
+      if (!rp.ok) return rp.error;
 
       const statuses = await db.select().from(schema.projectStatuses)
         .where(eq(schema.projectStatuses.projectId, pid))
@@ -51,7 +51,7 @@ export function registerGetContext(server: McpServer) {
       }
 
       const context = {
-        project: project[0],
+        project: rp.value,
         statuses: statuses.map(s => s.name),
         issueCounts: issuesByStatus,
         totalIssues: issues.length,

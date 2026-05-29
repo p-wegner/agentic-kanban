@@ -3,6 +3,7 @@ import { z } from "zod";
 import { db, schema } from "../db.js";
 import { eq } from "drizzle-orm";
 import * as gitService from "../git-service.js";
+import { requireEntity } from "../db-utils.js";
 
 export function registerGetWorkspaceDiff(server: McpServer) {
   server.tool(
@@ -17,11 +18,10 @@ export function registerGetWorkspaceDiff(server: McpServer) {
         .where(eq(schema.workspaces.id, workspaceId))
         .limit(1);
 
-      if (workspaces.length === 0) {
-        return { content: [{ type: "text" as const, text: `Workspace ${workspaceId} not found` }] };
-      }
+      const r = requireEntity(workspaces, workspaceId, "Workspace");
+      if (!r.ok) return r.error;
 
-      const ws = workspaces[0];
+      const ws = r.value;
       if (!ws.workingDir) {
         return { content: [{ type: "text" as const, text: "Workspace has no working directory" }] };
       }

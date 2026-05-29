@@ -3,6 +3,7 @@ import { z } from "zod";
 import { db, schema } from "../db.js";
 import { eq } from "drizzle-orm";
 import { notifyBoard } from "../notify.js";
+import { requireEntity } from "../db-utils.js";
 
 export function registerDeleteStatus(server: McpServer) {
   server.tool(
@@ -16,25 +17,24 @@ export function registerDeleteStatus(server: McpServer) {
         .from(schema.projectStatuses)
         .where(eq(schema.projectStatuses.id, statusId))
         .limit(1);
-      if (existing.length === 0) {
-        return { content: [{ type: "text" as const, text: `Status ${statusId} not found` }] };
-      }
+      const r = requireEntity(existing, statusId, "Status");
+      if (!r.ok) return r.error;
 
-      const projectId = existing[0].projectId;
+      const projectId = r.value.projectId;
 
       const linkedIssues = await db.select({ id: schema.issues.id })
         .from(schema.issues)
         .where(eq(schema.issues.statusId, statusId))
         .limit(1);
       if (linkedIssues.length > 0) {
-        return { content: [{ type: "text" as const, text: `Cannot delete status "${existing[0].name}" — it has linked issues. Move or delete those issues first.` }] };
+        return { content: [{ type: "text" as const, text: `Cannot delete status "${r.value.name}" — it has linked issues. Move or delete those issues first.` }] };
       }
 
       await db.delete(schema.projectStatuses).where(eq(schema.projectStatuses.id, statusId));
       notifyBoard(projectId, "mcp_delete_status");
 
       return {
-        content: [{ type: "text" as const, text: JSON.stringify({ id: statusId, name: existing[0].name, deleted: true }, null, 2) }],
+        content: [{ type: "text" as const, text: JSON.stringify({ id: statusId, name: r.value.name, deleted: true }, null, 2) }],
       };
     },
   );

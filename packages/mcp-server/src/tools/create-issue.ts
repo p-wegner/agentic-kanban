@@ -1,8 +1,9 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { eq, sql } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { prodDeps, type ToolDeps } from "./deps.js";
+import { mcpError, resolveStatusByName, nextIssueNumber } from "../db-utils.js";
 
 export function registerCreateIssue(server: McpServer, deps: ToolDeps = prodDeps) {
   const { db, schema, notifyBoard } = deps;
@@ -32,26 +33,21 @@ export function registerCreateIssue(server: McpServer, deps: ToolDeps = prodDeps
       }
 
       // Find status ID by name or default to first
-      const statuses = await db.select().from(schema.projectStatuses)
-        .where(eq(schema.projectStatuses.projectId, pid))
-        .orderBy(schema.projectStatuses.sortOrder);
-
       let statusId: string;
       if (statusName) {
-        const found = statuses.find(s => s.name === statusName);
-        if (!found) {
-          return { content: [{ type: "text" as const, text: `Status '${statusName}' not found. Available: ${statuses.map(s => s.name).join(", ")}` }] };
-        }
-        statusId = found.id;
+        const r = await resolveStatusByName(db, schema, pid, statusName);
+        if (!r.ok) return r.error;
+        statusId = r.statusId;
       } else {
+        const statuses = await db.select({ id: schema.projectStatuses.id })
+          .from(schema.projectStatuses)
+          .where(eq(schema.projectStatuses.projectId, pid))
+          .orderBy(schema.projectStatuses.sortOrder)
+          .limit(1);
         statusId = statuses[0].id;
       }
 
-      const maxResult = await db
-        .select({ maxNum: sql<number | null>`max(${schema.issues.issueNumber})` })
-        .from(schema.issues)
-        .where(eq(schema.issues.projectId, pid));
-      const issueNumber = (maxResult[0]?.maxNum ?? 0) + 1;
+      const issueNumber = await nextIssueNumber(db, schema, pid);
 
       const id = randomUUID();
       const now = new Date().toISOString();

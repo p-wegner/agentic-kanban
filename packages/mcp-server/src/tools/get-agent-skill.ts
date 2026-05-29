@@ -2,6 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { db, schema } from "../db.js";
 import { eq } from "drizzle-orm";
+import { requireEntity, mcpError } from "../db-utils.js";
 
 export function registerGetAgentSkill(server: McpServer) {
   server.tool(
@@ -24,7 +25,7 @@ export function registerGetAgentSkill(server: McpServer) {
       }
 
       if (rows.length === 0) {
-        return { content: [{ type: "text" as const, text: `Skill not found: ${skillId ?? name}` }] };
+        return mcpError(`Skill not found: ${skillId ?? name}`);
       }
 
       return {
