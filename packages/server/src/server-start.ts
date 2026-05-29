@@ -12,6 +12,7 @@ import { createMonitorSetup } from "./startup/monitor-setup.js";
 import { setupProcessHandlers } from "./startup/process-handlers.js";
 import { setupRoutes } from "./startup/route-setup.js";
 import { setupScheduledTasks } from "./startup/scheduled-tasks.js";
+import { startMonitorButler } from "./services/monitor-butler.js";
 import { runStartupTasks } from "./startup/startup-tasks.js";
 import { runSessionRestore } from "./startup/session-restore.js";
 import { startBackupScheduler } from "./startup/backup-scheduler.js";
@@ -58,6 +59,9 @@ export async function startServer(port?: number, hostname?: string) {
   injectWebSocket(server);
 
   setupScheduledTasks(serverPort);
+  // Autonomous Monitor Butler — cron-driven board-health agent (gated by the
+  // monitor_butler_enabled preference; off by default). See services/monitor-butler.ts.
+  startMonitorButler();
   setupProcessHandlers(server, agentService);
 
   // Periodic database backups (interval from the backup_interval_min preference).
