@@ -32,13 +32,22 @@ pnpm cli -- session analyze <session-id>
 ```
 
 ### `--last`
-Analyze the most recent agent sessions:
+Analyze the most recent agent sessions.
 
+**In the main checkout** (`C:\andrena\agentic-kanban`), use the CLI:
 ```bash
 pnpm cli -- session recent --limit 5
 ```
-
 Then pick the most interesting sessions and run `session analyze` on each.
+
+**In a worktree** (or when CLI fails with `ERR_MODULE_NOT_FOUND`), query the session_store SQL database directly:
+```sql
+-- Get recent sessions with multiple turns (more interesting for analysis)
+SELECT s.id, s.branch, COUNT(t.turn_index) as turns, s.updated_at
+FROM sessions s JOIN turns t ON t.session_id = s.id
+GROUP BY s.id HAVING turns > 1 ORDER BY s.updated_at DESC LIMIT 10;
+```
+Then read checkpoints and turns for the most interesting session IDs.
 
 ### `--session <path>`
 Read a specific JSONL transcript file. Use session-inspector patterns:

@@ -51,6 +51,7 @@ All git operations live in `packages/shared/src/lib/git-service.ts`. Both `packa
 
 - **Detached HEAD guard in worktrees**: `syncBranchToHead()` forces branch ref to match HEAD before every merge. `ensureOnBranch()` reattaches HEAD after worktree creation and successful rebase.
 - **Conflict detection uses `git merge-tree`**: `detectConflicts()` uses `git merge-tree --write-tree --no-messages HEAD <baseBranch>` (read-only). Exit 0 = clean, exit 1 = conflicts. Parse unique filenames from staged-entry records on stdout. Never use `merge --no-commit --no-ff` — it mutates the working tree and races on concurrent requests.
+- **`execGit` rejects on any non-zero exit** — use raw `execFile` for commands where a non-zero exit carries meaningful output (e.g. `merge-tree` exits 1 for conflicts, not errors). `detectConflicts()` already does this; replicate the pattern for any new git commands with meaningful non-zero exits.
 - **Direct workspace diff only shows tracked files**: `git diff HEAD` excludes untracked files. `getWorkingTreeDiff()` also runs `git ls-files --others --exclude-standard` for new files.
 
 ### E2E testing
