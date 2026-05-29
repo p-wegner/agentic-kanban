@@ -35,12 +35,24 @@ test.describe("Keyboard Shortcuts UI", () => {
     await expect(page.locator("text=Show keyboard shortcuts")).toBeVisible();
     await expect(page.locator("text=Create new issue")).toBeVisible();
 
+    // Verify view-switch shortcuts are shown
+    await expect(page.locator("text=Switch to Board view")).toBeVisible();
+    await expect(page.locator("text=Switch to Graph view")).toBeVisible();
+    await expect(page.locator("text=Switch to Table view")).toBeVisible();
+    await expect(page.locator("text=Open Quick Tasks panel")).toBeVisible();
+    await expect(page.locator("text=Open settings")).toBeVisible();
+
     // Verify key badges are shown
     const kbdElements = page.locator("kbd");
     const kbdTexts = await kbdElements.allTextContents();
     expect(kbdTexts).toContain("/");
     expect(kbdTexts).toContain("Escape");
     expect(kbdTexts).toContain("?");
+    expect(kbdTexts).toContain("b");
+    expect(kbdTexts).toContain("g");
+    expect(kbdTexts).toContain("t");
+    expect(kbdTexts).toContain("q");
+    expect(kbdTexts).toContain("s");
   });
 
   test("Escape dismisses shortcut help overlay", async ({ page }) => {
