@@ -52,6 +52,15 @@ pnpm cli -- session recent --limit 5
 
 Then pick the most interesting sessions and run `session analyze` on each (or query turns/checkpoints via SQL).
 
+**In a worktree** (or when CLI fails with `ERR_MODULE_NOT_FOUND`), query the session_store SQL database directly:
+```sql
+-- Get recent sessions with multiple turns (more interesting for analysis)
+SELECT s.id, s.branch, COUNT(t.turn_index) as turns, s.updated_at
+FROM sessions s JOIN turns t ON t.session_id = s.id
+GROUP BY s.id HAVING turns > 1 ORDER BY s.updated_at DESC LIMIT 10;
+```
+Then read checkpoints and turns for the most interesting session IDs.
+
 ### `--session <path>`
 Read a specific JSONL transcript file. Use session-inspector patterns:
 - Always use `Get-Content $path -Tail N` (never read the whole file)

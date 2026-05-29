@@ -58,6 +58,7 @@ export interface CreateWorkspaceInput {
   requiresReview?: boolean;
   thoroughReview?: boolean;
   planMode?: boolean;
+  tddMode?: boolean;
   includeVisualProof?: boolean;
   skipSetup?: boolean;
   customPrompt?: string;

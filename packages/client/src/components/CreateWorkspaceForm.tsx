@@ -56,6 +56,7 @@ export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCr
   const [isDirect, setIsDirect] = useState(false);
   const [requiresReview, setRequiresReview] = useState(prefs.auto_review !== "false");
   const [planMode, setPlanMode] = useState(false);
+  const [tddMode, setTddMode] = useState(prefs.tdd_mode === "true");
   const [skipSetup, setSkipSetup] = useState(false);
   const [branches, setBranches] = useState<{ local: string[]; remote: string[] } | null>(null);
   const [availableSkills, setAvailableSkills] = useState<{ id: string; name: string; description: string }[]>([]);
@@ -96,6 +97,10 @@ export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCr
         setSelectedProfile("");
       }
       setSelectedModel(settings.default_model || "");
+      // Per-project TDD preference (falls back to global tdd_mode)
+      const projectTddKey = project ? `tdd_mode_${project.id}` : null;
+      const tddPref = projectTddKey ? (settings[projectTddKey] ?? settings.tdd_mode) : settings.tdd_mode;
+      setTddMode(tddPref === "true");
     });
     const url = project ? `/api/agent-skills?projectId=${project.id}` : "/api/agent-skills";
     apiFetch<{ id: string; name: string; description: string }[]>(url)
@@ -109,7 +114,7 @@ export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCr
     setLocalError(null);
     onSubmitting?.();
     try {
-      const body: Record<string, unknown> = { issueId: issue.id, isDirect, requiresReview, planMode, skipSetup };
+      const body: Record<string, unknown> = { issueId: issue.id, isDirect, requiresReview, planMode, tddMode, skipSetup };
       if (selectedSkillId) body.skillId = selectedSkillId;
       if (selectedProfile) {
         const colonIdx = selectedProfile.indexOf(":");
@@ -130,6 +135,14 @@ export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCr
         method: "POST",
         body: JSON.stringify(body),
       });
+      // Persist TDD mode preference per-project (best-effort)
+      if (project) {
+        const prefKey = `tdd_mode_${project.id}`;
+        apiFetch("/api/preferences/settings", {
+          method: "PUT",
+          body: JSON.stringify({ [prefKey]: String(tddMode) }),
+        }).catch(() => {});
+      }
       onCreated({ id: result.id, sessionId: result.sessionId });
     } catch (err) {
       setLocalError(err instanceof Error ? err.message : "Failed to create workspace");
@@ -143,6 +156,7 @@ export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCr
     setIsDirect(false);
     setRequiresReview(false);
     setPlanMode(false);
+    setTddMode(false);
     setSkipSetup(false);
     onCancel();
   }
@@ -241,6 +255,16 @@ export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCr
           className="rounded border-gray-300"
         />
         <span>Plan mode (agent plans before implementing)</span>
+      </label>
+      <label className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400">
+        <input
+          type="checkbox"
+          checked={tddMode}
+          onChange={(e) => setTddMode(e.target.checked)}
+          className="rounded border-gray-300"
+          data-testid="tdd-mode-checkbox"
+        />
+        <span>TDD mode (write failing AC tests before implementing)</span>
       </label>
       {project?.setupScript && (
         <label className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400">
