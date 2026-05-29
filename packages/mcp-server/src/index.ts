@@ -14,6 +14,7 @@ import { registerMoveIssue } from "./tools/move-issue.js";
 import { registerListWorkspaces } from "./tools/list-workspaces.js";
 import { registerStartWorkspace } from "./tools/start-workspace.js";
 import { registerGetWorkspaceDiff } from "./tools/get-workspace-diff.js";
+import { registerGetWorkspaceScorecard } from "./tools/get-workspace-scorecard.js";
 import { registerMergeWorkspace } from "./tools/merge-workspace.js";
 import { registerCloseWorkspace } from "./tools/close-workspace.js";
 import { registerStopWorkspace } from "./tools/stop-workspace.js";
@@ -64,6 +65,7 @@ const TOOL_REGISTRARS: Record<string, (server: McpServer) => void> = {
   list_workspaces: registerListWorkspaces,
   start_workspace: registerStartWorkspace,
   get_workspace_diff: registerGetWorkspaceDiff,
+  get_workspace_scorecard: registerGetWorkspaceScorecard,
   merge_workspace: registerMergeWorkspace,
   close_workspace: registerCloseWorkspace,
   stop_workspace: registerStopWorkspace,

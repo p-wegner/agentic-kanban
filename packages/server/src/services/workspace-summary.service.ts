@@ -43,6 +43,7 @@ export type WorkspaceSummary = {
     lastAssistantMessage?: string | null;
     pendingPlanPath?: string | null;
     planOnlyWarning?: boolean;
+    scorecard?: { score: number } | null;
   };
 };
 
@@ -110,6 +111,7 @@ export async function buildWorkspaceSummaryMap(
       diffStatCacheFilesChanged: workspaces.diffStatCacheFilesChanged,
       diffStatCacheInsertions: workspaces.diffStatCacheInsertions,
       diffStatCacheDeletions: workspaces.diffStatCacheDeletions,
+      scorecardScore: workspaces.scorecardScore,
     })
     .from(workspaces)
     .where(inArray(workspaces.issueId, issueIds));
@@ -145,6 +147,7 @@ export async function buildWorkspaceSummaryMap(
       planMode: mainWs.planMode,
       pendingPlanPath: mainWs.pendingPlanPath,
       planOnlyWarning: false,
+      scorecard: mainWs.scorecardScore !== null ? { score: mainWs.scorecardScore } : null,
     };
 
     if (mainWs.workingDir && mainWs.status !== "closed") {
