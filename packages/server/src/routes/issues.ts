@@ -2,17 +2,26 @@ import { Hono } from "hono";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import type { BoardEvents } from "../services/board-events.js";
+import type { SessionManager } from "../services/session.manager.js";
+import type { ShowdownContestant } from "@agentic-kanban/shared";
 import { analyzeDependencies, enhanceIssue, aiEstimateIssue, decomposeEpic, confirmEpicDecomposition } from "../services/issue-ai.service.js";
 import { createIssueService } from "../services/issue.service.js";
+import { createShowdownService } from "../services/showdown.service.js";
 import { parseJsonBody } from "../middleware/parse-body.js";
 import { createRouter } from "../middleware/create-router.js";
 import { wrapAiOperation } from "../middleware/ai-operation.js";
 import { runTicketPreflight } from "../services/ticket-preflight.service.js";
+import { WorkspaceError } from "../services/workspace-internals.js";
 
-export function createIssuesRoute(database: Database = db, options?: { boardEvents?: BoardEvents }) {
+export function createIssuesRoute(database: Database = db, options?: { boardEvents?: BoardEvents; getSessionManager?: () => SessionManager }) {
   const router = createRouter();
 
   const issueService = createIssueService({ database, boardEvents: options?.boardEvents });
+  const showdownService = createShowdownService({
+    database,
+    getSessionManager: options?.getSessionManager,
+    boardEvents: options?.boardEvents,
+  });
 
   // GET /api/issues?projectId=...&issueNumber=N
   router.get("/", async (c) => {
@@ -262,7 +271,33 @@ export function createIssuesRoute(database: Database = db, options?: { boardEven
     return c.json({ success: true });
   });
 
+  // POST /api/issues/:id/showdown — start a showdown with N contestants
+  router.post("/:id/showdown", async (c) => {
+    const issueId = c.req.param("id");
+    const body = await parseJsonBody<{ contestants: ShowdownContestant[] }>(c);
+    if (!Array.isArray(body.contestants) || body.contestants.length < 2) {
+      return c.json({ error: "contestants must be an array with at least 2 entries" }, 400);
+    }
+    try {
+      const result = await showdownService.createShowdown(issueId, body.contestants);
+      return c.json(result, 201);
+    } catch (err) {
+      if (err instanceof WorkspaceError) {
+        return c.json({ error: err.message }, err.code === "NOT_FOUND" ? 404 : 400);
+      }
+      throw err;
+    }
+  });
+
+  // GET /api/issues/:id/showdown — get active showdown for this issue
+  router.get("/:id/showdown", async (c) => {
+    const issueId = c.req.param("id");
+    const result = await showdownService.getShowdownByIssue(issueId);
+    if (!result) return c.json({ error: "No showdown found for this issue" }, 404);
+    return c.json(result);
+  });
+
   return router;
 }
 
-export const issuesRoute = createIssuesRoute();
+export const issuesRoute = createIssuesRoute(db, {});

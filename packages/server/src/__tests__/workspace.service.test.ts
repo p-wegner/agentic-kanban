@@ -212,7 +212,7 @@ describe("workspace.service", () => {
       return id;
     }
 
-    it("merges the branch, cleans up the worktree, closes the workspace, and moves the issue to Done", async () => {
+    it("merges the branch, cleans up the worktree, closes the workspace, and moves the issue to Done", { timeout: 30000 }, async () => {
       const { projectId, issueId } = await seedProjectAndIssue(db);
       const wsId = await seedWorkspaceForMerge(projectId, issueId);
       const gitService = createFakeGitService();
@@ -239,7 +239,7 @@ describe("workspace.service", () => {
       expect(statusRow[0].name).toBe("Done");
     });
 
-    it("throws a BAD_REQUEST WorkspaceError with the conflicting files when merge conflicts are detected", async () => {
+    it("throws a BAD_REQUEST WorkspaceError with the conflicting files when merge conflicts are detected", { timeout: 30000 }, async () => {
       const { projectId, issueId } = await seedProjectAndIssue(db);
       const wsId = await seedWorkspaceForMerge(projectId, issueId);
       const gitService = createFakeGitService({

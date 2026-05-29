@@ -16,6 +16,7 @@ import { createSessionsRoute } from "./sessions.js";
 import { createInsightsRoute } from "./insights.js";
 import { createFlakyTestsRoute } from "./flaky-tests.js";
 import { createMergeQueueRoute } from "./merge-queue.js";
+import { createShowdownsRoute } from "./showdowns.js";
 import { createWorkflowForkService } from "../services/workflow-fork.service.js";
 import type { Database } from "../db/index.js";
 import type { SessionManager } from "../services/session.manager.js";
@@ -45,7 +46,7 @@ export function createRoutes(database: Database, getSessionManager: () => Sessio
   routes.route("/projects", createButlerRoute(database, getSessionManager, options));
   routes.route("/projects", createAgentQuestionsRoute(database, getSessionManager, options));
   routes.route("/projects", createVoiceCaptureRoute(database, options));
-  routes.route("/issues", createIssuesRoute(database, options));
+  routes.route("/issues", createIssuesRoute(database, { ...options, getSessionManager }));
   routes.route("/workspaces", createWorkspacesRoute(database, getSessionManager, options));
   routes.route("/workspaces", createWorkspaceActionsRoute(getSessionManager, database, options));
   routes.route("/tags", createTagsRoute(database));
@@ -57,6 +58,7 @@ export function createRoutes(database: Database, getSessionManager: () => Sessio
   routes.route("/workflows", createWorkflowsRoute(database, { ...options, onWorkflowAdvanced }));
   routes.route("/scheduled-runs", createScheduledRunsRoute(database, getSessionManager, options?.boardEvents));
   routes.route("/merge-queue", createMergeQueueRoute(database, getSessionManager, options));
+  routes.route("/showdowns", createShowdownsRoute(database, getSessionManager, options));
   if (options?.boardEvents) {
     routes.route("/approvals", createApprovalsRoute(options.boardEvents));
   }

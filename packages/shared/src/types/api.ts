@@ -181,6 +181,15 @@ export interface WorkspaceSummary {
   closed: number;
   branches: string[];
   main?: MainWorkspaceInfo;
+  /** Set when workspaces in this issue belong to a showdown. */
+  showdown?: {
+    id: string;
+    /** 'active' | 'decided' */
+    status: string;
+    total: number;
+    /** Number of contestants that have reached idle/closed status. */
+    doneCount: number;
+  };
 }
 
 export interface IssueWithStatus {
@@ -266,6 +275,33 @@ export interface IssueArtifact {
   content: string;
   caption: string | null;
   createdAt: string;
+}
+
+export interface ShowdownContestant {
+  skillId?: string;
+  skillName?: string;
+  model?: string;
+  profile?: ProfileSelection;
+}
+
+export interface ShowdownContestantResult {
+  workspaceId: string;
+  label: string;
+  branch: string;
+  status: string;
+  skillName: string | null;
+  model: string | null;
+  diffStats?: { filesChanged: number; insertions: number; deletions: number } | null;
+}
+
+export interface ShowdownResponse {
+  id: string;
+  issueId: string;
+  status: string;
+  winnerWorkspaceId: string | null;
+  contestants: ShowdownContestantResult[];
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface WorkspaceWithIssue extends WorkspaceResponse {
