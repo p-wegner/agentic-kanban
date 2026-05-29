@@ -3,7 +3,7 @@
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Project Status
-Stage 13 complete + Tauri desktop (Stages 0-13 done). Tech stack: TypeScript monorepo — Hono + Drizzle + React + MCP SDK + Tauri v2. Current progress: `docs/state.md`. Feature catalog visually verified: 2026-05-26.
+Stage 13 complete + Tauri desktop (Stages 0-13 done). Tech stack: TypeScript monorepo — Hono + Drizzle + React + MCP SDK + Tauri v2. Current progress: `docs/state.md`. Feature catalog visually verified: 2026-05-29.
 
 ## Active Project
 The active project is "agentic-kanban" — always use this for board monitor cycles, workspace operations, and MCP tools.
@@ -27,7 +27,7 @@ Cleanroom reimplementation of [vibe-kanban](https://github.com/BloopAI/vibe-kanb
 > **Signal of scope creep**: touching more than 3–4 files for a task that sounds like a small change, or changing files whose names don't appear in the ticket description.
 
 ## Key Constraints
-- **Claude Code only** as the AI agent (no multi-agent support)
+- **Multiple agent providers** supported — Claude Code, Codex, and Copilot — selectable via the Agent Profile dropdown (Settings → Agent). Each provider has named profiles; Claude uses `~/.claude/settings_*.json`, Codex uses `~/.codex/<name>.config.toml`, Copilot uses the CLI default or a configured model profile.
 - **Local only** — no cloud, no multi-tenant, no OAuth
 - **Testability first** — E2E tests from day one, AI-runnable feedback loops
 - **Tech stack**: TypeScript (Hono + Drizzle + React + MCP SDK)

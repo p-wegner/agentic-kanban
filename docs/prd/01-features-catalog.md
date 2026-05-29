@@ -1,6 +1,6 @@
 # PRD-01: Features Catalog
 
-<!-- last-synced: 2026-05-26T12:00:00+02:00 | commit: 2e68fa0 -->
+<!-- last-synced: 2026-05-29T12:00:00+02:00 | commit: 522a1c5a -->
 
 Complete inventory of features, organized by category. Status reflects the current implementation (Stages 0–14 complete).
 
@@ -160,8 +160,14 @@ Complete inventory of features, organized by category. Status reflects the curre
 
 ### F-MCP-03: Agent Configuration
 - Configurable agent command and args (Settings panel)
-- `claude_profile` setting for gateway auth
-- Mock agent: built-in `mock` Claude profile (appears in Claude Profile dropdown; no separate toggle)
+- **Multi-provider Agent Profile dropdown** — selects agent provider and profile across three providers, each with named profiles:
+  - **Claude**: Default (Claude), anth, gateway, mock, zai
+  - **Codex**: Default, andrena-azure, orig
+  - **Copilot**: Default
+  - Help text: "Selects agent provider and profile. Claude uses ~/.claude/settings_*.json, Codex uses ~/.codex/<name>.config.toml, Copilot uses the CLI default or configured model profile."
+  - Board issue cards show a provider agent badge (e.g. "Copilot") on workspaces
+- **Default Model dropdown** (Profile default / Opus / Sonnet / Haiku), passed via `--model`; supports per-workspace overrides; ignored for custom-endpoint profiles (e.g. z.ai) and for Codex/Copilot
+- Mock agent: built-in `mock` Claude profile (appears in the Agent Profile dropdown under Claude; no separate toggle)
 - `auto_merge` and `review_auto_fix` settings
 - **Status: DONE**
 
@@ -180,7 +186,7 @@ Complete inventory of features, organized by category. Status reflects the curre
 - One session per project; turns fed into a single `query()` via a `Pushable` queue so context stays warm (no `--resume` respawn)
 - SDK `session_id` persisted to `butler_session_<projectId>` → survives server restarts
 - agentic-kanban MCP tools wired in (`options.mcpServers`); `bypassPermissions` (no human in the chat loop)
-- Reached via the **Butler** view (press `i`); also `POST .../butler/ask` (synchronous) for CLI/MCP
+- Reached via the **Butler** view (press `i`) and via a dedicated **Butler** tab in the board view switcher (shows a "Project Butler" panel with a "Start Butler" button when no session is running); also `POST .../butler/ask` (synchronous) for CLI/MCP
 - **Status: DONE**
 
 ### F-BUTLER-02: Chat, Streaming & Markdown
@@ -264,6 +270,7 @@ Complete inventory of features, organized by category. Status reflects the curre
 - `c` to create issue, `w` to create issue + start workspace
 - `q` to open Quick Tasks panel
 - `b` to switch to Board view, `g` to switch to Graph view, `t` to switch to Table view, `f` to switch to Timeline view, `l` to switch to Agents view
+- Additional views (Metrics, Butler, Workflows, Insights, Swimlane, Flaky) are reachable by clicking their tabs in the board view switcher
 - `g + s` to open Settings
 - Help overlay (`?`) lists all shortcuts
 - **Status: DONE**
@@ -303,7 +310,7 @@ Complete inventory of features, organized by category. Status reflects the curre
 - **Status: DONE**
 
 ### F-UI-10: Board Views
-- Five view modes: Board (kanban columns), Graph (dependency DAG), Table (flat sortable list), Agents, Timeline
+- Eleven view modes, in order: Board (kanban columns), Graph (dependency DAG), Table (flat sortable list), Agents, Timeline, Metrics, Butler, Workflows, Insights, Swimlane, Flaky (see F-UI-18 through F-UI-22 and F-BUTLER-01 for the analytical/Butler views)
 - Table view: sortable columns (#, Title, Status, Priority, Type, Estimate, Updated, Tags); **Active only** default filter (dropdown: Active only, All); row click opens detail panel
 - Graph view: nodes colored by status, dependency arrows, "Show completed" toggle, zoom controls (+/−/reset), status legend
 - Agents view: lists active agent sessions across workspaces
@@ -364,6 +371,48 @@ Complete inventory of features, organized by category. Status reflects the curre
 - "Drop issues here to move to Backlog" drag-drop target area at the top of the panel
 - "Backlog is empty" empty state when no issues have Backlog status
 - Issues with Backlog status appear here; dragging an issue from the board drops it into the Backlog panel
+- **Status: DONE**
+
+### F-UI-18: Metrics View
+- Board view tab showing aggregate project metrics
+- KPI cards: Total Issues; Active (In Progress + In Review); Completed (with % completion rate); Blocked (issues that have blocking dependencies)
+- **By Status** donut chart with per-status counts and percentages
+- **By Priority** breakdown (Critical / High / Medium / Low)
+- **By Type** breakdown (Task / Feature / Bug / Chore)
+- GitHub-style **Issue Creation Activity (past 16 weeks)** contribution heatmap with a Less→More legend
+- **Recently Closed** list of clickable issue buttons; clicking opens the issue detail panel
+- **Status: DONE**
+
+### F-UI-19: Insights View (Agent Performance Insights)
+- Board view tab; subtitle "Cost, tokens, success rate, and latency across agent sessions."
+- Time-range toggle: 7d / 30d / 90d / All
+- KPI cards: Total Sessions; Success Rate (with N successful); Total Cost (in $); Total Tokens
+- Sortable **By Skill** table and sortable **By Model** table, columns: Skill/Model, Sessions, Success Rate, Avg Cost, Total Cost, Avg Tokens, Avg Turns, P50 Duration, P95 Duration
+- **Status: DONE**
+
+### F-UI-20: Workflows View
+- Top-level board view tab; heading "Workflows" with **Templates** and **Analytics** sub-tabs and a "+ New workflow" button
+- Description: "Workflow graphs route issues of a given ticket type through configurable stages (each mapped to a board status, with an attached skill). Built-in workflows are read-only — duplicate one to customize."
+- Workflow cards each show name, an optional type/built-in badge (e.g. "built-in", "feature", "bug default"), a description, an "N stages · M transitions" line, and actions (built-in: View + Duplicate; custom: Edit + Duplicate + Delete)
+- Built-in workflows: Simple Ticket (default), Simple Bug (bug default), Hard Bug, Research Task, Migration with AI, Parallel Review
+- Example custom workflows: "AI Migration (Advanced)" (18 stages · 24 transitions), "Azure DevOps + AKS Bootstrap" (feature)
+- This is the UI surface for the configurable-workflow-graphs epic
+- **Status: DONE**
+
+### F-UI-21: Swimlane View
+- Board view tab presenting a priority × status matrix
+- Top: active status columns (Todo, In Progress, In Review, AI Reviewed) with counts
+- Side: collapsible priority bands (Critical, High, Medium, Low), each with a count
+- Issue cards placed in the cell for their (priority, status); empty cells show "—"
+- Cards are clickable to open the issue detail panel
+- **Status: DONE**
+
+### F-UI-22: Flaky Tests Radar View
+- Board view tab; heading "Flaky Tests Radar"
+- Time-window dropdown (Last 7d / 30d / 90d), a "Pinned only" checkbox, and a Refresh button
+- Empty state: "No flaky tests detected — Tests appear here when they pass in some sessions and fail in others within the same window. Ingest test results via POST /api/flaky-tests/parse."
+- Footer: "0 flaky tests detected · 5%–95% failure rate required" and "MCP: list_flaky_tests"
+- Corresponds to the closed "Flaky test radar" ticket #58
 - **Status: DONE**
 
 ## Category: Infrastructure
