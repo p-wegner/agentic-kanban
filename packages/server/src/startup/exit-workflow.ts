@@ -1,3 +1,4 @@
+import { syncCurrentNodeToStatus } from "@agentic-kanban/shared/lib/workflow-engine";
 import { issues, preferences, projectStatuses, projects, scheduledRuns, sessions, workspaces } from "@agentic-kanban/shared/schema";
 import { eq } from "drizzle-orm";
 import { execFile } from "node:child_process";
@@ -173,7 +174,10 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge }:
       if (workspace.isDirect && !committedChanges) {
         const doneStatus = findStatus("Done");
         await db.update(workspaces).set({ status: "closed", workingDir: null, updatedAt: now }).where(eq(workspaces.id, workspaceId));
-        if (doneStatus) await db.update(issues).set({ statusId: doneStatus.id, updatedAt: now }).where(eq(issues.id, issueId));
+        if (doneStatus) {
+          await db.update(issues).set({ statusId: doneStatus.id, updatedAt: now }).where(eq(issues.id, issueId));
+          await syncCurrentNodeToStatus(db, issueId);
+        }
         boardEvents.broadcast(projectId, "workspace_merged");
         console.log(`[workflow] direct workspace ${workspaceId} closed on agent exit (no committed changes)  issue moved to Done`);
         return;
@@ -181,7 +185,10 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge }:
       if (!committedChanges) { console.log(`[workflow] agent session ${sessionId} completed but no committed changes  leaving issue in current status`); return; }
       console.log(`[workflow] agent session ${sessionId} completed with committed changes  moving to In Review`);
       const inReview = findStatus("In Review");
-      if (inReview) await db.update(issues).set({ statusId: inReview.id, updatedAt: now }).where(eq(issues.id, issueId));
+      if (inReview) {
+        await db.update(issues).set({ statusId: inReview.id, updatedAt: now }).where(eq(issues.id, issueId));
+        await syncCurrentNodeToStatus(db, issueId);
+      }
       boardEvents.broadcast(projectId, "issue_updated");
       if (prefMap.get("learning_step_after_agent") === "true" && workspace.workingDir) await launchLearningStep(sessionManager, learningSessionIds, workspace.id, prefMap, "after agent");
       const autoReview = !skipAutoReview && (workspace.requiresReview || prefMap.get("auto_review") !== "false");
