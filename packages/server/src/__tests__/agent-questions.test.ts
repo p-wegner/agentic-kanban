@@ -7,10 +7,13 @@ import {
   markAnswered,
   isAnswered,
   listPendingQuestionsForProject,
+  tryAutoAnswer,
   type StalenessInput,
+  type AgentQuestion,
+  type AgentQuestionRecommendation,
 } from "../services/agent-questions.service.js";
 import { createTestDb } from "./helpers/test-db.js";
-import { getPreference } from "../repositories/preferences.repository.js";
+import { getPreference, setPreference } from "../repositories/preferences.repository.js";
 import {
   projects,
   projectStatuses,
@@ -204,6 +207,11 @@ describe("markDismissed / isAnswered", () => {
 });
 
 describe("listPendingQuestionsForProject — dismiss + staleness integration", () => {
+  // Use dynamic timestamps so tests stay "fresh" regardless of when they run.
+  function ts(offsetMs: number) {
+    return new Date(Date.now() + offsetMs).toISOString();
+  }
+
   /** Seed a project with one issue/workspace/session that denied an AskUserQuestion. */
   async function seed(db: ReturnType<typeof createTestDb>["db"], opts: {
     toolUseId: string;
@@ -232,8 +240,8 @@ describe("listPendingQuestionsForProject — dismiss + staleness integration", (
       id: sessionId,
       workspaceId,
       status: "stopped",
-      startedAt: opts.sessionStartedAt ?? "2026-05-28T11:00:00.000Z",
-      endedAt: opts.sessionEndedAt ?? "2026-05-28T11:30:00.000Z",
+      startedAt: opts.sessionStartedAt ?? ts(-60 * 60 * 1000),   // 1h ago
+      endedAt: opts.sessionEndedAt ?? ts(-30 * 60 * 1000),        // 30m ago
     });
     const resultLine = JSON.stringify({
       type: "result",
@@ -255,7 +263,7 @@ describe("listPendingQuestionsForProject — dismiss + staleness integration", (
     expect(pending.map((p) => p.toolUseId)).toContain("tu-a");
     expect(pending.find((p) => p.toolUseId === "tu-a")?.staleness).toBe(null);
 
-    await markDismissed("tu-a", "2026-05-28T11:45:00.000Z", db);
+    await markDismissed("tu-a", ts(-15 * 60 * 1000), db);
     pending = await listPendingQuestionsForProject(projectId, db);
     expect(pending.map((p) => p.toolUseId)).not.toContain("tu-a");
   });
@@ -265,7 +273,7 @@ describe("listPendingQuestionsForProject — dismiss + staleness integration", (
     const { projectId } = await seed(db, {
       toolUseId: "tu-b",
       workspaceStatus: "closed",
-      workspaceClosedAt: "2026-05-28T11:45:00.000Z",
+      workspaceClosedAt: ts(-15 * 60 * 1000),
     });
     const pending = await listPendingQuestionsForProject(projectId, db);
     expect(pending.find((p) => p.toolUseId === "tu-b")?.staleness?.reason).toBe("workspace-merged");
@@ -282,18 +290,83 @@ describe("listPendingQuestionsForProject — dismiss + staleness integration", (
     const { db } = createTestDb();
     const { projectId, workspaceId } = await seed(db, {
       toolUseId: "tu-d",
-      sessionStartedAt: "2026-05-28T10:00:00.000Z",
-      sessionEndedAt: "2026-05-28T10:30:00.000Z",
+      sessionStartedAt: ts(-2 * 60 * 60 * 1000),  // 2h ago
+      sessionEndedAt: ts(-90 * 60 * 1000),          // 1.5h ago
     });
     // A newer session, no question — supersedes the older question-bearing one.
     await db.insert(sessions).values({
       id: "sess-newer",
       workspaceId,
       status: "stopped",
-      startedAt: "2026-05-28T11:00:00.000Z",
-      endedAt: "2026-05-28T11:30:00.000Z",
+      startedAt: ts(-60 * 60 * 1000),  // 1h ago
+      endedAt: ts(-30 * 60 * 1000),    // 30m ago
     });
     const pending = await listPendingQuestionsForProject(projectId, db);
     expect(pending.find((p) => p.toolUseId === "tu-d")?.staleness?.reason).toBe("superseded");
+  });
+});
+
+describe("tryAutoAnswer", () => {
+  const questions: AgentQuestion[] = [
+    { question: "Which approach?", options: [{ label: "A" }, { label: "B" }, { label: "C" }], multiSelect: false },
+  ];
+  const goodRecs: AgentQuestionRecommendation[] = [
+    { recommendedOptionIndexes: [1], rationale: "B is better" },
+  ];
+
+  it("does NOT auto-answer when butler_auto_answer pref is off (default)", async () => {
+    const { db } = createTestDb();
+    const sent: string[] = [];
+    await tryAutoAnswer("tu-aa1", "ws-1", questions, goodRecs, async (_, c) => { sent.push(c); }, db);
+    expect(sent).toHaveLength(0);
+    expect(await isAnswered("tu-aa1", db)).toBe(false);
+  });
+
+  it("auto-answers when pref is on and all recs are non-null", async () => {
+    const { db } = createTestDb();
+    await setPreference("butler_auto_answer", "true", db);
+    const sent: string[] = [];
+    await tryAutoAnswer("tu-aa2", "ws-2", questions, goodRecs, async (_, c) => { sent.push(c); }, db);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toContain("B");
+    expect(await isAnswered("tu-aa2", db)).toBe(true);
+  });
+
+  it("skips auto-answer when any recommendation is null", async () => {
+    const { db } = createTestDb();
+    await setPreference("butler_auto_answer", "true", db);
+    const sent: string[] = [];
+    const partialRecs = [null] as Array<AgentQuestionRecommendation | null>;
+    await tryAutoAnswer("tu-aa3", "ws-3", questions, partialRecs, async (_, c) => { sent.push(c); }, db);
+    expect(sent).toHaveLength(0);
+    expect(await isAnswered("tu-aa3", db)).toBe(false);
+  });
+
+  it("skips auto-answer for single-select with empty recommendedOptionIndexes and no freeText", async () => {
+    const { db } = createTestDb();
+    await setPreference("butler_auto_answer", "true", db);
+    const sent: string[] = [];
+    const noWinnerRecs: AgentQuestionRecommendation[] = [{ recommendedOptionIndexes: [], rationale: "unclear" }];
+    await tryAutoAnswer("tu-aa4", "ws-4", questions, noWinnerRecs, async (_, c) => { sent.push(c); }, db);
+    expect(sent).toHaveLength(0);
+    expect(await isAnswered("tu-aa4", db)).toBe(false);
+  });
+
+  it("auto-answers with freeText when no option selected but freeText provided", async () => {
+    const { db } = createTestDb();
+    await setPreference("butler_auto_answer", "true", db);
+    const sent: string[] = [];
+    const freeTextRecs: AgentQuestionRecommendation[] = [{ recommendedOptionIndexes: [], freeText: "custom reply", rationale: "none fit" }];
+    await tryAutoAnswer("tu-aa5", "ws-5", questions, freeTextRecs, async (_, c) => { sent.push(c); }, db);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toContain("custom reply");
+    expect(await isAnswered("tu-aa5", db)).toBe(true);
+  });
+
+  it("does not mark answered when sendTurn throws", async () => {
+    const { db } = createTestDb();
+    await setPreference("butler_auto_answer", "true", db);
+    await tryAutoAnswer("tu-aa6", "ws-6", questions, goodRecs, async () => { throw new Error("network error"); }, db);
+    expect(await isAnswered("tu-aa6", db)).toBe(false);
   });
 });
