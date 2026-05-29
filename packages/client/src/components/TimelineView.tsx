@@ -47,12 +47,12 @@ const AXIS_H = 28;
 function fmtAxisDate(d: Date, spanMs: number): string {
   if (spanMs < 2 * 86_400_000) {
     // Sub-2-day span: show time so adjacent ticks are distinguishable
-    return d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+    return d.toLocaleTimeString('en-US', { hour: "2-digit", minute: "2-digit" });
   }
-  return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  return d.toLocaleDateString('en-US', { month: "short", day: "numeric" });
 }
 function fmtTooltipDate(d: Date): string {
-  return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+  return d.toLocaleDateString('en-US', { month: "short", day: "numeric", year: "numeric" });
 }
 
 interface TooltipState {
