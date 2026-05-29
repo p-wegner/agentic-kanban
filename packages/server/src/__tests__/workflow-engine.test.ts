@@ -12,6 +12,8 @@ import {
   evaluateCondition,
   getJoinStrategy,
   getForkMode,
+  deriveStatusName,
+  isTerminalNodeType,
 } from "@agentic-kanban/shared/lib/workflow-engine";
 import { createTestDb, type TestDb } from "./helpers/test-db.js";
 import { ensureBuiltinSkills } from "../db/seed.js";
@@ -296,5 +298,47 @@ describe("workflow-engine", () => {
     expect(getForkMode(JSON.stringify({ forkMode: "worktree" }))).toBe("worktree");
     expect(getForkMode(JSON.stringify({ forkMode: "shared" }))).toBe("shared");
     expect(getForkMode(JSON.stringify({ forkMode: "shared", guidance: "x" }))).toBe("shared");
+  });
+
+  describe("deriveStatusName", () => {
+    it("maps 'start' to 'Backlog'", () => {
+      expect(deriveStatusName("start")).toBe("Backlog");
+    });
+    it("maps 'end' to 'Done'", () => {
+      expect(deriveStatusName("end")).toBe("Done");
+    });
+    it("maps 'normal' to 'In Progress'", () => {
+      expect(deriveStatusName("normal")).toBe("In Progress");
+    });
+    it("maps 'parallel-fork' to 'In Progress'", () => {
+      expect(deriveStatusName("parallel-fork")).toBe("In Progress");
+    });
+    it("maps 'parallel-join' to 'In Progress'", () => {
+      expect(deriveStatusName("parallel-join")).toBe("In Progress");
+    });
+    it("maps unknown type to 'In Progress'", () => {
+      expect(deriveStatusName("custom-type")).toBe("In Progress");
+    });
+  });
+
+  describe("isTerminalNodeType", () => {
+    it("returns true only for 'end' node type", () => {
+      expect(isTerminalNodeType("end")).toBe(true);
+    });
+    it("returns false for 'start'", () => {
+      expect(isTerminalNodeType("start")).toBe(false);
+    });
+    it("returns false for 'normal'", () => {
+      expect(isTerminalNodeType("normal")).toBe(false);
+    });
+    it("returns false for 'parallel-fork'", () => {
+      expect(isTerminalNodeType("parallel-fork")).toBe(false);
+    });
+    it("returns false for null", () => {
+      expect(isTerminalNodeType(null)).toBe(false);
+    });
+    it("returns false for undefined", () => {
+      expect(isTerminalNodeType(undefined)).toBe(false);
+    });
   });
 });
