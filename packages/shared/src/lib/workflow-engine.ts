@@ -997,3 +997,35 @@ export async function initWorkspaceWorkflow(
   const transitions = await getOutgoingTransitions(db, startNode.id);
   return { node: startNode, transitions };
 }
+
+// ---------------------------------------------------------------------------
+// Status derivation helpers (ticket #78 – status-as-view)
+// ---------------------------------------------------------------------------
+
+/**
+ * Derive the default board status name from a workflow node's structural type.
+ * Nodes with an explicit `statusName` always take precedence over this default;
+ * this function is the fallback when statusName is null/undefined.
+ *
+ * - start  → "Backlog"  (issue not yet picked up)
+ * - end    → "Done"     (workflow complete)
+ * - normal / parallel-fork / parallel-join → "In Progress" (work in flight)
+ */
+export function deriveStatusName(nodeType: string): string {
+  switch (nodeType) {
+    case "start":
+      return "Backlog";
+    case "end":
+      return "Done";
+    default:
+      return "In Progress";
+  }
+}
+
+/**
+ * Returns true when the node type indicates a terminal (done/closed) state.
+ * Accepts null/undefined for convenience (non-workflow issues → false).
+ */
+export function isTerminalNodeType(nodeType: string | null | undefined): boolean {
+  return nodeType === "end";
+}
