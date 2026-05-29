@@ -24,6 +24,8 @@ export function createWorkspaceService(deps: {
   gitService?: GitService;
   /** Injectable pre-merge backup hook (defaults to the real VACUUM-INTO backup). Tests pass a no-op. */
   createBackup?: (reason: string) => Promise<unknown>;
+  /** Injectable process killer (defaults to the real killProcessesInDir). Tests pass a no-op. */
+  processKiller?: (dir: string) => Promise<number>;
 }) {
   const crud = createWorkspaceCrudService(deps);
   const diff = createWorkspaceDiffService(deps);

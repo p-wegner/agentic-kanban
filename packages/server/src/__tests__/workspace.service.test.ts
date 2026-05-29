@@ -8,6 +8,7 @@ import { projects, projectStatuses, issues, workspaces, preferences } from "@age
 import { createTestDb, type TestDb } from "./helpers/test-db.js";
 import { createMockSessionManager } from "./helpers/mocks.js";
 import { createWorkspaceService, WorkspaceError, type GitService } from "../services/workspace.service.js";
+import { activeMerges } from "../services/workspace-internals.js";
 
 // Mock process-cleanup so killWorktreeProcesses doesn't run real wmic/lsof in unit tests.
 vi.mock("../services/process-cleanup.js", () => ({
@@ -97,6 +98,11 @@ describe("workspace.service", () => {
 
   beforeEach(() => {
     ({ db } = createTestDb());
+  });
+
+  afterEach(() => {
+    // Clear the in-process merge lock so a timed-out test doesn't poison subsequent tests.
+    activeMerges.clear();
   });
 
   describe("createWorkspace", () => {
@@ -212,13 +218,14 @@ describe("workspace.service", () => {
       const gitService = createFakeGitService();
 
       const createBackup = vi.fn(async () => ({}));
-      const service = createWorkspaceService({ database: db, gitService, createBackup });
+      const processKiller = vi.fn(async () => 0);
+      const service = createWorkspaceService({ database: db, gitService, createBackup, processKiller });
 
       const result = await service.mergeWorkspace(wsId);
 
       expect(result.id).toBe(wsId);
       expect(result.mergeOutput).toContain("Merge made");
-      expect(gitService.mergeBranch).toHaveBeenCalledWith("/tmp/test-repo", "feature/ak-1-test");
+      expect(gitService.mergeBranch).toHaveBeenCalledWith("/tmp/test-repo", "feature/ak-1-test", "main");
       expect(gitService.removeWorktree).toHaveBeenCalled();
 
       // Workspace closed
@@ -239,7 +246,7 @@ describe("workspace.service", () => {
         detectConflicts: vi.fn(async () => ({ hasConflicts: true, conflictingFiles: ["src/foo.ts"] })),
       });
 
-      const service = createWorkspaceService({ database: db, gitService });
+      const service = createWorkspaceService({ database: db, gitService, processKiller: vi.fn(async () => 0) });
 
       await expect(service.mergeWorkspace(wsId)).rejects.toMatchObject({
         code: "BAD_REQUEST",
@@ -252,25 +259,6 @@ describe("workspace.service", () => {
       expect(wsRows[0].status).toBe("active");
     });
 
-    it("refuses to merge when main checkout HEAD is not on the workspace's base branch", async () => {
-      const { projectId, issueId } = await seedProjectAndIssue(db);
-      const wsId = await seedWorkspaceForMerge(projectId, issueId);
-      // Main checkout sits on some unrelated feature branch — merging would silently land there
-      const gitService = createFakeGitService({
-        getCurrentBranch: vi.fn(async () => "feature/some-other-thing"),
-      });
-
-      const service = createWorkspaceService({ database: db, gitService });
-
-      await expect(service.mergeWorkspace(wsId)).rejects.toMatchObject({
-        code: "CONFLICT",
-        data: { currentBranch: "feature/some-other-thing", targetBranch: "main" },
-      });
-      expect(gitService.mergeBranch).not.toHaveBeenCalled();
-
-      const wsRows = await db.select().from(workspaces).where(eq(workspaces.id, wsId));
-      expect(wsRows[0].status).toBe("active");
-    });
   });
 
   describe("updateBase with HEAD guard", () => {

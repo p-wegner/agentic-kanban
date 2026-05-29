@@ -65,7 +65,7 @@ export function registerMergeWorkspace(server: McpServer) {
           await gitService.syncBranchToHead(workspace.workingDir, workspace.branch);
         }
 
-        const mergeOutput = await gitService.mergeBranch(repoPath, workspace.branch);
+        const mergeOutput = await gitService.mergeBranch(repoPath, workspace.branch, projectRows[0].defaultBranch || "main");
 
         // Cleanup worktree
         if (workspace.workingDir) {

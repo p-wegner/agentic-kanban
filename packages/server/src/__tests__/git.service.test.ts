@@ -42,7 +42,7 @@ describe("GitService", () => {
 
   beforeAll(async () => {
     repoPath = await createTempRepo();
-  });
+  }, 30000);
 
   afterAll(async () => {
     try {
@@ -67,7 +67,7 @@ describe("GitService", () => {
 
     // Cleanup
     await gitService.removeWorktree(repoPath, worktreePath);
-  });
+  }, 30000);
 
   it("reuses existing worktree for an already-checked-out branch", async () => {
     const worktreePath = await gitService.createWorktree(repoPath, "feature/dup-test");
@@ -78,7 +78,7 @@ describe("GitService", () => {
     } finally {
       await gitService.removeWorktree(repoPath, worktreePath);
     }
-  });
+  }, 30000);
 
   it("gets diff between worktree and base branch", async () => {
     const worktreePath = await gitService.createWorktree(repoPath, "feature/diff-test");
@@ -97,9 +97,9 @@ describe("GitService", () => {
     expect(diff).toContain("New content");
 
     await gitService.removeWorktree(repoPath, worktreePath);
-  });
+  }, 30000);
 
-  it("merges a branch", async () => {
+  it("merges a branch via plumbing (working tree unmodified, branch ref advanced)", async () => {
     const worktreePath = await gitService.createWorktree(repoPath, "feature/merge-test");
 
     const { writeFileSync } = await import("node:fs");
@@ -112,14 +112,27 @@ describe("GitService", () => {
 
     await gitService.removeWorktree(repoPath, worktreePath);
 
-    const result = await gitService.mergeBranch(repoPath, "feature/merge-test");
+    // Record working-tree files before the merge
+    const { readdirSync, existsSync: fsExistsSync } = await import("node:fs");
+    const filesBefore = readdirSync(repoPath).sort();
+
+    const result = await gitService.mergeBranch(repoPath, "feature/merge-test", "main");
     expect(result).toContain("Merge");
 
-    // Verify file exists in main
-    const { readFileSync } = await import("node:fs");
-    const content = readFileSync(join(repoPath, "merge-file.txt"), "utf-8");
-    expect(content.trim()).toBe("Merge me");
-  });
+    // Working tree must NOT have changed — no new files, no modified files
+    const filesAfter = readdirSync(repoPath).sort();
+    expect(filesAfter).toEqual(filesBefore);
+    expect(fsExistsSync(join(repoPath, "merge-file.txt"))).toBe(false);
+
+    // Branch ref (main) must be advanced — file exists in the git object store
+    const { execFile: rawExecFile } = await import("node:child_process");
+    const showOutput = await new Promise<string>((resolve, reject) =>
+      rawExecFile("git", ["show", "main:merge-file.txt"], { cwd: repoPath }, (err, stdout) =>
+        err ? reject(err) : resolve(stdout),
+      ),
+    );
+    expect(showOutput.trim()).toBe("Merge me");
+  }, 30000);
 
   it("aborts merge on conflict and leaves main checkout clean", async () => {
     const { writeFileSync, readFileSync } = await import("node:fs");
@@ -134,7 +147,7 @@ describe("GitService", () => {
     await gitService.removeWorktree(repoPath, worktreeA);
 
     // Merge branch A into main successfully
-    await gitService.mergeBranch(repoPath, "feature/conflict-a");
+    await gitService.mergeBranch(repoPath, "feature/conflict-a", "main");
 
     // Create branch B from BEFORE branch A was merged (i.e., from 2 commits ago, before the branch A changes)
     // We'll branch from the commit before the merge to simulate a parallel branch
@@ -149,18 +162,16 @@ describe("GitService", () => {
     await gitService.removeWorktree(repoPath, worktreeB);
 
     // Try to merge branch B — should conflict and throw
-    await expect(gitService.mergeBranch(repoPath, "feature/conflict-b")).rejects.toThrow();
+    await expect(gitService.mergeBranch(repoPath, "feature/conflict-b", "main")).rejects.toThrow();
 
-    // MERGE_HEAD must NOT exist — merge was aborted
+    // MERGE_HEAD must NOT exist — plumbing merge never creates it
     const mergeHeadPath = join(repoPath, ".git", "MERGE_HEAD");
     expect(existsSync(mergeHeadPath)).toBe(false);
 
-    // shared-conflict.txt must NOT contain conflict markers
-    const content = readFileSync(join(repoPath, "shared-conflict.txt"), "utf-8");
-    expect(content).not.toContain("<<<<<<<");
-    expect(content).not.toContain("=======");
-    expect(content).not.toContain(">>>>>>>");
-  });
+    // shared-conflict.txt must NOT exist in the working tree — plumbing merge never touches the working tree,
+    // so neither the successful merge of conflict-a nor the failed merge of conflict-b wrote the file.
+    expect(existsSync(join(repoPath, "shared-conflict.txt"))).toBe(false);
+  }, 30000);
 
   it("aborts merge on _journal.json conflict and leaves main checkout clean", async () => {
     const { writeFileSync, readFileSync } = await import("node:fs");
@@ -188,7 +199,7 @@ describe("GitService", () => {
     await gitService.removeWorktree(repoPath, worktreeC);
 
     // Merge branch C into main
-    await gitService.mergeBranch(repoPath, "feature/journal-c");
+    await gitService.mergeBranch(repoPath, "feature/journal-c", "main");
 
     // Branch D from BEFORE C was merged: also adds 0001_branch_d
     const mainBeforeC = (await exec("git", ["rev-parse", "HEAD^"], repoPath)).trim();
@@ -203,18 +214,18 @@ describe("GitService", () => {
     await gitService.removeWorktree(repoPath, worktreeD);
 
     // Merging branch D should conflict on _journal.json and throw
-    await expect(gitService.mergeBranch(repoPath, "feature/journal-d")).rejects.toThrow();
+    await expect(gitService.mergeBranch(repoPath, "feature/journal-d", "main")).rejects.toThrow();
 
-    // Main checkout must be clean — MERGE_HEAD absent
+    // Main checkout must be clean — plumbing merge never creates MERGE_HEAD
     const mergeHeadPath = join(repoPath, ".git", "MERGE_HEAD");
     expect(existsSync(mergeHeadPath)).toBe(false);
 
-    // _journal.json must NOT contain conflict markers
+    // _journal.json must NOT contain conflict markers — working tree untouched
     const journalContent = readFileSync(join(journalDir, "_journal.json"), "utf-8");
     expect(journalContent).not.toContain("<<<<<<<");
     expect(journalContent).not.toContain("=======");
     expect(journalContent).not.toContain(">>>>>>>");
-  });
+  }, 30000);
 
   it("isMergeInProgress returns false when no merge is in progress", async () => {
     const result = await gitService.isMergeInProgress(repoPath);

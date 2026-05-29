@@ -227,25 +227,77 @@ export async function deleteBranch(
   await execGit(["branch", "-d", branch], repoPath);
 }
 
-/** Merge a branch into the current HEAD of the repo.
- * On conflict or any failure, automatically aborts the merge so the checkout is never left mid-merge.
+/**
+ * Merge a feature branch into targetBranch using git plumbing commands only.
+ *
+ * The working tree and index of `repoPath` are never modified, making this safe
+ * for use alongside running dev servers and database connections (no file-watcher
+ * noise, no DB-lock window).
+ *
+ * Steps:
+ *   1. merge-tree --write-tree  → compute merged tree (read-only)
+ *   2. commit-tree              → create the merge commit object
+ *   3. update-ref               → atomically advance the target branch ref
+ *
+ * When `options.syncWorkingTree` is true (for worktrees an agent continues to
+ * use), also runs `git reset --hard HEAD` to sync the working tree to the new
+ * merge commit.
+ *
+ * Throws with the conflicting file list on merge conflicts.
  */
 export async function mergeBranch(
   repoPath: string,
-  branch: string,
+  featureBranch: string,
+  targetBranch: string,
+  options?: { syncWorkingTree?: boolean },
 ): Promise<string> {
-  try {
-    return await execGit(["merge", "--no-ff", branch, "-m", `Merge branch '${branch}'`], repoPath);
-  } catch (err) {
-    // Abort any in-progress merge to restore a clean state before re-throwing
-    try {
-      await execGit(["merge", "--abort"], repoPath);
-      console.log(`[git] merge --abort completed after conflict in ${repoPath}`);
-    } catch {
-      // No merge in progress or abort failed — best effort
-    }
-    throw err;
+  const targetSha = (await execGit(["rev-parse", targetBranch], repoPath)).trim();
+  const featureSha = (await execGit(["rev-parse", featureBranch], repoPath)).trim();
+
+  // merge-tree computes the merged tree without touching the working tree.
+  // Exit 0 = clean, exit 1 = conflicts; stdout always has the tree SHA on line 1.
+  const { treeSha, conflictingFiles } = await new Promise<{ treeSha: string; conflictingFiles: string[] }>((resolve, reject) => {
+    execFile(
+      "git",
+      ["merge-tree", "--write-tree", "--no-messages", targetBranch, featureBranch],
+      { cwd: repoPath, maxBuffer: 10 * 1024 * 1024 },
+      (_err, stdout) => {
+        const lines = stdout.toString().trim().split("\n").filter(Boolean);
+        const treeSha = lines[0]?.trim() ?? "";
+        if (!treeSha) {
+          reject(new Error("git merge-tree produced no output"));
+          return;
+        }
+        // Stage 1/2/3 entries indicate conflicting files: "<mode> <sha> <stage>\t<file>"
+        const seen = new Set<string>();
+        for (const line of lines.slice(1)) {
+          const m = line.match(/^\d+ \w+ [123]\t(.+)$/);
+          if (m) seen.add(m[1].replace(/\r$/, ""));
+        }
+        resolve({ treeSha, conflictingFiles: [...seen] });
+      },
+    );
+  });
+
+  if (conflictingFiles.length > 0) {
+    throw new Error(`Merge conflict in: ${conflictingFiles.join(", ")}`);
   }
+
+  // Create the merge commit with two parents
+  const newCommitSha = (await execGit(
+    ["commit-tree", treeSha, "-p", targetSha, "-p", featureSha, "-m", `Merge branch '${featureBranch}'`],
+    repoPath,
+  )).trim();
+
+  // Atomically advance the target branch ref (working tree untouched)
+  await execGit(["update-ref", `refs/heads/${targetBranch}`, newCommitSha], repoPath);
+
+  // For worktrees where the agent needs to see the merged state, sync working tree
+  if (options?.syncWorkingTree) {
+    await execGit(["reset", "--hard", "HEAD"], repoPath);
+  }
+
+  return `Merge branch '${featureBranch}' into ${targetBranch} (plumbing-merge: ${newCommitSha})`;
 }
 
 /**

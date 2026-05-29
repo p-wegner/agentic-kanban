@@ -430,8 +430,10 @@ export function createWorkflowForkService(deps: {
         }
         try {
           // Ensure the child branch ref reflects the agent's commits, then merge.
+          // syncWorkingTree: true updates the parent worktree's working tree so the
+          // join agent sees the merged state when it runs.
           if (c.workingDir) await gitService.syncBranchToHead(c.workingDir, c.branch).catch(() => {});
-          await gitService.mergeBranch(parent.workingDir, c.branch);
+          await gitService.mergeBranch(parent.workingDir, c.branch, parent.branch, { syncWorkingTree: true });
           mergeResults.push({ branch: c.branch, status: "merged" });
         } catch (err) {
           // mergeBranch auto-aborts on conflict; the child's work stays on its
