@@ -970,10 +970,10 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                           <span className="text-[11px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">Last cycle</span>
                           <div className="flex items-center gap-3 text-[11px] text-gray-500 dark:text-gray-400">
                             {monitorStatus.lastRun && (
-                              <span title={new Date(monitorStatus.lastRun).toLocaleString()}>{new Date(monitorStatus.lastRun).toLocaleTimeString()}</span>
+                              <span title={new Date(monitorStatus.lastRun).toLocaleString('en-US')}>{new Date(monitorStatus.lastRun).toLocaleTimeString('en-US')}</span>
                             )}
                             {monitorStatus.nextRunAt && (
-                              <span className="text-blue-500" title="Next scheduled run">→ {new Date(monitorStatus.nextRunAt).toLocaleTimeString()}</span>
+                              <span className="text-blue-500" title="Next scheduled run">→ {new Date(monitorStatus.nextRunAt).toLocaleTimeString('en-US')}</span>
                             )}
                           </div>
                         </div>
@@ -1730,7 +1730,7 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                                 const isSuccess = status === "success" || status === "completed";
                                 const icon = isRunning ? "●" : isSuccess ? "✓" : "✗";
                                 const colorClass = isRunning ? "text-blue-500" : isSuccess ? "text-green-600" : "text-red-600";
-                                const timeStr = new Date(run.lastRunAt).toLocaleString();
+                                const timeStr = new Date(run.lastRunAt).toLocaleString('en-US');
                                 const content = (
                                   <span className={`font-medium ${colorClass}`}>{icon} {status}</span>
                                 );
@@ -1763,9 +1763,9 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                                   ? "overdue"
                                   : diffMin < 60
                                     ? `in ${diffMin}m`
-                                    : `at ${new Date(nextMs).toLocaleTimeString()}`;
+                                    : `at ${new Date(nextMs).toLocaleTimeString('en-US')}`;
                                 return (
-                                  <p className="text-xs text-blue-500 pl-5" title={new Date(nextMs).toLocaleString()}>
+                                  <p className="text-xs text-blue-500 pl-5" title={new Date(nextMs).toLocaleString('en-US')}>
                                     Next run: {label}
                                   </p>
                                 );

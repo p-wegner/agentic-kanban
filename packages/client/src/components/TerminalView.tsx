@@ -893,7 +893,7 @@ function renderParsedEvent(event: DisplayEvent, key: number, ctx: RenderContext)
         <div className="text-gray-500 text-[10px] mt-1">
           {(event.durationMs / 1000).toFixed(1)}s
           {" | "}Cost: ${event.totalCostUsd.toFixed(4)}
-          {" | "}Tokens: {event.inputTokens.toLocaleString()} in / {event.outputTokens.toLocaleString()} out
+          {" | "}Tokens: {event.inputTokens.toLocaleString('en-US')} in / {event.outputTokens.toLocaleString('en-US')} out
         </div>
       </div>
     );
@@ -928,7 +928,7 @@ function renderParsedEvent(event: DisplayEvent, key: number, ctx: RenderContext)
 
   if (event.kind === "rate_limit") {
     const inSubagent = isInsideSubagent && !isSubagentStart;
-    const resetsAt = event.resetsAt ? new Date(event.resetsAt * 1000).toLocaleTimeString() : null;
+    const resetsAt = event.resetsAt ? new Date(event.resetsAt * 1000).toLocaleTimeString('en-US') : null;
     const overageRejected = event.overageStatus === "rejected";
     if (isMinimal) {
       return (
