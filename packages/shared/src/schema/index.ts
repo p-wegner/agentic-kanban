@@ -35,3 +35,4 @@ export {
 } from "./workflows.js";
 export type { WorkflowNodeType, WorkflowEdgeCondition } from "./workflows.js";
 export { testRuns, flakyTestPins } from "./test-runs.js";
+export { boardHealthEvents, boardHealthEventsRelations } from "./board-health-events.js";

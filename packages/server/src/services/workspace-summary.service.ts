@@ -117,8 +117,8 @@ export async function buildWorkspaceSummaryMap(
       diffStatCacheFilesChanged: workspaces.diffStatCacheFilesChanged,
       diffStatCacheInsertions: workspaces.diffStatCacheInsertions,
       diffStatCacheDeletions: workspaces.diffStatCacheDeletions,
-      scorecardScore: workspaces.scorecardScore,,
-            showdownId: workspaces.showdownId,
+      scorecardScore: workspaces.scorecardScore,
+      showdownId: workspaces.showdownId,
     })
     .from(workspaces)
     .where(inArray(workspaces.issueId, issueIds));
