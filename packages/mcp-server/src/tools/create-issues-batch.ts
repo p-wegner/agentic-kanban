@@ -1,8 +1,9 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { eq, sql } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { prodDeps, type ToolDeps } from "./deps.js";
+import { nextIssueNumber } from "../db-utils.js";
 
 const issueInputSchema = z.object({
   title: z.string(),
@@ -53,11 +54,7 @@ export function registerCreateIssuesBatch(server: McpServer, deps: ToolDeps = pr
         }
       }
 
-      const maxResult = await db
-        .select({ maxNum: sql<number | null>`max(${schema.issues.issueNumber})` })
-        .from(schema.issues)
-        .where(eq(schema.issues.projectId, pid));
-      let nextNumber = (maxResult[0]?.maxNum ?? 0) + 1;
+      let nextNumber = await nextIssueNumber(db, schema, pid);
 
       const now = new Date().toISOString();
       const created: { id: string; issueNumber: number; title: string }[] = [];
