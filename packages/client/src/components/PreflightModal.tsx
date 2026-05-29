@@ -9,6 +9,14 @@ export interface PreflightResult {
   summary: string;
   duplicateOfNumber?: number;
   blockedByNumber?: number;
+  /** Markdown block of answered clarifications, returned when the re-check was run
+   *  with clarifications. Caller prepends it to the launching agent's context. */
+  clarificationsBlock?: string;
+}
+
+export interface PreflightClarification {
+  question: string;
+  answer: string;
 }
 
 interface PreflightModalProps {
@@ -19,6 +27,9 @@ interface PreflightModalProps {
   issueDescription: string;
   onLaunchAnyway: () => void;
   onRetry: (updatedTitle: string, updatedDescription: string) => void;
+  /** Submit answered clarifications: persists a comment, injects the Q&A into the
+   *  launch context, and re-runs preflight. */
+  onAnswerAndLaunch: (clarifications: PreflightClarification[]) => void;
   onCancel: () => void;
   /** True while a re-check is in flight */
   loading?: boolean;
@@ -40,6 +51,7 @@ export function PreflightModal({
   issueDescription,
   onLaunchAnyway,
   onRetry,
+  onAnswerAndLaunch,
   onCancel,
   loading,
 }: PreflightModalProps) {
@@ -48,9 +60,13 @@ export function PreflightModal({
   const [isEditing, setIsEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  // One free-text answer per question (indexed parallel to result.questions).
+  const [answers, setAnswers] = useState<string[]>(() => result.questions.map(() => ""));
 
   const badge = verdictLabel(result.verdict);
   const isBlocking = result.verdict !== "ready";
+  const hasQuestions = result.questions.length > 0;
+  const answeredCount = answers.filter((a) => a.trim()).length;
 
   async function handleSaveAndRetry() {
     if (saving) return;
@@ -68,6 +84,14 @@ export function PreflightModal({
     } finally {
       setSaving(false);
     }
+  }
+
+  function handleAnswerAndLaunch() {
+    const clarifications = result.questions
+      .map((question, i) => ({ question, answer: answers[i]?.trim() ?? "" }))
+      .filter((c) => c.answer.length > 0);
+    if (clarifications.length === 0) return;
+    onAnswerAndLaunch(clarifications);
   }
 
   return (
@@ -96,17 +120,26 @@ export function PreflightModal({
             <p className="text-sm text-gray-600 dark:text-gray-400">{result.summary}</p>
           )}
 
-          {/* Questions */}
-          {result.questions.length > 0 && (
+          {/* Questions + per-question answer fields */}
+          {hasQuestions && !isEditing && (
             <div>
               <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">
-                Questions to answer first
+                Answer to clarify, then launch
               </p>
-              <ul className="space-y-1.5">
+              <ul className="space-y-3">
                 {result.questions.map((q, i) => (
-                  <li key={i} className="flex gap-2 text-sm text-gray-700 dark:text-gray-300">
-                    <span className="text-amber-500 font-bold mt-0.5">?</span>
-                    <span>{q}</span>
+                  <li key={i} className="space-y-1">
+                    <div className="flex gap-2 text-sm text-gray-700 dark:text-gray-300">
+                      <span className="text-amber-500 font-bold mt-0.5">?</span>
+                      <span>{q}</span>
+                    </div>
+                    <textarea
+                      value={answers[i] ?? ""}
+                      onChange={(e) => setAnswers((prev) => prev.map((a, j) => (j === i ? e.target.value : a)))}
+                      rows={2}
+                      placeholder="Your answer…"
+                      className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:bg-gray-800 dark:text-gray-100 resize-y"
+                    />
                   </li>
                 ))}
               </ul>
@@ -180,6 +213,16 @@ export function PreflightModal({
                 className="text-sm px-3 py-1.5 border border-amber-400 text-amber-700 dark:text-amber-400 rounded hover:bg-amber-50 dark:hover:bg-amber-900/20 disabled:opacity-50"
               >
                 Launch anyway
+              </button>
+            )}
+            {isBlocking && hasQuestions && !isEditing && (
+              <button
+                onClick={handleAnswerAndLaunch}
+                disabled={loading || answeredCount === 0}
+                title={answeredCount === 0 ? "Answer at least one question first" : "Save answers and re-check"}
+                className="text-sm px-3 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
+              >
+                {loading ? "Checking..." : "Answer & launch"}
               </button>
             )}
           </div>
