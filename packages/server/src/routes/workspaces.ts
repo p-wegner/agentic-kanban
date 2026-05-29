@@ -44,6 +44,7 @@ export function createWorkspacesRoute(
       profile: body.profile,
       claudeProfile: body.claudeProfile,
       model: body.model,
+      skipContextPacker: body.skipContextPacker === true,
     } satisfies CreateWorkspaceInput);
     return c.json(result, 201);
   });

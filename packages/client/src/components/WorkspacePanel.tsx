@@ -1394,6 +1394,22 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                   </details>
                 )}
 
+                {ws.contextPrimer && (
+                  <details className="text-xs">
+                    <summary className="text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide cursor-pointer hover:text-gray-600 dark:hover:text-gray-300 flex items-center gap-1">
+                      <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                      </svg>
+                      Context Primer
+                    </summary>
+                    <div className="mt-1 bg-blue-50 dark:bg-blue-950/50 border border-blue-200 dark:border-blue-800 rounded p-2 max-h-48 overflow-y-auto">
+                      <div className="prose prose-xs max-w-none text-[11px] leading-relaxed text-gray-700 dark:text-gray-300">
+                        <ReactMarkdown>{ws.contextPrimer}</ReactMarkdown>
+                      </div>
+                    </div>
+                  </details>
+                )}
+
                 {isThisRunning && (ws.contextTokens || ws.lastTool) && (
                   <div className="flex items-center gap-2 text-[10px] text-gray-400 dark:text-gray-500">
                     {ws.contextTokens ? (
