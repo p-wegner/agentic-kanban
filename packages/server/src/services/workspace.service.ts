@@ -28,7 +28,12 @@ export function createWorkspaceService(deps: {
   const crud = createWorkspaceCrudService(deps);
   const diff = createWorkspaceDiffService(deps);
   const merge = createWorkspaceMergeService(deps);
-  const session = createWorkspaceSessionService(deps);
+  const session = createWorkspaceSessionService({
+    database: deps.database,
+    getSessionManager: deps.getSessionManager,
+    boardEvents: deps.boardEvents,
+    gitService: deps.gitService,
+  });
   const comments = createWorkspaceCommentService(deps);
 
   return {

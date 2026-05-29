@@ -11,6 +11,7 @@ import { loadAgentSettings, toExecutorProvider } from "./agent-settings.service.
 import {
   getWorkspaceById,
   resolveProjectId,
+  resolveProjectRepo,
   updateWorkspaceStatus,
 } from "../repositories/workspace.repository.js";
 import {
@@ -18,19 +19,24 @@ import {
   getWorkspaceSessions,
   getWorkspaceSkillName,
 } from "../repositories/session.repository.js";
+import { getPreference } from "../repositories/preferences.repository.js";
 import { buildImplementPrompt } from "./plan-mode.service.js";
 import {
   WorkspaceError,
   applyWorkspaceAgentSelection,
   type TurnResult,
+  type GitService,
 } from "./workspace-internals.js";
+import * as realGitService from "./git.service.js";
 
 export function createWorkspaceSessionService(deps: {
   database: Database;
   getSessionManager?: () => SessionManager;
   boardEvents?: BoardEvents;
+  gitService?: GitService;
 }) {
   const { database, getSessionManager, boardEvents } = deps;
+  const gitService = deps.gitService ?? realGitService;
 
   async function launchSession(id: string, body: Record<string, unknown> = {}) {
     const ws0 = await getWorkspaceById(id, database);
@@ -58,6 +64,33 @@ export function createWorkspaceSessionService(deps: {
     const skipPermissions = typeof body.skipPermissions === "boolean" ? body.skipPermissions : undefined;
 
     console.log(`[workspace-service] launch: workspaceId=${id} prompt="${truncatedPrompt}" agentCommand=${agentCommand ?? "default"} agentArgs=${agentArgs ?? "none"} profile=${claudeProfile ?? "none"} resumeFromId=${body.resumeFromId ?? "none"} resumeWithNewModel=${resumeWithNewModel} skipPermissions=${skipPermissions ?? "default"}`);
+
+    // Auto-rebase onto baseBranch on continue (not first launch, not direct workspaces)
+    if (!ws0.isDirect && ws0.workingDir) {
+      const autoRebasePref = await getPreference("auto_rebase_on_continue", database);
+      if (autoRebasePref === "true") {
+        const priorSessions = await getWorkspaceSessions(id, database);
+        if (priorSessions.length > 0) {
+          const { defaultBranch } = await resolveProjectRepo(id, database);
+          const baseBranch = ws0.baseBranch || defaultBranch;
+          if (baseBranch) {
+            console.log(`[workspace-session] auto-rebase on launch: workspaceId=${id} baseBranch=${baseBranch}`);
+            const rebaseResult = await gitService.rebaseOntoBase(ws0.workingDir, baseBranch, ws0.branch);
+            if (!rebaseResult.success) {
+              try { await gitService.abortRebase(ws0.workingDir); } catch { /* best effort */ }
+              throw new WorkspaceError(
+                `Auto-rebase onto '${baseBranch}' failed before starting agent. ` +
+                  `Resolve conflicts manually or disable auto_rebase_on_continue. ` +
+                  `Conflicting files: ${(rebaseResult.conflictingFiles ?? []).join(", ")}`,
+                "CONFLICT",
+                { conflictingFiles: rebaseResult.conflictingFiles ?? [], rebaseError: rebaseResult.error },
+              );
+            }
+            console.log(`[workspace-session] auto-rebase succeeded on launch: workspaceId=${id}`);
+          }
+        }
+      }
+    }
 
     const planMode = ws0.planMode ?? false;
     const resumeFromId = typeof body.resumeFromId === "string" ? body.resumeFromId : undefined;
@@ -98,6 +131,30 @@ export function createWorkspaceSessionService(deps: {
 
     const ws0 = await getWorkspaceById(id, database);
     if (!ws0) throw new WorkspaceError("Workspace not found", "NOT_FOUND");
+
+    // Auto-rebase onto baseBranch before resuming (sendTurn is always a continue scenario)
+    if (!ws0.isDirect && ws0.workingDir) {
+      const autoRebasePref = await getPreference("auto_rebase_on_continue", database);
+      if (autoRebasePref === "true") {
+        const { defaultBranch } = await resolveProjectRepo(id, database);
+        const baseBranch = ws0.baseBranch || defaultBranch;
+        if (baseBranch) {
+          console.log(`[workspace-session] auto-rebase on turn: workspaceId=${id} baseBranch=${baseBranch}`);
+          const rebaseResult = await gitService.rebaseOntoBase(ws0.workingDir, baseBranch, ws0.branch);
+          if (!rebaseResult.success) {
+            try { await gitService.abortRebase(ws0.workingDir); } catch { /* best effort */ }
+            throw new WorkspaceError(
+              `Auto-rebase onto '${baseBranch}' failed before starting agent. ` +
+                `Resolve conflicts manually or disable auto_rebase_on_continue. ` +
+                `Conflicting files: ${(rebaseResult.conflictingFiles ?? []).join(", ")}`,
+              "CONFLICT",
+              { conflictingFiles: rebaseResult.conflictingFiles ?? [], rebaseError: rebaseResult.error },
+            );
+          }
+          console.log(`[workspace-session] auto-rebase succeeded on turn: workspaceId=${id}`);
+        }
+      }
+    }
 
     const planMode = ws0.planMode ?? false;
     const { agentCommand, agentArgs, claudeProfile, profile, provider, resumeWithNewModel, permissionPromptTool } =
