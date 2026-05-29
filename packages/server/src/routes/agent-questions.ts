@@ -40,7 +40,9 @@ export function createAgentQuestionsRoute(
   // GET /api/projects/:id/agent-questions — list pending questions for the project.
   router.get("/:id/agent-questions", async (c) => {
     const projectId = c.req.param("id");
-    const questions = await listPendingQuestionsForProject(projectId, database);
+    const questions = await listPendingQuestionsForProject(projectId, database, async (workspaceId, content) => {
+      await workspaceService.sendTurn(workspaceId, content);
+    });
     return c.json({ questions });
   });
 

@@ -50,7 +50,9 @@ Cleanroom reimplementation of [vibe-kanban](https://github.com/BloopAI/vibe-kanb
 All git operations live in `packages/shared/src/lib/git-service.ts`. Both `packages/server/src/services/git.service.ts` and `packages/mcp-server/src/git-service.ts` are thin re-exports — **edit only the shared file**.
 
 - **Detached HEAD guard in worktrees**: `syncBranchToHead()` forces branch ref to match HEAD before every merge. `ensureOnBranch()` reattaches HEAD after worktree creation and successful rebase.
+- **Never `git reset --soft <branch>` in a worktree** — this can corrupt the `.git` pointer file, detaching the worktree from its branch reference and requiring a fresh worktree to recover. Use `git rebase` or `git merge` instead.
 - **Conflict detection uses `git merge-tree`**: `detectConflicts()` uses `git merge-tree --write-tree --no-messages HEAD <baseBranch>` (read-only). Exit 0 = clean, exit 1 = conflicts. Parse unique filenames from staged-entry records on stdout. Never use `merge --no-commit --no-ff` — it mutates the working tree and races on concurrent requests.
+- **Migration file number conflicts on rebase**: When rebasing a feature branch that added a migration, check if the target branch independently added a migration with the same sequence number (e.g., both added `0044_*.sql`). If so, rename your migration to the next available number and remove any duplicate SQL from it before pushing.
 - **Direct workspace diff only shows tracked files**: `git diff HEAD` excludes untracked files. `getWorkingTreeDiff()` also runs `git ls-files --others --exclude-standard` for new files.
 
 ### E2E testing
@@ -100,6 +102,7 @@ When a test in the table below fails and you haven't touched the relevant code, 
 - `.first()` on broad selectors — use `[aria-label]`, `[placeholder]`, or scoped parent locators
 - `projects[0]` array access — use `getE2EProjectId()` (reads active-project preference)
 - `test.skip()` on setup failure — log the reason; prefer a clear error over a silent skip
+- **Hardcoded timestamps in unit tests** — if the production code computes staleness/age against `Date.now()`, seeding tests with hardcoded ISO strings (e.g. `"2026-05-28T11:30:00.000Z"`) causes failures the next day. Use `Date.now()`-relative offsets: `new Date(Date.now() - 60 * 60 * 1000).toISOString()` (= 1h ago)
 
 ### Unit testing
 - **`--related` is BROKEN in vitest 4** — `CACError: Unknown option '--related'`. Do not use it.
@@ -206,6 +209,8 @@ When the user references `#N` (e.g., "review #70", "merge #65", "what's the stat
 - `pnpm cli -- status` — board overview with last agent message per issue
 
 **Note:** `--json` flag doesn't work through `pnpm cli --` due to argument forwarding. Use REST API for JSON output.
+
+**Note:** `pnpm cli -- <any command>` fails in git worktrees with `ERR_MODULE_NOT_FOUND` because `packages/shared/dist` is not built in the worktree. Use the main checkout CLI (`cd C:\andrena\agentic-kanban && pnpm cli -- ...`) or MCP tools / REST API instead.
 
 **Only fall back to REST API** when no MCP tool or CLI equivalent exists.
 

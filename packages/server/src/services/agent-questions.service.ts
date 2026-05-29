@@ -17,6 +17,10 @@ import type { Database } from "../db/index.js";
 import { getPreference, setPreference } from "../repositories/preferences.repository.js";
 import { ensureButlerSession, sendButlerTurn, subscribeButler, getButlerSession } from "./butler-sdk.service.js";
 
+/** Function signature for sending a follow-up turn to a workspace — injected so this
+ *  service does not depend on the session manager singleton directly. */
+export type AutoAnswerSendTurn = (workspaceId: string, content: string) => Promise<void>;
+
 export interface AgentQuestionOption {
   label: string;
   description?: string;
@@ -218,10 +222,14 @@ export function computeStaleness(input: StalenessInput): Staleness | null {
 /**
  * List pending (unanswered) AskUserQuestion sets across all workspaces of a project.
  * Compute-on-read: scans the most recent completed session per workspace.
+ *
+ * @param sendTurn  Optional: when provided, newly-computed butler recommendations will
+ *                  trigger an auto-answer if the `butler_auto_answer` preference is on.
  */
 export async function listPendingQuestionsForProject(
   projectId: string,
   db: Database,
+  sendTurn?: AutoAnswerSendTurn,
 ): Promise<PendingQuestionSet[]> {
   // Pull all workspaces+issues for this project (one query). Includes the workspace
   // status/closedAt/readyForMerge and the issue's status-column name so staleness can
@@ -288,7 +296,7 @@ export async function listPendingQuestionsForProject(
           issueTitle: ws.issueTitle,
           issueDescription: ws.issueDescription,
           questions,
-        }, db);
+        }, db, sendTurn ? { workspaceId: ws.workspaceId, sendTurn } : undefined);
       }
       const staleness = computeStaleness({
         workspaceStatus: ws.workspaceStatus,
@@ -333,13 +341,21 @@ interface RecommendInput {
   questions: AgentQuestion[];
 }
 
-function scheduleBackgroundRecommendation(projectId: string, input: RecommendInput, db: Database): void {
+interface AutoAnswerDeps {
+  workspaceId: string;
+  sendTurn: AutoAnswerSendTurn;
+}
+
+function scheduleBackgroundRecommendation(projectId: string, input: RecommendInput, db: Database, autoAnswerDeps?: AutoAnswerDeps): void {
   if (inFlightRecommendations.has(input.toolUseId)) return;
   inFlightRecommendations.add(input.toolUseId);
   void (async () => {
     try {
       const recs = await recommendQuestionsForSet(projectId, input, db);
       await setCachedRecommendations(input.toolUseId, recs, db);
+      if (autoAnswerDeps) {
+        await tryAutoAnswer(input.toolUseId, autoAnswerDeps.workspaceId, input.questions, recs, autoAnswerDeps.sendTurn, db);
+      }
     } catch (err) {
       console.error(`[agent-questions] background recommend failed: toolUseId=${input.toolUseId} ${err instanceof Error ? err.message : err}`);
       // Cache nulls so we don't re-poll on every list call.
@@ -348,6 +364,86 @@ function scheduleBackgroundRecommendation(projectId: string, input: RecommendInp
       inFlightRecommendations.delete(input.toolUseId);
     }
   })();
+}
+
+/**
+ * Attempt to auto-answer a question set using butler recommendations if the
+ * `butler_auto_answer` preference is enabled.
+ *
+ * Requirements for auto-answering:
+ * - `butler_auto_answer` preference is "true"
+ * - All recommendations are non-null (butler must be confident on every sub-question)
+ * - For single-select questions: recommendation has ≥1 selected option or freeText
+ * - Butler session must not have been interrupted (recs already non-null means it ran)
+ */
+export async function tryAutoAnswer(
+  toolUseId: string,
+  workspaceId: string,
+  questions: AgentQuestion[],
+  recs: Array<AgentQuestionRecommendation | null>,
+  sendTurn: AutoAnswerSendTurn,
+  db: Database,
+): Promise<void> {
+  const autoAnswerEnabled = await getPreference("butler_auto_answer", db);
+  if (autoAnswerEnabled !== "true") return;
+
+  // All sub-questions must have a non-null recommendation.
+  if (recs.some((r) => r === null)) {
+    console.info(`[agent-questions] auto-answer skipped: incomplete recommendations toolUseId=${toolUseId}`);
+    return;
+  }
+
+  // For single-select questions, require at least one selected option or freeText.
+  for (let i = 0; i < questions.length; i++) {
+    const q = questions[i];
+    const rec = recs[i]!;
+    if (!q.multiSelect && rec.recommendedOptionIndexes.length === 0 && !rec.freeText) {
+      console.info(`[agent-questions] auto-answer skipped: no clear winner for question ${i} toolUseId=${toolUseId}`);
+      return;
+    }
+  }
+
+  // Build answers from recommendations.
+  const answers = buildAnswersFromRecommendations(questions, recs as AgentQuestionRecommendation[]);
+  const content = formatAnswerMessage(questions, answers);
+
+  const chosenLabels = questions.map((q, i) => {
+    const rec = recs[i]!;
+    const labels = rec.recommendedOptionIndexes.map((idx) => q.options[idx]?.label).filter(Boolean);
+    return labels.length > 0 ? labels.join(", ") : rec.freeText ?? "(none)";
+  });
+  const rationales = (recs as AgentQuestionRecommendation[]).map((r) => r.rationale).join("; ");
+
+  try {
+    await sendTurn(workspaceId, content);
+    await markAnswered(toolUseId, db);
+    const firstQ = questions[0]?.question ?? "(unknown)";
+    console.info(
+      `[agent-questions] auto-answered toolUseId=${toolUseId} workspaceId=${workspaceId} ` +
+      `question="${firstQ.slice(0, 80)}" chosen="${chosenLabels.join(" | ")}" rationale="${rationales.slice(0, 160)}"`,
+    );
+  } catch (err) {
+    console.error(`[agent-questions] auto-answer send failed: toolUseId=${toolUseId} ${err instanceof Error ? err.message : err}`);
+  }
+}
+
+/** Build answer structs from butler recommendations — the server-side equivalent of the
+ *  client's emptyAnswers() initializer. */
+function buildAnswersFromRecommendations(
+  questions: AgentQuestion[],
+  recs: AgentQuestionRecommendation[],
+): { selectedLabels: string[]; freeText?: string }[] {
+  return questions.map((q, i) => {
+    const rec = recs[i];
+    if (!rec) return { selectedLabels: [] };
+    const selectedLabels: string[] = [];
+    for (const idx of rec.recommendedOptionIndexes) {
+      const opt = q.options[idx];
+      if (opt) selectedLabels.push(opt.label);
+    }
+    const freeText = selectedLabels.length === 0 && rec.freeText ? rec.freeText : undefined;
+    return { selectedLabels, ...(freeText ? { freeText } : {}) };
+  });
 }
 
 function buildRecommendationPrompt(input: RecommendInput): string {
