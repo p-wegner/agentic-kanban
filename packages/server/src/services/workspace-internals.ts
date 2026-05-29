@@ -69,6 +69,8 @@ export interface CreateWorkspaceInput {
   claudeProfile?: string;
   /** Claude model tier (e.g. "opus"). Falls back to the default_model preference when omitted. */
   model?: string;
+  /** Skip the context-packer for lightweight tickets that don't need auto-context. */
+  skipContextPacker?: boolean;
 }
 
 export interface CreateWorkspaceResult {

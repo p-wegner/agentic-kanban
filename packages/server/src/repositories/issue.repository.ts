@@ -300,6 +300,7 @@ export async function getIssueWorkspaces(
       pendingPlanPath: workspaces.pendingPlanPath,
       skillId: workspaces.skillId,
       skillName: agentSkills.name,
+      contextPrimer: workspaces.contextPrimer,
       createdAt: workspaces.createdAt,
       updatedAt: workspaces.updatedAt,
       closedAt: workspaces.closedAt,

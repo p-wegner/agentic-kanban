@@ -56,4 +56,10 @@ export const MIGRATION_FILES = [
   "0047_workflow_graphs.sql",
   "0048_workflow_fork.sql",
   "0049_workspace_scorecard.sql",
+  "0050_tdd_mode.sql",
+  "0051_test_runs.sql",
+  "0052_failure_patterns.sql",
+  "0053_flaky_test_classifier.sql",
+  "0054_touched_files.sql",
+  "0055_context_primer.sql",
 ];

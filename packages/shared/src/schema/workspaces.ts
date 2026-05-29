@@ -46,6 +46,8 @@ export const workspaces = sqliteTable("workspaces", {
   scorecardScore: integer("scorecard_score"),
   scorecardJson: text("scorecard_json"),
   scorecardComputedAt: text("scorecard_computed_at"),
+  /** Context primer assembled by the context-packer at workspace creation. Injected into CLAUDE.local.md. */
+  contextPrimer: text("context_primer"),
 }, (table) => ({
   issueIdIdx: index("idx_workspaces_issue_id").on(table.issueId),
   statusIdx: index("idx_workspaces_status").on(table.status),
