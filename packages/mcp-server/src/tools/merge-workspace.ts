@@ -4,6 +4,7 @@ import { db, schema } from "../db.js";
 import { eq } from "drizzle-orm";
 import * as gitService from "../git-service.js";
 import { notifyBoard } from "../notify.js";
+import { requireEntity } from "../db-utils.js";
 
 export function registerMergeWorkspace(server: McpServer) {
   server.tool(
@@ -16,21 +17,19 @@ export function registerMergeWorkspace(server: McpServer) {
       const wsRows = await db.select().from(schema.workspaces)
         .where(eq(schema.workspaces.id, workspaceId))
         .limit(1);
-      if (wsRows.length === 0) {
-        return { content: [{ type: "text" as const, text: `Workspace ${workspaceId} not found` }] };
-      }
+      const r0 = requireEntity(wsRows, workspaceId, "Workspace");
+      if (!r0.ok) return r0.error;
 
-      const workspace = wsRows[0];
+      const workspace = r0.value;
 
       // Resolve project info
       const issueRows = await db.select({ projectId: schema.issues.projectId })
         .from(schema.issues)
         .where(eq(schema.issues.id, workspace.issueId))
         .limit(1);
-      if (issueRows.length === 0) {
-        return { content: [{ type: "text" as const, text: `Issue ${workspace.issueId} not found` }] };
-      }
-      const projectId = issueRows[0].projectId;
+      const r1 = requireEntity(issueRows, workspace.issueId, "Issue");
+      if (!r1.ok) return r1.error;
+      const projectId = r1.value.projectId;
 
       const projectRows = await db.select({
         repoPath: schema.projects.repoPath,

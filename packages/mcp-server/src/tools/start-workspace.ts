@@ -7,6 +7,7 @@ import * as gitService from "../git-service.js";
 import { notifyBoard } from "../notify.js";
 import { runSetupScript } from "../setup-script.js";
 import { writeAgentSkillFile } from "@agentic-kanban/shared/lib/agent-skill-files";
+import { requireEntity } from "../db-utils.js";
 
 export function registerStartWorkspace(server: McpServer) {
   server.tool(
@@ -28,14 +29,13 @@ export function registerStartWorkspace(server: McpServer) {
     async ({ issueId, repoPath, branch, baseBranch, isDirect, skillId, planMode, skipSetup }) => {
       // Look up the issue
       const issues = await db.select().from(schema.issues).where(eq(schema.issues.id, issueId)).limit(1);
-      if (issues.length === 0) {
-        return { content: [{ type: "text" as const, text: `Issue ${issueId} not found` }] };
-      }
+      const r = requireEntity(issues, issueId, "Issue");
+      if (!r.ok) return r.error;
 
       // Resolve repoPath and defaultBranch from issue → project chain if not provided
       let resolvedRepoPath = repoPath;
       let resolvedBaseBranch: string | null | undefined = baseBranch;
-      const issue = issues[0];
+      const issue = r.value;
       const projectRows = await db
         .select({ repoPath: schema.projects.repoPath, defaultBranch: schema.projects.defaultBranch, setupScript: schema.projects.setupScript, setupEnabled: schema.projects.setupEnabled })
         .from(schema.projects)
