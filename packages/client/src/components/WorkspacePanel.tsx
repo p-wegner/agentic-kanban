@@ -186,7 +186,7 @@ function SessionStatsBadge({ stats }: { stats: string | null | undefined }) {
   const s = parseStats(stats);
   if (!s) return null;
   return (
-    <span className="text-[10px] text-gray-400 dark:text-gray-500" title={`Tokens: ${s.inputTokens.toLocaleString()} in / ${s.outputTokens.toLocaleString()} out\nCost: $${s.totalCostUsd.toFixed(4)}\nDuration: ${(s.durationMs / 1000).toFixed(0)}s`}>
+    <span className="text-[10px] text-gray-400 dark:text-gray-500" title={`Tokens: ${s.inputTokens.toLocaleString('en-US')} in / ${s.outputTokens.toLocaleString('en-US')} out\nCost: $${s.totalCostUsd.toFixed(4)}\nDuration: ${(s.durationMs / 1000).toFixed(0)}s`}>
       ${s.totalCostUsd.toFixed(2)}
     </span>
   );
