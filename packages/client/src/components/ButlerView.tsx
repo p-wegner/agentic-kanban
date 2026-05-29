@@ -49,6 +49,21 @@ interface ChatMessage {
   ts: number;
 }
 
+interface ButlerSessionSummary {
+  sessionId: string;
+  startedAt: string;
+  endedAt: string;
+  title: string;
+  turnCount: number;
+  model?: string;
+}
+
+interface ButlerSessionMessage {
+  role: "user" | "assistant";
+  text: string;
+  ts: number;
+}
+
 interface ButlerViewProps {
   projectId: string;
   columns: StatusWithIssues[];
@@ -173,6 +188,11 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
   const [customizeOpen, setCustomizeOpen] = useState(false);
   const [customizePrompt, setCustomizePrompt] = useState("");
   const [customizeBusy, setCustomizeBusy] = useState(false);
+  // History panel (past butler sessions from disk JSONL).
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [historySessions, setHistorySessions] = useState<ButlerSessionSummary[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyTranscript, setHistoryTranscript] = useState<{ session: ButlerSessionSummary; messages: ButlerSessionMessage[] } | null>(null);
   // Model picker (switches in-place, no context loss) + profile picker (restarts fresh).
   const [selectedModel, setSelectedModel] = useState("");
   const [profiles, setProfiles] = useState<string[]>([]);
@@ -304,6 +324,9 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
     setContextWindow(undefined);
     setMcpConnected(undefined);
     setCustomizeOpen(false);
+    setHistoryOpen(false);
+    setHistoryTranscript(null);
+    setHistorySessions([]);
     setSelectedModel("");
     setProfiles([]);
     setSelectedProfile("");
@@ -443,6 +466,31 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
       setCustomizePrompt("");
     } finally {
       setCustomizeBusy(false);
+    }
+  }
+
+  async function openHistory() {
+    setHistoryOpen((prev) => !prev);
+    if (historyOpen) return;
+    setHistoryTranscript(null);
+    setHistoryLoading(true);
+    try {
+      const r = await apiFetch<{ sessions: ButlerSessionSummary[] }>(`/api/projects/${projectId}/butler/sessions?limit=5`);
+      setHistorySessions(r.sessions);
+    } catch {
+      setHistorySessions([]);
+    } finally {
+      setHistoryLoading(false);
+    }
+  }
+
+  async function openHistoryTranscript(session: ButlerSessionSummary) {
+    setHistoryTranscript({ session, messages: [] });
+    try {
+      const r = await apiFetch<{ messages: ButlerSessionMessage[] }>(`/api/projects/${projectId}/butler/sessions/${session.sessionId}/messages`);
+      setHistoryTranscript({ session, messages: r.messages });
+    } catch {
+      // keep empty messages
     }
   }
 
@@ -695,6 +743,17 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
                 <span aria-hidden>⚙</span>
                 <span>Customize</span>
               </button>
+              <button
+                onClick={() => void openHistory()}
+                className={`inline-flex items-center gap-1 px-2.5 py-1 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors shadow-sm ${historyOpen ? "bg-gray-100 dark:bg-gray-700" : ""}`}
+                title="View recent butler sessions"
+              >
+                <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="12" r="10" />
+                  <polyline points="12 6 12 12 16 14" />
+                </svg>
+                <span>History</span>
+              </button>
             </div>
           </div>
 
@@ -721,6 +780,90 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
                 </div>
                 <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-1">Saving clears the current context so the new behavior takes effect immediately.</p>
               </div>
+            </div>
+          )}
+
+          {historyOpen && (
+            <div className="shrink-0 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/60">
+              {historyTranscript ? (
+                /* Read-only transcript overlay */
+                <div className="flex flex-col max-h-[60vh]">
+                  <div className="flex items-center justify-between px-4 py-2 border-b border-gray-200 dark:border-gray-700">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <button
+                        onClick={() => setHistoryTranscript(null)}
+                        className="shrink-0 p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-500 dark:text-gray-400"
+                        title="Back to session list"
+                      >
+                        <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M19 12H5M12 5l-7 7 7 7" />
+                        </svg>
+                      </button>
+                      <span className="text-xs font-medium text-gray-700 dark:text-gray-300 truncate">{historyTranscript.session.title}</span>
+                      <span className="shrink-0 text-[10px] text-gray-400 dark:text-gray-500">
+                        {historyTranscript.session.turnCount} turns · {formatRelativeTs(new Date(historyTranscript.session.startedAt).getTime())}
+                      </span>
+                    </div>
+                    <button
+                      onClick={() => setHistoryOpen(false)}
+                      className="shrink-0 p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-400 dark:text-gray-500"
+                      title="Close history"
+                    >
+                      <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M18 6L6 18M6 6l12 12" />
+                      </svg>
+                    </button>
+                  </div>
+                  <div className="overflow-y-auto px-4 py-3 flex-1">
+                    {historyTranscript.messages.length === 0 ? (
+                      <p className="text-xs text-gray-400 dark:text-gray-500 text-center py-4">No messages found in this session.</p>
+                    ) : (
+                      <div className="max-w-3xl mx-auto">
+                        {historyTranscript.messages.map((msg, i) => (
+                          <ChatBubble key={i} msg={{ id: `hist-${i}`, role: msg.role, text: msg.text, ts: msg.ts }} />
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                /* Session list dropdown */
+                <div className="px-4 py-3">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-medium text-gray-600 dark:text-gray-300">Recent sessions</span>
+                    <button
+                      onClick={() => setHistoryOpen(false)}
+                      className="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-400 dark:text-gray-500"
+                      title="Close"
+                    >
+                      <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M18 6L6 18M6 6l12 12" />
+                      </svg>
+                    </button>
+                  </div>
+                  {historyLoading ? (
+                    <p className="text-xs text-gray-400 dark:text-gray-500 py-2">Loading…</p>
+                  ) : historySessions.length === 0 ? (
+                    <p className="text-xs text-gray-400 dark:text-gray-500 py-2">No past butler sessions found.</p>
+                  ) : (
+                    <div className="space-y-1">
+                      {historySessions.map((s) => (
+                        <button
+                          key={s.sessionId}
+                          onClick={() => void openHistoryTranscript(s)}
+                          className="w-full text-left flex items-center justify-between gap-3 px-3 py-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                        >
+                          <span className="text-xs text-gray-800 dark:text-gray-200 truncate">{s.title}</span>
+                          <div className="shrink-0 flex items-center gap-2 text-[10px] text-gray-400 dark:text-gray-500">
+                            <span>{s.turnCount}t</span>
+                            <span>{formatRelativeTs(new Date(s.startedAt).getTime())}</span>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
 
