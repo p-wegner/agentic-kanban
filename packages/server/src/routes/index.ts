@@ -14,7 +14,7 @@ import { createWorkflowsRoute } from "./workflows.js";
 import { createWorkflowForkService } from "../services/workflow-fork.service.js";
 import type { Database } from "../db/index.js";
 import type { SessionManager } from "../services/session.manager.js";
-import type { BoardEvents } from "../services/board-events.js";
+import type { BoardEvents, BoardEventType } from "../services/board-events.js";
 import { createRouter } from "../middleware/create-router.js";
 import { parseOptionalJsonBody } from "../middleware/parse-body.js";
 
@@ -58,7 +58,7 @@ export function createRoutes(database: Database, getSessionManager: () => Sessio
     }
     const body = await parseOptionalJsonBody<{ projectId?: string; reason?: string }>(c);
     if (body.projectId) {
-      options.boardEvents.broadcast(body.projectId, body.reason ?? "internal_notify");
+      options.boardEvents.broadcast(body.projectId, (body.reason ?? "internal_notify") as BoardEventType);
     }
     return c.json({ ok: true });
   });
