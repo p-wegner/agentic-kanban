@@ -32,13 +32,25 @@ pnpm cli -- session analyze <session-id>
 ```
 
 ### `--last`
-Analyze the most recent agent sessions:
+Analyze the most recent agent sessions.
 
+**⚠️ Worktree caveat**: `pnpm cli --` commands fail in worktrees with `ERR_MODULE_NOT_FOUND` because `packages/shared/dist` is not built. Use the SQL fallback instead:
+
+```sql
+-- Fallback: query session_store directly (database: "session_store")
+SELECT s.id, s.branch, substr(s.summary, 1, 120), s.updated_at, COUNT(t.turn_index) as turns
+FROM sessions s LEFT JOIN turns t ON t.session_id = s.id
+WHERE s.repository = 'p-wegner/agentic-kanban'
+GROUP BY s.id HAVING turns > 0
+ORDER BY s.updated_at DESC LIMIT 10;
+```
+
+If not in a worktree, you can also use the CLI:
 ```bash
 pnpm cli -- session recent --limit 5
 ```
 
-Then pick the most interesting sessions and run `session analyze` on each.
+Then pick the most interesting sessions and run `session analyze` on each (or query turns/checkpoints via SQL).
 
 ### `--session <path>`
 Read a specific JSONL transcript file. Use session-inspector patterns:
