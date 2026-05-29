@@ -123,6 +123,13 @@ Worktrees do **not** have their own `node_modules` — the directory only exists
 - Run `pnpm install` once in the worktree root to create symlinks, OR
 - Accept that TS errors in the worktree are environment noise; verify correctness via the running dev server + Playwright instead.
 
+**Unit/integration test anti-patterns:**
+
+| Anti-pattern | Problem | Fix |
+|---|---|---|
+| Hardcoded absolute timestamps in DB seed data | Staleness/time-window checks use wall-clock time; seeded dates age past thresholds → assertions fail hours later | Use `new Date(Date.now() - N * ms).toISOString()` for any seed timestamp that participates in a time check |
+| Not using `nowOverride` in time-sensitive integration tests | Service uses `new Date()` internally → results vary by when the test runs | Pass a fixed `now` to service calls: `listPendingQuestionsForProject(id, db, new Date().toISOString())` |
+
 ## Visual Verification
 Every feature with UI must be visually verified using the `playwright-cli` skill.
 1. Determine ports: in a worktree, use `$env:KANBAN_CLIENT_PORT` / `$env:KANBAN_SERVER_PORT` — never hardcode 3001/5173. Check if server is already listening before starting `pnpm dev`.

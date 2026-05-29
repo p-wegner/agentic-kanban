@@ -257,7 +257,13 @@ describe("listPendingQuestionsForProject — dismiss + staleness integration", (
 
   it("lists a pending question and hides it once dismissed", async () => {
     const { db } = createTestDb();
-    const { projectId } = await seed(db, { toolUseId: "tu-a" });
+    const now = new Date().toISOString();
+    const recentSessionAt = new Date(Date.now() - 30 * 60 * 1000).toISOString(); // 30 min ago
+    const { projectId } = await seed(db, {
+      toolUseId: "tu-a",
+      sessionStartedAt: recentSessionAt,
+      sessionEndedAt: recentSessionAt,
+    });
 
     let pending = await listPendingQuestionsForProject(projectId, db);
     expect(pending.map((p) => p.toolUseId)).toContain("tu-a");
@@ -268,7 +274,7 @@ describe("listPendingQuestionsForProject — dismiss + staleness integration", (
     expect(pending.map((p) => p.toolUseId)).not.toContain("tu-a");
   });
 
-  it("computes a workspace-merged staleness badge for a closed workspace", async () => {
+  it("filters out question when workspace is closed (workspace-merged)", async () => {
     const { db } = createTestDb();
     const { projectId } = await seed(db, {
       toolUseId: "tu-b",
@@ -276,17 +282,17 @@ describe("listPendingQuestionsForProject — dismiss + staleness integration", (
       workspaceClosedAt: ts(-15 * 60 * 1000),
     });
     const pending = await listPendingQuestionsForProject(projectId, db);
-    expect(pending.find((p) => p.toolUseId === "tu-b")?.staleness?.reason).toBe("workspace-merged");
+    expect(pending.find((p) => p.toolUseId === "tu-b")).toBeUndefined();
   });
 
-  it("computes an issue-done staleness badge when the issue is in a terminal status", async () => {
+  it("filters out question when issue is in a terminal status (issue-done)", async () => {
     const { db } = createTestDb();
     const { projectId } = await seed(db, { toolUseId: "tu-c", statusName: "Done" });
     const pending = await listPendingQuestionsForProject(projectId, db);
-    expect(pending.find((p) => p.toolUseId === "tu-c")?.staleness?.reason).toBe("issue-done");
+    expect(pending.find((p) => p.toolUseId === "tu-c")).toBeUndefined();
   });
 
-  it("computes a superseded staleness badge when a newer session has run", async () => {
+  it("filters out question when a newer session has run (superseded)", async () => {
     const { db } = createTestDb();
     const { projectId, workspaceId } = await seed(db, {
       toolUseId: "tu-d",
@@ -302,7 +308,7 @@ describe("listPendingQuestionsForProject — dismiss + staleness integration", (
       endedAt: ts(-30 * 60 * 1000),    // 30m ago
     });
     const pending = await listPendingQuestionsForProject(projectId, db);
-    expect(pending.find((p) => p.toolUseId === "tu-d")?.staleness?.reason).toBe("superseded");
+    expect(pending.find((p) => p.toolUseId === "tu-d")).toBeUndefined();
   });
 });
 
