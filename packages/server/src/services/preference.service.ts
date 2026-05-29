@@ -18,6 +18,7 @@ export const SETTINGS_KEYS = [
   "backup_interval_min", "backup_keep_last",
   "butler_event_feed", "butler_event_feed_min_interval_ms",
   "butler_auto_answer", "butler_auto_answer_min_confidence",
+  "monitor_butler_enabled", "monitor_butler_interval_min",
   ...allHarnessSettingKeys(),
 ];
 

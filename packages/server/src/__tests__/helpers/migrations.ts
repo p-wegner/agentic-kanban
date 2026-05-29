@@ -64,4 +64,5 @@ export const MIGRATION_FILES = [
   "0055_context_primer.sql",
   "0056_showdowns.sql",
   "0057_codemod_type.sql",
+  "0058_board_health_events.sql",
 ];
