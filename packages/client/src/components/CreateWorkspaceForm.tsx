@@ -175,7 +175,10 @@ export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCr
         method: "POST",
         body: JSON.stringify({ projectId: issue.projectId }),
       });
-      if (result.verdict === "ready") {
+      // Surface the modal when the verdict blocks, OR when a complex ticket is being run
+      // directly on the main checkout (advisory direct-workspace warning).
+      const directRisk = isDirect && result.looksComplex === true;
+      if (result.verdict === "ready" && !directRisk) {
         setPreflightLoading(false);
         await doLaunch(body);
       } else {
@@ -411,6 +414,7 @@ export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCr
         projectId={issue.projectId}
         issueTitle={issue.title}
         issueDescription={issue.description ?? ""}
+        isDirect={isDirect}
         loading={preflightLoading || localLoading}
         onLaunchAnyway={async () => {
           setPreflightResult(null);
