@@ -153,7 +153,7 @@ export interface UpdateIssueRequest {
 export interface MainWorkspaceInfo {
   id: string;
   branch: string;
-  status: "active" | "reviewing" | "fixing" | "idle" | "error" | "closed";
+  status: "active" | "reviewing" | "fixing" | "idle" | "awaiting-plan-approval" | "error" | "closed";
   readyForMerge?: boolean;
   planMode?: boolean;
   /** @deprecated Use profile instead */
