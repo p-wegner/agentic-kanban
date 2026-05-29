@@ -408,8 +408,10 @@ export function createWorkflowsRoute(database: Database = db, options?: Workflow
     return c.json({
       ok: true,
       movedTo: result.toNode?.name,
+      nodeType: result.toNode?.nodeType ?? null,
       status: result.statusName,
       nextStages: (result.nextTransitions ?? []).map((t) => t.toNodeName),
+      terminal: (result.nextTransitions ?? []).length === 0,
     });
   });
 

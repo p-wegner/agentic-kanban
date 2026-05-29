@@ -8,6 +8,12 @@
  *   error        - Failure: init + error result, exits with code 1
  *   rate-limit   - Rate limiting: init + rate_limit_event(rejected) + text + rate_limit_event(allowed) + result
  *   todo-progress - TodoWrite events: init + TodoWrite(pending tasks) + TodoWrite(one in_progress) + TodoWrite(all completed) + result
+ *   workflow     - Drives a configurable workflow: reads the injected `## Workflow`
+ *                  prompt from stdin, then walks the graph by POSTing to the REST
+ *                  transition endpoint (KANBAN_SERVER_PORT) — committing a stub file
+ *                  per stage — until it hits a fork, join, terminal, or visit cap.
+ *                  Lets the mock fully exercise transitions, forks, joins, auto-merge
+ *                  and shared-worktree flows with zero token cost.
  *
  * Configuration:
  *   --session-id <uuid>   / MOCK_SESSION_ID     - Deterministic session UUID
@@ -353,6 +359,173 @@ async function runError(sessionId: string, delayMs: number) {
   process.exit(1);
 }
 
+// --- Workflow profile ---
+
+/** Read everything available on stdin. Resolves on EOF, or after an idle gap if
+ * stdin is kept open (keepAlive sessions never close it). */
+function readStdin(idleMs = 800): Promise<string> {
+  return new Promise((resolve) => {
+    let buf = "";
+    let timer: NodeJS.Timeout | undefined;
+    const done = () => { if (timer) clearTimeout(timer); resolve(buf); };
+    const bump = () => { if (timer) clearTimeout(timer); timer = setTimeout(done, idleMs); };
+    process.stdin.setEncoding("utf-8");
+    process.stdin.on("data", (chunk) => { buf += chunk; bump(); });
+    process.stdin.on("end", done);
+    process.stdin.on("error", done);
+    bump();
+  });
+}
+
+/** Pull the workspace id, current stage, and valid next stages out of the
+ * `## Workflow` block that the server injects into the agent prompt. */
+function parseWorkflowPrompt(prompt: string): {
+  workspaceId: string | null;
+  currentStage: string | null;
+  nextStages: string[];
+  isFork: boolean;
+} {
+  const wsMatch = /workspaceId:\s*"([^"]+)"/.exec(prompt);
+  // The join relaunch prepends artifacts/intro text (which may itself contain
+  // bullet lists) before the workflow block, so scope parsing to the LAST
+  // "## Workflow" block and, for stages, to the "Valid next stages" section only.
+  const wfIdx = prompt.lastIndexOf("## Workflow");
+  const block = wfIdx >= 0 ? prompt.slice(wfIdx) : prompt;
+  const stageMatch = /at the \*\*(.+?)\*\* stage/.exec(block);
+  const nextStages: string[] = [];
+  const markerIdx = block.indexOf("Valid next stages from here:");
+  if (markerIdx >= 0) {
+    const lineRe = /^- \*\*(.+?)\*\*/gm;
+    let m: RegExpExecArray | null;
+    while ((m = lineRe.exec(block.slice(markerIdx))) !== null) nextStages.push(m[1]);
+  }
+  return {
+    workspaceId: wsMatch?.[1] ?? null,
+    currentStage: stageMatch?.[1] ?? null,
+    nextStages,
+    isFork: /parallel fork/i.test(block) && nextStages.length === 0,
+  };
+}
+
+function slugify(s: string): string {
+  return s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "stage";
+}
+
+/** Write a stub file for a stage and commit it (best-effort) so diffs/merges are real. */
+async function commitStageWork(stage: string): Promise<void> {
+  try {
+    const { writeFileSync } = await import("node:fs");
+    const { execSync } = await import("node:child_process");
+    const file = `mock-${slugify(stage)}.md`;
+    writeFileSync(file, `# ${stage}\n\nMock contribution for the "${stage}" stage.\n`, "utf-8");
+    const opts = { cwd: process.cwd(), stdio: "ignore" as const };
+    execSync("git add -A", opts);
+    execSync(`git commit -m "mock(${slugify(stage)}): stage work" --no-verify`, opts);
+  } catch {
+    // No git / nothing to commit / hooks — non-fatal for a mock.
+  }
+}
+
+async function postTransition(
+  workspaceId: string,
+  toNodeName: string,
+): Promise<{ ok: boolean; nodeType?: string | null; nextStages?: string[]; terminal?: boolean; error?: string }> {
+  const port = process.env.KANBAN_SERVER_PORT || process.env.PORT || "3001";
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}/api/workflows/workspaces/${workspaceId}/transition`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ toNodeName, summary: `mock advanced to ${toNodeName}` }),
+    });
+    const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+    if (!res.ok) return { ok: false, error: (data.error as string) ?? `HTTP ${res.status}` };
+    return {
+      ok: true,
+      nodeType: (data.nodeType as string) ?? null,
+      nextStages: (data.nextStages as string[]) ?? [],
+      terminal: (data.terminal as boolean) ?? false,
+    };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+async function runWorkflow(sessionId: string, delayMs: number) {
+  const startTime = Date.now();
+  emit(buildInitMsg(sessionId));
+
+  const prompt = await readStdin();
+  const parsed = parseWorkflowPrompt(prompt);
+  process.stderr.write(`[mock-agent:workflow] ws=${parsed.workspaceId} stage=${parsed.currentStage} next=[${parsed.nextStages.join(", ")}] fork=${parsed.isFork}\n`);
+
+  if (!parsed.workspaceId) {
+    emit(buildAssistantTextMsg("Mock workflow agent: no workspaceId in prompt — nothing to drive."));
+    emit(buildResultMsg(sessionId, "Mock workflow agent: no workflow context.", startTime, 1));
+    return;
+  }
+  if (parsed.isFork) {
+    emit(buildAssistantTextMsg("Mock workflow agent: at a parallel fork — the server spawns branches; stopping."));
+    emit(buildResultMsg(sessionId, "Mock workflow agent: stopped at parallel fork.", startTime, 1));
+    return;
+  }
+
+  const visited = new Set<string>();
+  let stage = parsed.currentStage ?? "Start";
+  let nextStages = parsed.nextStages;
+  const MAX_STEPS = 40;
+  let steps = 0;
+  const log: string[] = [];
+
+  while (nextStages.length > 0 && steps < MAX_STEPS) {
+    steps++;
+    // Do this stage's work (write + commit a stub file) before advancing.
+    await commitStageWork(stage);
+    emit(buildToolUseMsg("Write", { file_path: `mock-${slugify(stage)}.md` }));
+    await sleep(delayMs);
+
+    // Prefer an unvisited target so self-loops/decision-gates don't dominate.
+    const target = nextStages.find((s) => !visited.has(s)) ?? nextStages[0];
+    visited.add(target);
+    emit(buildAssistantTextMsg(`Completed "${stage}". Advancing to "${target}".`));
+
+    const res = await postTransition(parsed.workspaceId, target);
+    if (!res.ok) {
+      log.push(`blocked at ${target}: ${res.error}`);
+      emit(buildAssistantTextMsg(`Transition to "${target}" was blocked: ${res.error}. Stopping.`));
+      break;
+    }
+    log.push(`${stage} -> ${target} [${res.nodeType ?? "?"}]`);
+    stage = target;
+    nextStages = res.nextStages ?? [];
+
+    // Stop at control nodes: a fork is server-orchestrated (children spawn), and a
+    // child reaching its join must not advance past it (only the parent does that,
+    // via a fresh session after consolidation).
+    if (res.nodeType === "parallel-fork") {
+      emit(buildAssistantTextMsg(`Reached parallel fork "${target}" — server will spawn branches. Stopping.`));
+      break;
+    }
+    if (res.nodeType === "parallel-join") {
+      emit(buildAssistantTextMsg(`Reached join "${target}". Stopping (consolidation is server-driven).`));
+      break;
+    }
+    if (res.terminal) {
+      emit(buildAssistantTextMsg(`Reached terminal stage "${target}". Workflow complete.`));
+      break;
+    }
+    await sleep(delayMs);
+  }
+
+  emit(
+    buildResultMsg(
+      sessionId,
+      `Mock workflow agent walked ${steps} stage(s): ${log.join(", ") || "(no transitions)"}.`,
+      startTime,
+      steps || 1,
+    ),
+  );
+}
+
 // --- Main ---
 
 async function main() {
@@ -380,6 +553,9 @@ async function main() {
       break;
     case "rate-limit":
       await runRateLimit(sessionId, delayMs);
+      break;
+    case "workflow":
+      await runWorkflow(sessionId, delayMs);
       break;
     case "standard":
     default:
