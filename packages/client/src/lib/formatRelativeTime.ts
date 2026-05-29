@@ -11,5 +11,5 @@ export function formatRelativeTime(dateStr: string): string {
   if (diffMin < 60) return `${diffMin}m ago`;
   if (diffHour < 24) return `${diffHour}h ago`;
   if (diffDay < 30) return `${diffDay}d ago`;
-  return date.toLocaleDateString();
+  return date.toLocaleDateString('en-US');
 }

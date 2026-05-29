@@ -353,7 +353,7 @@ export function AllWorkspacesPanel({ columns, activeProjectId, onClose, onIssueC
 
                         {/* Context usage */}
                         {(main.status === "active" || main.status === "fixing") && main.contextTokens ? (
-                          <span className="text-xs text-gray-400 dark:text-gray-500" title={`${main.contextTokens.toLocaleString()} context tokens`}>
+                          <span className="text-xs text-gray-400 dark:text-gray-500" title={`${main.contextTokens.toLocaleString('en-US')} context tokens`}>
                             {main.contextTokens >= 1000
                               ? `${Math.round(main.contextTokens / 1000)}k ctx`
                               : `${main.contextTokens} ctx`}
