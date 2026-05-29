@@ -18,10 +18,29 @@ export interface TicketPreflightResult {
   blockedByNumber?: number;
 }
 
+/** A question + the answer the user provided during preflight clarification. */
+export interface PreflightClarification {
+  question: string;
+  answer: string;
+}
+
+/** Render answered clarifications as a markdown block — reused for the prompt re-check
+ *  and as the comment body / agent-context injection. */
+export function formatClarificationsBlock(clarifications: PreflightClarification[]): string {
+  const lines: string[] = ["## Clarifications from preflight", ""];
+  for (const c of clarifications) {
+    lines.push(`**Q:** ${c.question.trim()}`);
+    lines.push(`**A:** ${c.answer.trim()}`);
+    lines.push("");
+  }
+  return lines.join("\n").trimEnd();
+}
+
 export async function runTicketPreflight(
   issueId: string,
   projectId: string,
   database: Database,
+  clarifications?: PreflightClarification[],
 ): Promise<TicketPreflightResult> {
   const issueRows = await database
     .select({
@@ -70,6 +89,10 @@ export async function runTicketPreflight(
       .where(eq(issues.projectId, projectId));
   }
 
+  const answeredClarifications = (clarifications ?? []).filter(
+    (c) => c.question?.trim() && c.answer?.trim(),
+  );
+
   const otherIssues = openIssues.filter((i) => i.id !== issueId);
   const issuesSummary = otherIssues.length > 0
     ? otherIssues
@@ -109,7 +132,7 @@ Rules:
 
 Target ticket: #${target.issueNumber ?? "?"} "${target.title}"
 ${target.description ? `Description:\n${target.description.trim()}` : "(no description)"}
-
+${answeredClarifications.length > 0 ? `\nThe user has already answered these clarifying questions — treat them as part of the spec when judging readiness:\n${answeredClarifications.map((c) => `Q: ${c.question.trim()}\nA: ${c.answer.trim()}`).join("\n")}\n` : ""}
 Other open issues on the board:
 ${issuesSummary}`;
 
