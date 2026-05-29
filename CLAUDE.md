@@ -45,6 +45,8 @@ Cleanroom reimplementation of [vibe-kanban](https://github.com/BloopAI/vibe-kanb
 ### Cross-cutting / Windows
 - **Hook paths on Windows**: Use **forward slashes** in `settings.json` hook commands. `\\` gets mangled by Claude Code's hook runner → `MODULE_NOT_FOUND`. Relative paths like `.claude/hooks/...` also fail when CWD shifts. `$CLAUDE_PROJECT_DIR` is not expanded in hook command strings.
 - **Git tests on Windows**: Use `.trim()` for file content assertions (CRLF vs LF); test git output for keywords, not exact strings.
+- **`git stash` in worktrees is dangerous**: `git stash` + `git stash pop` can silently discard ALL tracked changes, leaving only untracked files. Always verify after pop: `git diff --stat HEAD`. Prefer a WIP commit (`git commit --amend`) over stashing in a worktree.
+- **Migration number collisions**: Parallel feature branches independently pick the same "next" migration number because each worktree starts from the same base. Before creating a migration, check the highest number in the **main checkout** (`C:\andrena\agentic-kanban\packages\shared\drizzle`), not the worktree — multiple branches in flight will all see the same last number. Use the kanban server's copy as ground truth.
 
 ### Git service — single source of truth
 All git operations live in `packages/shared/src/lib/git-service.ts`. Both `packages/server/src/services/git.service.ts` and `packages/mcp-server/src/git-service.ts` are thin re-exports — **edit only the shared file**.
@@ -174,6 +176,7 @@ When the user references `#N` (e.g., "review #70", "merge #65", "what's the stat
 | Rebase a workspace onto latest base | `POST /api/workspaces/:id/update-base` | Run `git rebase` directly |
 | Move an issue to a new status | MCP `move_issue` or CLI `issue move` | PATCH via REST unless no tool exists |
 | Send a follow-up message to a running agent | `POST /api/workspaces/:id/turn` | Spawn a new claude process |
+| Move workspace to next workflow stage (e.g. Review) | MCP `propose_transition` | REST `/api/workspaces/:id/propose-transition` — **does not exist**, returns 404 |
 
 ### MCP Tools are the primary interface
 
