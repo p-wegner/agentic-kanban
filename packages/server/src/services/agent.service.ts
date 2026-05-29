@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { openSync, closeSync, readSync, statSync, unlinkSync, existsSync } from "node:fs";
+import { openSync, closeSync, readSync, statSync, unlinkSync, existsSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildAgentLaunchConfig, type ProviderId, type ProviderName } from "./agent-provider.js";
@@ -408,18 +408,32 @@ export function reattachSession(
 ): void {
   agentState.activePids.set(sessionId, pid);
 
-  // Start watching the output file from its current end
+  // Resume streaming the output file from its current end. The file may have
+  // rolled away (temp cleanup) between runs — recreate it so the watcher has
+  // something to poll and any future agent output still has a sink.
   const outPath = sessionOutputPath(sessionId);
-  if (existsSync(outPath)) {
+  let startOffset = 0;
+  if (!existsSync(outPath)) {
     try {
-      const stat = statSync(outPath);
-      const watcher = startOutputFileWatcher(sessionId, outPath, onOutput, stat.size);
-      agentState.outputWatchers.set(sessionId, watcher);
-      console.log(`[agent] reattached output: sessionId=${sessionId} pid=${pid} fileOffset=${stat.size}`);
+      writeFileSync(outPath, "");
+      console.warn(`[agent] reattach: output file missing, recreated: ${outPath}`);
+    } catch (err) {
+      console.warn(`[agent] reattach: could not recreate output file ${outPath}`, err);
+    }
+  } else {
+    try {
+      startOffset = statSync(outPath).size;
     } catch {
-      console.warn(`[agent] failed to read output file for reattach: sessionId=${sessionId}`);
+      startOffset = 0;
     }
   }
+  try {
+    const watcher = startOutputFileWatcher(sessionId, outPath, onOutput, startOffset);
+    agentState.outputWatchers.set(sessionId, watcher);
+  } catch {
+    console.warn(`[agent] failed to start output watcher for reattach: sessionId=${sessionId}`);
+  }
+  console.log(`[agent-service] reattached session ${sessionId} pid=${pid} output=${outPath}`);
 
   // Start PID exit monitoring
   const pidWatcher = startPidWatcher(sessionId, pid, () => {
@@ -436,6 +450,4 @@ export function reattachSession(
     onExit();
   });
   agentState.pidWatchers.set(sessionId, pidWatcher);
-
-  console.log(`[agent] reattached: sessionId=${sessionId} pid=${pid}`);
 }
