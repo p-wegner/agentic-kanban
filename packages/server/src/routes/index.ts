@@ -46,7 +46,7 @@ export function createRoutes(database: Database, getSessionManager: () => Sessio
   routes.route("/preferences", createPreferencesRoute(database));
   routes.route("/agent-skills", createAgentSkillsRoute(database));
   routes.route("/workflows", createWorkflowsRoute(database, { ...options, onWorkflowAdvanced }));
-  routes.route("/scheduled-runs", createScheduledRunsRoute(database, options?.serverPort));
+  routes.route("/scheduled-runs", createScheduledRunsRoute(database, getSessionManager, options?.boardEvents));
   if (options?.boardEvents) {
     routes.route("/approvals", createApprovalsRoute(options.boardEvents));
   }
