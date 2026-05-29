@@ -7,10 +7,13 @@ import {
   markAnswered,
   isAnswered,
   listPendingQuestionsForProject,
+  tryAutoAnswer,
   type StalenessInput,
+  type AgentQuestion,
+  type AgentQuestionRecommendation,
 } from "../services/agent-questions.service.js";
 import { createTestDb } from "./helpers/test-db.js";
-import { getPreference } from "../repositories/preferences.repository.js";
+import { getPreference, setPreference } from "../repositories/preferences.repository.js";
 import {
   projects,
   projectStatuses,
@@ -295,5 +298,70 @@ describe("listPendingQuestionsForProject — dismiss + staleness integration", (
     });
     const pending = await listPendingQuestionsForProject(projectId, db);
     expect(pending.find((p) => p.toolUseId === "tu-d")?.staleness?.reason).toBe("superseded");
+  });
+});
+
+describe("tryAutoAnswer", () => {
+  const questions: AgentQuestion[] = [
+    { question: "Which approach?", options: [{ label: "A" }, { label: "B" }, { label: "C" }], multiSelect: false },
+  ];
+  const goodRecs: AgentQuestionRecommendation[] = [
+    { recommendedOptionIndexes: [1], rationale: "B is better" },
+  ];
+
+  it("does NOT auto-answer when butler_auto_answer pref is off (default)", async () => {
+    const { db } = createTestDb();
+    const sent: string[] = [];
+    await tryAutoAnswer("tu-aa1", "ws-1", questions, goodRecs, async (_, c) => { sent.push(c); }, db);
+    expect(sent).toHaveLength(0);
+    expect(await isAnswered("tu-aa1", db)).toBe(false);
+  });
+
+  it("auto-answers when pref is on and all recs are non-null", async () => {
+    const { db } = createTestDb();
+    await setPreference("butler_auto_answer", "true", db);
+    const sent: string[] = [];
+    await tryAutoAnswer("tu-aa2", "ws-2", questions, goodRecs, async (_, c) => { sent.push(c); }, db);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toContain("B");
+    expect(await isAnswered("tu-aa2", db)).toBe(true);
+  });
+
+  it("skips auto-answer when any recommendation is null", async () => {
+    const { db } = createTestDb();
+    await setPreference("butler_auto_answer", "true", db);
+    const sent: string[] = [];
+    const partialRecs = [null] as Array<AgentQuestionRecommendation | null>;
+    await tryAutoAnswer("tu-aa3", "ws-3", questions, partialRecs, async (_, c) => { sent.push(c); }, db);
+    expect(sent).toHaveLength(0);
+    expect(await isAnswered("tu-aa3", db)).toBe(false);
+  });
+
+  it("skips auto-answer for single-select with empty recommendedOptionIndexes and no freeText", async () => {
+    const { db } = createTestDb();
+    await setPreference("butler_auto_answer", "true", db);
+    const sent: string[] = [];
+    const noWinnerRecs: AgentQuestionRecommendation[] = [{ recommendedOptionIndexes: [], rationale: "unclear" }];
+    await tryAutoAnswer("tu-aa4", "ws-4", questions, noWinnerRecs, async (_, c) => { sent.push(c); }, db);
+    expect(sent).toHaveLength(0);
+    expect(await isAnswered("tu-aa4", db)).toBe(false);
+  });
+
+  it("auto-answers with freeText when no option selected but freeText provided", async () => {
+    const { db } = createTestDb();
+    await setPreference("butler_auto_answer", "true", db);
+    const sent: string[] = [];
+    const freeTextRecs: AgentQuestionRecommendation[] = [{ recommendedOptionIndexes: [], freeText: "custom reply", rationale: "none fit" }];
+    await tryAutoAnswer("tu-aa5", "ws-5", questions, freeTextRecs, async (_, c) => { sent.push(c); }, db);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toContain("custom reply");
+    expect(await isAnswered("tu-aa5", db)).toBe(true);
+  });
+
+  it("does not mark answered when sendTurn throws", async () => {
+    const { db } = createTestDb();
+    await setPreference("butler_auto_answer", "true", db);
+    await tryAutoAnswer("tu-aa6", "ws-6", questions, goodRecs, async () => { throw new Error("network error"); }, db);
+    expect(await isAnswered("tu-aa6", db)).toBe(false);
   });
 });
