@@ -248,6 +248,7 @@ export interface WorkspaceResponse {
   pendingPlanPath?: string | null;
   sessionId?: string;
   skillName?: string | null;
+  contextPrimer?: string | null;
   createdAt: string;
   updatedAt: string;
   closedAt?: string | null;
