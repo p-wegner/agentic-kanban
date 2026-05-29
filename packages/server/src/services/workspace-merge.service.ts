@@ -242,8 +242,19 @@ export function createWorkspaceMergeService(deps: {
       throw new WorkspaceError("Workspace is closed", "BAD_REQUEST");
     }
 
-    const { defaultBranch } = await resolveProjectRepo(id, database);
+    const { repoPath, defaultBranch } = await resolveProjectRepo(id, database);
     const baseBranch = requireBaseBranch(workspace.baseBranch || defaultBranch);
+
+    // Refuse if main checkout HEAD has drifted off the target branch (consistent with /merge guard).
+    const currentHeadBranch = await gitService.getCurrentBranch(repoPath);
+    if (currentHeadBranch !== baseBranch) {
+      throw new WorkspaceError(
+        `Cannot update base: main checkout HEAD is on '${currentHeadBranch}' but this workspace targets '${baseBranch}'. ` +
+          `Check out '${baseBranch}' in the main checkout before proceeding.`,
+        "CONFLICT",
+        { currentBranch: currentHeadBranch, targetBranch: baseBranch },
+      );
+    }
 
     // Stop any processes the agent left running in the worktree before we rewrite history.
     await killWorktreeProcesses(workspace.workingDir, `update-base:pre`);
@@ -318,12 +329,24 @@ export function createWorkspaceMergeService(deps: {
     if (workspace.status === "fixing") throw new WorkspaceError("Fix already in progress", "CONFLICT");
     if (!getSessionManager) throw new WorkspaceError("Session manager not available", "BAD_REQUEST");
 
+    const errorMessage = mergeError || "Unknown merge error";
+    const { repoPath, defaultBranch } = await resolveProjectRepo(id, database);
+    const baseBranch = requireBaseBranch(workspace.baseBranch || defaultBranch);
+
+    // Refuse if main checkout HEAD has drifted off the target branch (consistent with /merge guard).
+    const currentHeadBranch = await gitService.getCurrentBranch(repoPath);
+    if (currentHeadBranch !== baseBranch) {
+      throw new WorkspaceError(
+        `Cannot fix-and-merge: main checkout HEAD is on '${currentHeadBranch}' but this workspace targets '${baseBranch}'. ` +
+          `Check out '${baseBranch}' in the main checkout before proceeding.`,
+        "CONFLICT",
+        { currentBranch: currentHeadBranch, targetBranch: baseBranch },
+      );
+    }
+
     // Kill leftover worktree processes (e.g. dev.mjs from the prior agent) before spawning the fix agent.
     await killWorktreeProcesses(workspace.workingDir, "fix-and-merge");
 
-    const errorMessage = mergeError || "Unknown merge error";
-    const { defaultBranch } = await resolveProjectRepo(id, database);
-    const baseBranch = requireBaseBranch(workspace.baseBranch || defaultBranch);
     const prompt = buildFixAndMergePrompt(errorMessage, baseBranch);
 
     const { agentCommand, agentArgs, claudeProfile, profile, provider } =
