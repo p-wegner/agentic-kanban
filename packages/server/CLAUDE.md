@@ -57,7 +57,7 @@ On Windows, `claude.exe` buffers stdout until stdin closed. Always use `stdin.en
 Projects have `setup_script` (nullable text) and `setup_blocking` (boolean, default true) columns. `runSetupScript()` in `@agentic-kanban/shared/lib/setup-script.ts`. Blocking: await script then launch. Parallel: fire-and-forget. Non-fatal. PATCH `/api/projects/:id` updates setup script config.
 
 ## Issue numbers
-Auto-incrementing per project via `MAX(issue_number) + 1` in `POST /api/issues`. `issue_number` added in migration 0006. The `MIGRATION_FILES` array in `api.test.ts` must include every migration SQL file.
+Auto-incrementing per project via `MAX(issue_number) + 1` in `POST /api/issues`. `issue_number` added in migration 0006. The `MIGRATION_FILES` array in `packages/server/src/__tests__/helpers/migrations.ts` must include every migration SQL file (not `api.test.ts` — that file imports from this helper).
 
 ## Review session must inherit claude_profile
 When launching auto-review/manual-review from `index.ts`, read `claude_profile` from `prefMap` and pass as 6th arg to `sessionManager.startSession()`. Without it the review agent falls back to `ANTHROPIC_API_KEY` and gets 401. Pattern: `const claudeProfile = useMock ? undefined : (prefMap.get("claude_profile") || undefined);`

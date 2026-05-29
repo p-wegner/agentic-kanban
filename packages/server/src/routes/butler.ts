@@ -22,9 +22,30 @@ import {
   setButlerModel,
   interruptButler,
 } from "../services/butler-sdk.service.js";
+import { listButlerSessions, getButlerSessionMessages } from "../services/butler-transcripts.service.js";
 
 function butlerSessionPrefKey(projectId: string): string {
   return `butler_session_${projectId}`;
+}
+
+/** Rolling list of butler session IDs for this project (JSON array, capped at 50). */
+function butlerSessionHistoryPrefKey(projectId: string): string {
+  return `butler_session_history_${projectId}`;
+}
+
+/** Append a sessionId to the per-project butler session history preference. */
+async function appendToSessionHistory(projectId: string, sessionId: string, database: Database): Promise<void> {
+  try {
+    const raw = await getPreference(butlerSessionHistoryPrefKey(projectId), database);
+    const ids: string[] = raw ? (JSON.parse(raw) as string[]) : [];
+    if (!ids.includes(sessionId)) {
+      ids.unshift(sessionId); // most-recent first
+      if (ids.length > 50) ids.length = 50;
+      await setPreference(butlerSessionHistoryPrefKey(projectId), JSON.stringify(ids), database);
+    }
+  } catch (err) {
+    console.warn(`[butler] failed to append session history: project=${projectId}`, err);
+  }
 }
 
 /** Per-project model override for the butler (empty = profile/CLI default). */
@@ -154,7 +175,10 @@ export function createButlerRoute(
     // Persist the SDK session id (for resume across restarts) once, on first creation.
     if (!wasActive) {
       subscribeButler(projectId, (e) => {
-        if (e.type === "session") void setPreference(butlerSessionPrefKey(projectId), e.sessionId, database);
+        if (e.type === "session") {
+          void setPreference(butlerSessionPrefKey(projectId), e.sessionId, database);
+          void appendToSessionHistory(projectId, e.sessionId, database);
+        }
       });
     }
     return session;
@@ -372,6 +396,37 @@ export function createButlerRoute(
       }
       unsubscribe();
     });
+  });
+
+  // GET /api/projects/:id/butler/sessions — list recent butler sessions from disk JSONL
+  router.get("/:id/butler/sessions", async (c) => {
+    const projectId = c.req.param("id");
+    const limit = Math.min(parseInt(c.req.query("limit") ?? "5", 10) || 5, 20);
+    const project = await resolveProject(projectId);
+    if (!project) return c.json({ error: "Project not found" }, 404);
+
+    const raw = await getPreference(butlerSessionHistoryPrefKey(projectId), database);
+    const allowedIds = new Set<string>(raw ? (JSON.parse(raw) as string[]) : []);
+    if (allowedIds.size === 0) return c.json({ sessions: [] });
+
+    const sessions = await listButlerSessions(project.repoPath, allowedIds, limit);
+    return c.json({ sessions });
+  });
+
+  // GET /api/projects/:id/butler/sessions/:sid/messages — transcript of a past session
+  router.get("/:id/butler/sessions/:sid/messages", async (c) => {
+    const projectId = c.req.param("id");
+    const sessionId = c.req.param("sid");
+    const project = await resolveProject(projectId);
+    if (!project) return c.json({ error: "Project not found" }, 404);
+
+    // Security: only allow sessions that are tracked for this project
+    const raw = await getPreference(butlerSessionHistoryPrefKey(projectId), database);
+    const allowedIds = new Set<string>(raw ? (JSON.parse(raw) as string[]) : []);
+    if (!allowedIds.has(sessionId)) return c.json({ error: "Session not found" }, 404);
+
+    const messages = await getButlerSessionMessages(project.repoPath, sessionId);
+    return c.json({ messages });
   });
 
   // DELETE /api/projects/:id/butler — stop the warm session and forget the resume id.
