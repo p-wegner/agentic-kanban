@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { BacklogPanel } from "./BacklogPanel.js";
 import { MonitorPopover, type MonitorStatus } from "./MonitorPopover.js";
+import { VoiceInboxButton } from "./VoiceInboxButton.js";
 import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
 
 export type ViewMode = "kanban" | "graph" | "table" | "agents" | "timeline" | "metrics" | "butler" | "workflows";
@@ -28,6 +29,8 @@ interface BoardToolbarProps {
   viewMode: ViewMode;
   onViewModeChange: (mode: ViewMode) => void;
   butlerBadgeCount?: number;
+  projectId: string | null;
+  onVoiceIssueCreated?: () => void;
 }
 
 export function BoardToolbar({
@@ -53,6 +56,8 @@ export function BoardToolbar({
   viewMode,
   onViewModeChange,
   butlerBadgeCount = 0,
+  projectId,
+  onVoiceIssueCreated,
 }: BoardToolbarProps) {
   const [showMonitorPopover, setShowMonitorPopover] = useState(false);
 
@@ -77,6 +82,7 @@ export function BoardToolbar({
         </svg>
         Tasks
       </button>
+      <VoiceInboxButton projectId={projectId} onIssueCreated={onVoiceIssueCreated} />
       <div className="relative shrink-0 flex items-center gap-0.5">
         <button
           onClick={() => setShowMonitorPopover(v => !v)}
