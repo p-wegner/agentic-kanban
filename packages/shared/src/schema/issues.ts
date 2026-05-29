@@ -23,6 +23,8 @@ export const issues = sqliteTable("issues", {
   workflowTemplateId: text("workflow_template_id"),
   // The node the issue currently sits on; the board status is derived from it.
   currentNodeId: text("current_node_id"),
+  // Cached result of AI-predicted files this issue will touch (JSON array of {path,reason,confidence}).
+  touchedFilesJson: text("touched_files_json"),
 }, (table) => ({
   projectIdIdx: index("idx_issues_project_id").on(table.projectId),
   statusIdIdx: index("idx_issues_status_id").on(table.statusId),

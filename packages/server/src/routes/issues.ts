@@ -132,6 +132,26 @@ export function createIssuesRoute(database: Database = db, options?: { boardEven
     return c.json(result, 201);
   });
 
+  // GET /api/issues/:id/touched-files — return cached prediction only (no AI call)
+  router.get("/:id/touched-files", async (c) => {
+    const issueId = c.req.param("id");
+    const rows = await database.select({ touchedFilesJson: issues.touchedFilesJson }).from(issues).where(eq(issues.id, issueId)).limit(1);
+    if (rows.length === 0) return c.json({ error: "Issue not found" }, 404);
+    const json = rows[0].touchedFilesJson;
+    let files: unknown[] = [];
+    if (json) {
+      try { files = JSON.parse(json); } catch { files = []; }
+    }
+    return c.json({ files, cached: true });
+  });
+
+  // POST /api/issues/:id/analyze-touched-files — run (or re-run) AI prediction
+  router.post("/:id/analyze-touched-files", async (c) => {
+    const issueId = c.req.param("id");
+    const body = await parseJsonBody<{ refresh?: boolean }>(c).catch(() => ({ refresh: false }));
+    return c.json(await wrapAiOperation("analyze-touched-files", () => analyzeTouchedFiles(issueId, database, body?.refresh === true)));
+  });
+
   // GET /api/issues/:id/summary
   router.get("/:id/summary", async (c) => {
     const idParam = c.req.param("id");
@@ -235,4 +255,4 @@ export function createIssuesRoute(database: Database = db, options?: { boardEven
   return router;
 }
 
-export const issuesRoute = createIssuesRoute();
+export const issuesRoute = createIssuesRoute();

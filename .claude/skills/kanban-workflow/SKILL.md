@@ -69,13 +69,15 @@ Some workspaces have `isDirect: true` — the agent is working directly on the p
 
 ### 5. Run tests and commit your changes
 **This is mandatory before finishing.** After implementation is complete:
-1. **Run tests** — for refactoring tasks, run only the tests relevant to changed files:
+1. **Run tests** — for refactoring tasks, run only the tests relevant to changed files.
+   **Important**: vitest v4 moved `--related` to a subcommand — the `--related` flag no longer works.
    ```
-   pnpm --filter agentic-kanban test -- --related <changed-files>
-   ```
-   Pass the changed source files explicitly, or derive them from git:
-   ```
-   pnpm --filter agentic-kanban test -- --related $(git diff --name-only HEAD)
+   # Targeted (correct in vitest v4):
+   cd packages/server && node node_modules/vitest/vitest.mjs related src/services/foo.service.ts
+   # Or derive from git:
+   cd packages/server && node node_modules/vitest/vitest.mjs related $(git diff --name-only HEAD | grep "^packages/server" | sed 's|packages/server/||')
+   # Fast iteration via pnpm (safe subset, no known-flaky tests):
+   pnpm test:mine
    ```
    Only run the full suite (`pnpm --filter agentic-kanban test`) when cross-cutting changes may affect unrelated tests, or as a final pre-commit check.
 2. Stage and commit all changed files with a descriptive message
@@ -89,6 +91,8 @@ Do NOT leave uncommitted changes in the worktree. If you have made changes, comm
 
 #### Branched workspaces (automatic)
 After your session exits, the system automatically launches a review subagent. The board shows a purple **AI Reviewing** badge during review. You don't need to do anything — the system handles the full review-then-fix-then-merge cycle.
+
+**Do NOT call any REST endpoint to trigger the review.** There is no `/propose-transition` or `/review-trigger` endpoint. The transition happens automatically when your Claude Code session exits. Just commit, run tests, and exit normally.
 
 **Visual verification note:** If the project has `visual_verification_mode = "after_merge"` (Settings → Workflow), you are **not** required to verify the UI before stopping. The server will detect any client file changes and tag the issue with `needs-visual-verification` at merge time. If `visual_verification_mode = "before_merge"` (default), the stop hook will block you until you run `/playwright-cli` and confirm the UI renders correctly.
 
@@ -218,4 +222,4 @@ Shorthand for "review #N and merge if fine" — same workflow as above.
 7. **Description is a shared log** — write progress notes so the user can follow along without reading code.
 8. **Done means done** — code committed, tests green, review passed, no loose ends, no open questions.
 9. **Cancelled is not failure** — use it freely when scope changes.
-10. **Targeted tests for refactoring** — use `vitest --related <changed-files>` instead of the full suite when refactoring. It's faster and proves the changed code is covered without re-running unrelated tests.
+10. **Targeted tests for refactoring** — vitest v4 uses a subcommand, not a flag. Run `cd packages/server && node node_modules/vitest/vitest.mjs related <source-files>` instead of the full suite when refactoring. It's faster and proves the changed code is covered without re-running unrelated tests.
