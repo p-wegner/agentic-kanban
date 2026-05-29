@@ -11,6 +11,7 @@ import { createScheduledRunsRoute } from "./scheduled-runs.js";
 import { createButlerRoute } from "./butler.js";
 import { createAgentQuestionsRoute } from "./agent-questions.js";
 import { createWorkflowsRoute } from "./workflows.js";
+import { createVoiceCaptureRoute } from "./voice-capture.js";
 import { createWorkflowForkService } from "../services/workflow-fork.service.js";
 import type { Database } from "../db/index.js";
 import type { SessionManager } from "../services/session.manager.js";
@@ -39,6 +40,7 @@ export function createRoutes(database: Database, getSessionManager: () => Sessio
   routes.route("/projects", createProjectsRoute(database));
   routes.route("/projects", createButlerRoute(database, getSessionManager, options));
   routes.route("/projects", createAgentQuestionsRoute(database, getSessionManager, options));
+  routes.route("/projects", createVoiceCaptureRoute(database, options));
   routes.route("/issues", createIssuesRoute(database, options));
   routes.route("/workspaces", createWorkspacesRoute(database, getSessionManager, options));
   routes.route("/workspaces", createWorkspaceActionsRoute(getSessionManager, database, options));
