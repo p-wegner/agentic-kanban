@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@agentic-kanban/shared": "workspace:*",
+    "@dagrejs/dagre": "^3.0.0",
     "@tauri-apps/plugin-notification": "^2",
     "@xyflow/react": "^12.10.2",
     "react": "^19.1.0",
