@@ -243,6 +243,8 @@ export function createProjectService(deps: { database: Database }) {
     if (body.setupBlocking !== undefined) updates.setupBlocking = !!body.setupBlocking;
     if (body.setupEnabled !== undefined) updates.setupEnabled = !!body.setupEnabled;
     if (body.teardownScript !== undefined) updates.teardownScript = body.teardownScript || null;
+    if (body.autoRetryFlakes !== undefined) updates.autoRetryFlakes = !!body.autoRetryFlakes;
+    if (body.maxRetries !== undefined) updates.maxRetries = Number(body.maxRetries);
     if (body.defaultBranch !== undefined) {
       const nextDefaultBranch = typeof body.defaultBranch === "string"
         ? body.defaultBranch.trim()
