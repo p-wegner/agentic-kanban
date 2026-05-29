@@ -4,6 +4,7 @@ import { existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Database } from "../db/index.js";
+import { createBoardWsRoute } from "../routes/board-ws.js";
 import { createRoutes } from "../routes/index.js";
 import { createSessionsRoute } from "../routes/sessions.js";
 import type { createBoardEvents } from "../services/board-events.js";
@@ -18,9 +19,10 @@ export interface RouteSetupDeps {
   reviewSessionIds: Set<string>;
   fixAndMergeSessionIds: Set<string>;
   db: Database;
+  upgradeWebSocket: (callback: (c: any) => any) => any;
 }
 
-export function setupRoutes(app: Hono, { sessionManager, boardEvents, reviewSessionIds, fixAndMergeSessionIds, db }: RouteSetupDeps) {
+export function setupRoutes(app: Hono, { sessionManager, boardEvents, reviewSessionIds, fixAndMergeSessionIds, db, upgradeWebSocket }: RouteSetupDeps) {
   app.post("/api/workspaces/:id/review", async (c) => {
     const workspaceId = c.req.param("id");
     try {
@@ -41,7 +43,7 @@ export function setupRoutes(app: Hono, { sessionManager, boardEvents, reviewSess
   });
 
   app.get("/ws/sessions/:sessionId", sessionManager.wsRoute());
-  app.get("/ws/board/:projectId", boardEvents.wsRoute());
+  app.get("/ws/board/:projectId", createBoardWsRoute(upgradeWebSocket, boardEvents));
   app.route("/api", createRoutes(db, () => sessionManager, { boardEvents, fixAndMergeSessionIds }));
   app.route("/api/sessions", createSessionsRoute(db));
 
