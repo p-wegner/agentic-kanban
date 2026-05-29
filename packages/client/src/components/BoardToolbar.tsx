@@ -4,7 +4,7 @@ import { MonitorPopover, type MonitorStatus } from "./MonitorPopover.js";
 import { VoiceInboxButton } from "./VoiceInboxButton.js";
 import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
 
-export type ViewMode = "kanban" | "graph" | "table" | "agents" | "timeline" | "metrics" | "butler" | "workflows" | "insights";
+export type ViewMode = "kanban" | "graph" | "table" | "agents" | "timeline" | "metrics" | "butler" | "workflows" | "insights" | "swimlane";
 
 interface BoardToolbarProps {
   backlogColumn: StatusWithIssues | undefined;
