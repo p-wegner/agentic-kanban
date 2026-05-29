@@ -45,6 +45,13 @@ Cleanroom reimplementation of [vibe-kanban](https://github.com/BloopAI/vibe-kanb
 ### Cross-cutting / Windows
 - **Hook paths on Windows**: Use **forward slashes** in `settings.json` hook commands. `\\` gets mangled by Claude Code's hook runner → `MODULE_NOT_FOUND`. Relative paths like `.claude/hooks/...` also fail when CWD shifts. `$CLAUDE_PROJECT_DIR` is not expanded in hook command strings.
 - **Git tests on Windows**: Use `.trim()` for file content assertions (CRLF vs LF); test git output for keywords, not exact strings.
+- **`git stash` in worktrees can silently lose work** — `git stash` + `git stash pop` in a worktree has discarded all tracked modifications while preserving only untracked files. Always prefer `git commit` (even a WIP commit) over stashing. If you must stash, verify with `git diff --stat HEAD` immediately after `git stash pop`.
+
+### Adding a new DB migration — triple update required
+Three files must change together or tests will fail:
+1. `packages/shared/drizzle/<N>_name.sql` — the SQL file
+2. `packages/shared/drizzle/meta/_journal.json` — add journal entry for the migration
+3. `packages/server/src/__tests__/helpers/migrations.ts` — add filename to `MIGRATION_FILES` array
 
 ### Git service — single source of truth
 All git operations live in `packages/shared/src/lib/git-service.ts`. Both `packages/server/src/services/git.service.ts` and `packages/mcp-server/src/git-service.ts` are thin re-exports — **edit only the shared file**.
@@ -75,7 +82,7 @@ All git operations live in `packages/shared/src/lib/git-service.ts`. Both `packa
 
 ### Known Flaky Test Suites
 
-> **Use `pnpm test:mine` to skip these.** It runs only the unit suites that are reliably green in any environment (main checkout or worktree) — the unit-tests-marked-flaky below are excluded, so it's the fast, no-false-failures loop for day-to-day iteration. Use the full `pnpm test` only before mark-ready / for CI. Vitest args pass through: `pnpm test:mine -- --related <files>`.
+> **Use `pnpm test:mine` to skip these.** It runs only the unit suites that are reliably green in any environment (main checkout or worktree) — the unit-tests-marked-flaky below are excluded, so it's the fast, no-false-failures loop for day-to-day iteration. Use the full `pnpm test` only before mark-ready / for CI. Pass specific test file patterns through: `pnpm test:mine -- src/__tests__/foo.test.ts`. For source-file-based targeting, use `pnpm --filter agentic-kanban exec vitest related <source-file>` directly (test:mine doesn't support `vitest related` mode).
 
 When a test in the table below fails and you haven't touched the relevant code, treat it as a **false failure** and do not waste time debugging it. Investigate only if you changed the underlying source files.
 
@@ -102,16 +109,17 @@ When a test in the table below fails and you haven't touched the relevant code, 
 - `test.skip()` on setup failure — log the reason; prefer a clear error over a silent skip
 
 ### Unit testing
-- **For refactoring: use `--related`** — run only tests that cover the files you changed, not the full suite:
+- **For refactoring: use `vitest related`** — run only tests that cover the files you changed (vitest v4 changed `--related` flag to a subcommand):
   ```
-  pnpm --filter agentic-kanban test -- --related packages/server/src/services/foo.service.ts
+  pnpm --filter agentic-kanban exec vitest related packages/server/src/services/foo.service.ts
   ```
 - **Get changed files from git** and pass them directly:
   ```
-  pnpm --filter agentic-kanban test -- --related $(git diff --name-only HEAD)
+  pnpm --filter agentic-kanban exec vitest related $(git diff --name-only HEAD)
   ```
+- **⚠️ `pnpm test -- --related` is broken in vitest v4** — `--related` is no longer a flag of `vitest run`; it's a standalone subcommand. Use `exec vitest related` instead.
 - **Full suite** (`pnpm --filter agentic-kanban test`) should only be used before committing or when cross-cutting changes may affect unrelated tests.
-- `--related` works on source files — vitest resolves which test files import them transitively.
+- `vitest related` works on source files — vitest resolves which test files import them transitively.
 
 ## Visual Verification
 Every feature with UI must be visually verified using the `playwright-cli` skill.
@@ -208,9 +216,9 @@ The **Butler** is a warm, per-project Claude assistant (Agent SDK, in-process) �
 ## Monorepo Commands
 - `pnpm dev` — start server + client (auto-detects worktree ports; default: server 3001, client 5173)
 - `pnpm dev:desktop` — start server + client + Tauri native window
-- `pnpm test:mine` — **fast iteration loop**: runs only reliably-green unit suites (server + mcp-server), skipping the known-flaky ones (see "Known Flaky Test Suites"). Use this while iterating; run the full suite once before mark-ready. Vitest args pass through: `pnpm test:mine -- --related <files>`.
+- `pnpm test:mine` — **fast iteration loop**: runs only reliably-green unit suites (server + mcp-server), skipping the known-flaky ones (see "Known Flaky Test Suites"). Use this while iterating; run the full suite once before mark-ready. Pass test file patterns as filters: `pnpm test:mine -- src/__tests__/foo.test.ts`.
 - `pnpm --filter agentic-kanban test` — Vitest unit tests (full suite — server package only)
-- `pnpm --filter agentic-kanban test -- --related <files>` — **targeted**: run only tests covering the listed source files (use for refactoring)
+- `pnpm --filter agentic-kanban exec vitest related <source-files>` — **targeted**: run only tests covering the listed source files (vitest v4 syntax — `--related` flag removed)
 - `pnpm test:e2e` — Playwright E2E tests
 - `pnpm db:migrate && pnpm db:seed` — initialize DB
 - `pnpm cli -- register <path>` — register a git repo as a project
