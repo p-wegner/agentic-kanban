@@ -28,3 +28,5 @@ bash.exe.stackdump
 *.log
 HANDOFF.md
 CLAUDE.local.md
+# npm pack build artifacts
+*.tgz
