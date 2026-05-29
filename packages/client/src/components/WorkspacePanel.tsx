@@ -70,7 +70,7 @@ interface WorkspacePanelProps {
 
 const STATUS_COLORS: Record<string, string> = {
   active: "bg-green-100 text-green-700",
-  reviewing: "bg-purple-100 text-purple-700",
+  reviewing: "bg-accent-50 text-accent-700 dark:bg-accent-900/40 dark:text-accent-300",
   idle: "bg-yellow-100 text-yellow-700",
   error: "bg-red-100 text-red-700",
   closed: "bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400",
@@ -131,7 +131,7 @@ const SESSION_STATUS_COLORS: Record<string, string> = {
 const TRIGGER_TYPE_LABELS: Record<string, { label: string; className: string }> = {
   agent: { label: "Agent", className: "bg-blue-50 text-blue-600" },
   chat: { label: "Chat", className: "bg-indigo-50 text-indigo-600" },
-  review: { label: "AI Review", className: "bg-violet-100 text-violet-700" },
+  review: { label: "AI Review", className: "bg-accent-50 text-accent-700 dark:bg-accent-900/40 dark:text-accent-300" },
   merge: { label: "AI Merge", className: "bg-emerald-100 text-emerald-700" },
   "fix-conflicts": { label: "Fix Conflicts", className: "bg-orange-100 text-orange-700" },
   learning: { label: "Learning", className: "bg-teal-100 text-teal-700" },
@@ -147,13 +147,13 @@ function humanizeSkillName(name: string): string {
 
 function getTriggerTypeLabel(triggerType: string | null, skillName?: string | null): { label: string; className: string } | null {
   if (!triggerType) {
-    if (skillName) return { label: `✨ ${humanizeSkillName(skillName)}`, className: "bg-purple-100 text-purple-700" };
+    if (skillName) return { label: `✨ ${humanizeSkillName(skillName)}`, className: "bg-brand-50 text-brand-700 dark:bg-brand-900/40 dark:text-brand-300" };
     return null;
   }
   if (TRIGGER_TYPE_LABELS[triggerType]) return TRIGGER_TYPE_LABELS[triggerType];
   if (triggerType.startsWith("skill:")) {
     const name = triggerType.slice(6);
-    return { label: `✨ ${humanizeSkillName(name)}`, className: "bg-purple-100 text-purple-700" };
+    return { label: `✨ ${humanizeSkillName(name)}`, className: "bg-brand-50 text-brand-700 dark:bg-brand-900/40 dark:text-brand-300" };
   }
   return null;
 }
@@ -980,7 +980,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
       <div className="fixed inset-0 bg-black/30 z-40" onClick={onClose} />
       <div
         data-panel
-        className={`fixed bg-white dark:bg-gray-900 shadow-xl z-50 flex flex-col animate-slide-in-right ${
+        className={`fixed bg-surface-raised dark:bg-surface-raised-dark shadow-xl z-50 flex flex-col animate-slide-in-right ${
           panelMode === "modal"
             ? "top-[5vh] left-1/2 -translate-x-1/2 w-[min(560px,96vw)] h-[90vh] rounded-lg border border-gray-200 dark:border-gray-700"
             : sidebarSide === "left"
@@ -997,7 +997,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
           className={`flex items-center gap-2 px-4 py-3 border-b border-gray-200 dark:border-gray-700 min-w-0 cursor-grab active:cursor-grabbing ${panelMode === "modal" ? "rounded-t-lg" : ""}`}
           onMouseDown={handleHeaderMouseDown}
         >
-          <h2 className="flex-1 min-w-0 text-sm font-semibold text-gray-900 dark:text-gray-100 truncate" title={issue.title}>
+          <h2 className="flex-1 min-w-0 text-sm font-semibold text-ink dark:text-stone-100 truncate" title={issue.title}>
             {issue.title}
           </h2>
           <div className="flex items-center gap-2 shrink-0">
@@ -1065,20 +1065,20 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                 <button
                   onClick={() => handleQuickLaunch(false)}
                   disabled={actionLoading}
-                  className="text-sm bg-blue-600 text-white px-4 py-1.5 rounded-l hover:bg-blue-700 disabled:opacity-50"
+                  className="text-sm bg-brand-600 text-white px-4 py-1.5 rounded-l hover:bg-brand-700 disabled:opacity-50"
                 >
                   {actionLoading ? "Creating..." : "New Workspace"}
                 </button>
                 <button
                   onClick={() => setQuickDropdownOpen((o) => !o)}
                   disabled={actionLoading}
-                  className="text-sm bg-blue-600 text-white px-2 py-1.5 rounded-r border-l border-blue-500 hover:bg-blue-700 disabled:opacity-50"
+                  className="text-sm bg-brand-600 text-white px-2 py-1.5 rounded-r border-l border-brand-500 hover:bg-brand-700 disabled:opacity-50"
                   title="More options"
                 >
                   &#9662;
                 </button>
                 {quickDropdownOpen && (
-                  <div className="absolute top-full left-0 mt-1 w-52 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded shadow-lg z-10">
+                  <div className="absolute top-full left-0 mt-1 w-52 bg-surface-raised dark:bg-surface-raised-dark border border-gray-200 dark:border-gray-700 rounded shadow-lg z-10">
                     {availableProfileOptions.length > 0 && (
                       <>
                         <div className="px-3 py-1.5">
@@ -1141,7 +1141,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                             className="w-full text-left text-sm px-3 py-2 hover:bg-gray-50 dark:hover:bg-gray-800 flex items-center gap-2"
                             title={skill.description}
                           >
-                            <span className="text-purple-500">✨</span>
+                            <span className="text-brand-600 dark:text-brand-400">✨</span>
                             {humanizeSkillName(skill.name)}
                           </button>
                         ))}
@@ -1212,7 +1212,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                   <span className="text-sm font-medium text-gray-900 dark:text-gray-100">
                     {ws.branch}
                     {ws.isDirect && (
-                      <span className="ml-1.5 text-[10px] font-medium px-1.5 py-0.5 rounded bg-purple-100 text-purple-700">direct</span>
+                      <span className="ml-1.5 text-[10px] font-medium px-1.5 py-0.5 rounded bg-brand-50 text-brand-700 dark:bg-brand-900/40 dark:text-brand-300">direct</span>
                     )}
                     {ws.planMode && (
                       <span className="ml-1.5 text-[10px] font-medium px-1.5 py-0.5 rounded bg-blue-100 text-blue-700">plan</span>
@@ -1261,7 +1261,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                       </span>
                     )}
                     {ws.skillName && (
-                      <span className="px-1.5 py-0.5 rounded bg-purple-100 text-purple-700 font-medium" data-testid="workspace-skill-name">
+                      <span className="px-1.5 py-0.5 rounded bg-brand-50 text-brand-700 dark:bg-brand-900/40 dark:text-brand-300 font-medium" data-testid="workspace-skill-name">
                         ✨ {humanizeSkillName(ws.skillName)}
                       </span>
                     )}
@@ -1332,7 +1332,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                           if (specialSessions.length === 0) return null;
                           const counts = new Map<string, { label: string; className: string; count: number; lastStatus: string }>();
                           for (const s of specialSessions) {
-                            const tl = getTriggerTypeLabel(s.triggerType, s.skillName) ?? { label: s.triggerType ?? "Skill", className: "bg-purple-100 text-purple-700" };
+                            const tl = getTriggerTypeLabel(s.triggerType, s.skillName) ?? { label: s.triggerType ?? "Skill", className: "bg-brand-50 text-brand-700 dark:bg-brand-900/40 dark:text-brand-300" };
                             const key = s.triggerType ?? `skill:${s.skillName}`;
                             const existing = counts.get(key);
                             if (existing) { existing.count++; existing.lastStatus = s.status; }
@@ -1442,7 +1442,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                                     <button
                                       onClick={() => handleRestart(ws.id)}
                                       disabled={actionLoading}
-                                      className="text-[10px] bg-blue-600 text-white px-1.5 py-0.5 rounded-l hover:bg-blue-700 disabled:opacity-50"
+                                      className="text-[10px] bg-brand-600 text-white px-1.5 py-0.5 rounded-l hover:bg-brand-700 disabled:opacity-50"
                                       title="Start a new session (previous session has no resume ID)"
                                     >
                                       Restart
@@ -1450,7 +1450,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                                     <button
                                       onClick={() => handleRestart(ws.id, true)}
                                       disabled={actionLoading}
-                                      className="text-[10px] bg-blue-700 text-white px-1 py-0.5 rounded-r hover:bg-blue-800 disabled:opacity-50 border-l border-blue-500"
+                                      className="text-[10px] bg-brand-700 text-white px-1 py-0.5 rounded-r hover:bg-brand-800 disabled:opacity-50 border-l border-brand-500"
                                       title="Restart with --dangerously-skip-permissions (bypasses all permission prompts)"
                                     >
                                       ⚡
@@ -1487,7 +1487,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                             <button
                               onClick={(e) => { e.stopPropagation(); handleReview(ws.id); }}
                               disabled={actionLoading}
-                              className="text-[10px] font-medium px-2 py-0.5 rounded bg-violet-100 text-violet-700 hover:bg-violet-200 disabled:opacity-50"
+                              className="text-[10px] font-medium px-2 py-0.5 rounded bg-accent-50 text-accent-700 hover:bg-accent-100 dark:bg-accent-900/40 dark:text-accent-300 disabled:opacity-50"
                               title="Trigger AI code review"
                             >
                               AI Review
@@ -1520,7 +1520,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                                 <button
                                   onClick={(e) => { e.stopPropagation(); handleSkillQuickLaunch(skill.id); }}
                                   disabled={actionLoading}
-                                  className="text-[10px] font-medium px-2 py-0.5 rounded bg-purple-100 text-purple-700 hover:bg-purple-200 disabled:opacity-50"
+                                  className="text-[10px] font-medium px-2 py-0.5 rounded bg-brand-50 text-brand-700 hover:bg-brand-100 dark:bg-brand-900/40 dark:text-brand-300 disabled:opacity-50"
                                   title={skill.description}
                                 >
                                   ✨ {humanizeSkillName(skill.name)}
@@ -1748,7 +1748,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                                 placeholder={isSessionAlive && !isWaitingForInput ? "Agent is working..." : "Message agent..."}
                                 rows={2}
                                 disabled={isSessionAlive && !isWaitingForInput}
-                                className="flex-1 text-sm bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none disabled:bg-gray-50 dark:disabled:bg-gray-950 disabled:text-gray-400 dark:disabled:text-gray-500"
+                                className="flex-1 text-sm bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500 resize-none disabled:bg-gray-50 dark:disabled:bg-gray-950 disabled:text-gray-400 dark:disabled:text-gray-500"
                               />
                               {isSessionAlive && !isWaitingForInput ? (
                                 <button
@@ -1762,7 +1762,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                                 <button
                                   onClick={() => isWaitingForInput ? handleSendTurn(ws.id) : handleLaunch(ws.id)}
                                   disabled={actionLoading || !prompt.trim()}
-                                  className="text-sm bg-blue-600 text-white px-3 py-1.5 rounded hover:bg-blue-700 disabled:opacity-50 self-end"
+                                  className="text-sm bg-brand-600 text-white px-3 py-1.5 rounded hover:bg-brand-700 disabled:opacity-50 self-end"
                                 >
                                   Send
                                 </button>
@@ -1800,7 +1800,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                           placeholder={isSessionAlive && !isWaitingForInput ? "Agent is working..." : "Message agent..."}
                           rows={2}
                           disabled={isSessionAlive && !isWaitingForInput}
-                          className="flex-1 text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none disabled:bg-gray-50 dark:disabled:bg-gray-950 disabled:text-gray-400 dark:disabled:text-gray-500"
+                          className="flex-1 text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500 resize-none disabled:bg-gray-50 dark:disabled:bg-gray-950 disabled:text-gray-400 dark:disabled:text-gray-500"
                         />
                         {isSessionAlive && !isWaitingForInput ? (
                           <button
@@ -1814,7 +1814,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                           <button
                             onClick={() => handleLaunch(ws.id)}
                             disabled={actionLoading || !prompt.trim()}
-                            className="text-sm bg-blue-600 text-white px-3 py-1.5 rounded hover:bg-blue-700 disabled:opacity-50 self-end"
+                            className="text-sm bg-brand-600 text-white px-3 py-1.5 rounded hover:bg-brand-700 disabled:opacity-50 self-end"
                           >
                             Send
                           </button>
@@ -1854,7 +1854,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                             <button
                               onClick={() => handleRestart(ws.id)}
                               disabled={actionLoading}
-                              className="text-sm bg-blue-600 text-white px-3 py-1.5 rounded-l hover:bg-blue-700 disabled:opacity-50"
+                              className="text-sm bg-brand-600 text-white px-3 py-1.5 rounded-l hover:bg-brand-700 disabled:opacity-50"
                               title="Start a new session (previous session has no resume ID)"
                             >
                               Restart
@@ -1862,7 +1862,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                             <button
                               onClick={() => handleRestart(ws.id, true)}
                               disabled={actionLoading}
-                              className="text-sm bg-blue-700 text-white px-2 py-1.5 rounded-r hover:bg-blue-800 disabled:opacity-50 border-l border-blue-500"
+                              className="text-sm bg-brand-700 text-white px-2 py-1.5 rounded-r hover:bg-brand-800 disabled:opacity-50 border-l border-brand-500"
                               title="Restart with --dangerously-skip-permissions (bypasses all permission prompts)"
                             >
                               ⚡
@@ -1913,7 +1913,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                         <button
                           onClick={() => handleReview(ws.id)}
                           disabled={actionLoading || isRunning}
-                          className="text-sm bg-violet-600 text-white px-3 py-1.5 rounded hover:bg-violet-700 disabled:opacity-50"
+                          className="text-sm bg-brand-600 text-white px-3 py-1.5 rounded hover:bg-brand-700 disabled:opacity-50"
                           title="Trigger AI code review"
                         >
                           Review
@@ -1923,7 +1923,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                         <button
                           onClick={() => handleViewDiff(ws.id)}
                           disabled={actionLoading}
-                          className="text-sm bg-purple-600 text-white px-3 py-1.5 rounded hover:bg-purple-700 disabled:opacity-50 flex-1"
+                          className="text-sm bg-brand-600 text-white px-3 py-1.5 rounded hover:bg-brand-700 disabled:opacity-50 flex-1"
                         >
                           {ws.isDirect ? "View Changes" : "View Diff"}
                         </button>
@@ -2041,7 +2041,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                 &#9662;
               </button>
               {quickDropdownOpen && (
-                <div className="absolute bottom-full left-0 mb-1 w-52 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded shadow-lg z-10">
+                <div className="absolute bottom-full left-0 mb-1 w-52 bg-surface-raised dark:bg-surface-raised-dark border border-gray-200 dark:border-gray-700 rounded shadow-lg z-10">
                   {availableProfileOptions.length > 0 && (
                     <>
                       <div className="px-3 py-1.5">
@@ -2086,7 +2086,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                           className="w-full text-left text-sm px-3 py-2 hover:bg-gray-50 dark:hover:bg-gray-800 flex items-center gap-2"
                           title={skill.description}
                         >
-                          <span className="text-purple-500">✨</span>
+                          <span className="text-brand-600 dark:text-brand-400">✨</span>
                           {humanizeSkillName(skill.name)}
                         </button>
                       ))}

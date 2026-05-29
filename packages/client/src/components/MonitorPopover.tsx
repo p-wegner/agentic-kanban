@@ -20,7 +20,7 @@ export type MonitorStatus = {
 
 const ACTION_LABELS: Record<MonitorAction["action"], { label: string; color: string }> = {
   relaunch:   { label: "Relaunched agent",   color: "text-blue-600" },
-  merge:      { label: "Triggered merge",    color: "text-purple-600" },
+  merge:      { label: "Triggered merge",    color: "text-brand-600 dark:text-brand-400" },
   nudge:      { label: "Nudged agent",       color: "text-amber-600" },
   mark_idle:  { label: "Marked idle",        color: "text-gray-500 dark:text-gray-400" },
   mark_dead:  { label: "Marked dead",        color: "text-red-500" },
@@ -105,7 +105,7 @@ export function MonitorPopover({
       <div className="fixed inset-0 z-40" onClick={onClose} />
       <div
         id="monitor-popover"
-        className="fixed z-50 left-0 top-0 bottom-0 w-72 bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-700 shadow-xl text-xs flex flex-col"
+        className="fixed z-50 left-0 top-0 bottom-0 w-72 bg-surface-raised dark:bg-surface-raised-dark border-r border-gray-200 dark:border-gray-700 shadow-xl text-xs flex flex-col"
       >
         {/* Header */}
         <div className="px-3 py-2.5 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between shrink-0 rounded-t-xl bg-gray-50 dark:bg-gray-950">
@@ -200,8 +200,8 @@ export function MonitorPopover({
                     </span>
                   )}
                   {status.lastRun.merged > 0 && (
-                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-purple-50 dark:bg-purple-950 text-purple-700 font-medium text-[11px]">
-                      <span className="w-1 h-1 rounded-full bg-purple-400 shrink-0" />{status.lastRun.merged} merged
+                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-brand-50 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300 font-medium text-[11px]">
+                      <span className="w-1 h-1 rounded-full bg-brand-400 shrink-0" />{status.lastRun.merged} merged
                     </span>
                   )}
                   {status.lastRun.nudged > 0 && (

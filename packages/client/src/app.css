@@ -6,6 +6,64 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* ---------------------------------------------------------------------------
+   Editorial / "paper" theme tokens (ticket #103)
+   ---------------------------------------------------------------------------
+   The goal is a designed, human-feeling product rather than the generic
+   blue/violet "AI dashboard" look. Two deliberate type families, a warm
+   off-white paper surface, ink-dark text, and a single muted terracotta
+   accent (with a calm sage as the secondary).
+
+   These are registered as Tailwind colors via @theme, so utilities like
+   `bg-brand-600`, `text-accent-600`, `bg-surface`, `text-ink` work everywhere
+   and the whole palette can be re-tuned from this one place.
+--------------------------------------------------------------------------- */
+@theme {
+  /* Typography */
+  --font-sans: "Work Sans", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-serif: "Fraunces", ui-serif, Georgia, "Times New Roman", serif;
+  --font-display: "Fraunces", ui-serif, Georgia, serif;
+
+  /* Brand — warm terracotta/clay (replaces the AI blue/violet primary) */
+  --color-brand-50: #fbf3ee;
+  --color-brand-100: #f5e1d6;
+  --color-brand-200: #ebc3ad;
+  --color-brand-300: #df9f7e;
+  --color-brand-400: #d17d54;
+  --color-brand-500: #c25f36;
+  --color-brand-600: #b4552f;
+  --color-brand-700: #934428;
+  --color-brand-800: #743626;
+  --color-brand-900: #5f2f22;
+  --color-brand-950: #341610;
+
+  /* Accent — muted sage/forest (secondary, calmer states) */
+  --color-accent-50: #f1f4ef;
+  --color-accent-100: #dfe7d9;
+  --color-accent-200: #c0d0b5;
+  --color-accent-300: #98b288;
+  --color-accent-400: #719161;
+  --color-accent-500: #547446;
+  --color-accent-600: #415c37;
+  --color-accent-700: #34492d;
+  --color-accent-800: #2b3b27;
+  --color-accent-900: #243121;
+  --color-accent-950: #121a10;
+
+  /* Surfaces — warm paper instead of cold gray */
+  --color-surface: #f7f3ec;
+  --color-surface-raised: #fffdf8;
+  --color-surface-sunken: #efe9df;
+  --color-surface-dark: #1c1a17;
+  --color-surface-raised-dark: #26231f;
+  --color-surface-sunken-dark: #161412;
+
+  /* Ink — warm near-black text instead of pure gray */
+  --color-ink: #2a2622;
+  --color-ink-soft: #5b544c;
+  --color-ink-faint: #8a8175;
+}
+
 /* Butler markdown (`prose`) inline-code polish.
    @tailwindcss/typography injects literal backtick quotes around inline code
    (code::before/::after { content: "`" }) and gives it no background, so paths
@@ -33,6 +91,28 @@ html, body {
   padding: 0;
   overflow: hidden;
   height: 100%;
+}
+
+/* Apply the editorial type pairing app-wide. Work Sans for UI text; Fraunces
+   (serif) for the brand wordmark and headings via the `.font-serif` utility
+   and the heading styles below. */
+body {
+  font-family: var(--font-sans);
+  font-feature-settings: "ss01", "cv05";
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Section/page headings lean on the serif to feel authored, not generated.
+   Components opt in with `.heading-serif`; the brand wordmark uses `.wordmark`. */
+.heading-serif {
+  font-family: var(--font-serif);
+  letter-spacing: -0.01em;
+}
+.wordmark {
+  font-family: var(--font-serif);
+  font-weight: 600;
+  letter-spacing: -0.02em;
 }
 
 @keyframes slide-in-right {
@@ -138,13 +218,14 @@ html, body {
 
 .markdown-body {
   font-size: 0.875rem;
-  color: #374151;
+  color: #5b544c;
   line-height: 1.6;
 }
 .markdown-body h1, .markdown-body h2, .markdown-body h3,
 .markdown-body h4, .markdown-body h5, .markdown-body h6 {
+  font-family: var(--font-serif);
   font-weight: 600;
-  color: #1f2937;
+  color: #2a2622;
   margin-top: 1em;
   margin-bottom: 0.25em;
 }
@@ -191,11 +272,11 @@ html, body {
   padding: 0;
 }
 .markdown-body a {
-  color: #2563eb;
+  color: #b4552f;
   text-decoration: underline;
 }
 .dark .markdown-body a {
-  color: #60a5fa;
+  color: #df9f7e;
 }
 .markdown-body blockquote {
   border-left: 3px solid #d1d5db;

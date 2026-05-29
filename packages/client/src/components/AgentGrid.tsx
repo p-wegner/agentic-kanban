@@ -7,9 +7,9 @@ const MAX_HISTORY = 8;
 const WS_STATUS_CONFIG: Record<string, { label: string; dot: string; ring: string; header: string; tier: "live" | "background" }> = {
   active:    { label: "Active",    dot: "bg-green-500 animate-pulse",  ring: "ring-green-400/40",  header: "from-green-50 dark:from-green-950/50",  tier: "live" },
   fixing:    { label: "Fixing",    dot: "bg-orange-500 animate-pulse", ring: "ring-orange-400/40", header: "from-orange-50 dark:from-orange-950/50", tier: "live" },
-  reviewing: { label: "Reviewing", dot: "bg-violet-500 animate-pulse", ring: "ring-violet-400/30", header: "from-violet-50 dark:from-violet-950/40", tier: "background" },
-  idle:      { label: "Idle",      dot: "bg-gray-400",                 ring: "ring-gray-300/30",   header: "from-gray-50 dark:from-gray-800/40",    tier: "background" },
-  closed:    { label: "Closed",    dot: "bg-gray-300",                 ring: "ring-gray-200/30",   header: "from-gray-50 dark:from-gray-800/40",    tier: "background" },
+  reviewing: { label: "Reviewing", dot: "bg-accent-500 animate-pulse", ring: "ring-accent-400/30", header: "from-accent-50 dark:from-accent-950/40", tier: "background" },
+  idle:      { label: "Idle",      dot: "bg-gray-400",                 ring: "ring-gray-300/30",   header: "from-stone-100 dark:from-stone-800/40", tier: "background" },
+  closed:    { label: "Closed",    dot: "bg-gray-300",                 ring: "ring-gray-200/30",   header: "from-stone-100 dark:from-stone-800/40", tier: "background" },
 };
 
 const STATUS_ORDER = ["active", "fixing", "reviewing", "idle"];
@@ -88,7 +88,7 @@ function FeaturedCard({ issue, activityHistory, liveStats, todos, attention, onI
         : [];
 
   return (
-    <div className={`flex flex-col bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 ring-2 ${cfg.ring} overflow-hidden shadow-sm hover:shadow-md transition-shadow`}>
+    <div className={`flex flex-col bg-surface-raised dark:bg-surface-raised-dark rounded-xl border border-gray-200 dark:border-gray-700 ring-2 ${cfg.ring} overflow-hidden shadow-sm hover:shadow-md transition-shadow`}>
       <div className={`bg-gradient-to-r ${cfg.header} to-transparent px-3 pt-2.5 pb-2 border-b border-gray-100 dark:border-gray-800 flex items-start gap-2`}>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1.5 mb-1">
@@ -108,14 +108,14 @@ function FeaturedCard({ issue, activityHistory, liveStats, todos, attention, onI
           </div>
           <button
             onClick={() => onIssueClick(issue)}
-            className="text-sm font-semibold text-gray-900 dark:text-gray-100 hover:text-blue-600 dark:hover:text-blue-400 text-left line-clamp-2 leading-snug w-full"
+            className="text-sm font-semibold text-ink dark:text-stone-100 hover:text-brand-600 dark:hover:text-brand-400 text-left line-clamp-2 leading-snug w-full"
           >
             {issue.title}
           </button>
         </div>
         <button
           onClick={() => onWorkspaceClick(issue, ws.id)}
-          className="shrink-0 p-1 rounded text-gray-400 dark:text-gray-500 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-950 transition-colors"
+          className="shrink-0 p-1 rounded text-gray-400 dark:text-gray-500 hover:text-brand-500 hover:bg-brand-50 dark:hover:bg-brand-950 transition-colors"
           title="Open workspace"
         >
           <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
@@ -245,7 +245,7 @@ function CompactCard({ issue, currentActivity, liveStats, todos, onIssueClick, o
 
   return (
     <div
-      className={`flex flex-col bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700 ring-1 ${cfg.ring} overflow-hidden shadow-sm hover:shadow-md transition-shadow cursor-pointer`}
+      className={`flex flex-col bg-surface-raised dark:bg-surface-raised-dark rounded-lg border border-gray-200 dark:border-gray-700 ring-1 ${cfg.ring} overflow-hidden shadow-sm hover:shadow-md transition-shadow cursor-pointer`}
       onClick={() => onIssueClick(issue)}
     >
       <div className={`bg-gradient-to-r ${cfg.header} to-transparent px-2.5 py-2 flex items-start gap-2`}>
@@ -264,7 +264,7 @@ function CompactCard({ issue, currentActivity, liveStats, todos, onIssueClick, o
         </div>
         <button
           onClick={(e) => { e.stopPropagation(); onWorkspaceClick(issue, ws.id); }}
-          className="shrink-0 p-0.5 rounded text-gray-300 dark:text-gray-600 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-950 transition-colors"
+          className="shrink-0 p-0.5 rounded text-gray-300 dark:text-gray-600 hover:text-brand-500 hover:bg-brand-50 dark:hover:bg-brand-950 transition-colors"
           title="Open workspace"
         >
           <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
@@ -369,7 +369,7 @@ export function AgentGrid({ columns, liveActivity, liveStats, sessionTodos, onIs
           {onGoToBoard && (
             <button
               onClick={onGoToBoard}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md bg-blue-600 hover:bg-blue-700 text-white transition-colors"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md bg-brand-600 hover:bg-brand-700 text-white transition-colors"
             >
               Go to Board
             </button>
@@ -400,7 +400,7 @@ export function AgentGrid({ columns, liveActivity, liveStats, sessionTodos, onIs
 
   return (
     <div className="flex flex-col gap-0 h-full overflow-y-auto">
-      <div className="flex items-center gap-3 text-xs text-gray-500 dark:text-gray-400 shrink-0 px-4 py-2 border-b border-gray-100 dark:border-gray-800 bg-white/80 dark:bg-gray-900/80 backdrop-blur-sm sticky top-0 z-10">
+      <div className="flex items-center gap-3 text-xs text-gray-500 dark:text-gray-400 shrink-0 px-4 py-2 border-b border-gray-100 dark:border-gray-800 bg-surface-raised/80 dark:bg-surface-raised-dark/80 backdrop-blur-sm sticky top-0 z-10">
         <span className="font-semibold text-gray-700 dark:text-gray-300">{agents.length} workspace{agents.length !== 1 ? "s" : ""}</span>
         {attentionCount > 0 && (
           <span className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-semibold">
@@ -415,8 +415,8 @@ export function AgentGrid({ columns, liveActivity, liveStats, sessionTodos, onIs
           </span>
         )}
         {reviewingCount > 0 && (
-          <span className="flex items-center gap-1 text-violet-600 dark:text-violet-400">
-            <span className="w-1.5 h-1.5 rounded-full bg-violet-500 animate-pulse" />
+          <span className="flex items-center gap-1 text-accent-700 dark:text-accent-300">
+            <span className="w-1.5 h-1.5 rounded-full bg-accent-500 animate-pulse" />
             {reviewingCount} reviewing
           </span>
         )}

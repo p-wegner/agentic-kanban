@@ -176,7 +176,7 @@ export function WorktreeOverview({ projectId, onClose, onIssueClick, onWorkspace
   return (
     <div className="fixed inset-0 z-50 flex justify-end">
       <div className="absolute inset-0 bg-black/20" onClick={onClose} />
-      <div className="relative w-[min(480px,100vw)] bg-white dark:bg-gray-900 shadow-xl flex flex-col animate-slide-in-right">
+      <div className="relative w-[min(480px,100vw)] bg-surface-raised dark:bg-surface-raised-dark shadow-xl flex flex-col animate-slide-in-right">
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-gray-700">
           <div className="flex items-center gap-2">
@@ -186,7 +186,7 @@ export function WorktreeOverview({ projectId, onClose, onIssueClick, onWorkspace
               <circle cx="6" cy="18" r="3" />
               <path d="M18 9a9 9 0 0 1-9 9" />
             </svg>
-            <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Worktrees</h2>
+            <h2 className="text-lg font-semibold text-ink dark:text-stone-100 heading-serif">Worktrees</h2>
             <span className="text-sm text-gray-500 dark:text-gray-400">({worktrees.length})</span>
             {orphanCount > 0 && (
               <span className="text-xs bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded font-medium">
@@ -209,7 +209,7 @@ export function WorktreeOverview({ projectId, onClose, onIssueClick, onWorkspace
               type="checkbox"
               checked={allSelected}
               onChange={toggleSelectAll}
-              className="h-4 w-4 rounded border-gray-300 text-blue-600"
+              className="h-4 w-4 rounded border-gray-300 text-brand-600"
               title="Select all"
             />
             <span className="text-xs text-gray-500 dark:text-gray-400 flex-1">
@@ -262,7 +262,7 @@ export function WorktreeOverview({ projectId, onClose, onIssueClick, onWorkspace
                     </span>
                     <span className="text-xs bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-400 px-1.5 py-0.5 rounded">main</span>
                     {mainWorktree.workspace?.isDirect && (
-                      <span className="text-xs bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded">direct</span>
+                      <span className="text-xs bg-brand-50 text-brand-700 dark:bg-brand-900/40 dark:text-brand-300 px-1.5 py-0.5 rounded">direct</span>
                     )}
                     {mainWorktree.workspace && (
                       <span className={`text-xs px-1.5 py-0.5 rounded ${STATUS_COLORS[mainWorktree.workspace.status] ?? "bg-gray-100 text-gray-600"}`}>
@@ -272,7 +272,7 @@ export function WorktreeOverview({ projectId, onClose, onIssueClick, onWorkspace
                     <button
                       onClick={() => handleOpenFolder(mainWorktree)}
                       disabled={opening === mainWorktree.path}
-                      className="ml-auto p-1 text-gray-300 dark:text-gray-600 hover:text-blue-500 rounded hover:bg-blue-50 dark:hover:bg-blue-900/30 disabled:opacity-50"
+                      className="ml-auto p-1 text-gray-300 dark:text-gray-600 hover:text-brand-500 rounded hover:bg-brand-50 dark:hover:bg-brand-900/30 disabled:opacity-50"
                       title="Open folder in explorer"
                     >
                       <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -286,7 +286,7 @@ export function WorktreeOverview({ projectId, onClose, onIssueClick, onWorkspace
                   {mainWorktree.workspace && mainWorktree.workspace.issueNumber != null && (
                     <button
                       onClick={() => onIssueClick(mainWorktree.workspace!.issueId)}
-                      className="mt-1.5 text-xs text-blue-600 hover:text-blue-800 hover:underline"
+                      className="mt-1.5 text-xs text-brand-600 hover:text-brand-700 dark:text-brand-400 hover:underline"
                     >
                       #{mainWorktree.workspace.issueNumber} {mainWorktree.workspace.issueTitle}
                     </button>
@@ -306,14 +306,14 @@ export function WorktreeOverview({ projectId, onClose, onIssueClick, onWorkspace
                   return (
                     <div
                       key={wt.path}
-                      className={`px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-800 ${isSelected ? "bg-blue-50 dark:bg-blue-900/20" : ""}`}
+                      className={`px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-800 ${isSelected ? "bg-brand-50 dark:bg-brand-900/20" : ""}`}
                     >
                       <div className="flex items-center gap-2 mb-1 flex-wrap">
                         <input
                           type="checkbox"
                           checked={isSelected}
                           onChange={() => toggleSelect(wt.path)}
-                          className="h-4 w-4 rounded border-gray-300 text-blue-600 shrink-0"
+                          className="h-4 w-4 rounded border-gray-300 text-brand-600 shrink-0"
                         />
                         <span className="text-sm font-medium text-gray-900 dark:text-gray-100">
                           {wt.branch}
@@ -322,7 +322,7 @@ export function WorktreeOverview({ projectId, onClose, onIssueClick, onWorkspace
                           <span className="text-xs bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded">orphaned</span>
                         )}
                         {wt.workspace?.isDirect && (
-                          <span className="text-xs bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded">direct</span>
+                          <span className="text-xs bg-brand-50 text-brand-700 dark:bg-brand-900/40 dark:text-brand-300 px-1.5 py-0.5 rounded">direct</span>
                         )}
                         {wt.workspace && (
                           <span className={`text-xs px-1.5 py-0.5 rounded ${STATUS_COLORS[wt.workspace.status] ?? "bg-gray-100 text-gray-600"}`}>
@@ -340,7 +340,7 @@ export function WorktreeOverview({ projectId, onClose, onIssueClick, onWorkspace
                         <button
                           onClick={() => handleOpenFolder(wt)}
                           disabled={opening === wt.path}
-                          className="ml-auto p-1 text-gray-300 dark:text-gray-600 hover:text-blue-500 rounded hover:bg-blue-50 dark:hover:bg-blue-900/30 disabled:opacity-50"
+                          className="ml-auto p-1 text-gray-300 dark:text-gray-600 hover:text-brand-500 rounded hover:bg-brand-50 dark:hover:bg-brand-900/30 disabled:opacity-50"
                           title="Open folder in explorer"
                         >
                           <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -365,7 +365,7 @@ export function WorktreeOverview({ projectId, onClose, onIssueClick, onWorkspace
                       {wt.workspace && wt.workspace.issueNumber != null && (
                         <button
                           onClick={() => onIssueClick(wt.workspace!.issueId)}
-                          className="mt-1.5 ml-6 text-xs text-blue-600 hover:text-blue-800 hover:underline"
+                          className="mt-1.5 ml-6 text-xs text-brand-600 hover:text-brand-700 dark:text-brand-400 hover:underline"
                         >
                           #{wt.workspace.issueNumber} {wt.workspace.issueTitle}
                         </button>

@@ -18,7 +18,7 @@ function relativeTime(iso: string): string {
 function getLastSessionBadge(triggerType: string | null | undefined): { label: string; className: string } | null {
   if (!triggerType) return null;
   const map: Record<string, { label: string; className: string }> = {
-    review: { label: "AI Review", className: "bg-violet-100 text-violet-700" },
+    review: { label: "AI Review", className: "bg-accent-50 text-accent-700 dark:bg-accent-900/40 dark:text-accent-300" },
     merge: { label: "AI Merge", className: "bg-emerald-100 text-emerald-700" },
     "fix-conflicts": { label: "Fix Conflicts", className: "bg-orange-100 text-orange-700" },
     learning: { label: "Learning", className: "bg-teal-100 text-teal-700" },
@@ -27,7 +27,7 @@ function getLastSessionBadge(triggerType: string | null | undefined): { label: s
   if (map[triggerType]) return map[triggerType];
   if (triggerType.startsWith("skill:")) {
     const name = triggerType.slice(6).replace(/[-_]/g, " ").replace(/\b\w/g, c => c.toUpperCase());
-    return { label: `✨ ${name}`, className: "bg-purple-100 text-purple-700" };
+    return { label: `✨ ${name}`, className: "bg-brand-50 text-brand-700 dark:bg-brand-900/40 dark:text-brand-300" };
   }
   return null;
 }
@@ -35,7 +35,7 @@ function getLastSessionBadge(triggerType: string | null | undefined): { label: s
 const issueTypeColors: Record<string, string> = {
   task: "bg-blue-100 dark:bg-blue-900/50 text-blue-800 dark:text-blue-200",
   bug: "bg-red-100 dark:bg-red-900/50 text-red-800 dark:text-red-200",
-  feature: "bg-violet-100 dark:bg-violet-900/50 text-violet-800 dark:text-violet-200",
+  feature: "bg-brand-50 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300",
   chore: "bg-amber-100 dark:bg-amber-900/50 text-amber-800 dark:text-amber-200",
 };
 
@@ -138,17 +138,17 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
       onDragLeave={() => setDepDragOver(false)}
       onDrop={handleDrop}
       onClick={() => onClick(issue)}
-      className={`group bg-white dark:bg-gray-900 rounded-md shadow-sm p-2 border cursor-pointer hover:shadow-md transition-shadow relative isolate ${depDragOver ? "border-purple-400 bg-purple-50 shadow-purple-200" : isPendingWorkspace ? "border-blue-300 shadow-blue-100 shadow-md" : "border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600"}`}
+      className={`group bg-surface-raised dark:bg-surface-raised-dark rounded-md shadow-sm p-2 border cursor-pointer hover:shadow-md transition-shadow relative isolate ${depDragOver ? "border-brand-400 bg-brand-50 shadow-brand-200" : isPendingWorkspace ? "border-brand-300 shadow-brand-100 shadow-md" : "border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600"}`}
     >
       <div className="flex items-start justify-between gap-2">
-        <p className="text-sm text-gray-900 dark:text-gray-100">
+        <p className="text-sm text-ink dark:text-stone-100">
           {issue.issueNumber != null && (
             <span className="text-gray-400 dark:text-gray-500 font-mono mr-1">#{issue.issueNumber}</span>
           )}
           <HighlightedText text={issue.title} query={searchQuery ?? ""} />
         </p>
         {isPendingWorkspace && (
-          <svg className="w-3.5 h-3.5 shrink-0 text-blue-500 animate-spin mt-0.5" fill="none" viewBox="0 0 24 24">
+          <svg className="w-3.5 h-3.5 shrink-0 text-brand-500 animate-spin mt-0.5" fill="none" viewBox="0 0 24 24">
             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
             <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
           </svg>
@@ -167,7 +167,7 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
           </span>
         )}
         {!issue.isBlocked && (issue as IssueWithStatus & { dependencyCount?: number }).dependencyCount ? (
-          <span className="inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded bg-purple-50 text-purple-600" title={`${(issue as IssueWithStatus & { dependencyCount?: number }).dependencyCount} dependencies`}>
+          <span className="inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded bg-brand-50 text-brand-600 dark:bg-brand-900/40 dark:text-brand-400" title={`${(issue as IssueWithStatus & { dependencyCount?: number }).dependencyCount} dependencies`}>
             <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path d="M5 12h14M12 5l7 7-7 7"/></svg>
             {(issue as IssueWithStatus & { dependencyCount?: number }).dependencyCount}
           </span>
@@ -234,18 +234,18 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
       {ws && ws.main && (
         <div
           className={`group/ws flex items-center gap-1.5 mt-1.5 text-xs cursor-pointer rounded px-1 py-0.5 -mx-1 border-t transition-colors ${
-            ws.main.status === "reviewing" ? "border-purple-100 bg-purple-50 hover:bg-purple-100" :
+            ws.main.status === "reviewing" ? "border-accent-200 bg-accent-50 hover:bg-accent-100 dark:border-accent-700 dark:bg-accent-900/40" :
             ws.main.status === "fixing" ? "border-orange-100 bg-orange-50 hover:bg-orange-100" :
             ws.main.conflicts?.hasConflicts ? "border-red-100 bg-red-50 hover:bg-red-100" :
-            "border-blue-100 bg-blue-50 hover:bg-blue-100 hover:border-blue-200"
+            "border-brand-100 bg-brand-50 hover:bg-brand-100 hover:border-brand-200"
           }`}
           title="Open workspace"
           onClick={(e) => { e.stopPropagation(); onWorkspaceClick?.(issue, ws.main?.id); }}
         >
           {ws.main.status === "reviewing" ? (
             <>
-              <span className="inline-block w-2 h-2 rounded-full shrink-0 bg-purple-500 animate-pulse" />
-              <span className="font-medium text-purple-700">AI Reviewing</span>
+              <span className="inline-block w-2 h-2 rounded-full shrink-0 bg-accent-500 animate-pulse" />
+              <span className="font-medium text-accent-700 dark:text-accent-300">AI Reviewing</span>
             </>
           ) : ws.main.status === "fixing" ? (
             <>
@@ -296,7 +296,7 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
             </span>
           )}
           {ws.main.planMode && (
-            <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 text-[10px] font-medium shrink-0">
+            <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-brand-50 text-brand-700 dark:bg-brand-900/40 dark:text-brand-300 text-[10px] font-medium shrink-0">
               Plan Mode
             </span>
           )}
@@ -313,7 +313,7 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
             }`}>{ws.main.profile.provider === "copilot" ? "Copilot" : ws.main.profile.provider === "codex" ? "Codex" : ws.main.profile.provider}</span>
           )}
           {(ws.main.profile?.name ?? ws.main.claudeProfile) && (
-            <span className="inline-flex items-center px-1 rounded bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 font-medium shrink-0">{ws.main.profile?.name ?? ws.main.claudeProfile}</span>
+            <span className="inline-flex items-center px-1 rounded bg-brand-50 dark:bg-brand-900/40 text-brand-600 dark:text-brand-400 font-medium shrink-0">{ws.main.profile?.name ?? ws.main.claudeProfile}</span>
           )}
           {!ws.main.profile?.name && !ws.main.claudeProfile && ws.main.agentCommand && ws.main.agentCommand !== "claude" && (
             <span className="inline-flex items-center px-1 rounded bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 font-mono text-[10px] shrink-0">{ws.main.agentCommand}</span>
@@ -321,7 +321,7 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
           {ws.total > 1 && (
             <span className="text-gray-400 dark:text-gray-500 shrink-0">+{ws.total - 1} more</span>
           )}
-          <svg className="w-3 h-3 shrink-0 text-gray-300 dark:text-gray-600 group-hover/ws:text-blue-400 transition-colors ml-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <svg className="w-3 h-3 shrink-0 text-gray-300 dark:text-gray-600 group-hover/ws:text-brand-400 transition-colors ml-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
           </svg>
         </div>
@@ -342,7 +342,7 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
             <span>{liveStats.toolUses} tools</span>
           )}
           {liveStats.subagentCount > 0 && (
-            <span className="inline-flex items-center gap-0.5 px-1 rounded bg-violet-50 text-violet-600 font-medium">
+            <span className="inline-flex items-center gap-0.5 px-1 rounded bg-brand-50 text-brand-600 dark:bg-brand-900/40 dark:text-brand-400 font-medium">
               <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
               </svg>
@@ -381,7 +381,7 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
           {showStartWorkspace && (
             <button
               onClick={(e) => { e.stopPropagation(); onStartWorkspace!(issue); }}
-              className="flex-1 flex items-center justify-center gap-1 text-xs text-blue-600 hover:text-white hover:bg-blue-600 border border-blue-200 hover:border-blue-600 rounded px-2 py-1 transition-colors"
+              className="flex-1 flex items-center justify-center gap-1 text-xs text-brand-600 hover:text-white hover:bg-brand-600 border border-brand-200 hover:border-brand-600 rounded px-2 py-1 transition-colors"
               title="Start a new workspace for this issue"
             >
               <svg className="w-3 h-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -393,7 +393,7 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
           {showMoveToNext && (
             <button
               onClick={(e) => { e.stopPropagation(); onMoveToNext!(issue); }}
-              className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400 hover:text-white hover:bg-blue-600 border border-gray-200 dark:border-gray-700 hover:border-blue-600 rounded px-2 py-1 transition-colors"
+              className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400 hover:text-white hover:bg-brand-600 border border-gray-200 dark:border-gray-700 hover:border-brand-600 rounded px-2 py-1 transition-colors"
               title={`Move to ${nextStatusName}`}
             >
               <svg className="w-3 h-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>

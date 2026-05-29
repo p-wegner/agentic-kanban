@@ -205,7 +205,7 @@ export function CommandPalette({ onClose }: CommandPaletteProps) {
                     data-selected={isSelected}
                     className={`flex items-center gap-3 px-4 py-2 cursor-pointer transition-colors ${
                       isSelected
-                        ? "bg-blue-50 dark:bg-blue-900/30 border-l-2 border-blue-500"
+                        ? "bg-brand-50 dark:bg-brand-900/30 border-l-2 border-brand-500"
                         : "hover:bg-gray-50 dark:hover:bg-gray-800 border-l-2 border-transparent"
                     }`}
                     onClick={() => handleActionClick(action)}
@@ -213,7 +213,7 @@ export function CommandPalette({ onClose }: CommandPaletteProps) {
                   >
                     {/* Icon placeholder / category dot */}
                     <span className={`w-6 h-6 rounded flex items-center justify-center text-xs shrink-0 ${
-                      isSelected ? "bg-blue-100 text-blue-600" : "bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400"
+                      isSelected ? "bg-brand-100 text-brand-600" : "bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400"
                     }`}>
                       {action.icon ?? CATEGORY_ICONS[action.category]}
                     </span>

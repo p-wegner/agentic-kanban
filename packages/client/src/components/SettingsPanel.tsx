@@ -180,7 +180,7 @@ function CollapsibleSection({ title, configured, defaultOpen, children }: {
         <span className="flex items-center gap-2">
           {title}
           {configured && !open && (
-            <span className="text-[10px] px-1.5 py-0.5 bg-blue-50 text-blue-600 rounded">configured</span>
+            <span className="text-[10px] px-1.5 py-0.5 bg-brand-50 text-brand-700 dark:bg-brand-900/40 dark:text-brand-300 rounded">configured</span>
           )}
         </span>
         <svg
@@ -247,7 +247,7 @@ function EditSkillForm({ skill, isNew, onSave, onCancel }: {
         value={name}
         onChange={(e) => setName(e.target.value)}
         placeholder="Skill name (e.g. dependency-analyzer)"
-        className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
+        className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500"
         disabled={!isNew}
       />
       <input
@@ -255,14 +255,14 @@ function EditSkillForm({ skill, isNew, onSave, onCancel }: {
         value={description}
         onChange={(e) => setDescription(e.target.value)}
         placeholder="Short description"
-        className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
+        className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500"
       />
       <textarea
         value={prompt}
         onChange={(e) => setPrompt(e.target.value)}
         placeholder="Skill prompt — injected into the agent's context before the issue description"
         rows={6}
-        className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 font-mono"
+        className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500 font-mono"
       />
       <div className="flex items-center gap-2">
         <input
@@ -270,14 +270,14 @@ function EditSkillForm({ skill, isNew, onSave, onCancel }: {
           value={model}
           onChange={(e) => setModel(e.target.value)}
           placeholder="Model override (optional, e.g. haiku)"
-          className="flex-1 text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
+          className="flex-1 text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500"
         />
       </div>
       <div className="flex gap-2 flex-wrap">
         <button
           onClick={() => onSave({ name, description, prompt, model })}
           disabled={!name || !prompt}
-          className="text-xs px-3 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
+          className="text-xs px-3 py-1.5 bg-brand-600 text-white rounded hover:bg-brand-700 disabled:opacity-50"
         >
           {isNew ? "Create" : "Save"}
         </button>
@@ -287,11 +287,11 @@ function EditSkillForm({ skill, isNew, onSave, onCancel }: {
         <button
           onClick={handleEnhance}
           disabled={!name.trim() || enhancing}
-          className="text-xs px-3 py-1.5 text-purple-700 border border-purple-300 rounded hover:bg-purple-50 disabled:opacity-50 flex items-center gap-1"
+          className="text-xs px-3 py-1.5 text-brand-700 border border-brand-300 rounded hover:bg-brand-50 disabled:opacity-50 flex items-center gap-1"
         >
           {enhancing ? (
             <>
-              <span className="inline-block w-3 h-3 border-2 border-purple-400 border-t-transparent rounded-full animate-spin" />
+              <span className="inline-block w-3 h-3 border-2 border-brand-400 border-t-transparent rounded-full animate-spin" />
               Enhancing…
             </>
           ) : (
@@ -617,10 +617,10 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-2">
       <div className="absolute inset-0 bg-black/30" onClick={onClose} />
-      <div className="relative w-full max-w-5xl bg-white dark:bg-gray-900 rounded-xl shadow-2xl flex flex-col h-[90vh] max-h-[96vh] animate-slide-in-right">
+      <div className="relative w-full max-w-5xl bg-surface-raised dark:bg-surface-raised-dark rounded-xl shadow-2xl flex flex-col h-[90vh] max-h-[96vh] animate-slide-in-right">
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200 dark:border-gray-700">
-          <h2 className="text-base font-semibold text-gray-900 dark:text-gray-100">Settings</h2>
+          <h2 className="text-base font-semibold text-ink dark:text-stone-100 heading-serif">Settings</h2>
           <button onClick={onClose} className="text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 text-lg leading-none">&times;</button>
         </div>
 
@@ -632,7 +632,7 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
               onClick={() => setTab(t.id)}
               className={`px-3 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors ${
                 tab === t.id
-                  ? "border-blue-500 text-blue-600"
+                  ? "border-brand-500 text-brand-600"
                   : "border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"
               }`}
             >
@@ -656,7 +656,7 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                       value={settings.agent_command || ""}
                       onChange={(e) => set("agent_command")(e.target.value)}
                       placeholder="claude"
-                      className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
+                      className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-1 focus:ring-brand-500"
                     />
                   </Field>
                   <Field label="Agent Profile" hint="Selects agent provider and profile. Claude uses ~/.claude/settings_*.json, Codex uses ~/.codex/<name>.config.toml, Copilot uses the CLI default or configured model profile.">
@@ -677,7 +677,7 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                           }
                         }
                       }}
-                      className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
+                      className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-1 focus:ring-brand-500"
                     >
                       <option value="">Default ({defaultHarnessLabel(settings)})</option>
                       <optgroup label="Claude">
@@ -701,7 +701,7 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                     <select
                       value={settings.default_model || ""}
                       onChange={(e) => set("default_model")(e.target.value)}
-                      className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
+                      className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-1 focus:ring-brand-500"
                     >
                       {CLAUDE_MODEL_OPTIONS.map((m) => (
                         <option key={m.value} value={m.value}>{m.label}</option>
@@ -714,7 +714,7 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                       value={settings.agent_args || ""}
                       onChange={(e) => set("agent_args")(e.target.value)}
                       placeholder="--model opus --settings .claude/settings.json"
-                      className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
+                      className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-1 focus:ring-brand-500"
                     />
                   </Field>
                 </>
@@ -741,7 +741,7 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                       ].filter(s => s.always || s.enabled).map((step, i, arr) => (
                         <div key={step.label} className="flex items-center gap-1">
                           {i > 0 && <span className="text-gray-400 dark:text-gray-500 text-xs">→</span>}
-                          <span className={`px-2 py-0.5 rounded text-xs font-medium ${step.always ? "bg-blue-100 text-blue-700" : "bg-green-100 text-green-700"}`}>
+                          <span className={`px-2 py-0.5 rounded text-xs font-medium ${step.always ? "bg-brand-100 text-brand-700 dark:bg-brand-900/40 dark:text-brand-300" : "bg-green-100 text-green-700"}`}>
                             {step.label}
                           </span>
                         </div>
@@ -790,7 +790,7 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                         label="Auto Code Review"
                         hint="When an agent commits and exits successfully, automatically launch a review agent that checks the diff for issues."
                       />
-                      <div className={`pl-5 space-y-3 border-l-2 ${autoReviewOn ? "border-blue-200" : "border-gray-100 dark:border-gray-800"}`}>
+                      <div className={`pl-5 space-y-3 border-l-2 ${autoReviewOn ? "border-brand-200 dark:border-brand-700" : "border-gray-100 dark:border-gray-800"}`}>
                         <Toggle
                           checked={settings.review_auto_fix !== "false"}
                           onChange={setBool("review_auto_fix")}
@@ -819,7 +819,7 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                         <select
                           value={settings.visual_verification_mode || "before_merge"}
                           onChange={(e) => set("visual_verification_mode")(e.target.value)}
-                          className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
+                          className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-1 focus:ring-brand-500"
                         >
                           <option value="before_merge">Before merge (default) — agent must verify UI before stopping</option>
                           <option value="after_merge">After merge — verification runs on master after merge completes</option>
@@ -833,7 +833,7 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                           <select
                             value={settings.after_merge_verify_agent || "none"}
                             onChange={(e) => set("after_merge_verify_agent")(e.target.value)}
-                            className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
+                            className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-1 focus:ring-brand-500"
                           >
                             <option value="none">None (default) — tag issue, manual verification</option>
                             <option value="reviewer">Reviewer — review agent merges + verifies UI</option>
@@ -900,7 +900,7 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                             step="1000"
                             value={settings.butler_event_feed_min_interval_ms || "30000"}
                             onChange={(e) => set("butler_event_feed_min_interval_ms")(e.target.value)}
-                            className="w-24 px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                            className="w-24 px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-1 focus:ring-brand-500"
                           />
                           <span className="text-xs text-gray-500 dark:text-gray-400">ms (bursts collapse into a summary)</span>
                         </div>
@@ -914,7 +914,7 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                             <select
                               value={settings[`butler_event_feed_${activeProjectId}` as keyof Settings] ?? ""}
                               onChange={(e) => setSettings((s) => ({ ...s, [`butler_event_feed_${activeProjectId}`]: e.target.value } as Settings))}
-                              className="px-3 py-1.5 text-xs border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
+                              className="px-3 py-1.5 text-xs border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-1 focus:ring-brand-500"
                             >
                               <option value="">Inherit (global)</option>
                               <option value="true">Force on for this project</option>
@@ -968,7 +968,7 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                           max="60"
                           value={settings.auto_monitor_interval || "4"}
                           onChange={(e) => set("auto_monitor_interval")(e.target.value)}
-                          className="w-16 px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                          className="w-16 px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-1 focus:ring-brand-500"
                         />
                         <span className="text-xs text-gray-500 dark:text-gray-400">min</span>
                       </div>
@@ -1034,12 +1034,12 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                                 <span className="text-[10px] px-1.5 py-0.5 bg-gray-100 text-gray-500 rounded">builtin</span>
                               )}
                               {skill.projectId ? (
-                                <span className="text-[10px] px-1.5 py-0.5 bg-purple-50 text-purple-600 rounded">project</span>
+                                <span className="text-[10px] px-1.5 py-0.5 bg-brand-50 text-brand-700 dark:bg-brand-900/40 dark:text-brand-300 rounded">project</span>
                               ) : (
                                 <span className="text-[10px] px-1.5 py-0.5 bg-green-50 text-green-600 rounded">global</span>
                               )}
                               {skill.model && (
-                                <span className="text-[10px] px-1.5 py-0.5 bg-blue-50 text-blue-600 rounded">{skill.model}</span>
+                                <span className="text-[10px] px-1.5 py-0.5 bg-brand-50 text-brand-700 dark:bg-brand-900/40 dark:text-brand-300 rounded">{skill.model}</span>
                               )}
                             </div>
                             <p className="text-xs text-gray-500 mt-0.5 line-clamp-2">{skill.description}</p>
@@ -1047,7 +1047,7 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                           <div className="flex gap-1 shrink-0">
                             <button
                               onClick={() => setEditingSkill(skill.id)}
-                              className="text-xs text-gray-400 hover:text-blue-600 px-1"
+                              className="text-xs text-gray-400 hover:text-brand-600 px-1"
                             >
                               Edit
                             </button>
@@ -1105,7 +1105,7 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                   ) : (
                     <button
                       onClick={() => setNewSkill({ name: "", description: "", prompt: "", model: "" })}
-                      className="text-sm text-blue-600 hover:text-blue-700"
+                      className="text-sm text-brand-600 hover:text-brand-700"
                     >
                       + Add Skill
                     </button>
@@ -1148,7 +1148,7 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                   <select
                     value={settings.output_parser || "minimal"}
                     onChange={(e) => set("output_parser")(e.target.value)}
-                    className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-1 focus:ring-brand-500"
                   >
                     <option value="minimal">Minimal activity view</option>
                     <option value="false">Show raw output (debug)</option>
@@ -1177,7 +1177,7 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                       value={settings.projects_base_path ?? ""}
                       onChange={(e) => setSettings((s) => ({ ...s, projects_base_path: e.target.value }))}
                       placeholder="C:/projects"
-                      className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 font-mono"
+                      className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500 font-mono"
                     />
                     <p className="mt-1 text-xs text-gray-500">
                       Default parent folder for new projects created via "Create new project". New projects are created as subdirectories here.
@@ -1250,7 +1250,7 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                           onChange={(e) => setProjectSettings(s => ({ ...s, setupScript: e.target.value }))}
                           placeholder="pnpm install"
                           rows={3}
-                          className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 font-mono"
+                          className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500 font-mono"
                         />
                         <button
                           onClick={async () => {
@@ -1274,7 +1274,7 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                             }
                           }}
                           disabled={generatingScript || !activeProjectId}
-                          className="text-xs text-purple-600 px-2 py-1.5 hover:text-purple-800 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
+                          className="text-xs text-brand-600 px-2 py-1.5 hover:text-brand-800 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
                         >
                           {generatingScript ? (
                             <>
@@ -1317,7 +1317,7 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                           onChange={(e) => setProjectSettings(s => ({ ...s, teardownScript: e.target.value }))}
                           placeholder="pkill -f dev-server || true"
                           rows={3}
-                          className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 font-mono"
+                          className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500 font-mono"
                         />
                         <button
                           onClick={async () => {
@@ -1341,7 +1341,7 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                             }
                           }}
                           disabled={generatingTeardown || !activeProjectId}
-                          className="text-xs text-purple-600 px-2 py-1.5 hover:text-purple-800 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
+                          className="text-xs text-brand-600 px-2 py-1.5 hover:text-brand-800 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
                         >
                           {generatingTeardown ? (
                             <>
@@ -1400,7 +1400,7 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                               type="text"
                               value={editTagName}
                               onChange={(e) => setEditTagName(e.target.value)}
-                              className="flex-1 text-sm border border-gray-300 rounded px-2 py-0.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                              className="flex-1 text-sm border border-gray-300 rounded px-2 py-0.5 focus:outline-none focus:ring-1 focus:ring-brand-500"
                               autoFocus
                             />
                             <input
@@ -1420,7 +1420,7 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                                 setEditingTag(null);
                                 showToast("Tag updated", "success");
                               }}
-                              className="text-xs px-2 py-1 bg-blue-600 text-white rounded hover:bg-blue-700"
+                              className="text-xs px-2 py-1 bg-brand-600 text-white rounded hover:bg-brand-700"
                             >
                               Save
                             </button>
@@ -1443,7 +1443,7 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                               <>
                                 <button
                                   onClick={() => { setEditingTag(tag.id); setEditTagName(tag.name); setEditTagColor(tag.color ?? "#6B7280"); }}
-                                  className="text-xs text-gray-400 hover:text-blue-600"
+                                  className="text-xs text-gray-400 hover:text-brand-600"
                                 >
                                   Rename
                                 </button>
@@ -1532,7 +1532,7 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                         value={newTagName}
                         onChange={(e) => setNewTagName(e.target.value)}
                         placeholder="Tag name"
-                        className="flex-1 text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                        className="flex-1 text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500"
                         onKeyDown={(e) => {
                           if (e.key === "Enter" && newTagName.trim()) e.currentTarget.form?.requestSubmit();
                         }}
@@ -1550,7 +1550,7 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                           setNewTagColor("#6B7280");
                           showToast("Tag created", "success");
                         }}
-                        className="text-xs px-3 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
+                        className="text-xs px-3 py-1.5 bg-brand-600 text-white rounded hover:bg-brand-700 disabled:opacity-50"
                       >
                         Add
                       </button>
@@ -1580,7 +1580,7 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                                 value={editRunName}
                                 onChange={(e) => setEditRunName(e.target.value)}
                                 placeholder="Name"
-                                className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500"
                                 autoFocus
                               />
                               <textarea
@@ -1588,7 +1588,7 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                                 onChange={(e) => setEditRunPrompt(e.target.value)}
                                 placeholder="Prompt for the agent"
                                 rows={3}
-                                className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 font-mono"
+                                className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500 font-mono"
                               />
                               <div className="space-y-2">
                                 <div className="flex items-center gap-2">
@@ -1596,7 +1596,7 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                                   <select
                                     value={editRunMode}
                                     onChange={(e) => setEditRunMode(e.target.value as "interval" | "cron")}
-                                    className="text-xs border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                    className="text-xs border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-brand-500"
                                   >
                                     <option value="interval">Interval (minutes)</option>
                                     <option value="cron">Cron expression</option>
@@ -1610,7 +1610,7 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                                       min={1}
                                       value={editRunInterval}
                                       onChange={(e) => setEditRunInterval(Number(e.target.value))}
-                                      className="w-20 text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                      className="w-20 text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500"
                                     />
                                     <span className="text-xs text-gray-600">minutes</span>
                                   </div>
@@ -1621,7 +1621,7 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                                       value={editRunCron}
                                       onChange={(e) => setEditRunCron(e.target.value)}
                                       placeholder="e.g. 0 9 * * 1-5"
-                                      className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 font-mono"
+                                      className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500 font-mono"
                                     />
                                     {editRunCron.trim() && (() => {
                                       const v = validateCronExpression(editRunCron);
@@ -1656,7 +1656,7 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                                         setSavingEditRun(false);
                                       }
                                     }}
-                                    className="text-xs px-3 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
+                                    className="text-xs px-3 py-1.5 bg-brand-600 text-white rounded hover:bg-brand-700 disabled:opacity-50"
                                   >
                                     {savingEditRun ? "Saving…" : "Save"}
                                   </button>
@@ -1693,7 +1693,7 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                                 <span className="text-xs text-gray-400">{run.cronExpression ? describeCronExpression(run.cronExpression) : `every ${run.intervalMinutes}m`}</span>
                                 <button
                                   onClick={() => { setEditingRun(run.id); setEditRunName(run.name); setEditRunPrompt(run.prompt ?? ""); setEditRunInterval(run.intervalMinutes); setEditRunCron(run.cronExpression ?? ""); setEditRunMode(run.cronExpression ? "cron" : "interval"); }}
-                                  className="text-xs text-gray-400 hover:text-blue-600"
+                                  className="text-xs text-gray-400 hover:text-brand-600"
                                 >
                                   Edit
                                 </button>
@@ -1709,7 +1709,7 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                                     } catch { showToast("Trigger failed", "error"); }
                                     finally { setTriggeringRun(null); }
                                   }}
-                                  className="text-xs px-2 py-1 text-blue-600 hover:bg-blue-50 rounded border border-blue-200"
+                                  className="text-xs px-2 py-1 text-brand-600 hover:bg-brand-50 rounded border border-brand-200"
                                 >
                                   {triggeringRun === run.id ? "Running…" : "Run now"}
                                 </button>
@@ -1794,14 +1794,14 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                       value={newRunName}
                       onChange={(e) => setNewRunName(e.target.value)}
                       placeholder="Name (e.g. Daily standup update)"
-                      className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                      className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500"
                     />
                     <textarea
                       value={newRunPrompt}
                       onChange={(e) => setNewRunPrompt(e.target.value)}
                       placeholder="Prompt for the agent"
                       rows={3}
-                      className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 font-mono"
+                      className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500 font-mono"
                     />
                     <div className="space-y-2">
                       <div className="flex items-center gap-2">
@@ -1809,7 +1809,7 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                         <select
                           value={newRunMode}
                           onChange={(e) => setNewRunMode(e.target.value as "interval" | "cron")}
-                          className="text-xs border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                          className="text-xs border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-brand-500"
                         >
                           <option value="interval">Interval (minutes)</option>
                           <option value="cron">Cron expression</option>
@@ -1823,7 +1823,7 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                             min={1}
                             value={newRunInterval}
                             onChange={(e) => setNewRunInterval(Number(e.target.value))}
-                            className="w-20 text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                            className="w-20 text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500"
                           />
                           <span className="text-xs text-gray-600">minutes</span>
                         </div>
@@ -1834,7 +1834,7 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                             value={newRunCron}
                             onChange={(e) => setNewRunCron(e.target.value)}
                             placeholder="e.g. 0 9 * * 1-5  (weekdays at 09:00)"
-                            className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 font-mono"
+                            className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500 font-mono"
                           />
                           {newRunCron.trim() && (() => {
                             const v = validateCronExpression(newRunCron);
@@ -1871,7 +1871,7 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                           } catch { showToast("Failed to create", "error"); }
                           finally { setSavingRun(false); }
                         }}
-                        className="text-xs px-3 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
+                        className="text-xs px-3 py-1.5 bg-brand-600 text-white rounded hover:bg-brand-700 disabled:opacity-50"
                       >
                         {savingRun ? "Creating…" : "Add"}
                       </button>
@@ -1911,7 +1911,7 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
             <button
               onClick={handleSave}
               disabled={saving || defaultBranchInvalid}
-              className="px-4 py-2 text-sm text-white bg-blue-600 hover:bg-blue-700 rounded-md disabled:opacity-50"
+              className="px-4 py-2 text-sm text-white bg-brand-600 hover:bg-brand-700 rounded-md disabled:opacity-50"
             >
               {saving ? "Saving..." : "Save"}
             </button>
