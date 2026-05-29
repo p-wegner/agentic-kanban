@@ -247,6 +247,23 @@ describe("workflow-engine", () => {
     expect(blocked.error).toContain("gated by condition");
   });
 
+  it("syncCurrentNodeToStatus maps a manual status move to the matching node", async () => {
+    const { syncCurrentNodeToStatus } = await import("@agentic-kanban/shared/lib/workflow-engine");
+    const { projectId, statusIds } = await seedProject(db);
+    const issueId = await seedIssue(db, projectId, statusIds["Todo"], "bug");
+    const wsId = await seedWorkspace(db, issueId);
+    await initWorkspaceWorkflow(db as any, { workspaceId: wsId, issueId }); // start = In Progress node
+
+    // Manually move the issue to "In Review" (simulating drag-drop).
+    await db.update(schema.issues).set({ statusId: statusIds["In Review"] }).where(eq(schema.issues.id, issueId));
+    await syncCurrentNodeToStatus(db as any, issueId);
+
+    const issue = (await db.select().from(schema.issues).where(eq(schema.issues.id, issueId)))[0];
+    const node = (await db.select().from(schema.workflowNodes).where(eq(schema.workflowNodes.id, issue.currentNodeId!)))[0];
+    expect(node.statusName).toBe("In Review");
+    expect(node.name).toBe("Review");
+  });
+
   it("builds a transition block embedding the workspace id", async () => {
     const { projectId } = await seedProject(db);
     const templateId = await resolveTemplateForIssue(db as any, { projectId, issueType: "bug" });

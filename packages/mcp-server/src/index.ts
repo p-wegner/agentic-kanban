@@ -45,6 +45,13 @@ import { registerButlerSetModel } from "./tools/butler-set-model.js";
 import { registerButlerSetProfile } from "./tools/butler-set-profile.js";
 import { registerButlerState } from "./tools/butler-state.js";
 import { registerProposeTransition } from "./tools/propose-transition.js";
+import {
+  registerListWorkflowTemplates,
+  registerGetWorkflowTemplate,
+  registerCreateWorkflowTemplate,
+  registerUpdateWorkflowTemplate,
+  registerDeleteWorkflowTemplate,
+} from "./tools/workflow-templates.js";
 
 const TOOL_REGISTRARS: Record<string, (server: McpServer) => void> = {
   get_context: registerGetContext,
@@ -88,6 +95,11 @@ const TOOL_REGISTRARS: Record<string, (server: McpServer) => void> = {
   butler_set_profile: registerButlerSetProfile,
   butler_state: registerButlerState,
   propose_transition: registerProposeTransition,
+  list_workflow_templates: registerListWorkflowTemplates,
+  get_workflow_template: registerGetWorkflowTemplate,
+  create_workflow_template: registerCreateWorkflowTemplate,
+  update_workflow_template: registerUpdateWorkflowTemplate,
+  delete_workflow_template: registerDeleteWorkflowTemplate,
 };
 
 async function getDisabledTools(): Promise<Set<string>> {

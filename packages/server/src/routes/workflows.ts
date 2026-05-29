@@ -222,6 +222,72 @@ export function createWorkflowsRoute(database: Database = db, options?: Workflow
     return c.json({ ok: true });
   });
 
+  // GET /api/workflows/analytics?projectId= — per-node visit counts, avg dwell
+  // time, and drop-off (entered but not advanced, excluding end nodes).
+  router.get("/analytics", async (c) => {
+    const projectId = c.req.query("projectId");
+    if (!projectId) return c.json({ error: "projectId required" }, 400);
+
+    // All transitions for this project's workspaces, with node metadata.
+    const rows = await database
+      .select({
+        workspaceId: workflowTransitions.workspaceId,
+        toNodeId: workflowTransitions.toNodeId,
+        createdAt: workflowTransitions.createdAt,
+        nodeName: workflowNodes.name,
+        nodeType: workflowNodes.nodeType,
+        templateId: workflowNodes.templateId,
+      })
+      .from(workflowTransitions)
+      .innerJoin(workspaces, eq(workflowTransitions.workspaceId, workspaces.id))
+      .innerJoin(issues, eq(workspaces.issueId, issues.id))
+      .leftJoin(workflowNodes, eq(workflowTransitions.toNodeId, workflowNodes.id))
+      .where(eq(issues.projectId, projectId));
+
+    // Group by workspace and order chronologically to compute dwell times.
+    const byWorkspace = new Map<string, typeof rows>();
+    for (const r of rows) {
+      if (!byWorkspace.has(r.workspaceId)) byWorkspace.set(r.workspaceId, [] as any);
+      byWorkspace.get(r.workspaceId)!.push(r);
+    }
+
+    interface Agg { nodeId: string; nodeName: string; nodeType: string; visits: number; left: number; stuck: number; totalDwellMs: number; dwellSamples: number }
+    const agg = new Map<string, Agg>();
+    const ensure = (id: string, name: string, type: string): Agg => {
+      let a = agg.get(id);
+      if (!a) { a = { nodeId: id, nodeName: name, nodeType: type, visits: 0, left: 0, stuck: 0, totalDwellMs: 0, dwellSamples: 0 }; agg.set(id, a); }
+      return a;
+    };
+
+    for (const seq of byWorkspace.values()) {
+      seq.sort((a, b) => (a.createdAt < b.createdAt ? -1 : 1));
+      for (let i = 0; i < seq.length; i++) {
+        const cur = seq[i];
+        const a = ensure(cur.toNodeId, cur.nodeName ?? "(deleted)", cur.nodeType ?? "normal");
+        a.visits++;
+        const next = seq[i + 1];
+        if (next) {
+          a.left++;
+          const dwell = new Date(next.createdAt).getTime() - new Date(cur.createdAt).getTime();
+          if (Number.isFinite(dwell) && dwell >= 0) { a.totalDwellMs += dwell; a.dwellSamples++; }
+        } else if (cur.nodeType !== "end") {
+          a.stuck++; // currently sitting here / dropped off (not a terminal node)
+        }
+      }
+    }
+
+    const nodes = [...agg.values()].map((a) => ({
+      nodeId: a.nodeId,
+      nodeName: a.nodeName,
+      nodeType: a.nodeType,
+      visits: a.visits,
+      avgDwellMs: a.dwellSamples > 0 ? Math.round(a.totalDwellMs / a.dwellSamples) : null,
+      dropoff: a.stuck,
+    })).sort((x, y) => y.visits - x.visits);
+
+    return c.json({ totalWorkspaces: byWorkspace.size, nodes });
+  });
+
   // GET /api/workflows/resolve?issueId= — which template an issue uses (for the create picker default).
   router.get("/resolve", async (c) => {
     const issueId = c.req.query("issueId");

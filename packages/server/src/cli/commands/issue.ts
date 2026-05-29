@@ -5,6 +5,7 @@ import { eq, inArray, sql, and, desc } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { parseSessionSummary, formatDurationStr } from "@agentic-kanban/shared";
 import { runMigrations, getActiveProjectId } from "../shared.js";
+import { syncCurrentNodeToStatus } from "@agentic-kanban/shared/lib/workflow-engine";
 import { isAnalyticsNoise } from "../../services/session-filter.js";
 
 export function registerIssueCommand(program: Command) {
@@ -240,6 +241,8 @@ Tip: Use 'issue list' to find the issue ID and see available status names.
           .update(issues)
           .set({ statusId: target.id, statusChangedAt: now, updatedAt: now })
           .where(eq(issues.id, issueRows[0].id));
+
+        await syncCurrentNodeToStatus(db, issueRows[0].id).catch(() => {});
 
         console.log(`Moved issue to '${statusName}'`);
         process.exit(0);
