@@ -348,7 +348,13 @@ async function runLoop(session: ButlerSession, input: Pushable<SDKUserMessage>, 
     console.log(`[butler-sdk] session loop ended: project=${session.projectId}`);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    if (isTransientNetworkError(err)) {
+    if (session.abort.signal.aborted) {
+      // Deliberate teardown (clear-context, profile switch, server stop) aborts the
+      // SDK query, surfacing as an "operation aborted" throw. This is expected — do
+      // NOT broadcast it as an error, or a stream reconnecting right after the stop
+      // (the clear-context flow reopens immediately) would render a spurious error.
+      console.log(`[butler-sdk] session aborted (intentional): project=${session.projectId}`);
+    } else if (isTransientNetworkError(err)) {
       // Anthropic HTTPS socket got killed (tsx hot-reload, network blip, manual stop).
       // Don't propagate or surface as a hard error — the dev loop must keep running and
       // the next ensureButlerSession() call will reopen a warm connection.
