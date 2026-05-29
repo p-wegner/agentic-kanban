@@ -147,7 +147,7 @@ export function createWorkspaceCrudService(deps: {
 
   function buildAgentPrompt(
     issue: { title: string; description: string | null },
-    input: Pick<CreateWorkspaceInput, "customPrompt" | "includeVisualProof">,
+    input: Pick<CreateWorkspaceInput, "customPrompt" | "includeVisualProof" | "clarifications">,
     issueId: string,
   ): string {
     let prompt: string;
@@ -158,6 +158,11 @@ export function createWorkspaceCrudService(deps: {
       if (issue.description) {
         prompt += `\n\n${issue.description}`;
       }
+    }
+    // Prepend answered preflight clarifications so the agent starts with the resolved
+    // Q&A as part of its spec (the user already reconciled these ambiguities).
+    if (input.clarifications?.trim()) {
+      prompt = `${input.clarifications.trim()}\n\n${prompt}`;
     }
     if (input.includeVisualProof) {
       const serverPort = process.env.KANBAN_SERVER_PORT || process.env.PORT || "3001";
