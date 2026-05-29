@@ -166,6 +166,8 @@ The CLI `issue get` command works without knowing the project ID — it uses the
 
 ## Board Operations: Prefer MCP Tools or CLI over REST
 
+> **Don't hand-roll `curl ... | python -c "import json"` from the Bash tool.** Reach for the `mcp__agentic-kanban__*` tools first (they return parsed JSON directly), and only when no MCP/CLI equivalent exists, query REST from the **PowerShell tool** with `Invoke-RestMethod` (auto-parses JSON). Shelling out to `curl | python` for API+JSON work is brittle on Windows and burns turns — see [[feedback_powershell_http]].
+
 ### `#N` means kanban issue, not GitHub PR
 
 When the user references `#N` (e.g., "review #70", "merge #65", "what's the status of #72"), this **always refers to a kanban board issue number**, never a GitHub pull request.
