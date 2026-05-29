@@ -18,6 +18,7 @@ const SHORTCUTS: Array<{ keys: string[]; description: string; sequential?: boole
   { keys: ["l"], description: "Switch to Agents view" },
   { keys: ["m"], description: "Switch to Metrics view" },
   { keys: ["i"], description: "Switch to Butler chat" },
+  { keys: ["p"], description: "Switch to Swimlane view" },
   { keys: ["a"], description: "Toggle All Workspaces panel" },
   { keys: ["g", "s"], description: "Open settings", sequential: true },
 ];

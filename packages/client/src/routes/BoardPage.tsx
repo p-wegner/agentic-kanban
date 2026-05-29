@@ -9,6 +9,7 @@ import { MetricsView } from "../components/MetricsView.js";
 import { ButlerView } from "../components/ButlerView.js";
 import { WorkflowsView } from "../components/WorkflowsView.js";
 import { InsightsPanel } from "../components/InsightsPanel.js";
+import { SwimlaneView } from "../components/SwimlaneView.js";
 import { useAgentQuestionsCount } from "../components/AgentQuestionsPanel.js";
 import { BoardErrorBoundary } from "../components/BoardErrorBoundary.js";
 import { BoardKanbanView } from "../components/BoardKanbanView.js";
@@ -100,7 +101,7 @@ export function BoardPage() {
   const [expandedCreatePanel, setExpandedCreatePanel] = useState<{ statusId: string; statusName: string; state: Partial<CreateIssueFormState> } | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>(() => {
     const stored = localStorage.getItem("kanban-board-view");
-    const validViews: ViewMode[] = ["kanban", "graph", "table", "agents", "timeline", "metrics", "butler", "workflows", "insights"];
+    const validViews: ViewMode[] = ["kanban", "graph", "table", "agents", "timeline", "metrics", "butler", "workflows", "insights", "swimlane"];
     return validViews.includes(stored as ViewMode) ? (stored as ViewMode) : "kanban";
   });
   const [dynamicColumnScaling, setDynamicColumnScaling] = useState(false);
@@ -834,7 +835,7 @@ export function BoardPage() {
         setShowSettings(true);
         return;
       }
-      if ((e.key === "b" || e.key === "t" || e.key === "l" || e.key === "f" || e.key === "m" || e.key === "i" || e.key === "n") && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      if ((e.key === "b" || e.key === "t" || e.key === "l" || e.key === "f" || e.key === "m" || e.key === "i" || e.key === "n" || e.key === "p") && !e.ctrlKey && !e.metaKey && !e.altKey) {
         const target = e.target as HTMLElement;
         if (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT") return;
         e.preventDefault();
@@ -845,6 +846,7 @@ export function BoardPage() {
         else if (e.key === "m") handleViewModeChange("metrics");
         else if (e.key === "i") handleViewModeChange("butler");
         else if (e.key === "n") handleViewModeChange("insights");
+        else if (e.key === "p") handleViewModeChange("swimlane");
         return;
       }
       // "a" to toggle All Workspaces panel
@@ -1326,6 +1328,15 @@ export function BoardPage() {
                   setWorkspaceInitial({ workspaceId, sessionId });
                 }
               }}
+            />
+          </BoardErrorBoundary>
+        )}
+        {viewMode === "swimlane" && (
+          <BoardErrorBoundary columnName="Swimlane View">
+            <SwimlaneView
+              columns={columns}
+              onIssueClick={handleIssueClick}
+              searchQuery={searchQuery}
             />
           </BoardErrorBoundary>
         )}
