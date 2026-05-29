@@ -2,6 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { eq } from "drizzle-orm";
 import { prodDeps, type ToolDeps } from "./deps.js";
+import { requireEntity, resolveStatusByName } from "../db-utils.js";
 
 export function registerUpdateIssue(server: McpServer, deps: ToolDeps = prodDeps) {
   const { db, schema, notifyBoard } = deps;
@@ -18,10 +19,10 @@ export function registerUpdateIssue(server: McpServer, deps: ToolDeps = prodDeps
       estimate: z.enum(["XS", "S", "M", "L", "XL"]).nullable().optional().describe("Size estimate (XS/S/M/L/XL), or null to clear"),
     },
     async ({ issueId, title, description, statusName, priority, issueType, estimate }) => {
-      const existing = await db.select().from(schema.issues).where(eq(schema.issues.id, issueId)).limit(1);
-      if (existing.length === 0) {
-        return { content: [{ type: "text" as const, text: `Issue ${issueId} not found` }] };
-      }
+      const existingResult = await db.select().from(schema.issues).where(eq(schema.issues.id, issueId)).limit(1);
+      const r0 = requireEntity(existingResult, issueId, "Issue");
+      if (!r0.ok) return r0.error;
+      const existing = r0.value;
 
       const now = new Date().toISOString();
       const updates: Record<string, unknown> = { updatedAt: now };
@@ -33,18 +34,14 @@ export function registerUpdateIssue(server: McpServer, deps: ToolDeps = prodDeps
       if (estimate !== undefined) updates.estimate = estimate;
 
       if (statusName) {
-        const statuses = await db.select().from(schema.projectStatuses)
-          .where(eq(schema.projectStatuses.projectId, existing[0].projectId));
-        const found = statuses.find(s => s.name === statusName);
-        if (!found) {
-          return { content: [{ type: "text" as const, text: `Status '${statusName}' not found. Available: ${statuses.map(s => s.name).join(", ")}` }] };
-        }
-        updates.statusId = found.id;
+        const r = await resolveStatusByName(db, schema, existing.projectId, statusName);
+        if (!r.ok) return r.error;
+        updates.statusId = r.statusId;
       }
 
       await db.update(schema.issues).set(updates).where(eq(schema.issues.id, issueId));
 
-      notifyBoard(existing[0].projectId, "mcp_update_issue");
+      notifyBoard(existing.projectId, "mcp_update_issue");
 
       return {
         content: [{ type: "text" as const, text: JSON.stringify({ id: issueId, updated: Object.keys(updates).filter(k => k !== "updatedAt") }, null, 2) }],
