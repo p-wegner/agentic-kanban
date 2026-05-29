@@ -32,27 +32,30 @@ import {
   type GitService,
 } from "./workspace-internals.js";
 
-/** Best-effort kill of any process whose cwd/cmdline lives inside the worktree (e.g. leaked dev.mjs). */
-async function killWorktreeProcesses(workingDir: string | null | undefined, label: string): Promise<void> {
-  if (!workingDir) return;
-  try {
-    const killed = await killProcessesInDir(workingDir);
-    if (killed > 0) console.log(`[workspace-merge] ${label}: killed ${killed} leftover process(es) in ${workingDir}`);
-  } catch (err) {
-    console.warn(`[workspace-merge] ${label}: killWorktreeProcesses failed (non-fatal):`, err instanceof Error ? err.message : String(err));
-  }
-}
-
 export function createWorkspaceMergeService(deps: {
   database: Database;
   getSessionManager?: () => SessionManager;
   boardEvents?: BoardEvents;
   gitService?: GitService;
   createBackup?: (reason: string) => Promise<unknown>;
+  /** Injectable process killer for testing (defaults to the real killProcessesInDir). */
+  processKiller?: (dir: string) => Promise<number>;
 }) {
   const { database, getSessionManager, boardEvents } = deps;
   const gitService = deps.gitService ?? realGitService;
   const createBackup = deps.createBackup ?? realCreateBackup;
+  const killProcesses = deps.processKiller ?? killProcessesInDir;
+
+  /** Best-effort kill of processes in the worktree dir using the injected killer. */
+  async function killWorktreeProcesses(workingDir: string | null | undefined, label: string): Promise<void> {
+    if (!workingDir) return;
+    try {
+      const killed = await killProcesses(workingDir);
+      if (killed > 0) console.log(`[workspace-merge] ${label}: killed ${killed} leftover process(es) in ${workingDir}`);
+    } catch (err) {
+      console.warn(`[workspace-merge] ${label}: killWorktreeProcesses failed (non-fatal):`, err instanceof Error ? err.message : String(err));
+    }
+  }
 
   async function mergeWorkspace(id: string) {
     const workspace = await getWorkspaceById(id, database);
@@ -123,29 +126,8 @@ export function createWorkspaceMergeService(deps: {
     }
 
     const targetBranch = requireBaseBranch(workspace.baseBranch || defaultBranch);
-    const currentHeadBranch = await gitService.getCurrentBranch(repoPath);
-    if (currentHeadBranch !== targetBranch) {
-      throw new WorkspaceError(
-        `Cannot merge: main checkout HEAD is on '${currentHeadBranch}' but this workspace targets '${targetBranch}'. ` +
-          `Check out '${targetBranch}' in the main checkout before merging, or the merge would silently land on the wrong branch.`,
-        "CONFLICT",
-        { currentBranch: currentHeadBranch, targetBranch },
-      );
-    }
 
-    const uncommittedInMain = await gitService.getUncommittedTrackedChanges(repoPath);
-    if (uncommittedInMain.length > 0) {
-      const preview = uncommittedInMain.slice(0, 10).join("\n");
-      const suffix = uncommittedInMain.length > 10 ? `\n…and ${uncommittedInMain.length - 10} more` : "";
-      throw new WorkspaceError(
-        `Cannot merge: the main checkout has ${uncommittedInMain.length} uncommitted tracked change(s). ` +
-          `Commit or stash these before merging:\n${preview}${suffix}`,
-        "CONFLICT",
-        { uncommittedFiles: uncommittedInMain },
-      );
-    }
-
-    console.log(`[workspace-service] merge: workspaceId=${id} branch=${workspace.branch} repoPath=${repoPath}`);
+    console.log(`[workspace-service] merge: workspaceId=${id} branch=${workspace.branch} targetBranch=${targetBranch} repoPath=${repoPath}`);
 
     if (workspace.workingDir) {
       const synced = await gitService.syncBranchToHead(workspace.workingDir, workspace.branch);
@@ -164,7 +146,8 @@ export function createWorkspaceMergeService(deps: {
     let preMergeHead = "";
     try { preMergeHead = await gitService.revParse(repoPath, "HEAD"); } catch { /* tolerate */ }
 
-    const result = await gitService.mergeBranch(repoPath, workspace.branch);
+    // Plumbing-based merge: working tree and index are never modified.
+    const result = await gitService.mergeBranch(repoPath, workspace.branch, targetBranch);
 
     // Kill any agent-spawned processes (e.g. leaked dev.mjs) before removing the worktree.
     if (workspace.workingDir) {
