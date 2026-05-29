@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { issues, projectStatuses, issueDependencies, agentSkills } from "@agentic-kanban/shared/schema";
-import { eq, and, inArray, sql } from "drizzle-orm";
+import { issues, projectStatuses, issueDependencies, agentSkills, tags, issueTags, projects } from "@agentic-kanban/shared/schema";
+import { eq, and, inArray, sql, desc } from "drizzle-orm";
 import type { DependencyType } from "@agentic-kanban/shared/schema";
 import type { IssueEstimate } from "@agentic-kanban/shared";
 import type { Database } from "../db/index.js";
@@ -200,4 +200,286 @@ ${description ? `Description:\n${description}` : ""}`;
     throw new Error(`AI returned invalid estimate: ${parsed.estimate}`);
   }
   return { estimate, reasoning: parsed.reasoning?.trim() ?? "" };
+}
+
+export interface DecomposeChildProposal {
+  tempId: string;
+  title: string;
+  description: string;
+  priority: "low" | "medium" | "high" | "urgent";
+}
+
+export interface DecomposeDependencyProposal {
+  fromTempId: string;
+  toTempId: string;
+  type: DependencyType;
+}
+
+export interface DecomposeEpicResult {
+  children: DecomposeChildProposal[];
+  dependencies: DecomposeDependencyProposal[];
+  alreadyDecomposed: boolean;
+}
+
+export async function decomposeEpic(
+  issueId: string,
+  projectId: string,
+  database: Database,
+): Promise<DecomposeEpicResult> {
+  const issueRows = await database
+    .select({ id: issues.id, issueNumber: issues.issueNumber, title: issues.title, description: issues.description })
+    .from(issues)
+    .where(eq(issues.id, issueId))
+    .limit(1);
+  if (issueRows.length === 0) throw new NotFoundError("Issue not found");
+  const targetIssue = issueRows[0];
+
+  // Check if already decomposed (has parent_of dependencies)
+  const existingChildDeps = await database
+    .select({ id: issueDependencies.id })
+    .from(issueDependencies)
+    .where(and(eq(issueDependencies.issueId, issueId), eq(issueDependencies.type, "parent_of")))
+    .limit(1);
+  const alreadyDecomposed = existingChildDeps.length > 0;
+
+  // Get recent closed issues for context
+  const doneStatuses = await database
+    .select({ id: projectStatuses.id })
+    .from(projectStatuses)
+    .where(and(eq(projectStatuses.projectId, projectId), inArray(projectStatuses.name, ["Done", "Cancelled"])));
+  const doneStatusIds = doneStatuses.map(s => s.id);
+
+  let recentIssues: { title: string; description: string | null }[] = [];
+  if (doneStatusIds.length > 0) {
+    recentIssues = await database
+      .select({ title: issues.title, description: issues.description })
+      .from(issues)
+      .where(and(
+        eq(issues.projectId, projectId),
+        inArray(issues.statusId, doneStatusIds),
+      ))
+      .orderBy(desc(issues.updatedAt))
+      .limit(10);
+  }
+
+  const projectRows = await database
+    .select({ name: projects.name, repoName: projects.repoName })
+    .from(projects)
+    .where(eq(projects.id, projectId))
+    .limit(1);
+  const projectName = projectRows[0]?.repoName || projectRows[0]?.name || "unknown project";
+
+  const recentContext = recentIssues.length > 0
+    ? `\nRecently completed tasks (for context on coding patterns):\n${recentIssues.map(i => `  - ${i.title}`).join("\n")}`
+    : "";
+
+  const prompt = `You are a software project planner. You must decompose a large epic ticket into smaller, focused child tickets that can each be completed in a single agent session (typically 1-4 hours of work each).
+
+Project: ${projectName}
+Epic title: ${targetIssue.title}
+Epic description:
+${targetIssue.description || "(no description)"}
+${recentContext}
+
+Rules:
+- Generate 3-8 child tickets that together implement the full epic
+- Each child ticket must be independently workable (no ambiguity)
+- Titles should be actionable and specific (verb phrase, under 80 chars)
+- Descriptions should be 2-4 sentences with clear acceptance criteria
+- Use tempIds like "c1", "c2", etc.
+- Dependency type must be "depends_on" (child depends on another child that must be done first)
+- Only add dependencies when there is a genuine technical ordering requirement
+- Priority: "low", "medium", "high", or "urgent"
+
+Respond ONLY with valid JSON, no markdown, no explanation:
+{
+  "children": [
+    {"tempId": "c1", "title": "...", "description": "...", "priority": "medium"},
+    {"tempId": "c2", "title": "...", "description": "...", "priority": "medium"}
+  ],
+  "dependencies": [
+    {"fromTempId": "c2", "toTempId": "c1", "type": "depends_on"}
+  ]
+}`;
+
+  const stdout = await invokeClaudePrompt(prompt, { database });
+  const cleaned = stdout.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
+  const parsed = JSON.parse(cleaned) as {
+    children?: Array<{ tempId: string; title: string; description: string; priority: string }>;
+    dependencies?: Array<{ fromTempId: string; toTempId: string; type: string }>;
+  };
+
+  const validPriorities = ["low", "medium", "high", "urgent"];
+  const validTypes: DependencyType[] = ["depends_on", "blocked_by", "related_to", "parent_of", "child_of"];
+  const tempIds = new Set((parsed.children ?? []).map(c => c.tempId));
+
+  const children: DecomposeChildProposal[] = (parsed.children ?? [])
+    .filter(c => c.tempId && c.title?.trim())
+    .map(c => ({
+      tempId: c.tempId,
+      title: c.title.trim(),
+      description: c.description?.trim() ?? "",
+      priority: (validPriorities.includes(c.priority) ? c.priority : "medium") as DecomposeChildProposal["priority"],
+    }));
+
+  const dependencies: DecomposeDependencyProposal[] = (parsed.dependencies ?? [])
+    .filter(d => d.fromTempId && d.toTempId && tempIds.has(d.fromTempId) && tempIds.has(d.toTempId))
+    .filter(d => validTypes.includes(d.type as DependencyType))
+    .map(d => ({
+      fromTempId: d.fromTempId,
+      toTempId: d.toTempId,
+      type: d.type as DependencyType,
+    }));
+
+  return { children, dependencies, alreadyDecomposed };
+}
+
+export interface ConfirmDecomposeInput {
+  issueId: string;
+  projectId: string;
+  children: DecomposeChildProposal[];
+  dependencies: DecomposeDependencyProposal[];
+}
+
+export interface ConfirmDecomposeResult {
+  createdIssues: Array<{ id: string; issueNumber: number; title: string; tempId: string }>;
+}
+
+export async function confirmEpicDecomposition(
+  input: ConfirmDecomposeInput,
+  database: Database,
+): Promise<ConfirmDecomposeResult> {
+  const { issueId, projectId, children, dependencies } = input;
+
+  // Ensure the parent issue exists
+  const issueRows = await database
+    .select({ id: issues.id, title: issues.title, description: issues.description })
+    .from(issues)
+    .where(eq(issues.id, issueId))
+    .limit(1);
+  if (issueRows.length === 0) throw new NotFoundError("Issue not found");
+  const parentIssue = issueRows[0];
+
+  // Get Backlog status id
+  const backlogStatus = await database
+    .select({ id: projectStatuses.id })
+    .from(projectStatuses)
+    .where(and(eq(projectStatuses.projectId, projectId), eq(projectStatuses.name, "Backlog")))
+    .limit(1);
+  const backlogStatusId = backlogStatus[0]?.id;
+
+  // Get or create epic tag
+  let epicTag = await database
+    .select({ id: tags.id })
+    .from(tags)
+    .where(eq(tags.name, "epic"))
+    .limit(1);
+  if (epicTag.length === 0) {
+    const tagId = randomUUID();
+    await database.insert(tags).values({
+      id: tagId,
+      name: "epic",
+      color: "#8B5CF6",
+      isBuiltin: true,
+      createdAt: new Date().toISOString(),
+    }).catch(() => {});
+    epicTag = [{ id: tagId }];
+  }
+
+  // Create child issues
+  const now = new Date().toISOString();
+  const maxRow = await database
+    .select({ maxNum: sql<number | null>`max(${issues.issueNumber})` })
+    .from(issues)
+    .where(eq(issues.projectId, projectId));
+  let nextNumber = (maxRow[0]?.maxNum ?? 0) + 1;
+
+  const defaultStatusRow = await database
+    .select({ id: projectStatuses.id })
+    .from(projectStatuses)
+    .where(eq(projectStatuses.projectId, projectId))
+    .orderBy(projectStatuses.sortOrder)
+    .limit(1);
+  const defaultStatusId = backlogStatusId ?? defaultStatusRow[0]?.id;
+  if (!defaultStatusId) throw new NotFoundError("No statuses found for project");
+
+  const createdIssues: ConfirmDecomposeResult["createdIssues"] = [];
+  const tempIdToIssueId = new Map<string, string>();
+
+  for (const child of children) {
+    const childId = randomUUID();
+    const issueNumber = nextNumber++;
+    await database.insert(issues).values({
+      id: childId,
+      issueNumber,
+      title: child.title,
+      description: child.description || null,
+      priority: child.priority ?? "medium",
+      issueType: "task",
+      skipAutoReview: false,
+      estimate: null,
+      sortOrder: 0,
+      statusId: defaultStatusId,
+      projectId,
+      createdAt: now,
+      updatedAt: now,
+    });
+    createdIssues.push({ id: childId, issueNumber, title: child.title, tempId: child.tempId });
+    tempIdToIssueId.set(child.tempId, childId);
+  }
+
+  // Wire dependency edges between children (fromTempId depends_on toTempId)
+  for (const dep of dependencies) {
+    const fromId = tempIdToIssueId.get(dep.fromTempId);
+    const toId = tempIdToIssueId.get(dep.toTempId);
+    if (!fromId || !toId) continue;
+    try {
+      await database.insert(issueDependencies).values({
+        id: randomUUID(),
+        issueId: fromId,
+        dependsOnId: toId,
+        type: dep.type,
+        createdAt: now,
+      });
+    } catch { /* skip duplicate/cycle */ }
+  }
+
+  // Wire parent_of deps from parent to each child
+  for (const child of createdIssues) {
+    try {
+      await database.insert(issueDependencies).values({
+        id: randomUUID(),
+        issueId: issueId,
+        dependsOnId: child.id,
+        type: "parent_of",
+        createdAt: now,
+      });
+    } catch { /* skip */ }
+  }
+
+  // Add epic tag to parent issue (if not already tagged)
+  const existingEpicTag = await database
+    .select({ id: issueTags.id })
+    .from(issueTags)
+    .where(and(eq(issueTags.issueId, issueId), eq(issueTags.tagId, epicTag[0].id)))
+    .limit(1);
+  if (existingEpicTag.length === 0) {
+    await database.insert(issueTags).values({
+      id: randomUUID(),
+      issueId,
+      tagId: epicTag[0].id,
+    }).catch(() => {});
+  }
+
+  // Prepend checklist of children to parent description
+  const checklist = createdIssues.map(c => `- [ ] #${c.issueNumber} ${c.title}`).join("\n");
+  const childrenSection = `## Subtasks (${createdIssues.length})\n${checklist}`;
+  const newDescription = parentIssue.description
+    ? `${childrenSection}\n\n${parentIssue.description}`
+    : childrenSection;
+  await database.update(issues)
+    .set({ description: newDescription, updatedAt: now })
+    .where(eq(issues.id, issueId));
+
+  return { createdIssues };
 }

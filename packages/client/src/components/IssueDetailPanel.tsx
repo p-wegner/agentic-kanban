@@ -6,6 +6,7 @@ import { formatRelativeTime } from "../lib/formatRelativeTime.js";
 import { showToast } from "./Toast.js";
 import { MoveToDoneDialog } from "./MoveToDoneDialog.js";
 import { WorkflowProgress } from "./WorkflowProgress.js";
+import { EpicDecomposerModal } from "./EpicDecomposerModal.js";
 
 // Some issues were created via MCP/CLI calls whose JSON descriptions ended up
 // with literal `\n` / `\t` sequences rather than real newlines. Unescape when
@@ -122,6 +123,7 @@ export function IssueDetailPanel({
   const [showFollowUp, setShowFollowUp] = useState(false);
   const [followUpTitle, setFollowUpTitle] = useState("");
   const [followUpCreating, setFollowUpCreating] = useState(false);
+  const [showDecomposeModal, setShowDecomposeModal] = useState(false);
 
   // Track unsaved changes for warning
   const hasChanges = editing && (
@@ -562,7 +564,7 @@ export function IssueDetailPanel({
                   </svg>
                 </button>
                 {actionsOpen && (
-                  <div className="absolute right-0 top-full mt-1 w-40 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-50 py-1">
+                  <div className="absolute right-0 top-full mt-1 w-48 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-50 py-1">
                     <button
                       onClick={() => { setEditing(true); setActionsOpen(false); }}
                       className="w-full text-left px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2"
@@ -572,6 +574,17 @@ export function IssueDetailPanel({
                       </svg>
                       Edit
                     </button>
+                    {((issue.description?.length ?? 0) > 500 || issueTags.some(t => t.name === "epic")) && (
+                      <button
+                        onClick={() => { setShowDecomposeModal(true); setActionsOpen(false); }}
+                        className="w-full text-left px-3 py-2 text-sm text-purple-700 dark:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-950 flex items-center gap-2"
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 10h16M4 14h8m-8 4h8" />
+                        </svg>
+                        Decompose…
+                      </button>
+                    )}
                     <button
                       onClick={() => handleDelete()}
                       disabled={saving}
@@ -1432,6 +1445,16 @@ export function IssueDetailPanel({
           issue={issue}
           onConfirm={moveToDonePending.confirm}
           onCancel={() => setMoveToDonePending(null)}
+        />
+      )}
+      {showDecomposeModal && (
+        <EpicDecomposerModal
+          issue={issue}
+          onClose={() => setShowDecomposeModal(false)}
+          onConfirmed={() => {
+            setShowDecomposeModal(false);
+            onIssueUpdate(issue);
+          }}
         />
       )}
     </>
