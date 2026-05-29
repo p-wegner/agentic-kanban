@@ -21,7 +21,10 @@ vi.mock("../services/process-cleanup.js", () => ({
  */
 
 /** Seed a project (with Todo/In Progress/Done statuses) and one issue. */
-async function seedProjectAndIssue(db: TestDb): Promise<{ projectId: string; issueId: string }> {
+async function seedProjectAndIssue(
+  db: TestDb,
+  opts: { priority?: string } = {},
+): Promise<{ projectId: string; issueId: string }> {
   const now = new Date().toISOString();
   const projectId = randomUUID();
   const issueId = randomUUID();
@@ -60,7 +63,7 @@ async function seedProjectAndIssue(db: TestDb): Promise<{ projectId: string; iss
     issueNumber: 1,
     title: "Implement feature",
     description: "Do the thing",
-    priority: "medium",
+    priority: opts.priority ?? "medium",
     sortOrder: 0,
     statusId: statusIds["Todo"],
     projectId,
@@ -189,6 +192,34 @@ describe("workspace.service", () => {
       // No workspace row must remain in the DB (atomic rollback)
       const wsRows = await db.select().from(workspaces);
       expect(wsRows).toHaveLength(0);
+    });
+
+    it("returns 201-equivalent record with error field when worktree setup fails before insert", async () => {
+      // Pre-insert failure path: createWorktree throws before the DB row is written,
+      // so the catch block calls handleCreateFailure. This is the path that hit the
+      // `planMode is not defined` ReferenceError — planMode must be in catch-block scope.
+      const { issueId } = await seedProjectAndIssue(db, { priority: "high" });
+      const gitService = createFakeGitService({
+        createWorktree: vi.fn(async () => {
+          throw new Error("worktree setup boom");
+        }),
+      });
+      const sessionManager = createMockSessionManager();
+      const service = createWorkspaceService({
+        database: db,
+        getSessionManager: () => sessionManager,
+        gitService,
+      });
+
+      // Must not throw — the one-step endpoint returns 201 with an error field.
+      const result = await service.createWorkspace({ issueId, branch: "feature/ak-1-setup-fail" });
+
+      expect(result.id).toBeDefined();
+      expect(result.status).toBe("active");
+      expect(result.error).toContain("worktree setup boom");
+      // planMode was correctly in scope and defaulted on for the high-priority issue.
+      expect(result.planMode).toBe(true);
+      expect(sessionManager.startSession).not.toHaveBeenCalled();
     });
   });
 
