@@ -20,6 +20,7 @@ export {
   testRetryDecisions,
   testRetryDecisionsRelations,
 } from "./flaky-tests.js";
+export { showdowns, showdownsRelations } from "./showdowns.js";
 export {
   workflowTemplates,
   workflowNodes,
