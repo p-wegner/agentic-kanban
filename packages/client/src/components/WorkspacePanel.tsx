@@ -207,6 +207,59 @@ function SessionStatsSummary({ stats }: { stats: string | null | undefined }) {
 
 import { suggestBranchName } from "../lib/branch.js";
 
+type RetryDecision = {
+  id: string;
+  sessionId: string;
+  testName: string;
+  decision: "flake" | "suspicious" | "real";
+  confidence: number;
+  retryCount: number;
+  finalOutcome: "confirmed_flake" | "confirmed_real" | "pending";
+  reasoning: string | null;
+};
+
+const RETRY_DECISION_COLORS: Record<string, string> = {
+  flake: "bg-amber-100 text-amber-700",
+  suspicious: "bg-orange-100 text-orange-700",
+  real: "bg-red-100 text-red-700",
+};
+const FINAL_OUTCOME_COLORS: Record<string, string> = {
+  confirmed_flake: "bg-red-100 text-red-700",
+  confirmed_real: "bg-green-100 text-green-700",
+  pending: "bg-gray-100 text-gray-500",
+};
+
+function RetryDecisionBadge({ decision }: { decision: RetryDecision }) {
+  const colorClass = RETRY_DECISION_COLORS[decision.decision] ?? "bg-gray-100 text-gray-500";
+  const label = decision.decision === "flake" ? "🔁 Flake" : decision.decision === "suspicious" ? "⚠ Suspicious" : "✗ Real";
+  const tooltip = [
+    `Test: ${decision.testName}`,
+    `Decision: ${decision.decision} (${(decision.confidence * 100).toFixed(0)}% confidence)`,
+    decision.retryCount > 0 ? `Retried ${decision.retryCount}×` : null,
+    decision.finalOutcome !== "pending" ? `Outcome: ${decision.finalOutcome.replace("_", " ")}` : null,
+    decision.reasoning ?? null,
+  ].filter(Boolean).join("\n");
+
+  const outcomeLabel = decision.finalOutcome === "confirmed_real"
+    ? " — confirmed flake"
+    : decision.finalOutcome === "confirmed_flake"
+    ? " — real regression"
+    : decision.retryCount > 0 ? ` (×${decision.retryCount})` : "";
+
+  const outcomeClass = FINAL_OUTCOME_COLORS[decision.finalOutcome] ?? "";
+
+  return (
+    <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${colorClass}`} title={tooltip}>
+      {label}{outcomeLabel}
+      {decision.finalOutcome !== "pending" && (
+        <span className={`ml-1 text-[9px] px-1 rounded ${outcomeClass}`}>
+          {decision.finalOutcome === "confirmed_real" ? "✓ flake" : "✗ real"}
+        </span>
+      )}
+    </span>
+  );
+}
+
 export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onWorkspaceCreating, initialWorkspaceId, initialSessionId, autoSelectId, initialShowCreate }: WorkspacePanelProps) {
   const [workspaces, setWorkspaces] = useState<WorkspaceResponse[]>([]);
   const [loading, setLoading] = useState(true);
@@ -229,6 +282,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
 
   const [latestCommits, setLatestCommits] = useState<Record<string, { sha: string; message: string } | null>>({});
   const [handoffContent, setHandoffContent] = useState<Record<string, string | null>>({});
+  const [retryDecisions, setRetryDecisions] = useState<RetryDecision[]>([]);
 
   const [monitorRunning, setMonitorRunning] = useState(false);
   const [requiresReview, setRequiresReview] = useState(false);
@@ -435,6 +489,13 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
       })
       .catch(() => {});
   }, [selectedWorkspace, workspaces]);
+
+  useEffect(() => {
+    if (!selectedWorkspace) return;
+    apiFetch<RetryDecision[]>(`/api/workspaces/${selectedWorkspace}/retry-decisions`)
+      .then(setRetryDecisions)
+      .catch(() => setRetryDecisions([]));
+  }, [selectedWorkspace]);
 
   async function handleQuickLaunch(withPlanMode: boolean) {
     setActionLoading(true);
@@ -1401,6 +1462,15 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                                 </span>
                                 <SessionStatsBadge stats={session.stats} />
                               </button>
+                              {(() => {
+                                const sessionDecisions = retryDecisions.filter(d => d.sessionId === session.id);
+                                if (sessionDecisions.length === 0) return null;
+                                return (
+                                  <div className="flex flex-wrap gap-1 px-2 pb-1">
+                                    {sessionDecisions.map(d => <RetryDecisionBadge key={d.id} decision={d} />)}
+                                  </div>
+                                );
+                              })()}
                               {ws.status !== "closed" && (
                                 session.providerSessionId ? (
                                   <div className="flex shrink-0">
