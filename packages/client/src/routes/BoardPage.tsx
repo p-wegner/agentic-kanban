@@ -37,6 +37,7 @@ import { sendDesktopNotification } from "../lib/desktop.js";
 import { registerAction } from "../lib/actions.js";
 import { QuickTasksPanel } from "../components/QuickTasksPanel.js";
 import { MergeQueuePanel } from "../components/MergeQueuePanel.js";
+import { CodemodPanel } from "../components/CodemodPanel.js";
 import type { MonitorStatus } from "../components/MonitorPopover.js";
 import type {
   CreateIssueRequest,
@@ -78,6 +79,7 @@ export function BoardPage() {
   const [showSettings, setShowSettings] = useState(false);
   const [showQuickTasks, setShowQuickTasks] = useState(false);
   const [showMergeQueue, setShowMergeQueue] = useState(false);
+  const [showCodemod, setShowCodemod] = useState(false);
   const [showWorktreeOverview, setShowWorktreeOverview] = useState(false);
   const [showAllWorkspaces, setShowAllWorkspaces] = useState(false);
   const [showMergeQueue, setShowMergeQueue] = useState(false);
@@ -804,6 +806,10 @@ export function BoardPage() {
           setShowQuickTasks(false);
           return;
         }
+        if (showCodemod) {
+          setShowCodemod(false);
+          return;
+        }
         if (searchQuery) {
           setSearchQuery("");
           document.getElementById("search-input")?.blur();
@@ -870,6 +876,14 @@ export function BoardPage() {
         setShowQuickTasks(true);
         return;
       }
+      // "x" to open Codemod Factory
+      if (e.key === "x" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        const target = e.target as HTMLElement;
+        if (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT") return;
+        e.preventDefault();
+        setShowCodemod((prev) => !prev);
+        return;
+      }
       // "V" (shift+v) to trigger voice inbox
       if (e.key === "V" && e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
         const target = e.target as HTMLElement;
@@ -894,7 +908,7 @@ export function BoardPage() {
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [searchQuery, showCommandPalette, showAllWorkspaces, showWorktreeOverview, showShortcutHelp, showQuickTasks, filteredColumns, columns, handleViewModeChange, setShowQuickTasks, setShowSettings]);
+  }, [searchQuery, showCommandPalette, showAllWorkspaces, showWorktreeOverview, showShortcutHelp, showQuickTasks, showCodemod, filteredColumns, columns, handleViewModeChange, setShowQuickTasks, setShowSettings]);
 
   // Register command palette actions
   useEffect(() => {
@@ -994,6 +1008,16 @@ export function BoardPage() {
       shortcut: "q",
       category: "board",
       handler: () => setShowQuickTasks(true),
+    }));
+
+    unregisters.push(registerAction({
+      id: "open-codemod-factory",
+      label: "Codemod Factory",
+      description: "Describe a refactor in plain English — AI generates a ts-morph codemod",
+      icon: "⚙",
+      shortcut: "x",
+      category: "board",
+      handler: () => setShowCodemod(true),
     }));
 
     unregisters.push(registerAction({
@@ -1467,6 +1491,10 @@ export function BoardPage() {
           projectId={activeProjectId}
           onClose={() => setShowMergeQueue(false)}
           onMerged={() => refetchBoard()}
+      {showCodemod && (
+        <CodemodPanel
+          onClose={() => setShowCodemod(false)}
+          activeProjectId={activeProjectId}
         />
       )}
       {showAllWorkspaces && (
