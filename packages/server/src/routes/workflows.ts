@@ -14,6 +14,9 @@ import {
   resolveTemplateForIssue,
   getOutgoingTransitions,
   validateGraph,
+  writeTemplateGraph,
+  computeWorkspaceSignals,
+  evaluateCondition,
 } from "@agentic-kanban/shared/lib/workflow-engine";
 import { randomUUID } from "node:crypto";
 import { createRouter } from "../middleware/create-router.js";
@@ -91,54 +94,6 @@ export function createWorkflowsRoute(database: Database = db, options?: Workflow
     return c.json({ ...rows[0], ...graph });
   });
 
-  // Persist a graph's nodes + edges for a template, remapping client node ids.
-  async function writeGraph(
-    templateId: string,
-    nodes: any[],
-    edges: any[],
-    now: string,
-  ): Promise<void> {
-    await database.delete(workflowEdges).where(eq(workflowEdges.templateId, templateId));
-    await database.delete(workflowNodes).where(eq(workflowNodes.templateId, templateId));
-    const idMap = new Map<string, string>();
-    let sort = 0;
-    for (const n of nodes) {
-      const newId = randomUUID();
-      idMap.set(String(n.id), newId);
-      await database.insert(workflowNodes).values({
-        id: newId,
-        templateId,
-        name: n.name ?? "Stage",
-        nodeType: n.nodeType ?? "normal",
-        statusName: n.statusName ?? null,
-        skillId: n.skillId ?? null,
-        skillName: n.skillName ?? null,
-        maxVisits: Number.isFinite(n.maxVisits) ? n.maxVisits : 0,
-        config: n.config ?? null,
-        posX: Math.round(n.posX ?? 0),
-        posY: Math.round(n.posY ?? 0),
-        sortOrder: n.sortOrder ?? sort++,
-        createdAt: now,
-      });
-    }
-    let esort = 0;
-    for (const e of edges) {
-      const from = idMap.get(String(e.fromNodeId));
-      const to = idMap.get(String(e.toNodeId));
-      if (!from || !to) continue;
-      await database.insert(workflowEdges).values({
-        id: randomUUID(),
-        templateId,
-        fromNodeId: from,
-        toNodeId: to,
-        label: e.label ?? null,
-        condition: e.condition ?? "manual",
-        sortOrder: e.sortOrder ?? esort++,
-        createdAt: now,
-      });
-    }
-  }
-
   // POST /api/workflows/templates — create a template (optionally cloning another).
   router.post("/templates", async (c) => {
     const body = await parseJsonBody(c);
@@ -174,7 +129,7 @@ export function createWorkflowsRoute(database: Database = db, options?: Workflow
       id, projectId, name: tplName, description: tplDesc ?? null, ticketType: tplType,
       isDefault: !!isDefault, isBuiltin: false, builtinKey: null, createdAt: now, updatedAt: now,
     });
-    await writeGraph(id, srcNodes, srcEdges, now);
+    await writeTemplateGraph(database, id, srcNodes, srcEdges);
     boardEvents?.broadcast(projectId, "workflow_template_saved");
     return c.json({ id, ...(await loadGraph(database, id)) }, 201);
   });
@@ -204,7 +159,7 @@ export function createWorkflowsRoute(database: Database = db, options?: Workflow
       isDefault: isDefault !== undefined ? !!isDefault : rows[0].isDefault,
       updatedAt: now,
     }).where(eq(workflowTemplates.id, id));
-    await writeGraph(id, nodes, edges, now);
+    await writeTemplateGraph(database, id, nodes, edges);
     if (rows[0].projectId) boardEvents?.broadcast(rows[0].projectId, "workflow_template_saved");
     return c.json({ id, ...(await loadGraph(database, id)) });
   });
@@ -357,12 +312,21 @@ export function createWorkflowsRoute(database: Database = db, options?: Workflow
       ? await getOutgoingTransitions(database, ws.currentNodeId)
       : [];
 
+    // Evaluate edge conditions against live workspace signals for UI styling.
+    const signals = nextTransitions.length > 0
+      ? await computeWorkspaceSignals(database, workspaceId)
+      : {};
+    const nextWithVerdicts = nextTransitions.map((t) => ({
+      ...t,
+      verdict: evaluateCondition(t.condition, signals),
+    }));
+
     return c.json({
       workspaceId,
       templateId,
       currentNodeId: ws.currentNodeId,
       currentNode,
-      nextTransitions,
+      nextTransitions: nextWithVerdicts,
       transitions,
       ...graph,
     });
@@ -380,12 +344,14 @@ export function createWorkflowsRoute(database: Database = db, options?: Workflow
     if (!toNodeId && !toNodeName) {
       return c.json({ error: "toNodeId or toNodeName is required" }, 400);
     }
+    const signals = await computeWorkspaceSignals(database, workspaceId);
     const result = await proposeTransition(database, {
       workspaceId,
       toNodeId,
       toNodeName,
       summary,
       triggeredBy: "manual",
+      signals,
     });
     if (!result.ok) {
       return c.json({ error: result.error }, 400);

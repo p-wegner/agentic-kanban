@@ -338,6 +338,15 @@ export function WorkflowBuilder({
               <label className="block text-xs">Max visits (0 = unlimited)
                 <input type="number" min={0} value={selectedNode.data.maxVisits} onChange={(e) => patchNode(selectedNode.id, { maxVisits: Number(e.target.value) || 0 })} className="w-full mt-0.5 border rounded px-2 py-1 dark:bg-gray-800 dark:border-gray-600" />
               </label>
+              <label className="block text-xs">Guidance
+                <textarea
+                  rows={3}
+                  value={readGuidance(selectedNode.data.config)}
+                  onChange={(e) => patchNode(selectedNode.id, { config: writeGuidance(selectedNode.data.config, e.target.value) })}
+                  placeholder="Extra instructions injected into agent prompts at this node…"
+                  className="w-full mt-0.5 border rounded px-2 py-1 text-xs dark:bg-gray-800 dark:border-gray-600"
+                />
+              </label>
               {selectedNode.data.nodeType === "parallel-fork" && (
                 <label className="block text-xs">Fork mode
                   <select value={readForkMode(selectedNode.data.config)} onChange={(e) => patchNode(selectedNode.id, { config: writeForkMode(selectedNode.data.config, e.target.value) })} className="w-full mt-0.5 border rounded px-2 py-1 dark:bg-gray-800 dark:border-gray-600">
@@ -391,6 +400,20 @@ function writeJoinStrategy(config: string | null, strategy: string): string | nu
   let obj: Record<string, unknown> = {};
   if (config) { try { obj = JSON.parse(config) as Record<string, unknown>; } catch { obj = {}; } }
   if (strategy === "merge") obj.joinStrategy = "merge"; else delete obj.joinStrategy;
+  return Object.keys(obj).length ? JSON.stringify(obj) : null;
+}
+
+/** Read the guidance string from a node's JSON config (defaults to ""). */
+function readGuidance(config: string | null): string {
+  if (!config) return "";
+  try { return (JSON.parse(config) as { guidance?: string }).guidance ?? ""; }
+  catch { return ""; }
+}
+/** Write the guidance string into a node's JSON config, preserving other keys. */
+function writeGuidance(config: string | null, value: string): string | null {
+  let obj: Record<string, unknown> = {};
+  if (config) { try { obj = JSON.parse(config) as Record<string, unknown>; } catch { obj = {}; } }
+  if (value) obj.guidance = value; else delete obj.guidance;
   return Object.keys(obj).length ? JSON.stringify(obj) : null;
 }
 

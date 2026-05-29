@@ -30,6 +30,7 @@ interface NextTransition {
   toNodeName: string;
   label: string | null;
   condition: string;
+  verdict?: "fire" | "block" | "manual";
 }
 interface Progress {
   workspaceId: string;
@@ -53,7 +54,7 @@ const NODE_TYPE_BADGE: Record<string, string> = {
  * one highlighted, the transition history, and (when not terminal) buttons to
  * advance the workflow manually.
  */
-export function WorkflowProgress({ workspaceId }: { workspaceId: string }) {
+export function WorkflowProgress({ workspaceId, projectId }: { workspaceId: string; projectId: string }) {
   const [progress, setProgress] = useState<Progress | null>(null);
   const [loading, setLoading] = useState(true);
   const [transitioning, setTransitioning] = useState(false);
@@ -69,6 +70,25 @@ export function WorkflowProgress({ workspaceId }: { workspaceId: string }) {
     setLoading(true);
     load();
   }, [load]);
+
+  // Auto-refresh when a workflow_transition event arrives via the board WebSocket
+  useEffect(() => {
+    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+    const url = `${protocol}//${window.location.host}/ws/board/${projectId}`;
+    const ws = new WebSocket(url);
+    ws.onmessage = (event) => {
+      try {
+        const msg = JSON.parse(event.data);
+        if (msg.type === "board_changed" && msg.reason === "workflow_transition") {
+          load();
+        }
+      } catch { /* ignore malformed */ }
+    };
+    return () => {
+      ws.onclose = null;
+      ws.close();
+    };
+  }, [projectId, load]);
 
   async function transition(toNodeId: string, toNodeName: string) {
     if (transitioning) return;
@@ -149,19 +169,33 @@ export function WorkflowProgress({ workspaceId }: { workspaceId: string }) {
         <div className="mt-3">
           <div className="text-[11px] text-gray-500 dark:text-gray-400 mb-1">Advance to:</div>
           <div className="flex flex-wrap gap-1.5">
-            {progress.nextTransitions.map((t) => (
-              <button
-                key={t.toNodeId}
-                type="button"
-                disabled={transitioning}
-                onClick={() => transition(t.toNodeId, t.toNodeName)}
-                title={t.label ?? undefined}
-                className="text-xs px-2 py-1 rounded border border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-900/30 disabled:opacity-50"
-              >
-                {t.toNodeName}
-                {t.condition !== "manual" && <span className="text-[10px] opacity-60"> ({t.condition})</span>}
-              </button>
-            ))}
+            {progress.nextTransitions.map((t) => {
+              const isBlocked = t.verdict === "block";
+              const isFireable = t.verdict === "fire";
+              return (
+                <button
+                  key={t.toNodeId}
+                  type="button"
+                  disabled={transitioning || isBlocked}
+                  onClick={() => transition(t.toNodeId, t.toNodeName)}
+                  title={t.label ?? undefined}
+                  className={`text-xs px-2 py-1 rounded border text-blue-700 dark:text-blue-300 disabled:opacity-50 ${
+                    isBlocked
+                      ? "border-gray-300 dark:border-gray-600 opacity-50 cursor-not-allowed hover:bg-transparent dark:hover:bg-transparent"
+                      : isFireable
+                        ? "border-blue-300 dark:border-blue-700 hover:bg-blue-50 dark:hover:bg-blue-900/30 ring-1 ring-blue-200 dark:ring-blue-800"
+                        : "border-blue-300 dark:border-blue-700 hover:bg-blue-50 dark:hover:bg-blue-900/30"
+                  }`}
+                >
+                  {t.toNodeName}
+                  {t.condition !== "manual" && (
+                    <span className={`text-[10px] ${isBlocked ? "text-red-500 dark:text-red-400" : "opacity-60"}`}>
+                      {" "}({t.condition})
+                    </span>
+                  )}
+                </button>
+              );
+            })}
           </div>
         </div>
       )}
