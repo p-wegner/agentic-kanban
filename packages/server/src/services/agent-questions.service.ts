@@ -252,7 +252,7 @@ export async function listPendingQuestionsForProject(
     .where(eq(issues.projectId, projectId));
 
   const results: PendingQuestionSet[] = [];
-  const now = new Date().toISOString();
+  const now = nowOverride ?? new Date().toISOString();
 
   for (const ws of wsRows) {
     // Recent sessions (any status), newest first. We scan a few because a question
