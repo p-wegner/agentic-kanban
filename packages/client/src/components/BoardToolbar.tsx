@@ -3,7 +3,7 @@ import { BacklogPanel } from "./BacklogPanel.js";
 import { MonitorPopover, type MonitorStatus } from "./MonitorPopover.js";
 import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
 
-export type ViewMode = "kanban" | "graph" | "table" | "agents" | "timeline" | "metrics" | "butler";
+export type ViewMode = "kanban" | "graph" | "table" | "agents" | "timeline" | "metrics" | "butler" | "workflows";
 
 interface BoardToolbarProps {
   backlogColumn: StatusWithIssues | undefined;
@@ -204,6 +204,16 @@ export function BoardToolbar({
               {butlerBadgeCount > 99 ? "99+" : butlerBadgeCount}
             </span>
           )}
+        </button>
+        <button
+          onClick={() => onViewModeChange("workflows")}
+          className={`px-2.5 py-1 text-xs rounded flex items-center gap-1.5 transition-colors ${viewMode === "workflows" ? "bg-blue-600 text-white" : "text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700"}`}
+          title="Workflows — design ticket-type pipelines"
+        >
+          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h4.5v4.5h-4.5v-4.5zM15.75 12.75h4.5v4.5h-4.5v-4.5zM8.25 9h4.5m-2.25 0v6.75m0 0h3" />
+          </svg>
+          Workflows
         </button>
       </div>
     </div>

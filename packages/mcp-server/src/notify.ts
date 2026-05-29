@@ -14,3 +14,18 @@ export function notifyBoard(projectId: string, reason: string) {
     // Silently ignore — polling fallback will catch it
   });
 }
+
+/**
+ * Fire-and-forget notification to the main server that a workflow transition
+ * occurred, so it can run fork/join orchestration (which needs the session
+ * manager + git, only available in the main server process).
+ */
+export function notifyWorkflowAdvanced(workspaceId: string) {
+  fetch(`http://localhost:${SERVER_PORT}/api/internal/workflow-advanced`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ workspaceId }),
+  }).catch(() => {
+    /* best-effort */
+  });
+}

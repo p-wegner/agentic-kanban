@@ -2,9 +2,11 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { and, eq, ne } from "drizzle-orm";
 import { prodDeps, type ToolDeps } from "./deps.js";
+import { notifyWorkflowAdvanced } from "../notify.js";
 import {
   proposeTransition,
   getOutgoingTransitions,
+  computeWorkspaceSignals,
 } from "@agentic-kanban/shared/lib/workflow-engine";
 
 /**
@@ -22,11 +24,12 @@ export function registerProposeTransition(server: McpServer, deps: ToolDeps = pr
     {
       workspaceId: z.string().optional().describe("The workspace ID (provided in your workflow instructions)"),
       issueId: z.string().optional().describe("Issue ID — used to resolve the active workspace if workspaceId is omitted"),
-      toNodeName: z.string().optional().describe("Name of the target stage to move to (e.g. 'Review', 'Done')"),
+      toNodeName: z.string().optional().describe("Name of the target stage to move to (e.g. 'Review', 'Done'). Omit to let the workflow auto-route based on conditions (e.g. tests pass/fail)."),
       toNodeId: z.string().optional().describe("ID of the target node (alternative to toNodeName)"),
       summary: z.string().optional().describe("Short summary of what was completed at the current stage"),
+      testsPassed: z.boolean().optional().describe("Whether the tests you ran for this stage passed — used to auto-route tests_pass/tests_fail edges"),
     },
-    async ({ workspaceId, issueId, toNodeName, toNodeId, summary }) => {
+    async ({ workspaceId, issueId, toNodeName, toNodeId, summary, testsPassed }) => {
       const text = (t: string) => ({ content: [{ type: "text" as const, text: t }] });
 
       // Resolve the workspace: explicit id, else the active workspace for the issue.
@@ -43,12 +46,15 @@ export function registerProposeTransition(server: McpServer, deps: ToolDeps = pr
         return text("Provide a workspaceId (from your workflow instructions) or an issueId with an active workspace.");
       }
 
+      const signals = await computeWorkspaceSignals(db, resolvedWorkspaceId, { testsPassed });
+
       const result = await proposeTransition(db, {
         workspaceId: resolvedWorkspaceId,
         toNodeId,
         toNodeName,
         summary,
         triggeredBy: "agent",
+        signals,
       });
 
       if (!result.ok) {
@@ -65,6 +71,8 @@ export function registerProposeTransition(server: McpServer, deps: ToolDeps = pr
       if (issueRows[0]?.projectId) {
         notifyBoard(issueRows[0].projectId, "mcp_propose_transition");
       }
+      // Trigger fork/join orchestration in the main server (separate process).
+      notifyWorkflowAdvanced(resolvedWorkspaceId);
 
       const next = (result.nextTransitions ?? []).map((t) => t.toNodeName);
       return text(
@@ -72,6 +80,7 @@ export function registerProposeTransition(server: McpServer, deps: ToolDeps = pr
           {
             ok: true,
             movedTo: result.toNode?.name,
+            autoRouted: result.autoResolved ?? false,
             status: result.statusName,
             terminal: next.length === 0,
             nextStages: next,

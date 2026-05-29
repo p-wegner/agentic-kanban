@@ -12,6 +12,7 @@
   "dependencies": {
     "@agentic-kanban/shared": "workspace:*",
     "@tauri-apps/plugin-notification": "^2",
+    "@xyflow/react": "^12.10.2",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "react-markdown": "^10.1.0",

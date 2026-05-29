@@ -13,13 +13,17 @@ import {
   proposeTransition,
   resolveTemplateForIssue,
   getOutgoingTransitions,
+  validateGraph,
 } from "@agentic-kanban/shared/lib/workflow-engine";
+import { randomUUID } from "node:crypto";
 import { createRouter } from "../middleware/create-router.js";
 import { parseJsonBody } from "../middleware/parse-body.js";
 import type { BoardEvents } from "../services/board-events.js";
 
 interface WorkflowsRouteOptions {
   boardEvents?: BoardEvents;
+  /** Hook to run fork/join orchestration after a transition. */
+  onWorkflowAdvanced?: (workspaceId: string) => void;
 }
 
 /** Load a template's nodes + edges as a graph payload. */
@@ -42,6 +46,7 @@ async function loadGraph(database: Database, templateId: string) {
 export function createWorkflowsRoute(database: Database = db, options?: WorkflowsRouteOptions) {
   const router = createRouter();
   const boardEvents = options?.boardEvents;
+  const onWorkflowAdvanced = options?.onWorkflowAdvanced;
 
   // GET /api/workflows/templates?projectId=&ticketType=&graph=1
   // Lists global + project-scoped templates; ?graph=1 embeds nodes + edges.
@@ -84,6 +89,137 @@ export function createWorkflowsRoute(database: Database = db, options?: Workflow
     if (rows.length === 0) return c.json({ error: "Template not found" }, 404);
     const graph = await loadGraph(database, id);
     return c.json({ ...rows[0], ...graph });
+  });
+
+  // Persist a graph's nodes + edges for a template, remapping client node ids.
+  async function writeGraph(
+    templateId: string,
+    nodes: any[],
+    edges: any[],
+    now: string,
+  ): Promise<void> {
+    await database.delete(workflowEdges).where(eq(workflowEdges.templateId, templateId));
+    await database.delete(workflowNodes).where(eq(workflowNodes.templateId, templateId));
+    const idMap = new Map<string, string>();
+    let sort = 0;
+    for (const n of nodes) {
+      const newId = randomUUID();
+      idMap.set(String(n.id), newId);
+      await database.insert(workflowNodes).values({
+        id: newId,
+        templateId,
+        name: n.name ?? "Stage",
+        nodeType: n.nodeType ?? "normal",
+        statusName: n.statusName ?? null,
+        skillId: n.skillId ?? null,
+        skillName: n.skillName ?? null,
+        maxVisits: Number.isFinite(n.maxVisits) ? n.maxVisits : 0,
+        config: n.config ?? null,
+        posX: Math.round(n.posX ?? 0),
+        posY: Math.round(n.posY ?? 0),
+        sortOrder: n.sortOrder ?? sort++,
+        createdAt: now,
+      });
+    }
+    let esort = 0;
+    for (const e of edges) {
+      const from = idMap.get(String(e.fromNodeId));
+      const to = idMap.get(String(e.toNodeId));
+      if (!from || !to) continue;
+      await database.insert(workflowEdges).values({
+        id: randomUUID(),
+        templateId,
+        fromNodeId: from,
+        toNodeId: to,
+        label: e.label ?? null,
+        condition: e.condition ?? "manual",
+        sortOrder: e.sortOrder ?? esort++,
+        createdAt: now,
+      });
+    }
+  }
+
+  // POST /api/workflows/templates — create a template (optionally cloning another).
+  router.post("/templates", async (c) => {
+    const body = await parseJsonBody(c);
+    const { projectId, name, description, ticketType, isDefault, nodes = [], edges = [], cloneFrom } = body as any;
+    if (!projectId) return c.json({ error: "projectId is required" }, 400);
+
+    let srcNodes = nodes;
+    let srcEdges = edges;
+    let tplName = name;
+    let tplDesc = description;
+    let tplType = ticketType ?? null;
+    if (cloneFrom) {
+      const src = await database.select().from(workflowTemplates).where(eq(workflowTemplates.id, cloneFrom)).limit(1);
+      if (src.length === 0) return c.json({ error: "cloneFrom template not found" }, 404);
+      const g = await loadGraph(database, cloneFrom);
+      srcNodes = g.nodes.map((n) => ({ ...n }));
+      srcEdges = g.edges.map((e) => ({ ...e }));
+      tplName = name ?? `${src[0].name} (copy)`;
+      tplDesc = description ?? src[0].description;
+      tplType = ticketType ?? null; // a copy is not auto-default
+    }
+    if (!tplName) return c.json({ error: "name is required" }, 400);
+
+    const errors = validateGraph(
+      srcNodes.map((n: any) => ({ id: String(n.id), nodeType: n.nodeType })),
+      srcEdges.map((e: any) => ({ fromNodeId: String(e.fromNodeId), toNodeId: String(e.toNodeId) })),
+    );
+    if (errors.length > 0 && srcNodes.length > 0) return c.json({ error: "Invalid workflow graph", errors }, 400);
+
+    const now = new Date().toISOString();
+    const id = randomUUID();
+    await database.insert(workflowTemplates).values({
+      id, projectId, name: tplName, description: tplDesc ?? null, ticketType: tplType,
+      isDefault: !!isDefault, isBuiltin: false, builtinKey: null, createdAt: now, updatedAt: now,
+    });
+    await writeGraph(id, srcNodes, srcEdges, now);
+    boardEvents?.broadcast(projectId, "workflow_template_saved");
+    return c.json({ id, ...(await loadGraph(database, id)) }, 201);
+  });
+
+  // PUT /api/workflows/templates/:id — update a non-builtin template's graph in place.
+  router.put("/templates/:id", async (c) => {
+    const id = c.req.param("id");
+    const rows = await database.select().from(workflowTemplates).where(eq(workflowTemplates.id, id)).limit(1);
+    if (rows.length === 0) return c.json({ error: "Template not found" }, 404);
+    if (rows[0].isBuiltin) {
+      return c.json({ error: "Built-in workflows cannot be edited. Duplicate it first (POST with cloneFrom)." }, 400);
+    }
+    const body = await parseJsonBody(c);
+    const { name, description, ticketType, isDefault, nodes = [], edges = [] } = body as any;
+
+    const errors = validateGraph(
+      nodes.map((n: any) => ({ id: String(n.id), nodeType: n.nodeType })),
+      edges.map((e: any) => ({ fromNodeId: String(e.fromNodeId), toNodeId: String(e.toNodeId) })),
+    );
+    if (errors.length > 0) return c.json({ error: "Invalid workflow graph", errors }, 400);
+
+    const now = new Date().toISOString();
+    await database.update(workflowTemplates).set({
+      name: name ?? rows[0].name,
+      description: description ?? rows[0].description,
+      ticketType: ticketType !== undefined ? ticketType : rows[0].ticketType,
+      isDefault: isDefault !== undefined ? !!isDefault : rows[0].isDefault,
+      updatedAt: now,
+    }).where(eq(workflowTemplates.id, id));
+    await writeGraph(id, nodes, edges, now);
+    if (rows[0].projectId) boardEvents?.broadcast(rows[0].projectId, "workflow_template_saved");
+    return c.json({ id, ...(await loadGraph(database, id)) });
+  });
+
+  // DELETE /api/workflows/templates/:id — delete a non-builtin template (cascade nodes/edges).
+  router.delete("/templates/:id", async (c) => {
+    const id = c.req.param("id");
+    const rows = await database.select().from(workflowTemplates).where(eq(workflowTemplates.id, id)).limit(1);
+    if (rows.length === 0) return c.json({ error: "Template not found" }, 404);
+    if (rows[0].isBuiltin) return c.json({ error: "Built-in workflows cannot be deleted." }, 400);
+    await database.delete(workflowEdges).where(eq(workflowEdges.templateId, id));
+    await database.delete(workflowNodes).where(eq(workflowNodes.templateId, id));
+    await database.delete(workflowTemplates).where(eq(workflowTemplates.id, id));
+    if (rows[0].projectId) boardEvents?.broadcast(rows[0].projectId, "workflow_template_deleted");
+    return c.json({ ok: true });
   });
 
   // GET /api/workflows/resolve?issueId= — which template an issue uses (for the create picker default).
@@ -199,6 +335,9 @@ export function createWorkflowsRoute(database: Database = db, options?: Workflow
     if (projRows[0]?.projectId) {
       boardEvents?.broadcast(projRows[0].projectId, "workflow_transition");
     }
+
+    // Run fork/join orchestration (spawn children / consolidate) for this move.
+    onWorkflowAdvanced?.(workspaceId);
 
     return c.json({
       ok: true,

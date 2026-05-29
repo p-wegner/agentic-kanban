@@ -1,6 +1,7 @@
 import { and, eq, asc, sql } from "drizzle-orm";
 import type { LibSQLDatabase } from "drizzle-orm/libsql";
 import * as schema from "../schema/index.js";
+import { getDiffShortstat, getChangedFileNames } from "./git-service.js";
 
 /**
  * Workflow engine — the single source of truth for resolving an issue's
@@ -35,6 +36,116 @@ export interface TransitionTarget {
   toStatusName: string | null;
   label: string | null;
   condition: string;
+}
+
+/**
+ * Runtime signals about a workspace's state, evaluated against edge conditions
+ * for data-driven routing (conditional edges v2 / ticket #85).
+ */
+export interface SignalContext {
+  /** Did the agent's last test run pass? (reported by the agent) */
+  testsPassed?: boolean;
+  /** Number of changed files in the workspace diff (computed server-side). */
+  diffFilesChanged?: number;
+  /** Changed file paths in the workspace diff (computed server-side). */
+  diffFiles?: string[];
+}
+
+/** Split a stored condition like `diff_touches:packages/**` into base + arg. */
+export function parseCondition(condition: string): { base: string; arg: string | null } {
+  const idx = condition.indexOf(":");
+  if (idx === -1) return { base: condition, arg: null };
+  return { base: condition.slice(0, idx), arg: condition.slice(idx + 1) };
+}
+
+/** Minimal glob → RegExp supporting `**`, `*`, and `?`. */
+function globToRegExp(glob: string): RegExp {
+  let re = "";
+  for (let i = 0; i < glob.length; i++) {
+    const c = glob[i];
+    if (c === "*") {
+      if (glob[i + 1] === "*") {
+        re += ".*";
+        i++;
+        if (glob[i + 1] === "/") i++; // collapse `**/`
+      } else {
+        re += "[^/]*";
+      }
+    } else if (c === "?") {
+      re += "[^/]";
+    } else if ("\\^$.|+()[]{}".includes(c)) {
+      re += `\\${c}`;
+    } else {
+      re += c;
+    }
+  }
+  return new RegExp(`^${re}$`);
+}
+
+/**
+ * Evaluate an edge condition against the workspace signals.
+ * - "fire"   — the condition is satisfied; the edge auto-fires.
+ * - "block"  — the condition is known to be unsatisfied; the edge must not be taken.
+ * - "manual" — no automatic signal applies; the agent/human chooses freely.
+ */
+export type ConditionVerdict = "fire" | "block" | "manual";
+
+export function evaluateCondition(condition: string, ctx: SignalContext): ConditionVerdict {
+  const { base, arg } = parseCondition(condition);
+  switch (base) {
+    case "manual":
+      return "manual";
+    case "auto_on_exit_0":
+      // The agent reaches this point deliberately when the stage succeeded.
+      return "fire";
+    case "tests_pass":
+      if (ctx.testsPassed === undefined) return "manual";
+      return ctx.testsPassed ? "fire" : "block";
+    case "tests_fail":
+      if (ctx.testsPassed === undefined) return "manual";
+      return ctx.testsPassed === false ? "fire" : "block";
+    case "diff_clean":
+      if (ctx.diffFilesChanged === undefined) return "manual";
+      return ctx.diffFilesChanged === 0 ? "fire" : "block";
+    case "diff_touches": {
+      if (!arg || !ctx.diffFiles) return "manual";
+      const re = globToRegExp(arg);
+      return ctx.diffFiles.some((f) => re.test(f)) ? "fire" : "block";
+    }
+    default:
+      // agent_score / custom_js / unknown — not auto-evaluable in this version.
+      return "manual";
+  }
+}
+
+/**
+ * Compute the live workspace signals used to evaluate edge conditions: the diff
+ * state (from git) plus any agent-reported values (e.g. testsPassed). Safe to
+ * call with no worktree — diff signals are simply left undefined.
+ */
+export async function computeWorkspaceSignals(
+  db: WorkflowDb,
+  workspaceId: string,
+  reported?: { testsPassed?: boolean },
+): Promise<SignalContext> {
+  const ctx: SignalContext = { testsPassed: reported?.testsPassed };
+  const rows = await db
+    .select({ workingDir: schema.workspaces.workingDir, baseBranch: schema.workspaces.baseBranch })
+    .from(schema.workspaces)
+    .where(eq(schema.workspaces.id, workspaceId))
+    .limit(1);
+  const ws = rows[0];
+  if (ws?.workingDir) {
+    const base = ws.baseBranch || "HEAD";
+    try {
+      const stat = await getDiffShortstat(ws.workingDir, base);
+      ctx.diffFilesChanged = stat.filesChanged;
+      ctx.diffFiles = await getChangedFileNames(ws.workingDir, base);
+    } catch {
+      /* leave diff signals undefined → those conditions fall back to manual */
+    }
+  }
+  return ctx;
 }
 
 /** Parse the `guidance` string out of a node's JSON config, if present. */
@@ -211,16 +322,33 @@ export function buildTransitionBlock(
   );
   if (guidance) lines.push("", guidance);
 
+  // A fork node is a control point: the server spawns the parallel branches
+  // automatically. The agent that arrives here has nothing further to do.
+  if (node.nodeType === "parallel-fork") {
+    lines.push(
+      "",
+      "This is a **parallel fork**. The system will now spawn the parallel branches automatically — you do NOT need to call `propose_transition`. Your work at this stage is complete; stop here.",
+    );
+    return lines.join("\n");
+  }
+
   if (transitions.length === 0) {
     lines.push("", "This is a terminal stage — there are no further transitions.");
   } else {
     lines.push("", "When this stage's work is complete, advance the workflow by calling the MCP tool:");
     lines.push(`\`propose_transition({ ${wsArg}toNodeName, summary })\``);
     lines.push("", "Valid next stages from here:");
+    const hasConditions = transitions.some((t) => t.condition !== "manual");
     for (const t of transitions) {
-      const cond = t.condition === "manual" ? "" : ` _(auto: ${t.condition})_`;
+      const cond = t.condition === "manual" ? "" : ` _(condition: ${t.condition})_`;
       const why = t.label ? ` — ${t.label}` : "";
       lines.push(`- **${t.toNodeName}**${why}${cond}`);
+    }
+    if (hasConditions) {
+      lines.push(
+        "",
+        "Some edges are condition-gated. If you ran tests, pass `testsPassed: true|false` and you may omit `toNodeName` to let the workflow auto-route (e.g. tests_pass → review, tests_fail → fix). Diff-based conditions (diff_clean, diff_touches) are evaluated automatically from your committed changes.",
+      );
     }
     lines.push(
       "",
@@ -238,6 +366,8 @@ export interface ProposeResult {
   statusId?: string | null;
   /** Outgoing transitions from the new node (for re-injection). */
   nextTransitions?: TransitionTarget[];
+  /** True when the engine auto-resolved the target from a firing condition. */
+  autoResolved?: boolean;
 }
 
 /**
@@ -253,15 +383,18 @@ export async function proposeTransition(
     toNodeName?: string;
     summary?: string;
     triggeredBy?: string;
+    /** Workspace state signals for evaluating data-driven edge conditions (#85). */
+    signals?: SignalContext;
   },
 ): Promise<ProposeResult> {
-  const { workspaceId, toNodeId, toNodeName, summary, triggeredBy = "agent" } = opts;
+  const { workspaceId, toNodeId, toNodeName, summary, triggeredBy = "agent", signals = {} } = opts;
 
   const wsRows = await db
     .select({
       id: schema.workspaces.id,
       issueId: schema.workspaces.issueId,
       currentNodeId: schema.workspaces.currentNodeId,
+      parentWorkspaceId: schema.workspaces.parentWorkspaceId,
     })
     .from(schema.workspaces)
     .where(eq(schema.workspaces.id, workspaceId))
@@ -275,19 +408,50 @@ export async function proposeTransition(
 
   const transitions = await getOutgoingTransitions(db, ws.currentNodeId);
   let target: TransitionTarget | undefined;
+  let autoResolved = false;
+
   if (toNodeId) {
     target = transitions.find((t) => t.toNodeId === toNodeId);
   } else if (toNodeName) {
     target =
       transitions.find((t) => t.toNodeName === toNodeName) ??
       transitions.find((t) => t.toNodeName.toLowerCase() === toNodeName.toLowerCase());
+  } else {
+    // No explicit target: auto-resolve from edge conditions (#85). Take the edge
+    // iff exactly one fires given the current signals.
+    const firing = transitions.filter((t) => evaluateCondition(t.condition, signals) === "fire");
+    if (firing.length === 1) {
+      target = firing[0];
+      autoResolved = true;
+    } else {
+      const valid = transitions.map((t) => `${t.toNodeName} [${t.condition}]`).join(", ") || "(none — terminal stage)";
+      return {
+        ok: false,
+        error:
+          firing.length === 0
+            ? `No edge condition fired automatically. Specify a target stage. Valid next stages: ${valid}`
+            : `Multiple edges fired (${firing.map((t) => t.toNodeName).join(", ")}). Specify which stage to advance to.`,
+      };
+    }
   }
+
   if (!target) {
     const valid = transitions.map((t) => t.toNodeName).join(", ") || "(none — terminal stage)";
     return {
       ok: false,
       error: `No valid transition to "${toNodeName ?? toNodeId}" from the current stage. Valid next stages: ${valid}`,
     };
+  }
+
+  // Gate an explicitly-chosen target whose condition is known to be unsatisfied.
+  if (!autoResolved) {
+    const verdict = evaluateCondition(target.condition, signals);
+    if (verdict === "block") {
+      return {
+        ok: false,
+        error: `Transition to "${target.toNodeName}" is gated by condition "${target.condition}", which is not satisfied by the current workspace state.`,
+      };
+    }
   }
 
   const toNode = await getNode(db, target.toNodeId);
@@ -314,8 +478,12 @@ export async function proposeTransition(
     .limit(1);
   const issue = issueRows[0];
 
+  // A fork child shares the parent's issue; its transitions must NOT drive the
+  // shared issue's currentNode/status — only the parent path does that.
+  const isForkChild = !!ws.parentWorkspaceId;
+
   let statusId: string | null = null;
-  if (issue && toNode.statusName) {
+  if (issue && !isForkChild && toNode.statusName) {
     statusId = await resolveStatusId(db, issue.projectId, toNode.statusName);
   }
 
@@ -335,7 +503,7 @@ export async function proposeTransition(
     .set({ currentNodeId: toNode.id, updatedAt: now })
     .where(eq(schema.workspaces.id, workspaceId));
 
-  if (issue) {
+  if (issue && !isForkChild) {
     const issueUpdate: Record<string, unknown> = { currentNodeId: toNode.id, updatedAt: now };
     if (statusId) {
       issueUpdate.statusId = statusId;
@@ -345,7 +513,131 @@ export async function proposeTransition(
   }
 
   const nextTransitions = await getOutgoingTransitions(db, toNode.id);
-  return { ok: true, toNode, statusName: toNode.statusName, statusId, nextTransitions };
+  return { ok: true, toNode, statusName: toNode.statusName, statusId, nextTransitions, autoResolved };
+}
+
+/**
+ * Directly place a workspace on a node (NOT validated against edges) and record
+ * the transition. Used by the parallel fork/join orchestrator, where movement is
+ * structural (fork → child entry, all-children-joined → join) rather than via a
+ * single edge. When `syncIssue` is true, the issue's currentNode + derived status
+ * are updated too (used for the parent path, never for fork children).
+ */
+export async function placeWorkspaceOnNode(
+  db: WorkflowDb,
+  opts: {
+    workspaceId: string;
+    issueId: string;
+    projectId: string;
+    fromNodeId: string | null;
+    toNode: WorkflowNodeRow;
+    summary?: string;
+    triggeredBy?: string;
+    syncIssue: boolean;
+  },
+): Promise<void> {
+  const { workspaceId, issueId, projectId, fromNodeId, toNode, summary, triggeredBy = "system", syncIssue } = opts;
+  const now = new Date().toISOString();
+
+  await db.insert(schema.workflowTransitions).values({
+    id: crypto.randomUUID(),
+    workspaceId,
+    fromNodeId,
+    toNodeId: toNode.id,
+    summary: summary ?? null,
+    triggeredBy,
+    createdAt: now,
+  });
+
+  await db
+    .update(schema.workspaces)
+    .set({ currentNodeId: toNode.id, updatedAt: now })
+    .where(eq(schema.workspaces.id, workspaceId));
+
+  if (syncIssue) {
+    const issueUpdate: Record<string, unknown> = { currentNodeId: toNode.id, updatedAt: now };
+    if (toNode.statusName) {
+      const statusId = await resolveStatusId(db, projectId, toNode.statusName);
+      if (statusId) {
+        issueUpdate.statusId = statusId;
+        issueUpdate.statusChangedAt = now;
+      }
+    }
+    await db.update(schema.issues).set(issueUpdate).where(eq(schema.issues.id, issueId));
+  }
+}
+
+export interface GraphNodeInput {
+  id: string;
+  nodeType: string;
+}
+export interface GraphEdgeInput {
+  fromNodeId: string;
+  toNodeId: string;
+}
+
+/**
+ * Validate a workflow graph for the builder (#83). Returns a list of human-
+ * readable error strings; empty = valid.
+ * Rules: exactly one start; ≥1 end; no orphan nodes (non-start needs an inbound
+ * edge, non-end needs an outbound edge); edges reference real nodes; every
+ * parallel-join has at least one parallel-fork in the graph.
+ */
+export function validateGraph(nodes: GraphNodeInput[], edges: GraphEdgeInput[]): string[] {
+  const errors: string[] = [];
+  if (nodes.length === 0) return ["A workflow needs at least one node."];
+
+  const ids = new Set(nodes.map((n) => n.id));
+  const starts = nodes.filter((n) => n.nodeType === "start");
+  const ends = nodes.filter((n) => n.nodeType === "end");
+  if (starts.length !== 1) errors.push(`A workflow must have exactly one start node (found ${starts.length}).`);
+  if (ends.length < 1) errors.push("A workflow must have at least one end node.");
+
+  for (const e of edges) {
+    if (!ids.has(e.fromNodeId) || !ids.has(e.toNodeId)) {
+      errors.push("An edge references a node that no longer exists.");
+      break;
+    }
+  }
+
+  const incoming = new Map<string, number>();
+  const outgoing = new Map<string, number>();
+  for (const e of edges) {
+    outgoing.set(e.fromNodeId, (outgoing.get(e.fromNodeId) ?? 0) + 1);
+    incoming.set(e.toNodeId, (incoming.get(e.toNodeId) ?? 0) + 1);
+  }
+  for (const n of nodes) {
+    if (n.nodeType !== "start" && (incoming.get(n.id) ?? 0) === 0) {
+      errors.push("Every non-start node must have at least one incoming edge (no orphans).");
+      break;
+    }
+  }
+  for (const n of nodes) {
+    if (n.nodeType !== "end" && (outgoing.get(n.id) ?? 0) === 0) {
+      errors.push("Every non-end node must have at least one outgoing edge.");
+      break;
+    }
+  }
+
+  const hasFork = nodes.some((n) => n.nodeType === "parallel-fork");
+  const hasJoin = nodes.some((n) => n.nodeType === "parallel-join");
+  if (hasJoin && !hasFork) errors.push("A parallel-join node requires a matching parallel-fork upstream.");
+  if (hasFork && !hasJoin) errors.push("A parallel-fork node requires a matching parallel-join downstream.");
+
+  return errors;
+}
+
+/** Find the (first) parallel-join node in a template, if any. */
+export async function findJoinNode(
+  db: WorkflowDb,
+  templateId: string,
+): Promise<WorkflowNodeRow | null> {
+  const nodes = await db
+    .select()
+    .from(schema.workflowNodes)
+    .where(eq(schema.workflowNodes.templateId, templateId))
+    .orderBy(asc(schema.workflowNodes.sortOrder));
+  return (nodes.find((n) => n.nodeType === "parallel-join") as WorkflowNodeRow) ?? null;
 }
 
 /**

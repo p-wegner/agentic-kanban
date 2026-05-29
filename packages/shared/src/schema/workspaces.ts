@@ -24,6 +24,13 @@ export const workspaces = sqliteTable("workspaces", {
   skillId: text("skill_id").references(() => agentSkills.id),
   // The workflow node this workspace's agent is currently executing.
   currentNodeId: text("current_node_id"),
+  // Parallel fork/join (workflow graphs): for a fork child, the parent workspace
+  // that spawned it; the fork node that spawned it; the join node its path
+  // converges to; and the child lifecycle state ('running'|'queued'|'joined'|'cancelled').
+  parentWorkspaceId: text("parent_workspace_id"),
+  forkNodeId: text("fork_node_id"),
+  forkJoinNodeId: text("fork_join_node_id"),
+  forkStatus: text("fork_status"),
   includeVisualProof: integer("include_visual_proof", { mode: "boolean" }).notNull().default(false),
   createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
   updatedAt: text("updated_at").notNull().$defaultFn(() => new Date().toISOString()),
@@ -39,6 +46,7 @@ export const workspaces = sqliteTable("workspaces", {
   issueIdIdx: index("idx_workspaces_issue_id").on(table.issueId),
   statusIdx: index("idx_workspaces_status").on(table.status),
   createdAtIdx: index("idx_workspaces_created_at").on(table.createdAt),
+  parentWorkspaceIdIdx: index("idx_workspaces_parent_workspace_id").on(table.parentWorkspaceId),
 }));
 
 export const workspacesRelations = relations(workspaces, ({ one, many }) => ({
