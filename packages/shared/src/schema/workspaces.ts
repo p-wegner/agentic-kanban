@@ -15,6 +15,7 @@ export const workspaces = sqliteTable("workspaces", {
   thoroughReview: integer("thorough_review", { mode: "boolean" }).notNull().default(false),
   readyForMerge: integer("ready_for_merge", { mode: "boolean" }).notNull().default(false),
   planMode: integer("plan_mode", { mode: "boolean" }).notNull().default(false),
+  tddMode: integer("tdd_mode", { mode: "boolean" }).notNull().default(false),
   status: text("status").notNull().default("active"),
   claudeProfile: text("claude_profile"),
   agentCommand: text("agent_command"),
