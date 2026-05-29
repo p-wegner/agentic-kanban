@@ -3,6 +3,7 @@ import { z } from "zod";
 import { db, schema } from "../db.js";
 import { eq, inArray } from "drizzle-orm";
 import { notifyBoard } from "../notify.js";
+import { requireEntity } from "../db-utils.js";
 
 export function registerDeleteIssue(server: McpServer) {
   server.tool(
@@ -12,15 +13,14 @@ export function registerDeleteIssue(server: McpServer) {
       issueId: z.string().describe("The issue ID to delete"),
     },
     async ({ issueId }) => {
-      const existing = await db.select({ projectId: schema.issues.projectId })
+      const existingRows = await db.select({ projectId: schema.issues.projectId })
         .from(schema.issues)
         .where(eq(schema.issues.id, issueId))
         .limit(1);
-      if (existing.length === 0) {
-        return { content: [{ type: "text" as const, text: `Issue ${issueId} not found` }] };
-      }
+      const r = requireEntity(existingRows, issueId, "Issue");
+      if (!r.ok) return r.error;
 
-      const projectId = existing[0].projectId;
+      const projectId = r.value.projectId;
 
       // Cascade delete workspaces and their sessions/messages
       const wsRows = await db.select({ id: schema.workspaces.id })

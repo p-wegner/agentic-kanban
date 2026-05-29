@@ -4,6 +4,7 @@ import { db, schema } from "../db.js";
 import { eq } from "drizzle-orm";
 import { notifyBoard } from "../notify.js";
 import { syncCurrentNodeToStatus } from "@agentic-kanban/shared/lib/workflow-engine";
+import { requireEntity, resolveStatusByName } from "../db-utils.js";
 
 export function registerMoveIssue(server: McpServer) {
   server.tool(
@@ -14,31 +15,21 @@ export function registerMoveIssue(server: McpServer) {
       statusName: z.string().describe("Target status column name (e.g., 'Todo', 'In Progress', 'In Review', 'Done', 'Cancelled')"),
     },
     async ({ issueId, statusName }) => {
-      const existing = await db.select({ projectId: schema.issues.projectId })
+      const existingRows = await db.select({ projectId: schema.issues.projectId })
         .from(schema.issues)
         .where(eq(schema.issues.id, issueId))
         .limit(1);
-      if (existing.length === 0) {
-        return { content: [{ type: "text" as const, text: `Issue ${issueId} not found` }] };
-      }
+      const r0 = requireEntity(existingRows, issueId, "Issue");
+      if (!r0.ok) return r0.error;
 
-      const projectId = existing[0].projectId;
+      const projectId = r0.value.projectId;
 
-      const statuses = await db.select().from(schema.projectStatuses)
-        .where(eq(schema.projectStatuses.projectId, projectId));
-      const target = statuses.find(s => s.name === statusName);
-      if (!target) {
-        return {
-          content: [{
-            type: "text" as const,
-            text: `Status '${statusName}' not found. Available: ${statuses.map(s => s.name).join(", ")}`,
-          }],
-        };
-      }
+      const r = await resolveStatusByName(db, schema, projectId, statusName);
+      if (!r.ok) return r.error;
 
       const now = new Date().toISOString();
       await db.update(schema.issues)
-        .set({ statusId: target.id, statusChangedAt: now, updatedAt: now })
+        .set({ statusId: r.statusId, statusChangedAt: now, updatedAt: now })
         .where(eq(schema.issues.id, issueId));
 
       // Keep currentNode consistent with the new status for workflow-driven issues.

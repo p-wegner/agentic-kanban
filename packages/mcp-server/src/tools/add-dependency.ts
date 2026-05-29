@@ -4,6 +4,7 @@ import { db, schema } from "../db.js";
 import { eq } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { notifyBoard } from "../notify.js";
+import { requireEntity } from "../db-utils.js";
 
 const VALID_TYPES = ["depends_on", "blocked_by", "related_to", "duplicates", "parent_of", "child_of"] as const;
 
@@ -60,15 +61,17 @@ export function registerAddDependency(server: McpServer) {
         db.select({ projectId: schema.issues.projectId }).from(schema.issues).where(eq(schema.issues.id, dependsOnId)).limit(1),
       ]);
 
-      if (sourceIssue.length === 0) return { content: [{ type: "text" as const, text: `Issue ${issueId} not found` }] };
-      if (targetIssue.length === 0) return { content: [{ type: "text" as const, text: `Issue ${dependsOnId} not found` }] };
-      if (sourceIssue[0].projectId !== targetIssue[0].projectId) {
+      const r1 = requireEntity(sourceIssue, issueId, "Issue");
+      if (!r1.ok) return r1.error;
+      const r2 = requireEntity(targetIssue, dependsOnId, "Issue");
+      if (!r2.ok) return r2.error;
+      if (r1.value.projectId !== r2.value.projectId) {
         return { content: [{ type: "text" as const, text: "Error: Cannot add dependencies across projects" }] };
       }
 
       // Cycle detection for directional types only
       if (depType === "depends_on" || depType === "blocked_by" || depType === "parent_of" || depType === "child_of") {
-        const wouldCycle = await wouldCreateCycle(issueId, dependsOnId, sourceIssue[0].projectId);
+        const wouldCycle = await wouldCreateCycle(issueId, dependsOnId, r1.value.projectId);
         if (wouldCycle) {
           return { content: [{ type: "text" as const, text: "Error: Adding this dependency would create a cycle" }] };
         }
@@ -90,7 +93,7 @@ export function registerAddDependency(server: McpServer) {
         throw err;
       }
 
-      notifyBoard(sourceIssue[0].projectId, "mcp_dependency_added");
+      notifyBoard(r1.value.projectId, "mcp_dependency_added");
 
       return { content: [{ type: "text" as const, text: JSON.stringify({ id, issueId, dependsOnId, type: depType }, null, 2) }] };
     },

@@ -2,6 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { eq } from "drizzle-orm";
 import { prodDeps, type ToolDeps } from "./deps.js";
+import { requireEntity } from "../db-utils.js";
 
 export function registerGetIssue(server: McpServer, deps: ToolDeps = prodDeps) {
   const { db, schema } = deps;
@@ -35,11 +36,9 @@ export function registerGetIssue(server: McpServer, deps: ToolDeps = prodDeps) {
         .where(whereClause)
         .limit(1);
 
-      if (issues.length === 0) {
-        return { content: [{ type: "text" as const, text: `Issue ${issueId} not found` }] };
-      }
-
-      const resolvedId = issues[0].id;
+      const r = requireEntity(issues, issueId, "Issue");
+      if (!r.ok) return r.error;
+      const resolvedId = r.value.id;
 
       const [workspaces, outgoing, incoming] = await Promise.all([
         db.select().from(schema.workspaces).where(eq(schema.workspaces.issueId, resolvedId)),
@@ -81,7 +80,7 @@ export function registerGetIssue(server: McpServer, deps: ToolDeps = prodDeps) {
       });
 
       const result = {
-        ...issues[0],
+        ...r.value,
         workspaces,
         dependencies: { outgoing, incoming },
         isBlocked,
