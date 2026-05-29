@@ -60,20 +60,28 @@ export function createCodemodsRoute(database: Database) {
 
   /**
    * POST /api/codemods/apply
-   * Body: { changes: [{filePath, modified}], selectedFiles?: string[] }
+   * Body: { projectId: string, changes: [{filePath, modified}], selectedFiles?: string[] }
    * Returns: { applied: string[], skipped: string[] }
+   *
+   * `projectId` is required: the service uses the project's repo path as a
+   * security boundary and refuses to write to any path outside it.
    */
   router.post("/apply", async (c) => {
     const body = await parseJsonBody<{
+      projectId: string;
       changes: Array<{ filePath: string; modified: string }>;
       selectedFiles?: string[];
     }>(c);
 
+    if (!body.projectId?.trim()) {
+      return c.json({ error: "projectId is required" }, 400);
+    }
     if (!Array.isArray(body.changes) || body.changes.length === 0) {
       return c.json({ error: "changes array is required and must not be empty" }, 400);
     }
 
     const result = await codemodService.apply(
+      body.projectId,
       body.changes,
       body.selectedFiles ?? [],
     );

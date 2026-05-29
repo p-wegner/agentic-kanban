@@ -1,5 +1,5 @@
 import { readdir, readFile, stat, writeFile } from "node:fs/promises";
-import { join, relative, extname } from "node:path";
+import { join, relative, extname, resolve, sep } from "node:path";
 import { existsSync } from "node:fs";
 import { Project } from "ts-morph";
 import { invokeClaudePrompt } from "./claude-cli.service.js";
@@ -321,11 +321,29 @@ export async function previewCodemod(
 }
 
 /**
+ * Returns true if `target` resolves to a path inside `root` (or is `root` itself).
+ * Both are resolved to absolute paths first so `..` segments cannot escape.
+ */
+function isInside(root: string, target: string): boolean {
+  const resolvedRoot = resolve(root);
+  const resolvedTarget = resolve(target);
+  if (resolvedTarget === resolvedRoot) return true;
+  const rootWithSep = resolvedRoot.endsWith(sep) ? resolvedRoot : resolvedRoot + sep;
+  return resolvedTarget.startsWith(rootWithSep);
+}
+
+/**
  * Apply codemod changes for selected files (write to disk).
+ *
+ * `repoPath` is REQUIRED and acts as a security boundary: every target path is
+ * resolved and must live inside the project repo. Client-supplied paths that
+ * escape the repo (absolute paths elsewhere, `..` traversal) are rejected —
+ * without this an attacker (or a buggy client) could overwrite arbitrary files.
  */
 export async function applyCodemod(
   changes: Array<{ filePath: string; modified: string }>,
   selectedFiles: string[],
+  repoPath: string,
 ): Promise<CodemodApplyResult> {
   const applied: string[] = [];
   const skipped: string[] = [];
@@ -333,6 +351,11 @@ export async function applyCodemod(
 
   for (const change of changes) {
     const rel = change.filePath;
+    if (!isInside(repoPath, change.filePath)) {
+      throw new ValidationError(
+        `Refusing to write outside the project: ${change.filePath}`,
+      );
+    }
     if (selectedFiles.length === 0 || selectedSet.has(rel)) {
       await writeFile(change.filePath, change.modified, "utf8");
       applied.push(rel);
@@ -373,10 +396,13 @@ export function createCodemodService(database: Database) {
     },
 
     async apply(
+      projectId: string,
       changes: Array<{ filePath: string; modified: string }>,
       selectedFiles: string[],
     ): Promise<CodemodApplyResult> {
-      return applyCodemod(changes, selectedFiles);
+      const repoPath = await getProjectRepoPath(projectId, database);
+      if (!repoPath) throw new ValidationError("Project not found or has no repo path");
+      return applyCodemod(changes, selectedFiles, repoPath);
     },
   };
 }
