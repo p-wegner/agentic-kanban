@@ -33,3 +33,4 @@ export {
   WORKFLOW_EDGE_CONDITIONS,
 } from "./workflows.js";
 export type { WorkflowNodeType, WorkflowEdgeCondition } from "./workflows.js";
+export { testRuns, flakyTestPins } from "./test-runs.js";

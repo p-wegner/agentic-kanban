@@ -230,6 +230,7 @@ export async function listPendingQuestionsForProject(
   projectId: string,
   db: Database,
   sendTurn?: AutoAnswerSendTurn,
+  nowOverride?: string,
 ): Promise<PendingQuestionSet[]> {
   // Pull all workspaces+issues for this project (one query). Includes the workspace
   // status/closedAt/readyForMerge and the issue's status-column name so staleness can
