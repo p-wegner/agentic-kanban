@@ -16,6 +16,9 @@ export interface TicketPreflightResult {
   duplicateOfNumber?: number;
   /** Issue number that blocks this ticket (when verdict starts with blocked-by-#) */
   blockedByNumber?: number;
+  /** True when the ticket looks like a non-trivial / multi-file feature (not a tiny quick edit).
+   *  Used to warn against running it in a direct workspace (which edits the main checkout in place). */
+  looksComplex: boolean;
 }
 
 /** A question + the answer the user provided during preflight clarification. */
@@ -120,7 +123,8 @@ Respond ONLY with valid JSON — no markdown, no explanation:
   "questions": ["question 1", "..."],
   "summary": "one sentence explaining your verdict",
   "duplicateOfNumber": null,
-  "blockedByNumber": null
+  "blockedByNumber": null,
+  "looksComplex": false
 }
 
 Rules:
@@ -129,6 +133,7 @@ Rules:
 - A ticket with just a title and no description is NOT automatically needs-clarification — a clear title may be enough for small tasks
 - Only flag as needs-clarification for genuine ambiguity that would cause the agent to guess wrong
 - Only flag as duplicate-of / blocked-by when you're confident, not just topically similar
+- looksComplex: true when this is a non-trivial feature — touches multiple files/components, has several acceptance criteria, or involves new functionality / refactors. false for tiny, quick, single-spot edits (typo, copy tweak, one-line fix, small config change). This is independent of the verdict.
 
 Target ticket: #${target.issueNumber ?? "?"} "${target.title}"
 ${target.description ? `Description:\n${target.description.trim()}` : "(no description)"}
@@ -144,6 +149,7 @@ ${issuesSummary}`;
     summary?: string;
     duplicateOfNumber?: number | null;
     blockedByNumber?: number | null;
+    looksComplex?: boolean;
   };
 
   const rawVerdict = (parsed.verdict ?? "ready").trim();
@@ -166,6 +172,7 @@ ${issuesSummary}`;
 
   const duplicateOfNumber = typeof parsed.duplicateOfNumber === "number" ? parsed.duplicateOfNumber : undefined;
   const blockedByNumber = typeof parsed.blockedByNumber === "number" ? parsed.blockedByNumber : undefined;
+  const looksComplex = parsed.looksComplex === true;
 
-  return { verdict, questions, summary, duplicateOfNumber, blockedByNumber };
+  return { verdict, questions, summary, duplicateOfNumber, blockedByNumber, looksComplex };
 }
