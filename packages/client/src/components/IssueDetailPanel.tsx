@@ -7,6 +7,8 @@ import { showToast } from "./Toast.js";
 import { MoveToDoneDialog } from "./MoveToDoneDialog.js";
 import { WorkflowProgress } from "./WorkflowProgress.js";
 import { EpicDecomposerModal } from "./EpicDecomposerModal.js";
+import { ShowdownDialog } from "./ShowdownDialog.js";
+import { ShowdownPanel } from "./ShowdownPanel.js";
 
 // Some issues were created via MCP/CLI calls whose JSON descriptions ended up
 // with literal `\n` / `\t` sequences rather than real newlines. Unescape when
@@ -126,6 +128,9 @@ export function IssueDetailPanel({
   const [followUpTitle, setFollowUpTitle] = useState("");
   const [followUpCreating, setFollowUpCreating] = useState(false);
   const [showDecomposeModal, setShowDecomposeModal] = useState(false);
+  const [showShowdownDialog, setShowShowdownDialog] = useState(false);
+  const [activeShowdownId, setActiveShowdownId] = useState<string | null>(null);
+  const [availableSkills, setAvailableSkills] = useState<{ id: string; name: string; description: string }[]>([]);
 
   // Track unsaved changes for warning
   const hasChanges = editing && (
@@ -140,18 +145,24 @@ export function IssueDetailPanel({
   useEffect(() => {
     async function loadData() {
       try {
-        const [ws, tags, available, deps, issues] = await Promise.all([
+        const [ws, tags, available, deps, issues, skills] = await Promise.all([
           apiFetch<{ id: string }[]>(`/api/issues/${issue.id}/workspaces`),
           apiFetch<{ id: string; name: string; color: string | null }[]>(`/api/issues/${issue.id}/tags`),
           apiFetch<{ id: string; name: string; color: string | null }[]>(`/api/tags`),
           apiFetch<DependencyInfo>(`/api/issues/${issue.id}/dependencies`),
           apiFetch<IssueWithStatus[]>(`/api/issues?projectId=${issue.projectId}`),
+          apiFetch<{ id: string; name: string; description: string }[]>(`/api/agent-skills?projectId=${issue.projectId}`).catch(() => [] as { id: string; name: string; description: string }[]),
         ]);
         setWorkspaceCount(ws.length);
         setIssueTags(tags);
         setAllTags(available);
         setDependencies(deps);
         setAvailableIssues(issues.filter(i => i.id !== issue.id));
+        setAvailableSkills(skills);
+        // Check for active showdown
+        apiFetch<{ id: string }>(`/api/issues/${issue.id}/showdown`)
+          .then(sd => setActiveShowdownId(sd.id))
+          .catch(() => {});
       } catch {
         // Ignore — non-critical
       }
@@ -1054,7 +1065,7 @@ export function IssueDetailPanel({
                   <WorkflowProgress workspaceId={issue.workspaceSummary.main.id} />
                 </div>
               ) : (
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   {onStartWorkspace && (
                     <button
                       onClick={() => onStartWorkspace(issue)}
@@ -1066,6 +1077,13 @@ export function IssueDetailPanel({
                       Start Workspace
                     </button>
                   )}
+                  <button
+                    onClick={() => setShowShowdownDialog(true)}
+                    className="flex items-center gap-1.5 text-sm font-medium px-3 py-1.5 rounded bg-indigo-600 text-white hover:bg-indigo-700 transition-colors"
+                    title="Run this ticket with different skill/model combos in parallel"
+                  >
+                    ⚔️ Showdown…
+                  </button>
                   <button
                     onClick={() => onManageWorkspaces(issue)}
                     className="text-sm text-brand-600 hover:text-brand-700 dark:text-brand-400 dark:hover:text-brand-300"
@@ -1553,6 +1571,22 @@ export function IssueDetailPanel({
             setShowDecomposeModal(false);
             onIssueUpdate(issue);
           }}
+      {showShowdownDialog && (
+        <ShowdownDialog
+          issue={issue}
+          skills={availableSkills}
+          onCreated={(sd) => {
+            setShowShowdownDialog(false);
+            setActiveShowdownId(sd.id);
+          }}
+          onCancel={() => setShowShowdownDialog(false)}
+        />
+      )}
+      {activeShowdownId && (
+        <ShowdownPanel
+          showdownId={activeShowdownId}
+          onClose={() => setActiveShowdownId(null)}
+          onWinnerPicked={() => setActiveShowdownId(null)}
         />
       )}
     </>

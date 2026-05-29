@@ -62,4 +62,5 @@ export const MIGRATION_FILES = [
   "0053_flaky_test_classifier.sql",
   "0054_touched_files.sql",
   "0055_context_primer.sql",
+  "0056_showdowns.sql",
 ];
