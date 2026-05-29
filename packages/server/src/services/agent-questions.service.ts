@@ -252,7 +252,7 @@ export async function listPendingQuestionsForProject(
     .where(eq(issues.projectId, projectId));
 
   const results: PendingQuestionSet[] = [];
-  const now = new Date().toISOString();
+  const now = nowOverride ?? new Date().toISOString();
 
   for (const ws of wsRows) {
     // Recent sessions (any status), newest first. We scan a few because a question
@@ -308,6 +308,10 @@ export async function listPendingQuestionsForProject(
         askedAt: sess.endedAt,
         now,
       });
+      // Drop questions that are definitively stale — workspace closed, issue archived,
+      // or a newer session superseded this one. older-than-24h still surfaces (badge only)
+      // since the workspace may still be active and the question still actionable.
+      if (staleness && staleness.reason !== "older-than-24h") continue;
       results.push({
         toolUseId,
         workspaceId: ws.workspaceId,
