@@ -8,6 +8,7 @@ import type { SessionManager } from "./session.manager.js";
 import type { BoardEvents } from "./board-events.js";
 import type { ProviderName } from "./agent-provider.js";
 import * as realGitService from "./git.service.js";
+import { kill as killAgent } from "./agent.service.js";
 import { runSetupScript } from "./setup-script.js";
 import { writeAgentSkillFile, readLocalSkillPrompt, copySkillToWorktree } from "@agentic-kanban/shared/lib/agent-skill-files";
 import { writeTicketContextFile } from "@agentic-kanban/shared/lib/ticket-context";
@@ -505,15 +506,36 @@ export function createWorkspaceCrudService(deps: {
 
   async function deleteWorkspace(workspaceId: string): Promise<void> {
     const wsSessions = await database
-      .select({ id: sessions.id, status: sessions.status })
+      .select({ id: sessions.id, status: sessions.status, pid: sessions.pid })
       .from(sessions)
       .where(eq(sessions.workspaceId, workspaceId));
 
-    if (getSessionManager && wsSessions.some(s => s.status === "running")) {
-      for (const s of wsSessions) {
-        if (s.status === "running") {
-          await getSessionManager().stopSession(s.id).catch(() => {});
+    const runningSessions = wsSessions.filter(s => s.status === "running");
+    if (getSessionManager && runningSessions.length > 0) {
+      for (const s of runningSessions) {
+        // Graceful stop first (lets the agent flush + lets the session manager
+        // mark the DB status as user-stopped).
+        await getSessionManager().stopSession(s.id).catch(() => {});
+      }
+    }
+
+    // Hard-kill the agent process TREE for every running session BEFORE removing the
+    // worktree. The graceful stop above only kills the main agent process; its
+    // descendant processes (git / powershell / node spawned by the agent) keep
+    // running and hold open file handles inside the worktree, which makes the
+    // recursive directory removal race and fail on Windows (EBUSY/EPERM/ENOTEMPTY),
+    // leaving the worktree + branch registration behind.
+    for (const s of runningSessions) {
+      try {
+        // `kill` taskkills the whole process tree (taskkill /T /F on Windows) using
+        // the in-memory tracked pid. Fall back to the persisted sessions.pid for
+        // detached/restored sessions whose ChildProcess handle is no longer tracked.
+        const killed = killAgent(s.id);
+        if (!killed && s.pid) {
+          await killProcessTree(s.pid);
         }
+      } catch (err) {
+        console.warn(`[workspaces] failed to hard-kill session ${s.id} (pid=${s.pid ?? "?"})`, err);
       }
     }
 
@@ -537,14 +559,69 @@ export function createWorkspaceCrudService(deps: {
     await database.delete(workspaces).where(eq(workspaces.id, workspaceId));
 
     if (workingDir && !isDirect && repoPath) {
+      // Use git as the authoritative step to drop the worktree registration + branch
+      // (`git worktree remove --force` also deletes the directory). This succeeds even
+      // when a stray file handle survives, and unlike `git worktree prune` it does not
+      // require the directory to already be gone.
+      let removed = false;
       try {
-        const { rm } = await import("node:fs/promises");
-        await rm(workingDir, { recursive: true, force: true });
-        await gitService.pruneWorktrees(repoPath).catch(() => {});
-      } catch {
-        // Best-effort
+        await gitService.removeWorktree(repoPath, workingDir);
+        removed = true;
+      } catch (err) {
+        console.warn(`[workspaces] git worktree remove failed for ${workingDir} — retrying directory removal`, err);
+      }
+
+      // Fall back to (or follow up with) a retrying directory removal. Windows releases
+      // file handles asynchronously after a process dies, so a transient lock right
+      // after the kill should not be treated as a permanent failure.
+      const dirRemoved = await removeDirWithRetry(workingDir);
+
+      // Final fallback: prune dangling registrations whose directory is now gone.
+      await gitService.pruneWorktrees(repoPath).catch(() => {});
+
+      if (!removed && !dirRemoved) {
+        console.warn(`[workspaces] failed to fully clean up worktree at ${workingDir} — manual cleanup may be required`);
       }
     }
+  }
+
+  /** Force-kill a process tree by pid. Windows: taskkill /F /T; otherwise SIGKILL. Guards already-dead pids. */
+  async function killProcessTree(pid: number): Promise<void> {
+    if (!pid || pid <= 0) return;
+    if (process.platform === "win32") {
+      const { spawn } = await import("node:child_process");
+      await new Promise<void>((resolve) => {
+        const p = spawn("taskkill", ["/PID", String(pid), "/T", "/F"], { windowsHide: true });
+        p.on("error", () => resolve());
+        p.on("close", () => resolve());
+      });
+    } else {
+      try {
+        process.kill(-pid, "SIGKILL");
+      } catch {
+        try { process.kill(pid, "SIGKILL"); } catch { /* already dead */ }
+      }
+    }
+  }
+
+  /** Remove a directory recursively, retrying to ride out async Windows file-handle release. */
+  async function removeDirWithRetry(dir: string, attempts = 5, backoffMs = 300): Promise<boolean> {
+    const { rm } = await import("node:fs/promises");
+    const { existsSync } = await import("node:fs");
+    for (let i = 0; i < attempts; i++) {
+      try {
+        await rm(dir, { recursive: true, force: true });
+        if (!existsSync(dir)) return true;
+      } catch (err) {
+        if (i === attempts - 1) {
+          console.warn(`[workspaces] directory removal failed after ${attempts} attempts: ${dir}`, err);
+          return false;
+        }
+      }
+      if (!existsSync(dir)) return true;
+      await new Promise((resolve) => setTimeout(resolve, backoffMs * (i + 1)));
+    }
+    return !existsSync(dir);
   }
 
   async function markReadyForMerge(workspaceId: string): Promise<{ id: string; readyForMerge: boolean }> {
