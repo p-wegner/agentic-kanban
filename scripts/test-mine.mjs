@@ -29,10 +29,12 @@
 //   mcp-server:
 //     - mcp-tools.test.ts  spawn-based MCP integration; stale migration list / worktree DB resolution
 //
-// Pass-through: any extra args are forwarded to vitest in BOTH packages, so you can
+// Pass-through: any extra args are forwarded to vitest run in BOTH packages, so you can
 // still narrow the run, e.g.:
-//   pnpm test:mine -- --related packages/server/src/services/foo.service.ts
+//   pnpm test:mine -- --changed HEAD            (run tests for all git-changed files)
 //   pnpm test:mine -- src/__tests__/tags.test.ts
+// NOTE: vitest 4 removed the --related flag. Use `pnpm exec vitest related <file>`
+// from inside the package dir to run tests that cover a specific source file.
 
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
