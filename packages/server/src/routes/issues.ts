@@ -6,17 +6,20 @@ import type { SessionManager } from "../services/session.manager.js";
 import type { ShowdownContestant } from "@agentic-kanban/shared";
 import { analyzeDependencies, enhanceIssue, aiEstimateIssue, decomposeEpic, confirmEpicDecomposition } from "../services/issue-ai.service.js";
 import { createIssueService } from "../services/issue.service.js";
+import { createIssueCommentsService } from "../services/issue-comments.service.js";
+import type { IssueCommentKind, IssueCommentAuthor } from "../repositories/issue-comments.repository.js";
 import { createShowdownService } from "../services/showdown.service.js";
 import { parseJsonBody } from "../middleware/parse-body.js";
 import { createRouter } from "../middleware/create-router.js";
 import { wrapAiOperation } from "../middleware/ai-operation.js";
-import { runTicketPreflight } from "../services/ticket-preflight.service.js";
+import { runTicketPreflight, formatClarificationsBlock, type PreflightClarification } from "../services/ticket-preflight.service.js";
 import { WorkspaceError } from "../services/workspace-internals.js";
 
 export function createIssuesRoute(database: Database = db, options?: { boardEvents?: BoardEvents; getSessionManager?: () => SessionManager }) {
   const router = createRouter();
 
   const issueService = createIssueService({ database, boardEvents: options?.boardEvents });
+  const issueCommentsService = createIssueCommentsService({ database, boardEvents: options?.boardEvents });
   const showdownService = createShowdownService({
     database,
     getSessionManager: options?.getSessionManager,
@@ -163,12 +166,37 @@ export function createIssuesRoute(database: Database = db, options?: { boardEven
   });
 
 
-  // POST /api/issues/:id/preflight — AI ticket sanity check
+  // POST /api/issues/:id/preflight — AI ticket sanity check.
+  // Optional `clarifications` (answered preflight questions): when present, they are
+  // persisted as a durable `preflight-clarification` comment and folded into the prompt
+  // for the re-check. The returned `clarificationsBlock` is the markdown the caller can
+  // prepend to the launching agent's context.
   router.post("/:id/preflight", async (c) => {
     const issueId = c.req.param("id");
-    const body = await parseJsonBody<{ projectId: string }>(c);
+    const body = await parseJsonBody<{ projectId: string; clarifications?: PreflightClarification[] }>(c);
     if (!body.projectId) return c.json({ error: "projectId is required" }, 400);
-    return c.json(await wrapAiOperation("preflight", () => runTicketPreflight(issueId, body.projectId, database)));
+
+    const answered = (body.clarifications ?? []).filter(
+      (cl) => cl && typeof cl.question === "string" && typeof cl.answer === "string" && cl.question.trim() && cl.answer.trim(),
+    );
+
+    let clarificationsBlock: string | undefined;
+    if (answered.length > 0) {
+      clarificationsBlock = formatClarificationsBlock(answered);
+      // Persist the answered Q&A as durable ticket history before re-checking.
+      await issueCommentsService.addComment({
+        issueId,
+        kind: "preflight-clarification",
+        author: "user",
+        body: clarificationsBlock,
+        payload: { clarifications: answered },
+      });
+    }
+
+    const result = await wrapAiOperation("preflight", () =>
+      runTicketPreflight(issueId, body.projectId, database, answered.length > 0 ? answered : undefined),
+    );
+    return c.json({ ...result, clarificationsBlock });
   });
 
   // GET /api/issues/:id/summary
@@ -269,6 +297,38 @@ export function createIssuesRoute(database: Database = db, options?: { boardEven
     const artifactId = c.req.param("artifactId");
     await issueService.deleteArtifact(issueId, artifactId);
     return c.json({ success: true });
+  });
+
+  // GET /api/issues/:id/comments — durable Q&A / activity thread for an issue
+  router.get("/:id/comments", async (c) => {
+    const issueId = c.req.param("id");
+    return c.json({ comments: await issueCommentsService.listComments(issueId) });
+  });
+
+  // POST /api/issues/:id/comments
+  router.post("/:id/comments", async (c) => {
+    const issueId = c.req.param("id");
+    const body = await parseJsonBody<{
+      kind?: IssueCommentKind;
+      author?: IssueCommentAuthor;
+      body?: string;
+      payload?: unknown;
+      workspaceId?: string;
+    }>(c);
+    const validKinds: IssueCommentKind[] = ["preflight-clarification", "agent-question", "note"];
+    const validAuthors: IssueCommentAuthor[] = ["user", "butler", "agent", "preflight"];
+    if (!body.body?.trim()) return c.json({ error: "body is required" }, 400);
+    const kind = body.kind && validKinds.includes(body.kind) ? body.kind : "note";
+    const author = body.author && validAuthors.includes(body.author) ? body.author : "user";
+    const comment = await issueCommentsService.addComment({
+      issueId,
+      workspaceId: body.workspaceId ?? null,
+      kind,
+      author,
+      body: body.body,
+      payload: body.payload,
+    });
+    return c.json(comment, 201);
   });
 
   // POST /api/issues/:id/showdown — start a showdown with N contestants

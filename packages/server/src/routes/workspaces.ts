@@ -39,6 +39,7 @@ export function createWorkspacesRoute(
       includeVisualProof: body.includeVisualProof === true,
       skipSetup: body.skipSetup === true,
       customPrompt: body.customPrompt,
+      clarifications: body.clarifications,
       skillId: body.skillId,
       skillName: body.skillName,
       profile: body.profile,
