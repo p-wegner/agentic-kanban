@@ -3,6 +3,7 @@ import { z } from "zod";
 import { db, schema } from "../db.js";
 import { eq, inArray } from "drizzle-orm";
 import { notifyBoard } from "../notify.js";
+import { requireEntity } from "../db-utils.js";
 
 export function registerDeleteWorkspace(server: McpServer) {
   server.tool(
@@ -15,14 +16,13 @@ export function registerDeleteWorkspace(server: McpServer) {
       const wsRows = await db.select().from(schema.workspaces)
         .where(eq(schema.workspaces.id, workspaceId))
         .limit(1);
-      if (wsRows.length === 0) {
-        return { content: [{ type: "text" as const, text: `Workspace ${workspaceId} not found` }] };
-      }
+      const r = requireEntity(wsRows, workspaceId, "Workspace");
+      if (!r.ok) return r.error;
 
       // Resolve projectId for board notification
       const issueRows = await db.select({ projectId: schema.issues.projectId })
         .from(schema.issues)
-        .where(eq(schema.issues.id, wsRows[0].issueId))
+        .where(eq(schema.issues.id, r.value.issueId))
         .limit(1);
 
       // Get sessions for cascade delete

@@ -4,6 +4,7 @@ import { db, schema } from "../db.js";
 import { eq } from "drizzle-orm";
 import * as gitService from "../git-service.js";
 import { notifyBoard } from "../notify.js";
+import { requireEntity } from "../db-utils.js";
 
 export function registerCloseWorkspace(server: McpServer) {
   server.tool(
@@ -16,11 +17,10 @@ export function registerCloseWorkspace(server: McpServer) {
       const wsRows = await db.select().from(schema.workspaces)
         .where(eq(schema.workspaces.id, workspaceId))
         .limit(1);
-      if (wsRows.length === 0) {
-        return { content: [{ type: "text" as const, text: `Workspace ${workspaceId} not found` }] };
-      }
+      const r = requireEntity(wsRows, workspaceId, "Workspace");
+      if (!r.ok) return r.error;
 
-      const workspace = wsRows[0];
+      const workspace = r.value;
 
       // Resolve project for board notification
       const issueRows = await db.select({ projectId: schema.issues.projectId })

@@ -3,6 +3,7 @@ import { z } from "zod";
 import { db, schema } from "../db.js";
 import { eq, inArray, desc } from "drizzle-orm";
 import { parseSessionSummary, formatDurationStr } from "@agentic-kanban/shared";
+import { requireEntity } from "../db-utils.js";
 
 export function registerGetIssueSummary(server: McpServer) {
   server.tool(
@@ -20,11 +21,10 @@ export function registerGetIssueSummary(server: McpServer) {
           .where(eq(schema.issues.issueNumber, issueNumber))
           .limit(1);
 
-        if (issueRows.length === 0) {
-          return { content: [{ type: "text" as const, text: `Issue #${issueNumber} not found` }] };
-        }
+        const r = requireEntity(issueRows, String(issueNumber), "Issue #");
+        if (!r.ok) return r.error;
 
-        const issue = issueRows[0];
+        const issue = r.value;
 
         // 2. Find workspaces for this issue
         const wsRows = await db
