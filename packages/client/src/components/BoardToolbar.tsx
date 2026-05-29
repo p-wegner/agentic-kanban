@@ -89,16 +89,17 @@ export function BoardToolbar({
       {onShowMergeQueue && (
         <button
           onClick={onShowMergeQueue}
-          title="Merge Queue — batch-merge ready workspaces in conflict-safe order"
-          className={`relative shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium border transition-colors bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800`}
+          title="Smart Merge Queue — auto-order and merge ready workspaces"
+          className="relative shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium border transition-colors bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800"
         >
-          <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
+          <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M3 7h18M3 12h12M3 17h6" />
+            <path strokeLinecap="round" strokeLinejoin="round" d="M17 14l3 3-3 3" />
           </svg>
           Queue
           {mergeQueueCount > 0 && (
-            <span className="absolute -top-1 -right-1 w-4 h-4 text-[10px] rounded-full bg-blue-600 text-white flex items-center justify-center font-bold">
-              {mergeQueueCount}
+            <span className="ml-0.5 inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-blue-500 text-white text-[10px] font-semibold leading-none">
+              {mergeQueueCount > 99 ? "99+" : mergeQueueCount}
             </span>
           )}
         </button>
