@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ReactFlow,
   Background,
@@ -10,6 +10,7 @@ import {
   type Node,
   type Edge,
   type Connection,
+  type ReactFlowInstance,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { apiFetch } from "../lib/api.js";
@@ -66,6 +67,18 @@ export function WorkflowBuilder({
   const [isBuiltin, setIsBuiltin] = useState(false);
   const [saving, setSaving] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
+  const rfRef = useRef<ReactFlowInstance<Node<NodeData>, Edge> | null>(null);
+
+  // Zoom-to-fit after node positions change (layout / load). react-flow needs a
+  // beat to apply the new positions and measure node sizes before fitView can
+  // compute the right bounds — for large graphs a single RAF fits stale bounds
+  // (clipping the top/bottom), so fit after a short delay and once more after
+  // the animation to guarantee the whole graph is in view.
+  const fitSoon = useCallback(() => {
+    const fit = () => rfRef.current?.fitView({ padding: 0.2, duration: 300 });
+    setTimeout(fit, 150);
+    setTimeout(fit, 500);
+  }, []);
 
   useEffect(() => {
     apiFetch<Skill[]>(`/api/agent-skills?projectId=${projectId}`).then(setSkills).catch(() => {});
@@ -100,10 +113,11 @@ export function WorkflowBuilder({
         label: edgeLabel(e.label, e.condition),
         data: { label: e.label, condition: e.condition },
       }));
-      // Built-ins (and any graph saved before auto-layout) have all x=0 — lay them
-      // out hierarchically so the graph reads top-to-bottom instead of stacking.
-      const needsLayout = rawNodes.length > 0 && rawNodes.every((n) => n.position.x === 0);
-      if (needsLayout) {
+      // Always lay out hierarchically on open. Stored coordinates today are
+      // unreliable (built-ins use x=0; agent-created templates rarely supply
+      // sensible coordinates), so a deterministic top-to-bottom dagre layout is
+      // the human-friendly default. Saving persists these positions.
+      if (rawNodes.length > 1) {
         const pos = layoutGraph(rawNodes, rawEdges);
         for (const n of rawNodes) {
           const p = pos.get(n.id);
@@ -112,8 +126,11 @@ export function WorkflowBuilder({
       }
       setNodes(rawNodes);
       setEdges(rawEdges);
+      // Always zoom-to-fit on open (the initial `fitView` prop fits the empty
+      // graph because nodes load async, so it never refits the loaded graph).
+      fitSoon();
     }).catch(() => showToast("Failed to load workflow", "error"));
-  }, [templateId, setNodes, setEdges]);
+  }, [templateId, setNodes, setEdges, fitSoon]);
 
   const onConnect = useCallback(
     (c: Connection) =>
@@ -162,6 +179,7 @@ export function WorkflowBuilder({
       );
       return nds.map((n) => (pos.get(n.id) ? { ...n, position: pos.get(n.id)! } : n));
     });
+    fitSoon();
   }
 
   function deleteSelected() {
@@ -283,6 +301,7 @@ export function WorkflowBuilder({
             onNodeClick={(_, n) => { setSelectedNodeId(n.id); setSelectedEdgeId(null); }}
             onEdgeClick={(_, e) => { setSelectedEdgeId(e.id); setSelectedNodeId(null); }}
             onPaneClick={() => { setSelectedNodeId(null); setSelectedEdgeId(null); }}
+            onInit={(inst) => { rfRef.current = inst; }}
             fitView
           >
             <Background />

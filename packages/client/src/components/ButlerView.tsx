@@ -29,6 +29,7 @@ type ButlerEvent =
   | { type: "ready" }
   | { type: "session"; sessionId: string }
   | { type: "turn-start" }
+  | { type: "user"; text: string }
   | { type: "text"; text: string }
   | { type: "tool"; name: string }
   | { type: "result"; text?: string; isError?: boolean }
@@ -224,6 +225,16 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
         setSending(true);
         assistantBufRef.current = "";
         assistantMsgIdRef.current = null;
+        break;
+      case "user":
+        // A prompt sent from outside this UI (CLI/MCP `ask`). Render it so the
+        // butler isn't seen acting on an invisible request. Deduped against the
+        // optimistic bubble this view adds for prompts it sent itself.
+        setChatMessages((prev) => {
+          const recentDup = prev.slice(-4).some((m) => m.role === "user" && m.text === e.text);
+          if (recentDup) return prev;
+          return [...prev, { id: `user-ext-${Date.now()}`, role: "user", text: e.text, ts: Date.now() }];
+        });
         break;
       case "text":
         appendAssistantText(e.text);

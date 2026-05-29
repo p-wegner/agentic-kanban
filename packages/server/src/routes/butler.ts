@@ -342,7 +342,9 @@ export function createButlerRoute(
         else if (e.type === "error") finish(e.message, true);
       });
       const timer = setTimeout(() => finish(buf || "(timed out waiting for butler response)", true), timeoutMs);
-      sendButlerTurn(projectId, body.content);
+      // Emit the prompt to SSE listeners so the UI shows what was asked (CLI/MCP
+      // callers have no UI that rendered it optimistically).
+      sendButlerTurn(projectId, body.content, { emitUserText: true });
     });
     return c.json({
       sessionId: getButlerSession(projectId).sessionId ?? null,

@@ -29,6 +29,7 @@ export type ButlerEvent =
   | { type: "ready" }
   | { type: "session"; sessionId: string }
   | { type: "turn-start" }
+  | { type: "user"; text: string }
   | { type: "text"; text: string }
   | { type: "tool"; name: string }
   | { type: "result"; text?: string; isError?: boolean }
@@ -140,6 +141,7 @@ function buildButlerSystemPrompt(projectName: string, repoPath: string): string 
     `The user operates the board in the app's UI (clicking buttons), not the API. For "how do I…/how does X work" board questions, answer with simple UI steps (which tab/button) — a UI how-to is bundled at ${boardGuidePath}; READ it first and answer from it, don't dump API/tool names.`,
     `To start/launch work on an issue, use the board's one-step flow: POST http://localhost:${serverPort}/api/workspaces with { "issueId", "branch": "feature/ak-<n>-<slug>" }. It creates the worktree, moves the issue to In Progress, and launches the agent. Do NOT use start_workspace (it does not launch an agent), and never create worktrees/branches or run claude yourself.`,
     `Never claim an action succeeded (launched, moved, merged) unless the board confirms it — re-check with get_issue/get_board_status and report the real result; if unsure, say so.`,
+    `Scope of direct edits: you may edit frontend code (packages/client/**) and documentation (*.md, docs/**, .claude/**) directly. Do NOT directly edit backend code (packages/server/**, packages/shared/**, packages/mcp-server/**) — the server hot-reloads on file changes and that would terminate your own process mid-turn. For any backend change, create a kanban ticket via the MCP create_issue tool describing the change instead of editing the files; tell the user a ticket was created and reference its number. This applies even for one-line backend tweaks the user asks you to "just do".`,
     `Be concise and helpful; avoid unnecessary preamble. You have full read access to the project files and standard tools.`,
   ].join("\n");
 }
@@ -361,11 +363,20 @@ async function runLoop(session: ButlerSession, input: Pushable<SDKUserMessage>, 
   }
 }
 
-export function sendButlerTurn(projectId: string, content: string): boolean {
+export function sendButlerTurn(
+  projectId: string,
+  content: string,
+  opts?: { emitUserText?: boolean },
+): boolean {
   const s = sessions.get(projectId);
   if (!s) return false;
   s.busy = true;
   s.transcript.push({ role: "user", text: content, ts: Date.now() });
+  // For turns the UI itself didn't type (CLI/MCP `ask`), broadcast the prompt so
+  // connected chat views render it instead of showing the butler acting on an
+  // invisible request. The UI's own /message path renders its prompt optimistically,
+  // so it leaves this off to avoid a duplicate bubble.
+  if (opts?.emitUserText) broadcast(s, { type: "user", text: content });
   broadcast(s, { type: "turn-start" });
   s.input.push({ type: "user", message: { role: "user", content }, parent_tool_use_id: null });
   return true;
