@@ -1,6 +1,6 @@
 # PRD-01: Features Catalog
 
-<!-- last-synced: 2026-05-29T12:00:00+02:00 | commit: 522a1c5a -->
+<!-- last-synced: 2026-05-29T12:00:00+02:00 | commit: 2d32aaa5 -->
 
 Complete inventory of features, organized by category. Status reflects the current implementation (Stages 0–14 complete).
 
@@ -13,11 +13,20 @@ Complete inventory of features, organized by category. Status reflects the curre
 - AI enhancement: "Enhance with AI" button spawns Claude CLI to improve title/description
 - **Copy issue reference**: clipboard button in detail panel header copies `#N Title` reference string
 - **Issue type**: Task, Bug, Feature, Chore — shown as badge in detail panel; used as filter legend in Timeline view
+- **Detail panel controls**:
+  - **Actions** menu (dropdown): Edit, "Decompose…", Delete
+  - **Decompose…** — AI epic decomposer: splits a large ticket into linked child tickets (closed ticket #55)
+  - **Expand to modal** button — opens the detail panel as a full-screen modal
+  - **Mark for visual verification** button (header) — applies the `needs-visual-verification` tag; ties into the "Visual verification timing" setting (F-UI-09)
+  - **Estimate** row — T-shirt buttons XS/S/M/L/XL plus an **AI** button that AI-suggests an estimate (`POST /api/issues/ai-estimate`)
+  - **Predict Files** button — AI-predicts the files a ticket will touch (closed ticket #96)
+  - **Custom options...** next to "Start Workspace" — opens the launch dialog (base branch / skill / plan-mode / skip-review)
+  - **Status dropdown** offers 7 statuses: Backlog, Todo, In Progress, In Review, AI Reviewed, Done, Cancelled
 - **Status: DONE**
 
 ### F-TASK-02: Kanban Board View
 - Visual board with columns (statuses) and draggable cards
-- Statuses are per-project (Todo, In Progress, In Review, Done, Cancelled)
+- Statuses are per-project (Todo, In Progress, In Review, AI Reviewed, Done, Cancelled); the board has a dedicated **AI Reviewed** column
 - **Backlog** is a special-purpose status: issues with Backlog status appear in the Backlog slide-in panel rather than a regular board column
 - HTML5 drag-and-drop between columns
 - Collapsible archive group for Done/Cancelled columns
@@ -265,14 +274,27 @@ Complete inventory of features, organized by category. Status reflects the curre
 - **Status: DONE**
 
 ### F-UI-04: Keyboard Shortcuts
-- `/` to search, `Escape` to close/clear, `?` for help overlay
-- `Ctrl+K` for command palette, `Ctrl+Enter` to send chat message to agent
-- `c` to create issue, `w` to create issue + start workspace
-- `q` to open Quick Tasks panel
-- `b` to switch to Board view, `g` to switch to Graph view, `t` to switch to Table view, `f` to switch to Timeline view, `l` to switch to Agents view
-- Additional views (Metrics, Butler, Workflows, Insights, Swimlane, Flaky) are reachable by clicking their tabs in the board view switcher
-- `g + s` to open Settings
-- Help overlay (`?`) lists all shortcuts
+- The in-app `?` overlay is the ground truth; the keys below match it exactly:
+  - `/` Focus search
+  - `Ctrl+K` Command palette
+  - `Escape` Close panel / clear search
+  - `?` Show keyboard shortcuts
+  - `c` Create new issue
+  - `w` New issue + start workspace
+  - `q` Open Quick Tasks panel
+  - `Shift+V` Start voice inbox (record idea → Backlog issue)
+  - `b` Switch to Board view
+  - `g` Switch to Graph view
+  - `t` Switch to Table view
+  - `f` Switch to Timeline view
+  - `l` Switch to Agents view
+  - `m` Switch to Metrics view
+  - `i` Switch to Butler chat
+  - `p` Switch to Swimlane view
+  - `a` Toggle All Workspaces panel
+  - `g → s` Open Settings
+- `Ctrl+Enter` sends a chat message to the agent (not in the overlay; used inside chat inputs)
+- The Workflows, Insights, and Flaky Tests views have no dedicated shortcut — reach them by clicking their tabs in the board view switcher
 - **Status: DONE**
 
 ### F-UI-05: Dark/Light Theme
@@ -388,6 +410,10 @@ Complete inventory of features, organized by category. Status reflects the curre
 - Time-range toggle: 7d / 30d / 90d / All
 - KPI cards: Total Sessions; Success Rate (with N successful); Total Cost (in $); Total Tokens
 - Sortable **By Skill** table and sortable **By Model** table, columns: Skill/Model, Sessions, Success Rate, Avg Cost, Total Cost, Avg Tokens, Avg Turns, P50 Duration, P95 Duration
+- Sortable **By Issue Type** table (columns: Type, Sessions, Success%, Avg Cost)
+- Sortable **By Priority** table (columns: Priority, Sessions, Success%, Avg Cost)
+- **Daily Cost Trend** chart with a configurable window (e.g. "30 day window"), a peak label (e.g. "Peak $45.6434"), and a date range; bars/points carry per-day tooltips of the form "YYYY-MM-DD: $X (N sessions)"
+- **Top 10 Most Expensive Sessions** table (columns: Issue, Skill, Model, Cost, Tokens, Turns, Duration, Started); each row is clickable (opens the issue) and shows the session's success state
 - **Status: DONE**
 
 ### F-UI-20: Workflows View
@@ -413,6 +439,12 @@ Complete inventory of features, organized by category. Status reflects the curre
 - Empty state: "No flaky tests detected — Tests appear here when they pass in some sessions and fail in others within the same window. Ingest test results via POST /api/flaky-tests/parse."
 - Footer: "0 flaky tests detected · 5%–95% failure rate required" and "MCP: list_flaky_tests"
 - Corresponds to the closed "Flaky test radar" ticket #58
+- **Status: DONE**
+
+### F-UI-23: Voice Inbox
+- "Voice" button in the board toolbar and the `Shift+V` keyboard shortcut both start the voice inbox
+- Records a spoken idea and files it as a new issue in the **Backlog**
+- Voice-to-Butler (routing a spoken idea to the Butler assistant) is a separate, in-progress effort (open ticket #106); the voice-inbox-to-Backlog capability described here is DONE
 - **Status: DONE**
 
 ## Category: Infrastructure
