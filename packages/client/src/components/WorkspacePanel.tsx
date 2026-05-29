@@ -86,6 +86,7 @@ const STATUS_COLORS: Record<string, string> = {
   active: "bg-green-100 text-green-700",
   reviewing: "bg-accent-50 text-accent-700 dark:bg-accent-900/40 dark:text-accent-300",
   idle: "bg-yellow-100 text-yellow-700",
+  "awaiting-plan-approval": "bg-amber-100 text-amber-700",
   error: "bg-red-100 text-red-700",
   closed: "bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400",
 };
@@ -300,6 +301,11 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
   const [latestCommits, setLatestCommits] = useState<Record<string, { sha: string; message: string } | null>>({});
   const [handoffContent, setHandoffContent] = useState<Record<string, string | null>>({});
   const [retryDecisions, setRetryDecisions] = useState<RetryDecision[]>([]);
+  const [planContent, setPlanContent] = useState<Record<string, string | null>>({});
+  const [planEditMode, setPlanEditMode] = useState<Record<string, boolean>>({});
+  const [planEditText, setPlanEditText] = useState<Record<string, string>>({});
+  const [rejectMode, setRejectMode] = useState<Record<string, boolean>>({});
+  const [rejectFeedback, setRejectFeedback] = useState<Record<string, string>>({});
 
   const [monitorRunning, setMonitorRunning] = useState(false);
   const [requiresReview, setRequiresReview] = useState(false);
@@ -447,6 +453,21 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
         }),
       );
       setHandoffContent(handoffs);
+      // Fetch plan content for workspaces awaiting plan approval
+      const plans: Record<string, string | null> = {};
+      await Promise.all(
+        data.filter(ws => ws.pendingPlanPath && ws.workingDir).map(async (ws) => {
+          try {
+            const result = await apiFetch<{ content: string | null }>(
+              `/api/workspaces/${ws.id}/plan`,
+            );
+            plans[ws.id] = result.content;
+          } catch {
+            plans[ws.id] = null;
+          }
+        }),
+      );
+      setPlanContent(plans);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load workspaces");
     } finally {
@@ -950,16 +971,43 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
     }
   }
 
-  async function handleImplementPlan(wsId: string) {
+  async function handleImplementPlan(wsId: string, updatedPlanContent?: string) {
     setActionLoading(true);
     setError(null);
     try {
-      const result = await apiFetch<{ sessionId: string }>(`/api/workspaces/${wsId}/implement-plan`, { method: "POST" });
+      const body: Record<string, unknown> = {};
+      if (updatedPlanContent !== undefined) body.planContent = updatedPlanContent;
+      const result = await apiFetch<{ sessionId: string }>(`/api/workspaces/${wsId}/implement-plan`, {
+        method: "POST",
+        ...(Object.keys(body).length > 0 ? { body: JSON.stringify(body) } : {}),
+      });
       setActiveSession(result.sessionId);
       setCompletedMessages([]);
+      setPlanEditMode((prev) => ({ ...prev, [wsId]: false }));
+      setPlanEditText((prev) => ({ ...prev, [wsId]: "" }));
       await fetchWorkspaces();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to start implementation");
+    } finally {
+      setActionLoading(false);
+    }
+  }
+
+  async function handleRejectPlan(wsId: string, feedback: string) {
+    setActionLoading(true);
+    setError(null);
+    try {
+      const result = await apiFetch<{ sessionId: string }>(`/api/workspaces/${wsId}/reject-plan`, {
+        method: "POST",
+        body: JSON.stringify({ feedback }),
+      });
+      setActiveSession(result.sessionId);
+      setCompletedMessages([]);
+      setRejectMode((prev) => ({ ...prev, [wsId]: false }));
+      setRejectFeedback((prev) => ({ ...prev, [wsId]: "" }));
+      await fetchWorkspaces();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to reject plan");
     } finally {
       setActionLoading(false);
     }
@@ -1966,6 +2014,110 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                           Worktree directory unavailable -- some actions are disabled.
                         </p>
                       )}
+                      {/* Plan Approval Card */}
+                      {ws.pendingPlanPath && ws.workingDir && ws.status !== "closed" && !isRunning && (
+                        <div className="border border-amber-300 dark:border-amber-700 rounded-lg bg-amber-50 dark:bg-amber-950 p-3 space-y-2">
+                          <div className="flex items-center gap-2">
+                            <span className="text-amber-600 dark:text-amber-400 font-semibold text-sm">📋 Plan Ready for Review</span>
+                            <span className="text-xs text-amber-500 dark:text-amber-500">({ws.pendingPlanPath})</span>
+                          </div>
+                          {planContent[ws.id] ? (
+                            planEditMode[ws.id] ? (
+                              <textarea
+                                value={planEditText[ws.id] ?? planContent[ws.id] ?? ""}
+                                onChange={(e) => setPlanEditText((prev) => ({ ...prev, [ws.id]: e.target.value }))}
+                                className="w-full text-xs font-mono border border-amber-300 dark:border-amber-700 rounded px-2 py-1.5 bg-white dark:bg-gray-900 focus:outline-none focus:ring-1 focus:ring-amber-500 resize-y min-h-[200px]"
+                                rows={12}
+                              />
+                            ) : (
+                              <div className="bg-white dark:bg-gray-900 rounded border border-amber-200 dark:border-amber-800 p-2 max-h-64 overflow-y-auto">
+                                <pre className="text-xs font-mono whitespace-pre-wrap text-gray-800 dark:text-gray-200">{planContent[ws.id]}</pre>
+                              </div>
+                            )
+                          ) : (
+                            <p className="text-xs text-amber-600 dark:text-amber-400">Plan file not loaded.</p>
+                          )}
+                          {rejectMode[ws.id] ? (
+                            <div className="space-y-1.5">
+                              <label className="text-xs font-medium text-amber-700 dark:text-amber-400">Rejection feedback for agent:</label>
+                              <textarea
+                                value={rejectFeedback[ws.id] ?? ""}
+                                onChange={(e) => setRejectFeedback((prev) => ({ ...prev, [ws.id]: e.target.value }))}
+                                placeholder="Explain what's wrong with the plan and how to improve it..."
+                                className="w-full text-xs border border-amber-300 dark:border-amber-700 rounded px-2 py-1.5 bg-white dark:bg-gray-900 focus:outline-none focus:ring-1 focus:ring-amber-500 resize-y"
+                                rows={3}
+                              />
+                              <div className="flex gap-2">
+                                <button
+                                  onClick={() => handleRejectPlan(ws.id, rejectFeedback[ws.id] || "Please revise the plan.")}
+                                  disabled={actionLoading}
+                                  className="text-sm bg-red-600 text-white px-3 py-1.5 rounded hover:bg-red-700 disabled:opacity-50 font-medium"
+                                >
+                                  Send Rejection
+                                </button>
+                                <button
+                                  onClick={() => setRejectMode((prev) => ({ ...prev, [ws.id]: false }))}
+                                  disabled={actionLoading}
+                                  className="text-sm bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 px-3 py-1.5 rounded hover:bg-gray-300 dark:hover:bg-gray-600 disabled:opacity-50"
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="flex gap-2 flex-wrap">
+                              {planEditMode[ws.id] ? (
+                                <>
+                                  <button
+                                    onClick={() => handleImplementPlan(ws.id, planEditText[ws.id] ?? planContent[ws.id] ?? "")}
+                                    disabled={actionLoading}
+                                    className="text-sm bg-green-600 text-white px-3 py-1.5 rounded hover:bg-green-700 disabled:opacity-50 font-medium"
+                                  >
+                                    ✓ Save &amp; Implement
+                                  </button>
+                                  <button
+                                    onClick={() => setPlanEditMode((prev) => ({ ...prev, [ws.id]: false }))}
+                                    disabled={actionLoading}
+                                    className="text-sm bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 px-3 py-1.5 rounded hover:bg-gray-300 dark:hover:bg-gray-600 disabled:opacity-50"
+                                  >
+                                    Cancel Edit
+                                  </button>
+                                </>
+                              ) : (
+                                <>
+                                  <button
+                                    onClick={() => handleImplementPlan(ws.id)}
+                                    disabled={actionLoading}
+                                    className="text-sm bg-green-600 text-white px-3 py-1.5 rounded hover:bg-green-700 disabled:opacity-50 font-medium"
+                                    title="Approve plan and start implementation"
+                                  >
+                                    ✓ Approve
+                                  </button>
+                                  <button
+                                    onClick={() => {
+                                      setPlanEditMode((prev) => ({ ...prev, [ws.id]: true }));
+                                      setPlanEditText((prev) => ({ ...prev, [ws.id]: planContent[ws.id] ?? "" }));
+                                    }}
+                                    disabled={actionLoading}
+                                    className="text-sm bg-amber-500 text-white px-3 py-1.5 rounded hover:bg-amber-600 disabled:opacity-50 font-medium"
+                                    title="Edit the plan before approving"
+                                  >
+                                    ✎ Edit &amp; Approve
+                                  </button>
+                                  <button
+                                    onClick={() => setRejectMode((prev) => ({ ...prev, [ws.id]: true }))}
+                                    disabled={actionLoading}
+                                    className="text-sm bg-red-500 text-white px-3 py-1.5 rounded hover:bg-red-600 disabled:opacity-50 font-medium"
+                                    title="Reject plan and send feedback to agent for re-planning"
+                                  >
+                                    ✗ Reject
+                                  </button>
+                                </>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      )}
                       <div className="flex gap-2 flex-wrap">
                         {ws.workingDir && canResume(ws, sessions) && (
                           <div className="flex gap-1">
@@ -2005,16 +2157,6 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                               ⚡
                             </button>
                           </div>
-                        )}
-                        {ws.pendingPlanPath && ws.workingDir && ws.status !== "closed" && !isRunning && (
-                          <button
-                            onClick={() => handleImplementPlan(ws.id)}
-                            disabled={actionLoading}
-                            className="text-sm bg-green-600 text-white px-3 py-1.5 rounded hover:bg-green-700 disabled:opacity-50 font-medium"
-                            title={`A plan was written to ${ws.pendingPlanPath}. Review it in the diff, then accept to start implementation.`}
-                          >
-                            Accept &amp; Implement Plan
-                          </button>
                         )}
                         {!ws.isDirect && ws.workingDir && ws.status !== "closed" && !isRunning && (
                           <button
