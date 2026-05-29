@@ -25,7 +25,8 @@ export async function startServer(port?: number, hostname?: string) {
   app.onError(domainErrorHandler);
 
   const { injectWebSocket, upgradeWebSocket } = createNodeWebSocket({ app });
-  const boardEvents = createBoardEvents(upgradeWebSocket);
+  const boardEvents = createBoardEvents();
+  boardEvents.startCleanup();
   let runWorkflowOnExit: ReturnType<typeof createWorkflowEngine>["runWorkflowOnExit"] = async () => {};
   let autoMerge: ReturnType<typeof createAutoMerge> = async () => {};
   const sessionManager = createSessionManager(upgradeWebSocket, {
@@ -43,7 +44,7 @@ export async function startServer(port?: number, hostname?: string) {
 
   await runStartupTasks(sessionManager, { agentService });
   await runSessionRestore(workflow);
-  setupRoutes(app, { sessionManager, boardEvents, reviewSessionIds: workflow.reviewSessionIds, fixAndMergeSessionIds: workflow.fixAndMergeSessionIds, db });
+  setupRoutes(app, { sessionManager, boardEvents, reviewSessionIds: workflow.reviewSessionIds, fixAndMergeSessionIds: workflow.fixAndMergeSessionIds, db, upgradeWebSocket });
 
   const serverPort = port || Number(process.env.PORT) || 3001;
   const serverHost = hostname || process.env.KANBAN_HOST || "127.0.0.1";

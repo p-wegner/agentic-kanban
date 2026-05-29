@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createBoardEvents } from "../services/board-events.js";
+import { createBoardWsRoute } from "../routes/board-ws.js";
 
 function createMockWs(readyState = 1) {
   return {
@@ -9,15 +10,11 @@ function createMockWs(readyState = 1) {
   } as any;
 }
 
-function createMockUpgradeWebSocket() {
-  return (callback: any) => callback;
-}
-
 describe("board-events", () => {
   let boardEvents: ReturnType<typeof createBoardEvents>;
 
   beforeEach(() => {
-    boardEvents = createBoardEvents(createMockUpgradeWebSocket());
+    boardEvents = createBoardEvents();
   });
 
   describe("subscribe / unsubscribe", () => {
@@ -25,7 +22,7 @@ describe("board-events", () => {
       const ws = createMockWs();
       boardEvents.subscribe("proj-1", ws);
       // Should not throw; broadcast should reach this subscriber
-      boardEvents.broadcast("proj-1", "test");
+      boardEvents.broadcast("proj-1", "board_changed");
       expect(ws.send).toHaveBeenCalledTimes(1);
     });
 
@@ -33,7 +30,7 @@ describe("board-events", () => {
       const ws = createMockWs();
       boardEvents.subscribe("proj-1", ws);
       boardEvents.unsubscribe("proj-1", ws);
-      boardEvents.broadcast("proj-1", "test");
+      boardEvents.broadcast("proj-1", "board_changed");
       expect(ws.send).not.toHaveBeenCalled();
     });
 
@@ -47,7 +44,7 @@ describe("board-events", () => {
       const ws2 = createMockWs();
       boardEvents.subscribe("proj-1", ws1);
       boardEvents.subscribe("proj-1", ws2);
-      boardEvents.broadcast("proj-1", "test");
+      boardEvents.broadcast("proj-1", "board_changed");
       expect(ws1.send).toHaveBeenCalledTimes(1);
       expect(ws2.send).toHaveBeenCalledTimes(1);
     });
@@ -57,7 +54,7 @@ describe("board-events", () => {
       boardEvents.subscribe("proj-1", ws);
       boardEvents.unsubscribe("proj-1", ws);
       // No subscribers left; broadcast should be a no-op
-      boardEvents.broadcast("proj-1", "test");
+      boardEvents.broadcast("proj-1", "board_changed");
       expect(ws.send).not.toHaveBeenCalled();
     });
 
@@ -66,7 +63,7 @@ describe("board-events", () => {
       const ws2 = createMockWs();
       boardEvents.subscribe("proj-1", ws1);
       boardEvents.subscribe("proj-2", ws2);
-      boardEvents.broadcast("proj-1", "test");
+      boardEvents.broadcast("proj-1", "board_changed");
       expect(ws1.send).toHaveBeenCalledTimes(1);
       expect(ws2.send).not.toHaveBeenCalled();
     });
@@ -84,12 +81,12 @@ describe("board-events", () => {
     it("does not send to disconnected clients (readyState !== 1)", () => {
       const ws = createMockWs(3); // CLOSED
       boardEvents.subscribe("proj-1", ws);
-      boardEvents.broadcast("proj-1", "test");
+      boardEvents.broadcast("proj-1", "board_changed");
       expect(ws.send).not.toHaveBeenCalled();
     });
 
     it("does nothing for projects with no subscribers", () => {
-      expect(() => boardEvents.broadcast("no-subs", "test")).not.toThrow();
+      expect(() => boardEvents.broadcast("no-subs", "board_changed")).not.toThrow();
     });
   });
 
@@ -146,20 +143,45 @@ describe("board-events", () => {
     });
   });
 
-  describe("wsRoute", () => {
-    it("returns a route handler that subscribes on open and unsubscribes on close", () => {
+  describe("cleanupStaleConnections", () => {
+    it("removes closed WebSocket entries (readyState !== 1)", () => {
+      const wsOpen = createMockWs(1);
+      const wsClosed = createMockWs(3); // CLOSED
+      boardEvents.subscribe("proj-1", wsOpen);
+      boardEvents.subscribe("proj-1", wsClosed);
+
+      boardEvents.cleanupStaleConnections();
+      boardEvents.broadcast("proj-1", "board_changed");
+
+      expect(wsOpen.send).toHaveBeenCalledTimes(1);
+      expect(wsClosed.send).not.toHaveBeenCalled();
+    });
+
+    it("removes empty project entries after cleanup", () => {
+      const ws = createMockWs(3); // CLOSED
+      boardEvents.subscribe("proj-1", ws);
+      boardEvents.cleanupStaleConnections();
+      // No error, broadcast is a no-op for removed project
+      expect(() => boardEvents.broadcast("proj-1", "board_changed")).not.toThrow();
+      expect(ws.send).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("createBoardWsRoute", () => {
+    it("subscribes on open and unsubscribes on close", () => {
       const ws = createMockWs();
-      const handler = boardEvents.wsRoute();
+      const upgradeWebSocket = (callback: any) => callback;
+      const handler = createBoardWsRoute(upgradeWebSocket, boardEvents);
       const ctx = { req: { param: () => "proj-1" } };
       const result = handler(ctx);
       result.onOpen({}, ws);
       // Should be subscribed now
-      boardEvents.broadcast("proj-1", "test");
+      boardEvents.broadcast("proj-1", "issue_created");
       expect(ws.send).toHaveBeenCalledTimes(1);
 
       result.onClose({}, ws);
       // Should be unsubscribed
-      boardEvents.broadcast("proj-1", "test2");
+      boardEvents.broadcast("proj-1", "workspace_merged");
       expect(ws.send).toHaveBeenCalledTimes(1); // still 1, not 2
     });
   });
