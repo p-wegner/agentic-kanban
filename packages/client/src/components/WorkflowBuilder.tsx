@@ -338,6 +338,15 @@ export function WorkflowBuilder({
               <label className="block text-xs">Max visits (0 = unlimited)
                 <input type="number" min={0} value={selectedNode.data.maxVisits} onChange={(e) => patchNode(selectedNode.id, { maxVisits: Number(e.target.value) || 0 })} className="w-full mt-0.5 border rounded px-2 py-1 dark:bg-gray-800 dark:border-gray-600" />
               </label>
+              {selectedNode.data.nodeType === "parallel-fork" && (
+                <label className="block text-xs">Fork mode
+                  <select value={readForkMode(selectedNode.data.config)} onChange={(e) => patchNode(selectedNode.id, { config: writeForkMode(selectedNode.data.config, e.target.value) })} className="w-full mt-0.5 border rounded px-2 py-1 dark:bg-gray-800 dark:border-gray-600">
+                    <option value="worktree">Worktree — each branch its own worktree (parallel)</option>
+                    <option value="shared">Shared — one worktree/branch (sequential)</option>
+                  </select>
+                  <span className="block text-[10px] text-gray-400 mt-0.5">Shared runs stages one at a time on the same branch (each commits before the next starts) — independent agents can't safely share a git index concurrently.</span>
+                </label>
+              )}
               {selectedNode.data.nodeType === "parallel-join" && (
                 <label className="block text-xs">Join strategy
                   <select value={readJoinStrategy(selectedNode.data.config)} onChange={(e) => patchNode(selectedNode.id, { config: writeJoinStrategy(selectedNode.data.config, e.target.value) })} className="w-full mt-0.5 border rounded px-2 py-1 dark:bg-gray-800 dark:border-gray-600">
@@ -382,6 +391,20 @@ function writeJoinStrategy(config: string | null, strategy: string): string | nu
   let obj: Record<string, unknown> = {};
   if (config) { try { obj = JSON.parse(config) as Record<string, unknown>; } catch { obj = {}; } }
   if (strategy === "merge") obj.joinStrategy = "merge"; else delete obj.joinStrategy;
+  return Object.keys(obj).length ? JSON.stringify(obj) : null;
+}
+
+/** Read the fork mode from a node's JSON config (defaults to "worktree"). */
+function readForkMode(config: string | null): string {
+  if (!config) return "worktree";
+  try { return (JSON.parse(config) as { forkMode?: string }).forkMode === "shared" ? "shared" : "worktree"; }
+  catch { return "worktree"; }
+}
+/** Write the fork mode into a node's JSON config, preserving other keys. */
+function writeForkMode(config: string | null, mode: string): string | null {
+  let obj: Record<string, unknown> = {};
+  if (config) { try { obj = JSON.parse(config) as Record<string, unknown>; } catch { obj = {}; } }
+  if (mode === "shared") obj.forkMode = "shared"; else delete obj.forkMode;
   return Object.keys(obj).length ? JSON.stringify(obj) : null;
 }
 

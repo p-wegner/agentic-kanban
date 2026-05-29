@@ -181,6 +181,29 @@ export function getJoinStrategy(config: string | null): JoinStrategy {
 }
 
 /**
+ * How a parallel-fork node runs its children:
+ *  - "worktree" (default): each child gets its own git worktree + branch (forked
+ *    from the parent branch HEAD) and they run concurrently; the join consolidates.
+ *  - "shared": children run SEQUENTIALLY in the parent's worktree on the parent's
+ *    branch — each commits its contribution before the next starts. Suits additive
+ *    work (e.g. each stage appends a different research doc) with no merge step.
+ *    (Sequential, not parallel: independent agent processes can't share one git
+ *    index safely — concurrent commits would collide on .git/index.lock.)
+ */
+export type ForkMode = "worktree" | "shared";
+
+/** Parse the `forkMode` out of a (fork) node's JSON config. Defaults to "worktree". */
+export function getForkMode(config: string | null): ForkMode {
+  if (!config) return "worktree";
+  try {
+    const parsed = JSON.parse(config) as { forkMode?: string };
+    return parsed.forkMode === "shared" ? "shared" : "worktree";
+  } catch {
+    return "worktree";
+  }
+}
+
+/**
  * Resolve which workflow template an issue should use, in priority order:
  *  1. An explicit template id (validated against project/global scope),
  *  2. The project-scoped default for the issue's ticket type,
