@@ -67,6 +67,8 @@ export interface CreateIssueRequest {
   projectId: string;
   skipAutoReview?: boolean;
   estimate?: IssueEstimate;
+  /** Optional configurable-workflow template; null/omitted = auto-route by ticket type. */
+  workflowTemplateId?: string | null;
 }
 
 export interface UpdateIssueRequest {

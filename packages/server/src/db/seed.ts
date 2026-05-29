@@ -69,6 +69,9 @@ export async function seed() {
 
   await ensureBuiltinSkills();
 
+  const { ensureBuiltinWorkflows } = await import("./builtin-workflows.js");
+  await ensureBuiltinWorkflows();
+
   console.log('Run `agentic-kanban init <path>` to register a git repo as a project.');
 }
 

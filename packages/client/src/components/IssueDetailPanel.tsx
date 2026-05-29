@@ -5,6 +5,15 @@ import { apiFetch } from "../lib/api.js";
 import { formatRelativeTime } from "../lib/formatRelativeTime.js";
 import { showToast } from "./Toast.js";
 import { MoveToDoneDialog } from "./MoveToDoneDialog.js";
+import { WorkflowProgress } from "./WorkflowProgress.js";
+
+// Some issues were created via MCP/CLI calls whose JSON descriptions ended up
+// with literal `\n` / `\t` sequences rather than real newlines. Unescape when
+// the string has no real newlines so ReactMarkdown can render headings/lists.
+function normalizeMarkdown(s: string): string {
+  if (s.includes("\n")) return s;
+  return s.replace(/\\n/g, "\n").replace(/\\t/g, "\t");
+}
 
 interface StatusOption {
   id: string;
@@ -702,7 +711,7 @@ export function IssueDetailPanel({
               {descriptionMode === "preview" ? (
                 description ? (
                   <div className="markdown-body min-h-[6rem] border border-gray-200 dark:border-gray-700 rounded px-2 py-1.5">
-                    <ReactMarkdown>{description}</ReactMarkdown>
+                    <ReactMarkdown>{normalizeMarkdown(description)}</ReactMarkdown>
                   </div>
                 ) : (
                   <p className="text-sm text-gray-400 dark:text-gray-500 italic min-h-[6rem] border border-gray-200 dark:border-gray-700 rounded px-2 py-1.5">Nothing to preview.</p>
@@ -753,7 +762,7 @@ export function IssueDetailPanel({
               </>
             ) : issue.description ? (
               <div className="markdown-body">
-                <ReactMarkdown>{issue.description}</ReactMarkdown>
+                <ReactMarkdown>{normalizeMarkdown(issue.description)}</ReactMarkdown>
               </div>
             ) : (
               <p className="text-sm text-gray-400 dark:text-gray-500 italic">
@@ -994,6 +1003,7 @@ export function IssueDetailPanel({
                       Fix with AI
                     </button>
                   )}
+                  <WorkflowProgress workspaceId={issue.workspaceSummary.main.id} />
                 </div>
               ) : (
                 <div className="flex items-center gap-2">

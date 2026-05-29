@@ -22,6 +22,8 @@ export const workspaces = sqliteTable("workspaces", {
   model: text("model"),
   pendingPlanPath: text("pending_plan_path"),
   skillId: text("skill_id").references(() => agentSkills.id),
+  // The workflow node this workspace's agent is currently executing.
+  currentNodeId: text("current_node_id"),
   includeVisualProof: integer("include_visual_proof", { mode: "boolean" }).notNull().default(false),
   createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
   updatedAt: text("updated_at").notNull().$defaultFn(() => new Date().toISOString()),

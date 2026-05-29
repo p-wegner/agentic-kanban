@@ -10,10 +10,11 @@ interface Skill {
   description: string | null;
 }
 
-interface Skill {
+interface WorkflowTemplate {
   id: string;
   name: string;
-  description: string | null;
+  ticketType: string | null;
+  isDefault: boolean;
 }
 
 export interface CreateIssueFormState {
@@ -54,6 +55,9 @@ export function CreateIssueForm({
   const [isDirect, setIsDirect] = useState(false);
   const [skillId, setSkillId] = useState<string>(initialState?.skillId ?? "");
   const [skills, setSkills] = useState<Skill[]>([]);
+  const [templates, setTemplates] = useState<WorkflowTemplate[]>([]);
+  const [workflowTemplateId, setWorkflowTemplateId] = useState<string>("");
+  const [autoTemplateId, setAutoTemplateId] = useState<string>("");
   const titleRef = useRef<HTMLTextAreaElement>(null);
   const descRef = useRef<HTMLTextAreaElement>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -75,6 +79,30 @@ export function CreateIssueForm({
       .then(setSkills)
       .catch(() => {});
   }, [startWorkspace, projectId]);
+
+  // Load workflow templates available to this project (global + project-scoped).
+  useEffect(() => {
+    if (!projectId) return;
+    apiFetch<WorkflowTemplate[]>(`/api/workflows/templates?projectId=${projectId}`)
+      .then(setTemplates)
+      .catch(() => {});
+  }, [projectId]);
+
+  // Resolve the default template for the chosen ticket type. While the user
+  // hasn't overridden the picker, follow the auto-resolved default.
+  useEffect(() => {
+    if (!projectId) return;
+    apiFetch<{ templateId: string | null }>(
+      `/api/workflows/resolve?projectId=${projectId}&issueType=${issueType}`,
+    )
+      .then((r) => {
+        const resolved = r.templateId ?? "";
+        setWorkflowTemplateId((prev) => (prev === "" || prev === autoTemplateId ? resolved : prev));
+        setAutoTemplateId(resolved);
+      })
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId, issueType]);
 
   async function handleEnhance() {
     if (!title.trim() || enhancing) return;
@@ -113,6 +141,7 @@ export function CreateIssueForm({
         issueType,
         statusId,
         projectId,
+        workflowTemplateId: workflowTemplateId || undefined,
         startWorkspace: startWorkspace || undefined,
         planMode: (startWorkspace && planMode) || undefined,
         skipAutoReview: (startWorkspace && skipAutoReview) || undefined,
@@ -187,6 +216,24 @@ export function CreateIssueForm({
         <option value="feature">Feature</option>
         <option value="chore">Chore</option>
       </select>
+      {templates.length > 0 && (
+        <div className="flex items-center gap-2">
+          <label className="text-xs text-gray-600 dark:text-gray-400 shrink-0" title="The workflow graph this issue flows through. Defaults to the ticket type's workflow.">
+            Workflow:
+          </label>
+          <select
+            value={workflowTemplateId}
+            onChange={(e) => setWorkflowTemplateId(e.target.value)}
+            className="flex-1 text-xs border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:bg-gray-900 dark:text-gray-100"
+          >
+            {templates.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.name}{t.id === autoTemplateId ? " (default)" : ""}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
       {canStartWorkspace && (
         <label className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400 cursor-pointer">
           <input

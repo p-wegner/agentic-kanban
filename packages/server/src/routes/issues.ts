@@ -104,6 +104,7 @@ export function createIssuesRoute(database: Database = db, options?: { boardEven
       estimate: body.estimate,
       sortOrder: body.sortOrder,
       statusId: body.statusId,
+      workflowTemplateId: body.workflowTemplateId,
     });
     return c.json(result, 201);
   });

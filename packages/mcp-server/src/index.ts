@@ -44,6 +44,7 @@ import { registerButlerInterrupt } from "./tools/butler-interrupt.js";
 import { registerButlerSetModel } from "./tools/butler-set-model.js";
 import { registerButlerSetProfile } from "./tools/butler-set-profile.js";
 import { registerButlerState } from "./tools/butler-state.js";
+import { registerProposeTransition } from "./tools/propose-transition.js";
 
 const TOOL_REGISTRARS: Record<string, (server: McpServer) => void> = {
   get_context: registerGetContext,
@@ -86,6 +87,7 @@ const TOOL_REGISTRARS: Record<string, (server: McpServer) => void> = {
   butler_set_model: registerButlerSetModel,
   butler_set_profile: registerButlerSetProfile,
   butler_state: registerButlerState,
+  propose_transition: registerProposeTransition,
 };
 
 async function getDisabledTools(): Promise<Set<string>> {

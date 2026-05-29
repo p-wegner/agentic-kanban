@@ -40,6 +40,7 @@ export interface CreateIssueInput {
   estimate?: string | null;
   sortOrder?: number;
   statusId?: string;
+  workflowTemplateId?: string | null;
 }
 
 export interface CreateIssueResult {
@@ -77,6 +78,7 @@ export function createIssueService(deps: {
       skipAutoReview: input.skipAutoReview ?? false,
       estimate: input.estimate ?? null,
       sortOrder: input.sortOrder ?? 0,
+      workflowTemplateId: input.workflowTemplateId ?? null,
       statusId,
       projectId: input.projectId,
       createdAt: now,
@@ -168,6 +170,7 @@ export function createIssueService(deps: {
     if (body.estimate !== undefined) updates.estimate = body.estimate;
     if (body.skipAutoReview !== undefined) updates.skipAutoReview = body.skipAutoReview;
     if (body.dueDate !== undefined) updates.dueDate = body.dueDate;
+    if (body.workflowTemplateId !== undefined) updates.workflowTemplateId = body.workflowTemplateId;
 
     await database.update(issues).set(updates).where(eq(issues.id, id));
 

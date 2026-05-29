@@ -82,10 +82,13 @@ export async function runMigrations(): Promise<void> {
 
   try {
     const { ensureBuiltinTags, ensureBuiltinSkills } = await import("../db/seed.js");
+    const { ensureBuiltinWorkflows } = await import("../db/builtin-workflows.js");
     await ensureBuiltinTags(db);
     await ensureBuiltinSkills(db);
+    // Built-in skills must be seeded first — workflow nodes resolve skills by name.
+    await ensureBuiltinWorkflows(db);
   } catch (err) {
-    console.warn("[startup] ensureBuiltinTags/Skills failed (non-fatal):", err instanceof Error ? err.message : String(err));
+    console.warn("[startup] ensureBuiltinTags/Skills/Workflows failed (non-fatal):", err instanceof Error ? err.message : String(err));
   }
 
   try {

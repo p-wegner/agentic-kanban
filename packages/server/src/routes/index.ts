@@ -10,6 +10,7 @@ import { createApprovalsRoute } from "./approvals.js";
 import { createScheduledRunsRoute } from "./scheduled-runs.js";
 import { createButlerRoute } from "./butler.js";
 import { createAgentQuestionsRoute } from "./agent-questions.js";
+import { createWorkflowsRoute } from "./workflows.js";
 import type { Database } from "../db/index.js";
 import type { SessionManager } from "../services/session.manager.js";
 import type { BoardEvents } from "../services/board-events.js";
@@ -33,6 +34,7 @@ export function createRoutes(database: Database, getSessionManager: () => Sessio
   routes.route("/tags", createTagsRoute(database));
   routes.route("/preferences", createPreferencesRoute(database));
   routes.route("/agent-skills", createAgentSkillsRoute(database));
+  routes.route("/workflows", createWorkflowsRoute(database, options));
   routes.route("/scheduled-runs", createScheduledRunsRoute(database, options?.serverPort));
   if (options?.boardEvents) {
     routes.route("/approvals", createApprovalsRoute(options.boardEvents));

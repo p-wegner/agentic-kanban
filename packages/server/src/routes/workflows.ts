@@ -1,0 +1,212 @@
+import { db } from "../db/index.js";
+import type { Database } from "../db/index.js";
+import {
+  workflowTemplates,
+  workflowNodes,
+  workflowEdges,
+  workflowTransitions,
+  issues,
+  workspaces,
+} from "@agentic-kanban/shared/schema";
+import { eq, asc, sql } from "drizzle-orm";
+import {
+  proposeTransition,
+  resolveTemplateForIssue,
+  getOutgoingTransitions,
+} from "@agentic-kanban/shared/lib/workflow-engine";
+import { createRouter } from "../middleware/create-router.js";
+import { parseJsonBody } from "../middleware/parse-body.js";
+import type { BoardEvents } from "../services/board-events.js";
+
+interface WorkflowsRouteOptions {
+  boardEvents?: BoardEvents;
+}
+
+/** Load a template's nodes + edges as a graph payload. */
+async function loadGraph(database: Database, templateId: string) {
+  const [nodes, edges] = await Promise.all([
+    database
+      .select()
+      .from(workflowNodes)
+      .where(eq(workflowNodes.templateId, templateId))
+      .orderBy(asc(workflowNodes.sortOrder)),
+    database
+      .select()
+      .from(workflowEdges)
+      .where(eq(workflowEdges.templateId, templateId))
+      .orderBy(asc(workflowEdges.sortOrder)),
+  ]);
+  return { nodes, edges };
+}
+
+export function createWorkflowsRoute(database: Database = db, options?: WorkflowsRouteOptions) {
+  const router = createRouter();
+  const boardEvents = options?.boardEvents;
+
+  // GET /api/workflows/templates?projectId=&ticketType=&graph=1
+  // Lists global + project-scoped templates; ?graph=1 embeds nodes + edges.
+  router.get("/templates", async (c) => {
+    const projectId = c.req.query("projectId");
+    const ticketType = c.req.query("ticketType");
+    const withGraph = c.req.query("graph") === "1";
+
+    const rows = await database
+      .select()
+      .from(workflowTemplates)
+      .where(
+        projectId
+          ? sql`${workflowTemplates.projectId} = ${projectId} OR ${workflowTemplates.projectId} IS NULL`
+          : sql`1 = 1`,
+      );
+
+    let filtered = rows;
+    if (ticketType) {
+      filtered = rows.filter((r) => r.ticketType === ticketType || r.ticketType === null);
+    }
+
+    if (!withGraph) {
+      return c.json(filtered);
+    }
+    const withGraphs = await Promise.all(
+      filtered.map(async (t) => ({ ...t, ...(await loadGraph(database, t.id)) })),
+    );
+    return c.json(withGraphs);
+  });
+
+  // GET /api/workflows/templates/:id — full graph for one template.
+  router.get("/templates/:id", async (c) => {
+    const id = c.req.param("id");
+    const rows = await database
+      .select()
+      .from(workflowTemplates)
+      .where(eq(workflowTemplates.id, id))
+      .limit(1);
+    if (rows.length === 0) return c.json({ error: "Template not found" }, 404);
+    const graph = await loadGraph(database, id);
+    return c.json({ ...rows[0], ...graph });
+  });
+
+  // GET /api/workflows/resolve?issueId= — which template an issue uses (for the create picker default).
+  router.get("/resolve", async (c) => {
+    const issueId = c.req.query("issueId");
+    const projectId = c.req.query("projectId");
+    const issueType = c.req.query("issueType");
+    if (issueId) {
+      const rows = await database
+        .select({
+          projectId: issues.projectId,
+          issueType: issues.issueType,
+          workflowTemplateId: issues.workflowTemplateId,
+        })
+        .from(issues)
+        .where(eq(issues.id, issueId))
+        .limit(1);
+      if (rows.length === 0) return c.json({ error: "Issue not found" }, 404);
+      const templateId = await resolveTemplateForIssue(database, {
+        projectId: rows[0].projectId,
+        issueType: rows[0].issueType,
+        explicitTemplateId: rows[0].workflowTemplateId,
+      });
+      return c.json({ templateId });
+    }
+    if (projectId) {
+      const templateId = await resolveTemplateForIssue(database, {
+        projectId,
+        issueType: issueType ?? null,
+      });
+      return c.json({ templateId });
+    }
+    return c.json({ error: "issueId or projectId required" }, 400);
+  });
+
+  // GET /api/workflows/workspaces/:id/progress — current node + transition history + graph.
+  router.get("/workspaces/:id/progress", async (c) => {
+    const workspaceId = c.req.param("id");
+    const wsRows = await database
+      .select({
+        id: workspaces.id,
+        issueId: workspaces.issueId,
+        currentNodeId: workspaces.currentNodeId,
+      })
+      .from(workspaces)
+      .where(eq(workspaces.id, workspaceId))
+      .limit(1);
+    if (wsRows.length === 0) return c.json({ error: "Workspace not found" }, 404);
+    const ws = wsRows[0];
+
+    const issueRows = await database
+      .select({ workflowTemplateId: issues.workflowTemplateId })
+      .from(issues)
+      .where(eq(issues.id, ws.issueId))
+      .limit(1);
+    const templateId = issueRows[0]?.workflowTemplateId ?? null;
+
+    const transitions = await database
+      .select()
+      .from(workflowTransitions)
+      .where(eq(workflowTransitions.workspaceId, workspaceId))
+      .orderBy(asc(workflowTransitions.createdAt));
+
+    const graph = templateId ? await loadGraph(database, templateId) : { nodes: [], edges: [] };
+    const currentNode = ws.currentNodeId
+      ? graph.nodes.find((n) => n.id === ws.currentNodeId) ?? null
+      : null;
+    const nextTransitions = ws.currentNodeId
+      ? await getOutgoingTransitions(database, ws.currentNodeId)
+      : [];
+
+    return c.json({
+      workspaceId,
+      templateId,
+      currentNodeId: ws.currentNodeId,
+      currentNode,
+      nextTransitions,
+      transitions,
+      ...graph,
+    });
+  });
+
+  // POST /api/workflows/workspaces/:id/transition — manual transition (UI-driven).
+  router.post("/workspaces/:id/transition", async (c) => {
+    const workspaceId = c.req.param("id");
+    const body = await parseJsonBody(c);
+    const { toNodeId, toNodeName, summary } = body as {
+      toNodeId?: string;
+      toNodeName?: string;
+      summary?: string;
+    };
+    if (!toNodeId && !toNodeName) {
+      return c.json({ error: "toNodeId or toNodeName is required" }, 400);
+    }
+    const result = await proposeTransition(database, {
+      workspaceId,
+      toNodeId,
+      toNodeName,
+      summary,
+      triggeredBy: "manual",
+    });
+    if (!result.ok) {
+      return c.json({ error: result.error }, 400);
+    }
+
+    // Notify the board so the UI reflects the new stage/status.
+    const projRows = await database
+      .select({ projectId: issues.projectId })
+      .from(workspaces)
+      .innerJoin(issues, eq(workspaces.issueId, issues.id))
+      .where(eq(workspaces.id, workspaceId))
+      .limit(1);
+    if (projRows[0]?.projectId) {
+      boardEvents?.broadcast(projRows[0].projectId, "workflow_transition");
+    }
+
+    return c.json({
+      ok: true,
+      movedTo: result.toNode?.name,
+      status: result.statusName,
+      nextStages: (result.nextTransitions ?? []).map((t) => t.toNodeName),
+    });
+  });
+
+  return router;
+}
