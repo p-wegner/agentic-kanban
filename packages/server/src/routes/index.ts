@@ -12,6 +12,7 @@ import { createButlerRoute } from "./butler.js";
 import { createAgentQuestionsRoute } from "./agent-questions.js";
 import { createWorkflowsRoute } from "./workflows.js";
 import { createVoiceCaptureRoute } from "./voice-capture.js";
+import { createFailurePatternsRoute } from "./failure-patterns.js";
 import { createWorkflowForkService } from "../services/workflow-fork.service.js";
 import type { Database } from "../db/index.js";
 import type { SessionManager } from "../services/session.manager.js";
@@ -49,6 +50,7 @@ export function createRoutes(database: Database, getSessionManager: () => Sessio
   routes.route("/agent-skills", createAgentSkillsRoute(database));
   routes.route("/workflows", createWorkflowsRoute(database, { ...options, onWorkflowAdvanced }));
   routes.route("/scheduled-runs", createScheduledRunsRoute(database, getSessionManager, options?.boardEvents));
+  routes.route("/failure-patterns", createFailurePatternsRoute(database));
   if (options?.boardEvents) {
     routes.route("/approvals", createApprovalsRoute(options.boardEvents));
   }

@@ -116,6 +116,34 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge }:
       if (learningSessionIds.has(sessionId)) { learningSessionIds.delete(sessionId); console.log(`[workflow] learning step session ${sessionId} completed  no further workflow action`); return; }
       if (exitCode !== 0) {
         emitButlerSystemEvent({ projectId, kind: "session_failed", workspaceId, text: `Agent session for workspace ${workspaceId} ended with non-zero exit code ${exitCode}.` });
+        // Surface similar past failures as a board comment
+        try {
+          const { extractSessionStderr, findSimilarFailures } = await import("../services/failure-pattern.service.js");
+          const stderrText = await extractSessionStderr(sessionId);
+          if (stderrText.trim()) {
+            const matches = await findSimilarFailures(stderrText);
+            if (matches.length > 0) {
+              const commentLines = [
+                `🔍 **Failure pattern memory**: this session's errors resemble past incidents:`,
+                ...matches.map((m, i) =>
+                  `${i + 1}. **${m.pattern.title}** (${Math.round(m.score * 100)}% match)` +
+                  (m.pattern.rootCause ? `\n   _Root cause_: ${m.pattern.rootCause.slice(0, 200)}` : "") +
+                  (m.pattern.fix ? `\n   _Fix_: ${m.pattern.fix.slice(0, 200)}` : "") +
+                  (m.pattern.sourceRef ? `\n   _Source_: ${m.pattern.sourceRef}` : ""),
+                ),
+              ];
+              const { createDiffComment } = await import("../repositories/session.repository.js");
+              await createDiffComment(
+                workspaceId,
+                { filePath: ".failure-patterns", body: commentLines.join("\n\n"), lineNumOld: null, lineNumNew: null },
+                db,
+              );
+              boardEvents.broadcast(projectId, "issue_updated");
+            }
+          }
+        } catch (fpErr) {
+          console.warn("[workflow] failure-pattern match failed (non-fatal):", fpErr instanceof Error ? fpErr.message : String(fpErr));
+        }
         return;
       }
       if (reviewSessionIds.has(sessionId)) {

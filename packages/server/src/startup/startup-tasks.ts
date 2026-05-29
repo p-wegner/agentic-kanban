@@ -63,7 +63,7 @@ export async function killOrphanedServers(): Promise<void> {
   }
 }
 
-/** Run database migrations, seed built-in tags and skills, deduplicate projects, and disable auto_monitor. */
+/** Run database migrations, seed built-in tags and skills, deduplicate projects, disable auto_monitor, and backfill failure patterns. */
 export async function runMigrations(): Promise<void> {
   // Cheap insurance: a verified snapshot before any schema change.
   try {
@@ -102,6 +102,21 @@ export async function runMigrations(): Promise<void> {
   await db.insert(preferences).values({ key: "auto_monitor", value: "false", updatedAt: now })
     .onConflictDoUpdate({ target: preferences.key, set: { value: "false", updatedAt: now } });
   console.log("[startup] auto_monitor disabled — re-enable in Settings → Workflow → Board Monitoring");
+
+  // Backfill failure patterns from docs/learnings/ in all registered projects (non-fatal)
+  try {
+    const { backfillFromLearnings } = await import("../services/failure-pattern.service.js");
+    const { resolve: pathResolve } = await import("node:path");
+    const projRows = await db.select({ repoPath: projects.repoPath }).from(projects);
+    for (const { repoPath } of projRows) {
+      if (!repoPath) continue;
+      const learningsDir = pathResolve(repoPath, "docs", "learnings");
+      const count = await backfillFromLearnings(learningsDir, db);
+      if (count > 0) console.log(`[startup] failure-pattern backfill: ingested ${count} learning(s) from ${learningsDir}`);
+    }
+  } catch (err) {
+    console.warn("[startup] failure-pattern backfill failed (non-fatal):", err instanceof Error ? err.message : String(err));
+  }
 }
 
 /** Clean up stale sessions and reattach surviving agent processes. */
