@@ -39,6 +39,13 @@ const issueTypeColors: Record<string, string> = {
   chore: "bg-amber-100 dark:bg-amber-900/50 text-amber-800 dark:text-amber-200",
 };
 
+const priorityColors: Record<string, string> = {
+  critical: "bg-red-100 dark:bg-red-900/50 text-red-700 dark:text-red-300",
+  high: "bg-orange-100 dark:bg-orange-900/50 text-orange-700 dark:text-orange-300",
+  medium: "bg-yellow-100 dark:bg-yellow-900/50 text-yellow-700 dark:text-yellow-300",
+  low: "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400",
+};
+
 interface TagBadge {
   id: string;
   name: string;
@@ -83,6 +90,7 @@ function HighlightedText({ text, query }: { text: string; query: string }) {
 
 export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, onDragStart, onMoveToNext, nextStatusName, tags, searchQuery, liveActivity, liveStats, todos, isPendingWorkspace }: IssueCardProps) {
   const typeBadgeColor = issue.issueType ? (issueTypeColors[issue.issueType] ?? null) : null;
+  const priorityBadgeColor = issue.priority && issue.priority !== "medium" ? (priorityColors[issue.priority] ?? null) : null;
   const ws = issue.workspaceSummary;
   const hasActiveWorkspace = ws?.main && ws.main.status !== "closed";
   const [depDragOver, setDepDragOver] = useState(false);
@@ -167,6 +175,11 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
         {typeBadgeColor && (
           <span className={`inline-block text-xs font-medium px-1.5 py-0.5 rounded capitalize ${typeBadgeColor}`}>
             {issue.issueType}
+          </span>
+        )}
+        {priorityBadgeColor && (
+          <span className={`inline-block text-xs font-medium px-1.5 py-0.5 rounded capitalize ${priorityBadgeColor}`}>
+            {issue.priority}
           </span>
         )}
         {issue.estimate && (
