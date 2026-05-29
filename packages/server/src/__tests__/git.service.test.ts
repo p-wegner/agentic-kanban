@@ -252,3 +252,197 @@ describe("GitService", () => {
     expect(fsExists(mergeHeadPath)).toBe(false);
   });
 });
+
+describe("autoRenumberMigrations", () => {
+  const DRIZZLE_DIR = "packages/shared/drizzle";
+  const JOURNAL_REL = `${DRIZZLE_DIR}/meta/_journal.json`;
+
+  /** Build a repo whose `main` has the drizzle dir + the given base migrations. */
+  async function createMigrationRepo(
+    baseMigrations: { tag: string; when: number }[],
+  ): Promise<string> {
+    const { writeFileSync, mkdirSync } = await import("node:fs");
+    const dir = await mkdtemp(join(tmpdir(), "kanban-renumber-test-"));
+    await exec("git", ["init"], dir);
+    await exec("git", ["config", "user.email", "test@test.com"], dir);
+    await exec("git", ["config", "user.name", "Test"], dir);
+
+    mkdirSync(join(dir, DRIZZLE_DIR, "meta"), { recursive: true });
+    for (const m of baseMigrations) {
+      writeFileSync(join(dir, DRIZZLE_DIR, `${m.tag}.sql`), `-- ${m.tag}\nSELECT 1;\n`);
+    }
+    const journal = {
+      version: "7",
+      dialect: "sqlite",
+      entries: baseMigrations.map((m, idx) => ({
+        idx,
+        version: "6",
+        when: m.when,
+        tag: m.tag,
+        breakpoints: true,
+      })),
+    };
+    writeFileSync(join(dir, ...JOURNAL_REL.split("/")), JSON.stringify(journal, null, 2) + "\n");
+    writeFileSync(join(dir, "README.md"), "# Test\n");
+    await exec("git", ["add", "."], dir);
+    await exec("git", ["commit", "-m", "base migrations"], dir);
+    try { await exec("git", ["branch", "-M", "main"], dir); } catch { /* already main */ }
+    return dir;
+  }
+
+  /** Add migrations on a feature branch's worktree, append journal entries, and commit. */
+  async function addFeatureMigrations(
+    worktreePath: string,
+    migrations: { tag: string; when: number }[],
+  ): Promise<void> {
+    const { writeFileSync, readFileSync } = await import("node:fs");
+    const journalPath = join(worktreePath, ...JOURNAL_REL.split("/"));
+    const journal = JSON.parse(readFileSync(journalPath, "utf-8"));
+    let idx = journal.entries.length;
+    for (const m of migrations) {
+      writeFileSync(join(worktreePath, DRIZZLE_DIR, `${m.tag}.sql`), `-- ${m.tag}\nSELECT 2;\n`);
+      journal.entries.push({ idx: idx++, version: "6", when: m.when, tag: m.tag, breakpoints: true });
+    }
+    writeFileSync(journalPath, JSON.stringify(journal, null, 2) + "\n");
+    await exec("git", ["add", "."], worktreePath);
+    await exec("git", ["config", "user.email", "test@test.com"], worktreePath);
+    await exec("git", ["config", "user.name", "Test"], worktreePath);
+    await exec("git", ["commit", "-m", "feature migrations"], worktreePath);
+  }
+
+  /** Read journal tags from the working tree of a worktree. */
+  async function readJournalTags(worktree: string): Promise<string[]> {
+    const { readFileSync } = await import("node:fs");
+    const j = JSON.parse(readFileSync(join(worktree, ...JOURNAL_REL.split("/")), "utf-8"));
+    return j.entries.map((e: { tag: string }) => e.tag);
+  }
+
+  /** Read journal tags from a git ref (after a plumbing merge the working tree is untouched). */
+  async function readJournalTagsAtRef(repo: string, ref: string): Promise<string[]> {
+    const raw = (await exec("git", ["show", `${ref}:${JOURNAL_REL}`], repo)).toString();
+    const j = JSON.parse(raw);
+    return j.entries.map((e: { tag: string }) => e.tag);
+  }
+
+  it("is a no-op when the feature branch added no migrations", async () => {
+    const repo = await createMigrationRepo([{ tag: "0000_base", when: 1000 }]);
+    try {
+      const wt = await gitService.createWorktree(repo, "feature/no-mig", "main");
+      const { writeFileSync } = await import("node:fs");
+      writeFileSync(join(wt, "README.md"), "# Test\nchange\n");
+      await exec("git", ["add", "."], wt);
+      await exec("git", ["config", "user.email", "test@test.com"], wt);
+      await exec("git", ["config", "user.name", "Test"], wt);
+      await exec("git", ["commit", "-m", "non-migration change"], wt);
+
+      const headBefore = (await exec("git", ["rev-parse", "HEAD"], wt)).trim();
+      const result = await gitService.autoRenumberMigrations(wt, repo, "main");
+      const headAfter = (await exec("git", ["rev-parse", "HEAD"], wt)).trim();
+
+      expect(result.renumbered).toBe(false);
+      expect(result.renames).toEqual([]);
+      expect(headAfter).toBe(headBefore); // no commit made
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  }, 30000);
+
+  it("renumbers a single colliding migration and the merge then succeeds cleanly", async () => {
+    // Branch A added 0001_a and merged. Branch B (older) also added 0001_b.
+    const repo = await createMigrationRepo([{ tag: "0000_base", when: 1000 }]);
+    try {
+      const wtA = await gitService.createWorktree(repo, "feature/A", "main");
+      await addFeatureMigrations(wtA, [{ tag: "0001_a", when: 2000 }]);
+      await gitService.removeWorktree(repo, wtA);
+      await gitService.mergeBranch(repo, "feature/A", "main");
+
+      const mainBeforeA = (await exec("git", ["rev-parse", "main^"], repo)).trim();
+      await exec("git", ["branch", "feature/B", mainBeforeA], repo);
+      const wtB = await gitService.createWorktree(repo, "feature/B");
+      await addFeatureMigrations(wtB, [{ tag: "0001_b", when: 2001 }]);
+
+      const result = await gitService.autoRenumberMigrations(wtB, repo, "main");
+
+      expect(result.renumbered).toBe(true);
+      expect(result.renames).toEqual([{ from: "0001_b.sql", to: "0002_b.sql" }]);
+
+      const { existsSync: fsE } = await import("node:fs");
+      expect(fsE(join(wtB, DRIZZLE_DIR, "0002_b.sql"))).toBe(true);
+      expect(fsE(join(wtB, DRIZZLE_DIR, "0001_b.sql"))).toBe(false);
+
+      // Journal shares base's prefix then appends the renumbered entry.
+      expect(await readJournalTags(wtB)).toEqual(["0000_base", "0001_a", "0002_b"]);
+
+      // The merge that used to conflict now succeeds.
+      await gitService.removeWorktree(repo, wtB);
+      await expect(gitService.mergeBranch(repo, "feature/B", "main")).resolves.toContain("Merge");
+      expect(await readJournalTagsAtRef(repo, "main")).toEqual(["0000_base", "0001_a", "0002_b"]);
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  }, 40000);
+
+  it("renumbers MULTIPLE feature migrations without clobbering (0001+0002 vs base 0001)", async () => {
+    const repo = await createMigrationRepo([{ tag: "0000_base", when: 1000 }]);
+    try {
+      const wtA = await gitService.createWorktree(repo, "feature/A", "main");
+      await addFeatureMigrations(wtA, [{ tag: "0001_a", when: 2000 }]);
+      await gitService.removeWorktree(repo, wtA);
+      await gitService.mergeBranch(repo, "feature/A", "main");
+
+      const mainBeforeA = (await exec("git", ["rev-parse", "main^"], repo)).trim();
+      await exec("git", ["branch", "feature/B", mainBeforeA], repo);
+      const wtB = await gitService.createWorktree(repo, "feature/B");
+      await addFeatureMigrations(wtB, [
+        { tag: "0001_b", when: 2001 },
+        { tag: "0002_c", when: 2002 },
+      ]);
+
+      const result = await gitService.autoRenumberMigrations(wtB, repo, "main");
+
+      expect(result.renumbered).toBe(true);
+      // 0001_b -> 0002_b, 0002_c -> 0003_c (both shifted up, executed without clobber)
+      expect(result.renames).toEqual([
+        { from: "0001_b.sql", to: "0002_b.sql" },
+        { from: "0002_c.sql", to: "0003_c.sql" },
+      ]);
+      expect(await readJournalTags(wtB)).toEqual(["0000_base", "0001_a", "0002_b", "0003_c"]);
+
+      const { existsSync: fsE } = await import("node:fs");
+      expect(fsE(join(wtB, DRIZZLE_DIR, "0002_b.sql"))).toBe(true);
+      expect(fsE(join(wtB, DRIZZLE_DIR, "0003_c.sql"))).toBe(true);
+
+      await gitService.removeWorktree(repo, wtB);
+      await expect(gitService.mergeBranch(repo, "feature/B", "main")).resolves.toContain("Merge");
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  }, 40000);
+
+  it("is idempotent - a second renumber after a successful one is a no-op", async () => {
+    const repo = await createMigrationRepo([{ tag: "0000_base", when: 1000 }]);
+    try {
+      const wtA = await gitService.createWorktree(repo, "feature/A", "main");
+      await addFeatureMigrations(wtA, [{ tag: "0001_a", when: 2000 }]);
+      await gitService.removeWorktree(repo, wtA);
+      await gitService.mergeBranch(repo, "feature/A", "main");
+
+      const mainBeforeA = (await exec("git", ["rev-parse", "main^"], repo)).trim();
+      await exec("git", ["branch", "feature/B", mainBeforeA], repo);
+      const wtB = await gitService.createWorktree(repo, "feature/B");
+      await addFeatureMigrations(wtB, [{ tag: "0001_b", when: 2001 }]);
+
+      const first = await gitService.autoRenumberMigrations(wtB, repo, "main");
+      expect(first.renumbered).toBe(true);
+      const headAfterFirst = (await exec("git", ["rev-parse", "HEAD"], wtB)).trim();
+
+      const second = await gitService.autoRenumberMigrations(wtB, repo, "main");
+      const headAfterSecond = (await exec("git", ["rev-parse", "HEAD"], wtB)).trim();
+
+      expect(second.renumbered).toBe(false);
+      expect(headAfterSecond).toBe(headAfterFirst); // no new commit
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  }, 40000);
+});
