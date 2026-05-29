@@ -160,6 +160,27 @@ export function getNodeGuidance(config: string | null): string | null {
 }
 
 /**
+ * How a parallel-join node consolidates its fork children:
+ *  - "artifacts" (default): collect each child branch's diff into an artifacts
+ *    file and let the join agent merge them by hand.
+ *  - "merge": the server auto-merges every child branch back into the parent
+ *    branch at the join (ideal for additive, non-conflicting work like each
+ *    child writing a different research doc).
+ */
+export type JoinStrategy = "artifacts" | "merge";
+
+/** Parse the `joinStrategy` out of a (join) node's JSON config. Defaults to "artifacts". */
+export function getJoinStrategy(config: string | null): JoinStrategy {
+  if (!config) return "artifacts";
+  try {
+    const parsed = JSON.parse(config) as { joinStrategy?: string };
+    return parsed.joinStrategy === "merge" ? "merge" : "artifacts";
+  } catch {
+    return "artifacts";
+  }
+}
+
+/**
  * Resolve which workflow template an issue should use, in priority order:
  *  1. An explicit template id (validated against project/global scope),
  *  2. The project-scoped default for the issue's ticket type,
