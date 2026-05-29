@@ -30,7 +30,6 @@ Use the **agentic-kanban MCP** tools (prefix: `mcp__agentic-kanban__`) to keep t
 | `list_sessions` | List sessions for a workspace |
 | `read_terminal` | Read last N lines of terminal output for a session |
 | `get_session_stats` | Get token usage, cost, and duration for a session |
-| `propose_transition` | Advance workspace to the next workflow stage (call after each stage is done) |
 
 ## Step-by-Step Workflow
 
@@ -84,20 +83,6 @@ Some workspaces have `isDirect: true` — the agent is working directly on the p
 4. Reference the issue in the commit if appropriate
 
 Do NOT leave uncommitted changes in the worktree. If you have made changes, commit them before moving to the next step.
-
-### 5b. Advance the workflow stage (REQUIRED for workflow-graph issues)
-After committing, call `propose_transition` to advance the workflow to the Review stage. This is what triggers the auto-review agent for branched workspaces — **skipping it leaves the board stuck**.
-
-```
-propose_transition({
-  workspaceId: "<workspaceId from your workflow instructions>",
-  toNodeName: "Review",
-  summary: "Implemented <brief description>",
-  testsPassed: true   // or false if tests failed
-})
-```
-
-The tool returns `nextStages` showing where the workflow can go next, and `terminal: true` when the workflow is complete. If the issue has no workflow graph (no `workspaceId` in instructions), skip this step.
 
 ### 6. Run a code review
 **Every workspace must be reviewed before closing — no exceptions.** How the review happens depends on the workspace type:
