@@ -1,4 +1,4 @@
-import { issues, preferences, projectStatuses, workspaces } from "@agentic-kanban/shared/schema";
+import { issues, preferences, projectStatuses, workflowNodes, workspaces } from "@agentic-kanban/shared/schema";
 import { eq, sql } from "drizzle-orm";
 import type { Hono } from "hono";
 import { db } from "../db/index.js";
@@ -51,7 +51,8 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort }: 
       if (activeStatusIds.length === 0) return;
       const candidates = await db.select({ wsId: workspaces.id, wsStatus: workspaces.status, workingDir: workspaces.workingDir, isDirect: workspaces.isDirect, projectId: issues.projectId, issueId: issues.id, issueTitle: issues.title, issueNumber: issues.issueNumber, issueStatusName: projectStatuses.name, baseBranch: workspaces.baseBranch, readyForMerge: workspaces.readyForMerge }).from(workspaces)
         .innerJoin(issues, eq(workspaces.issueId, issues.id)).innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
-        .where(sql`${workspaces.status} != 'closed' AND ${issues.statusId} IN (${sql.join(activeStatusIds.map((id) => sql`${id}`), sql`, `)})`);
+        .leftJoin(workflowNodes, eq(issues.currentNodeId, workflowNodes.id))
+        .where(sql`${workspaces.status} != 'closed' AND ${issues.statusId} IN (${sql.join(activeStatusIds.map((id) => sql`${id}`), sql`, `)}) AND (${issues.currentNodeId} IS NULL OR ${workflowNodes.nodeType} != 'end')`);
       Object.assign(cycleStats, await processWorkspaceCandidates(candidates, {
         sessionManager,
         boardEvents,
