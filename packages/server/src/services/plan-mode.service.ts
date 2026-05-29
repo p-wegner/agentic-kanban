@@ -36,3 +36,13 @@ export function buildImplementPrompt(): string {
     "Do not merely restate the plan; carry it out.",
   ].join(" ");
 }
+
+/** Prompt sent to the agent when a plan is rejected so it can revise and re-submit. */
+export function buildRejectPrompt(feedback: string): string {
+  return [
+    `Your plan in \`${PLAN_FILE}\` was reviewed and **rejected** by the user.`,
+    `\n\nUser feedback:\n${feedback}`,
+    `\n\nPlease revise your plan based on this feedback and write an updated plan to \`${PLAN_FILE}\`.`,
+    "When done, stop — do not start implementing yet.",
+  ].join("");
+}

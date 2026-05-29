@@ -58,7 +58,22 @@ export function createWorkspaceActionsRoute(
   // POST /api/workspaces/:id/implement-plan
   router.post("/:id/implement-plan", async (c) => {
     const id = c.req.param("id");
-    return c.json(await workspaceService.implementPlan(id), 201);
+    const body = await parseOptionalJsonBody<{ planContent?: string }>(c);
+    return c.json(await workspaceService.implementPlan(id, body.planContent), 201);
+  });
+
+  // GET /api/workspaces/:id/plan
+  router.get("/:id/plan", async (c) => {
+    const id = c.req.param("id");
+    return c.json(await workspaceService.getPlanContent(id));
+  });
+
+  // POST /api/workspaces/:id/reject-plan
+  router.post("/:id/reject-plan", async (c) => {
+    const id = c.req.param("id");
+    const body = await parseJsonBody(c);
+    if (!body.feedback) return c.json({ error: "feedback is required" }, 400);
+    return c.json(await workspaceService.rejectPlan(id, body.feedback as string), 201);
   });
 
   // GET /api/workspaces/:id/latest-commit

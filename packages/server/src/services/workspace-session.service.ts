@@ -1,9 +1,10 @@
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { writeFileSync } from "node:fs";
+import { writeFileSync, readFileSync, existsSync } from "node:fs";
 import { spawn, spawnSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
-import { issues, sessions, workspaces } from "@agentic-kanban/shared/schema";
+import { issues, sessions, sessionMessages, workspaces } from "@agentic-kanban/shared/schema";
 import type { Database } from "../db/index.js";
 import type { SessionManager } from "./session.manager.js";
 import type { BoardEvents } from "./board-events.js";
@@ -20,7 +21,7 @@ import {
   getWorkspaceSkillName,
 } from "../repositories/session.repository.js";
 import { getPreference } from "../repositories/preferences.repository.js";
-import { buildImplementPrompt } from "./plan-mode.service.js";
+import { buildImplementPrompt, buildRejectPrompt, writePlanFile, PLAN_FILE } from "./plan-mode.service.js";
 import {
   WorkspaceError,
   applyWorkspaceAgentSelection,
@@ -203,11 +204,16 @@ export function createWorkspaceSessionService(deps: {
     return { stopped };
   }
 
-  async function implementPlan(id: string): Promise<{ sessionId: string }> {
+  async function implementPlan(id: string, updatedPlanContent?: string): Promise<{ sessionId: string }> {
     const ws0 = await getWorkspaceById(id, database);
     if (!ws0) throw new WorkspaceError("Workspace not found", "NOT_FOUND");
     if (!ws0.pendingPlanPath) throw new WorkspaceError("No pending plan to implement", "CONFLICT");
     if (!getSessionManager) throw new WorkspaceError("Session manager not available", "BAD_REQUEST");
+
+    // If the user edited the plan, overwrite PLAN.md before the agent runs
+    if (updatedPlanContent !== undefined && ws0.workingDir) {
+      writePlanFile(ws0.workingDir, updatedPlanContent);
+    }
 
     const { agentCommand, agentArgs, claudeProfile, profile: agentProfile, provider: agentProvider, permissionPromptTool } =
       applyWorkspaceAgentSelection(await loadAgentSettings(database, undefined), ws0);
@@ -225,10 +231,73 @@ export function createWorkspaceSessionService(deps: {
       provider: agentProvider, updatedAt: now,
     }).where(eq(workspaces.id, id));
 
+    // Audit trail: record approval as a session message
+    const approvalMsg = updatedPlanContent !== undefined
+      ? "[Plan gate] User approved plan with edits and started implementation."
+      : "[Plan gate] User approved plan and started implementation.";
+    await database.insert(sessionMessages).values({
+      sessionId,
+      type: "stdout",
+      data: approvalMsg,
+      exitCode: null,
+    }).catch((err) => console.warn("[plan-gate] audit message insert failed:", err));
+
     const projectId = await resolveProjectId(id, database);
     if (projectId) boardEvents?.broadcast(projectId, "session_launched");
 
     return { sessionId };
+  }
+
+  async function rejectPlan(id: string, feedback: string): Promise<{ sessionId: string }> {
+    const ws0 = await getWorkspaceById(id, database);
+    if (!ws0) throw new WorkspaceError("Workspace not found", "NOT_FOUND");
+    if (!ws0.pendingPlanPath) throw new WorkspaceError("No pending plan to reject", "CONFLICT");
+    if (!getSessionManager) throw new WorkspaceError("Session manager not available", "BAD_REQUEST");
+
+    const { agentCommand, agentArgs, claudeProfile, profile: agentProfile, provider: agentProvider, permissionPromptTool } =
+      applyWorkspaceAgentSelection(await loadAgentSettings(database, undefined), ws0);
+
+    const sessionId = await getSessionManager().startSession({
+      workspaceId: id, prompt: buildRejectPrompt(feedback), agentCommand, agentArgs, claudeProfile,
+      provider: toExecutorProvider(agentProvider), multiTurn: false, permissionPromptTool,
+      planMode: true, triggerType: "plan-reject", profile: agentProfile,
+    });
+
+    const now = new Date().toISOString();
+    await database.update(workspaces).set({
+      status: "active", pendingPlanPath: null, planMode: true,
+      claudeProfile: claudeProfile ?? null, agentCommand: agentCommand ?? null,
+      provider: agentProvider, updatedAt: now,
+    }).where(eq(workspaces.id, id));
+
+    // Audit trail: record rejection as a session message
+    await database.insert(sessionMessages).values({
+      sessionId,
+      type: "stdout",
+      data: `[Plan gate] User rejected plan. Feedback: ${feedback}`,
+      exitCode: null,
+    }).catch((err) => console.warn("[plan-gate] audit message insert failed:", err));
+
+    const projectId = await resolveProjectId(id, database);
+    if (projectId) boardEvents?.broadcast(projectId, "session_launched");
+
+    return { sessionId };
+  }
+
+  async function getPlanContent(id: string): Promise<{ content: string | null; path: string | null }> {
+    const ws0 = await getWorkspaceById(id, database);
+    if (!ws0) throw new WorkspaceError("Workspace not found", "NOT_FOUND");
+    if (!ws0.pendingPlanPath || !ws0.workingDir) return { content: null, path: null };
+
+    const planFilePath = join(ws0.workingDir, PLAN_FILE);
+    if (!existsSync(planFilePath)) return { content: null, path: ws0.pendingPlanPath };
+
+    try {
+      const content = readFileSync(planFilePath, "utf-8");
+      return { content, path: ws0.pendingPlanPath };
+    } catch {
+      return { content: null, path: ws0.pendingPlanPath };
+    }
   }
 
   async function openTerminal(id: string): Promise<{ workingDir: string; command: string }> {
@@ -276,5 +345,5 @@ export function createWorkspaceSessionService(deps: {
     return result.map(s => ({ ...s, skillName }));
   }
 
-  return { launchSession, sendTurn, stopWorkspace, implementPlan, openTerminal, openEditor, getSessions };
+  return { launchSession, sendTurn, stopWorkspace, implementPlan, rejectPlan, getPlanContent, openTerminal, openEditor, getSessions };
 }
