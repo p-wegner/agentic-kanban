@@ -77,6 +77,7 @@ export function BoardPage() {
   const [showBlocked, setShowBlocked] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showQuickTasks, setShowQuickTasks] = useState(false);
+  const [showMergeQueue, setShowMergeQueue] = useState(false);
   const [showWorktreeOverview, setShowWorktreeOverview] = useState(false);
   const [showAllWorkspaces, setShowAllWorkspaces] = useState(false);
   const [showMergeQueue, setShowMergeQueue] = useState(false);
@@ -1458,6 +1459,14 @@ export function BoardPage() {
           projectId={activeProjectId}
           onClose={() => setShowQuickTasks(false)}
           onLaunched={() => refetchBoard()}
+        />
+      )}
+      {showMergeQueue && activeProjectId && (
+        <MergeQueuePanel
+          columns={columns}
+          projectId={activeProjectId}
+          onClose={() => setShowMergeQueue(false)}
+          onMerged={() => refetchBoard()}
         />
       )}
       {showAllWorkspaces && (
