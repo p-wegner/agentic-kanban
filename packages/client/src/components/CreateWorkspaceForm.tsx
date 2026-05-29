@@ -61,6 +61,7 @@ export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCr
   );
   const [tddMode, setTddMode] = useState(prefs.tdd_mode === "true");
   const [skipSetup, setSkipSetup] = useState(false);
+  const [skipContextPacker, setSkipContextPacker] = useState(false);
   const [branches, setBranches] = useState<{ local: string[]; remote: string[] } | null>(null);
   const [availableSkills, setAvailableSkills] = useState<{ id: string; name: string; description: string }[]>([]);
   const [selectedSkillId, setSelectedSkillId] = useState<string>("");
@@ -142,7 +143,7 @@ export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCr
   async function handleSubmit() {
     if (!isDirect && !branchName.trim()) return;
 
-    const body: Record<string, unknown> = { issueId: issue.id, isDirect, requiresReview, planMode, tddMode, skipSetup };
+    const body: Record<string, unknown> = { issueId: issue.id, isDirect, requiresReview, planMode, tddMode, skipSetup, skipContextPacker };
     if (selectedSkillId) body.skillId = selectedSkillId;
     if (selectedProfile) {
       const colonIdx = selectedProfile.indexOf(":");
@@ -197,6 +198,7 @@ export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCr
     setPlanMode(false);
     setTddMode(false);
     setSkipSetup(false);
+    setSkipContextPacker(false);
     onCancel();
   }
 
@@ -317,6 +319,15 @@ export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCr
           <span>Skip setup script</span>
         </label>
       )}
+      <label className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400">
+        <input
+          type="checkbox"
+          checked={skipContextPacker}
+          onChange={(e) => setSkipContextPacker(e.target.checked)}
+          className="rounded border-gray-300"
+        />
+        <span>Skip context packer (faster for simple tasks)</span>
+      </label>
       {availableSkills.length > 0 && (
         <div>
           <label className="text-xs font-medium text-gray-600 dark:text-gray-400 block">

@@ -31,6 +31,8 @@ interface BoardToolbarProps {
   butlerBadgeCount?: number;
   projectId: string | null;
   onVoiceIssueCreated?: () => void;
+  onShowMergeQueue?: () => void;
+  mergeQueueCount?: number;
 }
 
 export function BoardToolbar({
@@ -58,6 +60,8 @@ export function BoardToolbar({
   butlerBadgeCount = 0,
   projectId,
   onVoiceIssueCreated,
+  onShowMergeQueue,
+  mergeQueueCount = 0,
 }: BoardToolbarProps) {
   const [showMonitorPopover, setShowMonitorPopover] = useState(false);
 
@@ -82,6 +86,23 @@ export function BoardToolbar({
         </svg>
         Tasks
       </button>
+      {onShowMergeQueue && (
+        <button
+          onClick={onShowMergeQueue}
+          title="Merge Queue — batch-merge ready workspaces in conflict-safe order"
+          className={`relative shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium border transition-colors bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800`}
+        >
+          <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
+          </svg>
+          Queue
+          {mergeQueueCount > 0 && (
+            <span className="absolute -top-1 -right-1 w-4 h-4 text-[10px] rounded-full bg-blue-600 text-white flex items-center justify-center font-bold">
+              {mergeQueueCount}
+            </span>
+          )}
+        </button>
+      )}
       <VoiceInboxButton projectId={projectId} onIssueCreated={onVoiceIssueCreated} />
       <div className="relative shrink-0 flex items-center gap-0.5">
         <button
