@@ -861,6 +861,14 @@ export function BoardPage() {
         setShowQuickTasks(true);
         return;
       }
+      // "V" (shift+v) to trigger voice inbox
+      if (e.key === "V" && e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        const target = e.target as HTMLElement;
+        if (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT") return;
+        e.preventDefault();
+        window.dispatchEvent(new CustomEvent("voice-inbox-trigger"));
+        return;
+      }
       // "c" to create issue, "w" to create issue + workspace
       if ((e.key === "c" || e.key === "w") && !e.ctrlKey && !e.metaKey && !e.altKey) {
         const target = e.target as HTMLElement;
@@ -1222,6 +1230,8 @@ export function BoardPage() {
           viewMode={viewMode}
           onViewModeChange={handleViewModeChange}
           butlerBadgeCount={agentQuestionsCount}
+          projectId={activeProjectId}
+          onVoiceIssueCreated={() => refetchBoard()}
         />
         {viewMode === "graph" && activeProjectId ? (
           <div className="flex-1 min-h-0">
