@@ -23,6 +23,7 @@
     "dev:server": "pnpm --filter agentic-kanban dev",
     "dev:client": "pnpm --filter client dev",
     "build": "pnpm --filter shared build && node scripts/build-server.mjs && node scripts/build-mcp.mjs && pnpm --filter client build && node scripts/copy-assets.mjs",
+    "typecheck": "pnpm --filter agentic-kanban exec tsc --noEmit && pnpm --filter @agentic-kanban/mcp-server exec tsc --noEmit",
     "test": "pnpm --filter agentic-kanban test",
     "test:mine": "node scripts/test-mine.mjs",
     "test:e2e": "pnpm --filter e2e test",
