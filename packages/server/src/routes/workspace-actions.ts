@@ -161,5 +161,26 @@ export function createWorkspaceActionsRoute(
     return c.json({ ok: true });
   });
 
+  // GET /api/workspaces/:id/scorecard
+  router.get("/:id/scorecard", async (c) => {
+    const id = c.req.param("id");
+    const { getScorecardFromDb, computeScorecard } = await import("../services/workspace-scorecard.service.js");
+    let scorecard = await getScorecardFromDb(id, database);
+    if (!scorecard) {
+      scorecard = await computeScorecard(id, database);
+    }
+    if (!scorecard) return c.json({ error: "Scorecard not available" }, 404);
+    return c.json(scorecard);
+  });
+
+  // POST /api/workspaces/:id/scorecard/refresh
+  router.post("/:id/scorecard/refresh", async (c) => {
+    const id = c.req.param("id");
+    const { computeScorecard } = await import("../services/workspace-scorecard.service.js");
+    const scorecard = await computeScorecard(id, database);
+    if (!scorecard) return c.json({ error: "Scorecard not available" }, 404);
+    return c.json(scorecard);
+  });
+
   return router;
 }

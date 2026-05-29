@@ -56,6 +56,19 @@ interface SessionStats {
   success: boolean;
 }
 
+interface ScorecardDimension {
+  name: string;
+  score: number;
+  maxScore: number;
+  signal: string;
+}
+
+interface ScorecardResult {
+  total: number;
+  dimensions: ScorecardDimension[];
+  computedAt: string;
+}
+
 interface WorkspacePanelProps {
   issue: IssueWithStatus;
   project: Project | null;
@@ -222,6 +235,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
   const dragStartRef = useRef<{ mouseX: number; mouseY: number; panelX: number; panelY: number } | null>(null);
   const [diff, setDiff] = useState<DiffResponse | null>(null);
   const [diffComments, setDiffComments] = useState<DiffComment[]>([]);
+  const [scorecard, setScorecard] = useState<ScorecardResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
   const [conflictState, setConflictState] = useState<{ hasConflicts: boolean; conflictingFiles: string[] } | null>(null);
@@ -436,6 +450,27 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
         if (result.conflicts) setConflictState(result.conflicts);
       })
       .catch(() => {});
+  }, [selectedWorkspace, workspaces]);
+
+  useEffect(() => {
+    if (!selectedWorkspace) {
+      setScorecard(null);
+      return;
+    }
+
+    let cancelled = false;
+    setScorecard(null);
+    apiFetch<ScorecardResult>(`/api/workspaces/${selectedWorkspace}/scorecard`)
+      .then((result) => {
+        if (!cancelled) setScorecard(result);
+      })
+      .catch(() => {
+        if (!cancelled) setScorecard(null);
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, [selectedWorkspace, workspaces]);
 
   async function handleQuickLaunch(withPlanMode: boolean) {
@@ -1316,6 +1351,42 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                     {ws.lastTool ? (
                       <span className="truncate" title={ws.lastTool}>{ws.lastTool}</span>
                     ) : null}
+                  </div>
+                )}
+
+                {isSelected && scorecard && (
+                  <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50 p-3 space-y-2">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <div className="text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide">Scorecard</div>
+                        <div className="text-xs text-gray-500 dark:text-gray-400">Updated {formatRelativeTime(scorecard.computedAt)}</div>
+                      </div>
+                      <span className={`inline-flex items-center px-2 py-1 rounded text-sm font-bold ${
+                        scorecard.total >= 80 ? "bg-green-100 text-green-700" :
+                        scorecard.total >= 60 ? "bg-yellow-100 text-yellow-700" :
+                        "bg-red-100 text-red-700"
+                      }`}>
+                        {scorecard.total}/100
+                      </span>
+                    </div>
+                    <div className="space-y-2">
+                      {scorecard.dimensions.map((dimension) => {
+                        const percent = Math.max(0, Math.min(100, (dimension.score / dimension.maxScore) * 100));
+                        const barColor = percent >= 80 ? "bg-green-500" : percent >= 60 ? "bg-yellow-500" : "bg-red-500";
+                        return (
+                          <div key={dimension.name} className="space-y-1">
+                            <div className="flex items-center justify-between gap-2 text-xs">
+                              <span className="font-medium text-gray-700 dark:text-gray-200">{dimension.name}</span>
+                              <span className="font-mono text-gray-500 dark:text-gray-400">{dimension.score}/{dimension.maxScore}</span>
+                            </div>
+                            <div className="h-2 rounded-full bg-gray-200 dark:bg-gray-700 overflow-hidden">
+                              <div className={`h-full rounded-full ${barColor}`} style={{ width: `${percent}%` }} />
+                            </div>
+                            <div className="text-[11px] text-gray-500 dark:text-gray-400">{dimension.signal}</div>
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
                 )}
 

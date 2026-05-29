@@ -279,6 +279,18 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
             )
           )}
           <span className="inline-flex items-center gap-1 text-[10px] font-mono shrink-0 ml-auto">
+            {ws.main.scorecard && (
+              <span
+                className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold shrink-0 ${
+                  ws.main.scorecard.score >= 80 ? "bg-green-100 text-green-700" :
+                  ws.main.scorecard.score >= 60 ? "bg-yellow-100 text-yellow-700" :
+                  "bg-red-100 text-red-700"
+                }`}
+                title={`PR Quality Score: ${ws.main.scorecard.score}/100`}
+              >
+                {ws.main.scorecard.score}
+              </span>
+            )}
             {ws.main.diffStats && liveActivity && (
               <>
                 <span className="text-green-600">+{ws.main.diffStats.insertions}</span>
