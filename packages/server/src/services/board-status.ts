@@ -123,7 +123,7 @@ export async function getBoardStatus(
   for (const issue of projectIssues) {
     const wsForIssue = wsByIssue.get(issue.id) ?? [];
     const mainWs = wsForIssue.sort((a, b) => {
-      const p = (s: string) => s === "active" ? 0 : s === "reviewing" ? 1 : s === "idle" ? 2 : 3;
+      const p = (s: string) => s === "active" ? 0 : s === "reviewing" ? 1 : s === "awaiting-plan-approval" ? 2 : s === "idle" ? 3 : 4;
       return p(a.status) - p(b.status) || (b.updatedAt ?? "").localeCompare(a.updatedAt ?? "");
     })[0] ?? null;
 
