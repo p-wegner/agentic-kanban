@@ -22,6 +22,7 @@ import {
   placeWorkspaceOnNode,
   findJoinNode,
   getJoinStrategy,
+  getForkMode,
   type WorkflowNodeRow,
 } from "@agentic-kanban/shared/lib/workflow-engine";
 import { writeAgentSkillFile, readLocalSkillPrompt, copySkillToWorktree } from "@agentic-kanban/shared/lib/agent-skill-files";
@@ -81,28 +82,39 @@ export function createWorkflowForkService(deps: {
 
   /** Actually create the worktree + workspace row + launch the child agent. */
   async function launchChild(params: {
-    parent: { id: string; issueId: string; branch: string };
+    parent: { id: string; issueId: string; branch: string; workingDir: string | null };
     project: { id: string; repoPath: string };
     issue: { issueNumber: number | null; title: string; description: string | null };
     forkNode: WorkflowNodeRow;
     joinNode: WorkflowNodeRow;
     entry: WorkflowNodeRow;
     childWorkspaceId: string;
+    /** Shared mode: run in the parent's worktree on the parent's branch (sequential). */
+    sharedWorktree: boolean;
   }): Promise<void> {
-    const { parent, project, issue, forkNode, joinNode, entry, childWorkspaceId } = params;
+    const { parent, project, issue, forkNode, joinNode, entry, childWorkspaceId, sharedWorktree } = params;
     const now = new Date().toISOString();
-    const childBranch = `${parent.branch}__fork-${entry.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
 
-    // Sub-worktree rooted at the parent branch's current HEAD.
-    const worktreePath = await gitService.createWorktree(project.repoPath, childBranch, parent.branch);
+    // Shared mode reuses the parent worktree + branch; worktree mode forks a new
+    // sub-worktree rooted at the parent branch's current HEAD.
+    const childBranch = sharedWorktree
+      ? parent.branch
+      : `${parent.branch}__fork-${entry.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
+    const worktreePath = sharedWorktree
+      ? (parent.workingDir ?? project.repoPath)
+      : await gitService.createWorktree(project.repoPath, childBranch, parent.branch);
 
     const skillName = await injectNodeSkill(entry, worktreePath, project.repoPath);
     const transitions = await getOutgoingTransitions(database, entry.id);
-    const prompt =
-      `You are working on a PARALLEL BRANCH of issue #${issue.issueNumber ?? "?"} — "${issue.title}".\n` +
-      `This is the "${entry.name}" branch of a fork; sibling branches run concurrently. Do ONLY this branch's work, commit it, then advance to the join stage so your work can be consolidated.\n\n` +
-      `${issue.description ?? ""}\n\n` +
-      buildTransitionBlock(entry, transitions, childWorkspaceId);
+    const prompt = sharedWorktree
+      ? `You are working on a SHARED worktree for issue #${issue.issueNumber ?? "?"} — "${issue.title}", on branch \`${parent.branch}\`.\n` +
+        `This is the "${entry.name}" stage of a fork whose stages run ONE AT A TIME on this same branch/worktree. Earlier stages' work is already committed here. Do ONLY this stage's work, add NEW files or additive changes (avoid rewriting other stages' work), commit it on this branch, then advance to the join stage.\n\n` +
+        `${issue.description ?? ""}\n\n` +
+        buildTransitionBlock(entry, transitions, childWorkspaceId)
+      : `You are working on a PARALLEL BRANCH of issue #${issue.issueNumber ?? "?"} — "${issue.title}".\n` +
+        `This is the "${entry.name}" branch of a fork; sibling branches run concurrently. Do ONLY this branch's work, commit it, then advance to the join stage so your work can be consolidated.\n\n` +
+        `${issue.description ?? ""}\n\n` +
+        buildTransitionBlock(entry, transitions, childWorkspaceId);
 
     const cfg = await resolveAgentConfig();
 
@@ -167,12 +179,13 @@ export function createWorkflowForkService(deps: {
   /** Spawn fork children for a parent workspace that just entered a parallel-fork node. */
   async function spawnForkChildren(parentWorkspaceId: string, forkNode: WorkflowNodeRow): Promise<void> {
     const parentRows = await database
-      .select({ id: workspaces.id, issueId: workspaces.issueId, branch: workspaces.branch })
+      .select({ id: workspaces.id, issueId: workspaces.issueId, branch: workspaces.branch, workingDir: workspaces.workingDir })
       .from(workspaces)
       .where(eq(workspaces.id, parentWorkspaceId))
       .limit(1);
     if (parentRows.length === 0) return;
     const parent = parentRows[0];
+    const sharedWorktree = getForkMode(forkNode.config) === "shared";
 
     const issueRows = await database
       .select({ issueNumber: issues.issueNumber, title: issues.title, description: issues.description, projectId: issues.projectId, workflowTemplateId: issues.workflowTemplateId })
@@ -210,14 +223,17 @@ export function createWorkflowForkService(deps: {
 
     boardEvents?.broadcast(issue.projectId, "workflow_fork");
 
+    // Shared mode runs strictly one stage at a time on the parent branch, so the
+    // effective per-workspace concurrency is 1 (the rest queue and drain on join).
+    const perWorkspaceCap = sharedWorktree ? 1 : MAX_CONCURRENT_PER_WORKSPACE;
     let launchedNow = 0;
     for (const entry of entries) {
       const childId = randomUUID();
       const projectRunning = await projectRunningForkCount(issue.projectId);
       const canLaunch =
-        launchedNow < MAX_CONCURRENT_PER_WORKSPACE && projectRunning < MAX_CONCURRENT_PER_PROJECT;
+        launchedNow < perWorkspaceCap && projectRunning < MAX_CONCURRENT_PER_PROJECT;
       if (canLaunch) {
-        await launchChild({ parent, project, issue, forkNode, joinNode, entry, childWorkspaceId: childId });
+        await launchChild({ parent, project, issue, forkNode, joinNode, entry, childWorkspaceId: childId, sharedWorktree });
         launchedNow++;
       } else {
         // Over the concurrency cap: queue the child (no worktree/session yet).
@@ -225,7 +241,9 @@ export function createWorkflowForkService(deps: {
         await database.insert(workspaces).values({
           id: childId,
           issueId: parent.issueId,
-          branch: `${parent.branch}__fork-${entry.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`,
+          branch: sharedWorktree
+            ? parent.branch
+            : `${parent.branch}__fork-${entry.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`,
           status: "active",
           currentNodeId: entry.id,
           parentWorkspaceId: parent.id,
@@ -243,7 +261,7 @@ export function createWorkflowForkService(deps: {
   /** Drain queued children for a parent up to the concurrency caps. */
   async function drainQueued(parentWorkspaceId: string): Promise<void> {
     const parentRows = await database
-      .select({ id: workspaces.id, issueId: workspaces.issueId, branch: workspaces.branch })
+      .select({ id: workspaces.id, issueId: workspaces.issueId, branch: workspaces.branch, workingDir: workspaces.workingDir })
       .from(workspaces)
       .where(eq(workspaces.id, parentWorkspaceId))
       .limit(1);
@@ -271,15 +289,18 @@ export function createWorkflowForkService(deps: {
       .where(and(eq(workspaces.parentWorkspaceId, parent.id), eq(workspaces.forkStatus, "queued")));
 
     for (const q of queued) {
-      if (runningCount >= MAX_CONCURRENT_PER_WORKSPACE) break;
-      if ((await projectRunningForkCount(issue.projectId)) >= MAX_CONCURRENT_PER_PROJECT) break;
       const forkNode = q.forkNodeId ? await getNode(database, q.forkNodeId) : null;
       const joinNode = q.forkJoinNodeId ? await getNode(database, q.forkJoinNodeId) : null;
       const entry = q.currentNodeId ? await getNode(database, q.currentNodeId) : null;
       if (!forkNode || !joinNode || !entry) continue;
+      const sharedWorktree = getForkMode(forkNode.config) === "shared";
+      // Shared mode is strictly sequential (one stage at a time on the parent branch).
+      const perWorkspaceCap = sharedWorktree ? 1 : MAX_CONCURRENT_PER_WORKSPACE;
+      if (runningCount >= perWorkspaceCap) break;
+      if ((await projectRunningForkCount(issue.projectId)) >= MAX_CONCURRENT_PER_PROJECT) break;
       // Remove the placeholder row; launchChild re-inserts a full one with the same id.
       await database.delete(workspaces).where(eq(workspaces.id, q.id));
-      await launchChild({ parent, project, issue, forkNode, joinNode, entry, childWorkspaceId: q.id });
+      await launchChild({ parent, project, issue, forkNode, joinNode, entry, childWorkspaceId: q.id, sharedWorktree });
       runningCount++;
     }
   }
@@ -375,9 +396,15 @@ export function createWorkflowForkService(deps: {
     if (parent.currentNodeId === joinNode.id) return;
 
     const children = await database
-      .select({ id: workspaces.id, branch: workspaces.branch, workingDir: workspaces.workingDir, forkStatus: workspaces.forkStatus })
+      .select({ id: workspaces.id, branch: workspaces.branch, workingDir: workspaces.workingDir, forkStatus: workspaces.forkStatus, forkNodeId: workspaces.forkNodeId })
       .from(workspaces)
       .where(eq(workspaces.parentWorkspaceId, parent.id));
+
+    // Shared-worktree forks ran sequentially on the parent branch, so their work
+    // is already committed here — there's nothing to merge, and their workingDir
+    // IS the parent worktree (which must never be removed as a "child" below).
+    const forkNodeForMode = children[0]?.forkNodeId ? await getNode(database, children[0].forkNodeId) : null;
+    const sharedWorktree = forkNodeForMode ? getForkMode(forkNodeForMode.config) === "shared" : false;
 
     // Capture each child's diff vs the parent branch BEFORE any merge (a merged
     // child would otherwise diff to nothing).
@@ -388,10 +415,11 @@ export function createWorkflowForkService(deps: {
 
     // Auto-merge strategy: merge every completed child branch back into the parent
     // branch now, so additive work (e.g. each child writing a different research
-    // doc) lands on one branch without the join agent doing it by hand.
+    // doc) lands on one branch without the join agent doing it by hand. (Skipped in
+    // shared mode — the children already committed onto this branch.)
     const joinStrategy = getJoinStrategy(joinNode.config);
     const mergeResults: { branch: string; status: "merged" | "conflict" | "skipped"; detail?: string }[] = [];
-    if (joinStrategy === "merge" && parent.workingDir) {
+    if (!sharedWorktree && joinStrategy === "merge" && parent.workingDir) {
       // Make sure the parent worktree is on its branch (captures any commits made
       // in detached HEAD) before merging into it.
       await gitService.ensureOnBranch(parent.workingDir, parent.branch).catch(() => {});
@@ -424,7 +452,9 @@ export function createWorkflowForkService(deps: {
           : `${unmerged.length} branch(es) did NOT merge cleanly (the conflicting merge was auto-aborted; that work remains only on its own branch). Integrate them manually using the diffs below.\n\n`)
       : "";
 
-    const headerJob = joinStrategy === "merge"
+    const headerJob = sharedWorktree
+      ? `${children.length} fork stage(s) ran sequentially on this shared branch; all their work is already committed here. Your job at this **${joinNode.name}** stage: verify the combined result is coherent, then advance the workflow.`
+      : joinStrategy === "merge"
       ? `${children.length} parallel branch(es) completed and were auto-merged into this branch. Your job at this **${joinNode.name}** stage: verify the combined result is coherent, integrate any branches that failed to merge (listed above), then advance the workflow.`
       : `${children.length} parallel branch(es) completed. Your job at this **${joinNode.name}** stage: review each branch's diff below, consolidate them into a single coherent result on this (parent) branch, resolve any overlaps, and then advance the workflow.`;
 
@@ -459,9 +489,10 @@ export function createWorkflowForkService(deps: {
       syncIssue: true,
     });
 
-    // Clean up child sub-worktrees now that diffs are captured.
+    // Clean up child sub-worktrees now that diffs are captured. NEVER remove a
+    // shared-mode child's workingDir — it IS the parent worktree.
     for (const c of children) {
-      if (c.workingDir) {
+      if (c.workingDir && c.workingDir !== parent.workingDir) {
         await gitService.removeWorktree(project.repoPath, c.workingDir).catch(() => {});
       }
     }
@@ -471,7 +502,9 @@ export function createWorkflowForkService(deps: {
     // Launch the parent agent at the join node to consolidate.
     if (getSessionManager) {
       const joinTransitions = await getOutgoingTransitions(database, joinNode.id);
-      const consolidateLine = joinStrategy === "merge"
+      const consolidateLine = sharedWorktree
+        ? `The fork stages ran sequentially on this branch, so all their work is already committed here. Verify the combined result is coherent, then advance the workflow.`
+        : joinStrategy === "merge"
         ? `The parallel branches have already been auto-merged into this branch. Verify the combined result is coherent${unmerged.length ? `, integrate the ${unmerged.length} branch(es) that failed to merge (see the artifacts)` : ""}, then advance the workflow.`
         : `Consolidate the branches into a single coherent result on this branch, then advance the workflow.`;
       const prompt =

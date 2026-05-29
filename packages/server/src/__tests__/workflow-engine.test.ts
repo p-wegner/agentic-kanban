@@ -11,6 +11,7 @@ import {
   getStartNode,
   evaluateCondition,
   getJoinStrategy,
+  getForkMode,
 } from "@agentic-kanban/shared/lib/workflow-engine";
 import { createTestDb, type TestDb } from "./helpers/test-db.js";
 import { ensureBuiltinSkills } from "../db/seed.js";
@@ -285,5 +286,15 @@ describe("workflow-engine", () => {
     expect(getJoinStrategy(JSON.stringify({ joinStrategy: "artifacts" }))).toBe("artifacts");
     expect(getJoinStrategy(JSON.stringify({ joinStrategy: "merge" }))).toBe("merge");
     expect(getJoinStrategy(JSON.stringify({ joinStrategy: "merge", guidance: "x" }))).toBe("merge");
+  });
+
+  it("parses fork mode from node config (defaults to worktree)", () => {
+    expect(getForkMode(null)).toBe("worktree");
+    expect(getForkMode("")).toBe("worktree");
+    expect(getForkMode("not json")).toBe("worktree");
+    expect(getForkMode(JSON.stringify({ guidance: "x" }))).toBe("worktree");
+    expect(getForkMode(JSON.stringify({ forkMode: "worktree" }))).toBe("worktree");
+    expect(getForkMode(JSON.stringify({ forkMode: "shared" }))).toBe("shared");
+    expect(getForkMode(JSON.stringify({ forkMode: "shared", guidance: "x" }))).toBe("shared");
   });
 });

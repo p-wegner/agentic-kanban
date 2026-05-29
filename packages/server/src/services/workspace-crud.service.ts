@@ -558,7 +558,22 @@ export function createWorkspaceCrudService(deps: {
     await database.delete(sessions).where(eq(sessions.workspaceId, workspaceId));
     await database.delete(workspaces).where(eq(workspaces.id, workspaceId));
 
+    // A shared-worktree fork child reuses its parent's workingDir. Never remove the
+    // directory while another (e.g. the parent) workspace still points at it — this
+    // row is already deleted above, so any match here is a genuine other sharer.
+    let sharedByOthers = false;
     if (workingDir && !isDirect && repoPath) {
+      const sharers = await database
+        .select({ id: workspaces.id })
+        .from(workspaces)
+        .where(eq(workspaces.workingDir, workingDir));
+      sharedByOthers = sharers.length > 0;
+      if (sharedByOthers) {
+        console.log(`[workspaces] worktree ${workingDir} still referenced by ${sharers.length} other workspace(s) — skipping removal`);
+      }
+    }
+
+    if (workingDir && !isDirect && repoPath && !sharedByOthers) {
       // Use git as the authoritative step to drop the worktree registration + branch
       // (`git worktree remove --force` also deletes the directory). This succeeds even
       // when a stray file handle survives, and unlike `git worktree prune` it does not
