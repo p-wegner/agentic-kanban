@@ -3,6 +3,7 @@ import { z } from "zod";
 import { db, schema } from "../db.js";
 import { eq } from "drizzle-orm";
 import { notifyBoard } from "../notify.js";
+import { syncCurrentNodeToStatus } from "@agentic-kanban/shared/lib/workflow-engine";
 
 export function registerMoveIssue(server: McpServer) {
   server.tool(
@@ -39,6 +40,9 @@ export function registerMoveIssue(server: McpServer) {
       await db.update(schema.issues)
         .set({ statusId: target.id, statusChangedAt: now, updatedAt: now })
         .where(eq(schema.issues.id, issueId));
+
+      // Keep currentNode consistent with the new status for workflow-driven issues.
+      await syncCurrentNodeToStatus(db, issueId).catch(() => {});
 
       notifyBoard(projectId, "mcp_move_issue");
 

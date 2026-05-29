@@ -4,6 +4,7 @@ import { eq, and, sql, inArray } from "drizzle-orm";
 import type { Database } from "../db/index.js";
 import type { BoardEvents } from "./board-events.js";
 import type { DependencyType } from "@agentic-kanban/shared/schema";
+import { syncCurrentNodeToStatus } from "@agentic-kanban/shared/lib/workflow-engine";
 import {
   resolveNewIssueDefaults,
   getIssueProjectId,
@@ -173,6 +174,12 @@ export function createIssueService(deps: {
     if (body.workflowTemplateId !== undefined) updates.workflowTemplateId = body.workflowTemplateId;
 
     await database.update(issues).set(updates).where(eq(issues.id, id));
+
+    // If a manual status change moved an issue that runs a workflow, keep its
+    // currentNode consistent with the new board status (#78 status-as-view).
+    if (body.statusId !== undefined) {
+      await syncCurrentNodeToStatus(database, id).catch(() => {});
+    }
 
     boardEvents?.broadcast(projectId, "issue_updated");
 
