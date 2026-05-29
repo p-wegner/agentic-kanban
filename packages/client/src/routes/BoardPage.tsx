@@ -36,6 +36,7 @@ import { MoveToDoneDialog } from "../components/MoveToDoneDialog.js";
 import { sendDesktopNotification } from "../lib/desktop.js";
 import { registerAction } from "../lib/actions.js";
 import { QuickTasksPanel } from "../components/QuickTasksPanel.js";
+import { MergeQueuePanel } from "../components/MergeQueuePanel.js";
 import type { MonitorStatus } from "../components/MonitorPopover.js";
 import type {
   CreateIssueRequest,
@@ -78,6 +79,7 @@ export function BoardPage() {
   const [showQuickTasks, setShowQuickTasks] = useState(false);
   const [showWorktreeOverview, setShowWorktreeOverview] = useState(false);
   const [showAllWorkspaces, setShowAllWorkspaces] = useState(false);
+  const [showMergeQueue, setShowMergeQueue] = useState(false);
   const [showCommandPalette, setShowCommandPalette] = useState(false);
   const [showShortcutHelp, setShowShortcutHelp] = useState(false);
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(
@@ -1248,6 +1250,11 @@ export function BoardPage() {
           butlerBadgeCount={agentQuestionsCount}
           projectId={activeProjectId}
           onVoiceIssueCreated={() => refetchBoard()}
+          onShowMergeQueue={() => setShowMergeQueue(true)}
+          mergeQueueCount={columns.flatMap(c => c.issues).filter(i => {
+            const ws = i.workspaceSummary?.main;
+            return ws && (ws.status === "idle" || ws.status === "reviewing" || ws.readyForMerge);
+          }).length}
         />
         {viewMode === "graph" && activeProjectId ? (
           <div className="flex-1 min-h-0">
@@ -1463,6 +1470,16 @@ export function BoardPage() {
             setShowAllWorkspaces(false);
           }}
           onRefresh={() => refetchBoard()}
+        />
+      )}
+      {showMergeQueue && activeProjectId && (
+        <MergeQueuePanel
+          columns={columns}
+          projectId={activeProjectId}
+          onClose={() => setShowMergeQueue(false)}
+          onMerged={() => {
+            refetchBoard();
+          }}
         />
       )}
       {showWorktreeOverview && activeProjectId && (
