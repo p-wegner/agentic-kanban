@@ -2,7 +2,7 @@ interface ShortcutHelpProps {
   onClose: () => void;
 }
 
-const SHORTCUTS = [
+const SHORTCUTS: Array<{ keys: string[]; description: string; sequential?: boolean }> = [
   { keys: ["/"], description: "Focus search" },
   { keys: ["Ctrl", "K"], description: "Command palette" },
   { keys: ["Escape"], description: "Close panel / clear search" },
@@ -18,7 +18,7 @@ const SHORTCUTS = [
   { keys: ["m"], description: "Switch to Metrics view" },
   { keys: ["i"], description: "Switch to Butler chat" },
   { keys: ["a"], description: "Toggle All Workspaces panel" },
-  { keys: ["g", "s"], description: "Open settings" },
+  { keys: ["g", "s"], description: "Open settings", sequential: true },
 ];
 
 export function ShortcutHelp({ onClose }: ShortcutHelpProps) {
@@ -49,7 +49,9 @@ export function ShortcutHelp({ onClose }: ShortcutHelpProps) {
                       {key}
                     </kbd>
                     {i < shortcut.keys.length - 1 && (
-                      <span className="text-xs text-gray-300 dark:text-gray-600 mx-0.5">+</span>
+                      <span className="text-xs text-gray-400 dark:text-gray-500 mx-0.5">
+                        {shortcut.sequential ? "→" : "+"}
+                      </span>
                     )}
                   </span>
                 ))}
