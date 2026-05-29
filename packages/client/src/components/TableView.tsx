@@ -26,15 +26,15 @@ const ISSUE_TYPE_LABEL: Record<string, string> = {
 const ISSUE_TYPE_CLASS: Record<string, string> = {
   task: "text-gray-600 bg-gray-100",
   bug: "text-red-700 bg-red-50",
-  feature: "text-blue-700 bg-blue-50",
+  feature: "text-brand-700 bg-brand-50 dark:text-brand-300 dark:bg-brand-900/40",
   chore: "text-amber-700 bg-amber-50",
 };
 
 const STATUS_CLASS: Record<string, string> = {
   "Todo": "text-gray-600 bg-gray-100",
   "In Progress": "text-blue-700 bg-blue-50",
-  "In Review": "text-purple-700 bg-purple-50",
-  "AI Reviewed": "text-indigo-700 bg-indigo-50",
+  "In Review": "text-accent-700 bg-accent-50 dark:text-accent-300 dark:bg-accent-900/40",
+  "AI Reviewed": "text-accent-700 bg-accent-50 dark:text-accent-300 dark:bg-accent-900/40",
   "Done": "text-green-700 bg-green-50",
   "Cancelled": "text-gray-500 bg-gray-100",
 };
@@ -60,7 +60,7 @@ const TAG_COLORS: Record<string, string> = {
   green: "bg-green-100 text-green-700",
   red: "bg-red-100 text-red-700",
   yellow: "bg-yellow-100 text-yellow-700",
-  purple: "bg-purple-100 text-purple-700",
+  purple: "bg-brand-100 text-brand-700 dark:bg-brand-900/40 dark:text-brand-300",
   pink: "bg-pink-100 text-pink-700",
   orange: "bg-orange-100 text-orange-700",
   indigo: "bg-indigo-100 text-indigo-700",
@@ -125,7 +125,7 @@ export function TableView({ columns, onIssueClick, searchQuery, onRefresh }: Tab
 
   function SortIcon({ col }: { col: SortKey }) {
     if (sort.key !== col) return <span className="text-gray-300 dark:text-gray-600 ml-1">↕</span>;
-    return <span className="text-blue-500 ml-1">{sort.dir === "asc" ? "↑" : "↓"}</span>;
+    return <span className="text-brand-500 ml-1">{sort.dir === "asc" ? "↑" : "↓"}</span>;
   }
 
   const statusNames = [...new Set(columns.map((c) => c.name))];
@@ -262,13 +262,13 @@ export function TableView({ columns, onIssueClick, searchQuery, onRefresh }: Tab
 
       {/* Bulk action bar */}
       {someChecked && (
-        <div className="flex items-center gap-2 px-3 py-2 mb-2 rounded-lg bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-700">
-          <span className="text-xs font-medium text-blue-700 dark:text-blue-300">
+        <div className="flex items-center gap-2 px-3 py-2 mb-2 rounded-lg bg-brand-50 dark:bg-brand-900/30 border border-brand-200 dark:border-brand-700">
+          <span className="text-xs font-medium text-brand-700 dark:text-brand-300">
             {activeSelectedIds.length} selected
           </span>
           <button
             onClick={() => setSelectedIds(new Set())}
-            className="text-xs text-blue-500 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-200 underline"
+            className="text-xs text-brand-500 hover:text-brand-700 dark:text-brand-400 dark:hover:text-brand-200 underline"
           >
             Clear
           </button>
@@ -284,12 +284,12 @@ export function TableView({ columns, onIssueClick, searchQuery, onRefresh }: Tab
               Move to status ▾
             </button>
             {bulkStatusOpen && (
-              <div className="absolute right-0 top-full mt-1 z-50 min-w-[160px] rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-lg py-1">
+              <div className="absolute right-0 top-full mt-1 z-50 min-w-[160px] rounded-lg border border-gray-200 dark:border-gray-700 bg-surface-raised dark:bg-surface-raised-dark shadow-lg py-1">
                 {columns.map((col) => (
                   <button
                     key={col.id}
                     onClick={() => handleBulkMoveStatus(col.id, col.name)}
-                    className="w-full text-left px-3 py-1.5 text-xs text-gray-700 dark:text-gray-300 hover:bg-blue-50 dark:hover:bg-blue-900/30"
+                    className="w-full text-left px-3 py-1.5 text-xs text-gray-700 dark:text-gray-300 hover:bg-brand-50 dark:hover:bg-brand-900/30"
                   >
                     {col.name}
                   </button>
@@ -312,14 +312,14 @@ export function TableView({ columns, onIssueClick, searchQuery, onRefresh }: Tab
               Add tag ▾
             </button>
             {bulkTagOpen && (
-              <div className="absolute right-0 top-full mt-1 z-50 min-w-[160px] rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-lg py-1">
+              <div className="absolute right-0 top-full mt-1 z-50 min-w-[160px] rounded-lg border border-gray-200 dark:border-gray-700 bg-surface-raised dark:bg-surface-raised-dark shadow-lg py-1">
                 {allTags.length === 0 ? (
                   <div className="px-3 py-2 text-xs text-gray-400 dark:text-gray-500">No tags available</div>
                 ) : allTags.map((tag) => (
                   <button
                     key={tag.id}
                     onClick={() => handleBulkAddTag(tag)}
-                    className="w-full text-left px-3 py-1.5 text-xs hover:bg-blue-50 dark:hover:bg-blue-900/30 flex items-center gap-2"
+                    className="w-full text-left px-3 py-1.5 text-xs hover:bg-brand-50 dark:hover:bg-brand-900/30 flex items-center gap-2"
                   >
                     <span className={`inline-flex px-1.5 py-0.5 rounded text-xs font-medium ${tagClass(tag.color)}`}>
                       {tag.name}
@@ -341,7 +341,7 @@ export function TableView({ columns, onIssueClick, searchQuery, onRefresh }: Tab
         </div>
       )}
 
-      <div className="flex-1 overflow-auto rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900">
+      <div className="flex-1 overflow-auto rounded-lg border border-gray-200 dark:border-gray-700 bg-surface-raised dark:bg-surface-raised-dark">
         <table className="w-full text-sm border-collapse">
           <thead className="sticky top-0 bg-gray-50 dark:bg-gray-800 z-10">
             <tr>
@@ -351,7 +351,7 @@ export function TableView({ columns, onIssueClick, searchQuery, onRefresh }: Tab
                   checked={allChecked}
                   ref={(el) => { if (el) el.indeterminate = someChecked && !allChecked; }}
                   onChange={toggleSelectAll}
-                  className="rounded border-gray-300 dark:border-gray-600 text-blue-500 cursor-pointer"
+                  className="rounded border-gray-300 dark:border-gray-600 text-brand-500 cursor-pointer"
                   aria-label="Select all"
                 />
               </th>
@@ -390,14 +390,14 @@ export function TableView({ columns, onIssueClick, searchQuery, onRefresh }: Tab
               <tr
                 key={issue.id}
                 onClick={() => onIssueClick(issue)}
-                className={`border-b border-gray-100 dark:border-gray-800 hover:bg-blue-50 dark:hover:bg-blue-900/20 cursor-pointer transition-colors ${selectedIds.has(issue.id) ? "bg-blue-50/60 dark:bg-blue-900/10" : ""}`}
+                className={`border-b border-gray-100 dark:border-gray-800 hover:bg-brand-50 dark:hover:bg-brand-900/20 cursor-pointer transition-colors ${selectedIds.has(issue.id) ? "bg-brand-50/60 dark:bg-brand-900/10" : ""}`}
               >
                 <td className="px-3 py-1.5" onClick={(e) => toggleSelectOne(issue.id, e)}>
                   <input
                     type="checkbox"
                     checked={selectedIds.has(issue.id)}
                     onChange={() => {}}
-                    className="rounded border-gray-300 dark:border-gray-600 text-blue-500 cursor-pointer"
+                    className="rounded border-gray-300 dark:border-gray-600 text-brand-500 cursor-pointer"
                     aria-label={`Select issue ${issue.issueNumber}`}
                   />
                 </td>

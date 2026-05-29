@@ -46,7 +46,7 @@ const FILTER_CHIPS: { label: string; value: WsStatusFilter }[] = [
 
 const WS_STATUS_COLORS: Record<string, string> = {
   active: "bg-green-100 text-green-700",
-  reviewing: "bg-purple-100 text-purple-700",
+  reviewing: "bg-accent-50 text-accent-700 dark:bg-accent-900/40 dark:text-accent-300",
   fixing: "bg-orange-100 text-orange-700",
   idle: "bg-yellow-100 text-yellow-700",
   closed: "bg-gray-100 text-gray-500 dark:text-gray-400",
@@ -56,7 +56,7 @@ const ISSUE_STATUS_COLORS: Record<string, string> = {
   "Todo": "bg-gray-100 text-gray-600",
   "In Progress": "bg-blue-100 text-blue-700",
   "In Review": "bg-orange-100 text-orange-700",
-  "AI Reviewed": "bg-purple-100 text-purple-700",
+  "AI Reviewed": "bg-accent-50 text-accent-700 dark:bg-accent-900/40 dark:text-accent-300",
   "Done": "bg-green-100 text-green-700",
   "Cancelled": "bg-red-100 text-red-500",
 };
@@ -154,7 +154,7 @@ export function AllWorkspacesPanel({ columns, activeProjectId, onClose, onIssueC
   return (
     <div className="fixed inset-0 z-50 flex justify-end">
       <div className="absolute inset-0 bg-black/20" onClick={onClose} />
-      <div className="relative w-[min(520px,100vw)] bg-white dark:bg-gray-900 shadow-xl flex flex-col animate-slide-in-right">
+      <div className="relative w-[min(520px,100vw)] bg-surface-raised dark:bg-surface-raised-dark shadow-xl flex flex-col animate-slide-in-right">
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-gray-700">
           <div className="flex items-center gap-2">
@@ -164,7 +164,7 @@ export function AllWorkspacesPanel({ columns, activeProjectId, onClose, onIssueC
               <rect x="3" y="14" width="7" height="7" rx="1" />
               <rect x="14" y="14" width="7" height="7" rx="1" />
             </svg>
-            <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">All Workspaces</h2>
+            <h2 className="text-lg font-semibold text-ink dark:text-stone-100 heading-serif">All Workspaces</h2>
             <span className="text-sm text-gray-500 dark:text-gray-400">
               {crossProjectLoading
                 ? "…"
@@ -203,7 +203,7 @@ export function AllWorkspacesPanel({ columns, activeProjectId, onClose, onIssueC
           <select
             value={projectFilter}
             onChange={(e) => setProjectFilter(e.target.value)}
-            className="w-full text-sm px-3 py-1.5 border border-gray-200 dark:border-gray-700 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-400 bg-white dark:bg-gray-900 dark:text-gray-200"
+            className="w-full text-sm px-3 py-1.5 border border-gray-200 dark:border-gray-700 rounded-md focus:outline-none focus:ring-1 focus:ring-brand-400 bg-white dark:bg-gray-900 dark:text-gray-200"
           >
             <option value="all">All projects</option>
             {allProjects.map((p) => (
@@ -219,7 +219,7 @@ export function AllWorkspacesPanel({ columns, activeProjectId, onClose, onIssueC
             placeholder={showingCrossProject ? "Search by title, branch, or project…" : "Search by title or branch…"}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full text-sm px-3 py-1.5 border border-gray-200 dark:border-gray-700 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-400 dark:bg-gray-900 dark:text-gray-200"
+            className="w-full text-sm px-3 py-1.5 border border-gray-200 dark:border-gray-700 rounded-md focus:outline-none focus:ring-1 focus:ring-brand-400 dark:bg-gray-900 dark:text-gray-200"
           />
           {/* Status chips */}
           <div className="flex gap-1.5 flex-wrap">
@@ -229,7 +229,7 @@ export function AllWorkspacesPanel({ columns, activeProjectId, onClose, onIssueC
                 onClick={() => setStatusFilter(chip.value)}
                 className={`text-xs px-2.5 py-1 rounded-full font-medium transition-colors ${
                   statusFilter === chip.value
-                    ? "bg-blue-600 text-white"
+                    ? "bg-brand-600 text-white"
                     : "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700"
                 }`}
               >
@@ -285,7 +285,7 @@ export function AllWorkspacesPanel({ columns, activeProjectId, onClose, onIssueC
                     {/* Project name (cross-project mode only) */}
                     {showingCrossProject && projectName && (
                       <div className="ml-6 mb-1">
-                        <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-600">
+                        <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-brand-50 text-brand-700 dark:bg-brand-900/40 dark:text-brand-300">
                           {projectName}
                         </span>
                       </div>
@@ -333,14 +333,14 @@ export function AllWorkspacesPanel({ columns, activeProjectId, onClose, onIssueC
                         {/* Last session trigger */}
                         {main.lastSessionTriggerType && (() => {
                           const map: Record<string, { label: string; className: string }> = {
-                            review: { label: "AI Review", className: "bg-violet-100 text-violet-700" },
+                            review: { label: "AI Review", className: "bg-accent-50 text-accent-700 dark:bg-accent-900/40 dark:text-accent-300" },
                             merge: { label: "AI Merge", className: "bg-emerald-100 text-emerald-700" },
                             "fix-conflicts": { label: "Fix Conflicts", className: "bg-orange-100 text-orange-700" },
                             learning: { label: "Learning", className: "bg-teal-100 text-teal-700" },
                             "auto-start": { label: "Auto-start", className: "bg-gray-100 text-gray-600" },
                           };
                           const humanize = (n: string) => n.replace(/[-_]/g, " ").replace(/\b\w/g, c => c.toUpperCase());
-                          const badge = map[main.lastSessionTriggerType] ?? (main.lastSessionTriggerType.startsWith("skill:") ? { label: `✨ ${humanize(main.lastSessionTriggerType.slice(6))}`, className: "bg-purple-100 text-purple-700" } : null);
+                          const badge = map[main.lastSessionTriggerType] ?? (main.lastSessionTriggerType.startsWith("skill:") ? { label: `✨ ${humanize(main.lastSessionTriggerType.slice(6))}`, className: "bg-brand-50 text-brand-700 dark:bg-brand-900/40 dark:text-brand-300" } : null);
                           return badge ? <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${badge.className}`}>{badge.label}</span> : null;
                         })()}
 

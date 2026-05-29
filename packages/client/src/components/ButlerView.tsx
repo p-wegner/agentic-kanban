@@ -102,12 +102,12 @@ function ActivityStrip({ columns, liveActivity, liveStats, onIssueClick }: Omit<
         const stats = liveStats[issue.id];
         const statusDot = ws.status === "active" || ws.status === "fixing"
           ? "bg-green-500 animate-pulse"
-          : "bg-violet-400";
+          : "bg-accent-500";
         return (
           <button
             key={issue.id}
             onClick={() => onIssueClick(issue)}
-            className="flex items-center gap-1.5 px-2 py-1 rounded-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 hover:border-blue-300 dark:hover:border-blue-600 text-xs text-gray-700 dark:text-gray-300 transition-colors max-w-[260px]"
+            className="flex items-center gap-1.5 px-2 py-1 rounded-full bg-surface-raised dark:bg-surface-raised-dark border border-gray-200 dark:border-gray-700 hover:border-brand-300 dark:hover:border-brand-600 text-xs text-gray-700 dark:text-gray-300 transition-colors max-w-[260px]"
             title={activity || `#${issue.issueNumber} ${issue.title}`}
           >
             <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${statusDot}`} />
@@ -129,9 +129,9 @@ function ChatBubble({ msg }: { msg: ChatMessage }) {
   if (msg.role === "user") {
     return (
       <div className="flex justify-end mb-3">
-        <div className="max-w-[80%] bg-blue-600 text-white rounded-2xl rounded-tr-md px-4 py-2.5 shadow-sm">
+        <div className="max-w-[80%] bg-brand-600 text-white rounded-2xl rounded-tr-md px-4 py-2.5 shadow-sm">
           <p className="text-sm whitespace-pre-wrap break-words">{msg.text}</p>
-          <p className="text-[10px] text-blue-200 mt-1 text-right">{formatRelativeTs(msg.ts)}</p>
+          <p className="text-[10px] text-brand-200 mt-1 text-right">{formatRelativeTs(msg.ts)}</p>
         </div>
       </div>
     );
@@ -149,7 +149,7 @@ function ChatBubble({ msg }: { msg: ChatMessage }) {
 
   return (
     <div className="flex justify-start mb-3">
-      <div className="max-w-[80%] bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl rounded-tl-md px-4 py-2.5 shadow-sm">
+      <div className="max-w-[80%] bg-surface-raised dark:bg-surface-raised-dark border border-gray-200 dark:border-gray-700 rounded-2xl rounded-tl-md px-4 py-2.5 shadow-sm">
         <div className="text-sm text-gray-800 dark:text-gray-200 prose prose-sm dark:prose-invert max-w-none prose-p:my-1 prose-pre:my-1 prose-table:my-1 prose-headings:mt-2 prose-headings:mb-1">
           <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.text}</ReactMarkdown>
         </div>
@@ -581,19 +581,19 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
         <>
         <div className="flex-1 flex items-center justify-center p-8">
           <div className="text-center max-w-sm">
-            <div className="w-14 h-14 mx-auto mb-4 rounded-2xl bg-gradient-to-br from-blue-500 to-violet-600 flex items-center justify-center shadow-lg">
+            <div className="w-14 h-14 mx-auto mb-4 rounded-2xl bg-brand-600 flex items-center justify-center shadow-lg">
               <svg className="w-7 h-7 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M8.625 12a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H8.25m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H12m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0h-.375M21 12c0 4.556-4.03 8.25-9 8.25a9.764 9.764 0 01-2.555-.337A5.972 5.972 0 015.41 20.97a5.969 5.969 0 01-.474-.065 4.48 4.48 0 00.978-2.025c.09-.457-.133-.901-.467-1.226C3.93 16.178 3 14.189 3 12c0-4.556 4.03-8.25 9-8.25s9 3.694 9 8.25z" />
               </svg>
             </div>
-            <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">Project Butler</h2>
+            <h2 className="text-lg font-semibold text-ink dark:text-stone-100 mb-2 heading-serif">Project Butler</h2>
             <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">
               A warm, persistent Claude agent that lives in your repository. Ask questions, get summaries, or run quick tasks — all without creating a new workspace.
             </p>
             <button
               onClick={handleStart}
               disabled={starting}
-              className="inline-flex items-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-50 shadow-sm"
+              className="inline-flex items-center gap-2 px-5 py-2.5 bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-50 shadow-sm"
             >
               {starting ? (
                 <>
@@ -622,7 +622,7 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
           <div className="shrink-0 flex items-center justify-between gap-3 border-b border-gray-200 dark:border-gray-800 bg-gray-50/60 dark:bg-gray-900/40 px-4 py-2 text-xs">
             {/* Left group — context status pill with an attached "clear" icon button.
                 Grouping them makes it obvious that the button resets the value shown in the pill. */}
-            <div className="flex items-center shrink-0 min-w-0 rounded-full border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 overflow-hidden">
+            <div className="flex items-center shrink-0 min-w-0 rounded-full border border-gray-200 dark:border-gray-700 bg-surface-raised dark:bg-surface-raised-dark overflow-hidden">
               <div
                 className="flex items-center gap-1.5 px-3 py-1 text-gray-600 dark:text-gray-300 min-w-0"
                 title={[
@@ -664,7 +664,7 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
                 <select
                   value={selectedModel}
                   onChange={(e) => void handleModelChange(e.target.value)}
-                  className="rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-1.5 py-1 text-xs text-gray-700 dark:text-gray-200 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  className="rounded border border-gray-300 dark:border-gray-600 bg-surface-raised dark:bg-surface-raised-dark px-1.5 py-1 text-xs text-gray-700 dark:text-gray-200 focus:outline-none focus:ring-1 focus:ring-brand-500"
                 >
                   {CLAUDE_MODEL_OPTIONS.map((m) => (
                     <option key={m.value} value={m.value}>{m.label}</option>
@@ -678,7 +678,7 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
                   value={selectedProfile}
                   onChange={(e) => void handleProfileChange(e.target.value)}
                   disabled={switchingProfile || sending}
-                  className="rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-1.5 py-1 text-xs text-gray-700 dark:text-gray-200 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-50"
+                  className="rounded border border-gray-300 dark:border-gray-600 bg-surface-raised dark:bg-surface-raised-dark px-1.5 py-1 text-xs text-gray-700 dark:text-gray-200 focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:opacity-50"
                 >
                   <option value="">{globalProfile ? `Default (${globalProfile})` : "Default"}</option>
                   {profiles.map((p) => (
@@ -689,7 +689,7 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
               <span className="h-5 w-px bg-gray-300 dark:bg-gray-700" aria-hidden />
               <button
                 onClick={openCustomize}
-                className="inline-flex items-center gap-1 px-2.5 py-1 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors shadow-sm"
+                className="inline-flex items-center gap-1 px-2.5 py-1 rounded border border-gray-300 dark:border-gray-600 bg-surface-raised dark:bg-surface-raised-dark text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors shadow-sm"
                 title="Customize the butler's behavior (edits the project's butler skill)"
               >
                 <span aria-hidden>⚙</span>
@@ -710,12 +710,12 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
                   onChange={(e) => setCustomizePrompt(e.target.value)}
                   disabled={customizeBusy}
                   rows={8}
-                  className="w-full resize-y rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-xs font-mono text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+                  className="w-full resize-y rounded-lg border border-gray-300 dark:border-gray-600 bg-surface-raised dark:bg-surface-raised-dark px-3 py-2 text-xs font-mono text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-brand-500 disabled:opacity-50"
                   placeholder="Leave empty to revert to the default butler behavior."
                 />
                 <div className="flex items-center justify-end gap-2 mt-2">
                   <button onClick={() => setCustomizeOpen(false)} disabled={customizeBusy} className="px-3 py-1.5 text-xs rounded-lg text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-50">Cancel</button>
-                  <button onClick={saveCustomize} disabled={customizeBusy} className="px-3 py-1.5 text-xs rounded-lg bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-50">
+                  <button onClick={saveCustomize} disabled={customizeBusy} className="px-3 py-1.5 text-xs rounded-lg bg-brand-600 hover:bg-brand-700 text-white disabled:opacity-50">
                     {customizeBusy ? "Saving…" : "Save & apply"}
                   </button>
                 </div>
@@ -739,7 +739,7 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
               ))}
               {sending && (
                 <div className="flex justify-start mb-3">
-                  <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl rounded-tl-md px-4 py-2.5 flex items-center gap-1.5 shadow-sm">
+                  <div className="bg-surface-raised dark:bg-surface-raised-dark border border-gray-200 dark:border-gray-700 rounded-2xl rounded-tl-md px-4 py-2.5 flex items-center gap-1.5 shadow-sm">
                     <span className="w-1.5 h-1.5 rounded-full bg-gray-400 dark:bg-gray-500 animate-bounce" style={{ animationDelay: "0ms" }} />
                     <span className="w-1.5 h-1.5 rounded-full bg-gray-400 dark:bg-gray-500 animate-bounce" style={{ animationDelay: "150ms" }} />
                     <span className="w-1.5 h-1.5 rounded-full bg-gray-400 dark:bg-gray-500 animate-bounce" style={{ animationDelay: "300ms" }} />
@@ -750,11 +750,11 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
             </div>
           </div>
 
-          <div className="shrink-0 border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-4 py-3">
+          <div className="shrink-0 border-t border-gray-200 dark:border-gray-700 bg-surface-raised dark:bg-surface-raised-dark px-4 py-3">
             <div className="max-w-3xl mx-auto flex items-end gap-2">
               <div className="flex-1 relative">
                 {commandMenuOpen && (
-                  <div className="absolute bottom-full mb-2 left-0 right-0 max-h-60 overflow-y-auto rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-lg z-10 py-1">
+                  <div className="absolute bottom-full mb-2 left-0 right-0 max-h-60 overflow-y-auto rounded-xl border border-gray-200 dark:border-gray-700 bg-surface-raised dark:bg-surface-raised-dark shadow-lg z-10 py-1">
                     <div className="px-3 py-1 text-[10px] uppercase tracking-wide text-gray-400 dark:text-gray-500">Commands</div>
                     {filteredCommands.map((cmd, i) => (
                       <button
@@ -762,9 +762,9 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
                         type="button"
                         onMouseDown={(e) => { e.preventDefault(); applyCommand(cmd.name); }}
                         onMouseEnter={() => setCommandIndex(i)}
-                        className={`w-full text-left px-3 py-1.5 flex items-baseline gap-2 ${i === commandIndex ? "bg-blue-50 dark:bg-blue-900/30" : "hover:bg-gray-50 dark:hover:bg-gray-700/50"}`}
+                        className={`w-full text-left px-3 py-1.5 flex items-baseline gap-2 ${i === commandIndex ? "bg-brand-50 dark:bg-brand-900/30" : "hover:bg-gray-50 dark:hover:bg-gray-700/50"}`}
                       >
-                        <span className="text-sm font-mono text-blue-600 dark:text-blue-400 shrink-0">/{cmd.name}</span>
+                        <span className="text-sm font-mono text-brand-600 dark:text-brand-400 shrink-0">/{cmd.name}</span>
                         {cmd.argumentHint && <span className="text-[11px] text-gray-400 dark:text-gray-500 shrink-0">{cmd.argumentHint}</span>}
                         {cmd.description && <span className="text-xs text-gray-500 dark:text-gray-400 truncate">{cmd.description}</span>}
                       </button>
@@ -779,7 +779,7 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
                   disabled={sending}
                   rows={1}
                   placeholder="Message the butler... (Enter to send, Shift+Enter for new line, / for commands)"
-                  className="block w-full resize-none rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-4 py-2.5 pr-10 text-sm text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-600 transition-all disabled:opacity-50"
+                  className="block w-full resize-none rounded-xl border border-gray-300 dark:border-gray-600 bg-surface-raised dark:bg-surface-raised-dark px-4 py-2.5 pr-10 text-sm text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-brand-500 dark:focus:ring-brand-600 transition-all disabled:opacity-50"
                   style={{ minHeight: "42px", maxHeight: "160px", overflowY: "auto" }}
                   onInput={(e) => {
                     const t = e.target as HTMLTextAreaElement;
@@ -803,7 +803,7 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
                 <button
                   onClick={handleSend}
                   disabled={!input.trim()}
-                  className="shrink-0 p-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors shadow-sm"
+                  className="shrink-0 p-2.5 rounded-xl bg-brand-600 hover:bg-brand-700 text-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors shadow-sm"
                   title="Send message"
                 >
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>

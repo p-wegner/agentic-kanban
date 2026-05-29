@@ -35,7 +35,7 @@ interface IssueDetailPanelProps {
 const issueTypeColors: Record<string, string> = {
   task: "bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300",
   bug: "bg-red-100 text-red-700",
-  feature: "bg-blue-100 text-blue-700",
+  feature: "bg-brand-50 text-brand-700 dark:bg-brand-900/40 dark:text-brand-300",
   chore: "bg-amber-100 text-amber-700",
 };
 
@@ -493,10 +493,10 @@ export function IssueDetailPanel({
     <>
       {/* Snap zone indicators shown while dragging */}
       {snapZone === "left" && (
-        <div className="fixed left-0 top-0 h-full w-[min(384px,100vw)] z-40 bg-blue-500/20 border-r-2 border-blue-400 pointer-events-none transition-opacity" />
+        <div className="fixed left-0 top-0 h-full w-[min(384px,100vw)] z-40 bg-brand-500/20 border-r-2 border-brand-400 pointer-events-none transition-opacity" />
       )}
       {snapZone === "right" && (
-        <div className="fixed right-0 top-0 h-full w-[min(384px,100vw)] z-40 bg-blue-500/20 border-l-2 border-blue-400 pointer-events-none transition-opacity" />
+        <div className="fixed right-0 top-0 h-full w-[min(384px,100vw)] z-40 bg-brand-500/20 border-l-2 border-brand-400 pointer-events-none transition-opacity" />
       )}
       {/* Backdrop */}
       <div
@@ -506,7 +506,7 @@ export function IssueDetailPanel({
       {/* Panel */}
       <div
         data-panel
-        className={`fixed bg-white dark:bg-gray-900 shadow-xl z-50 flex flex-col animate-slide-in-right ${
+        className={`fixed bg-surface-raised dark:bg-surface-raised-dark shadow-xl z-50 flex flex-col animate-slide-in-right ${
           panelMode === "fullscreen"
             ? "inset-0"
             : panelMode === "modal"
@@ -671,7 +671,7 @@ export function IssueDetailPanel({
                   type="text"
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
-                  className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500"
                 />
               </>
             ) : (
@@ -692,14 +692,14 @@ export function IssueDetailPanel({
                   <button
                     type="button"
                     onClick={() => setDescriptionMode("edit")}
-                    className={`text-xs px-2 py-0.5 ${descriptionMode === "edit" ? "bg-blue-500 text-white" : "bg-white dark:bg-gray-900 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"}`}
+                    className={`text-xs px-2 py-0.5 ${descriptionMode === "edit" ? "bg-brand-600 text-white" : "bg-white dark:bg-gray-900 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"}`}
                   >
                     Edit
                   </button>
                   <button
                     type="button"
                     onClick={() => setDescriptionMode("preview")}
-                    className={`text-xs px-2 py-0.5 border-l border-gray-300 dark:border-gray-600 ${descriptionMode === "preview" ? "bg-blue-500 text-white" : "bg-white dark:bg-gray-900 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"}`}
+                    className={`text-xs px-2 py-0.5 border-l border-gray-300 dark:border-gray-600 ${descriptionMode === "preview" ? "bg-brand-600 text-white" : "bg-white dark:bg-gray-900 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"}`}
                   >
                     Preview
                   </button>
@@ -722,7 +722,7 @@ export function IssueDetailPanel({
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
                 rows={panelMode !== "sidebar" ? 16 : 4}
-                className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none"
+                className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500 resize-none"
                 placeholder="Add a description... (paste screenshots with Ctrl+V)"
                 onPaste={(e) => {
                   const items = e.clipboardData?.items;
@@ -780,7 +780,7 @@ export function IssueDetailPanel({
               value={issue.statusId}
               onChange={(e) => handleStatusChange(e.target.value)}
               disabled={editing}
-              className={`w-full text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 ${editing ? "bg-gray-50 dark:bg-gray-950 text-gray-500 dark:text-gray-400" : ""}`}
+              className={`w-full text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500 ${editing ? "bg-gray-50 dark:bg-gray-950 text-gray-500 dark:text-gray-400" : ""}`}
             >
               {statuses.map((s) => (
                 <option key={s.id} value={s.id}>{s.name}</option>
@@ -797,7 +797,7 @@ export function IssueDetailPanel({
               <select
                 value={issueType}
                 onChange={(e) => setIssueType(e.target.value)}
-                className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500"
               >
                 <option value="task">Task</option>
                 <option value="bug">Bug</option>
@@ -820,7 +820,7 @@ export function IssueDetailPanel({
               <select
                 value={estimate}
                 onChange={(e) => setEstimate(e.target.value)}
-                className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500"
               >
                 <option value="">None</option>
                 <option value="XS">XS</option>
@@ -851,7 +851,7 @@ export function IssueDetailPanel({
                   onClick={handleAiEstimate}
                   disabled={estimating}
                   title="Estimate with AI (Haiku)"
-                  className="ml-1 text-xs text-purple-600 dark:text-purple-400 hover:text-purple-800 dark:hover:text-purple-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-0.5"
+                  className="ml-1 text-xs text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:hover:text-brand-300 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-0.5"
                 >
                   {estimating ? (
                     <svg className="animate-spin h-3 w-3" fill="none" viewBox="0 0 24 24">
@@ -879,7 +879,7 @@ export function IssueDetailPanel({
                 type="date"
                 value={dueDate}
                 onChange={(e) => setDueDate(e.target.value)}
-                className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100"
+                className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100"
               />
             ) : issue.dueDate ? (() => {
               const overdue = new Date(issue.dueDate) < new Date(new Date().toDateString()) &&
@@ -915,7 +915,7 @@ export function IssueDetailPanel({
                   type="checkbox"
                   checked={skipAutoReview}
                   onChange={(e) => setSkipAutoReview(e.target.checked)}
-                  className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                  className="w-4 h-4 rounded border-gray-300 text-brand-600 focus:ring-brand-500"
                 />
                 <span className="text-sm text-gray-700 dark:text-gray-300">Skip auto AI code review</span>
               </label>
@@ -935,13 +935,13 @@ export function IssueDetailPanel({
                     className={`w-full flex flex-col gap-1 p-2 rounded border transition-colors text-left ${
                       issue.workspaceSummary.main.conflicts?.hasConflicts
                         ? "border-red-200 dark:border-red-800 hover:border-red-300 dark:hover:border-red-700 hover:bg-red-50 dark:hover:bg-red-950"
-                        : "border-gray-200 dark:border-gray-700 hover:border-blue-300 dark:hover:border-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950"
+                        : "border-gray-200 dark:border-gray-700 hover:border-brand-300 dark:hover:border-brand-600 hover:bg-brand-50 dark:hover:bg-brand-950"
                     }`}
                   >
                     <div className="flex items-center gap-2 w-full">
                       <span className={`inline-block w-2 h-2 rounded-full shrink-0 ${
                         issue.workspaceSummary.main.status === "active" ? "bg-green-500" :
-                        issue.workspaceSummary.main.status === "reviewing" ? "bg-purple-500 animate-pulse" :
+                        issue.workspaceSummary.main.status === "reviewing" ? "bg-accent-500 animate-pulse" :
                         issue.workspaceSummary.main.status === "fixing" ? "bg-orange-500 animate-pulse" :
                         issue.workspaceSummary.main.status === "error" ? "bg-red-500" :
                         issue.workspaceSummary.main.conflicts?.hasConflicts ? "bg-red-500" :
@@ -951,7 +951,7 @@ export function IssueDetailPanel({
                       <span className="text-sm font-mono text-gray-700 dark:text-gray-300 truncate">{issue.workspaceSummary.main.branch}</span>
                       <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded shrink-0 ${
                         issue.workspaceSummary.main.status === "active" ? "bg-green-100 text-green-700" :
-                        issue.workspaceSummary.main.status === "reviewing" ? "bg-purple-100 text-purple-700" :
+                        issue.workspaceSummary.main.status === "reviewing" ? "bg-accent-50 text-accent-700 dark:bg-accent-900/40 dark:text-accent-300" :
                         issue.workspaceSummary.main.status === "fixing" ? "bg-orange-100 text-orange-700" :
                         issue.workspaceSummary.main.status === "error" ? "bg-red-100 text-red-700" :
                         issue.workspaceSummary.main.conflicts?.hasConflicts ? "bg-red-100 text-red-700" :
@@ -1010,7 +1010,7 @@ export function IssueDetailPanel({
                   {onStartWorkspace && (
                     <button
                       onClick={() => onStartWorkspace(issue)}
-                      className="flex items-center gap-1.5 text-sm font-medium px-3 py-1.5 rounded bg-blue-600 text-white hover:bg-blue-700 transition-colors"
+                      className="flex items-center gap-1.5 text-sm font-medium px-3 py-1.5 rounded bg-brand-600 text-white hover:bg-brand-700 transition-colors"
                     >
                       <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                         <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
@@ -1020,7 +1020,7 @@ export function IssueDetailPanel({
                   )}
                   <button
                     onClick={() => onManageWorkspaces(issue)}
-                    className="text-sm text-blue-600 hover:text-blue-700"
+                    className="text-sm text-brand-600 hover:text-brand-700 dark:text-brand-400 dark:hover:text-brand-300"
                   >
                     {workspaceCount === 0 ? "Custom options..." : "View Workspaces"}
                   </button>
@@ -1059,7 +1059,7 @@ export function IssueDetailPanel({
                 ))}
                 {allTags.filter((t) => !issueTags.some((it) => it.id === t.id)).length > 0 && (
                   <select
-                    className="text-xs border border-gray-300 dark:border-gray-600 rounded px-1 py-0.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    className="text-xs border border-gray-300 dark:border-gray-600 rounded px-1 py-0.5 focus:outline-none focus:ring-1 focus:ring-brand-500"
                     value=""
                     onChange={async (e) => {
                       const tagId = e.target.value;
@@ -1096,7 +1096,7 @@ export function IssueDetailPanel({
                 <button
                   onClick={handleAnalyzeDeps}
                   disabled={analyzingDeps}
-                  className="text-[10px] text-purple-600 hover:text-purple-700 font-medium px-1.5 py-0.5 rounded border border-purple-200 hover:bg-purple-50 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
+                  className="text-[10px] text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:hover:text-brand-300 font-medium px-1.5 py-0.5 rounded border border-brand-200 dark:border-brand-700 hover:bg-brand-50 dark:hover:bg-brand-900/40 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
                   title="Analyze dependencies with AI"
                 >
                   {analyzingDeps && (
@@ -1165,7 +1165,7 @@ export function IssueDetailPanel({
                       related_to: "bg-gray-50 dark:bg-gray-800 text-gray-700 dark:text-gray-300",
                       duplicates: "bg-yellow-50 text-yellow-700",
                       parent_of: "bg-green-50 text-green-700",
-                      child_of: "bg-purple-50 text-purple-700",
+                      child_of: "bg-brand-50 text-brand-700 dark:bg-brand-900/40 dark:text-brand-300",
                     };
                     return typeOrder
                       .filter((t) => byDisplayType.has(t))
@@ -1261,7 +1261,7 @@ export function IssueDetailPanel({
                       <input
                         ref={depInputRef}
                         type="text"
-                        className="text-xs border border-gray-300 dark:border-gray-600 rounded px-1.5 py-0.5 w-44 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                        className="text-xs border border-gray-300 dark:border-gray-600 rounded px-1.5 py-0.5 w-44 focus:outline-none focus:ring-1 focus:ring-brand-500"
                         placeholder="+ Add dependency…"
                         value={depSearch}
                         onChange={(e) => {
@@ -1305,7 +1305,7 @@ export function IssueDetailPanel({
                               <button
                                 key={i.id}
                                 tabIndex={-1}
-                                className={`w-full text-left text-xs px-2 py-1 truncate ${idx === depHighlightIdx ? "bg-blue-100 text-blue-800" : "hover:bg-gray-100 dark:hover:bg-gray-800"}`}
+                                className={`w-full text-left text-xs px-2 py-1 truncate ${idx === depHighlightIdx ? "bg-brand-100 text-brand-800 dark:bg-brand-900/40 dark:text-brand-300" : "hover:bg-gray-100 dark:hover:bg-gray-800"}`}
                                 onMouseDown={(e) => { e.preventDefault(); addDep(i.id); }}
                                 onMouseEnter={() => setDepHighlightIdx(idx)}
                               >
@@ -1319,7 +1319,7 @@ export function IssueDetailPanel({
                     </div>
                     <select
                       ref={depTypeRef}
-                      className="text-xs border border-gray-300 dark:border-gray-600 rounded px-1 py-0.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                      className="text-xs border border-gray-300 dark:border-gray-600 rounded px-1 py-0.5 focus:outline-none focus:ring-1 focus:ring-brand-500"
                       defaultValue="depends_on"
                     >
                       <option value="depends_on">depends on</option>
@@ -1339,7 +1339,7 @@ export function IssueDetailPanel({
             {!showFollowUp ? (
               <button
                 onClick={() => setShowFollowUp(true)}
-                className="text-xs text-blue-600 hover:text-blue-800 flex items-center gap-1"
+                className="text-xs text-brand-600 hover:text-brand-700 dark:text-brand-400 dark:hover:text-brand-300 flex items-center gap-1"
               >
                 <span className="font-bold text-sm leading-none">+</span> Create follow-up task
               </button>
@@ -1352,12 +1352,12 @@ export function IssueDetailPanel({
                   onChange={(e) => setFollowUpTitle(e.target.value)}
                   onKeyDown={(e) => { if (e.key === "Enter") handleCreateFollowUp(); if (e.key === "Escape") { setShowFollowUp(false); setFollowUpTitle(""); } }}
                   placeholder="Follow-up task title..."
-                  className="flex-1 text-xs border border-gray-300 dark:border-gray-600 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  className="flex-1 text-xs border border-gray-300 dark:border-gray-600 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-brand-500"
                 />
                 <button
                   onClick={handleCreateFollowUp}
                   disabled={!followUpTitle.trim() || followUpCreating}
-                  className="text-xs bg-blue-600 text-white px-2 py-1 rounded hover:bg-blue-700 disabled:opacity-50 whitespace-nowrap"
+                  className="text-xs bg-brand-600 text-white px-2 py-1 rounded hover:bg-brand-700 disabled:opacity-50 whitespace-nowrap"
                 >{followUpCreating ? "…" : "Create"}</button>
                 <button onClick={() => { setShowFollowUp(false); setFollowUpTitle(""); }} className="text-xs text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300">✕</button>
               </div>
@@ -1382,7 +1382,7 @@ export function IssueDetailPanel({
             <button
               onClick={handleSave}
               disabled={saving || !title.trim()}
-              className="text-sm bg-blue-600 text-white px-4 py-1.5 rounded hover:bg-blue-700 disabled:opacity-50"
+              className="text-sm bg-brand-600 text-white px-4 py-1.5 rounded hover:bg-brand-700 disabled:opacity-50"
             >
               {saving ? "Saving..." : "Save"}
             </button>
@@ -1397,7 +1397,7 @@ export function IssueDetailPanel({
               onClick={handleEnhance}
               disabled={!title.trim() || enhancing}
               title="Enhance with AI"
-              className="ml-auto text-sm text-purple-600 px-2 py-1.5 hover:text-purple-800 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
+              className="ml-auto text-sm text-brand-600 dark:text-brand-400 px-2 py-1.5 hover:text-brand-700 dark:hover:text-brand-300 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
             >
               {enhancing ? (
                 <svg className="animate-spin h-3.5 w-3.5" fill="none" viewBox="0 0 24 24">

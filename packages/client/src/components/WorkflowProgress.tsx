@@ -44,8 +44,8 @@ interface Progress {
 const NODE_TYPE_BADGE: Record<string, string> = {
   start: "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300",
   end: "bg-gray-200 text-gray-700 dark:bg-gray-700 dark:text-gray-300",
-  "parallel-fork": "bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300",
-  "parallel-join": "bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300",
+  "parallel-fork": "bg-brand-50 text-brand-700 dark:bg-brand-900/40 dark:text-brand-300",
+  "parallel-join": "bg-brand-50 text-brand-700 dark:bg-brand-900/40 dark:text-brand-300",
 };
 
 /**
@@ -135,7 +135,7 @@ export function WorkflowProgress({ workspaceId }: { workspaceId: string }) {
                 <span className="text-[10px] text-gray-400 dark:text-gray-500 ml-auto">{n.statusName}</span>
               )}
               {n.skillName && (
-                <span className="text-[10px] text-violet-500 dark:text-violet-400" title="skill attached to this stage">
+                <span className="text-[10px] text-brand-600 dark:text-brand-400" title="skill attached to this stage">
                   ⚙ {n.skillName}
                 </span>
               )}

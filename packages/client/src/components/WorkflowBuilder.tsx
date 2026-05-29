@@ -265,7 +265,7 @@ export function WorkflowBuilder({
           <button onClick={autoLayout} className="text-xs border border-gray-300 dark:border-gray-600 px-3 py-1.5 rounded hover:bg-gray-50 dark:hover:bg-gray-800 dark:text-gray-200" title="Arrange nodes top-to-bottom">
             Auto layout
           </button>
-          <button onClick={save} disabled={saving} className="text-xs bg-blue-600 text-white px-3 py-1.5 rounded hover:bg-blue-700 disabled:opacity-50">
+          <button onClick={save} disabled={saving} className="text-xs bg-brand-600 text-white px-3 py-1.5 rounded hover:bg-brand-700 disabled:opacity-50">
             {saving ? "Saving…" : "Save"}
           </button>
           <button onClick={onClose} className="text-xs text-gray-500 dark:text-gray-400 px-3 py-1.5 hover:text-gray-700">Close</button>

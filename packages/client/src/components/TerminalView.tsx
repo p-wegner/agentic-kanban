@@ -358,8 +358,8 @@ export function TerminalView({ messages, connectionState, parseOutput = "minimal
       switch (event.kind) {
         case "assistant": color = "bg-green-500"; break;
         case "thinking": color = "bg-gray-500"; break;
-        case "tool_use": color = (event.kind === "tool_use" && event.name === "Agent") ? "bg-purple-500" : "bg-yellow-500"; break;
-        case "tool_result": color = event.isError ? "bg-red-500" : "bg-purple-500"; break;
+        case "tool_use": color = (event.kind === "tool_use" && event.name === "Agent") ? "bg-brand-500" : "bg-yellow-500"; break;
+        case "tool_result": color = event.isError ? "bg-red-500" : "bg-brand-500"; break;
         case "result": color = event.success ? "bg-emerald-400" : "bg-red-400"; break;
         case "init": color = "bg-cyan-400"; break;
         case "task_started": color = "bg-blue-500"; break;
@@ -600,28 +600,28 @@ function renderParsedEvent(event: DisplayEvent, key: number, ctx: RenderContext)
     if (isMinimal) {
       return (
         <div key={key} data-event-idx={key} className="mb-0.5 text-[11px]">
-          <div className="flex items-center gap-1 bg-purple-900/20 rounded px-1.5 py-0.5">
+          <div className="flex items-center gap-1 bg-brand-50 dark:bg-brand-900/40 rounded px-1.5 py-0.5">
             {isRunning
-              ? <span className="text-purple-400 animate-pulse">⟳</span>
-              : <span className="text-purple-400">⇢</span>}
-            <span className="text-purple-300 font-medium">Subagent</span>
+              ? <span className="text-brand-600 dark:text-brand-400 animate-pulse">⟳</span>
+              : <span className="text-brand-600 dark:text-brand-400">⇢</span>}
+            <span className="text-brand-700 dark:text-brand-300 font-medium">Subagent</span>
             <span className="text-gray-300">{description.slice(0, 80) || "delegating to agent"}</span>
             {subagentType && <span className="text-gray-500 ml-1">({subagentType})</span>}
-            {isRunning && <span className="text-purple-500 text-[10px] animate-pulse">running</span>}
+            {isRunning && <span className="text-brand-600 dark:text-brand-400 text-[10px] animate-pulse">running</span>}
           </div>
         </div>
       );
     }
     return (
       <div key={key} data-event-idx={key} className="mb-1">
-        <div className={`flex items-center gap-1.5 rounded px-2 py-1 ${isRunning ? "bg-purple-900/30 border border-purple-700" : "bg-purple-900/15 border border-purple-800"}`}>
+        <div className={`flex items-center gap-1.5 rounded px-2 py-1 ${isRunning ? "bg-brand-50 dark:bg-brand-900/40 border border-brand-200 dark:border-brand-700" : "bg-brand-50 dark:bg-brand-900/30 border border-brand-200 dark:border-brand-700"}`}>
           {isRunning
-            ? <span className="text-purple-400 animate-pulse">⟳</span>
-            : <span className="text-purple-400">⇢</span>}
-          <span className="text-purple-300 font-semibold text-xs">
+            ? <span className="text-brand-600 dark:text-brand-400 animate-pulse">⟳</span>
+            : <span className="text-brand-600 dark:text-brand-400">⇢</span>}
+          <span className="text-brand-700 dark:text-brand-300 font-semibold text-xs">
             {isRunning ? "Subagent running" : "Subagent"}
           </span>
-          {subagentType && <span className="text-purple-400 text-[10px] bg-purple-800/40 px-1 rounded">{subagentType}</span>}
+          {subagentType && <span className="text-brand-600 dark:text-brand-400 text-[10px] bg-brand-100 dark:bg-brand-800/40 px-1 rounded">{subagentType}</span>}
           <span className="text-gray-300 text-[11px] ml-1">{description}</span>
         </div>
       </div>
@@ -692,8 +692,8 @@ function renderParsedEvent(event: DisplayEvent, key: number, ctx: RenderContext)
       if (skillName) {
         return (
           <div key={key} data-event-idx={key} className={`mb-1 text-[11px] ${inSubagent ? "ml-6" : "ml-1"} flex items-center gap-1.5`}>
-            <span className="text-purple-400">⚡</span>
-            <span className="text-purple-300 font-medium">Skill: {skillName}</span>
+            <span className="text-brand-600 dark:text-brand-400">⚡</span>
+            <span className="text-brand-700 dark:text-brand-300 font-medium">Skill: {skillName}</span>
           </div>
         );
       }
@@ -839,8 +839,8 @@ function renderParsedEvent(event: DisplayEvent, key: number, ctx: RenderContext)
         </div>
       );
     }
-    const borderColor = event.isError ? "border-red-600" : inSubagent ? "border-gray-700" : "border-purple-600";
-    const textColor = event.isError ? "text-red-400" : inSubagent ? "text-gray-500" : "text-purple-400";
+    const borderColor = event.isError ? "border-red-600" : inSubagent ? "border-gray-700" : "border-brand-500";
+    const textColor = event.isError ? "text-red-400" : inSubagent ? "text-gray-500" : "text-brand-600 dark:text-brand-400";
     return (
       <div key={key} data-event-idx={key} className={`mb-1 ${inSubagent ? "ml-6" : "ml-2"} pl-2 border-l-2 ${borderColor}`}>
         <span className={textColor}>{event.isError ? "Error" : "Result"}: {event.toolName}</span>

@@ -12,7 +12,7 @@ interface SplitButtonProps {
   /** Additional actions shown in the dropdown */
   options: SplitButtonOption[];
   disabled?: boolean;
-  /** Tailwind color classes, e.g. "bg-violet-600 hover:bg-violet-700 border-violet-500" */
+  /** Tailwind color classes, e.g. "bg-brand-600 hover:bg-brand-700 border-brand-500" */
   colorClasses?: string;
   className?: string;
   /** Open dropdown above the button instead of below */
@@ -30,7 +30,7 @@ export function SplitButton({
   primary,
   options,
   disabled = false,
-  colorClasses = "bg-violet-600 hover:bg-violet-700 border-violet-500",
+  colorClasses = "bg-brand-600 hover:bg-brand-700 border-brand-500",
   className = "",
   dropUp = false,
 }: SplitButtonProps) {
@@ -70,7 +70,7 @@ export function SplitButton({
       </button>
       {open && (
         <div
-          className={`absolute ${dropUp ? "bottom-full mb-1" : "top-full mt-1"} left-0 w-52 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded shadow-lg z-10`}
+          className={`absolute ${dropUp ? "bottom-full mb-1" : "top-full mt-1"} left-0 w-52 bg-surface-raised dark:bg-surface-raised-dark border border-gray-200 dark:border-gray-700 rounded shadow-lg z-10`}
         >
           {options.map((opt) => (
             <button

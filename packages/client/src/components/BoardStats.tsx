@@ -14,8 +14,8 @@ interface BoardStatsProps {
 const STATUS_CONFIG: Record<string, { bar: string; dot: string; text: string; bg: string }> = {
   "Todo":        { bar: "bg-slate-400",   dot: "bg-slate-300",   text: "text-slate-600",   bg: "bg-slate-50" },
   "In Progress": { bar: "bg-amber-400",   dot: "bg-amber-300",   text: "text-amber-700",   bg: "bg-amber-50" },
-  "In Review":   { bar: "bg-blue-400",    dot: "bg-blue-300",    text: "text-blue-700",    bg: "bg-blue-50" },
-  "AI Reviewed": { bar: "bg-purple-400",  dot: "bg-purple-300",  text: "text-purple-700",  bg: "bg-purple-50" },
+  "In Review":   { bar: "bg-accent-500",  dot: "bg-accent-300",  text: "text-accent-700",  bg: "bg-accent-50" },
+  "AI Reviewed": { bar: "bg-accent-500",  dot: "bg-accent-300",  text: "text-accent-700",  bg: "bg-accent-50" },
   "Done":        { bar: "bg-emerald-400", dot: "bg-emerald-300", text: "text-emerald-700", bg: "bg-emerald-50" },
   "Cancelled":   { bar: "bg-gray-400",    dot: "bg-gray-300",    text: "text-gray-500",    bg: "bg-gray-50" },
 };
@@ -115,7 +115,7 @@ export function BoardStats({
           <span
             key={popKey}
             className={`inline-flex items-center justify-center min-w-[18px] h-4 px-1 rounded-full text-[10px] font-bold text-white ${
-              isFiltered ? "bg-violet-500" : "bg-gray-600"
+              isFiltered ? "bg-brand-500" : "bg-gray-600"
             } ${popKey > 0 ? "count-pop" : ""}`}
           >
             {total}
@@ -162,10 +162,10 @@ export function BoardStats({
 
         {/* Profile badges */}
         {[...profileCounts.entries()].map(([profile, count]) => (
-          <div key={profile} className="flex items-center gap-1 px-2 py-1 rounded-full bg-violet-50 border border-violet-200" title="Active profile">
-            <span className="w-1.5 h-1.5 rounded-full bg-violet-400" />
-            <span className="text-xs text-violet-600 hidden sm:inline">{profile}</span>
-            <span className="text-xs font-semibold text-violet-700">{count}</span>
+          <div key={profile} className="flex items-center gap-1 px-2 py-1 rounded-full bg-brand-50 dark:bg-brand-900/40 border border-brand-200 dark:border-brand-700" title="Active profile">
+            <span className="w-1.5 h-1.5 rounded-full bg-brand-500" />
+            <span className="text-xs text-brand-600 dark:text-brand-400 hidden sm:inline">{profile}</span>
+            <span className="text-xs font-semibold text-brand-700 dark:text-brand-300">{count}</span>
           </div>
         ))}
 
