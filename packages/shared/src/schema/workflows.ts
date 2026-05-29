@@ -30,6 +30,7 @@ export const WORKFLOW_EDGE_CONDITIONS = [
   "tests_pass",
   "tests_fail",
   "diff_clean",
+  "diff_touches",
 ] as const;
 export type WorkflowEdgeCondition = (typeof WORKFLOW_EDGE_CONDITIONS)[number];
 
