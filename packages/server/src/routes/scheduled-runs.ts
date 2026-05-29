@@ -1,12 +1,20 @@
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { createScheduledRunService } from "../services/scheduled-run.service.js";
+import { createWorkspaceService } from "../services/workspace.service.js";
 import { createRouter } from "../middleware/create-router.js";
 import { parseJsonBody } from "../middleware/parse-body.js";
+import type { BoardEvents } from "../services/board-events.js";
+import type { SessionManager } from "../services/session.manager.js";
 
-export function createScheduledRunsRoute(database: Database = db, serverPort?: number) {
+export function createScheduledRunsRoute(
+  database: Database = db,
+  getSessionManager?: () => SessionManager,
+  boardEvents?: BoardEvents,
+) {
   const router = createRouter();
-  const service = createScheduledRunService({ database, serverPort });
+  const workspaceService = createWorkspaceService({ database, getSessionManager, boardEvents });
+  const service = createScheduledRunService({ database, createWorkspace: workspaceService.createWorkspace });
 
   // GET /api/scheduled-runs?projectId=
   router.get("/", async (c) => {
