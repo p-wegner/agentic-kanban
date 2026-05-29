@@ -35,6 +35,7 @@ export function createWorkspacesRoute(
       requiresReview: body.requiresReview === true,
       thoroughReview: body.thoroughReview === true,
       planMode: body.planMode === true,
+      tddMode: body.tddMode === true,
       includeVisualProof: body.includeVisualProof === true,
       skipSetup: body.skipSetup === true,
       customPrompt: body.customPrompt,
