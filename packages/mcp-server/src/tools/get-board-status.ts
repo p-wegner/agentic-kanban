@@ -4,6 +4,7 @@ import { eq, inArray, desc } from "drizzle-orm";
 import { extractMeaningfulOutput } from "@agentic-kanban/shared";
 import type { BoardStatusIssue } from "@agentic-kanban/shared";
 import { prodDeps, type ToolDeps } from "./deps.js";
+import { requireEntity } from "../db-utils.js";
 
 export function registerGetBoardStatus(server: McpServer, deps: ToolDeps = prodDeps) {
   const { db, schema, getDiffShortstat } = deps;
@@ -38,10 +39,9 @@ export function registerGetBoardStatus(server: McpServer, deps: ToolDeps = prodD
           .from(schema.projects)
           .where(eq(schema.projects.id, pid))
           .limit(1);
-        if (projectRows.length === 0) {
-          return { content: [{ type: "text" as const, text: `Project ${pid} not found` }] };
-        }
-        const project = projectRows[0];
+        const rp = requireEntity(projectRows, pid, "Project");
+        if (!rp.ok) return rp.error;
+        const project = rp.value;
 
         // 2. Get statuses to identify terminal ones
         const statuses = await db

@@ -2,6 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { db, schema } from "../db.js";
 import { eq, desc } from "drizzle-orm";
+import { requireEntity } from "../db-utils.js";
 
 export function registerGetSessionStats(server: McpServer) {
   server.tool(
@@ -39,11 +40,10 @@ export function registerGetSessionStats(server: McpServer) {
         .where(eq(schema.sessions.id, targetSessionId))
         .limit(1);
 
-      if (rows.length === 0) {
-        return { content: [{ type: "text" as const, text: `Session ${targetSessionId} not found` }] };
-      }
+      const r = requireEntity(rows, targetSessionId, "Session");
+      if (!r.ok) return r.error;
 
-      const session = rows[0];
+      const session = r.value;
       if (!session.stats) {
         return { content: [{ type: "text" as const, text: `No stats available for session ${targetSessionId} (session may still be running or stats were not captured)` }] };
       }
