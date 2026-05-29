@@ -6,6 +6,7 @@ import { CLAUDE_MODEL_OPTIONS } from "@agentic-kanban/shared";
 import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
 import type { LiveSessionStats } from "../lib/useBoardEvents.js";
 import { AgentQuestionsPanel } from "./AgentQuestionsPanel.js";
+import { ButlerVoiceButton } from "./ButlerVoiceButton.js";
 
 interface ButlerState {
   active: boolean;
@@ -180,6 +181,8 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
   const [starting, setStarting] = useState(false);
   const [sending, setSending] = useState(false);
   const [input, setInput] = useState("");
+  // Live preview of the in-progress voice phrase (not yet appended to `input`).
+  const [interimVoiceText, setInterimVoiceText] = useState("");
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [contextTokens, setContextTokens] = useState(0);
   const [model, setModel] = useState<string | undefined>(undefined);
@@ -509,6 +512,22 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
     } finally {
       setCustomizeBusy(false);
     }
+  }
+
+  // Append a finalized dictation chunk to the input, inserting a space when
+  // continuing an existing message. Keeps the textarea auto-grow in sync.
+  function appendVoiceTranscript(chunk: string) {
+    setInput((prev) => {
+      const sep = prev.length > 0 && !/\s$/.test(prev) ? " " : "";
+      return prev + sep + chunk;
+    });
+    requestAnimationFrame(() => {
+      const t = inputRef.current;
+      if (t) {
+        t.style.height = "auto";
+        t.style.height = `${Math.min(t.scrollHeight, 160)}px`;
+      }
+    });
   }
 
   async function handleSend() {
@@ -930,7 +949,17 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
                     t.style.height = `${Math.min(t.scrollHeight, 160)}px`;
                   }}
                 />
+                {interimVoiceText && (
+                  <div className="absolute bottom-full mb-1 left-0 right-0 z-10 rounded-md bg-gray-900/90 dark:bg-gray-100/90 px-2.5 py-1 text-xs italic text-white dark:text-gray-900 pointer-events-none">
+                    🎙️ {interimVoiceText}
+                  </div>
+                )}
               </div>
+              <ButlerVoiceButton
+                disabled={sending}
+                onTranscript={appendVoiceTranscript}
+                onInterim={setInterimVoiceText}
+              />
               {sending ? (
                 <button
                   onClick={handleStop}
@@ -965,7 +994,7 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
                   Butler is thinking...
                 </span>
               ) : (
-                "Persistent warm butler · runs in your project repo · Enter to send"
+                "Persistent warm butler · runs in your project repo · Enter to send · 🎙️ to dictate"
               )}
             </p>
           </div>
