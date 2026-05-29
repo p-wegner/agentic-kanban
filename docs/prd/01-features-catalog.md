@@ -451,6 +451,16 @@ Complete inventory of features, organized by category. Status reflects the curre
 - Voice-to-Butler (routing a spoken idea to the Butler assistant) is a separate, in-progress effort (open ticket #106); the voice-inbox-to-Backlog capability described here is DONE
 - **Status: DONE**
 
+### F-UI-24: Standup Digest View
+- Board view tab ("Digest", `d` shortcut); heading "Standup Digest", subtitle "What changed on the board while you were away."
+- Time-window toggle: Last 24h (default) / Last 3 days / Last 7 days
+- Headline KPI cards: Created (new issues), Completed (done + cancelled), Merged (workspaces), Agent runs (with N succeeded · $cost)
+- Activity pills: "N agents running now" (live) and "N blocked issues need attention"
+- Sections (each clickable to open the issue detail panel): Completed, Merged (shows branch), New issues, Moved (status changes), Blocked — needs attention, Agent runs (success/fail/running dot + duration + cost)
+- Pure server-side aggregation via `GET /api/digest?projectId=<id>&range=<24h|3d|7d>` — no LLM, no new DB table; derived from issue/session/workspace timestamps. Accepts an optional `now` query param for deterministic time-window tests
+- "All quiet" empty state when nothing changed in the window
+- **Status: DONE**
+
 ## Category: Infrastructure
 
 | Feature | Original | Our Decision |
