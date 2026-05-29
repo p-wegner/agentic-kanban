@@ -26,7 +26,9 @@ interface Settings {
   resume_with_new_model?: string;
   disabled_mcp_tools?: string;
   auto_start_followup?: string;
+  auto_rebase_on_continue?: string;
   require_manual_approval?: string;
+  skip_preflight?: string;
   dynamic_column_scaling?: string;
   persistent_agent?: string;
   learning_step_after_agent?: string;
@@ -66,7 +68,9 @@ const DEFAULT_SETTINGS: Settings = {
   resume_with_new_model: "false",
   disabled_mcp_tools: "",
   auto_start_followup: "false",
+  auto_rebase_on_continue: "false",
   require_manual_approval: "false",
+  skip_preflight: "false",
   dynamic_column_scaling: "false",
   persistent_agent: "false",
   learning_step_after_agent: "false",

@@ -9,6 +9,7 @@ export const agentSkills = sqliteTable("agent_skills", {
   model: text("model"),
   projectId: text("project_id").references(() => projects.id),
   isBuiltin: integer("is_builtin", { mode: "boolean" }).notNull().default(false),
+  type: text("type").notNull().default("skill"),
   createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
   updatedAt: text("updated_at").notNull().$defaultFn(() => new Date().toISOString()),
 });
