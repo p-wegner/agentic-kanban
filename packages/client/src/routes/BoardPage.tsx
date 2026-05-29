@@ -82,7 +82,6 @@ export function BoardPage() {
   const [showCodemod, setShowCodemod] = useState(false);
   const [showWorktreeOverview, setShowWorktreeOverview] = useState(false);
   const [showAllWorkspaces, setShowAllWorkspaces] = useState(false);
-  const [showMergeQueue, setShowMergeQueue] = useState(false);
   const [showCommandPalette, setShowCommandPalette] = useState(false);
   const [showShortcutHelp, setShowShortcutHelp] = useState(false);
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(
@@ -1485,12 +1484,6 @@ export function BoardPage() {
           onLaunched={() => refetchBoard()}
         />
       )}
-      {showMergeQueue && activeProjectId && (
-        <MergeQueuePanel
-          columns={columns}
-          projectId={activeProjectId}
-          onClose={() => setShowMergeQueue(false)}
-          onMerged={() => refetchBoard()}
       {showCodemod && (
         <CodemodPanel
           onClose={() => setShowCodemod(false)}
