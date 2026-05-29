@@ -55,3 +55,16 @@ Always pass `'en-US'` (or another explicit locale) to `toLocaleDateString()`, `t
 
 ## Workspace panel status guards
 Don't gate session history, TerminalView, and session stats on `ws.status !== "closed"` — auto-merged workspaces set `workingDir: null` and `status: "closed"` but their history is still viewable. Only chat footer and action buttons (Review, Merge, etc.) should be gated on active status.
+
+## SSE from POST endpoints
+Server-sent events consumed from POST endpoints (e.g. merge-queue execution) **must** use `fetch()` + `ReadableStream`, not `EventSource`. `EventSource` only supports GET. Pattern:
+```ts
+const resp = await fetch(url, { method: "POST", body: JSON.stringify(payload), headers: { "Content-Type": "application/json" } });
+const reader = resp.body!.getReader();
+const decoder = new TextDecoder();
+while (true) {
+  const { done, value } = await reader.read();
+  if (done) break;
+  // parse SSE lines from decoder.decode(value)
+}
+```
