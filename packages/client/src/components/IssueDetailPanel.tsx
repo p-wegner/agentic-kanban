@@ -24,6 +24,23 @@ interface StatusOption {
   name: string;
 }
 
+interface IssueComment {
+  id: string;
+  issueId: string;
+  workspaceId: string | null;
+  kind: string;
+  author: string;
+  body: string;
+  payload: unknown;
+  createdAt: string;
+}
+
+const COMMENT_KIND_LABELS: Record<string, string> = {
+  "preflight-clarification": "Preflight clarification",
+  "agent-question": "Agent question",
+  note: "Note",
+};
+
 interface IssueDetailPanelProps {
   issue: IssueWithStatus;
   statuses: StatusOption[];
@@ -145,6 +162,7 @@ export function IssueDetailPanel({
   const [showShowdownDialog, setShowShowdownDialog] = useState(false);
   const [activeShowdownId, setActiveShowdownId] = useState<string | null>(null);
   const [availableSkills, setAvailableSkills] = useState<{ id: string; name: string; description: string }[]>([]);
+  const [comments, setComments] = useState<IssueComment[]>([]);
 
   // Track unsaved changes for warning
   const hasChanges = editing && (
@@ -159,13 +177,14 @@ export function IssueDetailPanel({
   useEffect(() => {
     async function loadData() {
       try {
-        const [ws, tags, available, deps, issues, skills] = await Promise.all([
+        const [ws, tags, available, deps, issues, skills, commentsResp] = await Promise.all([
           apiFetch<{ id: string }[]>(`/api/issues/${issue.id}/workspaces`),
           apiFetch<{ id: string; name: string; color: string | null }[]>(`/api/issues/${issue.id}/tags`),
           apiFetch<{ id: string; name: string; color: string | null }[]>(`/api/tags`),
           apiFetch<DependencyInfo>(`/api/issues/${issue.id}/dependencies`),
           apiFetch<IssueWithStatus[]>(`/api/issues?projectId=${issue.projectId}`),
           apiFetch<{ id: string; name: string; description: string }[]>(`/api/agent-skills?projectId=${issue.projectId}`).catch(() => [] as { id: string; name: string; description: string }[]),
+          apiFetch<{ comments: IssueComment[] }>(`/api/issues/${issue.id}/comments`).catch(() => ({ comments: [] as IssueComment[] })),
         ]);
         setWorkspaceCount(ws.length);
         setIssueTags(tags);
@@ -173,6 +192,7 @@ export function IssueDetailPanel({
         setDependencies(deps);
         setAvailableIssues(issues.filter(i => i.id !== issue.id));
         setAvailableSkills(skills);
+        setComments(commentsResp.comments);
         // Check for active showdown
         apiFetch<{ id: string }>(`/api/issues/${issue.id}/showdown`)
           .then(sd => setActiveShowdownId(sd.id))
@@ -1516,6 +1536,40 @@ export function IssueDetailPanel({
               </div>
             )}
           </div>
+
+          {/* Comments / activity thread (preflight clarifications + agent questions) */}
+          {!editing && comments.length > 0 && (
+            <div className="pt-2 border-t border-gray-100 dark:border-gray-800">
+              <label className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-2">
+                Clarifications &amp; activity
+              </label>
+              <ul className="space-y-2">
+                {comments.map((cmt) => (
+                  <li
+                    key={cmt.id}
+                    className="border border-gray-200 dark:border-gray-700 rounded px-2.5 py-2 bg-gray-50 dark:bg-gray-800/50"
+                  >
+                    <div className="flex items-center gap-2 mb-1 text-[11px]">
+                      <span className={`font-medium px-1.5 py-0.5 rounded ${
+                        cmt.kind === "preflight-clarification"
+                          ? "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300"
+                          : cmt.kind === "agent-question"
+                          ? "bg-brand-50 text-brand-700 dark:bg-brand-900/40 dark:text-brand-300"
+                          : "bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300"
+                      }`}>
+                        {COMMENT_KIND_LABELS[cmt.kind] ?? cmt.kind}
+                      </span>
+                      <span className="text-gray-400 dark:text-gray-500 capitalize">{cmt.author}</span>
+                      <span className="text-gray-400 dark:text-gray-500 ml-auto">{formatRelativeTime(cmt.createdAt)}</span>
+                    </div>
+                    <div className="markdown-body text-sm">
+                      <ReactMarkdown>{normalizeMarkdown(cmt.body)}</ReactMarkdown>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
 
           {/* Timestamps */}
           <div className="pt-2 border-t border-gray-100 dark:border-gray-800">
