@@ -90,6 +90,25 @@ translate.)
 
 ### Pick: Option A for tech-heavy audiences, Option B for mixed/leadership.
 
+### Positioning slide (either opener): The 5 Levels of AI Coding
+
+Borrow Dan Shapiro's framing as a single orientation slide so the audience
+knows where this talk lives:
+
+```
+Level 0: Spicy Autocomplete   → next-line suggestions (Copilot original)
+Level 1: Coding Intern        → bounded tasks, human reviews every line
+Level 2: Junior Developer     → multi-file edits, human still reads everything
+Level 3: Developer as Manager → AI submits PRs, human reviews at feature level
+Level 4: Developer as PM      → human writes spec, returns, checks outcomes
+Level 5: Dark Factory         → spec in → product out, no human in the loop
+```
+
+> *"90% of developers who say they're AI-native operate at Level 2."*
+
+This talk is about **what it actually takes to operate reliably at Level 3–4**
+— without building skyscrapers that don't stand up.
+
 ---
 
 ## Act 2 — Diagnosis: why vibe coding stalls (8 min)
@@ -105,6 +124,14 @@ articulated. When they're nodding, you've earned the right to prescribe.
   progress tracking. (Tie to the 2024 article's "biggest weakness of aider:
   no automatic progress tracking for complex tasks" — same problem, just
   bigger now.)
+- **Data point worth quoting:** METR's 2025 RCT — 16 experienced OSS
+  developers, 246 real tasks from their own repos. They *expected* +24%
+  speedup with AI. Actual result: **−19% slower.** Self-assessment after the
+  test: "felt about 20% faster."
+  > *"This gap between perception and reality is striking."* — METR 2025
+  
+  Translation: the feeling of speed and the fact of speed are not the same
+  thing, and most of us are bad at telling them apart without instrumentation.
 
 ### 2. The fundamental attribution error, applied to LLMs
 
@@ -155,6 +182,21 @@ Four concrete changes, each illustrated with a side-by-side of "2024 me" vs
   decides whether to keep going. **The feedback loop closes without me in it.**
 - Key insight: this is the difference between an agent that can *finish* and
   an agent that can only *start*.
+- **Name the pattern** so the audience can take it home: the
+  **Self-Verification Loop** (some call it the "Ralph Wiggum Loop" — keep
+  trying until external checks say done):
+  
+  ```
+  1. Agent attempts the task with current knowledge
+  2. External verification: tests, linter, deterministic checks
+  3. Adversarial review by a second agent with project rules in context
+  4. Failed?  → retry (optionally update rules/context)
+  5. Success? → human review at feature level
+  6. Review feedback feeds back into the rules
+  ```
+  
+  External verification is the load-bearing piece. Without it, the agent
+  is just guessing whether it's done.
 
 ### 3.3 Guardrails: trust the agent → trust the harness around the agent
 
@@ -183,6 +225,25 @@ That system is the actual product. The features it ships are a byproduct.
 
 The "so what" act. Practical and prescriptive — the audience should leave with
 3 things they could do Monday morning.
+
+### The honest caveat first: the J-curve
+
+Before the prescription, name the cost openly. The 28-day / 59k LOC number is
+not a starting point — it's the *output* of ~14 months of prior tooling
+evolution (the Coding-Aider era), plus a non-trivial investment in the
+harness around the agent (hooks, skills, MCP tools, E2E tests, the kanban
+board itself).
+
+> *"You're running a new engine on an old transmission."* — Dan Shapiro
+
+Bolt agents onto an unchanged workflow and you get the **dip first**:
+slower, more frustrating, more rework, the agent fights your conventions.
+Teams that bail out at the dip conclude "AI doesn't work" — and they're
+right, *for the setup they tried*. Teams that push through and rebuild the
+workflow are the ones who report the 25–30%+ gains.
+
+The honest version of the speedup claim: **the gain is real and it
+compounds, but it's a J-curve, not a step change.** Plan for the dip.
 
 ### For individual developers
 
