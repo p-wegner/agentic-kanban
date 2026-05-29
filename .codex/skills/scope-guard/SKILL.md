@@ -58,13 +58,13 @@ Call out anything suspicious in these categories directly.
 
 ## Step 6 — Run targeted tests
 
-Run only the tests covering the changed files (Windows-aware: use Bash tool for `$(...)`, or list files explicitly in PowerShell):
+Run only the tests covering the changed files (vitest v4 uses `related` as a subcommand — `--related` flag is broken):
 
 ```bash
-pnpm --filter agentic-kanban test -- --related $(git diff --name-only HEAD)
+pnpm --filter agentic-kanban exec vitest related $(git diff --name-only HEAD)
 ```
 
-If PowerShell can't expand `$(...)`, list the changed paths after `--related` manually.
+If PowerShell can't expand `$(...)`, list the changed paths after `related` manually.
 
 ## Step 7 — Commit
 

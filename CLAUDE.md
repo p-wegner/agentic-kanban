@@ -117,6 +117,7 @@ When a test in the table below fails and you haven't touched the relevant code, 
   ```
   pnpm test:mine -- --changed HEAD
   ```
+- **⚠️ `pnpm test -- --related` is broken in vitest v4** — `--related` is no longer a flag of `vitest run`; it's a standalone subcommand. Use `exec vitest related` instead.
 - **Full suite** (`pnpm --filter agentic-kanban test`) should only be used before committing or when cross-cutting changes may affect unrelated tests.
 - **`nowOverride` pattern for time-dependent services**: inject an optional `now?: string` parameter into any service function that calls `new Date()` for staleness/expiry logic. Tests pass `new Date().toISOString()` or a relative offset — never a hardcoded ISO string that ages out.
 

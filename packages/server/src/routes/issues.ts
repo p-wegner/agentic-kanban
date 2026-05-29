@@ -7,6 +7,7 @@ import { createIssueService } from "../services/issue.service.js";
 import { parseJsonBody } from "../middleware/parse-body.js";
 import { createRouter } from "../middleware/create-router.js";
 import { wrapAiOperation } from "../middleware/ai-operation.js";
+import { runTicketPreflight } from "../services/ticket-preflight.service.js";
 
 export function createIssuesRoute(database: Database = db, options?: { boardEvents?: BoardEvents }) {
   const router = createRouter();
@@ -150,6 +151,15 @@ export function createIssuesRoute(database: Database = db, options?: { boardEven
     const issueId = c.req.param("id");
     const body = await parseJsonBody<{ refresh?: boolean }>(c).catch(() => ({ refresh: false }));
     return c.json(await wrapAiOperation("analyze-touched-files", () => analyzeTouchedFiles(issueId, database, body?.refresh === true)));
+  });
+
+
+  // POST /api/issues/:id/preflight — AI ticket sanity check
+  router.post("/:id/preflight", async (c) => {
+    const issueId = c.req.param("id");
+    const body = await parseJsonBody<{ projectId: string }>(c);
+    if (!body.projectId) return c.json({ error: "projectId is required" }, 400);
+    return c.json(await wrapAiOperation("preflight", () => runTicketPreflight(issueId, body.projectId, database)));
   });
 
   // GET /api/issues/:id/summary
