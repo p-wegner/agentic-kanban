@@ -10,6 +10,7 @@ import { ButlerView } from "../components/ButlerView.js";
 import { WorkflowsView } from "../components/WorkflowsView.js";
 import { InsightsPanel } from "../components/InsightsPanel.js";
 import { DigestView } from "../components/DigestView.js";
+import { FocusView } from "../components/FocusView.js";
 import { SwimlaneView } from "../components/SwimlaneView.js";
 import { FlakyTestsPanel } from "../components/FlakyTestsPanel.js";
 import { useAgentQuestionsCount } from "../components/AgentQuestionsPanel.js";
@@ -107,7 +108,7 @@ export function BoardPage() {
   const [expandedCreatePanel, setExpandedCreatePanel] = useState<{ statusId: string; statusName: string; state: Partial<CreateIssueFormState> } | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>(() => {
     const stored = localStorage.getItem("kanban-board-view");
-    const validViews: ViewMode[] = ["kanban", "graph", "table", "agents", "timeline", "metrics", "butler", "workflows", "insights", "swimlane", "flaky-tests", "digest"];
+    const validViews: ViewMode[] = ["kanban", "graph", "table", "agents", "timeline", "metrics", "butler", "workflows", "insights", "swimlane", "flaky-tests", "digest", "focus"];
     return validViews.includes(stored as ViewMode) ? (stored as ViewMode) : "kanban";
   });
   const [dynamicColumnScaling, setDynamicColumnScaling] = useState(false);
@@ -845,7 +846,7 @@ export function BoardPage() {
         setShowSettings(true);
         return;
       }
-      if ((e.key === "b" || e.key === "t" || e.key === "l" || e.key === "f" || e.key === "m" || e.key === "i" || e.key === "n" || e.key === "p" || e.key === "k" || e.key === "d") && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      if ((e.key === "b" || e.key === "t" || e.key === "l" || e.key === "f" || e.key === "m" || e.key === "i" || e.key === "n" || e.key === "p" || e.key === "k" || e.key === "d" || e.key === "o") && !e.ctrlKey && !e.metaKey && !e.altKey) {
         const target = e.target as HTMLElement;
         if (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT") return;
         e.preventDefault();
@@ -859,6 +860,7 @@ export function BoardPage() {
         else if (e.key === "p") handleViewModeChange("swimlane");
         else if (e.key === "k") handleViewModeChange("flaky-tests");
         else if (e.key === "d") handleViewModeChange("digest");
+        else if (e.key === "o") handleViewModeChange("focus");
         return;
       }
       // "a" to toggle All Workspaces panel
@@ -1369,6 +1371,17 @@ export function BoardPage() {
         {viewMode === "digest" && activeProjectId && (
           <BoardErrorBoundary columnName="Digest View">
             <DigestView
+              projectId={activeProjectId}
+              onIssueClick={(issueId) => {
+                const issue = columns.flatMap(c => c.issues).find(i => i.id === issueId);
+                if (issue) handleIssueClick(issue);
+              }}
+            />
+          </BoardErrorBoundary>
+        )}
+        {viewMode === "focus" && activeProjectId && (
+          <BoardErrorBoundary columnName="Focus View">
+            <FocusView
               projectId={activeProjectId}
               onIssueClick={(issueId) => {
                 const issue = columns.flatMap(c => c.issues).find(i => i.id === issueId);
