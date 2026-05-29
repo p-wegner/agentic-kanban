@@ -140,7 +140,7 @@ function CommentBlock({
     );
   }
 
-  const timestamp = new Date(comment.createdAt).toLocaleString(undefined, {
+  const timestamp = new Date(comment.createdAt).toLocaleString('en-US', {
     month: "short",
     day: "numeric",
     hour: "2-digit",
