@@ -42,6 +42,7 @@ export interface BuiltinEdgeDef {
   to: string;
   label?: string;
   condition?: WorkflowEdgeCondition;
+  isLoop?: boolean;
 }
 
 export interface BuiltinTemplateDef {
@@ -86,7 +87,7 @@ export const BUILTIN_WORKFLOWS: BuiltinTemplateDef[] = [
     edges: [
       { from: "implement", to: "review", condition: "auto_on_exit_0", label: "changes committed" },
       { from: "review", to: "done", condition: "manual", label: "approved" },
-      { from: "review", to: "implement", condition: "manual", label: "changes requested" },
+      { from: "review", to: "implement", condition: "manual", label: "changes requested", isLoop: true },
     ],
   },
   {
@@ -117,7 +118,7 @@ export const BUILTIN_WORKFLOWS: BuiltinTemplateDef[] = [
     edges: [
       { from: "fix", to: "review", condition: "auto_on_exit_0", label: "fix committed" },
       { from: "review", to: "done", condition: "manual", label: "approved" },
-      { from: "review", to: "fix", condition: "manual", label: "needs more work" },
+      { from: "review", to: "fix", condition: "manual", label: "needs more work", isLoop: true },
     ],
   },
   {
@@ -164,7 +165,7 @@ export const BUILTIN_WORKFLOWS: BuiltinTemplateDef[] = [
       { from: "research", to: "reproduce", condition: "manual", label: "root cause found" },
       { from: "reproduce", to: "fix", condition: "manual", label: "reproduced" },
       { from: "fix", to: "review", condition: "auto_on_exit_0", label: "fix committed" },
-      { from: "review", to: "fix", condition: "manual", label: "needs rework" },
+      { from: "review", to: "fix", condition: "manual", label: "needs rework", isLoop: true },
       { from: "review", to: "done", condition: "manual", label: "approved" },
     ],
   },
@@ -201,7 +202,7 @@ export const BUILTIN_WORKFLOWS: BuiltinTemplateDef[] = [
     edges: [
       { from: "research", to: "consult", condition: "manual", label: "findings ready" },
       { from: "consult", to: "writeup", condition: "manual", label: "direction received" },
-      { from: "consult", to: "research", condition: "manual", label: "needs more research" },
+      { from: "consult", to: "research", condition: "manual", label: "needs more research", isLoop: true },
     ],
   },
   {
@@ -322,9 +323,9 @@ export const BUILTIN_WORKFLOWS: BuiltinTemplateDef[] = [
       { from: "requirements", to: "safety-net", condition: "manual", label: "requirements ready" },
       { from: "safety-net", to: "modules", condition: "manual", label: "safety net green" },
       { from: "modules", to: "migrate", condition: "manual", label: "modules identified" },
-      { from: "migrate", to: "migrate", condition: "manual", label: "next module" },
+      { from: "migrate", to: "migrate", condition: "manual", label: "next module", isLoop: true },
       { from: "migrate", to: "consolidate", condition: "manual", label: "all migrated" },
-      { from: "consolidate", to: "migrate", condition: "manual", label: "issues found" },
+      { from: "consolidate", to: "migrate", condition: "manual", label: "issues found", isLoop: true },
       { from: "consolidate", to: "done", condition: "manual", label: "approved" },
     ],
   },
@@ -402,6 +403,7 @@ export async function ensureBuiltinWorkflows(database: Database = db): Promise<v
         toNodeId: toId,
         label: edge.label ?? null,
         condition: edge.condition ?? "manual",
+        isLoop: !!edge.isLoop,
         sortOrder: edgeSort,
         createdAt: now,
       });
