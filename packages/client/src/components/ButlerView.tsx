@@ -173,6 +173,174 @@ function ChatBubble({ msg }: { msg: ChatMessage }) {
     </div>
   );
 }
+/** A defined butler plus this project's runtime state for it (GET /:id/butlers). */
+interface ButlerListItem {
+  id: string;
+  name: string;
+  model: string;
+  active: boolean;
+  busy: boolean;
+  contextTokens: number;
+  contextWindow?: number;
+  sessionId: string | null;
+  mcpConnected?: boolean;
+}
+
+function modelLabel(value: string): string {
+  return CLAUDE_MODEL_OPTIONS.find((m) => m.value === value)?.label ?? value;
+}
+
+/** Compact butler switcher — a labelled select of the defined butlers plus a gear
+ *  to open the manage dialog. A filled dot marks butlers with a warm session. */
+function ButlerSwitcher({ butlers, activeId, onSelect, onManage, disabled }: {
+  butlers: ButlerListItem[];
+  activeId: string;
+  onSelect: (id: string) => void;
+  onManage: () => void;
+  disabled?: boolean;
+}) {
+  return (
+    <div className="flex items-center gap-1 shrink-0" title="Switch butlers — each keeps its own warm context and model">
+      <svg className="w-3.5 h-3.5 text-gray-400 dark:text-gray-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M8.625 12a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H8.25m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H12m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0h-.375M21 12c0 4.556-4.03 8.25-9 8.25a9.764 9.764 0 01-2.555-.337A5.972 5.972 0 015.41 20.97a5.969 5.969 0 01-.474-.065 4.48 4.48 0 00.978-2.025c.09-.457-.133-.901-.467-1.226C3.93 16.178 3 14.189 3 12c0-4.556 4.03-8.25 9-8.25s9 3.694 9 8.25z" />
+      </svg>
+      <select
+        value={activeId}
+        onChange={(e) => onSelect(e.target.value)}
+        disabled={disabled}
+        className="rounded border border-gray-300 dark:border-gray-600 bg-surface-raised dark:bg-surface-raised-dark px-1.5 py-1 text-xs font-medium text-gray-700 dark:text-gray-200 focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:opacity-50 max-w-[180px]"
+      >
+        {butlers.map((b) => (
+          <option key={b.id} value={b.id}>
+            {b.active ? "● " : "○ "}{b.name}{b.model ? ` · ${modelLabel(b.model)}` : ""}
+          </option>
+        ))}
+      </select>
+      <button
+        onClick={onManage}
+        disabled={disabled}
+        title="Manage butlers (add, rename, set model, remove)"
+        className="inline-flex items-center justify-center w-7 h-7 rounded border border-gray-300 dark:border-gray-600 bg-surface-raised dark:bg-surface-raised-dark text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 hover:text-gray-800 dark:hover:text-gray-100 transition-colors disabled:opacity-50"
+      >
+        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 6h9.75M10.5 6a1.5 1.5 0 11-3 0m3 0a1.5 1.5 0 10-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m-9.75 0h9.75" />
+        </svg>
+      </button>
+    </div>
+  );
+}
+
+interface ButlerDef { id: string; name: string; model: string; }
+
+/** Modal for managing the global set of butlers: add, rename, set model, remove. Capped server-side. */
+function ButlerManageModal({ onClose, onChanged }: { onClose: () => void; onChanged: () => void }) {
+  const [items, setItems] = useState<ButlerDef[]>([]);
+  const [max, setMax] = useState(4);
+  const [newName, setNewName] = useState("");
+  const [newModel, setNewModel] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  async function refresh() {
+    try {
+      const r = await apiFetch<{ butlers: ButlerDef[]; max: number }>("/api/butler-definitions");
+      setItems(r.butlers);
+      setMax(r.max);
+      onChanged();
+    } catch { /* ignore */ }
+  }
+
+  useEffect(() => { void refresh(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
+
+  async function run(fn: () => Promise<unknown>) {
+    setBusy(true);
+    setError("");
+    try {
+      await fn();
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Operation failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function callDef(path: string, init: { method: string; body?: unknown }) {
+    const res = await fetch(`/api/butler-definitions${path}`, {
+      method: init.method,
+      headers: init.body !== undefined ? { "Content-Type": "application/json" } : undefined,
+      body: init.body !== undefined ? JSON.stringify(init.body) : undefined,
+    });
+    const data = (await res.json().catch(() => ({}))) as { error?: string };
+    if (!res.ok) throw new Error(data.error ?? `Request failed (${res.status})`);
+    return data;
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+      <div className="w-full max-w-lg rounded-xl bg-surface dark:bg-surface-dark border border-gray-200 dark:border-gray-700 shadow-xl" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-5 py-3 border-b border-gray-200 dark:border-gray-800">
+          <h3 className="text-sm font-semibold text-ink dark:text-stone-100">Manage butlers</h3>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 text-lg leading-none">×</button>
+        </div>
+        <div className="px-5 py-4 space-y-2 max-h-[60vh] overflow-y-auto">
+          <p className="text-xs text-gray-500 dark:text-gray-400">
+            Butlers are shared across all projects; each keeps its own warm conversation per project. Up to {max}.
+          </p>
+          {items.map((b) => (
+            <div key={b.id} className="flex items-center gap-2">
+              <input
+                defaultValue={b.name}
+                onBlur={(e) => { const v = e.target.value.trim(); if (v && v !== b.name) void run(() => callDef(`/${b.id}`, { method: "PUT", body: { name: v } })); }}
+                disabled={busy}
+                className="flex-1 min-w-0 rounded border border-gray-300 dark:border-gray-600 bg-surface-raised dark:bg-surface-raised-dark px-2 py-1 text-sm text-gray-800 dark:text-gray-100 focus:outline-none focus:ring-1 focus:ring-brand-500"
+              />
+              <select
+                value={b.model}
+                onChange={(e) => void run(() => callDef(`/${b.id}`, { method: "PUT", body: { model: e.target.value } }))}
+                disabled={busy}
+                className="rounded border border-gray-300 dark:border-gray-600 bg-surface-raised dark:bg-surface-raised-dark px-1.5 py-1 text-xs text-gray-700 dark:text-gray-200 focus:outline-none focus:ring-1 focus:ring-brand-500"
+              >
+                {CLAUDE_MODEL_OPTIONS.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
+              </select>
+              <button
+                onClick={() => void run(() => callDef(`/${b.id}`, { method: "DELETE" }))}
+                disabled={busy || b.id === "default"}
+                title={b.id === "default" ? "The default butler can't be removed" : "Remove this butler"}
+                className="text-gray-400 hover:text-red-500 disabled:opacity-30 disabled:hover:text-gray-400 px-1"
+              >
+                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6h14z" /></svg>
+              </button>
+            </div>
+          ))}
+          {items.length < max && (
+            <div className="flex items-center gap-2 pt-2 border-t border-gray-100 dark:border-gray-800 mt-2">
+              <input
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                placeholder="New butler name (e.g. Quick)"
+                disabled={busy}
+                className="flex-1 min-w-0 rounded border border-gray-300 dark:border-gray-600 bg-surface-raised dark:bg-surface-raised-dark px-2 py-1 text-sm text-gray-800 dark:text-gray-100 focus:outline-none focus:ring-1 focus:ring-brand-500"
+              />
+              <select value={newModel} onChange={(e) => setNewModel(e.target.value)} disabled={busy} className="rounded border border-gray-300 dark:border-gray-600 bg-surface-raised dark:bg-surface-raised-dark px-1.5 py-1 text-xs text-gray-700 dark:text-gray-200 focus:outline-none focus:ring-1 focus:ring-brand-500">
+                {CLAUDE_MODEL_OPTIONS.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
+              </select>
+              <button
+                onClick={() => { if (newName.trim()) void run(async () => { await callDef("", { method: "POST", body: { name: newName.trim(), model: newModel } }); setNewName(""); setNewModel(""); }); }}
+                disabled={busy || !newName.trim()}
+                className="px-3 py-1 rounded bg-brand-600 hover:bg-brand-700 text-white text-xs font-medium disabled:opacity-50"
+              >
+                Add
+              </button>
+            </div>
+          )}
+          {error && <p className="text-xs text-red-500">{error}</p>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssueClick }: ButlerViewProps) {
   const [butlerState, setButlerState] = useState<ButlerState | null>(null);
   const [loadingState, setLoadingState] = useState(true);
@@ -204,6 +372,11 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
   // Slash-command autocomplete.
   const [commands, setCommands] = useState<ButlerCommand[]>([]);
   const [commandIndex, setCommandIndex] = useState(0);
+  // Multiple butlers: the defined set (+ this project's warm state) and the one in view.
+  const [butlers, setButlers] = useState<ButlerListItem[]>([]);
+  const [activeButlerId, setActiveButlerId] = useState("default");
+  const activeButlerIdRef = useRef("default");
+  const [manageOpen, setManageOpen] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
@@ -303,9 +476,75 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
     }
   }
 
+  // Build a butler endpoint URL for the butler currently in view (read from the ref so
+  // it's correct inside callbacks/closures even right after a switch). The default
+  // butler omits the query param so it hits the legacy (unsuffixed) server keys.
+  function butlerUrl(path: string): string {
+    const id = activeButlerIdRef.current;
+    const base = `/api/projects/${projectId}/butler${path}`;
+    if (!id || id === "default") return base;
+    return `${base}${path.includes("?") ? "&" : "?"}butler=${encodeURIComponent(id)}`;
+  }
+
+  async function fetchButlers() {
+    try {
+      const r = await apiFetch<{ butlers: ButlerListItem[] }>(`/api/projects/${projectId}/butlers`);
+      setButlers(r.butlers);
+      return r.butlers;
+    } catch {
+      return [] as ButlerListItem[];
+    }
+  }
+
+  // Load the in-view butler's state, restore its transcript, and open its stream.
+  // Used on mount and whenever the user switches butlers (reads the ref, not state).
+  async function loadActiveButler() {
+    setChatMessages([]);
+    setSending(false);
+    setContextTokens(0);
+    setModel(undefined);
+    setContextWindow(undefined);
+    setMcpConnected(undefined);
+    assistantBufRef.current = "";
+    assistantMsgIdRef.current = null;
+    eventSourceRef.current?.close();
+    eventSourceRef.current = null;
+    try {
+      const state = await apiFetch<ButlerState>(butlerUrl(""));
+      setButlerState(state);
+      setContextTokens(state.contextTokens ?? 0);
+      setModel(state.model);
+      setContextWindow(state.contextWindow);
+      setMcpConnected(state.mcpConnected);
+      setSelectedModel(state.selectedModel ?? "");
+      if (state.active) {
+        try {
+          const { messages } = await apiFetch<{ messages: { role: "user" | "assistant"; text: string; ts: number }[] }>(butlerUrl("/messages"));
+          if (messages.length) {
+            setChatMessages(messages.map((m, i) => ({ id: `hist-${i}-${m.ts}`, role: m.role, text: m.text, ts: m.ts })));
+          }
+        } catch { /* no history available */ }
+        openStream();
+        void loadCapabilities();
+      }
+    } catch {
+      setButlerState({ active: false, sessionId: null });
+    }
+  }
+
+  // Switch the butler in view: persist the choice, then reload its state + stream.
+  function selectButler(id: string) {
+    if (id === activeButlerIdRef.current) return;
+    activeButlerIdRef.current = id;
+    setActiveButlerId(id);
+    try { localStorage.setItem(`butler:active:${projectId}`, id); } catch { /* ignore */ }
+    void loadActiveButler();
+    void fetchButlers();
+  }
+
   function openStream() {
     eventSourceRef.current?.close();
-    const es = new EventSource(`/api/projects/${projectId}/butler/stream`);
+    const es = new EventSource(butlerUrl("/stream"));
     es.onmessage = (ev) => {
       try {
         handleButlerEvent(JSON.parse(ev.data) as ButlerEvent);
@@ -326,7 +565,7 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
   async function loadCapabilities(attempt = 0) {
     try {
       const [cmdData, profData] = await Promise.all([
-        apiFetch<{ commands: ButlerCommand[] }>(`/api/projects/${projectId}/butler/commands`),
+        apiFetch<{ commands: ButlerCommand[] }>(butlerUrl("/commands")),
         apiFetch<{ profiles: string[]; selected: string; globalDefault: string }>(`/api/projects/${projectId}/butler/profiles`),
       ]);
       setCommands(cmdData.commands);
@@ -359,40 +598,24 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
     setGlobalProfile("");
     setCommands([]);
     setCommandIndex(0);
+    setButlers([]);
     assistantBufRef.current = "";
     assistantMsgIdRef.current = null;
     eventSourceRef.current?.close();
     eventSourceRef.current = null;
 
-    apiFetch<ButlerState>(`/api/projects/${projectId}/butler`)
-      .then(async (state) => {
-        setButlerState(state);
-        setContextTokens(state.contextTokens ?? 0);
-        setModel(state.model);
-        setContextWindow(state.contextWindow);
-        setMcpConnected(state.mcpConnected);
-        setSelectedModel(state.selectedModel ?? "");
-        if (state.active) {
-          // Restore prior conversation (the SSE stream only carries new events).
-          try {
-            const { messages } = await apiFetch<{ messages: { role: "user" | "assistant"; text: string; ts: number }[] }>(
-              `/api/projects/${projectId}/butler/messages`,
-            );
-            if (messages.length) {
-              setChatMessages(messages.map((m, i) => ({
-                id: `hist-${i}-${m.ts}`,
-                role: m.role,
-                text: m.text,
-                ts: m.ts,
-              })));
-            }
-          } catch { /* no history available */ }
-          openStream();
-          void loadCapabilities();
-        }
-      })
-      .catch(() => setButlerState({ active: false, sessionId: null }))
-      .finally(() => setLoadingState(false));
+    // Resolve which butler to show: the last one used for this project (if it still
+    // exists), else the default. Then load that butler's state + stream.
+    let stored = "default";
+    try { stored = localStorage.getItem(`butler:active:${projectId}`) || "default"; } catch { /* ignore */ }
+    void (async () => {
+      const list = await fetchButlers();
+      const initial = list.some((b) => b.id === stored) ? stored : "default";
+      activeButlerIdRef.current = initial;
+      setActiveButlerId(initial);
+      await loadActiveButler();
+      setLoadingState(false);
+    })();
 
     return () => {
       eventSourceRef.current?.close();
@@ -410,12 +633,13 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
     setStarting(true);
     try {
       const result = await apiFetch<ButlerState>(
-        `/api/projects/${projectId}/butler/ensure`,
+        butlerUrl("/ensure"),
         { method: "POST", body: "{}" },
       );
       setButlerState({ active: true, sessionId: result.sessionId });
       openStream();
       void loadCapabilities();
+      void fetchButlers();
     } catch (err) {
       console.error("Failed to start butler", err);
     } finally {
@@ -430,7 +654,7 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
     eventSourceRef.current?.close();
     eventSourceRef.current = null;
     try {
-      await apiFetch(`/api/projects/${projectId}/butler`, { method: "DELETE" });
+      await apiFetch(butlerUrl(""), { method: "DELETE" });
     } catch { /* ignore */ }
     setChatMessages([]);
     setContextTokens(0);
@@ -438,6 +662,7 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
     assistantMsgIdRef.current = null;
     setButlerState({ active: true, sessionId: null });
     openStream();
+    void fetchButlers();
   }
 
   // Switch model without restarting â€” the server uses the SDK setModel control
@@ -445,10 +670,11 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
   async function handleModelChange(value: string) {
     setSelectedModel(value);
     try {
-      await apiFetch(`/api/projects/${projectId}/butler/model`, {
+      await apiFetch(butlerUrl("/model"), {
         method: "POST",
         body: JSON.stringify({ model: value }),
       });
+      void fetchButlers(); // reflect the new model label in the switcher
     } catch (err) {
       console.error("Failed to switch butler model", err);
     }
@@ -463,7 +689,7 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
     eventSourceRef.current?.close();
     eventSourceRef.current = null;
     try {
-      await apiFetch(`/api/projects/${projectId}/butler/profile`, {
+      await apiFetch(butlerUrl("/profile"), {
         method: "POST",
         body: JSON.stringify({ profile: value }),
       });
@@ -501,7 +727,7 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
     setHistoryTranscript(null);
     setHistoryLoading(true);
     try {
-      const r = await apiFetch<{ sessions: ButlerSessionSummary[] }>(`/api/projects/${projectId}/butler/sessions?limit=5`);
+      const r = await apiFetch<{ sessions: ButlerSessionSummary[] }>(butlerUrl("/sessions?limit=5"));
       setHistorySessions(r.sessions);
     } catch {
       setHistorySessions([]);
@@ -513,7 +739,7 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
   async function openHistoryTranscript(session: ButlerSessionSummary) {
     setHistoryTranscript({ session, messages: [] });
     try {
-      const r = await apiFetch<{ messages: ButlerSessionMessage[] }>(`/api/projects/${projectId}/butler/sessions/${session.sessionId}/messages`);
+      const r = await apiFetch<{ messages: ButlerSessionMessage[] }>(butlerUrl(`/sessions/${session.sessionId}/messages`));
       setHistoryTranscript({ session, messages: r.messages });
     } catch {
       // keep empty messages
@@ -571,7 +797,7 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
 
     try {
       await apiFetch<{ ok: boolean }>(
-        `/api/projects/${projectId}/butler/message`,
+        butlerUrl("/message"),
         { method: "POST", body: JSON.stringify({ content }) },
       );
     } catch (err) {
@@ -614,7 +840,7 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
   async function handleStop() {
     if (!sending) return;
     try {
-      await apiFetch(`/api/projects/${projectId}/butler/interrupt`, { method: "POST", body: "{}" });
+      await apiFetch(butlerUrl("/interrupt"), { method: "POST", body: "{}" });
     } catch (err) {
       console.error("Failed to stop butler", err);
     }
