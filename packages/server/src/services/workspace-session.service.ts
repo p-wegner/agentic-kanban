@@ -22,13 +22,13 @@ import {
 } from "../repositories/session.repository.js";
 import { getPreference } from "../repositories/preferences.repository.js";
 import { buildImplementPrompt, buildRejectPrompt, writePlanFile, PLAN_FILE } from "./plan-mode.service.js";
-import { stopBisectSession } from "./bisect.service.js";
 import {
   WorkspaceError,
   applyWorkspaceAgentSelection,
   type TurnResult,
   type GitService,
 } from "./workspace-internals.js";
+import { stopBisectSession } from "./bisect.service.js";
 import * as realGitService from "./git.service.js";
 
 export function createWorkspaceSessionService(deps: {

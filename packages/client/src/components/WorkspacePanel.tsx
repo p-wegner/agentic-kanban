@@ -970,21 +970,6 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
     }
   }
 
-  async function handleReview(wsId: string) {
-    setActionLoading(true);
-    setError(null);
-    try {
-      const result = await apiFetch<{ sessionId: string }>(`/api/workspaces/${wsId}/review`, { method: "POST" });
-      setActiveSession(result.sessionId);
-      setCompletedMessages([]);
-      await fetchWorkspaces();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to start review");
-    } finally {
-      setActionLoading(false);
-    }
-  }
-
   async function handleAutoBisect(wsId: string, scope: "related" | "full" = "related") {
     setActionLoading(true);
     setError(null);
@@ -1001,6 +986,21 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
       await fetchWorkspaces();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to start auto-bisect");
+    } finally {
+      setActionLoading(false);
+    }
+  }
+
+  async function handleReview(wsId: string) {
+    setActionLoading(true);
+    setError(null);
+    try {
+      const result = await apiFetch<{ sessionId: string }>(`/api/workspaces/${wsId}/review`, { method: "POST" });
+      setActiveSession(result.sessionId);
+      setCompletedMessages([]);
+      await fetchWorkspaces();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to start review");
     } finally {
       setActionLoading(false);
     }
