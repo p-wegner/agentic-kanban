@@ -21,39 +21,53 @@ import {
   getButlerCommands,
   setButlerModel,
   interruptButler,
+  listProjectButlerStates,
 } from "../services/butler-sdk.service.js";
+import {
+  listButlerDefinitions,
+  getButlerDefinition,
+  updateButlerDefinition,
+} from "../services/butler-definitions.service.js";
 import { listButlerSessions, getButlerSessionMessages } from "../services/butler-transcripts.service.js";
 
-function butlerSessionPrefKey(projectId: string): string {
-  return `butler_session_${projectId}`;
+/** Suffix per-butler pref keys for named butlers; the "default" butler keeps the
+ *  legacy unsuffixed keys so existing resume ids / history carry over unchanged. */
+function butlerSuffix(butlerId: string): string {
+  return butlerId && butlerId !== "default" ? `__${butlerId}` : "";
 }
 
-/** Rolling list of butler session IDs for this project (JSON array, capped at 50). */
-function butlerSessionHistoryPrefKey(projectId: string): string {
-  return `butler_session_history_${projectId}`;
+/** The butler selected by the `?butler=<id>` query param (defaults to "default"). */
+function resolveButlerId(c: { req: { query: (k: string) => string | undefined } }): string {
+  return c.req.query("butler")?.trim() || "default";
 }
 
-/** Append a sessionId to the per-project butler session history preference. */
-async function appendToSessionHistory(projectId: string, sessionId: string, database: Database): Promise<void> {
+function butlerSessionPrefKey(projectId: string, butlerId: string): string {
+  return `butler_session_${projectId}${butlerSuffix(butlerId)}`;
+}
+
+/** Rolling list of butler session IDs for this project+butler (JSON array, capped at 50). */
+function butlerSessionHistoryPrefKey(projectId: string, butlerId: string): string {
+  return `butler_session_history_${projectId}${butlerSuffix(butlerId)}`;
+}
+
+/** Append a sessionId to the per-project+butler session history preference. */
+async function appendToSessionHistory(projectId: string, butlerId: string, sessionId: string, database: Database): Promise<void> {
   try {
-    const raw = await getPreference(butlerSessionHistoryPrefKey(projectId), database);
+    const key = butlerSessionHistoryPrefKey(projectId, butlerId);
+    const raw = await getPreference(key, database);
     const ids: string[] = raw ? (JSON.parse(raw) as string[]) : [];
     if (!ids.includes(sessionId)) {
       ids.unshift(sessionId); // most-recent first
       if (ids.length > 50) ids.length = 50;
-      await setPreference(butlerSessionHistoryPrefKey(projectId), JSON.stringify(ids), database);
+      await setPreference(key, JSON.stringify(ids), database);
     }
   } catch (err) {
-    console.warn(`[butler] failed to append session history: project=${projectId}`, err);
+    console.warn(`[butler] failed to append session history: project=${projectId} butler=${butlerId}`, err);
   }
 }
 
-/** Per-project model override for the butler (empty = profile/CLI default). */
-function butlerModelPrefKey(projectId: string): string {
-  return `butler_model_${projectId}`;
-}
-
-/** Per-project Claude profile override for the butler (empty = global claude_profile). */
+/** Per-project Claude profile override for the butler (empty = global claude_profile).
+ *  Profile is auth/endpoint, shared by ALL of a project's butlers — not per-butler. */
 function butlerProfilePrefKey(projectId: string): string {
   return `butler_profile_${projectId}`;
 }
@@ -176,16 +190,18 @@ export function createButlerRoute(
     return (await getPreference("claude_profile", database)) || undefined;
   }
 
-  async function startSession(projectId: string) {
+  async function startSession(projectId: string, butlerId: string = "default") {
     const project = await resolveProject(projectId);
     if (!project) return null;
     const claudeProfile = await resolveButlerProfile(projectId);
-    const model = (await getPreference(butlerModelPrefKey(projectId), database)) || undefined;
-    const resumeSessionId = (await getPreference(butlerSessionPrefKey(projectId), database)) || undefined;
+    // Model is a property of the (global) butler definition, not a per-project pref.
+    const model = (await getButlerDefinition(database, butlerId))?.model || undefined;
+    const resumeSessionId = (await getPreference(butlerSessionPrefKey(projectId, butlerId), database)) || undefined;
     const systemPromptAppend = await resolveButlerPrompt(projectId, project.name, project.repoPath);
-    const wasActive = getButlerSession(projectId).active;
+    const wasActive = getButlerSession(projectId, butlerId).active;
     const session = ensureButlerSession({
       projectId,
+      butlerId,
       repoPath: project.repoPath,
       projectName: project.name,
       claudeProfile,
@@ -197,22 +213,48 @@ export function createButlerRoute(
     if (!wasActive) {
       subscribeButler(projectId, (e) => {
         if (e.type === "session") {
-          void setPreference(butlerSessionPrefKey(projectId), e.sessionId, database);
-          void appendToSessionHistory(projectId, e.sessionId, database);
+          void setPreference(butlerSessionPrefKey(projectId, butlerId), e.sessionId, database);
+          void appendToSessionHistory(projectId, butlerId, e.sessionId, database);
         }
-      });
+      }, butlerId);
     }
     return session;
   }
 
-  // GET /api/projects/:id/butler — current butler state
+  // GET /api/projects/:id/butlers — all defined butlers + this project's per-butler
+  // runtime state (warm/cold, busy, context). Powers the butler switcher.
+  router.get("/:id/butlers", async (c) => {
+    const projectId = c.req.param("id");
+    const defs = await listButlerDefinitions(database);
+    const states = new Map(listProjectButlerStates(projectId).map((s) => [s.butlerId, s]));
+    const butlers = defs.map((d) => {
+      const st = states.get(d.id);
+      return {
+        id: d.id,
+        name: d.name,
+        model: d.model,
+        active: !!st,
+        busy: st?.busy ?? false,
+        contextTokens: st?.contextTokens ?? 0,
+        contextWindow: st?.contextWindow,
+        sessionId: st?.sessionId ?? null,
+        mcpConnected: st?.mcpConnected,
+      };
+    });
+    return c.json({ butlers });
+  });
+
+  // GET /api/projects/:id/butler — current butler state (for the selected ?butler=<id>)
   router.get("/:id/butler", async (c) => {
     const projectId = c.req.param("id");
-    const state = getButlerSession(projectId);
-    const persisted = (await getPreference(butlerSessionPrefKey(projectId), database)) || null;
-    const selectedModel = (await getPreference(butlerModelPrefKey(projectId), database)) || "";
+    const butlerId = resolveButlerId(c);
+    const state = getButlerSession(projectId, butlerId);
+    const persisted = (await getPreference(butlerSessionPrefKey(projectId, butlerId), database)) || null;
+    // Model is sourced from the butler definition (global), profile from the project pref.
+    const selectedModel = (await getButlerDefinition(database, butlerId))?.model ?? "";
     const selectedProfile = (await getPreference(butlerProfilePrefKey(projectId), database)) || "";
     return c.json({
+      butlerId,
       active: state.active,
       sessionId: state.sessionId ?? persisted,
       contextTokens: state.contextTokens,
@@ -231,8 +273,9 @@ export function createButlerRoute(
   // a project whose session isn't warm yet), deduped by name.
   router.get("/:id/butler/commands", async (c) => {
     const projectId = c.req.param("id");
+    const butlerId = resolveButlerId(c);
     const byName = new Map<string, { name: string; description: string; argumentHint?: string }>();
-    for (const cmd of getButlerCommands(projectId)) {
+    for (const cmd of getButlerCommands(projectId, butlerId)) {
       if (!byName.has(cmd.name)) byName.set(cmd.name, cmd);
     }
     const project = await resolveProject(projectId);
@@ -259,14 +302,21 @@ export function createButlerRoute(
   });
 
   // POST /api/projects/:id/butler/model — switch model for subsequent turns WITHOUT
-  // restarting (preserves context, per the design). Persists the choice per-project.
+  // restarting (preserves context, per the design). The model lives on the (global)
+  // butler definition, so this updates the definition and applies it live to the
+  // selected butler's warm session in this project.
   router.post("/:id/butler/model", async (c) => {
     const projectId = c.req.param("id");
+    const butlerId = resolveButlerId(c);
     const body = await parseJsonBody<{ model?: string }>(c);
     const model = (body.model ?? "").trim();
-    await setPreference(butlerModelPrefKey(projectId), model, database);
-    // Apply live if a session is running; otherwise the pref is picked up on next start.
-    const applied = getButlerSession(projectId).active ? await setButlerModel(projectId, model) : false;
+    try {
+      await updateButlerDefinition(database, butlerId, { model });
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : "Failed to update butler" }, 400);
+    }
+    // Apply live if a session is running; otherwise the model is picked up on next start.
+    const applied = getButlerSession(projectId, butlerId).active ? await setButlerModel(projectId, model, butlerId) : false;
     return c.json({ ok: true, model, applied });
   });
 
@@ -275,13 +325,14 @@ export function createButlerRoute(
   // (forgets the resume id) per the design ("restart only where needed").
   router.post("/:id/butler/profile", async (c) => {
     const projectId = c.req.param("id");
+    const butlerId = resolveButlerId(c);
     const body = await parseJsonBody<{ profile?: string }>(c);
     const profile = (body.profile ?? "").trim();
     await setPreference(butlerProfilePrefKey(projectId), profile, database);
     // Fresh session: stop, forget resume id (different endpoint can't resume), restart.
-    stopButlerSession(projectId);
-    await setPreference(butlerSessionPrefKey(projectId), "", database);
-    const session = await startSession(projectId);
+    stopButlerSession(projectId, butlerId);
+    await setPreference(butlerSessionPrefKey(projectId, butlerId), "", database);
+    const session = await startSession(projectId, butlerId);
     if (!session) return c.json({ error: "Project not found" }, 404);
     return c.json({ ok: true, profile, active: true });
   });
@@ -289,7 +340,7 @@ export function createButlerRoute(
   // GET /api/projects/:id/butler/messages — conversation history for the active session,
   // so the chat UI can restore prior messages after a page reload.
   router.get("/:id/butler/messages", (c) => {
-    return c.json({ messages: getButlerTranscript(c.req.param("id")) });
+    return c.json({ messages: getButlerTranscript(c.req.param("id"), resolveButlerId(c)) });
   });
 
   // GET /api/projects/:id/butler/skill — the editable butler prompt + whether a
@@ -331,29 +382,30 @@ export function createButlerRoute(
   // POST /api/projects/:id/butler/ensure — start the warm session if not running
   router.post("/:id/butler/ensure", async (c) => {
     const projectId = c.req.param("id");
-    const session = await startSession(projectId);
+    const session = await startSession(projectId, resolveButlerId(c));
     if (!session) return c.json({ error: "Project not found" }, 404);
     return c.json({ active: true, sessionId: session.sessionId ?? null }, 201);
   });
 
   // POST /api/projects/:id/butler/interrupt — stop the in-flight turn (keeps the session warm)
   router.post("/:id/butler/interrupt", async (c) => {
-    const ok = await interruptButler(c.req.param("id"));
+    const ok = await interruptButler(c.req.param("id"), resolveButlerId(c));
     return c.json({ ok });
   });
 
   // POST /api/projects/:id/butler/message — send a turn to the warm session
   router.post("/:id/butler/message", async (c) => {
     const projectId = c.req.param("id");
+    const butlerId = resolveButlerId(c);
     const body = await parseJsonBody<{ content: string }>(c);
     if (!body.content?.trim()) {
       return c.json({ error: "content is required" }, 400);
     }
-    if (!getButlerSession(projectId).active) {
-      const session = await startSession(projectId);
+    if (!getButlerSession(projectId, butlerId).active) {
+      const session = await startSession(projectId, butlerId);
       if (!session) return c.json({ error: "Project not found" }, 404);
     }
-    const ok = sendButlerTurn(projectId, body.content);
+    const ok = sendButlerTurn(projectId, body.content, { butlerId });
     return c.json({ ok });
   });
 
@@ -362,12 +414,13 @@ export function createButlerRoute(
   // MCP tool (separate processes that cannot read the server's in-memory SSE stream).
   router.post("/:id/butler/ask", async (c) => {
     const projectId = c.req.param("id");
+    const butlerId = resolveButlerId(c);
     const body = await parseJsonBody<{ content: string; timeoutMs?: number }>(c);
     if (!body.content?.trim()) {
       return c.json({ error: "content is required" }, 400);
     }
-    if (!getButlerSession(projectId).active) {
-      const session = await startSession(projectId);
+    if (!getButlerSession(projectId, butlerId).active) {
+      const session = await startSession(projectId, butlerId);
       if (!session) return c.json({ error: "Project not found" }, 404);
     }
     const timeoutMs = typeof body.timeoutMs === "number" && body.timeoutMs > 0 ? body.timeoutMs : 120_000;
@@ -385,14 +438,14 @@ export function createButlerRoute(
         if (e.type === "text") buf += e.text;
         else if (e.type === "result") finish(e.text ?? buf, e.isError ?? false);
         else if (e.type === "error") finish(e.message, true);
-      });
+      }, butlerId);
       const timer = setTimeout(() => finish(buf || "(timed out waiting for butler response)", true), timeoutMs);
       // Emit the prompt to SSE listeners so the UI shows what was asked (CLI/MCP
       // callers have no UI that rendered it optimistically).
-      sendButlerTurn(projectId, body.content, { emitUserText: true });
+      sendButlerTurn(projectId, body.content, { emitUserText: true, butlerId });
     });
     return c.json({
-      sessionId: getButlerSession(projectId).sessionId ?? null,
+      sessionId: getButlerSession(projectId, butlerId).sessionId ?? null,
       text: answer.text,
       isError: answer.isError,
     });
@@ -401,10 +454,11 @@ export function createButlerRoute(
   // GET /api/projects/:id/butler/stream — SSE stream of butler events
   router.get("/:id/butler/stream", (c) => {
     const projectId = c.req.param("id");
+    const butlerId = resolveButlerId(c);
     return streamSSE(c, async (stream) => {
       const unsubscribe = subscribeButler(projectId, (e) => {
         void stream.writeSSE({ data: JSON.stringify(e) });
-      });
+      }, butlerId);
       stream.onAbort(() => unsubscribe());
       // Hold the connection open with periodic heartbeats until the client disconnects.
       while (!c.req.raw.signal.aborted) {
@@ -422,11 +476,12 @@ export function createButlerRoute(
   // GET /api/projects/:id/butler/sessions — list recent butler sessions from disk JSONL
   router.get("/:id/butler/sessions", async (c) => {
     const projectId = c.req.param("id");
+    const butlerId = resolveButlerId(c);
     const limit = Math.min(parseInt(c.req.query("limit") ?? "5", 10) || 5, 20);
     const project = await resolveProject(projectId);
     if (!project) return c.json({ error: "Project not found" }, 404);
 
-    const raw = await getPreference(butlerSessionHistoryPrefKey(projectId), database);
+    const raw = await getPreference(butlerSessionHistoryPrefKey(projectId, butlerId), database);
     const allowedIds = new Set<string>(raw ? (JSON.parse(raw) as string[]) : []);
     if (allowedIds.size === 0) return c.json({ sessions: [] });
 
@@ -437,12 +492,13 @@ export function createButlerRoute(
   // GET /api/projects/:id/butler/sessions/:sid/messages — transcript of a past session
   router.get("/:id/butler/sessions/:sid/messages", async (c) => {
     const projectId = c.req.param("id");
+    const butlerId = resolveButlerId(c);
     const sessionId = c.req.param("sid");
     const project = await resolveProject(projectId);
     if (!project) return c.json({ error: "Project not found" }, 404);
 
     // Security: only allow sessions that are tracked for this project
-    const raw = await getPreference(butlerSessionHistoryPrefKey(projectId), database);
+    const raw = await getPreference(butlerSessionHistoryPrefKey(projectId, butlerId), database);
     const allowedIds = new Set<string>(raw ? (JSON.parse(raw) as string[]) : []);
     if (!allowedIds.has(sessionId)) return c.json({ error: "Session not found" }, 404);
 
@@ -456,8 +512,9 @@ export function createButlerRoute(
   // users apply skill/behavior changes.
   router.delete("/:id/butler", async (c) => {
     const projectId = c.req.param("id");
-    stopButlerSession(projectId);
-    await setPreference(butlerSessionPrefKey(projectId), "", database);
+    const butlerId = resolveButlerId(c);
+    stopButlerSession(projectId, butlerId);
+    await setPreference(butlerSessionPrefKey(projectId, butlerId), "", database);
     return c.json({ ok: true });
   });
 

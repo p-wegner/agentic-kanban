@@ -88,6 +88,12 @@ class Pushable<T> implements AsyncIterable<T> {
 
 interface ButlerSession {
   projectId: string;
+  /** Which butler (definition id) this session belongs to. "default" is the
+   *  legacy/always-present butler; others are user-defined named butlers. */
+  butlerId: string;
+  /** Composite map key: plain projectId for the default butler (backward compat),
+   *  `${projectId}::${butlerId}` for any other. */
+  key: string;
   input: Pushable<SDKUserMessage>;
   sessionId?: string;
   abort: AbortController;
@@ -105,26 +111,36 @@ interface ButlerSession {
   commands?: ButlerCommand[];
 }
 
+/**
+ * Sessions keyed by a composite of project + butler. The default butler keeps the
+ * plain projectId as its key so existing in-memory/resume behavior is unchanged;
+ * named butlers use `${projectId}::${butlerId}`.
+ */
 const sessions = new Map<string, ButlerSession>();
 
+/** Composite session/listener key. Default butler → plain projectId (backward compat). */
+export function butlerSessionKey(projectId: string, butlerId: string = "default"): string {
+  return butlerId && butlerId !== "default" ? `${projectId}::${butlerId}` : projectId;
+}
+
 /**
- * SSE listeners keyed by projectId, kept SEPARATE from the session lifecycle. A
- * stream connects once and must keep receiving events across "clear context" and
- * profile switches, which stop+recreate the underlying session. If listeners lived
- * on the session, reconnecting the stream while no session exists (the gap between
- * stop and the next message) would silently drop the listener and the stream would
- * go dead. Keeping them here means a stream stays attached regardless.
+ * SSE listeners keyed by the same composite key as sessions, kept SEPARATE from the
+ * session lifecycle. A stream connects once and must keep receiving events across
+ * "clear context" and profile switches, which stop+recreate the underlying session.
+ * If listeners lived on the session, reconnecting the stream while no session exists
+ * (the gap between stop and the next message) would silently drop the listener and
+ * the stream would go dead. Keeping them here means a stream stays attached regardless.
  */
-const listenersByProject = new Map<string, Set<Listener>>();
+const listenersByKey = new Map<string, Set<Listener>>();
 
 function broadcast(s: ButlerSession, e: ButlerEvent): void {
-  const ls = listenersByProject.get(s.projectId);
+  const ls = listenersByKey.get(s.key);
   if (!ls) return;
   for (const l of ls) {
     try {
       l(e);
     } catch (err) {
-      console.error(`[butler-sdk] listener error: project=${s.projectId}`, err);
+      console.error(`[butler-sdk] listener error: project=${s.projectId} butler=${s.butlerId}`, err);
     }
   }
 }
@@ -146,14 +162,36 @@ function buildButlerSystemPrompt(projectName: string, repoPath: string): string 
   ].join("\n");
 }
 
-export function getButlerSession(projectId: string): { sessionId?: string; active: boolean; contextTokens: number; model?: string; contextWindow?: number; mcpConnected?: boolean; claudeProfile?: string } {
-  const s = sessions.get(projectId);
-  return { sessionId: s?.sessionId, active: !!s, contextTokens: s?.contextTokens ?? 0, model: s?.model, contextWindow: s?.contextWindow, mcpConnected: s?.mcpConnected, claudeProfile: s?.claudeProfile };
+export interface ButlerSessionState {
+  butlerId: string;
+  sessionId?: string;
+  active: boolean;
+  busy: boolean;
+  contextTokens: number;
+  model?: string;
+  contextWindow?: number;
+  mcpConnected?: boolean;
+  claudeProfile?: string;
+}
+
+export function getButlerSession(projectId: string, butlerId: string = "default"): ButlerSessionState {
+  const s = sessions.get(butlerSessionKey(projectId, butlerId));
+  return { butlerId, sessionId: s?.sessionId, active: !!s, busy: s?.busy ?? false, contextTokens: s?.contextTokens ?? 0, model: s?.model, contextWindow: s?.contextWindow, mcpConnected: s?.mcpConnected, claudeProfile: s?.claudeProfile };
+}
+
+/** Runtime state of every warm butler session for a project (for the butler switcher). */
+export function listProjectButlerStates(projectId: string): ButlerSessionState[] {
+  const out: ButlerSessionState[] = [];
+  for (const s of sessions.values()) {
+    if (s.projectId !== projectId) continue;
+    out.push({ butlerId: s.butlerId, sessionId: s.sessionId, active: true, busy: s.busy, contextTokens: s.contextTokens, model: s.model, contextWindow: s.contextWindow, mcpConnected: s.mcpConnected, claudeProfile: s.claudeProfile });
+  }
+  return out;
 }
 
 /** Slash commands the active session reported as available (empty if none/not yet fetched). */
-export function getButlerCommands(projectId: string): ButlerCommand[] {
-  return sessions.get(projectId)?.commands ?? [];
+export function getButlerCommands(projectId: string, butlerId: string = "default"): ButlerCommand[] {
+  return sessions.get(butlerSessionKey(projectId, butlerId))?.commands ?? [];
 }
 
 /**
@@ -162,8 +200,8 @@ export function getButlerCommands(projectId: string): ButlerCommand[] {
  * Returns false if there is no active session. An empty string clears the
  * override (back to the profile/CLI default).
  */
-export async function setButlerModel(projectId: string, model: string): Promise<boolean> {
-  const s = sessions.get(projectId);
+export async function setButlerModel(projectId: string, model: string, butlerId: string = "default"): Promise<boolean> {
+  const s = sessions.get(butlerSessionKey(projectId, butlerId));
   if (!s?.query) return false;
   await s.query.setModel(model || undefined);
   s.model = model || undefined;
@@ -177,13 +215,13 @@ export async function setButlerModel(projectId: string, model: string): Promise<
  * if there is no active session/query. Broadcasts a result so the UI leaves its "thinking"
  * state even if the SDK does not emit its own interrupt result.
  */
-export async function interruptButler(projectId: string): Promise<boolean> {
-  const s = sessions.get(projectId);
+export async function interruptButler(projectId: string, butlerId: string = "default"): Promise<boolean> {
+  const s = sessions.get(butlerSessionKey(projectId, butlerId));
   if (!s?.query) return false;
   try {
     await s.query.interrupt();
   } catch (err) {
-    console.warn(`[butler-sdk] interrupt failed: project=${projectId} ${err instanceof Error ? err.message : err}`);
+    console.warn(`[butler-sdk] interrupt failed: project=${projectId} butler=${butlerId} ${err instanceof Error ? err.message : err}`);
     return false;
   }
   s.busy = false;
@@ -192,34 +230,37 @@ export async function interruptButler(projectId: string): Promise<boolean> {
 }
 
 /** Conversation history for the active session (empty if none) — replayed by the UI on reload. */
-export function getButlerTranscript(projectId: string): ButlerTurn[] {
-  return sessions.get(projectId)?.transcript ?? [];
+export function getButlerTranscript(projectId: string, butlerId: string = "default"): ButlerTurn[] {
+  return sessions.get(butlerSessionKey(projectId, butlerId))?.transcript ?? [];
 }
 
-export function subscribeButler(projectId: string, listener: Listener): () => void {
-  let ls = listenersByProject.get(projectId);
+export function subscribeButler(projectId: string, listener: Listener, butlerId: string = "default"): () => void {
+  const key = butlerSessionKey(projectId, butlerId);
+  let ls = listenersByKey.get(key);
   if (!ls) {
     ls = new Set();
-    listenersByProject.set(projectId, ls);
+    listenersByKey.set(key, ls);
   }
   ls.add(listener);
   // Replay current state so a freshly-connected stream is immediately in sync.
-  const s = sessions.get(projectId);
+  const s = sessions.get(key);
   if (s) {
     if (s.sessionId) listener({ type: "session", sessionId: s.sessionId });
     if (s.model || s.contextWindow || s.mcpConnected !== undefined) listener({ type: "meta", model: s.model, contextWindow: s.contextWindow, mcpConnected: s.mcpConnected });
     if (s.contextTokens) listener({ type: "usage", contextTokens: s.contextTokens });
   }
   return () => {
-    const set = listenersByProject.get(projectId);
+    const set = listenersByKey.get(key);
     if (!set) return;
     set.delete(listener);
-    if (set.size === 0) listenersByProject.delete(projectId);
+    if (set.size === 0) listenersByKey.delete(key);
   };
 }
 
 export function ensureButlerSession(opts: {
   projectId: string;
+  /** Butler definition id; "default" (the legacy butler) when omitted. */
+  butlerId?: string;
   repoPath: string;
   projectName: string;
   claudeProfile?: string;
@@ -231,12 +272,16 @@ export function ensureButlerSession(opts: {
    *  agent skill so users can customize the butler's behavior. */
   systemPromptAppend?: string;
 }): ButlerSession {
-  const existing = sessions.get(opts.projectId);
+  const butlerId = opts.butlerId || "default";
+  const key = butlerSessionKey(opts.projectId, butlerId);
+  const existing = sessions.get(key);
   if (existing) return existing;
 
   const input = new Pushable<SDKUserMessage>();
   const session: ButlerSession = {
     projectId: opts.projectId,
+    butlerId,
+    key,
     input,
     abort: new AbortController(),
     busy: false,
@@ -245,7 +290,7 @@ export function ensureButlerSession(opts: {
     claudeProfile: opts.claudeProfile,
     model: opts.model || undefined,
   };
-  sessions.set(opts.projectId, session);
+  sessions.set(key, session);
 
   const env = buildSpawnEnv(opts.claudeProfile);
   const options: Options = {
@@ -261,7 +306,7 @@ export function ensureButlerSession(opts: {
     ...(opts.resumeSessionId ? { resume: opts.resumeSessionId } : {}),
   };
 
-  console.log(`[butler-sdk] starting warm session: project=${opts.projectId} cwd=${opts.repoPath} resume=${opts.resumeSessionId ?? "none"}`);
+  console.log(`[butler-sdk] starting warm session: project=${opts.projectId} butler=${butlerId} cwd=${opts.repoPath} resume=${opts.resumeSessionId ?? "none"}`);
   void runLoop(session, input, options);
   return session;
 }
@@ -365,16 +410,16 @@ async function runLoop(session: ButlerSession, input: Pushable<SDKUserMessage>, 
     }
   } finally {
     session.query = undefined;
-    sessions.delete(session.projectId);
+    sessions.delete(session.key);
   }
 }
 
 export function sendButlerTurn(
   projectId: string,
   content: string,
-  opts?: { emitUserText?: boolean },
+  opts?: { emitUserText?: boolean; butlerId?: string },
 ): boolean {
-  const s = sessions.get(projectId);
+  const s = sessions.get(butlerSessionKey(projectId, opts?.butlerId));
   if (!s) return false;
   s.busy = true;
   s.transcript.push({ role: "user", text: content, ts: Date.now() });
@@ -388,11 +433,12 @@ export function sendButlerTurn(
   return true;
 }
 
-export function stopButlerSession(projectId: string): void {
-  const s = sessions.get(projectId);
+export function stopButlerSession(projectId: string, butlerId: string = "default"): void {
+  const key = butlerSessionKey(projectId, butlerId);
+  const s = sessions.get(key);
   if (!s) return;
-  console.log(`[butler-sdk] stopping session: project=${s.projectId}`);
+  console.log(`[butler-sdk] stopping session: project=${s.projectId} butler=${s.butlerId}`);
   s.input.end();
   s.abort.abort();
-  sessions.delete(projectId);
+  sessions.delete(key);
 }
