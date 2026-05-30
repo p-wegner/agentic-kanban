@@ -1,5 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { VIEW_REGISTRY, VIEW_IDS, SHORTCUT_TO_VIEW, type ViewMode } from "./viewRegistry";
+import {
+  VIEW_REGISTRY,
+  VIEW_IDS,
+  SHORTCUT_TO_VIEW,
+  PRIMARY_VIEWS,
+  SECONDARY_VIEWS,
+  type ViewMode,
+} from "./viewRegistry";
 
 describe("VIEW_REGISTRY", () => {
   it("has no duplicate view ids", () => {
@@ -51,6 +58,32 @@ describe("VIEW_REGISTRY", () => {
       expect(v.icon).toBeTruthy();
       expect(v.paletteIcon).toBeTruthy();
       expect(v.paletteDescription).toBeTruthy();
+    }
+  });
+
+  it("splits views into primary tabs and secondary overflow (#109)", () => {
+    // The two groups partition the registry with no overlap and no loss.
+    expect(PRIMARY_VIEWS.length + SECONDARY_VIEWS.length).toBe(VIEW_REGISTRY.length);
+    const primaryIds = new Set(PRIMARY_VIEWS.map((v) => v.id));
+    const secondaryIds = new Set(SECONDARY_VIEWS.map((v) => v.id));
+    for (const id of secondaryIds) expect(primaryIds.has(id)).toBe(false);
+
+    // Primary views (no `group` or group === "primary") stay one click away.
+    expect([...primaryIds].sort()).toEqual(
+      ["agents", "butler", "graph", "kanban", "table", "timeline"].sort(),
+    );
+    // Analytics/secondary views live behind the "More" overflow dropdown.
+    expect([...secondaryIds].sort()).toEqual(
+      ["digest", "flaky-tests", "focus", "insights", "metrics", "swimlane", "workflows"].sort(),
+    );
+  });
+
+  it("keeps every view reachable by some keyboard shortcut regardless of group", () => {
+    // No view loses its shortcut by being tucked into the overflow menu.
+    for (const v of SECONDARY_VIEWS) {
+      if (v.shortcut && !v.chord) {
+        expect(SHORTCUT_TO_VIEW[v.shortcut]).toBe(v.id);
+      }
     }
   });
 
