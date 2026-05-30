@@ -43,6 +43,20 @@ function normalizeImportedTemplate(input: any) {
   };
 }
 
+function validateImportedTemplate(spec: ReturnType<typeof normalizeImportedTemplate>): string[] {
+  const errors: string[] = [];
+  if (typeof spec.name !== "string" || spec.name.trim().length === 0) {
+    errors.push("Imported workflow name is required.");
+  }
+  if (!Array.isArray(spec.nodes)) {
+    errors.push("Imported workflow nodes must be an array.");
+  }
+  if (!Array.isArray(spec.edges)) {
+    errors.push("Imported workflow edges must be an array.");
+  }
+  return errors;
+}
+
 function readJsonFile(path: string): unknown {
   return JSON.parse(readFileSync(path, "utf-8").replace(/^\uFEFF/, ""));
 }
@@ -154,18 +168,20 @@ export function registerWorkflowCommand(program: Command) {
         await runMigrations();
         const projectId = await getActiveProjectId();
         const spec = normalizeImportedTemplate(readJsonFile(jsonFile));
-        if (!spec.name) {
-          console.error("Imported workflow name is required.");
+        const importErrors = validateImportedTemplate(spec);
+        if (importErrors.length > 0) {
+          console.error("Invalid workflow import:");
+          for (const e of importErrors) console.error("  - " + e);
           process.exit(1);
         }
         const res = await createWorkflowTemplate(db, {
           projectId,
-          name: spec.name,
+          name: spec.name.trim(),
           description: spec.description,
           ticketType: spec.ticketType ?? null,
           isDefault: spec.isDefault,
-          nodes: spec.nodes ?? [],
-          edges: spec.edges ?? [],
+          nodes: spec.nodes,
+          edges: spec.edges,
         });
         if (!res.ok) {
           console.error("Invalid workflow graph:");
