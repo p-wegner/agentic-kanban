@@ -17,10 +17,13 @@ interface SeedSessionOpts {
   sessionSkillName?: string | null;
   /** Skill currently on the WORKSPACE (used as a fallback for historical rows). */
   wsSkillId?: string | null;
+  startedAt?: string;
+  stats?: Record<string, unknown>;
 }
 
 async function seed(db: TestDb, projectId: string, opts: SeedSessionOpts) {
   const now = new Date().toISOString();
+  const startedAt = opts.startedAt ?? now;
   const issueId = randomUUID();
   const statusId = randomUUID();
   const workspaceId = randomUUID();
@@ -40,7 +43,8 @@ async function seed(db: TestDb, projectId: string, opts: SeedSessionOpts) {
   });
   await db.insert(sessions).values({
     id: sessionId, workspaceId, executor: "claude-code", status: "completed",
-    startedAt: now, endedAt: now, exitCode: "0",
+    startedAt, endedAt: now, exitCode: "0",
+    stats: opts.stats ? JSON.stringify(opts.stats) : null,
     skillId: opts.sessionSkillId ?? null, skillName: opts.sessionSkillName ?? null,
   });
   return sessionId;
@@ -109,5 +113,32 @@ describe("insights by-skill attribution (#110)", () => {
     expect(noSkill).toBeDefined();
     expect(noSkill!.skillId).toBeNull();
     expect(noSkill!.sessionCount).toBe(1);
+  });
+
+  it("returns ISO dates even when historical session timestamps are localized", async () => {
+    await seed(db, projectId, {
+      sessionSkillId: null,
+      sessionSkillName: null,
+      wsSkillId: null,
+      startedAt: "1. Mai",
+      stats: {
+        durationMs: 1000,
+        totalCostUsd: 0.01,
+        inputTokens: 10,
+        outputTokens: 5,
+        numTurns: 1,
+        model: "test-model",
+        success: true,
+      },
+    });
+
+    const app = createInsightsRoute(db);
+    const res = await app.request(`/?projectId=${projectId}&range=all`);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+
+    expect(body.totals.dateFrom).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    expect(body.totals.dateTo).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    expect(body.topExpensive[0].startedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
   });
 });
