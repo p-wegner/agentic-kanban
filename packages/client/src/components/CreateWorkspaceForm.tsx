@@ -56,6 +56,8 @@ export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCr
   const [baseBranch, setBaseBranch] = useState("");
   const [isDirect, setIsDirect] = useState(false);
   const [requiresReview, setRequiresReview] = useState(prefs.auto_review !== "false");
+  // Per-launch override for the pre-flight check; defaults to the inherited `skip_preflight` setting.
+  const [runPreflight, setRunPreflight] = useState(prefs.skip_preflight !== "true");
   const [planMode, setPlanMode] = useState(
     issue.priority === "high" || issue.priority === "critical",
   );
@@ -161,8 +163,8 @@ export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCr
       }
     }
 
-    // Skip preflight if opted out
-    if (prefs.skip_preflight === "true" || !project) {
+    // Skip preflight if opted out for this launch (defaults to the inherited setting)
+    if (!runPreflight || !project) {
       await doLaunch(body);
       return;
     }
@@ -198,6 +200,7 @@ export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCr
     setBaseBranch("");
     setIsDirect(false);
     setRequiresReview(false);
+    setRunPreflight(prefs.skip_preflight !== "true");
     setPlanMode(false);
     setTddMode(false);
     setSkipSetup(false);
@@ -291,6 +294,16 @@ export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCr
           className="rounded border-gray-300"
         />
         <span>Request code review before merge</span>
+      </label>
+      <label className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400">
+        <input
+          type="checkbox"
+          checked={runPreflight}
+          onChange={(e) => setRunPreflight(e.target.checked)}
+          className="rounded border-gray-300"
+          data-testid="run-preflight-checkbox"
+        />
+        <span>Run pre-flight check (AI ticket sanity check)</span>
       </label>
       <label className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400">
         <input
