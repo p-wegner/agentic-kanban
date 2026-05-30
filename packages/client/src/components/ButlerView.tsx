@@ -948,6 +948,10 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
 
       {!hasButler ? (
         <>
+        <div className="shrink-0 flex items-center gap-2 border-b border-gray-200 dark:border-gray-800 bg-gray-50/60 dark:bg-gray-900/40 px-4 py-2">
+          <ButlerSwitcher butlers={butlers} activeId={activeButlerId} onSelect={selectButler} onManage={() => setManageOpen(true)} disabled={starting} />
+          <span className="text-[11px] text-gray-400 dark:text-gray-500">Pick a butler, then start it — or add another via the gear.</span>
+        </div>
         <div className="flex-1 flex items-center justify-center p-8">
           <div className="text-center max-w-sm">
             <div className="w-14 h-14 mx-auto mb-4 rounded-2xl bg-brand-600 flex items-center justify-center shadow-lg">
@@ -991,6 +995,8 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
           <div className="shrink-0 flex items-center justify-between gap-3 border-b border-gray-200 dark:border-gray-800 bg-gray-50/60 dark:bg-gray-900/40 px-4 py-2 text-xs">
             {/* Left group â€” context status pill with an attached "clear" icon button.
                 Grouping them makes it obvious that the button resets the value shown in the pill. */}
+            <div className="flex items-center gap-2 shrink-0 min-w-0">
+            <ButlerSwitcher butlers={butlers} activeId={activeButlerId} onSelect={selectButler} onManage={() => setManageOpen(true)} disabled={sending} />
             <div className="flex items-center shrink-0 min-w-0 rounded-full border border-gray-200 dark:border-gray-700 bg-surface-raised dark:bg-surface-raised-dark overflow-hidden">
               <div
                 className="flex items-center gap-1.5 px-3 py-1 text-gray-600 dark:text-gray-300 min-w-0"
@@ -1023,6 +1029,7 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
                 </svg>
                 <span>Clear</span>
               </button>
+            </div>
             </div>
 
             {/* Right group â€” prominent voice dictation, config selects, then a clearly-styled Customize button. */}
@@ -1348,6 +1355,7 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
           <AgentQuestionsPanel projectId={projectId} />
         </>
       )}
+      {manageOpen && <ButlerManageModal onClose={() => setManageOpen(false)} onChanged={() => { void fetchButlers(); }} />}
     </div>
   );
 }
