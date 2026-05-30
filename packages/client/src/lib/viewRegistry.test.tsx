@@ -1,0 +1,63 @@
+import { describe, it, expect } from "vitest";
+import { VIEW_REGISTRY, VIEW_IDS, SHORTCUT_TO_VIEW, type ViewMode } from "./viewRegistry";
+
+describe("VIEW_REGISTRY", () => {
+  it("has no duplicate view ids", () => {
+    const ids = VIEW_REGISTRY.map((v) => v.id);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it("has no duplicate shortcut keys", () => {
+    const shortcuts = VIEW_REGISTRY.map((v) => v.shortcut).filter(Boolean);
+    expect(new Set(shortcuts).size).toBe(shortcuts.length);
+  });
+
+  it("enumerates all 13 board views", () => {
+    expect(VIEW_REGISTRY).toHaveLength(13);
+  });
+
+  it("preserves the existing view ids", () => {
+    const expected: ViewMode[] = [
+      "kanban", "graph", "table", "agents", "timeline", "metrics",
+      "digest", "focus", "butler", "workflows", "insights", "swimlane", "flaky-tests",
+    ];
+    expect(VIEW_IDS.slice().sort()).toEqual(expected.slice().sort());
+  });
+
+  it("preserves the existing view shortcuts (b/g/t/f/l/m/i/p, etc.)", () => {
+    const byId = Object.fromEntries(VIEW_REGISTRY.map((v) => [v.id, v.shortcut]));
+    expect(byId.kanban).toBe("b");
+    expect(byId.graph).toBe("g");
+    expect(byId.table).toBe("t");
+    expect(byId.timeline).toBe("f");
+    expect(byId.agents).toBe("l");
+    expect(byId.metrics).toBe("m");
+    expect(byId.butler).toBe("i");
+    expect(byId.swimlane).toBe("p");
+    expect(byId.insights).toBe("n");
+    expect(byId["flaky-tests"]).toBe("k");
+    expect(byId.digest).toBe("d");
+    expect(byId.focus).toBe("o");
+    // workflows intentionally has no shortcut
+    expect(byId.workflows).toBeUndefined();
+  });
+
+  it("every view has the fields the three consumers need", () => {
+    for (const v of VIEW_REGISTRY) {
+      expect(v.id).toBeTruthy();
+      expect(v.toolbarLabel).toBeTruthy();
+      expect(v.label).toBeTruthy();
+      expect(v.tooltip).toBeTruthy();
+      expect(v.icon).toBeTruthy();
+      expect(v.paletteIcon).toBeTruthy();
+      expect(v.paletteDescription).toBeTruthy();
+    }
+  });
+
+  it("excludes the graph chord from the plain-key shortcut map", () => {
+    // graph is reached via a `g` chord (g+s -> settings), handled separately
+    expect(SHORTCUT_TO_VIEW["g"]).toBeUndefined();
+    expect(SHORTCUT_TO_VIEW["b"]).toBe("kanban");
+    expect(SHORTCUT_TO_VIEW["k"]).toBe("flaky-tests");
+  });
+});
