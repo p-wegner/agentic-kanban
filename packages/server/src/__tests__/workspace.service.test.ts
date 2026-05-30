@@ -8,7 +8,7 @@ import { projects, projectStatuses, issues, workspaces, preferences } from "@age
 import { createTestDb, type TestDb } from "./helpers/test-db.js";
 import { createMockSessionManager } from "./helpers/mocks.js";
 import { createWorkspaceService, WorkspaceError, type GitService } from "../services/workspace.service.js";
-import { activeMerges } from "../services/workspace-internals.js";
+import { activeMerges, MERGE_LOCK_STALE_MS } from "../services/workspace-internals.js";
 
 // Mock process-cleanup so killWorktreeProcesses doesn't run real wmic/lsof in unit tests.
 vi.mock("../services/process-cleanup.js", () => ({
@@ -291,6 +291,60 @@ describe("workspace.service", () => {
       // Workspace stays active (not closed) on conflict
       const wsRows = await db.select().from(workspaces).where(eq(workspaces.id, wsId));
       expect(wsRows[0].status).toBe("active");
+    });
+
+    it("reports active merge lock diagnostics while another merge is still fresh", async () => {
+      const { projectId, issueId } = await seedProjectAndIssue(db);
+      const wsId = await seedWorkspaceForMerge(projectId, issueId);
+      const gitService = createFakeGitService();
+      const startedAtMs = Date.now() - 5_000;
+      activeMerges.set("/tmp/test-repo", {
+        promise: new Promise(() => {}),
+        workspaceId: "old-workspace",
+        repoPath: "/tmp/test-repo",
+        startedAt: new Date(startedAtMs).toISOString(),
+        startedAtMs,
+      });
+
+      const service = createWorkspaceService({ database: db, gitService, processKiller: vi.fn(async () => 0) });
+
+      await expect(service.mergeWorkspace(wsId)).rejects.toMatchObject({
+        code: "CONFLICT",
+        data: {
+          repoPath: "/tmp/test-repo",
+          activeWorkspaceId: "old-workspace",
+          staleAfterMs: MERGE_LOCK_STALE_MS,
+          isStale: false,
+        },
+      });
+      expect(gitService.mergeBranch).not.toHaveBeenCalled();
+    });
+
+    it("recovers a stale merge lock and proceeds with the merge", async () => {
+      const { projectId, issueId } = await seedProjectAndIssue(db);
+      const wsId = await seedWorkspaceForMerge(projectId, issueId);
+      const staleStartedAtMs = Date.now() - MERGE_LOCK_STALE_MS - 1_000;
+      activeMerges.set("/tmp/test-repo", {
+        promise: Promise.resolve("old merge settled later"),
+        workspaceId: "stale-workspace",
+        repoPath: "/tmp/test-repo",
+        startedAt: new Date(staleStartedAtMs).toISOString(),
+        startedAtMs: staleStartedAtMs,
+      });
+
+      const gitService = createFakeGitService();
+      const service = createWorkspaceService({
+        database: db,
+        gitService,
+        createBackup: vi.fn(async () => ({})),
+        processKiller: vi.fn(async () => 0),
+      });
+
+      const result = await service.mergeWorkspace(wsId);
+
+      expect(result.id).toBe(wsId);
+      expect(gitService.mergeBranch).toHaveBeenCalledWith("/tmp/test-repo", "feature/ak-1-test", "main");
+      expect(activeMerges.has("/tmp/test-repo")).toBe(false);
     });
 
   });
