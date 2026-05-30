@@ -87,6 +87,47 @@ function isDangerous(command) {
   return false;
 }
 
+function usesBrokenRelatedFlag(command) {
+  if (!/--related\b/i.test(command)) return false;
+  return /\bvitest\b/i.test(command) || /\btest:mine\b/i.test(command) || /\bpnpm\b[^\n]*(?:\btest\b|\bexec\s+vitest\b)/i.test(command);
+}
+
+function commandMovesToMainCheckout(command) {
+  return /\b(?:cd|Set-Location|Push-Location)\s+["']?C:[\/\\]andrena[\/\\]agentic-kanban\b/i.test(command);
+}
+
+function isWorktreeProjectDir() {
+  return /[\/\\]\.worktrees[\/\\]/i.test(getProjectDir());
+}
+
+function usesWorktreeCli(command) {
+  if (!isWorktreeProjectDir()) return false;
+  if (commandMovesToMainCheckout(command)) return false;
+  return /(?:^|[;&|]\s*)pnpm(?:\.cmd)?\s+cli\s+--(?:\s|$)/i.test(command);
+}
+
+function getBlockedNonDbReason(command) {
+  if (usesBrokenRelatedFlag(command)) {
+    return (
+      "Vitest 4 does not support the --related flag. Use the related subcommand instead:\n" +
+      "  cd packages/server && pnpm exec vitest related src/services/foo.service.ts\n\n" +
+      "For the reliable-suite wrapper, use:\n" +
+      "  pnpm test:mine -- --changed HEAD"
+    );
+  }
+
+  if (usesWorktreeCli(command)) {
+    return (
+      "`pnpm cli --` is unreliable from git worktrees because the server package can use the wrong " +
+      "or missing shared build context. Use MCP tools, REST on the running server, or run the CLI " +
+      "from the main checkout:\n" +
+      "  cd C:\\andrena\\agentic-kanban && pnpm cli -- <command>"
+    );
+  }
+
+  return null;
+}
+
 /** Best-effort timestamped backup of the db and its WAL/SHM sidecars. Returns the backup dir or null. */
 function backupDatabase() {
   const dbPath = getDbPath();
@@ -148,6 +189,22 @@ async function main() {
   }
 
   const command = input.command || input.Command || "";
+  const nonDbReason = getBlockedNonDbReason(command);
+  if (nonDbReason) {
+    console.error("[safety] Command blocked.");
+    console.error("");
+    console.error("Command:");
+    console.error(`  ${command.substring(0, 160)}${command.length > 160 ? "..." : ""}`);
+
+    console.log(
+      JSON.stringify({
+        decision: "block",
+        reason: nonDbReason,
+      })
+    );
+    process.exit(1);
+  }
+
   if (!isDangerous(command)) process.exit(0);
 
   // Always create a backup first, regardless of what happens next.
