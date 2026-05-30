@@ -83,6 +83,7 @@ function createFakeGitService(overrides: Partial<GitService> = {}): GitService {
     createWorktree: vi.fn(async () => "/tmp/test-repo/.worktrees/feature-1"),
     getCurrentBranch: vi.fn(async () => "main"),
     getHeadCommitSha: vi.fn(async () => "abc123"),
+    revParse: vi.fn(async () => "base-sha-123"),
     removeWorktree: vi.fn(async () => {}),
     deleteBranch: vi.fn(async () => {}),
     detectConflicts: vi.fn(async () => ({ hasConflicts: false, conflictingFiles: [] })),
@@ -129,6 +130,7 @@ describe("workspace.service", () => {
       expect(result.sessionId).toBe("mock-session-id");
 
       // Worktree was created off the project default branch
+      expect(gitService.revParse).toHaveBeenCalledWith("/tmp/test-repo", "main");
       expect(gitService.createWorktree).toHaveBeenCalledWith("/tmp/test-repo", "feature/ak-1-test", "main");
       // Agent launch happened
       expect(sessionManager.startSession).toHaveBeenCalledOnce();
@@ -137,6 +139,7 @@ describe("workspace.service", () => {
       const wsRows = await db.select().from(workspaces).where(eq(workspaces.id, result.id));
       expect(wsRows).toHaveLength(1);
       expect(wsRows[0].status).toBe("active");
+      expect(wsRows[0].baseCommitSha).toBe("base-sha-123");
 
       // Issue moved to In Progress
       const issueRow = await db.select().from(issues).where(eq(issues.id, issueId));
