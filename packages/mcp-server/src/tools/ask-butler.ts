@@ -17,10 +17,12 @@ export function registerAskButler(server: McpServer) {
     {
       projectId: z.string().describe("The project ID"),
       question: z.string().describe("The question to ask the butler"),
+      butler: z.string().optional().describe("Which butler to ask (definition id, e.g. \"smart\"). Defaults to the project's default butler. List available butlers via GET /api/butler-definitions."),
     },
-    async ({ projectId, question }) => {
+    async ({ projectId, question, butler }) => {
       try {
-        const res = await fetch(`http://127.0.0.1:${SERVER_PORT}/api/projects/${projectId}/butler/ask`, {
+        const q = butler && butler !== "default" ? `?butler=${encodeURIComponent(butler)}` : "";
+        const res = await fetch(`http://127.0.0.1:${SERVER_PORT}/api/projects/${projectId}/butler/ask${q}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ content: question }),
