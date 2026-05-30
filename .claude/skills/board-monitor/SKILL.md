@@ -77,16 +77,52 @@ $proj = "<active-project-id>"  # read from GET /api/preferences/active-project i
 $board = Invoke-RestMethod "http://localhost:3001/api/projects/$proj/board" -TimeoutSec 10
 ```
 
-For each issue in `In Progress` and `In Review` columns, check `workspaceSummary.main`:
+For each issue in `In Progress` and `In Review` columns, check `workspaceSummary.main`. **The action depends on which column the issue is in** — `idle` means "continue work" in In Progress but "ready to land" in In Review:
 
-| Workspace status | Session status | Action |
-|---|---|---|
-| `idle` | any | **Relaunch**: `POST /api/workspaces/:id/launch` |
-| `reviewing`, workingDir empty | — | **Ghost**: delete workspace, reset issue to In Progress, create fresh workspace |
-| `reviewing` | `stopped` | **Merge**: `POST /api/workspaces/:id/merge` (60s timeout) — see "Merging branches safely" below |
-| `active` | `stopped` | Mark idle: `PATCH /api/workspaces/:id` `{"status":"idle"}` |
-| `active` | `running`, age >5min | **Nudge**: `POST /api/workspaces/:id/turn` `{"message": "Please continue with the task..."}` |
-| `active` | `running`, age ≤5min | Leave alone — too fresh |
+| Column | Workspace status | Session status | Action |
+|---|---|---|---|
+| **In Review** | `idle` or `active`+`stopped`, has committed diff | — | **Merge if the prefs allow it** — see "Auto-merge In Review (configurable)" below for the `auto_merge` / `auto_merge_in_review` decision table |
+| **In Review** | `reviewing` | `stopped` | **Merge** (if `auto_merge` on): `POST /api/workspaces/:id/merge` (60s timeout) — see "Merging branches safely" below |
+| In Progress | `idle` | any | **Relaunch**: `POST /api/workspaces/:id/launch` |
+| any | `reviewing`, workingDir empty | — | **Ghost**: delete workspace, reset issue to In Progress, create fresh workspace |
+| In Progress | `active` | `stopped` | Mark idle: `PATCH /api/workspaces/:id` `{"status":"idle"}` |
+| In Progress | `active` | `running`, age >5min | **Nudge**: `POST /api/workspaces/:id/turn` `{"content": "Please continue with the task..."}` (field is `content`, not `message`) |
+| In Progress | `active` | `running`, age >25min, same `lastAssistantMessage` 2 cycles | **Stop** the runaway loop: `POST /api/workspaces/:id/stop` (graceful, no PID kill; only safe when diff is committed / tree clean), then it falls to the In-Review auto-merge rule once moved |
+| In Progress | `active` | `running`, age ≤5min | Leave alone — too fresh |
+
+### Auto-merge In Review (configurable — pick up the preference, allow override)
+
+Whether the monitor lands not-yet-ready In-Review work is driven by **two preferences** the app owns — read them every cycle and honor them automatically:
+
+```powershell
+$autoMerge        = (Invoke-RestMethod "http://localhost:3001/api/preferences/auto_merge" -EA SilentlyContinue).value          # default "true"
+$autoMergeInReview = (Invoke-RestMethod "http://localhost:3001/api/preferences/auto_merge_in_review" -EA SilentlyContinue).value # default "false"
+```
+(Both are also in `GET /api/preferences/settings`. Unset → use the defaults above.)
+
+**Decision for an issue in `In Review` whose `workspaceSummary.main` is `idle` (or `active`+session `stopped`) with a committed diff (`diffStats.filesChanged > 0`):**
+
+| `auto_merge` | `auto_merge_in_review` | `readyForMerge` | Action |
+|---|---|---|---|
+| `false` | any | any | **Do nothing** — operator froze merging. Report under "Idle / awaiting". |
+| `true` | any | `true` | **Merge** — agent marked it ready. |
+| `true` | `true` | `false` | **Merge** — policy lands committed In-Review work without the ready gate. |
+| `true` | `false` (default) | `false` | **Do nothing** — leave it waiting; report under "Idle / awaiting". |
+
+**User override:** if the user's `/board-monitor` argument explicitly asks to merge In-Review work (e.g. "merge in review to master", "no human gating", "unblock and merge review"), treat it as `auto_merge_in_review = true` for this run **regardless of the stored preference** — and persist it so the app monitor agrees:
+```powershell
+Invoke-RestMethod "http://localhost:3001/api/preferences/settings" -Method Put -ContentType "application/json" -Body '{"auto_merge_in_review":"true"}'
+```
+Conversely, if they say "stop auto-merging review" / "require manual merge", set it back to `"false"`.
+
+**To merge (when the table says Merge):**
+1. `POST /api/workspaces/:id/merge` (90s timeout).
+   - **200** → merged. **Verify master actually advanced** (`git log --oneline -3 master` shows the merge commit) — a "merged" response does not guarantee the code is on master. Confirm the issue left In Review (→ Done / AI Reviewed).
+   - **409** `conflictingFiles` → `POST /api/workspaces/:id/fix-and-merge` `{ "mergeError": "<the 409 body>" }`; re-check next cycle. Never resolve by hand.
+   - **5xx / timeout** → retry once; if it still fails, check `workingDir` (empty = ghost), else report under "Needs attention".
+2. Never **relaunch** an idle In-Review workspace — its work is already committed; relaunching just restarts whatever loop stopped it (e.g. an unsatisfiable visual-verification Stop hook).
+
+> This mirrors the app's built-in monitor exactly (`monitor-cycle.ts` reads the same two prefs). When `auto_monitor` is ON, the app does this itself; when it's OFF (current default), this skill is the one carrying it out — same policy, same gates.
 
 ### Merging branches safely
 
