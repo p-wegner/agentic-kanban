@@ -45,6 +45,7 @@ Classify the stuck reason:
 | `ws=idle`, `sess=completed`, agent asked plain-text question | Answer via `/turn`, see Step 2 |
 | `ws=idle`, agent has `permission_denials[*].AskUserQuestion` | Pick best option per question, answer via `/turn` |
 | `ws=active`, `sess=running`, age >5min, no recent output | Nudge: "Please continue with the task..." |
+| `sess=running/stopped`, provider transcript is ~1s with 0 tokens or no assistant output | Treat as launch failure/stale board state: stop the workspace session, do not wait longer, and inspect/rebuild the branch manually in the worktree |
 | `ws=reviewing`, `sess=stopped` | Skip to Step 4 (merge) |
 | `ws=closed`, already merged in kanban | Verify master, jump to Step 5 |
 | Worktree gone, no commit on branch | ABORT — surface to user |
@@ -73,6 +74,8 @@ echo "WORKSPACE LEFT ACTIVE"
 ```
 
 Run this via Bash `run_in_background: true`. You get a single notification when the workspace flips out of `active`. Refactors of large files can take 10–15 minutes — don't panic, don't kill it.
+
+Do not stack synchronous `Start-Sleep 120/180/240` loops; if a session has no provider output after one check, inspect the session transcript before waiting again.
 
 When the notification fires, re-run `pnpm cli -- issue status N`. If the agent asked another question, loop back to Step 2. If it completed cleanly with a commit, go to Step 4.
 
