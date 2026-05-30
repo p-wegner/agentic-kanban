@@ -43,7 +43,7 @@ function getVisualVerificationMode() {
   try {
     const port = process.env.KANBAN_SERVER_PORT || process.env.SERVER_PORT || "3001";
     const result = execSync(
-      `curl -s --max-time 3 "http://localhost:${port}/api/preferences/settings"`,
+      `curl -s --max-time 3 "http://127.0.0.1:${port}/api/preferences/settings"`,
       { encoding: "utf8", windowsHide: true, timeout: 4000 }
     );
     const settings = JSON.parse(result);
@@ -95,11 +95,11 @@ function main() {
         "You are in after_merge+reviewer mode. Before stopping, you must:",
         "",
         "  1. Merge the workspace:",
-        `     curl -s -X POST http://localhost:${serverPort}/api/workspaces/{workspaceId}/merge`,
+        `     curl -s -X POST http://127.0.0.1:${serverPort}/api/workspaces/{workspaceId}/merge`,
         "     (or use the workspaceId from your prompt)",
         "",
         "  2. Visually verify on master:",
-        `     Open http://localhost:${clientPort} using playwright-cli (/playwright-cli)`,
+        `     Open http://127.0.0.1:${clientPort} using playwright-cli (/playwright-cli)`,
         "     Navigate to the relevant UI sections and take a screenshot",
         "",
         "  3. Report your verification result, then exit.",
@@ -113,7 +113,7 @@ function main() {
         "  /playwright-cli",
         "",
         "Then:",
-        `  1. Open http://localhost:${clientPort}`,
+        `  1. Open http://127.0.0.1:${clientPort}`,
         "  2. Take a snapshot to check the UI renders correctly",
         "  3. Screenshot only if debugging — clean up .png files after",
         "",
