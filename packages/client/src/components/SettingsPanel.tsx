@@ -38,6 +38,9 @@ interface Settings {
   auto_monitor_interval?: string;
   nudge_auto_start?: string;
   nudge_wip_limit?: string;
+  backlog_empty_strategy?: string;
+  backlog_empty_skill?: string;
+  backlog_empty_cooldown_min?: string;
   projects_base_path?: string;
   plan_auto_continue?: string;
   visual_verification_mode?: string;
@@ -79,6 +82,9 @@ const DEFAULT_SETTINGS: Settings = {
   auto_monitor: "false",
   auto_monitor_interval: "4",
   nudge_auto_start: "false",
+  backlog_empty_strategy: "skip",
+  backlog_empty_skill: "architecture-improvement",
+  backlog_empty_cooldown_min: "120",
   projects_base_path: "",
   plan_auto_continue: "true",
   visual_verification_mode: "before_merge",
@@ -987,6 +993,55 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                           className="w-16 px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-1 focus:ring-brand-500"
                         />
                         <span className="text-xs text-gray-500 dark:text-gray-400">min</span>
+                      </div>
+                    )}
+                    {settings.auto_monitor === "true" && (
+                      <div className="mt-3 pl-5">
+                        <div className="flex items-center gap-2">
+                          <label className="text-xs text-gray-600 dark:text-gray-400">When backlog is empty</label>
+                          <select
+                            value={settings.backlog_empty_strategy || "skip"}
+                            onChange={(e) => set("backlog_empty_strategy")(e.target.value)}
+                            className="px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-1 focus:ring-brand-500 bg-white dark:bg-gray-900"
+                          >
+                            <option value="skip">Do nothing</option>
+                            <option value="generate_tickets">Generate new tickets (run a skill)</option>
+                          </select>
+                        </div>
+                        <p className="mt-1 text-[11px] text-gray-400 dark:text-gray-500 leading-snug">
+                          When 0 unstarted Todo issues remain, run a skill that creates new high-value, local-only tickets. Respects the WIP limit and the cooldown below.
+                        </p>
+                        {settings.backlog_empty_strategy === "generate_tickets" && (
+                          <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2">
+                            <div className="flex items-center gap-2">
+                              <label className="text-xs text-gray-600 dark:text-gray-400">Skill</label>
+                              <select
+                                value={settings.backlog_empty_skill || "architecture-improvement"}
+                                onChange={(e) => set("backlog_empty_skill")(e.target.value)}
+                                className="px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-1 focus:ring-brand-500 bg-white dark:bg-gray-900"
+                              >
+                                <option value="architecture-improvement">architecture-improvement</option>
+                                <option value="ui-explorer">ui-explorer</option>
+                                {skills
+                                  .filter((s) => s.name !== "architecture-improvement" && s.name !== "ui-explorer")
+                                  .map((s) => (
+                                    <option key={s.id} value={s.name}>{s.name}</option>
+                                  ))}
+                              </select>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <label className="text-xs text-gray-600 dark:text-gray-400">Cooldown</label>
+                              <input
+                                type="number"
+                                min="1"
+                                value={settings.backlog_empty_cooldown_min || "120"}
+                                onChange={(e) => set("backlog_empty_cooldown_min")(e.target.value)}
+                                className="w-20 px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-1 focus:ring-brand-500"
+                              />
+                              <span className="text-xs text-gray-500 dark:text-gray-400">min</span>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     )}
                     {monitorStatus && (
