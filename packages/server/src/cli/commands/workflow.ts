@@ -9,10 +9,48 @@ import {
 } from "@agentic-kanban/shared/lib/workflow-engine";
 import { runMigrations, getActiveProjectId } from "../shared.js";
 
+function toExportJson(graph: any) {
+  return {
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    metadata: {
+      id: graph.id,
+      name: graph.name,
+      description: graph.description ?? null,
+      ticketType: graph.ticketType ?? null,
+      isDefault: !!graph.isDefault,
+      isBuiltin: !!graph.isBuiltin,
+      builtinKey: graph.builtinKey ?? null,
+      projectId: graph.projectId ?? null,
+      createdAt: graph.createdAt,
+      updatedAt: graph.updatedAt,
+    },
+    nodes: graph.nodes ?? [],
+    edges: graph.edges ?? [],
+  };
+}
+
+function normalizeImportedTemplate(input: any) {
+  const source = input?.template ?? input?.workflow ?? input;
+  const metadata = source?.metadata ?? source ?? {};
+  return {
+    name: input?.name ?? source?.name ?? metadata.name,
+    description: input?.description ?? source?.description ?? metadata.description ?? null,
+    ticketType: input?.ticketType ?? source?.ticketType ?? metadata.ticketType ?? null,
+    isDefault: input?.isDefault ?? source?.isDefault ?? metadata.isDefault ?? false,
+    nodes: source?.nodes ?? [],
+    edges: source?.edges ?? [],
+  };
+}
+
+function readJsonFile(path: string): unknown {
+  return JSON.parse(readFileSync(path, "utf-8").replace(/^\uFEFF/, ""));
+}
+
 export function registerWorkflowCommand(program: Command) {
   const wf = program
     .command("workflow")
-    .description("Manage configurable workflow templates (graphs of stages + transitions).\n\nSubcommands: list, get, create, delete");
+    .description("Manage configurable workflow templates (graphs of stages + transitions).\n\nSubcommands: list, get, export, create, import, delete");
 
   wf
     .command("list")
@@ -59,13 +97,32 @@ export function registerWorkflowCommand(program: Command) {
     });
 
   wf
+    .command("export <templateId>")
+    .description("Print a workflow template's importable JSON (metadata + nodes + edges).")
+    .action(async (templateId: string) => {
+      try {
+        await runMigrations();
+        const g = await getTemplateGraph(db, templateId);
+        if (!g) {
+          console.error(`Template ${templateId} not found`);
+          process.exit(1);
+        }
+        console.log(JSON.stringify(toExportJson(g), null, 2));
+        process.exit(0);
+      } catch (err) {
+        console.error("Error:", err instanceof Error ? err.message : String(err));
+        process.exit(1);
+      }
+    });
+
+  wf
     .command("create <jsonFile>")
     .description("Create a workflow template from a JSON file: { name, description?, ticketType?, isDefault?, nodes:[{id,name,nodeType,statusName?,skillName?,maxVisits?,config?}], edges:[{fromNodeId,toNodeId,label?,condition?}] }")
     .action(async (jsonFile: string) => {
       try {
         await runMigrations();
         const projectId = await getActiveProjectId();
-        const spec = JSON.parse(readFileSync(jsonFile, "utf-8"));
+        const spec = readJsonFile(jsonFile) as any;
         const res = await createWorkflowTemplate(db, {
           projectId,
           name: spec.name,
@@ -81,6 +138,41 @@ export function registerWorkflowCommand(program: Command) {
           process.exit(1);
         }
         console.log(`Created workflow template: ${spec.name}`);
+        console.log(`  id: ${res.id}`);
+        process.exit(0);
+      } catch (err) {
+        console.error("Error:", err instanceof Error ? err.message : String(err));
+        process.exit(1);
+      }
+    });
+
+  wf
+    .command("import <jsonFile>")
+    .description("Import a workflow template JSON file into the active project as a new template.")
+    .action(async (jsonFile: string) => {
+      try {
+        await runMigrations();
+        const projectId = await getActiveProjectId();
+        const spec = normalizeImportedTemplate(readJsonFile(jsonFile));
+        if (!spec.name) {
+          console.error("Imported workflow name is required.");
+          process.exit(1);
+        }
+        const res = await createWorkflowTemplate(db, {
+          projectId,
+          name: spec.name,
+          description: spec.description,
+          ticketType: spec.ticketType ?? null,
+          isDefault: spec.isDefault,
+          nodes: spec.nodes ?? [],
+          edges: spec.edges ?? [],
+        });
+        if (!res.ok) {
+          console.error("Invalid workflow graph:");
+          for (const e of res.errors) console.error("  - " + e);
+          process.exit(1);
+        }
+        console.log(`Imported workflow template: ${spec.name}`);
         console.log(`  id: ${res.id}`);
         process.exit(0);
       } catch (err) {
