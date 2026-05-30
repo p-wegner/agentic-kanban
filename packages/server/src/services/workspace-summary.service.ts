@@ -1,4 +1,4 @@
-import { workspaces, sessions, sessionMessages, showdowns } from "@agentic-kanban/shared/schema";
+import { workspaces, sessions, sessionMessages, showdowns, workflowEdges, workflowNodes } from "@agentic-kanban/shared/schema";
 import { eq, inArray, sql, desc } from "drizzle-orm";
 import type { Database } from "../db/index.js";
 import { detectConflicts, getCommitCountAhead, getDiffShortstat } from "./git.service.js";
@@ -56,6 +56,13 @@ export type WorkspaceSummary = {
     scorecard?: { score: number } | null;
     commitCount?: number | null;
     codeMetrics?: WorkspaceCodeMetrics | null;
+    workflow?: {
+      currentNodeId: string;
+      currentNodeName: string;
+      currentNodeType: string;
+      state: "active" | "waiting" | "terminal";
+      nextStages: string[];
+    } | null;
   };
 };
 
@@ -126,6 +133,7 @@ export async function buildWorkspaceSummaryMap(
       scorecardScore: workspaces.scorecardScore,
       codeMetricsJson: workspaces.codeMetricsJson,
       codeMetricsComputedAt: workspaces.codeMetricsComputedAt,
+      currentNodeId: workspaces.currentNodeId,
       showdownId: workspaces.showdownId,
       mergedAt: workspaces.mergedAt,
     })
@@ -190,12 +198,14 @@ export async function buildWorkspaceSummaryMap(
       scorecard: mainWs.scorecardScore !== null ? { score: mainWs.scorecardScore } : null,
       commitCount: null,
       codeMetrics: parseStoredWorkspaceCodeMetrics(mainWs.codeMetricsJson, mainWs.codeMetricsComputedAt),
+      workflow: null,
       mergedAt: mainWs.mergedAt,
     };
 
     if (mainWs.workingDir && mainWs.status !== "closed") {
-      if (!mainWs.isDirect && (mainWs.baseBranch || defaultBranch)) {
-        summary.main.commitCount = await getCommitCountAhead(mainWs.workingDir, mainWs.baseBranch || defaultBranch);
+      const baseForCommitCount = mainWs.baseBranch || defaultBranch;
+      if (!mainWs.isDirect && baseForCommitCount) {
+        summary.main.commitCount = await getCommitCountAhead(mainWs.workingDir, baseForCommitCount);
       }
 
       const diffRef = mainWs.isDirect ? "HEAD" : (mainWs.baseBranch || defaultBranch);
@@ -294,6 +304,66 @@ export async function buildWorkspaceSummaryMap(
           );
         }
       }
+    }
+  }
+
+  const currentNodeIds = [...mainWorkspaceMap.values()]
+    .map((w) => w.currentNodeId)
+    .filter((id): id is string => !!id);
+  if (currentNodeIds.length > 0) {
+    const currentNodes = await database
+      .select({
+        id: workflowNodes.id,
+        name: workflowNodes.name,
+        nodeType: workflowNodes.nodeType,
+      })
+      .from(workflowNodes)
+      .where(inArray(workflowNodes.id, currentNodeIds));
+    const currentNodeById = new Map(currentNodes.map((n) => [n.id, n]));
+
+    const outgoingEdges = await database
+      .select({
+        fromNodeId: workflowEdges.fromNodeId,
+        toNodeId: workflowEdges.toNodeId,
+        sortOrder: workflowEdges.sortOrder,
+      })
+      .from(workflowEdges)
+      .where(inArray(workflowEdges.fromNodeId, currentNodeIds));
+    const targetNodeIds = [...new Set(outgoingEdges.map((e) => e.toNodeId))];
+    const targetNodes = targetNodeIds.length > 0
+      ? await database
+          .select({ id: workflowNodes.id, name: workflowNodes.name })
+          .from(workflowNodes)
+          .where(inArray(workflowNodes.id, targetNodeIds))
+      : [];
+    const targetNameById = new Map(targetNodes.map((n) => [n.id, n.name]));
+
+    const nextStagesByNode = new Map<string, string[]>();
+    for (const edge of outgoingEdges.sort((a, b) => a.sortOrder - b.sortOrder)) {
+      const targetName = targetNameById.get(edge.toNodeId);
+      if (!targetName) continue;
+      const names = nextStagesByNode.get(edge.fromNodeId) ?? [];
+      names.push(targetName);
+      nextStagesByNode.set(edge.fromNodeId, names);
+    }
+
+    for (const [issueId, summary] of workspaceSummaryMap) {
+      const main = summary.main;
+      if (!main) continue;
+      const mainWs = mainWorkspaceMap.get(issueId);
+      if (!mainWs?.currentNodeId) continue;
+      const currentNode = currentNodeById.get(mainWs.currentNodeId);
+      if (!currentNode) continue;
+      const nextStages = nextStagesByNode.get(currentNode.id) ?? [];
+      const isTerminal = currentNode.nodeType === "end" || nextStages.length === 0;
+      const isRunning = main.status === "active" || main.status === "reviewing" || main.status === "fixing";
+      main.workflow = {
+        currentNodeId: currentNode.id,
+        currentNodeName: currentNode.name,
+        currentNodeType: currentNode.nodeType,
+        state: isTerminal ? "terminal" : isRunning ? "active" : "waiting",
+        nextStages,
+      };
     }
   }
 
