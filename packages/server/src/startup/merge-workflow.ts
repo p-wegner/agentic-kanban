@@ -99,11 +99,13 @@ export function createAutoMerge({ sessionManager, boardEvents, learningSessionId
           const { repoPath, teardownScript, defaultBranch } = projectRows[0];
 
           const mergePromise = (async () => {
-            if (activeMerges.has(repoPath)) {
-              throw new Error("A merge is already in progress for this repository. Please wait for it to complete.");
+            const pendingMerge = activeMerges.get(repoPath);
+            if (pendingMerge) {
+              console.log(`[workflow] auto-merge for workspace ${workspace.id} is queued behind existing merge on ${repoPath}`);
+              await pendingMerge.catch(() => {});
             }
 
-            const actualMerge = (async () => {
+            return (async () => {
               if (workspace.workingDir) {
                 try { await killProcessesInDir(workspace.workingDir); } catch {}
                 if (teardownScript) {
@@ -168,14 +170,15 @@ Server: http://localhost:${serverPort}`;
                 }
               }
             })();
-
-            activeMerges.set(repoPath, actualMerge);
-            return await actualMerge.finally(() => {
-              activeMerges.delete(repoPath);
-            });
           })();
 
-          await mergePromise;
+          const trackedMerge = mergePromise.finally(() => {
+            if (activeMerges.get(repoPath) === trackedMerge) {
+              activeMerges.delete(repoPath);
+            }
+          });
+          activeMerges.set(repoPath, trackedMerge);
+          await trackedMerge;
         }
       }
 
