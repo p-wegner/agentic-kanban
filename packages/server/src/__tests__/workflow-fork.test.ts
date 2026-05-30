@@ -120,6 +120,36 @@ describe("workflow fork/join orchestration", () => {
     // Parent join session launched.
     expect(startSession).toHaveBeenCalledTimes(1);
   });
+
+  it("marks a failed child launch and still consolidates after the remaining child joins", async () => {
+    const { parentId, issueId, statusIds } = await setupForkAtSplit();
+    gitMock.createWorktree.mockImplementationOnce(async () => {
+      throw new Error("worktree failed");
+    });
+
+    await svc.onWorkspaceEnteredNode(parentId);
+
+    const children = await db.select().from(schema.workspaces).where(eq(schema.workspaces.parentWorkspaceId, parentId));
+    expect(children).toHaveLength(2);
+    expect(children.map((c) => c.forkStatus).sort()).toEqual(["failed", "running"]);
+    expect(startSession).toHaveBeenCalledTimes(1);
+
+    const runningChild = children.find((c) => c.forkStatus === "running")!;
+    const t = await proposeTransition(db as any, { workspaceId: runningChild.id, toNodeName: "Consolidate" });
+    expect(t.ok).toBe(true);
+    await svc.onWorkspaceEnteredNode(runningChild.id);
+
+    const parent = (await db.select().from(schema.workspaces).where(eq(schema.workspaces.id, parentId)))[0];
+    const joinNode = (await db.select().from(schema.workflowNodes).where(eq(schema.workflowNodes.id, parent.currentNodeId!)))[0];
+    expect(joinNode.name).toBe("Consolidate");
+
+    const issue = (await db.select().from(schema.issues).where(eq(schema.issues.id, issueId)))[0];
+    expect(issue.statusId).toBe(statusIds["In Review"]);
+
+    const after = await db.select().from(schema.workspaces).where(eq(schema.workspaces.parentWorkspaceId, parentId));
+    expect(after.map((c) => c.forkStatus).sort()).toEqual(["failed", "joined"]);
+    expect(startSession).toHaveBeenCalledTimes(2);
+  });
 });
 
 async function resolveTemplateForIssueByKey(db: TestDb, projectId: string, builtinKey: string): Promise<string | null> {
