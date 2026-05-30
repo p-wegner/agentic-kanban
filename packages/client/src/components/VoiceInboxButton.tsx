@@ -1,5 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { apiFetch } from "../lib/api.js";
+import {
+  getVoiceLanguageLabel,
+  loadVoiceLanguage,
+  resolveVoiceLanguage,
+  saveVoiceLanguage,
+  VOICE_LANGUAGE_OPTIONS,
+} from "../lib/voice-language.js";
 import { showToast } from "./Toast.js";
 
 interface VoiceInboxButtonProps {
@@ -55,6 +62,7 @@ function getSpeechRecognitionCtor(): (new () => SpeechRecognitionType) | null {
 export function VoiceInboxButton({ projectId, onIssueCreated }: VoiceInboxButtonProps) {
   const [state, setState] = useState<RecordingState>("idle");
   const [interimText, setInterimText] = useState("");
+  const [voiceLanguage, setVoiceLanguage] = useState(loadVoiceLanguage);
   // Editable transcript shown in the review dialog after recording stops.
   const [reviewText, setReviewText] = useState("");
   const recognitionRef = useRef<SpeechRecognitionType | null>(null);
@@ -93,13 +101,18 @@ export function VoiceInboxButton({ projectId, onIssueCreated }: VoiceInboxButton
       setState("idle");
       return;
     }
+    const speechRecognitionLanguage = resolveVoiceLanguage(voiceLanguage);
     setState("processing");
     try {
       const result = await apiFetch<{ issueId: string; issueNumber: number; title: string }>(
         `/api/projects/${projectId}/voice-capture`,
         {
           method: "POST",
-          body: JSON.stringify({ transcript }),
+          body: JSON.stringify({
+            transcript,
+            speechLanguage: speechRecognitionLanguage || null,
+            speechLanguageLabel: getVoiceLanguageLabel(speechRecognitionLanguage),
+          }),
         },
       );
       showToast(`🎙️ Created #${result.issueNumber}: ${result.title}`, "success");
@@ -112,7 +125,7 @@ export function VoiceInboxButton({ projectId, onIssueCreated }: VoiceInboxButton
       setReviewText("");
       transcriptRef.current = "";
     }
-  }, [projectId, onIssueCreated]);
+  }, [projectId, onIssueCreated, voiceLanguage]);
 
   // Stop listening and move to the review step (does NOT create an issue yet —
   // the captured transcript is surfaced for the user to confirm, edit or discard).
@@ -164,7 +177,10 @@ export function VoiceInboxButton({ projectId, onIssueCreated }: VoiceInboxButton
     const recognition = new SpeechRecognitionCtor();
     recognition.continuous = true;
     recognition.interimResults = true;
-    recognition.lang = "en-US";
+    const recognitionLanguage = resolveVoiceLanguage(voiceLanguage);
+    if (recognitionLanguage) {
+      recognition.lang = recognitionLanguage;
+    }
 
     recognition.onresult = (event: SpeechRecognitionEvent) => {
       let interim = "";
@@ -210,7 +226,7 @@ export function VoiceInboxButton({ projectId, onIssueCreated }: VoiceInboxButton
     recognitionRef.current = recognition;
     recognition.start();
     setState("recording");
-  }, [submitTranscript]);
+  }, [submitTranscript, voiceLanguage]);
 
   const handleClick = useCallback(() => {
     if (!projectId) return;
@@ -245,6 +261,7 @@ export function VoiceInboxButton({ projectId, onIssueCreated }: VoiceInboxButton
   const isReviewing = state === "review";
   const isProcessing = state === "processing";
   const isDisabled = !projectId || isProcessing || isReviewing;
+  const isLanguageDisabled = isDisabled || isRecording;
 
   const title = isRecording
     ? "Recording… click to stop and review before creating an issue"
@@ -255,7 +272,7 @@ export function VoiceInboxButton({ projectId, onIssueCreated }: VoiceInboxButton
     : "Voice inbox — record an idea and auto-create a Backlog issue (shift+v)";
 
   return (
-    <div className="relative shrink-0">
+    <div className="relative shrink-0 inline-flex items-center gap-1">
       <button
         onClick={handleClick}
         disabled={isDisabled}
@@ -296,6 +313,19 @@ export function VoiceInboxButton({ projectId, onIssueCreated }: VoiceInboxButton
         )}
         {isProcessing ? "Processing…" : isRecording ? "Stop" : "Voice"}
       </button>
+
+      <select
+        value={voiceLanguage}
+        onChange={(e) => setVoiceLanguage(saveVoiceLanguage(e.target.value))}
+        disabled={isLanguageDisabled}
+        aria-label="Voice input language"
+        title="Voice input language"
+        className="h-7 max-w-[116px] rounded-md border border-gray-200 dark:border-gray-700 bg-surface-raised dark:bg-surface-raised-dark px-1.5 text-xs text-gray-600 dark:text-gray-300 focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:opacity-40 disabled:cursor-not-allowed"
+      >
+        {VOICE_LANGUAGE_OPTIONS.map((option) => (
+          <option key={option.label} value={option.value}>{option.label}</option>
+        ))}
+      </select>
 
       {/* Cancel (abort) button — only while recording. Discards the capture
           without creating an issue, returning straight to the ready state. */}
