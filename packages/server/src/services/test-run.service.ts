@@ -1,5 +1,5 @@
 import { eq, desc, gte, sql } from "drizzle-orm";
-import { testRuns, flakyTestPins } from "@agentic-kanban/shared/schema";
+import { testRuns, flakyTestPins, sessionMessages } from "@agentic-kanban/shared/schema";
 import type { Database } from "../db/index.js";
 
 export interface TestRunRecord {
@@ -210,6 +210,192 @@ export function parseTestOutput(
   return parseVitestJson(raw);
 }
 
+// ---- Plain-text console-output parsing (for auto-ingestion) ----
+//
+// Agent/CI sessions stream the *console* output of a test runner, not its JSON
+// reporter. These parsers recognize per-test pass/fail lines so the radar can be
+// fed automatically. They are deliberately conservative: lines that don't clearly
+// describe a single test result are ignored, so non-test sessions produce nothing.
+
+// Strip ANSI escape codes (color) that terminals/agents embed in output.
+// eslint-disable-next-line no-control-regex
+const ANSI_RE = /\[[0-9;]*m/g;
+
+/**
+ * A vitest default-reporter per-test line, e.g.:
+ *   ✓ src/foo.test.ts > suite > does a thing 12ms
+ *   × src/foo.test.ts > suite > breaks 3ms
+ *   ✓ does a thing (when file shown on its own header line)
+ * The status glyph is one of ✓ (pass), ×/✗ (fail), ↓/- (skip).
+ */
+const VITEST_LINE_RE = /^\s*(?<glyph>[✓✔×✗❯↓])\s+(?<body>.+?)(?:\s+(?<dur>\d+(?:\.\d+)?)\s*ms)?\s*$/;
+
+/**
+ * A playwright list-reporter per-test line, e.g.:
+ *   ✓  1 [chromium] › board.test.ts:12:3 › board › loads (1.2s)
+ *   ✘  2 [chromium] › board.test.ts:20:3 › board › drags (3.0s)
+ *   -  3 [chromium] › board.test.ts:30:3 › board › skipped
+ */
+const PLAYWRIGHT_LINE_RE = /^\s*(?<glyph>[✓✔✘×✗-])\s+\d+\s+(?<body>.+?)(?:\s+\((?<dur>[\d.]+)(?<unit>m?s)\))?\s*$/;
+
+function vitestGlyphPassed(glyph: string): boolean | null {
+  if (glyph === "✓" || glyph === "✔") return true;
+  if (glyph === "×" || glyph === "✗") return false;
+  return null; // ↓/❯ etc. — skip / not a terminal result
+}
+
+function playwrightGlyphPassed(glyph: string): boolean | null {
+  if (glyph === "✓" || glyph === "✔") return true;
+  if (glyph === "✘" || glyph === "×" || glyph === "✗") return false;
+  return null; // "-" skipped
+}
+
+/** Split a "file > suite > test" or "file:line:col › suite › test" body into file + name. */
+function splitBody(body: string, sep: RegExp): { file?: string; testName: string } {
+  const parts = body.split(sep).map(p => p.trim()).filter(Boolean);
+  if (parts.length === 0) return { testName: body.trim() };
+  const first = parts[0];
+  // A file segment looks like a path with a test/spec extension, optionally with :line:col.
+  const fileMatch = /\.(?:test|spec)\.[tj]sx?(?::\d+(?::\d+)?)?$/i.test(first)
+    || /[\\/].+\.[tj]sx?$/i.test(first);
+  if (fileMatch && parts.length > 1) {
+    const file = first.replace(/:\d+(?::\d+)?$/, "");
+    return { file, testName: parts.slice(1).join(" > ") };
+  }
+  return { testName: parts.join(" > ") };
+}
+
+/**
+ * Parse the console output of a test runner (vitest or playwright) line-by-line.
+ * Returns one record per recognized test result. Unrecognized lines are skipped,
+ * so feeding arbitrary agent chatter yields an empty array.
+ */
+export function parseTestTextOutput(
+  raw: string,
+): Omit<TestRunRecord, "sessionId" | "commitSha">[] {
+  const results: Omit<TestRunRecord, "sessionId" | "commitSha">[] = [];
+  const seen = new Set<string>();
+
+  const push = (rec: Omit<TestRunRecord, "sessionId" | "commitSha">) => {
+    const key = `${rec.runner}|${rec.testName}|${rec.passed}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    results.push(rec);
+  };
+
+  for (const rawLine of raw.split(/\r?\n/)) {
+    const line = rawLine.replace(ANSI_RE, "");
+    if (!line.trim()) continue;
+
+    // Playwright list reporter: "<glyph>  <index> [project] › file:line › ... › test"
+    const pw = line.match(PLAYWRIGHT_LINE_RE);
+    if (pw?.groups && /›|\[[^\]]+\]/.test(pw.groups.body)) {
+      const passed = playwrightGlyphPassed(pw.groups.glyph);
+      if (passed === null) continue;
+      // Drop a leading "[project]" tag before splitting.
+      const body = pw.groups.body.replace(/^\[[^\]]+\]\s*›?\s*/, "");
+      const { file, testName } = splitBody(body, /\s+›\s+/);
+      if (!testName) continue;
+      const dur = pw.groups.dur ? Number(pw.groups.dur) * (pw.groups.unit === "s" ? 1000 : 1) : undefined;
+      push({ runner: "playwright", testName, file, suite: undefined, passed, durationMs: dur != null ? Math.round(dur) : undefined });
+      continue;
+    }
+
+    // Vitest default reporter: "<glyph> file > suite > test  Nms"
+    const vt = line.match(VITEST_LINE_RE);
+    if (vt?.groups && vt.groups.body.includes(">")) {
+      const passed = vitestGlyphPassed(vt.groups.glyph);
+      if (passed === null) continue;
+      const { file, testName } = splitBody(vt.groups.body, /\s+>\s+/);
+      if (!testName) continue;
+      push({ runner: "vitest", testName, file, suite: undefined, passed, durationMs: vt.groups.dur ? Math.round(Number(vt.groups.dur)) : undefined });
+      continue;
+    }
+  }
+
+  return results;
+}
+
+/**
+ * Best-effort parse of an arbitrary text blob that may contain either a JSON
+ * reporter dump (somewhere within it) or plain console output. Tries JSON first
+ * (whole string, then any embedded `{...}` object), falling back to line parsing.
+ */
+export function parseTestResultsFromText(
+  raw: string,
+): Omit<TestRunRecord, "sessionId" | "commitSha">[] {
+  const trimmed = raw.trim();
+  if (!trimmed) return [];
+
+  // Whole-string JSON?
+  if (trimmed.startsWith("{")) {
+    const json = parseTestOutput(trimmed);
+    if (json.length > 0) return json;
+  }
+
+  // Embedded JSON object containing a reporter shape (testResults/files/suites)?
+  const jsonMatch = trimmed.match(/\{[\s\S]*"(?:testResults|files|suites)"[\s\S]*\}/);
+  if (jsonMatch) {
+    const json = parseTestOutput(jsonMatch[0]);
+    if (json.length > 0) return json;
+  }
+
+  return parseTestTextOutput(trimmed);
+}
+
+// ---- Session-output extraction ----
+//
+// Session messages persist raw agent stdout: for Claude/Copilot this is
+// stream-json / JSONL where the test runner's console output is buried inside
+// `tool_result` content. For plain (`raw`) agents the data is the console text
+// directly. We walk each line, pull out any human-readable text we can find, and
+// concatenate it so the text parsers above can scan for test-result lines.
+
+/** Recursively collect string values that look like console text from a parsed JSON value. */
+function collectText(value: unknown, out: string[]): void {
+  if (typeof value === "string") {
+    if (value.length > 0) out.push(value);
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const v of value) collectText(v, out);
+    return;
+  }
+  if (value && typeof value === "object") {
+    const obj = value as Record<string, unknown>;
+    // tool_result content lives under `content` (string or [{type:"text",text}]) and
+    // sometimes a top-level `text`/`output`/`stdout`/`result` field.
+    for (const key of ["content", "text", "output", "stdout", "result", "message"]) {
+      if (key in obj) collectText(obj[key], out);
+    }
+  }
+}
+
+/**
+ * Extract candidate console text from one persisted stdout message's `data`.
+ * Handles: (a) plain text, (b) a single JSON object/JSONL line whose tool_result
+ * content carries the runner output.
+ */
+export function extractTextFromMessageData(data: string): string {
+  const parts: string[] = [];
+  let sawJson = false;
+  for (const line of data.split(/\r?\n/)) {
+    const t = line.trim();
+    if (!t) continue;
+    if (t.startsWith("{") || t.startsWith("[")) {
+      try {
+        collectText(JSON.parse(t), parts);
+        sawJson = true;
+        continue;
+      } catch { /* not a complete JSON line — fall through to raw */ }
+    }
+    if (!sawJson) parts.push(line);
+  }
+  // If nothing JSON-structured was found, treat the whole blob as raw console text.
+  if (parts.length === 0) return data;
+  return parts.join("\n");
+}
+
 // ---- DB operations ----
 
 export function createTestRunService(database: Database) {
@@ -312,7 +498,44 @@ export function createTestRunService(database: Database) {
       .orderBy(desc(flakyTestPins.pinnedAt));
   }
 
-  return { recordRuns, getFlaky, pinTest, unpinTest, getPinnedTests };
+  /**
+   * Auto-ingest test results from a completed agent/CI session's persisted output.
+   * Idempotent per session: if any test_runs row already exists for this session
+   * (e.g. it was ingested on a previous exit, or via a manual POST), it is skipped.
+   * Returns the number of records inserted. Robust to non-test sessions — they
+   * yield no parseable results and insert nothing.
+   */
+  async function ingestSession(sessionId: string): Promise<number> {
+    // Skip if this session already has recorded runs (idempotent across re-exits).
+    const existing = await database
+      .select({ id: testRuns.id })
+      .from(testRuns)
+      .where(eq(testRuns.sessionId, sessionId))
+      .limit(1);
+    if (existing.length > 0) return 0;
+
+    const msgs = await database
+      .select({ type: sessionMessages.type, data: sessionMessages.data })
+      .from(sessionMessages)
+      .where(eq(sessionMessages.sessionId, sessionId))
+      .orderBy(sessionMessages.id);
+
+    const textParts: string[] = [];
+    for (const m of msgs) {
+      if ((m.type === "stdout" || m.type === "stderr") && m.data) {
+        textParts.push(extractTextFromMessageData(m.data));
+      }
+    }
+    if (textParts.length === 0) return 0;
+
+    const records = parseTestResultsFromText(textParts.join("\n"));
+    if (records.length === 0) return 0;
+
+    await recordRuns(records.map(r => ({ ...r, sessionId })));
+    return records.length;
+  }
+
+  return { recordRuns, getFlaky, pinTest, unpinTest, getPinnedTests, ingestSession };
 }
 
 export type TestRunService = ReturnType<typeof createTestRunService>;
