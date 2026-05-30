@@ -12,6 +12,7 @@ import type { ViewMode } from "../lib/viewRegistry.js";
 
 const ACTIVE_DEFAULT = "bg-brand-600 text-white hover:bg-brand-700";
 const INACTIVE = "text-ink-soft dark:text-gray-400 hover:bg-surface-sunken dark:hover:bg-gray-700";
+const BOARD_ACTIVITY_STATUS_ORDER = ["In Progress", "In Review", "AI Reviewed", "Todo"];
 
 interface BoardToolbarProps {
   backlogColumn: StatusWithIssues | undefined;
@@ -73,6 +74,7 @@ export function BoardToolbar({
   const [showMonitorPopover, setShowMonitorPopover] = useState(false);
   const [showMoreViews, setShowMoreViews] = useState(false);
   const moreViewsRef = useRef<HTMLDivElement>(null);
+  const boardActivitySummary = formatBoardActivitySummary(activeColumns);
 
   // Close the "More" views dropdown on outside click or Escape.
   useEffect(() => {
@@ -194,6 +196,18 @@ export function BoardToolbar({
             >
               {view.icon}
               {view.toolbarLabel}
+              {view.id === "kanban" && boardActivitySummary && (
+                <span
+                  className={`hidden md:inline max-w-[260px] truncate rounded-full px-1.5 py-0.5 text-[10px] font-semibold leading-none ${
+                    isActive
+                      ? "bg-white/20 text-white"
+                      : "bg-surface-sunken dark:bg-gray-800 text-ink-soft dark:text-gray-400"
+                  }`}
+                  title={boardActivitySummary}
+                >
+                  {boardActivitySummary}
+                </span>
+              )}
               {showBadge && (
                 <span
                   className="ml-0.5 inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-amber-500 text-white text-[10px] font-semibold leading-none"
@@ -265,4 +279,18 @@ export function BoardToolbar({
       </div>
     </div>
   );
+}
+
+export function formatBoardActivitySummary(activeColumns: StatusWithIssues[]) {
+  const columnsByName = new Map(activeColumns.map((col) => [col.name, col]));
+  const orderedNames = [
+    ...BOARD_ACTIVITY_STATUS_ORDER,
+    ...activeColumns.map((col) => col.name).filter((name) => !BOARD_ACTIVITY_STATUS_ORDER.includes(name)),
+  ];
+
+  return orderedNames
+    .map((name) => columnsByName.get(name))
+    .filter((col): col is StatusWithIssues => Boolean(col) && col.issues.length > 0)
+    .map((col) => `${col.issues.length} ${col.name}`)
+    .join(", ");
 }
