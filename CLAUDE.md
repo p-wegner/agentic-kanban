@@ -107,6 +107,7 @@ When a test in the table below fails and you haven't touched the relevant code, 
 - **Hardcoded timestamps in unit tests** — if the production code computes staleness/age against `Date.now()`, seeding tests with hardcoded ISO strings (e.g. `"2026-05-28T11:30:00.000Z"`) causes failures the next day. Use `Date.now()`-relative offsets: `new Date(Date.now() - 60 * 60 * 1000).toISOString()` (= 1h ago)
 
 ### Unit testing
+- **Run vitest from the WORKTREE, not the main checkout** — new/changed test files exist only on your branch in the worktree. Running `pnpm exec vitest run src/__tests__/foo.test.ts` from `C:\andrena\agentic-kanban` (the main checkout) yields a misleading **`No test files found, exiting with code 1`** — the file simply isn't there. This is a directory mismatch, NOT a broken or missing test. (Contrast: `pnpm cli --` must run from the *main* checkout — opposite rule. Don't conflate them.) `cd <worktree>\packages\server` first.
 - **`--related` is BROKEN in vitest 4** — `CACError: Unknown option '--related'`. Do not use it.
 - **For a specific source file**: use the `vitest related` subcommand (from inside the package dir):
   ```
