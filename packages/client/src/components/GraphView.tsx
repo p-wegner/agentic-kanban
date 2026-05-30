@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
 import { apiFetch } from "../lib/api.js";
+import { STATUS_COLORS, TYPE_COLORS, BRAND, ACCENT } from "../lib/chartColors";
 
 interface Dependency {
   id: string;
@@ -24,25 +25,16 @@ interface Node {
   issue: IssueWithStatus;
 }
 
-const STATUS_COLORS: Record<string, string> = {
-  "Todo": "#6b7280",
-  "In Progress": "#3b82f6",
-  "In Review": "#8b5cf6",
-  "AI Reviewed": "#06b6d4",
-  "Done": "#22c55e",
-  "Cancelled": "#ef4444",
-};
-
 // Ordered workflow columns for status-based layout
 const STATUS_ORDER = ["Todo", "In Progress", "In Review", "AI Reviewed", "Done", "Cancelled"];
 
 const DEPENDENCY_COLORS: Record<string, string> = {
-  depends_on: "#6b7280",
-  blocked_by: "#ef4444",
-  related_to: "#8b5cf6",
-  parent_of: "#f59e0b",
-  child_of: "#f59e0b",
-  duplicates: "#ec4899",
+  depends_on: "#8a8175",
+  blocked_by: "#b4453a",
+  related_to: ACCENT,
+  parent_of: "#c79a3e",
+  child_of: "#c79a3e",
+  duplicates: "#b07a8c",
 };
 
 const NODE_W = 220;
@@ -523,7 +515,7 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery }: Gra
                   rx={6}
                   ry={6}
                   fill="white"
-                  stroke={isSelected ? "#3b82f6" : color}
+                  stroke={isSelected ? BRAND : color}
                   strokeWidth={isSelected ? 2 : 1.5}
                   filter="drop-shadow(0 1px 3px rgba(0,0,0,0.12))"
                 />
@@ -535,9 +527,9 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery }: Gra
                   cy={12}
                   r={4}
                   fill={
-                    node.issue.issueType === "bug" ? "#ef4444" :
-                    node.issue.issueType === "feature" ? "#3b82f6" :
-                    node.issue.issueType === "chore" ? "#f59e0b" : "#9ca3af"
+                    node.issue.issueType === "bug" ? TYPE_COLORS.bug :
+                    node.issue.issueType === "feature" ? TYPE_COLORS.feature :
+                    node.issue.issueType === "chore" ? TYPE_COLORS.chore : "#a8a195"
                   }
                 />
                 {/* Issue number */}
