@@ -892,7 +892,7 @@ export function BoardPage() {
         const target = e.target as HTMLElement;
         if (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT") return;
         e.preventDefault();
-        const col = filteredColumns[0] ?? columns[0];
+        const col = activeColumns[0] ?? filteredColumns[0] ?? columns[0];
         if (!col) return;
         if (e.key === "w") {
           setExpandedCreatePanel({ statusId: col.id, statusName: col.name, state: { startWorkspace: true } });
@@ -917,8 +917,9 @@ export function BoardPage() {
       shortcut: "c",
       category: "issue",
       handler: () => {
-        if (filteredColumns.length > 0) {
-          setCreatingInColumnId(filteredColumns[0].id);
+        const col = activeColumns[0] ?? filteredColumns[0];
+        if (col) {
+          setCreatingInColumnId(col.id);
         }
       },
     }));
@@ -929,7 +930,7 @@ export function BoardPage() {
       shortcut: "w",
       category: "issue",
       handler: () => {
-        const col = filteredColumns[0] ?? columns[0];
+        const col = activeColumns[0] ?? filteredColumns[0] ?? columns[0];
         if (col) {
           setExpandedCreatePanel({ statusId: col.id, statusName: col.name, state: { startWorkspace: true } });
         }
@@ -1502,6 +1503,10 @@ export function BoardPage() {
           projectId={activeProjectId}
           statusId={expandedCreatePanel.statusId}
           statusName={expandedCreatePanel.statusName}
+          availableStatuses={[
+            ...(backlogColumn ? [{ id: backlogColumn.id, name: backlogColumn.name }] : []),
+            ...activeColumns.map((c) => ({ id: c.id, name: c.name })),
+          ]}
           initialState={expandedCreatePanel.state}
           onSubmit={handleCreateIssue}
           onClose={() => setExpandedCreatePanel(null)}
