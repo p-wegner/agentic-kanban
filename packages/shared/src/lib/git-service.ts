@@ -869,6 +869,23 @@ export async function getChangedFileNames(
   }
 }
 
+/** Get the number of commits on HEAD that are not reachable from baseBranch. */
+export async function getCommitCountAhead(
+  worktreePath: string,
+  baseBranch: string,
+): Promise<number | null> {
+  if (!isGitWorkingTree(worktreePath)) return null;
+  try {
+    const output = await execGit(["rev-list", "--count", `${baseBranch}..HEAD`], worktreePath);
+    const trimmed = output.trim();
+    if (!trimmed) return null;
+    const count = Number.parseInt(trimmed, 10);
+    return Number.isNaN(count) ? null : count;
+  } catch {
+    return null;
+  }
+}
+
 /** Get the latest commit SHA (short) and message on the current branch. Returns null when no commits exist. */
 export async function getLatestCommit(
   worktreePath: string,
