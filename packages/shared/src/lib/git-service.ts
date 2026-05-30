@@ -230,18 +230,23 @@ export async function deleteBranch(
 /**
  * Merge a feature branch into targetBranch using git plumbing commands only.
  *
- * The working tree and index of `repoPath` are never modified, making this safe
- * for use alongside running dev servers and database connections (no file-watcher
- * noise, no DB-lock window).
- *
  * Steps:
  *   1. merge-tree --write-tree  → compute merged tree (read-only)
  *   2. commit-tree              → create the merge commit object
  *   3. update-ref               → atomically advance the target branch ref
  *
- * When `options.syncWorkingTree` is true (for worktrees an agent continues to
- * use), also runs `git reset --hard HEAD` to sync the working tree to the new
- * merge commit.
+ * Working-tree handling:
+ * - If `targetBranch` is NOT the branch checked out in `repoPath`, the working
+ *   tree and index are left untouched — safe alongside running dev servers / DB
+ *   connections (no file-watcher noise, no DB-lock window).
+ * - If `targetBranch` IS the branch checked out in `repoPath` (the usual case for
+ *   the main checkout on `master`), advancing the ref alone would leave the
+ *   working tree at the OLD commit — a silent desync where the next commit
+ *   reverts the merge. In that case the working tree is synced to the new merge
+ *   commit (`git reset --hard`). To avoid discarding real work, the merge is
+ *   refused up-front if that checked-out branch has uncommitted tracked changes.
+ * - `options.syncWorkingTree` forces the sync (e.g. for a worktree an agent
+ *   continues to use even when its branch isn't the merge target).
  *
  * Throws with the conflicting file list on merge conflicts.
  */
@@ -253,6 +258,24 @@ export async function mergeBranch(
 ): Promise<string> {
   const targetSha = (await execGit(["rev-parse", targetBranch], repoPath)).trim();
   const featureSha = (await execGit(["rev-parse", featureBranch], repoPath)).trim();
+
+  // Is targetBranch the branch currently checked out in repoPath's working tree?
+  // If so, we must sync the working tree after advancing the ref (otherwise it
+  // desyncs). Refuse first if there are uncommitted tracked changes, since the
+  // sync (`reset --hard`) would discard them. `getCurrentBranch` returns "HEAD"
+  // on a detached checkout — never a real branch name — so this stays false there.
+  const checkedOutBranch = await getCurrentBranch(repoPath).catch(() => "");
+  const targetIsCheckedOut = checkedOutBranch === targetBranch;
+  if (targetIsCheckedOut) {
+    const dirty = await getUncommittedTrackedChanges(repoPath);
+    if (dirty.length > 0) {
+      const preview = dirty.slice(0, 5).join(", ");
+      const more = dirty.length > 5 ? ` (and ${dirty.length - 5} more)` : "";
+      throw new Error(
+        `Cannot merge into '${targetBranch}': it is checked out in ${repoPath} with ${dirty.length} uncommitted tracked change(s): ${preview}${more}. Commit or stash them first.`,
+      );
+    }
+  }
 
   // merge-tree computes the merged tree without touching the working tree.
   // Exit 0 = clean, exit 1 = conflicts; stdout always has the tree SHA on line 1.
@@ -289,12 +312,15 @@ export async function mergeBranch(
     repoPath,
   )).trim();
 
-  // Atomically advance the target branch ref (working tree untouched)
+  // Atomically advance the target branch ref.
   await execGit(["update-ref", `refs/heads/${targetBranch}`, newCommitSha], repoPath);
 
-  // For worktrees where the agent needs to see the merged state, sync working tree
-  if (options?.syncWorkingTree) {
-    await execGit(["reset", "--hard", "HEAD"], repoPath);
+  // Sync the working tree to the new merge commit when the target branch is
+  // checked out here (otherwise repoPath silently desyncs), or when a caller
+  // explicitly requests it (a worktree the agent keeps using). When the target
+  // branch is not checked out, the working tree is correctly left untouched.
+  if (options?.syncWorkingTree || targetIsCheckedOut) {
+    await execGit(["reset", "--hard", newCommitSha], repoPath);
   }
 
   return `Merge branch '${featureBranch}' into ${targetBranch} (plumbing-merge: ${newCommitSha})`;

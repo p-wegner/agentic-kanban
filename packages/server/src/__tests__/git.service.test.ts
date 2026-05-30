@@ -99,7 +99,7 @@ describe("GitService", () => {
     await gitService.removeWorktree(repoPath, worktreePath);
   }, 30000);
 
-  it("merges a branch via plumbing (working tree unmodified, branch ref advanced)", async () => {
+  it("merges a branch via plumbing and syncs the working tree when the target is checked out", async () => {
     const worktreePath = await gitService.createWorktree(repoPath, "feature/merge-test");
 
     const { writeFileSync } = await import("node:fs");
@@ -112,26 +112,49 @@ describe("GitService", () => {
 
     await gitService.removeWorktree(repoPath, worktreePath);
 
-    // Record working-tree files before the merge
-    const { readdirSync, existsSync: fsExistsSync } = await import("node:fs");
-    const filesBefore = readdirSync(repoPath).sort();
-
     const result = await gitService.mergeBranch(repoPath, "feature/merge-test", "main");
     expect(result).toContain("Merge");
 
-    // Working tree must NOT have changed — no new files, no modified files
-    const filesAfter = readdirSync(repoPath).sort();
-    expect(filesAfter).toEqual(filesBefore);
-    expect(fsExistsSync(join(repoPath, "merge-file.txt"))).toBe(false);
+    // `main` is checked out in repoPath, so the working tree MUST be synced to the
+    // merge commit — otherwise the checkout silently desyncs and the next commit
+    // reverts the merge.
+    const { existsSync: fsExistsSync, readFileSync } = await import("node:fs");
+    expect(fsExistsSync(join(repoPath, "merge-file.txt"))).toBe(true);
+    expect(readFileSync(join(repoPath, "merge-file.txt"), "utf-8").trim()).toBe("Merge me");
 
-    // Branch ref (main) must be advanced — file exists in the git object store
-    const { execFile: rawExecFile } = await import("node:child_process");
-    const showOutput = await new Promise<string>((resolve, reject) =>
-      rawExecFile("git", ["show", "main:merge-file.txt"], { cwd: repoPath }, (err, stdout) =>
-        err ? reject(err) : resolve(stdout),
-      ),
-    );
+    // Branch ref (main) must be advanced — file exists in the git object store too.
+    const showOutput = await exec("git", ["show", "main:merge-file.txt"], repoPath);
     expect(showOutput.trim()).toBe("Merge me");
+
+    // And the synced working tree must be clean (no phantom uncommitted diff).
+    const dirty = await gitService.getUncommittedTrackedChanges(repoPath);
+    expect(dirty).toEqual([]);
+  }, 30000);
+
+  it("refuses to merge into a checked-out branch with uncommitted tracked changes", async () => {
+    const { writeFileSync, readFileSync } = await import("node:fs");
+
+    // Build a mergeable feature branch in a worktree.
+    const wt = await gitService.createWorktree(repoPath, "feature/dirty-guard");
+    writeFileSync(join(wt, "guard-file.txt"), "from feature\n");
+    await exec("git", ["add", "."], wt);
+    await exec("git", ["config", "user.email", "test@test.com"], wt);
+    await exec("git", ["config", "user.name", "Test"], wt);
+    await exec("git", ["commit", "-m", "guard feature"], wt);
+    await gitService.removeWorktree(repoPath, wt);
+
+    // Dirty the main checkout (uncommitted tracked change) and capture it.
+    writeFileSync(join(repoPath, "README.md"), "# Test (locally edited, uncommitted)\n");
+    const before = readFileSync(join(repoPath, "README.md"), "utf-8");
+
+    // The merge must refuse rather than reset --hard over the uncommitted edit.
+    await expect(gitService.mergeBranch(repoPath, "feature/dirty-guard", "main")).rejects.toThrow(/uncommitted tracked change/);
+
+    // The local edit must survive untouched.
+    expect(readFileSync(join(repoPath, "README.md"), "utf-8")).toBe(before);
+
+    // Restore a clean checkout for subsequent tests.
+    await exec("git", ["checkout", "--", "README.md"], repoPath);
   }, 30000);
 
   it("aborts merge on conflict and leaves main checkout clean", async () => {
@@ -168,9 +191,14 @@ describe("GitService", () => {
     const mergeHeadPath = join(repoPath, ".git", "MERGE_HEAD");
     expect(existsSync(mergeHeadPath)).toBe(false);
 
-    // shared-conflict.txt must NOT exist in the working tree — plumbing merge never touches the working tree,
-    // so neither the successful merge of conflict-a nor the failed merge of conflict-b wrote the file.
-    expect(existsSync(join(repoPath, "shared-conflict.txt"))).toBe(false);
+    // The successful merge of conflict-a synced the working tree (main is checked
+    // out here), so shared-conflict.txt exists with branch A's content. The FAILED
+    // merge of conflict-b must have left it untouched — no conflict markers, no
+    // branch B content.
+    const shared = readFileSync(join(repoPath, "shared-conflict.txt"), "utf-8");
+    expect(shared.trim()).toBe("branch A content");
+    expect(shared).not.toContain("<<<<<<<");
+    expect(shared).not.toContain("branch B content");
   }, 30000);
 
   it("aborts merge on _journal.json conflict and leaves main checkout clean", async () => {
