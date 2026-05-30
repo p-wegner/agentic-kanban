@@ -380,10 +380,34 @@ export function createWorkspaceMergeService(deps: {
       );
     }
 
-    // Kill leftover worktree processes (e.g. dev.mjs from the prior agent) before spawning the fix agent.
+    // Kill leftover worktree processes (e.g. dev.mjs from the prior agent) before rewriting or spawning.
     await killWorktreeProcesses(workspace.workingDir, "fix-and-merge");
 
-    const prompt = buildFixAndMergePrompt(errorMessage, baseBranch);
+    let rebuildNote = "";
+    try {
+      const synced = await gitService.syncBranchToHead(workspace.workingDir, workspace.branch);
+      if (synced) {
+        console.log(`[workspace-merge] fix-and-merge synced branch ${workspace.branch} to worktree HEAD`);
+      }
+      const rebaseResult = await gitService.rebaseOntoBase(workspace.workingDir, baseBranch, workspace.branch);
+      if (rebaseResult.success) {
+        rebuildNote = `Before launching this fix-and-merge agent, the app rebased the workspace branch onto '${baseBranch}' successfully.`;
+        await computeWorkspaceCodeMetrics(id, database).catch(() => null);
+      } else {
+        const conflictingFiles = rebaseResult.conflictingFiles ?? [];
+        rebuildNote =
+          `Before launching this fix-and-merge agent, the app tried to rebase the workspace branch onto '${baseBranch}' ` +
+          `and left the rebase in progress for you to resolve.` +
+          (conflictingFiles.length > 0 ? ` Conflicting files: ${conflictingFiles.join(", ")}.` : "") +
+          (rebaseResult.error ? ` Rebase error: ${rebaseResult.error}` : "");
+      }
+    } catch (err) {
+      rebuildNote =
+        `Before launching this fix-and-merge agent, the app tried to rebuild the workspace branch on '${baseBranch}' ` +
+        `but the rebuild preflight failed: ${err instanceof Error ? err.message : String(err)}`;
+    }
+
+    const prompt = buildFixAndMergePrompt(`${errorMessage}\n\n${rebuildNote}`, baseBranch);
 
     const { agentCommand, agentArgs, claudeProfile, profile, provider } =
       applyWorkspaceAgentSelection(await loadAgentSettings(database), workspace);
