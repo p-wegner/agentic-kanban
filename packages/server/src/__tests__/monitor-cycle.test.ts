@@ -8,7 +8,13 @@ vi.mock("../db/index.js", () => ({
 }));
 
 import { db } from "../db/index.js";
-import { processWorkspaceCandidates, type ProcessWorkspaceDeps, type WorkspaceCandidate } from "../startup/monitor-cycle.js";
+import {
+  MAX_MONITOR_MERGES_PER_CYCLE,
+  MAX_MONITOR_RELAUNCHES_PER_CYCLE,
+  processWorkspaceCandidates,
+  type ProcessWorkspaceDeps,
+  type WorkspaceCandidate,
+} from "../startup/monitor-cycle.js";
 
 // Returns a chainable drizzle-style select builder that resolves to `result`.
 function makeSelectChain(result: unknown[]) {
@@ -150,6 +156,31 @@ describe("processWorkspaceCandidates — idle + readyForMerge=false", () => {
     const calls = vi.mocked(fetch).mock.calls;
     expect(calls.some(([url]) => String(url).includes("/launch"))).toBe(true);
   });
+
+  it("caps idle workspace relaunches per monitor cycle", async () => {
+    vi.mocked(db.select).mockReset();
+    for (let i = 0; i < 3; i++) {
+      vi.mocked(db.select)
+        .mockReturnValueOnce(makeSelectChain([]) as ReturnType<typeof db.select>)
+        .mockReturnValueOnce(makeSelectChain([{ count: 0 }]) as ReturnType<typeof db.select>);
+    }
+    vi.mocked(fetch).mockResolvedValue({ ok: true } as Response);
+
+    const deps = makeDeps();
+    const candidates = [1, 2, 3].map((n) => ({
+      ...baseCandidate,
+      wsId: `ws-${n}`,
+      issueId: `issue-${n}`,
+      readyForMerge: false,
+      issueStatusName: "In Progress",
+    }));
+    const stats = await processWorkspaceCandidates(candidates, deps);
+
+    expect(stats.relaunched).toBe(MAX_MONITOR_RELAUNCHES_PER_CYCLE);
+    const launchCalls = vi.mocked(fetch).mock.calls.filter(([url]) => String(url).includes("/launch"));
+    expect(launchCalls).toHaveLength(MAX_MONITOR_RELAUNCHES_PER_CYCLE);
+    expect(launchCalls.some(([url]) => String(url).includes("/ws-3/"))).toBe(false);
+  });
 });
 
 describe("processWorkspaceCandidates — auto_merge_in_review (not-ready In Review)", () => {
@@ -229,6 +260,30 @@ describe("processWorkspaceCandidates — auto_merge gating", () => {
     expect(stats.merged).toBe(1);
     const calls = vi.mocked(fetch).mock.calls;
     expect(calls.some(([url]) => String(url).includes("/merge"))).toBe(true);
+  });
+
+  it("caps automatic merges per monitor cycle", async () => {
+    vi.mocked(db.select).mockReset();
+    for (let i = 0; i < 3; i++) {
+      vi.mocked(db.select)
+        .mockReturnValueOnce(makeSelectChain([]) as ReturnType<typeof db.select>)
+        .mockReturnValueOnce(makeSelectChain([{ count: 0 }]) as ReturnType<typeof db.select>);
+    }
+    vi.mocked(fetch).mockResolvedValue({ ok: true } as Response);
+
+    const deps = { ...makeDeps(), autoMergeEnabled: true };
+    const candidates = [1, 2, 3].map((n) => ({
+      ...baseCandidate,
+      wsId: `ws-${n}`,
+      issueId: `issue-${n}`,
+      readyForMerge: true,
+    }));
+    const stats = await processWorkspaceCandidates(candidates, deps);
+
+    expect(stats.merged).toBe(MAX_MONITOR_MERGES_PER_CYCLE);
+    const mergeCalls = vi.mocked(fetch).mock.calls.filter(([url]) => String(url).includes("/merge"));
+    expect(mergeCalls).toHaveLength(MAX_MONITOR_MERGES_PER_CYCLE);
+    expect(mergeCalls.some(([url]) => String(url).includes("/ws-3/"))).toBe(false);
   });
 
   it("does NOT merge a reviewing+stopped workspace when autoMergeEnabled=false", async () => {
