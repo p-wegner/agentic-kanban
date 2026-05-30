@@ -260,6 +260,27 @@ Examples:
     });
 
   wsCmd
+    .command("wait <issue-number>")
+    .description("Block until a workspace leaves its active state, then exit.\n\nResolves the latest workspace for an issue number (same lookup as 'resume'), subscribes to the board WebSocket, and waits for the workspace to reach a terminal status. Prints each status transition as it arrives. Replaces sleep-loop polling of GET /api/workspaces/:id. Requires the kanban server to be running (pnpm dev).\n\nExit code 0: status reached idle, ready_for_merge, closed, or merged.\nExit code 1: status reached an error state, a workflow error was broadcast, the WS closed unexpectedly, or the timeout elapsed.")
+    .option("-p, --port <port>", "Server port (default: $KANBAN_SERVER_PORT or 3001)")
+    .option("--timeout <seconds>", "Give up after N seconds (default: no timeout)")
+    .addHelpText("after", `
+Examples:
+  $ agentic-kanban workspace wait 118                # block until #118 finishes
+  $ agentic-kanban workspace wait 118 --timeout 600  # give up after 10 minutes
+`)
+    .action(async (issueNumberArg: string, options: { port?: string; timeout?: string }) => {
+      try {
+        const { runWorkspaceWait } = await import("./workspace-wait.js");
+        const code = await runWorkspaceWait(issueNumberArg, options);
+        process.exit(code);
+      } catch (err) {
+        console.error("Error:", err instanceof Error ? err.message : String(err));
+        process.exit(1);
+      }
+    });
+
+  wsCmd
     .command("review <workspace-id>")
     .description("Trigger an AI code review for an idle workspace.\n\nRequires the kanban server to be running (pnpm dev). The workspace must be in 'idle' status.")
     .option("-p, --port <port>", "Server port (default: $KANBAN_SERVER_PORT or 3001)")
