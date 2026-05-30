@@ -42,6 +42,19 @@ export function createBroadcaster(
         const evt = provider.parseStreamEvent(line);
         if (!evt) continue;
 
+        if (
+          evt.assistantText ||
+          evt.stats ||
+          evt.liveStats ||
+          evt.toolActivity ||
+          evt.toolResult ||
+          evt.turnComplete ||
+          evt.exitPlanModeDenied ||
+          evt.rateLimitInfo
+        ) {
+          state.sessionSubstantiveOutput.add(sessionId);
+        }
+
         const ctx = state.sessionContexts.get(sessionId);
 
         // Provider session ID (e.g. Claude's system/init session_id)
