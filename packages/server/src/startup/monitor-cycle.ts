@@ -9,6 +9,8 @@ import type { MonitorAction } from "./monitor-helpers.js";
 import { NOISE_TRIGGER_TYPES } from "../services/session-filter.js";
 
 const MAX_SESSIONS = 10;
+export const MAX_MONITOR_RELAUNCHES_PER_CYCLE = 2;
+export const MAX_MONITOR_MERGES_PER_CYCLE = 2;
 
 export interface WorkspaceCandidate {
   wsId: string;
@@ -51,11 +53,25 @@ export interface ProcessWorkspaceDeps {
   buildMonitorNudgePrompt: (projectId: string) => Promise<string>;
   getRecentAgentExcerpts: (sessionId: string, count?: number) => Promise<string[]>;
   shouldSkipNudge: (excerpts: string[]) => boolean;
+  maxRelaunchesPerCycle?: number;
+  maxMergesPerCycle?: number;
 }
 
 export async function processWorkspaceCandidates(candidates: WorkspaceCandidate[], deps: ProcessWorkspaceDeps): Promise<{ relaunched: number; merged: number; nudged: number }> {
   const stats = { relaunched: 0, merged: 0, nudged: 0 };
+  const maxRelaunches = deps.maxRelaunchesPerCycle ?? MAX_MONITOR_RELAUNCHES_PER_CYCLE;
+  const maxMerges = deps.maxMergesPerCycle ?? MAX_MONITOR_MERGES_PER_CYCLE;
   const logAction = (action: MonitorActionName, workspaceId: string, issueId: string) => deps.logMonitorAction(deps.monitorRecentActions, action, workspaceId, issueId);
+  const canStartRelaunch = (ws: WorkspaceCandidate) => {
+    if (stats.relaunched < maxRelaunches) return true;
+    console.log(`[monitor] Relaunch cap reached (${maxRelaunches}/cycle)  leaving workspace ${ws.wsId} idle until the next monitor run`);
+    return false;
+  };
+  const canStartMerge = (ws: WorkspaceCandidate) => {
+    if (stats.merged < maxMerges) return true;
+    console.log(`[monitor] Merge cap reached (${maxMerges}/cycle)  leaving workspace ${ws.wsId} queued until the next monitor run`);
+    return false;
+  };
   for (const ws of candidates) {
     try {
       const [sess] = await db.select({ id: sessions.id, status: sessions.status, startedAt: sessions.startedAt }).from(sessions)
@@ -81,6 +97,7 @@ export async function processWorkspaceCandidates(candidates: WorkspaceCandidate[
             console.log(`[monitor] Skipping auto-merge for idle+readyForMerge workspace ${ws.wsId}  auto_merge is disabled`);
             continue;
           }
+          if (!canStartMerge(ws)) continue;
           const mergeRes = await fetch(`http://localhost:${deps.serverPort}/api/workspaces/${ws.wsId}/merge`, { method: "POST" }).catch(() => null);
           if (!mergeRes || !mergeRes.ok) {
             const body = mergeRes ? await mergeRes.json().catch(() => ({})) : {};
@@ -111,6 +128,7 @@ export async function processWorkspaceCandidates(candidates: WorkspaceCandidate[
           deps.boardEvents.broadcast(ws.projectId, "board_changed");
         } else if (ws.issueStatusName === "In Review") {
           if (deps.autoMergeEnabled && deps.autoMergeInReview) {
+            if (!canStartMerge(ws)) continue;
             const mergeRes = await fetch(`http://localhost:${deps.serverPort}/api/workspaces/${ws.wsId}/merge`, { method: "POST" }).catch(() => null);
             if (!mergeRes || !mergeRes.ok) {
               const body = mergeRes ? await mergeRes.json().catch(() => ({})) : {};
@@ -129,6 +147,7 @@ export async function processWorkspaceCandidates(candidates: WorkspaceCandidate[
             console.log(`[monitor] Skipping relaunch for idle workspace ${ws.wsId}  issue #${ws.issueNumber} is in review (committed work awaiting merge; enable auto_merge_in_review to land it)`);
           }
         } else {
+          if (!canStartRelaunch(ws)) continue;
           await fetch(`http://localhost:${deps.serverPort}/api/workspaces/${ws.wsId}/launch`, { method: "POST" }).catch(() => {});
           stats.relaunched++;
           logAction("relaunch", ws.wsId, ws.issueId);
@@ -148,6 +167,7 @@ export async function processWorkspaceCandidates(candidates: WorkspaceCandidate[
             console.log(`[monitor] Skipping auto-merge for reviewing+stopped workspace ${ws.wsId}  auto_merge is disabled`);
             continue;
           }
+          if (!canStartMerge(ws)) continue;
           await fetch(`http://localhost:${deps.serverPort}/api/workspaces/${ws.wsId}/merge`, { method: "POST" }).catch(() => {});
           stats.merged++;
           logAction("merge", ws.wsId, ws.issueId);
