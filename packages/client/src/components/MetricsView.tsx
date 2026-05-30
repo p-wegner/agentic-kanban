@@ -1,33 +1,17 @@
 import { useMemo, useState } from "react";
 import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
+import { STATUS_COLORS, PRIORITY_META, TYPE_COLORS, BRAND, ACCENT, HEATMAP_SCALE } from "../lib/chartColors";
 
 interface MetricsViewProps {
   columns: StatusWithIssues[];
   onIssueClick: (issue: IssueWithStatus) => void;
 }
 
-const STATUS_COLORS: Record<string, string> = {
-  Backlog:      "#94a3b8",
-  Todo:         "#64748b",
-  "In Progress": "#3b82f6",
-  "In Review":  "#8b5cf6",
-  "AI Reviewed": "#06b6d4",
-  Done:         "#22c55e",
-  Cancelled:    "#9ca3af",
-};
-
-const PRIORITY_META: Array<{ key: string; label: string; color: string; lightBg: string; darkBg: string }> = [
-  { key: "critical", label: "Critical", color: "#ef4444", lightBg: "#fee2e2", darkBg: "#450a0a" },
-  { key: "high",     label: "High",     color: "#f97316", lightBg: "#ffedd5", darkBg: "#431407" },
-  { key: "medium",   label: "Medium",   color: "#eab308", lightBg: "#fef9c3", darkBg: "#422006" },
-  { key: "low",      label: "Low",      color: "#94a3b8", lightBg: "#f1f5f9", darkBg: "#1e293b" },
-];
-
 const TYPE_META: Array<{ key: string; label: string; color: string }> = [
-  { key: "task",    label: "Task",    color: "#3b82f6" },
-  { key: "feature", label: "Feature", color: "#8b5cf6" },
-  { key: "bug",     label: "Bug",     color: "#ef4444" },
-  { key: "chore",   label: "Chore",   color: "#f59e0b" },
+  { key: "task",    label: "Task",    color: TYPE_COLORS.task },
+  { key: "feature", label: "Feature", color: TYPE_COLORS.feature },
+  { key: "bug",     label: "Bug",     color: TYPE_COLORS.bug },
+  { key: "chore",   label: "Chore",   color: TYPE_COLORS.chore },
 ];
 
 const HEATMAP_WEEKS = 16;
@@ -239,10 +223,10 @@ function ActivityHeatmap({ issues }: { issues: IssueWithStatus[] }) {
   function cellColor(count: number): string {
     if (count === 0) return undefined as unknown as string;
     const intensity = Math.min(1, count / Math.max(maxCount, 1));
-    if (intensity < 0.25) return "#bbf7d0";
-    if (intensity < 0.5)  return "#4ade80";
-    if (intensity < 0.75) return "#16a34a";
-    return "#15803d";
+    if (intensity < 0.25) return HEATMAP_SCALE[1];
+    if (intensity < 0.5)  return HEATMAP_SCALE[2];
+    if (intensity < 0.75) return HEATMAP_SCALE[3];
+    return HEATMAP_SCALE[4];
   }
 
   // Month labels
@@ -314,7 +298,7 @@ function ActivityHeatmap({ issues }: { issues: IssueWithStatus[] }) {
                       width: CELL,
                       height: CELL,
                       backgroundColor: color ?? undefined,
-                      outline: isToday ? "2px solid #3b82f6" : undefined,
+                      outline: isToday ? `2px solid ${BRAND}` : undefined,
                       outlineOffset: "1px",
                     }}
                     className={`rounded-sm cursor-default transition-opacity hover:opacity-80 ${!color ? "bg-gray-100 dark:bg-gray-800" : ""}`}
@@ -339,7 +323,7 @@ function ActivityHeatmap({ issues }: { issues: IssueWithStatus[] }) {
       {/* Legend */}
       <div className="flex items-center gap-1.5 mt-2 ml-8">
         <span className="text-[10px] text-gray-400 dark:text-gray-500">Less</span>
-        {["#e2e8f0", "#bbf7d0", "#4ade80", "#16a34a", "#15803d"].map((c) => (
+        {HEATMAP_SCALE.map((c) => (
           <div key={c} className="rounded-sm" style={{ width: CELL, height: CELL, backgroundColor: c }} />
         ))}
         <span className="text-[10px] text-gray-400 dark:text-gray-500">More</span>
@@ -451,8 +435,8 @@ export function MetricsView({ columns, onIssueClick }: MetricsViewProps) {
         {/* Summary cards */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           <StatCard label="Total Issues" value={allIssues.length} sub={`across ${columns.filter(c => c.issues.length > 0).length} statuses`} />
-          <StatCard label="Active" value={activeCount} sub="In Progress + In Review" color="#3b82f6" />
-          <StatCard label="Completed" value={doneCount} sub={`${completionRate}% completion rate`} color="#22c55e" />
+          <StatCard label="Active" value={activeCount} sub="In Progress + In Review" color={BRAND} />
+          <StatCard label="Completed" value={doneCount} sub={`${completionRate}% completion rate`} color={ACCENT} />
           <StatCard label="Blocked" value={blockedCount} sub="have blocking dependencies" color={blockedCount > 0 ? "#ef4444" : undefined} />
         </div>
 
@@ -503,7 +487,7 @@ export function MetricsView({ columns, onIssueClick }: MetricsViewProps) {
                   >
                     <span className="mt-0.5 w-1.5 h-1.5 rounded-full bg-green-400 shrink-0" />
                     <div className="min-w-0">
-                      <p className="text-xs text-gray-700 dark:text-gray-300 truncate group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
+                      <p className="text-xs text-gray-700 dark:text-gray-300 truncate group-hover:text-brand-600 dark:group-hover:text-brand-400 transition-colors">
                         #{issue.issueNumber} {issue.title}
                       </p>
                       <p className="text-[10px] text-gray-400 dark:text-gray-500">

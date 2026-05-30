@@ -106,7 +106,7 @@ function formatTokens(value: number) {
   if (absolute >= 1_000) {
     return `${(value / 1_000).toFixed(absolute >= 100_000 ? 0 : 1)}K`;
   }
-  return Math.round(value).toLocaleString();
+  return Math.round(value).toLocaleString("en-US");
 }
 
 function formatDuration(value: number) {
@@ -120,14 +120,14 @@ function formatCompactDate(value: string) {
   const date = new Date(value);
   return Number.isNaN(date.getTime())
     ? value
-    : date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+    : date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
 function formatStartedAt(value: string) {
   const date = new Date(value);
   return Number.isNaN(date.getTime())
     ? value
-    : date.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+    : date.toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 }
 
 function getAvgCost(row: MetricRowBase) {
@@ -277,7 +277,7 @@ function SortableMetricTable<T extends MetricRowBase>({
                       className={`inline-flex items-center gap-1 ${header.className === "text-left" ? "justify-start" : "justify-end w-full"} hover:text-gray-900 dark:hover:text-gray-100 transition-colors`}
                     >
                       <span>{header.label}</span>
-                      <span className={`text-[10px] ${active ? "text-blue-500" : "text-gray-300 dark:text-gray-600"}`}>
+                      <span className={`text-[10px] ${active ? "text-brand-500" : "text-gray-300 dark:text-gray-600"}`}>
                         {active ? (sort.direction === "asc" ? "▲" : "▼") : "↕"}
                       </span>
                     </button>
@@ -401,10 +401,10 @@ function CostSparkline({ series }: { series: InsightsData["timeSeries"] }) {
         </div>
       </div>
       <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-44">
-        <path d={areaPath} fill="rgba(59, 130, 246, 0.18)" />
-        <path d={linePath} fill="none" stroke="#3b82f6" strokeWidth="3" strokeLinejoin="round" strokeLinecap="round" />
+        <path d={areaPath} fill="rgba(194, 95, 54, 0.16)" />
+        <path d={linePath} fill="none" stroke={PRIMARY_SERIES} strokeWidth="3" strokeLinejoin="round" strokeLinecap="round" />
         {points.map(({ x, y, point }) => (
-          <circle key={point.date} cx={x} cy={y} r="2.5" fill="#3b82f6">
+          <circle key={point.date} cx={x} cy={y} r="2.5" fill={PRIMARY_SERIES}>
             <title>{`${point.date}: ${formatCurrency(point.totalCostUsd)} (${point.sessionCount} sessions)`}</title>
           </circle>
         ))}
@@ -496,7 +496,7 @@ export function InsightsPanel({ projectId, onSessionClick }: InsightsPanelProps)
                 key={option.value}
                 type="button"
                 onClick={() => setRange(option.value)}
-                className={`px-3 py-1.5 text-xs rounded-md transition-colors ${range === option.value ? "bg-blue-600 text-white" : "text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800"}`}
+                className={`px-3 py-1.5 text-xs rounded-md transition-colors ${range === option.value ? "bg-brand-600 text-white" : "text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800"}`}
               >
                 {option.label}
               </button>
@@ -519,8 +519,8 @@ export function InsightsPanel({ projectId, onSessionClick }: InsightsPanelProps)
         {data && !loading && !error && (
           <>
             <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
-              <SummaryCard label="Total Sessions" value={data.totals.sessionCount.toLocaleString()} subtext={`${formatCompactDate(data.totals.dateFrom)} → ${formatCompactDate(data.totals.dateTo)}`} />
-              <SummaryCard label="Success Rate" value={formatSuccessRate(data.totals.successCount, data.totals.sessionCount)} subtext={`${data.totals.successCount.toLocaleString()} successful`} />
+              <SummaryCard label="Total Sessions" value={data.totals.sessionCount.toLocaleString("en-US")} subtext={`${formatCompactDate(data.totals.dateFrom)} → ${formatCompactDate(data.totals.dateTo)}`} />
+              <SummaryCard label="Success Rate" value={formatSuccessRate(data.totals.successCount, data.totals.sessionCount)} subtext={`${data.totals.successCount.toLocaleString("en-US")} successful`} />
               <SummaryCard label="Total Cost" value={formatCurrency(data.totals.totalCostUsd)} />
               <SummaryCard label="Total Tokens" value={formatTokens(data.totals.totalTokens)} />
             </div>
@@ -576,7 +576,7 @@ export function InsightsPanel({ projectId, onSessionClick }: InsightsPanelProps)
                     ) : data.topExpensive.map((session) => (
                       <tr
                         key={session.sessionId}
-                        className="border-t border-gray-100 dark:border-gray-800/80 text-gray-700 dark:text-gray-300 cursor-pointer hover:bg-blue-50 dark:hover:bg-blue-950/20 transition-colors"
+                        className="border-t border-gray-100 dark:border-gray-800/80 text-gray-700 dark:text-gray-300 cursor-pointer hover:bg-brand-50 dark:hover:bg-brand-950/20 transition-colors"
                         onClick={() => onSessionClick(session.sessionId, session.workspaceId, session.issueId)}
                       >
                         <td className="px-4 py-3 text-left">

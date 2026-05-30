@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
+import { STATUS_COLORS } from "../lib/chartColors";
 
 const ARCHIVE_STATUS_NAMES = new Set(["Done", "Cancelled", "Backlog"]);
 
@@ -46,20 +47,13 @@ const PRIORITY_LANES = [
   },
 ];
 
-const STATUS_COLORS: Record<string, string> = {
-  Todo: "#64748b",
-  "In Progress": "#3b82f6",
-  "In Review": "#8b5cf6",
-  "AI Reviewed": "#06b6d4",
-};
-
 function WorkspaceStatusDot({ status }: { status: string }) {
   const colorMap: Record<string, string> = {
     active: "bg-green-500 animate-pulse",
     fixing: "bg-orange-500 animate-pulse",
-    reviewing: "bg-violet-500 animate-pulse",
-    idle: "bg-blue-400",
-    merging: "bg-teal-500",
+    reviewing: "bg-accent-500 animate-pulse",
+    idle: "bg-ink-faint",
+    merging: "bg-accent-400",
   };
   const cls = colorMap[status];
   if (!cls) return null;
