@@ -30,6 +30,7 @@ import {
   applyWorkspaceAgentSelection,
   requireBaseBranch,
   activeMerges,
+  describeMergeLock,
   type GitService,
 } from "./workspace-internals.js";
 
@@ -64,19 +65,41 @@ export function createWorkspaceMergeService(deps: {
 
     const { project, repoPath, defaultBranch } = await resolveProjectFull(id, database);
 
-    if (activeMerges.has(repoPath)) {
-      throw new WorkspaceError(
-        "A merge is already in progress for this repository. Please wait for it to complete.",
-        "CONFLICT",
-      );
+    const existingLock = activeMerges.get(repoPath);
+    if (existingLock) {
+      const diagnostic = describeMergeLock(existingLock);
+      if (diagnostic.isStale) {
+        console.warn(
+          `[workspace-merge] recovering stale merge lock: repoPath=${repoPath} ` +
+            `activeWorkspaceId=${diagnostic.activeWorkspaceId} ageMs=${diagnostic.ageMs}`,
+        );
+        activeMerges.delete(repoPath);
+      } else {
+        throw new WorkspaceError(
+          `A merge is already in progress for this repository ` +
+            `(workspace ${diagnostic.activeWorkspaceId}, age ${Math.round(diagnostic.ageMs / 1000)}s). ` +
+            "Please wait for it to complete.",
+          "CONFLICT",
+          diagnostic,
+        );
+      }
     }
 
     const mergePromise = doMerge(id, workspace, project, repoPath, defaultBranch);
-    activeMerges.set(repoPath, mergePromise);
+    const lock = {
+      promise: mergePromise,
+      workspaceId: id,
+      repoPath,
+      startedAt: new Date().toISOString(),
+      startedAtMs: Date.now(),
+    };
+    activeMerges.set(repoPath, lock);
     // Always clear the lock — both on success and on rejection — so a crashed
     // merge never strands the repo behind a stale in-memory lock.
     mergePromise.finally(() => {
-      activeMerges.delete(repoPath);
+      if (activeMerges.get(repoPath) === lock) {
+        activeMerges.delete(repoPath);
+      }
     }).catch(() => { /* swallow: caller awaits mergePromise below */ });
 
     return await mergePromise;
