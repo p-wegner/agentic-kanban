@@ -369,7 +369,7 @@ export interface CreateDiffCommentRequest {
 }
 
 export interface AgentOutputMessage {
-  type: "stdout" | "stderr" | "exit";
+  type: "stdout" | "stderr" | "exit" | "bisect";
   sessionId: string;
   data?: string;
   exitCode?: number | null;

@@ -158,6 +158,20 @@ export function TerminalView({ messages, connectionState, parseOutput = "minimal
         events.push({ kind: "raw", text: `Process exited with code ${msg.exitCode ?? "unknown"}` });
         continue;
       }
+      if (msg.type === "bisect") {
+        try {
+          const parsed = JSON.parse(msg.data || "{}") as { breakingCommitSha?: string; message?: string; failingTestName?: string; status?: string };
+          events.push({
+            kind: "raw",
+            text: parsed.breakingCommitSha
+              ? `Auto-bisect result: ${parsed.breakingCommitSha} ${parsed.message ?? ""}${parsed.failingTestName ? `\nFailing test: ${parsed.failingTestName}` : ""}`
+              : `Auto-bisect result: ${parsed.status ?? "finished"}`,
+          });
+        } catch {
+          events.push({ kind: "raw", text: msg.data || "Auto-bisect result" });
+        }
+        continue;
+      }
       if (msg.type === "stderr") {
         events.push({ kind: "raw", text: msg.data || "" });
         continue;
