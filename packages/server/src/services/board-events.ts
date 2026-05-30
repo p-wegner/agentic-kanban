@@ -27,6 +27,9 @@ import type { WSContext } from "hono/ws";
  * | workflow_error            | exit-workflow, merge-workflow               |
  * | workflow_fork             | workflow-fork.service                       |
  * | workflow_join             | workflow-fork.service                       |
+ * | workflow_template_saved   | workflows route                             |
+ * | workflow_template_deleted | workflows route                             |
+ * | workflow_transition       | workflows route                             |
  * | internal_notify           | routes/index internal endpoint              |
  */
 export type BoardEventType =
@@ -48,6 +51,9 @@ export type BoardEventType =
   | "workflow_error"
   | "workflow_fork"
   | "workflow_join"
+  | "workflow_template_saved"
+  | "workflow_template_deleted"
+  | "workflow_transition"
   | "internal_notify";
 
 interface BoardEventMessage {

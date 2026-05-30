@@ -10,6 +10,7 @@ import {
 } from "@agentic-kanban/shared/schema";
 import { eq, asc, sql } from "drizzle-orm";
 import {
+  createWorkflowTemplate,
   proposeTransition,
   resolveTemplateForIssue,
   getOutgoingTransitions,
@@ -27,6 +28,59 @@ interface WorkflowsRouteOptions {
   boardEvents?: BoardEvents;
   /** Hook to run fork/join orchestration after a transition. */
   onWorkflowAdvanced?: (workspaceId: string) => void;
+}
+
+interface WorkflowTemplateJson {
+  version: number;
+  exportedAt: string;
+  metadata: {
+    id: string;
+    name: string;
+    description: string | null;
+    ticketType: string | null;
+    isDefault: boolean;
+    isBuiltin: boolean;
+    builtinKey: string | null;
+    projectId: string | null;
+    createdAt: string;
+    updatedAt: string;
+  };
+  nodes: unknown[];
+  edges: unknown[];
+}
+
+function toTemplateJson(template: any, graph: { nodes: unknown[]; edges: unknown[] }): WorkflowTemplateJson {
+  return {
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    metadata: {
+      id: template.id,
+      name: template.name,
+      description: template.description ?? null,
+      ticketType: template.ticketType ?? null,
+      isDefault: !!template.isDefault,
+      isBuiltin: !!template.isBuiltin,
+      builtinKey: template.builtinKey ?? null,
+      projectId: template.projectId ?? null,
+      createdAt: template.createdAt,
+      updatedAt: template.updatedAt,
+    },
+    nodes: graph.nodes,
+    edges: graph.edges,
+  };
+}
+
+function normalizeImportedTemplate(input: any) {
+  const source = input?.template ?? input?.workflow ?? input;
+  const metadata = source?.metadata ?? source ?? {};
+  return {
+    name: input?.name ?? source?.name ?? metadata.name,
+    description: input?.description ?? source?.description ?? metadata.description ?? null,
+    ticketType: input?.ticketType ?? source?.ticketType ?? metadata.ticketType ?? null,
+    isDefault: input?.isDefault ?? source?.isDefault ?? metadata.isDefault ?? false,
+    nodes: source?.nodes ?? [],
+    edges: source?.edges ?? [],
+  };
 }
 
 /** Load a template's nodes + edges as a graph payload. */
@@ -94,6 +148,19 @@ export function createWorkflowsRoute(database: Database = db, options?: Workflow
     return c.json({ ...rows[0], ...graph });
   });
 
+  // GET /api/workflows/templates/:id/export — JSON envelope suitable for import.
+  router.get("/templates/:id/export", async (c) => {
+    const id = c.req.param("id");
+    const rows = await database
+      .select()
+      .from(workflowTemplates)
+      .where(eq(workflowTemplates.id, id))
+      .limit(1);
+    if (rows.length === 0) return c.json({ error: "Template not found" }, 404);
+    const graph = await loadGraph(database, id);
+    return c.json(toTemplateJson(rows[0], graph));
+  });
+
   // POST /api/workflows/templates — create a template (optionally cloning another).
   router.post("/templates", async (c) => {
     const body = await parseJsonBody(c);
@@ -132,6 +199,34 @@ export function createWorkflowsRoute(database: Database = db, options?: Workflow
     await writeTemplateGraph(database, id, srcNodes, srcEdges);
     boardEvents?.broadcast(projectId, "workflow_template_saved");
     return c.json({ id, ...(await loadGraph(database, id)) }, 201);
+  });
+
+  // POST /api/workflows/templates/import — import JSON as a new project template.
+  router.post("/templates/import", async (c) => {
+    const body = await parseJsonBody(c);
+    const projectId = (body as any)?.projectId;
+    if (!projectId) return c.json({ error: "projectId is required" }, 400);
+    const spec = normalizeImportedTemplate(body);
+    if (!spec.name) return c.json({ error: "Imported workflow name is required" }, 400);
+
+    const result = await createWorkflowTemplate(database, {
+      projectId,
+      name: spec.name,
+      description: spec.description,
+      ticketType: spec.ticketType,
+      isDefault: spec.isDefault,
+      nodes: spec.nodes,
+      edges: spec.edges,
+    });
+    if (!result.ok) return c.json({ error: "Invalid workflow graph", errors: result.errors }, 400);
+
+    boardEvents?.broadcast(projectId, "workflow_template_saved");
+    const rows = await database
+      .select()
+      .from(workflowTemplates)
+      .where(eq(workflowTemplates.id, result.id))
+      .limit(1);
+    return c.json({ ...rows[0], ...(await loadGraph(database, result.id)) }, 201);
   });
 
   // PUT /api/workflows/templates/:id — update a non-builtin template's graph in place.

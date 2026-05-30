@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { apiFetch } from "../lib/api.js";
 import { showToast } from "./Toast.js";
 import { WorkflowBuilder } from "./WorkflowBuilder.js";
@@ -18,6 +18,15 @@ interface Template {
 interface NodeStat { nodeId: string; nodeName: string; nodeType: string; visits: number; avgDwellMs: number | null; dropoff: number }
 interface Analytics { totalWorkspaces: number; nodes: NodeStat[] }
 
+function safeFileName(value: string): string {
+  const cleaned = value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  return cleaned || "workflow-template";
+}
+
+function parseJsonText(text: string): unknown {
+  return JSON.parse(text.replace(/^\uFEFF/, ""));
+}
+
 function fmtDwell(ms: number | null): string {
   if (ms == null) return "—";
   const s = Math.round(ms / 1000);
@@ -32,6 +41,7 @@ export function WorkflowsView({ projectId }: { projectId: string }) {
   const [editing, setEditing] = useState<{ templateId: string | null } | null>(null);
   const [tab, setTab] = useState<"templates" | "analytics">("templates");
   const [analytics, setAnalytics] = useState<Analytics | null>(null);
+  const importInputRef = useRef<HTMLInputElement | null>(null);
 
   const load = useCallback(() => {
     apiFetch<Template[]>(`/api/workflows/templates?projectId=${projectId}&graph=1`).then(setTemplates).catch(() => {});
@@ -64,6 +74,38 @@ export function WorkflowsView({ projectId }: { projectId: string }) {
     }
   }
 
+  async function exportTemplate(t: Template) {
+    try {
+      const payload = await apiFetch<unknown>(`/api/workflows/templates/${t.id}/export`);
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${safeFileName(t.name)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      showToast(`Exported "${t.name}"`, "success");
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Export failed", "error");
+    }
+  }
+
+  async function importTemplate(file: File) {
+    try {
+      const parsed = parseJsonText(await file.text());
+      await apiFetch(`/api/workflows/templates/import`, {
+        method: "POST",
+        body: JSON.stringify({ projectId, template: parsed }),
+      });
+      showToast("Workflow imported", "success");
+      load();
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Import failed", "error");
+    } finally {
+      if (importInputRef.current) importInputRef.current.value = "";
+    }
+  }
+
   return (
     <div className="p-4 overflow-y-auto h-full">
       <div className="flex items-center mb-3 gap-2">
@@ -73,9 +115,24 @@ export function WorkflowsView({ projectId }: { projectId: string }) {
           <button onClick={() => setTab("analytics")} className={`text-xs px-2 py-1 rounded ${tab === "analytics" ? "bg-brand-600 text-white" : "text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700"}`}>Analytics</button>
         </div>
         {tab === "templates" && (
-          <button onClick={() => setEditing({ templateId: null })} className="ml-auto text-xs bg-brand-600 text-white px-3 py-1.5 rounded hover:bg-brand-700">
-            + New workflow
-          </button>
+          <div className="ml-auto flex items-center gap-2">
+            <input
+              ref={importInputRef}
+              type="file"
+              accept="application/json,.json"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) void importTemplate(file);
+              }}
+            />
+            <button onClick={() => importInputRef.current?.click()} className="text-xs text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600 px-3 py-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700">
+              Import
+            </button>
+            <button onClick={() => setEditing({ templateId: null })} className="text-xs bg-brand-600 text-white px-3 py-1.5 rounded hover:bg-brand-700">
+              + New workflow
+            </button>
+          </div>
         )}
       </div>
 
@@ -126,6 +183,7 @@ export function WorkflowsView({ projectId }: { projectId: string }) {
               <button onClick={() => setEditing({ templateId: t.id })} className="text-xs text-brand-600 hover:text-brand-700">
                 {t.isBuiltin ? "View" : "Edit"}
               </button>
+              <button onClick={() => exportTemplate(t)} className="text-xs text-gray-600 dark:text-gray-400 hover:text-gray-800">Export</button>
               <button onClick={() => duplicate(t)} className="text-xs text-gray-600 dark:text-gray-400 hover:text-gray-800">Duplicate</button>
               {!t.isBuiltin && <button onClick={() => remove(t)} className="text-xs text-red-600 hover:text-red-700">Delete</button>}
             </div>
