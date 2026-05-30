@@ -1027,6 +1027,20 @@ export async function revParse(repoPath: string, ref: string): Promise<string> {
   return (await execGit(["rev-parse", ref], repoPath)).trim();
 }
 
+/** Return true when ancestorRef is reachable from descendantRef. */
+export async function isAncestor(
+  repoPath: string,
+  ancestorRef: string,
+  descendantRef: string,
+): Promise<boolean> {
+  try {
+    await execGit(["merge-base", "--is-ancestor", ancestorRef, descendantRef], repoPath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Check if a rebase is in progress in the worktree. */
 export async function isRebaseInProgress(worktreePath: string): Promise<boolean> {
   try {

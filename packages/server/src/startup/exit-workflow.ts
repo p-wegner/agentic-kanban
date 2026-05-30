@@ -171,10 +171,12 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge }:
           boardEvents.broadcast(projectId, "issue_updated");
           return;
         }
+        await db.update(workspaces).set({ readyForMerge: true, updatedAt: now }).where(eq(workspaces.id, workspaceId));
+        boardEvents.broadcast(projectId, "workspace_ready_for_merge");
         const learningAfterReview = prefMap.get("learning_step_after_review") === "true" && workspace.workingDir ? launchLearningStep(sessionManager, learningSessionIds, workspace.id, prefMap, "after review", true) : Promise.resolve();
         if (autoMergeEnabled) {
-          console.log(`[workflow] review session ${sessionId} completed  auto-merging (learning step runs in parallel)`);
-          await Promise.all([autoMerge(workspace, projectId, issueId, findStatus("Done")?.id ?? null, now), learningAfterReview]);
+          console.log(`[workflow] review session ${sessionId} completed  queued for scheduled auto-merge`);
+          await learningAfterReview;
         } else {
           console.log(`[workflow] review session ${sessionId} completed  auto-merge disabled, leaving in In Review`);
           await learningAfterReview;

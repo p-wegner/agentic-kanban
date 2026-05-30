@@ -6,6 +6,8 @@ import { createWorkspaceMergeService } from "./workspace-merge.service.js";
 import type { BoardEvents } from "./board-events.js";
 import type { SessionManager } from "./session.manager.js";
 
+const MIGRATION_RE = /^packages\/shared\/drizzle\/(\d{4})_.+\.sql$/;
+
 export interface WorkspaceQueueInfo {
   id: string;
   branch: string;
@@ -17,6 +19,7 @@ export interface WorkspaceQueueInfo {
   issueTitle: string;
   changedFiles: string[];
   status: string;
+  isDirect: boolean;
 }
 
 export interface OverlapEntry {
@@ -26,10 +29,21 @@ export interface OverlapEntry {
   files: string[];
 }
 
+export interface MigrationCollisionEntry {
+  migrationNumber: string;
+  workspaces: {
+    workspaceId: string;
+    issueNumber: number | null;
+    issueTitle: string;
+    files: string[];
+  }[];
+}
+
 export interface MergeQueuePlan {
   order: WorkspaceQueueInfo[];
   overlaps: OverlapEntry[];
   totalOverlapScore: number;
+  migrationCollisions: MigrationCollisionEntry[];
 }
 
 export type MergeQueueEvent =
@@ -109,6 +123,7 @@ export function createMergeQueueService(deps: {
         issueTitle: issue.title,
         changedFiles,
         status: ws.status,
+        isDirect: ws.isDirect,
       });
     }
 
@@ -133,6 +148,39 @@ export function createMergeQueueService(deps: {
       }
     }
     return overlaps;
+  }
+
+  function computeMigrationCollisions(infos: WorkspaceQueueInfo[]): MigrationCollisionEntry[] {
+    const byNumber = new Map<string, MigrationCollisionEntry["workspaces"]>();
+    for (const info of infos) {
+      const migrationFiles = info.changedFiles.filter((file) => MIGRATION_RE.test(file));
+      if (migrationFiles.length === 0) continue;
+
+      const filesByNumber = new Map<string, string[]>();
+      for (const file of migrationFiles) {
+        const match = file.match(MIGRATION_RE);
+        if (!match) continue;
+        const list = filesByNumber.get(match[1]) ?? [];
+        list.push(file);
+        filesByNumber.set(match[1], list);
+      }
+
+      for (const [migrationNumber, files] of filesByNumber) {
+        const list = byNumber.get(migrationNumber) ?? [];
+        list.push({
+          workspaceId: info.id,
+          issueNumber: info.issueNumber,
+          issueTitle: info.issueTitle,
+          files,
+        });
+        byNumber.set(migrationNumber, list);
+      }
+    }
+
+    return [...byNumber.entries()]
+      .filter(([, entries]) => entries.length > 1)
+      .map(([migrationNumber, workspaces]) => ({ migrationNumber, workspaces }))
+      .sort((a, b) => a.migrationNumber.localeCompare(b.migrationNumber));
   }
 
   /** Greedy sort: repeatedly pick the workspace with the least overlap against the remaining set. */
@@ -181,7 +229,30 @@ export function createMergeQueueService(deps: {
     const overlaps = computeOverlaps(infos);
     const sortedInfos = sortByLeastOverlap(infos, overlaps);
     const totalOverlapScore = overlaps.reduce((s, e) => s + e.overlapCount, 0);
-    return { order: sortedInfos, overlaps, totalOverlapScore };
+    const migrationCollisions = computeMigrationCollisions(infos);
+    return { order: sortedInfos, overlaps, totalOverlapScore, migrationCollisions };
+  }
+
+  async function verifyWorkspaceMerged(ws: WorkspaceQueueInfo, featureSha: string | null): Promise<void> {
+    const [row] = await database
+      .select({
+        status: workspaces.status,
+        mergedAt: workspaces.mergedAt,
+      })
+      .from(workspaces)
+      .where(eq(workspaces.id, ws.id))
+      .limit(1);
+
+    if (!row || row.status !== "closed" || (!ws.isDirect && !row.mergedAt)) {
+      throw new Error("Merge returned but workspace is not marked closed with mergedAt");
+    }
+
+    if (!ws.isDirect && featureSha) {
+      const landed = await gitService.isAncestor(ws.repoPath, featureSha, ws.baseBranch);
+      if (!landed) {
+        throw new Error(`Merge returned but commit ${featureSha.slice(0, 12)} is not reachable from ${ws.baseBranch}`);
+      }
+    }
   }
 
   async function* executeQueue(
@@ -223,7 +294,39 @@ export function createMergeQueueService(deps: {
       }
 
       // Rebase onto base first (if we have a working dir)
-      if (ws.workingDir && !ws.status.startsWith("direct")) {
+      if (ws.workingDir && !ws.isDirect) {
+        try {
+          const renumber = await gitService.autoRenumberMigrations(ws.workingDir, ws.repoPath, ws.baseBranch);
+          if (renumber.renumbered) {
+            console.log(
+              `[merge-queue] auto-renumbered migrations for workspace ${ws.id}: ` +
+                renumber.renames.map((r) => `${r.from}->${r.to}`).join(", "),
+            );
+          }
+        } catch (err) {
+          const error = err instanceof Error ? err.message : String(err);
+          if (opts.skipOnConflict) {
+            skipped.push(ws.id);
+            yield {
+              type: "skipped",
+              workspaceId: ws.id,
+              issueNumber: ws.issueNumber,
+              issueTitle: ws.issueTitle,
+              reason: `migration renumber failed: ${error}`,
+            };
+            continue;
+          }
+          failed.push(ws.id);
+          yield {
+            type: "error",
+            workspaceId: ws.id,
+            issueNumber: ws.issueNumber,
+            issueTitle: ws.issueTitle,
+            error,
+          };
+          break;
+        }
+
         yield {
           type: "rebasing",
           workspaceId: ws.id,
@@ -236,6 +339,9 @@ export function createMergeQueueService(deps: {
           const rebaseResult = await gitService.rebaseOntoBase(ws.workingDir, ws.baseBranch, ws.branch);
           if (!rebaseResult.success) {
             if (opts.skipOnConflict) {
+              await gitService.abortRebase(ws.workingDir).catch(() => {
+                // Best effort: skip-on-conflict should leave the queue free to continue.
+              });
               skipped.push(ws.id);
               yield {
                 type: "skipped",
@@ -286,7 +392,11 @@ export function createMergeQueueService(deps: {
         total,
       };
       try {
+        const featureSha = ws.isDirect
+          ? null
+          : await gitService.revParse(ws.repoPath, ws.branch).catch(() => null);
         await mergeService.mergeWorkspace(ws.id);
+        await verifyWorkspaceMerged(ws, featureSha);
         merged.push(ws.id);
         yield {
           type: "merged",
