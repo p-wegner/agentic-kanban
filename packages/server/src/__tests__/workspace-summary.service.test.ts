@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { issues, projects, projectStatuses, workspaces } from "@agentic-kanban/shared/schema";
+import { issues, projects, projectStatuses, workflowEdges, workflowNodes, workflowTemplates, workspaces } from "@agentic-kanban/shared/schema";
 import { createTestDb } from "./helpers/test-db.js";
 import { buildWorkspaceSummaryMap } from "../services/workspace-summary.service.js";
 
@@ -59,5 +59,101 @@ describe("workspace-summary.service", () => {
     const summaryMap = await buildWorkspaceSummaryMap([issueId], "main", db);
 
     expect(summaryMap.get(issueId)?.main?.codeMetrics).toEqual(metrics);
+  });
+
+  it("includes workflow progress for the main workspace", async () => {
+    const { db } = createTestDb();
+    const now = new Date().toISOString();
+    const projectId = randomUUID();
+    const statusId = randomUUID();
+    const issueId = randomUUID();
+    const workspaceId = randomUUID();
+    const templateId = randomUUID();
+    const implementNodeId = randomUUID();
+    const reviewNodeId = randomUUID();
+
+    await db.insert(projects).values({
+      id: projectId,
+      name: "Workflow Project",
+      repoPath: "/tmp/workflow-project",
+      repoName: "workflow-project",
+      defaultBranch: "main",
+      createdAt: now,
+      updatedAt: now,
+    });
+    await db.insert(projectStatuses).values({
+      id: statusId,
+      projectId,
+      name: "In Progress",
+      sortOrder: 0,
+      isDefault: true,
+      createdAt: now,
+    });
+    await db.insert(workflowTemplates).values({
+      id: templateId,
+      projectId,
+      name: "Feature workflow",
+      createdAt: now,
+      updatedAt: now,
+    });
+    await db.insert(workflowNodes).values([
+      {
+        id: implementNodeId,
+        templateId,
+        name: "Implement",
+        nodeType: "normal",
+        statusName: "In Progress",
+        sortOrder: 0,
+        createdAt: now,
+      },
+      {
+        id: reviewNodeId,
+        templateId,
+        name: "Review",
+        nodeType: "normal",
+        statusName: "In Review",
+        sortOrder: 1,
+        createdAt: now,
+      },
+    ]);
+    await db.insert(workflowEdges).values({
+      id: randomUUID(),
+      templateId,
+      fromNodeId: implementNodeId,
+      toNodeId: reviewNodeId,
+      condition: "manual",
+      sortOrder: 0,
+      createdAt: now,
+    });
+    await db.insert(issues).values({
+      id: issueId,
+      issueNumber: 2,
+      title: "Show workflow",
+      statusId,
+      projectId,
+      workflowTemplateId: templateId,
+      currentNodeId: implementNodeId,
+      createdAt: now,
+      updatedAt: now,
+    });
+    await db.insert(workspaces).values({
+      id: workspaceId,
+      issueId,
+      branch: "feature/workflow",
+      status: "idle",
+      currentNodeId: implementNodeId,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const summaryMap = await buildWorkspaceSummaryMap([issueId], "main", db);
+
+    expect(summaryMap.get(issueId)?.main?.workflow).toEqual({
+      currentNodeId: implementNodeId,
+      currentNodeName: "Implement",
+      currentNodeType: "normal",
+      state: "waiting",
+      nextStages: ["Review"],
+    });
   });
 });
