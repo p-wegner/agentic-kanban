@@ -14,6 +14,7 @@ import {
   getForkMode,
   deriveStatusName,
   isTerminalNodeType,
+  validateGraph,
 } from "@agentic-kanban/shared/lib/workflow-engine";
 import { createTestDb, type TestDb } from "./helpers/test-db.js";
 import { ensureBuiltinSkills } from "../db/seed.js";
@@ -210,6 +211,57 @@ describe("workflow-engine", () => {
     expect(evaluateCondition("diff_clean", { diffFilesChanged: 3 })).toBe("block");
     expect(evaluateCondition("diff_touches:packages/server/**", { diffFiles: ["packages/server/src/x.ts"] })).toBe("fire");
     expect(evaluateCondition("diff_touches:packages/client/**", { diffFiles: ["packages/server/src/x.ts"] })).toBe("block");
+  });
+
+  describe("validateGraph", () => {
+    const baseNodes = [
+      { id: "start", name: "Start", nodeType: "start" },
+      { id: "build", name: "Build", nodeType: "normal" },
+      { id: "done", name: "Done", nodeType: "end" },
+    ];
+
+    it("detects disconnected subgraphs with node names", () => {
+      const errors = validateGraph(
+        [
+          ...baseNodes,
+          { id: "stray-a", name: "Stray A", nodeType: "normal" },
+          { id: "stray-b", name: "Stray B", nodeType: "end" },
+        ],
+        [
+          { fromNodeId: "start", toNodeId: "build" },
+          { fromNodeId: "build", toNodeId: "done" },
+          { fromNodeId: "stray-a", toNodeId: "stray-b" },
+        ],
+      );
+
+      expect(errors).toContain('Disconnected workflow node(s) unreachable from start "Start": "Stray A", "Stray B".');
+    });
+
+    it("detects cycles with node names", () => {
+      const errors = validateGraph(
+        baseNodes,
+        [
+          { fromNodeId: "start", toNodeId: "build" },
+          { fromNodeId: "build", toNodeId: "start" },
+          { fromNodeId: "build", toNodeId: "done" },
+        ],
+      );
+
+      expect(errors).toContain('Workflow contains a cycle: "Start" -> "Build" -> "Start". Mark intentional back-edges as loop edges.');
+    });
+
+    it("allows intentional loop edges to opt out of cycle detection", () => {
+      const errors = validateGraph(
+        baseNodes,
+        [
+          { fromNodeId: "start", toNodeId: "build" },
+          { fromNodeId: "build", toNodeId: "start", isLoop: true },
+          { fromNodeId: "build", toNodeId: "done" },
+        ],
+      );
+
+      expect(errors).toEqual([]);
+    });
   });
 
   it("auto-routes on a firing condition and gates a blocked explicit target", async () => {

@@ -118,8 +118,8 @@ export function createWorkflowsRoute(database: Database = db, options?: Workflow
     if (!tplName) return c.json({ error: "name is required" }, 400);
 
     const errors = validateGraph(
-      srcNodes.map((n: any) => ({ id: String(n.id), nodeType: n.nodeType })),
-      srcEdges.map((e: any) => ({ fromNodeId: String(e.fromNodeId), toNodeId: String(e.toNodeId) })),
+      srcNodes.map((n: any) => ({ id: String(n.id), name: n.name, nodeType: n.nodeType })),
+      srcEdges.map((e: any) => ({ fromNodeId: String(e.fromNodeId), toNodeId: String(e.toNodeId), isLoop: !!e.isLoop })),
     );
     if (errors.length > 0 && srcNodes.length > 0) return c.json({ error: "Invalid workflow graph", errors }, 400);
 
@@ -146,8 +146,8 @@ export function createWorkflowsRoute(database: Database = db, options?: Workflow
     const { name, description, ticketType, isDefault, nodes = [], edges = [] } = body as any;
 
     const errors = validateGraph(
-      nodes.map((n: any) => ({ id: String(n.id), nodeType: n.nodeType })),
-      edges.map((e: any) => ({ fromNodeId: String(e.fromNodeId), toNodeId: String(e.toNodeId) })),
+      nodes.map((n: any) => ({ id: String(n.id), name: n.name, nodeType: n.nodeType })),
+      edges.map((e: any) => ({ fromNodeId: String(e.fromNodeId), toNodeId: String(e.toNodeId), isLoop: !!e.isLoop })),
     );
     if (errors.length > 0) return c.json({ error: "Invalid workflow graph", errors }, 400);
 
