@@ -22,6 +22,7 @@ import {
 } from "../repositories/session.repository.js";
 import { getPreference } from "../repositories/preferences.repository.js";
 import { buildImplementPrompt, buildRejectPrompt, writePlanFile, PLAN_FILE } from "./plan-mode.service.js";
+import { computeWorkspaceCodeMetrics } from "./workspace-code-metrics.service.js";
 import {
   WorkspaceError,
   applyWorkspaceAgentSelection,
@@ -89,6 +90,7 @@ export function createWorkspaceSessionService(deps: {
               );
             }
             console.log(`[workspace-session] auto-rebase succeeded on launch: workspaceId=${id}`);
+            await computeWorkspaceCodeMetrics(id, database).catch(() => null);
           }
         }
       }
@@ -154,6 +156,7 @@ export function createWorkspaceSessionService(deps: {
             );
           }
           console.log(`[workspace-session] auto-rebase succeeded on turn: workspaceId=${id}`);
+          await computeWorkspaceCodeMetrics(id, database).catch(() => null);
         }
       }
     }

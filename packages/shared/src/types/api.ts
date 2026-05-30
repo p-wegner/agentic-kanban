@@ -168,12 +168,14 @@ export interface MainWorkspaceInfo {
   lastSessionTriggerType?: string | null;
   /** Set when the workspace's branch was actually merged into its base (distinguishes merged from abandoned-closed). */
   mergedAt?: string | null;
+  commitCount?: number | null;
   contextTokens?: number | null;
   lastTool?: string | null;
   lastAssistantMessage?: string | null;
   /** True when a non-plan-mode session completed (idle) but produced no file changes. */
   planOnlyWarning?: boolean;
   scorecard?: { score: number } | null;
+  codeMetrics?: WorkspaceCodeMetrics | null;
 }
 
 export interface WorkspaceSummary {
@@ -192,6 +194,28 @@ export interface WorkspaceSummary {
     /** Number of contestants that have reached idle/closed status. */
     doneCount: number;
   };
+}
+
+export interface WorkspaceCodeMetrics {
+  computedAt: string;
+  coverage?: {
+    linesPct: number;
+    covered?: number;
+    total?: number;
+    source: string;
+  } | null;
+  lint?: {
+    errors: number;
+    warnings: number;
+    violations: number;
+    source: string;
+  } | null;
+  complexity?: {
+    average: number;
+    max: number;
+    files: number;
+    source: "heuristic";
+  } | null;
 }
 
 export interface IssueWithStatus {

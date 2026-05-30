@@ -24,6 +24,7 @@ import {
 import { PREF_AUTO_START_FOLLOWUP } from "../constants/preference-keys.js";
 import { autoStartFollowups } from "./followup-workspace.service.js";
 import { loadAgentSettings, toExecutorProvider } from "./agent-settings.service.js";
+import { computeWorkspaceCodeMetrics } from "./workspace-code-metrics.service.js";
 import {
   WorkspaceError,
   applyWorkspaceAgentSelection,
@@ -100,6 +101,7 @@ export function createWorkspaceMergeService(deps: {
 
     if (workspace.isDirect) {
       const now = new Date().toISOString();
+      await computeWorkspaceCodeMetrics(id, database).catch(() => null);
       await updateWorkspaceStatus(id, "closed", { closedAt: now }, database);
       await moveIssueToDone(id, workspace.issueId, now, database, true);
 
@@ -168,6 +170,10 @@ export function createWorkspaceMergeService(deps: {
 
     // Plumbing-based merge: working tree and index are never modified.
     const result = await gitService.mergeBranch(repoPath, workspace.branch, targetBranch);
+
+    if (workspace.workingDir) {
+      await computeWorkspaceCodeMetrics(id, database).catch(() => null);
+    }
 
     // Kill any agent-spawned processes (e.g. leaked dev.mjs) before removing the worktree.
     if (workspace.workingDir) {
@@ -273,6 +279,10 @@ export function createWorkspaceMergeService(deps: {
     await killWorktreeProcesses(workspace.workingDir, `update-base:post`);
 
     console.log(`[workspace-service] update-base: workspaceId=${id} mode=${mode} success=${result.success} conflicts=${result.conflictingFiles?.length ?? 0}`);
+
+    if (result.success) {
+      await computeWorkspaceCodeMetrics(id, database).catch(() => null);
+    }
 
     const projectId = await resolveProjectId(id, database);
     if (projectId) boardEvents?.broadcast(projectId, "board_changed");
