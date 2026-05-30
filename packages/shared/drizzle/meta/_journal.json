@@ -428,6 +428,13 @@
       "when": 1748764527058,
       "tag": "0060_session_skill",
       "breakpoints": true
+    },
+    {
+      "idx": 61,
+      "version": "6",
+      "when": 1748764527059,
+      "tag": "0061_workspace_merged_at",
+      "breakpoints": true
     }
   ]
 }

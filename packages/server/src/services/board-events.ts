@@ -43,6 +43,7 @@ export type BoardEventType =
   | "workspace_setup"
   | "workspace_idle"
   | "workspace_merged"
+  | "workspace_closed"
   | "workspace_ready_for_merge"
   | "workflow_error"
   | "workflow_fork"

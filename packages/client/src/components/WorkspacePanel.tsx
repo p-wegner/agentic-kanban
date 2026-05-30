@@ -1047,6 +1047,21 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
     }
   }
 
+  async function handleCloseWorkspace(wsId: string) {
+    if (!window.confirm("Close this workspace without merging? It will be removed from active views. Session history is kept.")) return;
+    setActionLoading(true);
+    setError(null);
+    try {
+      await apiFetch(`/api/workspaces/${wsId}/close`, { method: "POST" });
+      await fetchWorkspaces();
+      onWorkspaceChange?.();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Close failed");
+    } finally {
+      setActionLoading(false);
+    }
+  }
+
   function handleHeaderMouseDown(e: React.MouseEvent) {
     if ((e.target as HTMLElement).closest("button")) return;
     const panel = (e.currentTarget as HTMLElement).closest("[data-panel]") as HTMLElement;
@@ -1402,6 +1417,11 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                         Ready to merge
                       </span>
                     )}
+                    {ws.mergedAt && (
+                      <span className="text-xs font-medium px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700">
+                        Merged
+                      </span>
+                    )}
                     <span className={`text-xs font-medium px-1.5 py-0.5 rounded ${
                       isThisRunning ? "bg-green-100 text-green-700 animate-pulse" :
                       isLaunching ? "bg-blue-100 text-blue-700 animate-pulse" :
@@ -1433,7 +1453,11 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
 
                 <div className="flex gap-3 text-xs text-gray-400 dark:text-gray-500">
                   <span>Created {formatRelativeTime(ws.createdAt)}</span>
-                  {ws.closedAt && <span>Closed {formatRelativeTime(ws.closedAt)}</span>}
+                  {ws.mergedAt ? (
+                    <span>Merged {formatRelativeTime(ws.mergedAt)}</span>
+                  ) : ws.closedAt ? (
+                    <span>Closed {formatRelativeTime(ws.closedAt)}</span>
+                  ) : null}
                 </div>
 
                 {ws.workingDir && (
@@ -2258,6 +2282,16 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                         </button>
                         )}
                         <span className="w-px bg-gray-300 dark:bg-gray-600 self-stretch mx-2" aria-hidden="true" />
+                        {!ws.isDirect && ws.status !== "closed" && !isRunning && (
+                          <button
+                            onClick={() => handleCloseWorkspace(ws.id)}
+                            disabled={actionLoading}
+                            className="text-sm text-gray-600 dark:text-gray-300 px-3 py-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-50 border border-gray-300 dark:border-gray-600 font-medium"
+                            title="Close without merging (e.g. already merged elsewhere or abandoned). Keeps session history."
+                          >
+                            Close
+                          </button>
+                        )}
                         <button
                           onClick={() => handleDeleteWorkspace(ws.id)}
                           disabled={actionLoading}

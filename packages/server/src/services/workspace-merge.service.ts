@@ -181,7 +181,7 @@ export function createWorkspaceMergeService(deps: {
     } catch { /* ignore */ }
 
     const now = new Date().toISOString();
-    await updateWorkspaceStatus(id, "closed", { workingDir: null, closedAt: now }, database);
+    await updateWorkspaceStatus(id, "closed", { workingDir: null, closedAt: now, mergedAt: now }, database);
     await moveIssueToDone(id, workspace.issueId, now, database);
 
     const projectId = await resolveProjectId(id, database);
