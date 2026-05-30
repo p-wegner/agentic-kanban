@@ -150,6 +150,7 @@ const TRIGGER_TYPE_LABELS: Record<string, { label: string; className: string }> 
   review: { label: "AI Review", className: "bg-accent-50 text-accent-700 dark:bg-accent-900/40 dark:text-accent-300" },
   merge: { label: "AI Merge", className: "bg-emerald-100 text-emerald-700" },
   "fix-conflicts": { label: "Fix Conflicts", className: "bg-orange-100 text-orange-700" },
+  bisect: { label: "Auto-bisect", className: "bg-rose-100 text-rose-700" },
   learning: { label: "Learning", className: "bg-teal-100 text-teal-700" },
   "auto-start": { label: "Auto-start", className: "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400" },
 };
@@ -984,6 +985,27 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
     }
   }
 
+  async function handleAutoBisect(wsId: string, scope: "related" | "full" = "related") {
+    setActionLoading(true);
+    setError(null);
+    try {
+      const result = await apiFetch<{ sessionId: string }>(`/api/workspaces/${wsId}/bisect`, {
+        method: "POST",
+        body: JSON.stringify({ scope }),
+      });
+      setActiveSession(result.sessionId);
+      setLastPrompt(`Auto-bisect (${scope})`);
+      setCompletedMessages([]);
+      setSelectedHistoryId(null);
+      setViewMode("output");
+      await fetchWorkspaces();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to start auto-bisect");
+    } finally {
+      setActionLoading(false);
+    }
+  }
+
   async function handleImplementPlan(wsId: string, updatedPlanContent?: string) {
     setActionLoading(true);
     setError(null);
@@ -1718,6 +1740,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                     {ws.status !== "closed" && !isRunning && ws.workingDir && (() => {
                       const lastReview = completedSessions.filter(s => s.triggerType === "review").at(-1);
                       const lastMerge = completedSessions.filter(s => s.triggerType === "merge").at(-1);
+                      const lastBisect = completedSessions.filter(s => s.triggerType === "bisect").at(-1);
                       const quickActionsKey = `qa-${ws.id}`;
                       const qaExpanded = expandedQuickActions[quickActionsKey];
                       return (
@@ -1760,6 +1783,31 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                             {lastMerge && (
                               <span className={`text-[9px] px-1 ${lastMerge.status === "completed" ? "text-green-600" : "text-yellow-600"}`}>
                                 {lastMerge.status === "completed" ? "✓" : "✗"} {formatRelativeTime(lastMerge.endedAt ?? lastMerge.startedAt)}
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex flex-col gap-0.5">
+                            <div className="flex">
+                              <button
+                                onClick={(e) => { e.stopPropagation(); handleAutoBisect(ws.id, "related"); }}
+                                disabled={actionLoading}
+                                className="text-[10px] font-medium px-2 py-0.5 rounded-l bg-rose-100 text-rose-700 hover:bg-rose-200 disabled:opacity-50"
+                                title="Run git bisect using tests related to changed files"
+                              >
+                                Auto-bisect
+                              </button>
+                              <button
+                                onClick={(e) => { e.stopPropagation(); handleAutoBisect(ws.id, "full"); }}
+                                disabled={actionLoading}
+                                className="text-[10px] font-medium px-1.5 py-0.5 rounded-r bg-rose-200 text-rose-800 hover:bg-rose-300 disabled:opacity-50 border-l border-rose-300"
+                                title="Run git bisect using the full test suite"
+                              >
+                                Full
+                              </button>
+                            </div>
+                            {lastBisect && (
+                              <span className={`text-[9px] px-1 ${lastBisect.status === "completed" && lastBisect.exitCode === "0" ? "text-green-600" : "text-yellow-600"}`}>
+                                {lastBisect.status === "completed" && lastBisect.exitCode === "0" ? "ok" : "fail"} {formatRelativeTime(lastBisect.endedAt ?? lastBisect.startedAt)}
                               </span>
                             )}
                           </div>
@@ -2261,6 +2309,16 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                           title="Trigger AI code review"
                         >
                           Review
+                        </button>
+                        )}
+                        {ws.workingDir && !isRunning && (
+                        <button
+                          onClick={() => handleAutoBisect(ws.id)}
+                          disabled={actionLoading}
+                          className="text-sm bg-rose-600 text-white px-3 py-1.5 rounded hover:bg-rose-700 disabled:opacity-50"
+                          title="Find the commit that introduced the failing test"
+                        >
+                          Auto-bisect
                         </button>
                         )}
                         {ws.workingDir && (
