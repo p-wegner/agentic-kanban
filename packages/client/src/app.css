@@ -103,6 +103,56 @@ body {
   text-rendering: optimizeLegibility;
 }
 
+/* Warm text selection so highlighting reads as part of the paper theme rather
+   than the browser's default cold blue. */
+::selection {
+  background-color: rgb(194 95 54 / 0.22); /* brand-500 @ 22% */
+  color: inherit;
+}
+
+/* App-wide scrollbar treatment. Previously only board columns
+   (`.column-scroll-container`) were styled, so every other scrollable panel
+   (detail panels, modals, the Butler chat, settings) fell back to the default
+   chunky OS scrollbar in cold gray. Give them all a thin, warm, unobtrusive
+   bar that matches the paper theme. The dedicated board-column rules below
+   still override this for that surface. The `.scrollbar-hide` utility wins
+   because `display: none` removes the bar entirely. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(90, 84, 76, 0.28) transparent; /* ink-soft tint */
+}
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background: rgba(90, 84, 76, 0.28); /* ink-soft tint */
+  border-radius: 9999px;
+  border: 3px solid transparent;
+  background-clip: padding-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: rgba(90, 84, 76, 0.45);
+  background-clip: padding-box;
+}
+.dark,
+.dark * {
+  scrollbar-color: rgba(231, 224, 213, 0.22) transparent;
+}
+.dark::-webkit-scrollbar-thumb,
+.dark *::-webkit-scrollbar-thumb {
+  background: rgba(231, 224, 213, 0.22);
+  background-clip: padding-box;
+}
+.dark::-webkit-scrollbar-thumb:hover,
+.dark *::-webkit-scrollbar-thumb:hover {
+  background: rgba(231, 224, 213, 0.38);
+  background-clip: padding-box;
+}
+
 /* Section/page headings lean on the serif to feel authored, not generated.
    Components opt in with `.heading-serif`; the brand wordmark uses `.wordmark`. */
 .heading-serif {
@@ -248,24 +298,24 @@ body {
 .markdown-body ol { list-style-type: decimal; }
 .markdown-body li { margin-bottom: 0.15em; }
 .markdown-body code {
-  background: #f3f4f6;
-  border-radius: 3px;
+  background: #efe9df;
+  border-radius: 4px;
   padding: 0.1em 0.35em;
   font-size: 0.85em;
   font-family: ui-monospace, monospace;
 }
 .dark .markdown-body code {
-  background: #374151;
+  background: #34302a;
 }
 .markdown-body pre {
-  background: #f3f4f6;
-  border-radius: 4px;
+  background: #efe9df;
+  border-radius: 6px;
   padding: 0.75em;
   overflow-x: auto;
   margin-bottom: 0.5em;
 }
 .dark .markdown-body pre {
-  background: #1f2937;
+  background: #161412;
 }
 .markdown-body pre code {
   background: none;
@@ -279,22 +329,22 @@ body {
   color: #df9f7e;
 }
 .markdown-body blockquote {
-  border-left: 3px solid #d1d5db;
+  border-left: 3px solid #df9f7e;
   padding-left: 0.75em;
-  color: #6b7280;
+  color: #8a8175;
   margin-bottom: 0.5em;
 }
 .dark .markdown-body blockquote {
-  border-left-color: #4b5563;
-  color: #9ca3af;
+  border-left-color: #934428;
+  color: #a39a8c;
 }
 .markdown-body hr {
   border: none;
-  border-top: 1px solid #e5e7eb;
+  border-top: 1px solid #e0d8cb;
   margin: 0.75em 0;
 }
 .dark .markdown-body hr {
-  border-top-color: #374151;
+  border-top-color: #34302a;
 }
 .markdown-body strong { font-weight: 600; }
 .markdown-body em { font-style: italic; }
