@@ -56,6 +56,13 @@ export interface ViewDescriptor {
   chord?: boolean;
   /** `butler` renders a pending-question badge. */
   badge?: "butler";
+  /**
+   * Toolbar placement (#109). `"primary"` views render as direct tabs; `"secondary"`
+   * views are tucked behind the toolbar's "More" overflow dropdown to keep the tab
+   * row scannable. Defaults to `"primary"` when omitted. Grouping is purely visual —
+   * keyboard shortcuts and the command palette reach every view regardless of group.
+   */
+  group?: "primary" | "secondary";
 }
 
 const ICON = {
@@ -199,6 +206,7 @@ export const VIEW_REGISTRY: ViewDescriptor[] = [
     paletteIcon: "▥",
     paletteDescription: "Show board metrics and charts",
     shortcut: "m",
+    group: "secondary",
   },
   {
     id: "digest",
@@ -209,6 +217,7 @@ export const VIEW_REGISTRY: ViewDescriptor[] = [
     paletteIcon: "◷",
     paletteDescription: "What changed since you were away",
     shortcut: "d",
+    group: "secondary",
   },
   {
     id: "focus",
@@ -219,6 +228,7 @@ export const VIEW_REGISTRY: ViewDescriptor[] = [
     paletteIcon: "◎",
     paletteDescription: "What should I work on next?",
     shortcut: "o",
+    group: "secondary",
   },
   {
     id: "butler",
@@ -239,6 +249,7 @@ export const VIEW_REGISTRY: ViewDescriptor[] = [
     icon: ICON.workflows,
     paletteIcon: "⛓",
     paletteDescription: "Design ticket-type pipelines",
+    group: "secondary",
   },
   {
     id: "insights",
@@ -250,6 +261,7 @@ export const VIEW_REGISTRY: ViewDescriptor[] = [
     paletteDescription: "Show agent cost, token, success, and duration trends",
     shortcut: "n",
     activeClass: "bg-blue-600 text-white",
+    group: "secondary",
   },
   {
     id: "swimlane",
@@ -261,6 +273,7 @@ export const VIEW_REGISTRY: ViewDescriptor[] = [
     paletteDescription: "Priority lanes × status columns",
     shortcut: "p",
     activeClass: "bg-blue-600 text-white",
+    group: "secondary",
   },
   {
     id: "flaky-tests",
@@ -272,11 +285,18 @@ export const VIEW_REGISTRY: ViewDescriptor[] = [
     paletteDescription: "Track intermittent test failures",
     shortcut: "k",
     activeClass: "bg-amber-500 text-white",
+    group: "secondary",
   },
 ];
 
 /** Set of all valid view ids — used for validating persisted `viewMode`. */
 export const VIEW_IDS: ViewMode[] = VIEW_REGISTRY.map((v) => v.id);
+
+/** Primary views — rendered as direct toolbar tabs (#109). */
+export const PRIMARY_VIEWS: ViewDescriptor[] = VIEW_REGISTRY.filter((v) => v.group !== "secondary");
+
+/** Secondary/analytics views — tucked behind the toolbar "More" overflow dropdown (#109). */
+export const SECONDARY_VIEWS: ViewDescriptor[] = VIEW_REGISTRY.filter((v) => v.group === "secondary");
 
 /**
  * Map of single-key shortcut → view id, for views whose shortcut is handled by
