@@ -45,6 +45,65 @@ function commitCountClass(count: number): string {
   return "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300";
 }
 
+type WorkflowSnapshot = NonNullable<
+  NonNullable<NonNullable<IssueWithStatus["workspaceSummary"]>["main"]>["workflow"]
+>;
+
+const workflowStateClasses: Record<WorkflowSnapshot["state"], string> = {
+  active: "border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-800 dark:bg-blue-900/30 dark:text-blue-300",
+  waiting: "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-800 dark:bg-amber-900/30 dark:text-amber-300",
+  terminal: "border-green-200 bg-green-50 text-green-700 dark:border-green-800 dark:bg-green-900/30 dark:text-green-300",
+};
+
+const workflowDotClasses: Record<WorkflowSnapshot["state"], string> = {
+  active: "bg-blue-500",
+  waiting: "bg-amber-500",
+  terminal: "bg-green-500",
+};
+
+function WorkflowMiniIndicator({ workflow }: { workflow: WorkflowSnapshot }) {
+  const [open, setOpen] = useState(false);
+  const nextLabel = workflow.nextStages.length > 0 ? workflow.nextStages.join(", ") : "None";
+  const title = `Workflow: ${workflow.currentNodeName}. Next: ${nextLabel}`;
+
+  return (
+    <span
+      className="relative inline-flex shrink-0"
+      onMouseEnter={() => setOpen(true)}
+      onMouseLeave={() => setOpen(false)}
+    >
+      <button
+        type="button"
+        title={title}
+        aria-label={title}
+        onFocus={() => setOpen(true)}
+        onBlur={() => setOpen(false)}
+        onClick={(e) => {
+          e.stopPropagation();
+          setOpen((v) => !v);
+        }}
+        className={`inline-flex max-w-[8.5rem] items-center gap-1 rounded border px-1.5 py-0.5 text-[10px] font-medium transition-colors ${workflowStateClasses[workflow.state]}`}
+      >
+        <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${workflowDotClasses[workflow.state]} ${workflow.state === "active" ? "animate-pulse" : ""}`} />
+        <span className="truncate">{workflow.currentNodeName}</span>
+      </button>
+      {open && (
+        <span
+          role="tooltip"
+          className="absolute left-0 top-full z-20 mt-1 w-52 rounded-md border border-gray-200 bg-white p-2 text-left shadow-lg dark:border-gray-700 dark:bg-gray-900"
+        >
+          <span className="block text-[11px] font-semibold text-gray-800 dark:text-gray-100">
+            {workflow.currentNodeName}
+          </span>
+          <span className="mt-1 block text-[10px] text-gray-500 dark:text-gray-400">
+            Next: {nextLabel}
+          </span>
+        </span>
+      )}
+    </span>
+  );
+}
+
 const issueTypeColors: Record<string, string> = {
   task: "bg-blue-100 dark:bg-blue-900/50 text-blue-800 dark:text-blue-200",
   bug: "bg-red-100 dark:bg-red-900/50 text-red-800 dark:text-red-200",
@@ -348,21 +407,25 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
             <>
               <span className="inline-block w-2 h-2 rounded-full shrink-0 bg-accent-500 animate-pulse" />
               <span className="font-medium text-accent-700 dark:text-accent-300">AI Reviewing</span>
+              {ws.main.workflow && <WorkflowMiniIndicator workflow={ws.main.workflow} />}
             </>
           ) : ws.main.status === "fixing" ? (
             <>
               <span className="inline-block w-2 h-2 rounded-full shrink-0 bg-orange-500 animate-pulse" />
               <span className="font-medium text-orange-700">AI Fixing Conflicts</span>
+              {ws.main.workflow && <WorkflowMiniIndicator workflow={ws.main.workflow} />}
             </>
           ) : ws.main.status === "awaiting-plan-approval" ? (
             <>
               <span className="inline-block w-2 h-2 rounded-full shrink-0 bg-amber-500" />
               <span className="font-medium text-amber-700">Plan Awaiting Approval</span>
+              {ws.main.workflow && <WorkflowMiniIndicator workflow={ws.main.workflow} />}
             </>
           ) : ws.main.conflicts?.hasConflicts ? (
             <>
               <span className="inline-block w-2 h-2 rounded-full shrink-0 bg-red-500" />
               <span className="font-medium text-red-700">Merge Conflicts</span>
+              {ws.main.workflow && <WorkflowMiniIndicator workflow={ws.main.workflow} />}
             </>
           ) : (
             <>
@@ -372,6 +435,7 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
                 "bg-gray-400"
               }`} />
               <span className="font-mono text-gray-600 dark:text-gray-400 truncate">{ws.main.branch}</span>
+              {ws.main.workflow && <WorkflowMiniIndicator workflow={ws.main.workflow} />}
               {ws.main.status === "idle" && liveActivity && (() => {
                 const badge = getLastSessionBadge(ws.main.lastSessionTriggerType);
                 return badge ? <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded shrink-0 ${badge.className}`}>{badge.label}</span> : null;

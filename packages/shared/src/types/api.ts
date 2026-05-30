@@ -176,6 +176,13 @@ export interface MainWorkspaceInfo {
   planOnlyWarning?: boolean;
   scorecard?: { score: number } | null;
   codeMetrics?: WorkspaceCodeMetrics | null;
+  workflow?: {
+    currentNodeId: string;
+    currentNodeName: string;
+    currentNodeType: string;
+    state: "active" | "waiting" | "terminal";
+    nextStages: string[];
+  } | null;
 }
 
 export interface WorkspaceSummary {
