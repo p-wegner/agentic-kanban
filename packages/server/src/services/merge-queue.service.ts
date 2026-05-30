@@ -339,6 +339,9 @@ export function createMergeQueueService(deps: {
           const rebaseResult = await gitService.rebaseOntoBase(ws.workingDir, ws.baseBranch, ws.branch);
           if (!rebaseResult.success) {
             if (opts.skipOnConflict) {
+              await gitService.abortRebase(ws.workingDir).catch(() => {
+                // Best effort: skip-on-conflict should leave the queue free to continue.
+              });
               skipped.push(ws.id);
               yield {
                 type: "skipped",

@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   revParse: vi.fn(),
   isAncestor: vi.fn(),
   autoRenumberMigrations: vi.fn(),
+  abortRebase: vi.fn(),
 }));
 
 vi.mock("../services/git.service.js", () => ({
@@ -20,6 +21,7 @@ vi.mock("../services/git.service.js", () => ({
   revParse: mocks.revParse,
   isAncestor: mocks.isAncestor,
   autoRenumberMigrations: mocks.autoRenumberMigrations,
+  abortRebase: mocks.abortRebase,
 }));
 
 vi.mock("../services/workspace-merge.service.js", () => ({
@@ -106,6 +108,7 @@ describe("merge queue service", () => {
     mocks.revParse.mockReset().mockResolvedValue("feature-sha");
     mocks.isAncestor.mockReset().mockResolvedValue(true);
     mocks.autoRenumberMigrations.mockReset().mockResolvedValue({ renumbered: false, renames: [] });
+    mocks.abortRebase.mockReset().mockResolvedValue(undefined);
   });
 
   it("reports migration-number collisions across queued workspaces", async () => {
@@ -219,5 +222,52 @@ describe("merge queue service", () => {
     expect(mocks.autoRenumberMigrations.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.rebaseOntoBase.mock.invocationCallOrder[0],
     );
+  });
+
+  it("aborts a skipped rebase conflict so the worktree is not left mid-rebase", async () => {
+    const { db } = createTestDb();
+    const { projectId, statusId } = await seedProject(db);
+    const first = await seedWorkspace(db, {
+      projectId,
+      statusId,
+      issueNumber: 41,
+      issueTitle: "Conflicting workspace",
+      workingDir: "/repo/.worktrees/conflict",
+      branch: "feature/conflict",
+    });
+    const second = await seedWorkspace(db, {
+      projectId,
+      statusId,
+      issueNumber: 42,
+      issueTitle: "Clean workspace",
+      workingDir: "/repo/.worktrees/clean",
+      branch: "feature/clean",
+    });
+
+    mocks.rebaseOntoBase
+      .mockResolvedValueOnce({ success: false, conflictingFiles: ["src/conflict.ts"], error: "conflict" })
+      .mockResolvedValueOnce({ success: true });
+    mocks.mergeWorkspace.mockImplementation(async (id: string) => {
+      const now = new Date().toISOString();
+      await db.update(workspaces).set({ status: "closed", mergedAt: now, updatedAt: now }).where(eq(workspaces.id, id));
+      return { id, mergeOutput: "ok" };
+    });
+
+    const service = createMergeQueueService({ database: db });
+    const events = [];
+    for await (const event of service.executeQueue([first.workspaceId, second.workspaceId], { skipOnConflict: true })) {
+      events.push(event);
+    }
+
+    expect(mocks.abortRebase).toHaveBeenCalledWith("/repo/.worktrees/conflict");
+    expect(events).toContainEqual(expect.objectContaining({
+      type: "skipped",
+      workspaceId: first.workspaceId,
+      reason: expect.stringContaining("rebase conflict"),
+    }));
+    expect(events).toContainEqual(expect.objectContaining({
+      type: "merged",
+      workspaceId: second.workspaceId,
+    }));
   });
 });
