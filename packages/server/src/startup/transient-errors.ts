@@ -13,13 +13,18 @@
  * network-using service could regress, so the top-level handler also filters.
  */
 
-const TRANSIENT_CODES = new Set(["ECONNRESET", "ECONNREFUSED", "EPIPE", "ETIMEDOUT", "ECONNABORTED"]);
+const TRANSIENT_CODES = new Set([
+  // Network errors (butler/Anthropic HTTPS socket torn down during tsx hot-reload)
+  "ECONNRESET", "ECONNREFUSED", "EPIPE", "ETIMEDOUT", "ECONNABORTED",
+  // Filesystem lock errors (Windows: git worktree remove on a busy directory)
+  "EBUSY", "ENOTEMPTY",
+]);
 
 export function isTransientNetworkError(err: unknown): boolean {
   if (!err) return false;
   const code = (err as NodeJS.ErrnoException).code;
   if (typeof code === "string" && TRANSIENT_CODES.has(code)) return true;
-  // Fallback: some socket errors arrive as plain Error with the code in the message.
-  if (err instanceof Error && /ECONNRESET|ECONNREFUSED|EPIPE/.test(err.message)) return true;
+  // Fallback: some errors arrive as plain Error with the code in the message.
+  if (err instanceof Error && /ECONNRESET|ECONNREFUSED|EPIPE|EBUSY|ENOTEMPTY/.test(err.message)) return true;
   return false;
 }
