@@ -8,6 +8,7 @@ import { createBoardEvents } from "./services/board-events.js";
 import { createSessionManager } from "./services/session.manager.js";
 import { createWorkflowEngine } from "./startup/exit-workflow.js";
 import { createAutoMerge } from "./startup/merge-workflow.js";
+import { startAutoMergeOrchestrator } from "./startup/auto-merge-orchestrator.js";
 import { createMonitorSetup } from "./startup/monitor-setup.js";
 import { setupProcessHandlers } from "./startup/process-handlers.js";
 import { setupRoutes } from "./startup/route-setup.js";
@@ -59,6 +60,11 @@ export async function startServer(port?: number, hostname?: string) {
   injectWebSocket(server);
 
   setupScheduledTasks(serverPort);
+  startAutoMergeOrchestrator({
+    database: db,
+    boardEvents,
+    getSessionManager: () => sessionManager,
+  });
   // Autonomous Monitor Butler — cron-driven board-health agent (gated by the
   // monitor_butler_enabled preference; off by default). See services/monitor-butler.ts.
   startMonitorButler();
