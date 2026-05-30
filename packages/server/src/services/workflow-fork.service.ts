@@ -70,6 +70,51 @@ export function createWorkflowForkService(deps: {
     return null;
   }
 
+  function childBranchName(parentBranch: string, entryName: string, sharedWorktree: boolean) {
+    return sharedWorktree
+      ? parentBranch
+      : `${parentBranch}__fork-${entryName.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
+  }
+
+  async function markChildFailed(params: {
+    childWorkspaceId: string;
+    parent: { id: string; issueId: string; branch: string };
+    forkNode: WorkflowNodeRow;
+    joinNode: WorkflowNodeRow;
+    entry: WorkflowNodeRow;
+    sharedWorktree: boolean;
+    error: unknown;
+  }) {
+    const { childWorkspaceId, parent, forkNode, joinNode, entry, sharedWorktree, error } = params;
+    const now = new Date().toISOString();
+    const failure = error instanceof Error ? error.message : String(error);
+    const insertValues = {
+      id: childWorkspaceId,
+      issueId: parent.issueId,
+      branch: childBranchName(parent.branch, entry.name, sharedWorktree),
+      status: "closed",
+      currentNodeId: entry.id,
+      parentWorkspaceId: parent.id,
+      forkNodeId: forkNode.id,
+      forkJoinNodeId: joinNode.id,
+      forkStatus: "failed",
+      closedAt: now,
+      updatedAt: now,
+    };
+    const existing = await database.select({ id: workspaces.id }).from(workspaces).where(eq(workspaces.id, childWorkspaceId)).limit(1);
+    if (existing.length > 0) {
+      await database.update(workspaces).set({
+        status: "closed",
+        forkStatus: "failed",
+        closedAt: now,
+        updatedAt: now,
+      }).where(eq(workspaces.id, childWorkspaceId));
+    } else {
+      await database.insert(workspaces).values({ ...insertValues, createdAt: now });
+    }
+    console.warn(`[fork] child launch failed (${childWorkspaceId}, ${entry.name}): ${failure}`);
+  }
+
   /** Count fork-child sessions currently running across the whole project. */
   async function projectRunningForkCount(projectId: string): Promise<number> {
     const rows = await database
@@ -97,9 +142,7 @@ export function createWorkflowForkService(deps: {
 
     // Shared mode reuses the parent worktree + branch; worktree mode forks a new
     // sub-worktree rooted at the parent branch's current HEAD.
-    const childBranch = sharedWorktree
-      ? parent.branch
-      : `${parent.branch}__fork-${entry.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
+    const childBranch = childBranchName(parent.branch, entry.name, sharedWorktree);
     const worktreePath = sharedWorktree
       ? (parent.workingDir ?? project.repoPath)
       : await gitService.createWorktree(project.repoPath, childBranch, parent.branch);
@@ -152,8 +195,8 @@ export function createWorkflowForkService(deps: {
     });
 
     if (getSessionManager) {
-      await getSessionManager()
-        .startSession({
+      try {
+        await getSessionManager().startSession({
           workspaceId: childWorkspaceId,
           prompt,
           agentCommand: cfg.agentCommand,
@@ -164,10 +207,11 @@ export function createWorkflowForkService(deps: {
           triggerType: skillName ? `fork:${skillName}` : "fork-child",
           profile: cfg.profile,
           model: cfg.model,
-        })
-        .catch((err) => {
-          console.error(`[fork] child session launch failed (${childWorkspaceId}):`, err instanceof Error ? err.message : String(err));
         });
+      } catch (err) {
+        await markChildFailed({ childWorkspaceId, parent, forkNode, joinNode, entry, sharedWorktree, error: err });
+        return;
+      }
     }
 
     // Best-effort timeout: cancel an overdue child so the join can still proceed.
@@ -233,17 +277,19 @@ export function createWorkflowForkService(deps: {
       const canLaunch =
         launchedNow < perWorkspaceCap && projectRunning < MAX_CONCURRENT_PER_PROJECT;
       if (canLaunch) {
-        await launchChild({ parent, project, issue, forkNode, joinNode, entry, childWorkspaceId: childId, sharedWorktree });
-        launchedNow++;
+        try {
+          await launchChild({ parent, project, issue, forkNode, joinNode, entry, childWorkspaceId: childId, sharedWorktree });
+          launchedNow++;
+        } catch (err) {
+          await markChildFailed({ childWorkspaceId: childId, parent, forkNode, joinNode, entry, sharedWorktree, error: err });
+        }
       } else {
         // Over the concurrency cap: queue the child (no worktree/session yet).
         const now = new Date().toISOString();
         await database.insert(workspaces).values({
           id: childId,
           issueId: parent.issueId,
-          branch: sharedWorktree
-            ? parent.branch
-            : `${parent.branch}__fork-${entry.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`,
+          branch: childBranchName(parent.branch, entry.name, sharedWorktree),
           status: "active",
           currentNodeId: entry.id,
           parentWorkspaceId: parent.id,
@@ -256,6 +302,12 @@ export function createWorkflowForkService(deps: {
       }
     }
     console.log(`[fork] parent=${parent.id} spawned ${launchedNow}/${entries.length} children now (rest queued).`);
+
+    const pending = await database
+      .select({ id: workspaces.id })
+      .from(workspaces)
+      .where(and(eq(workspaces.parentWorkspaceId, parent.id), inArray(workspaces.forkStatus, ["running", "queued"])));
+    if (pending.length === 0) await consolidate(parent.id);
   }
 
   /** Drain queued children for a parent up to the concurrency caps. */
