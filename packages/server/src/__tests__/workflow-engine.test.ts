@@ -237,6 +237,23 @@ describe("workflow-engine", () => {
       expect(errors).toContain('Disconnected workflow node(s) unreachable from start "Start": "Stray A", "Stray B".');
     });
 
+    it("rejects duplicate node ids before persistence can remap edges ambiguously", () => {
+      const errors = validateGraph(
+        [
+          { id: "start", name: "Start", nodeType: "start" },
+          { id: "build", name: "Build", nodeType: "normal" },
+          { id: "build", name: "Build Copy", nodeType: "normal" },
+          { id: "done", name: "Done", nodeType: "end" },
+        ],
+        [
+          { fromNodeId: "start", toNodeId: "build" },
+          { fromNodeId: "build", toNodeId: "done" },
+        ],
+      );
+
+      expect(errors).toContain("Workflow node ids must be unique (duplicate id(s): build).");
+    });
+
     it("detects cycles with node names", () => {
       const errors = validateGraph(
         baseNodes,
