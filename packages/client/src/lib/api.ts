@@ -5,13 +5,14 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
   });
   if (!res.ok) {
     let message = `API error: ${res.status} ${res.statusText}`;
+    let body: unknown;
     try {
-      const body = await res.json();
-      if (body.error) message = body.error;
+      body = await res.json();
+      if ((body as any).error) message = (body as any).error;
     } catch {
       // response body wasn't JSON, use default message
     }
-    throw new Error(message);
+    throw Object.assign(new Error(message), { body });
   }
   return res.json();
 }
