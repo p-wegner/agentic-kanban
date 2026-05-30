@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { issues, issueTags, issueDependencies, issueArtifacts, workspaces, projectStatuses } from "@agentic-kanban/shared/schema";
-import { eq, and, sql, inArray } from "drizzle-orm";
+import { issues, issueTags, issueDependencies, issueArtifacts, issueComments, showdowns, workspaces, projectStatuses } from "@agentic-kanban/shared/schema";
+import { eq, and, or, sql, inArray } from "drizzle-orm";
 import type { Database } from "../db/index.js";
 import type { BoardEvents } from "./board-events.js";
 import type { DependencyType } from "@agentic-kanban/shared/schema";
@@ -190,6 +190,11 @@ export function createIssueService(deps: {
     const projectId = await getIssueProjectId(id, database);
     if (!projectId) throw new IssueError("Issue not found", "NOT_FOUND");
 
+    // These rows can point at both the issue and its workspaces, so remove them
+    // before deleting workspace rows.
+    await database.delete(issueArtifacts).where(eq(issueArtifacts.issueId, id));
+    await database.delete(issueComments).where(eq(issueComments.issueId, id));
+
     // Find all workspaces for this issue and cascade delete
     const wsRows = await database.select({ id: workspaces.id }).from(workspaces).where(eq(workspaces.issueId, id));
     for (const ws of wsRows) {
@@ -197,7 +202,8 @@ export function createIssueService(deps: {
     }
 
     await database.delete(issueTags).where(eq(issueTags.issueId, id));
-    await database.delete(issueDependencies).where(eq(issueDependencies.issueId, id));
+    await database.delete(issueDependencies).where(or(eq(issueDependencies.issueId, id), eq(issueDependencies.dependsOnId, id)));
+    await database.delete(showdowns).where(eq(showdowns.issueId, id));
     await database.delete(issues).where(eq(issues.id, id));
 
     boardEvents?.broadcast(projectId, "issue_deleted");
