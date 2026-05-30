@@ -1,6 +1,14 @@
+import { VIEW_REGISTRY } from "../lib/viewRegistry.js";
+
 interface ShortcutHelpProps {
   onClose: () => void;
 }
+
+// View-switch shortcuts are derived from the canonical view registry (#116) so
+// the overlay never drifts out of sync with the toolbar and command palette.
+const VIEW_SHORTCUTS: Array<{ keys: string[]; description: string }> = VIEW_REGISTRY.filter(
+  (v) => v.shortcut,
+).map((v) => ({ keys: [v.shortcut as string], description: `Switch to ${v.label}` }));
 
 const SHORTCUTS: Array<{ keys: string[]; description: string; sequential?: boolean }> = [
   { keys: ["/"], description: "Focus search" },
@@ -11,14 +19,7 @@ const SHORTCUTS: Array<{ keys: string[]; description: string; sequential?: boole
   { keys: ["w"], description: "New issue + start workspace" },
   { keys: ["q"], description: "Open Quick Tasks panel" },
   { keys: ["Shift", "V"], description: "Start voice inbox (record idea → Backlog issue)" },
-  { keys: ["b"], description: "Switch to Board view" },
-  { keys: ["g"], description: "Switch to Graph view" },
-  { keys: ["t"], description: "Switch to Table view" },
-  { keys: ["f"], description: "Switch to Timeline view" },
-  { keys: ["l"], description: "Switch to Agents view" },
-  { keys: ["m"], description: "Switch to Metrics view" },
-  { keys: ["i"], description: "Switch to Butler chat" },
-  { keys: ["p"], description: "Switch to Swimlane view" },
+  ...VIEW_SHORTCUTS,
   { keys: ["a"], description: "Toggle All Workspaces panel" },
   { keys: ["x"], description: "Open Codemod Factory" },
   { keys: ["g", "s"], description: "Open settings", sequential: true },
