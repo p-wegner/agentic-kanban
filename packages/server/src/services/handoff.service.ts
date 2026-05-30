@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { readFile, appendFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { getLatestCommit, getDiffShortstat } from "./git.service.js";
+import { getLatestCommit, getDiffShortstat, getChangedFileNames } from "./git.service.js";
 import { parseSessionSummary } from "@agentic-kanban/shared";
 import { sessionMessages, sessions } from "@agentic-kanban/shared/schema";
 import { eq } from "drizzle-orm";
@@ -9,7 +9,6 @@ import type { Database } from "../db/index.js";
 
 const HANDOFF_FILENAME = "HANDOFF.md";
 const MAX_FILES = 20;
-const MAX_COMMANDS = 10;
 const MAX_ERRORS = 5;
 const MAX_SUMMARY_CHARS = 500;
 const MAX_HANDOFF_BYTES = 4096;
@@ -18,8 +17,8 @@ interface HandoffData {
   lastCommit: { sha: string; message: string } | null;
   diffStats: { filesChanged: number; insertions: number; deletions: number } | null;
   agentSummary: string | null;
+  changedFiles: string[];
   filesModified: string[];
-  commandsRun: string[];
   errors: string[];
   model: string;
   durationMs: number;
@@ -36,15 +35,27 @@ function truncateText(text: string | null, maxChars: number): string | null {
   return text.slice(0, maxChars) + "...";
 }
 
+function finalSummary(summary: string | null, fallback: string | null): string | null {
+  const source = summary || fallback;
+  if (!source) return null;
+  const parts = source
+    .split("\n\n---\n\n")
+    .map(part => part.trim())
+    .filter(Boolean);
+  return parts[parts.length - 1] || source.trim();
+}
+
 export async function generateHandoff(
   workingDir: string,
   sessionId: string,
   database: Database,
   baseBranch?: string | null,
 ): Promise<string> {
-  const [lastCommit, diffStatsResult, sessionRows, messageRows] = await Promise.all([
+  const diffBase = baseBranch || "HEAD~1";
+  const [lastCommit, diffStatsResult, changedFilesResult, sessionRows, messageRows] = await Promise.all([
     getLatestCommit(workingDir).catch(() => null),
-    getDiffShortstat(workingDir, baseBranch || "HEAD~1").catch(() => null),
+    getDiffShortstat(workingDir, diffBase).catch(() => null),
+    getChangedFileNames(workingDir, diffBase).catch(() => []),
     database.select({ stats: sessions.stats }).from(sessions).where(eq(sessions.id, sessionId)).limit(1),
     database.select({ type: sessionMessages.type, data: sessionMessages.data }).from(sessionMessages).where(eq(sessionMessages.sessionId, sessionId)),
   ]);
@@ -59,9 +70,9 @@ export async function generateHandoff(
   const data: HandoffData = {
     lastCommit,
     diffStats: diffStatsResult,
-    agentSummary: truncateText(summary.agentSummary || (parsedStats.agentSummary as string) || null, MAX_SUMMARY_CHARS),
+    agentSummary: truncateText(finalSummary(summary.agentSummary, (parsedStats.agentSummary as string) || null), MAX_SUMMARY_CHARS),
+    changedFiles: changedFilesResult,
     filesModified: [...new Set([...summary.filesEdited, ...summary.filesWritten])],
-    commandsRun: summary.commandsRun,
     errors: summary.errors,
     model: summary.model || (parsedStats.model as string) || "",
     durationMs: (parsedStats.durationMs as number) || 0,
@@ -86,24 +97,24 @@ function buildHandoffMarkdown(data: HandoffData): string {
     lines.push("");
   }
 
+  if (data.changedFiles.length > 0) {
+    lines.push("## Current Changed Files");
+    for (const f of truncateList(data.changedFiles, MAX_FILES)) {
+      lines.push(`- \`${f}\``);
+    }
+    if (data.changedFiles.length > MAX_FILES) {
+      lines.push(`- ... and ${data.changedFiles.length - MAX_FILES} more`);
+    }
+    lines.push("");
+  }
+
   if (data.filesModified.length > 0) {
-    lines.push("## Files Modified");
+    lines.push("## Files Modified By Previous Session");
     for (const f of truncateList(data.filesModified, MAX_FILES)) {
       lines.push(`- \`${f}\``);
     }
     if (data.filesModified.length > MAX_FILES) {
       lines.push(`- ... and ${data.filesModified.length - MAX_FILES} more`);
-    }
-    lines.push("");
-  }
-
-  if (data.commandsRun.length > 0) {
-    lines.push("## Commands Run");
-    for (const cmd of truncateList(data.commandsRun, MAX_COMMANDS)) {
-      lines.push(`- \`${cmd}\``);
-    }
-    if (data.commandsRun.length > MAX_COMMANDS) {
-      lines.push(`- ... and ${data.commandsRun.length - MAX_COMMANDS} more`);
     }
     lines.push("");
   }

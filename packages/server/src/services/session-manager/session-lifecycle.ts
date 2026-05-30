@@ -249,15 +249,29 @@ export function createSessionLifecycle(
             return;
           }
 
-          db.update(sessions)
-            .set({ status: "completed", endedAt: endNow, exitCode: String(exitCode ?? 0) })
-            .where(eq(sessions.id, sessionId))
-            .catch((err) => console.error("Failed to update session:", err));
-          // Always fire the workflow callback — don't gate it on the DB update.
-          options?.onSessionExit?.(workspaceId, sessionId, exitCode, planMode);
-          computeScorecard(workspaceId, db).catch(() => {});
-          computeWorkspaceCodeMetrics(workspaceId, db).catch(() => {});
+          const sessionFinalized = (async () => {
+            await db.update(sessions)
+              .set({ status: "completed", endedAt: endNow, exitCode: String(exitCode ?? 0) })
+              .where(eq(sessions.id, sessionId));
 
+            // Write HANDOFF.md before workflow callbacks can launch the next session.
+            if (effectiveWorkingDir) {
+              try {
+                const { writeHandoffFile } = await import("../handoff.service.js");
+                await writeHandoffFile(effectiveWorkingDir, sessionId, db, workspace.baseBranch);
+                console.log(`[session] HANDOFF.md written: workspaceId=${workspaceId} sessionId=${sessionId}`);
+              } catch (err) {
+                console.warn(`[session] HANDOFF.md write failed: sessionId=${sessionId}`, err);
+              }
+            }
+          })()
+            .catch((err) => console.error("Failed to finalize session:", err));
+          sessionFinalized.finally(() => {
+            // Always fire the workflow callback even if finalization failed.
+            options?.onSessionExit?.(workspaceId, sessionId, exitCode, planMode);
+            computeScorecard(workspaceId, db).catch(() => {});
+            computeWorkspaceCodeMetrics(workspaceId, db).catch(() => {});
+          });
           // Auto-resume: if ExitPlanMode was denied and workspace wasn't in plan-only mode,
           // start a new session with --resume and a "proceed" prompt
           if (hadExitPlanModeDenied && !planMode) {
@@ -265,7 +279,7 @@ export function createSessionLifecycle(
             if (resumeCount < 1) {
               state.workspaceAutoResumeCount.set(workspaceId, resumeCount + 1);
               console.log(`[session] auto-resuming after ExitPlanMode denial: workspaceId=${workspaceId} resumeFromId=${sessionId}`);
-              startSession({
+              sessionFinalized.finally(() => startSession({
                 workspaceId,
                 prompt: "Your plan has been approved. Proceed with the implementation now.",
                 agentCommand,
@@ -279,7 +293,7 @@ export function createSessionLifecycle(
                 provider,
                 triggerType: "agent",
                 profile,
-              }).catch((err) => console.error(`[session] auto-resume failed: workspaceId=${workspaceId}`, err));
+              })).catch((err) => console.error(`[session] auto-resume failed: workspaceId=${workspaceId}`, err));
             } else {
               console.log(`[session] skipping auto-resume: workspaceId=${workspaceId} already auto-resumed ${resumeCount} time(s)`);
             }
@@ -288,7 +302,7 @@ export function createSessionLifecycle(
           // All-provider plan mode: a read-only plan run just finished. Persist the plan to PLAN.md,
           // leave plan mode, then either auto-continue or park awaiting human approval.
           if (planMode && exitCode === 0 && workspace.workingDir && planText) {
-            void (async () => {
+            sessionFinalized.then(async () => {
               try {
                 const plan = extractPlan(planText);
                 if (!plan) {
@@ -325,21 +339,9 @@ export function createSessionLifecycle(
               } catch (err) {
                 console.error(`[session] plan completion handling failed: workspaceId=${workspaceId}`, err);
               }
-            })();
+            });
           }
 
-          // Write HANDOFF.md for the next session on this workspace
-          if (effectiveWorkingDir) {
-            void (async () => {
-              try {
-                const { writeHandoffFile } = await import("../handoff.service.js");
-                await writeHandoffFile(effectiveWorkingDir, sessionId, db, workspace.baseBranch);
-                console.log(`[session] HANDOFF.md written: workspaceId=${workspaceId} sessionId=${sessionId}`);
-              } catch (err) {
-                console.warn(`[session] HANDOFF.md write failed: sessionId=${sessionId}`, err);
-              }
-            })();
-          }
         }
       // When resumeWithNewModel is true, omit --resume so the new profile/provider is used instead
       }, resumeWithNewModel ? undefined : providerSessionId, agentCommand, claudeProfile, multiTurn, permissionPromptTool, planMode, provider, profile, extraEnv, skipPermissions, effectiveModel);
