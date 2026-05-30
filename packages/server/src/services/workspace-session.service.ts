@@ -22,6 +22,7 @@ import {
 } from "../repositories/session.repository.js";
 import { getPreference } from "../repositories/preferences.repository.js";
 import { buildImplementPrompt, buildRejectPrompt, writePlanFile, PLAN_FILE } from "./plan-mode.service.js";
+import { stopBisectSession } from "./bisect.service.js";
 import {
   WorkspaceError,
   applyWorkspaceAgentSelection,
@@ -190,6 +191,10 @@ export function createWorkspaceSessionService(deps: {
     if (getSessionManager) {
       for (const session of runningSessions) {
         if (session.status === "running") {
+          if (session.executor === "auto-bisect" && stopBisectSession(session.id)) {
+            stopped = true;
+            continue;
+          }
           await getSessionManager().stopSession(session.id);
           stopped = true;
         }

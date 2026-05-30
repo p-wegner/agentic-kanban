@@ -1,7 +1,7 @@
-import { spawn, execFile } from "node:child_process";
+import { spawn, execFile, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
-import { issues, projects, sessionMessages, sessions, workspaces } from "@agentic-kanban/shared/schema";
+import { issues, sessionMessages, sessions, workspaces } from "@agentic-kanban/shared/schema";
 import type { AgentOutputMessage } from "@agentic-kanban/shared";
 import type { Database } from "../db/index.js";
 import type { BoardEvents } from "./board-events.js";
@@ -9,6 +9,19 @@ import type { SessionManager } from "./session.manager.js";
 import { WorkspaceError } from "./workspace-internals.js";
 
 export type BisectScope = "related" | "full";
+
+class BisectCancelled extends Error {
+  constructor() {
+    super("Auto-bisect stopped");
+  }
+}
+
+interface ActiveBisect {
+  cancelled: boolean;
+  child: ChildProcessWithoutNullStreams | null;
+}
+
+const activeBisects = new Map<string, ActiveBisect>();
 
 export interface BisectResult {
   status: "found" | "inconclusive" | "failed";
@@ -22,11 +35,20 @@ export interface BisectResult {
   changedFiles: string[];
 }
 
-function execGit(args: string[], cwd: string): Promise<string> {
+function execGit(args: string[], cwd: string, allowedExitCodes = [0]): Promise<string> {
   return new Promise((resolve, reject) => {
     execFile("git", args, { cwd, windowsHide: true, maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
-      if (err) reject(new Error(`git ${args.join(" ")} failed: ${stderr || err.message}`));
-      else resolve(stdout.toString());
+      const output = `${stdout.toString()}${stderr.toString()}`;
+      if (err) {
+        const exitCode = typeof (err as { code?: unknown }).code === "number" ? (err as { code: number }).code : null;
+        if (exitCode != null && allowedExitCodes.includes(exitCode)) {
+          resolve(output);
+          return;
+        }
+        reject(new Error(`git ${args.join(" ")} failed: ${output || err.message}`));
+      } else {
+        resolve(output);
+      }
     });
   });
 }
@@ -63,11 +85,29 @@ function isSkippableFailure(exitCode: number | null, output: string): boolean {
   if (exitCode === 125) return true;
   return [
     "No test files found",
-    "Cannot find module",
-    "Failed to load",
-    "Transform failed",
-    "Build failed",
   ].some((needle) => output.includes(needle));
+}
+
+function throwIfCancelled(active: ActiveBisect) {
+  if (active.cancelled) throw new BisectCancelled();
+}
+
+function killProcessTree(child: ChildProcessWithoutNullStreams) {
+  if (process.platform === "win32" && child.pid) {
+    execFile("taskkill", ["/PID", String(child.pid), "/T", "/F"], { windowsHide: true }, () => {});
+    return;
+  }
+  child.kill();
+}
+
+export function stopBisectSession(sessionId: string): boolean {
+  const active = activeBisects.get(sessionId);
+  if (!active) return false;
+  active.cancelled = true;
+  if (active.child && !active.child.killed) {
+    killProcessTree(active.child);
+  }
+  return true;
 }
 
 function formatResult(result: BisectResult): string {
@@ -119,7 +159,7 @@ export function createBisectService(deps: {
     await emit(sessionId, { type: "stdout", sessionId, data: `${line}\n` });
   }
 
-  async function runTests(sessionId: string, cwd: string, scope: BisectScope, changedFiles: string[]) {
+  async function runTests(sessionId: string, cwd: string, scope: BisectScope, changedFiles: string[], active: ActiveBisect) {
     const args = ["--filter", "agentic-kanban", "test", "--", "--reporter=verbose"];
     if (scope === "related" && changedFiles.length > 0) {
       args.push("--related", ...changedFiles);
@@ -131,6 +171,8 @@ export function createBisectService(deps: {
       const command = process.platform === "win32" ? "cmd.exe" : "pnpm";
       const commandArgs = process.platform === "win32" ? ["/d", "/s", "/c", "pnpm", ...args] : args;
       const child = spawn(command, commandArgs, { cwd, windowsHide: true, shell: false });
+      active.child = child;
+      let settled = false;
       let output = "";
       child.stdout?.on("data", (chunk) => {
         const data = chunk.toString();
@@ -143,12 +185,20 @@ export function createBisectService(deps: {
         void emit(sessionId, { type: "stderr", sessionId, data });
       });
       child.on("error", (err) => {
+        if (settled) return;
+        settled = true;
+        active.child = null;
         const data = `${err.message}\n`;
         output = trimOutput(output + data);
         void emit(sessionId, { type: "stderr", sessionId, data });
         resolve({ exitCode: 127, output });
       });
-      child.on("close", (code) => resolve({ exitCode: code, output }));
+      child.on("close", (code) => {
+        if (settled) return;
+        settled = true;
+        active.child = null;
+        resolve({ exitCode: code, output });
+      });
     });
   }
 
@@ -167,7 +217,21 @@ export function createBisectService(deps: {
       .where(eq(workspaces.id, workspaceId));
   }
 
+  async function stopSession(workspaceId: string, sessionId: string) {
+    const now = new Date().toISOString();
+    await emitLine(sessionId, "Auto-bisect stopped.");
+    await emit(sessionId, { type: "exit", sessionId, exitCode: 130 });
+    await database.update(sessions)
+      .set({ status: "stopped", endedAt: now, exitCode: "130" })
+      .where(eq(sessions.id, sessionId));
+    await database.update(workspaces)
+      .set({ status: "idle", updatedAt: now })
+      .where(eq(workspaces.id, workspaceId));
+  }
+
   async function runBisect(workspaceId: string, sessionId: string, scope: BisectScope) {
+    const active = activeBisects.get(sessionId) ?? { cancelled: false, child: null };
+    activeBisects.set(sessionId, active);
     let resetNeeded = false;
     let resetWorkingDir: string | null = null;
     let projectId: string | null = null;
@@ -175,34 +239,33 @@ export function createBisectService(deps: {
     try {
       const rows = await database
         .select({
-          workspace: workspaces,
+          workingDir: workspaces.workingDir,
+          baseCommitSha: workspaces.baseCommitSha,
           projectId: issues.projectId,
-          repoPath: projects.repoPath,
         })
         .from(workspaces)
         .innerJoin(issues, eq(workspaces.issueId, issues.id))
-        .innerJoin(projects, eq(issues.projectId, projects.id))
         .where(eq(workspaces.id, workspaceId))
         .limit(1);
 
       const row = rows[0];
       if (!row) throw new WorkspaceError("Workspace not found", "NOT_FOUND");
-      const workspace = row.workspace;
       projectId = row.projectId;
-      if (!workspace.workingDir) throw new WorkspaceError("Workspace has no working directory", "BAD_REQUEST");
-      if (!workspace.baseCommitSha) throw new WorkspaceError("Workspace has no base commit SHA to use as the good commit", "BAD_REQUEST");
-      resetWorkingDir = workspace.workingDir;
+      if (!row.workingDir) throw new WorkspaceError("Workspace has no working directory", "BAD_REQUEST");
+      if (!row.baseCommitSha) throw new WorkspaceError("Workspace has no base commit SHA to use as the good commit", "BAD_REQUEST");
+      resetWorkingDir = row.workingDir;
 
-      const dirty = (await execGit(["status", "--porcelain"], workspace.workingDir)).trim();
+      const dirty = (await execGit(["status", "--porcelain"], row.workingDir)).trim();
       if (dirty) throw new WorkspaceError("Working tree must be clean before auto-bisect can run", "CONFLICT");
 
-      const badSha = (await execGit(["rev-parse", "HEAD"], workspace.workingDir)).trim();
-      const goodSha = workspace.baseCommitSha;
-      const changedFiles = (await execGit(["diff", "--name-only", `${goodSha}..${badSha}`], workspace.workingDir))
+      const badSha = (await execGit(["rev-parse", "HEAD"], row.workingDir)).trim();
+      const goodSha = row.baseCommitSha;
+      const changedFiles = (await execGit(["diff", "--name-only", `${goodSha}..${badSha}`], row.workingDir))
         .split(/\r?\n/)
         .map((line) => line.trim())
         .filter(Boolean);
 
+      throwIfCancelled(active);
       await emitLine(sessionId, `Auto-bisect starting: bad=${badSha} good=${goodSha} scope=${scope}`);
       if (scope === "related") {
         await emitLine(sessionId, changedFiles.length > 0
@@ -210,7 +273,7 @@ export function createBisectService(deps: {
           : "No changed files detected; falling back to full test suite.");
       }
 
-      await execGit(["bisect", "start", badSha, goodSha], workspace.workingDir);
+      await execGit(["bisect", "start", badSha, goodSha], row.workingDir);
       resetNeeded = true;
 
       const result: BisectResult = {
@@ -227,7 +290,8 @@ export function createBisectService(deps: {
 
       const seen = new Set<string>();
       for (let step = 1; step <= 100; step++) {
-        const current = (await execGit(["rev-parse", "HEAD"], workspace.workingDir)).trim();
+        throwIfCancelled(active);
+        const current = (await execGit(["rev-parse", "HEAD"], row.workingDir)).trim();
         if (seen.has(current)) {
           await emitLine(sessionId, `Stopping: git bisect revisited ${current}.`);
           break;
@@ -235,11 +299,12 @@ export function createBisectService(deps: {
         seen.add(current);
         await emitLine(sessionId, `\n[${step}] Testing ${current}`);
 
-        const test = await runTests(sessionId, workspace.workingDir, scope, changedFiles);
+        const test = await runTests(sessionId, row.workingDir, scope, changedFiles, active);
+        throwIfCancelled(active);
         const output = trimOutput(test.output);
         if (test.exitCode === 0) {
           result.testedCommits.push({ sha: current, result: "good", exitCode: 0 });
-          const markOutput = await execGit(["bisect", "good"], workspace.workingDir);
+          const markOutput = await execGit(["bisect", "good"], row.workingDir, [0, 10]);
           await emitLine(sessionId, `Marked ${shortSha(current)} good.`);
           const firstBad = extractFirstBadCommit(markOutput);
           if (firstBad) {
@@ -253,7 +318,7 @@ export function createBisectService(deps: {
         if (isSkippableFailure(test.exitCode, output)) {
           result.testedCommits.push({ sha: current, result: "skip", exitCode: test.exitCode });
           result.skippedCommits.push(current);
-          const markOutput = await execGit(["bisect", "skip"], workspace.workingDir);
+          const markOutput = await execGit(["bisect", "skip"], row.workingDir, [0, 10]);
           await emitLine(sessionId, `Skipped ${shortSha(current)} because the test command could not run cleanly.`);
           if (markOutput.includes("only 'skip'ped commits left")) break;
           continue;
@@ -261,7 +326,7 @@ export function createBisectService(deps: {
 
         result.testedCommits.push({ sha: current, result: "bad", exitCode: test.exitCode });
         result.failingTestName ??= extractFailingTestName(output);
-        const markOutput = await execGit(["bisect", "bad"], workspace.workingDir);
+        const markOutput = await execGit(["bisect", "bad"], row.workingDir, [0, 10]);
         await emitLine(sessionId, `Marked ${shortSha(current)} bad.`);
         const firstBad = extractFirstBadCommit(markOutput);
         if (firstBad) {
@@ -272,18 +337,28 @@ export function createBisectService(deps: {
       }
 
       if (result.breakingCommitSha) {
-        result.message = (await execGit(["log", "-1", "--format=%s", result.breakingCommitSha], workspace.workingDir)).trim();
-        result.diffStat = (await execGit(["show", "--stat", "--oneline", "--summary", "--no-renames", result.breakingCommitSha], workspace.workingDir)).trim();
+        result.message = (await execGit(["log", "-1", "--format=%s", result.breakingCommitSha], row.workingDir)).trim();
+        result.diffStat = (await execGit(["show", "--stat", "--oneline", "--summary", "--no-renames", result.breakingCommitSha], row.workingDir)).trim();
         exitCode = 0;
       }
 
       if (resetNeeded) {
-        await execGit(["bisect", "reset"], workspace.workingDir);
+        await execGit(["bisect", "reset"], row.workingDir);
         resetNeeded = false;
       }
       await finishSession(workspaceId, sessionId, exitCode, result);
       if (projectId) boardEvents?.broadcast(projectId, "session_completed");
     } catch (err) {
+      if (err instanceof BisectCancelled) {
+        if (resetNeeded) {
+          try {
+            await execGit(["bisect", "reset"], resetWorkingDir ?? process.cwd());
+          } catch { /* ignore */ }
+        }
+        await stopSession(workspaceId, sessionId);
+        if (projectId) boardEvents?.broadcast(projectId, "session_stopped");
+        return;
+      }
       const message = err instanceof Error ? err.message : String(err);
       await emit(sessionId, { type: "stderr", sessionId, data: `${message}\n` });
       if (resetNeeded) {
@@ -303,19 +378,21 @@ export function createBisectService(deps: {
         changedFiles: [],
       });
       if (projectId) boardEvents?.broadcast(projectId, "session_completed");
+    } finally {
+      activeBisects.delete(sessionId);
     }
   }
 
   async function startBisect(workspaceId: string, scope: BisectScope): Promise<{ sessionId: string }> {
     const rows = await database
-      .select({ workspace: workspaces, projectId: issues.projectId })
+      .select({ workingDir: workspaces.workingDir, projectId: issues.projectId })
       .from(workspaces)
       .innerJoin(issues, eq(workspaces.issueId, issues.id))
       .where(eq(workspaces.id, workspaceId))
       .limit(1);
     const row = rows[0];
     if (!row) throw new WorkspaceError("Workspace not found", "NOT_FOUND");
-    if (!row.workspace.workingDir) throw new WorkspaceError("Workspace has no working directory", "BAD_REQUEST");
+    if (!row.workingDir) throw new WorkspaceError("Workspace has no working directory", "BAD_REQUEST");
 
     const existingSessions = await database
       .select({ id: sessions.id, status: sessions.status })
