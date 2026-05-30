@@ -30,3 +30,6 @@ HANDOFF.md
 CLAUDE.local.md
 # npm pack build artifacts
 *.tgz
+
+# Runtime scheduler lock — pid/session churn, must not be tracked
+.claude/scheduled_tasks.lock
