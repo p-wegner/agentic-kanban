@@ -87,7 +87,7 @@ export async function buildReviewPrompt(
 
 If only MINOR issues or no issues:
 1. Use the mark_ready_for_merge MCP tool with workspaceId={{workspaceId}} to signal the workspace is approved
-2. Exit normally (the system will auto-merge)`
+2. Exit normally (the scheduled merge orchestrator will merge it)`
     : `If you find CRITICAL or MAJOR issues:
 1. Use the move_issue MCP tool to move issue ${issueId} to 'In Progress'
 2. Describe each issue clearly so the developer knows what to fix
@@ -95,7 +95,7 @@ If only MINOR issues or no issues:
 
 If only MINOR issues or no issues:
 1. Use the mark_ready_for_merge MCP tool with workspaceId={{workspaceId}} to signal the workspace is approved
-2. Exit normally (the system will auto-merge)`;
+2. Exit normally (the scheduled merge orchestrator will merge it)`;
 
   const localBaseBranch = (baseBranch ?? "HEAD").replace(/^origin\//, "");
 
