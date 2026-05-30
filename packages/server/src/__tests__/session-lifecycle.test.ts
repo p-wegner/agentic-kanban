@@ -136,15 +136,17 @@ describe("session-lifecycle", () => {
     const workspaceId = await seedWorkspace(db);
     const { service: agentService, getOnOutput } = createFakeAgentService();
     const onSessionExit = vi.fn();
+    const state = createSessionState();
 
     const lifecycle = createSessionLifecycle(
-      createSessionState(),
+      state,
       { onSessionExit },
       vi.fn(),
       { db, agentService },
     );
 
     const sessionId = await lifecycle.startSession({ workspaceId, prompt: "do it" });
+    state.sessionSubstantiveOutput.add(sessionId);
 
     // Drive the exit event the way agent.service would
     const onOutput = getOnOutput();
@@ -157,6 +159,40 @@ describe("session-lifecycle", () => {
     expect(rows[0].status).toBe("completed");
     expect(rows[0].exitCode).toBe("0");
     expect(onSessionExit).toHaveBeenCalledWith(workspaceId, sessionId, 0, undefined);
+  });
+
+  it("marks a fast provider exit with no model output as a stopped launch failure", async () => {
+    const workspaceId = await seedWorkspace(db);
+    const { service: agentService, getOnOutput } = createFakeAgentService();
+    const onSessionExit = vi.fn();
+
+    const lifecycle = createSessionLifecycle(
+      createSessionState(),
+      { onSessionExit },
+      vi.fn(),
+      { db, agentService },
+    );
+
+    const sessionId = await lifecycle.startSession({ workspaceId, prompt: "do it", provider: "codex" });
+
+    const onOutput = getOnOutput();
+    expect(onOutput).toBeDefined();
+    onOutput!({ type: "exit", exitCode: 0 } as never);
+
+    await flush();
+
+    const rows = await db.select().from(sessions).where(eq(sessions.id, sessionId));
+    expect(rows[0].status).toBe("stopped");
+    expect(rows[0].exitCode).toBe("1");
+    const stats = JSON.parse(rows[0].stats!);
+    expect(stats.launchFailure).toBe(true);
+    expect(stats.success).toBe(false);
+    expect(stats.numTurns).toBe(0);
+    expect(stats.agentSummary).toContain("provider process exited");
+
+    const wsRows = await db.select().from(workspaces).where(eq(workspaces.id, workspaceId));
+    expect(wsRows[0].status).toBe("idle");
+    expect(onSessionExit).toHaveBeenCalledWith(workspaceId, sessionId, 1, undefined);
   });
 
   it("marks the session stopped and rethrows when the agent fails to launch", async () => {
