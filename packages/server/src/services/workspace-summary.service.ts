@@ -44,6 +44,7 @@ export type WorkspaceSummary = {
     conflicts?: { hasConflicts: boolean; conflictingFiles: string[] } | null;
     lastSessionAt?: string | null;
     lastSessionTriggerType?: string | null;
+    mergedAt?: string | null;
     contextTokens?: number | null;
     lastTool?: string | null;
     lastAssistantMessage?: string | null;
@@ -119,6 +120,7 @@ export async function buildWorkspaceSummaryMap(
       diffStatCacheDeletions: workspaces.diffStatCacheDeletions,
       scorecardScore: workspaces.scorecardScore,
       showdownId: workspaces.showdownId,
+      mergedAt: workspaces.mergedAt,
     })
     .from(workspaces)
     .where(inArray(workspaces.issueId, issueIds));
@@ -179,6 +181,7 @@ export async function buildWorkspaceSummaryMap(
       pendingPlanPath: mainWs.pendingPlanPath,
       planOnlyWarning: false,
       scorecard: mainWs.scorecardScore !== null ? { score: mainWs.scorecardScore } : null,
+      mergedAt: mainWs.mergedAt,
     };
 
     if (mainWs.workingDir && mainWs.status !== "closed") {
