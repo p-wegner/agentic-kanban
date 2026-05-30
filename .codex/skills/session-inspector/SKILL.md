@@ -238,6 +238,10 @@ Write-Output "Last tool: $lastTool"
 Write-Output "Last text: $lastText"
 ```
 
+### Detect Codex launch failures
+
+If `analyze-codex-session.mjs` reports `Duration: 1s`, `Tokens: 0 in / 0 out`, and no assistant text, the process received a prompt but never executed a model turn. Treat the related board session as launch-failed or stale instead of waiting longer; stop the workspace session and inspect the worktree/branch directly.
+
 ### Find user messages in a Codex session
 
 ```powershell
