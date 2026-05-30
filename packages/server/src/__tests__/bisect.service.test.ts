@@ -4,8 +4,8 @@ import { execFile } from "node:child_process";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { eq } from "drizzle-orm";
-import { issues, projects, projectStatuses, sessionMessages, sessions, workspaces } from "@agentic-kanban/shared/schema";
+import { eq, sql } from "drizzle-orm";
+import { sessionMessages, sessions } from "@agentic-kanban/shared/schema";
 import { createTestDb, type TestDb } from "./helpers/test-db.js";
 import { createBisectService } from "../services/bisect.service.js";
 
@@ -31,45 +31,22 @@ async function seedWorkspace(db: TestDb, repoPath: string, baseCommitSha: string
   const issueId = randomUUID();
   const workspaceId = randomUUID();
 
-  await db.insert(projects).values({
-    id: projectId,
-    name: "Bisect Project",
-    repoPath,
-    repoName: "bisect-project",
-    defaultBranch: "main",
-    createdAt: now,
-    updatedAt: now,
-  });
-  await db.insert(projectStatuses).values({
-    id: statusId,
-    projectId,
-    name: "In Progress",
-    sortOrder: 0,
-    isDefault: true,
-    createdAt: now,
-  });
-  await db.insert(issues).values({
-    id: issueId,
-    issueNumber: 1,
-    title: "Find break",
-    priority: "medium",
-    sortOrder: 0,
-    statusId,
-    projectId,
-    createdAt: now,
-    updatedAt: now,
-  });
-  await db.insert(workspaces).values({
-    id: workspaceId,
-    issueId,
-    branch: "feature/bisect",
-    workingDir: repoPath,
-    baseBranch: "main",
-    baseCommitSha,
-    status: "active",
-    createdAt: now,
-    updatedAt: now,
-  });
+  await db.run(sql`
+    insert into projects (id, name, repo_path, repo_name, default_branch, created_at, updated_at)
+    values (${projectId}, 'Bisect Project', ${repoPath}, 'bisect-project', 'main', ${now}, ${now})
+  `);
+  await db.run(sql`
+    insert into project_statuses (id, project_id, name, sort_order, is_default, created_at)
+    values (${statusId}, ${projectId}, 'In Progress', 0, 1, ${now})
+  `);
+  await db.run(sql`
+    insert into issues (id, issue_number, title, priority, sort_order, status_id, project_id, created_at, updated_at)
+    values (${issueId}, 1, 'Find break', 'medium', 0, ${statusId}, ${projectId}, ${now}, ${now})
+  `);
+  await db.run(sql`
+    insert into workspaces (id, issue_id, branch, working_dir, base_branch, base_commit_sha, status, created_at, updated_at)
+    values (${workspaceId}, ${issueId}, 'feature/bisect', ${repoPath}, 'main', ${baseCommitSha}, 'active', ${now}, ${now})
+  `);
   return workspaceId;
 }
 
@@ -141,5 +118,49 @@ describe("bisect.service", () => {
     expect(result.status).toBe("found");
     expect(result.breakingCommitSha).toBe(breakingCommit);
     expect(result.failingTestName).toBe("value.test > keeps value passing");
+  }, 60_000);
+
+  it("treats import and build failures as bad commits instead of skipping them", async () => {
+    await writeFile(join(repoDir, "package.json"), JSON.stringify({
+      name: "agentic-kanban",
+      version: "0.0.0",
+      scripts: { test: "node test.mjs" },
+    }, null, 2));
+    await writeFile(join(repoDir, "test.mjs"), "console.log('PASS module.test > loads module');\n");
+    const baseCommit = await commit(repoDir, "commit 1: base passing");
+
+    await writeFile(join(repoDir, "README.md"), "still passing\n");
+    await commit(repoDir, "commit 2: unrelated passing change");
+
+    await writeFile(join(repoDir, "test.mjs"), [
+      "console.error('Cannot find module ./missing.js');",
+      "process.exit(1);",
+    ].join("\n"));
+    const breakingCommit = await commit(repoDir, "commit 3: break import");
+
+    await writeFile(join(repoDir, "README.md"), "still broken\n");
+    await commit(repoDir, "commit 4: final broken state");
+
+    const workspaceId = await seedWorkspace(db, repoDir, baseCommit);
+    const sessionId = randomUUID();
+    await db.insert(sessions).values({
+      id: sessionId,
+      workspaceId,
+      executor: "auto-bisect",
+      status: "running",
+      startedAt: new Date().toISOString(),
+      triggerType: "bisect",
+    });
+
+    const service = createBisectService({ database: db });
+    await service.runBisect(workspaceId, sessionId, "full");
+
+    const rows = await db.select().from(sessionMessages).where(eq(sessionMessages.sessionId, sessionId));
+    const resultMessage = rows.find((row) => row.type === "bisect");
+    expect(resultMessage).toBeTruthy();
+    const result = JSON.parse(resultMessage!.data!);
+    expect(result.status).toBe("found");
+    expect(result.breakingCommitSha).toBe(breakingCommit);
+    expect(result.skippedCommits).toEqual([]);
   }, 60_000);
 });
