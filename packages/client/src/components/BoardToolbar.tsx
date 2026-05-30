@@ -1,8 +1,8 @@
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { BacklogPanel } from "./BacklogPanel.js";
 import { MonitorPopover, type MonitorStatus } from "./MonitorPopover.js";
 import { VoiceInboxButton } from "./VoiceInboxButton.js";
-import { VIEW_REGISTRY } from "../lib/viewRegistry.js";
+import { PRIMARY_VIEWS, SECONDARY_VIEWS } from "../lib/viewRegistry.js";
 import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
 
 // Re-exported from the canonical view registry (#116). Kept here for back-compat
@@ -71,6 +71,29 @@ export function BoardToolbar({
   mergeQueueCount = 0,
 }: BoardToolbarProps) {
   const [showMonitorPopover, setShowMonitorPopover] = useState(false);
+  const [showMoreViews, setShowMoreViews] = useState(false);
+  const moreViewsRef = useRef<HTMLDivElement>(null);
+
+  // Close the "More" views dropdown on outside click or Escape.
+  useEffect(() => {
+    if (!showMoreViews) return;
+    function handleClick(e: MouseEvent) {
+      if (moreViewsRef.current && !moreViewsRef.current.contains(e.target as Node)) {
+        setShowMoreViews(false);
+      }
+    }
+    function handleKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setShowMoreViews(false);
+    }
+    document.addEventListener("mousedown", handleClick);
+    document.addEventListener("keydown", handleKey);
+    return () => {
+      document.removeEventListener("mousedown", handleClick);
+      document.removeEventListener("keydown", handleKey);
+    };
+  }, [showMoreViews]);
+
+  const activeSecondaryView = SECONDARY_VIEWS.find((v) => v.id === viewMode);
 
   return (
     <div className="flex items-start gap-2 flex-wrap">
@@ -154,7 +177,7 @@ export function BoardToolbar({
         )}
       </div>
       <div className="flex items-center gap-1 border border-black/[0.07] dark:border-white/10 rounded-md p-0.5 bg-surface-raised dark:bg-surface-raised-dark shrink-0">
-        {VIEW_REGISTRY.map((view) => {
+        {PRIMARY_VIEWS.map((view) => {
           const isActive = viewMode === view.id;
           const activeClass = view.activeClass ?? ACTIVE_DEFAULT;
           const showBadge = view.badge === "butler" && butlerBadgeCount > 0;
@@ -182,6 +205,63 @@ export function BoardToolbar({
             </button>
           );
         })}
+        {SECONDARY_VIEWS.length > 0 && (
+          <div className="relative" ref={moreViewsRef}>
+            <button
+              onClick={() => setShowMoreViews((v) => !v)}
+              aria-haspopup="menu"
+              aria-expanded={showMoreViews}
+              className={`relative px-2.5 py-1 text-xs rounded flex items-center gap-1.5 transition-colors ${activeSecondaryView ? (activeSecondaryView.activeClass ?? ACTIVE_DEFAULT) : INACTIVE}`}
+              title={
+                activeSecondaryView
+                  ? `${activeSecondaryView.tooltip} — more analytics views`
+                  : "More views — metrics, insights, swimlane and more"
+              }
+            >
+              {activeSecondaryView ? (
+                <>
+                  {activeSecondaryView.icon}
+                  {activeSecondaryView.toolbarLabel}
+                </>
+              ) : (
+                "More"
+              )}
+              <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 9l6 6 6-6" />
+              </svg>
+            </button>
+            {showMoreViews && (
+              <div
+                role="menu"
+                className="absolute top-full right-0 mt-1 w-48 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-md shadow-lg z-20 p-1"
+              >
+                {SECONDARY_VIEWS.map((view) => {
+                  const isActive = viewMode === view.id;
+                  const activeClass = view.activeClass ?? ACTIVE_DEFAULT;
+                  const shortcutHint = view.shortcut ? ` (${view.shortcut})` : "";
+                  return (
+                    <button
+                      key={view.id}
+                      role="menuitem"
+                      onClick={() => {
+                        onViewModeChange(view.id);
+                        setShowMoreViews(false);
+                      }}
+                      className={`w-full text-left px-2.5 py-1.5 text-xs rounded flex items-center gap-2 transition-colors ${isActive ? activeClass : INACTIVE}`}
+                      title={`${view.tooltip}${shortcutHint}`}
+                    >
+                      {view.icon}
+                      <span className="flex-1">{view.label}</span>
+                      {view.shortcut && (
+                        <kbd className="text-[10px] font-mono opacity-60">{view.shortcut}</kbd>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
