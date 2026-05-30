@@ -234,6 +234,8 @@ When the user references `#N` (e.g., "review #70", "merge #65", "what's the stat
 
 The **Butler** is a warm, per-project Claude assistant (Agent SDK, in-process) — distinct from the per-task workspace agents. Users reach it in the UI via the **Butler** view (press `i`); it can answer project/board questions and orchestrate board work (it launches via `POST /api/workspaces`, never the bare `start_workspace`). For a one-shot question without the UI: MCP `ask_butler` (`{ projectId, question }`) or `pnpm cli -- butler ask "<question>"`. Implementation/ops detail: `packages/server/CLAUDE.md` ("Butler" section); architecture rationale: `docs/decisions/003-butler-architecture-agent-sdk-vs-cli.md`.
 
+**Multiple butlers:** you can keep several named butlers warm at once (e.g. a "Smart"/opus and a "Quick"/haiku), each with its own model and conversation context. Definitions are **global** (shared across projects, capped at 4) — manage them via the gear next to the butler switcher in the Butler view, or `GET/POST/PUT/DELETE /api/butler-definitions`. Select one with the `?butler=<id>` query param (REST), `--butler <id>` (CLI), or the `butler` arg (MCP `ask_butler`); omitting it targets the always-present `default` butler. List them: `pnpm cli -- butler list`.
+
 ## Monorepo Commands
 - `pnpm dev` — start server + client (auto-detects worktree ports; default: server 3001, client 5173)
 - `pnpm dev:desktop` — start server + client + Tauri native window

@@ -33,9 +33,12 @@ async function withProject<T>(
 async function callButler(
   projectId: string,
   path: string,
-  init: { method?: "GET" | "POST" | "PUT" | "DELETE"; body?: unknown } = {},
+  init: { method?: "GET" | "POST" | "PUT" | "DELETE"; body?: unknown; butler?: string } = {},
 ): Promise<unknown> {
-  const url = `http://127.0.0.1:${SERVER_PORT}/api/projects/${projectId}/butler${path}`;
+  const butlerQuery = init.butler && init.butler !== "default"
+    ? `${path.includes("?") ? "&" : "?"}butler=${encodeURIComponent(init.butler)}`
+    : "";
+  const url = `http://127.0.0.1:${SERVER_PORT}/api/projects/${projectId}/butler${path}${butlerQuery}`;
   try {
     const res = await fetch(url, {
       method: init.method ?? "GET",
@@ -76,9 +79,10 @@ export function registerButlerCommand(program: Command) {
     .command("ask <question...>")
     .description("Ask the butler a question and print its answer. Requires the dev server to be running.")
     .option("-p, --project <id>", "Project ID (defaults to active project)")
+    .option("-b, --butler <id>", "Which butler to ask (definition id; defaults to the default butler)")
     .option("-t, --timeout <seconds>", "Max seconds to wait for the answer", "120")
     .option("--json", "Output the raw JSON response")
-    .action(async (question: string[], options: { project?: string; timeout?: string; json?: boolean }) => {
+    .action(async (question: string[], options: { project?: string; butler?: string; timeout?: string; json?: boolean }) => {
       await withProject(options, async (projectId) => {
         const content = question.join(" ").trim();
         if (!content) {
@@ -89,6 +93,7 @@ export function registerButlerCommand(program: Command) {
         const data = (await callButler(projectId, "/ask", {
           method: "POST",
           body: { content, timeoutMs },
+          butler: options.butler,
         })) as AskResponse;
         if (options.json) console.log(JSON.stringify(data, null, 2));
         else console.log(data.text);
@@ -99,10 +104,11 @@ export function registerButlerCommand(program: Command) {
     .command("ensure")
     .description("Start the butler's warm session if not already running.")
     .option("-p, --project <id>", "Project ID (defaults to active project)")
+    .option("-b, --butler <id>", "Which butler (definition id; defaults to the default butler)")
     .option("--json", "Output the raw JSON response")
-    .action(async (options: { project?: string; json?: boolean }) => {
+    .action(async (options: { project?: string; butler?: string; json?: boolean }) => {
       await withProject(options, async (projectId) => {
-        const data = (await callButler(projectId, "/ensure", { method: "POST", body: {} })) as {
+        const data = (await callButler(projectId, "/ensure", { method: "POST", body: {}, butler: options.butler })) as {
           active: boolean;
           sessionId: string | null;
         };
@@ -114,10 +120,11 @@ export function registerButlerCommand(program: Command) {
     .command("stop")
     .description("Stop the butler's warm session and forget the resume id (next ensure starts fresh).")
     .option("-p, --project <id>", "Project ID (defaults to active project)")
+    .option("-b, --butler <id>", "Which butler (definition id; defaults to the default butler)")
     .option("--json", "Output the raw JSON response")
-    .action(async (options: { project?: string; json?: boolean }) => {
+    .action(async (options: { project?: string; butler?: string; json?: boolean }) => {
       await withProject(options, async (projectId) => {
-        const data = await callButler(projectId, "", { method: "DELETE" });
+        const data = await callButler(projectId, "", { method: "DELETE", butler: options.butler });
         printJsonOrSummary(data, "Butler stopped.", options.json);
       });
     });
@@ -126,10 +133,11 @@ export function registerButlerCommand(program: Command) {
     .command("interrupt")
     .description("Interrupt the butler's in-flight turn (session stays warm).")
     .option("-p, --project <id>", "Project ID (defaults to active project)")
+    .option("-b, --butler <id>", "Which butler (definition id; defaults to the default butler)")
     .option("--json", "Output the raw JSON response")
-    .action(async (options: { project?: string; json?: boolean }) => {
+    .action(async (options: { project?: string; butler?: string; json?: boolean }) => {
       await withProject(options, async (projectId) => {
-        const data = (await callButler(projectId, "/interrupt", { method: "POST", body: {} })) as { ok: boolean };
+        const data = (await callButler(projectId, "/interrupt", { method: "POST", body: {}, butler: options.butler })) as { ok: boolean };
         printJsonOrSummary(data, `Interrupt: ${data.ok ? "sent" : "no-op (nothing in flight)"}`, options.json);
       });
     });
@@ -138,10 +146,11 @@ export function registerButlerCommand(program: Command) {
     .command("model <name>")
     .description('Switch the butler\'s model live (pass an empty string "" to revert to the profile default).')
     .option("-p, --project <id>", "Project ID (defaults to active project)")
+    .option("-b, --butler <id>", "Which butler (definition id; defaults to the default butler)")
     .option("--json", "Output the raw JSON response")
-    .action(async (name: string, options: { project?: string; json?: boolean }) => {
+    .action(async (name: string, options: { project?: string; butler?: string; json?: boolean }) => {
       await withProject(options, async (projectId) => {
-        const data = (await callButler(projectId, "/model", { method: "POST", body: { model: name } })) as {
+        const data = (await callButler(projectId, "/model", { method: "POST", body: { model: name }, butler: options.butler })) as {
           ok: boolean; model: string; applied: boolean;
         };
         printJsonOrSummary(
@@ -156,10 +165,11 @@ export function registerButlerCommand(program: Command) {
     .command("profile <name>")
     .description('Switch the butler\'s Claude profile. Restarts the session. Pass "" to inherit the global default.')
     .option("-p, --project <id>", "Project ID (defaults to active project)")
+    .option("-b, --butler <id>", "Which butler (definition id; defaults to the default butler)")
     .option("--json", "Output the raw JSON response")
-    .action(async (name: string, options: { project?: string; json?: boolean }) => {
+    .action(async (name: string, options: { project?: string; butler?: string; json?: boolean }) => {
       await withProject(options, async (projectId) => {
-        const data = (await callButler(projectId, "/profile", { method: "POST", body: { profile: name } })) as {
+        const data = (await callButler(projectId, "/profile", { method: "POST", body: { profile: name }, butler: options.butler })) as {
           ok: boolean; profile: string; active: boolean;
         };
         printJsonOrSummary(
@@ -174,10 +184,11 @@ export function registerButlerCommand(program: Command) {
     .command("state")
     .description("Print the butler's current state (model, profile, context usage).")
     .option("-p, --project <id>", "Project ID (defaults to active project)")
+    .option("-b, --butler <id>", "Which butler (definition id; defaults to the default butler)")
     .option("--json", "Output the raw JSON response")
-    .action(async (options: { project?: string; json?: boolean }) => {
+    .action(async (options: { project?: string; butler?: string; json?: boolean }) => {
       await withProject(options, async (projectId) => {
-        const data = (await callButler(projectId, "")) as {
+        const data = (await callButler(projectId, "", { butler: options.butler })) as {
           active: boolean;
           sessionId: string | null;
           contextTokens?: number;
@@ -201,6 +212,32 @@ export function registerButlerCommand(program: Command) {
         console.log(`Selected profile: ${data.selectedProfile || "(global default)"}`);
         console.log(`Context usage:    ${ctx} tokens`);
         console.log(`MCP connected:    ${data.mcpConnected ?? "n/a"}`);
+      });
+    });
+
+  butler
+    .command("list")
+    .description("List the defined butlers and this project's warm state for each.")
+    .option("-p, --project <id>", "Project ID (defaults to active project)")
+    .option("--json", "Output the raw JSON response")
+    .action(async (options: { project?: string; json?: boolean }) => {
+      await withProject(options, async (projectId) => {
+        const url = `http://127.0.0.1:${SERVER_PORT}/api/projects/${projectId}/butlers`;
+        const res = await fetch(url).catch(() => null);
+        if (!res || !res.ok) {
+          console.error(`Failed to list butlers — is the dev server running on port ${SERVER_PORT}?`);
+          process.exit(1);
+        }
+        const data = (await res.json()) as { butlers: { id: string; name: string; model: string; active: boolean; contextTokens: number }[] };
+        if (options.json) {
+          console.log(JSON.stringify(data, null, 2));
+          return;
+        }
+        for (const b of data.butlers) {
+          const dot = b.active ? "●" : "○";
+          const ctx = b.active && b.contextTokens ? ` (${Math.round(b.contextTokens / 1000)}k)` : "";
+          console.log(`${dot} ${b.id.padEnd(16)} ${b.name.padEnd(16)} ${b.model || "(profile default)"}${ctx}`);
+        }
       });
     });
 

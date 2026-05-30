@@ -74,10 +74,25 @@ The project butler is a persistent, warm Claude assistant — **not** the CLI-sp
 agent model used for board tasks. It runs in-process via the Claude Agent SDK
 (`@anthropic-ai/claude-agent-sdk`), one warm session per project.
 
-- `butler-sdk.service.ts` owns a `Map<projectId, ButlerSession>`. Each session
-  feeds turns into a single `query({ prompt: AsyncIterable<SDKUserMessage> })` via
-  a `Pushable` queue, so conversation context stays warm in-process across turns
-  (no `--resume` respawn). Token deltas are emitted as `ButlerEvent`s to listeners.
+- **Multiple named butlers.** A user can keep several butlers warm at once (e.g.
+  "Smart"/opus and "Quick"/haiku). **Definitions are GLOBAL** (one set shared across
+  projects), stored in the `butler_definitions` preference (JSON array of
+  `{id,name,model}`), capped at `MAX_BUTLERS` (4), managed by
+  `butler-definitions.service.ts` + `routes/butler-definitions.ts`
+  (`GET/POST/PUT/DELETE /api/butler-definitions`). The `model` lives on the
+  definition; **profile stays per-project** (shared by all of a project's butlers).
+  Each project keeps its own warm session + context **per butler**. Routes select a
+  butler with `?butler=<id>` (default `"default"`, the always-present legacy butler).
+  `GET /api/projects/:id/butlers` returns the defs + per-project runtime state for the
+  switcher. The client persists the active butler per project in localStorage; CLI/MCP
+  take a `--butler` flag / `butler` arg. List via `pnpm cli -- butler list`.
+- `butler-sdk.service.ts` owns a `Map<key, ButlerSession>` keyed by
+  `butlerSessionKey(projectId, butlerId)` — plain `projectId` for the default butler
+  (backward compat with the legacy unsuffixed pref keys), `${projectId}::${butlerId}`
+  otherwise. Listeners are keyed by the same composite. Each session feeds turns into a
+  single `query({ prompt: AsyncIterable<SDKUserMessage> })` via a `Pushable` queue, so
+  conversation context stays warm in-process across turns (no `--resume` respawn).
+  Token deltas are emitted as `ButlerEvent`s to listeners.
 - **Why SDK, not CLI:** keeping a CLI `claude.exe` warm with stdin open does not
   stream on Windows (it buffers stdout until stdin closes). The SDK is a library
   call with a native async iterator — no stdio/TTY buffering, true streaming.
@@ -86,10 +101,11 @@ agent model used for board tasks. It runs in-process via the Claude Agent SDK
   (CLI login / API key / Bedrock). Per-project pref `butler_profile_<projectId>`
   overrides the global `claude_profile`. Switching profile **restarts** the session
   (different endpoint can't resume) — `POST /:id/butler/profile`.
-- **Model:** per-project pref `butler_model_<projectId>` (values from
-  `CLAUDE_MODEL_OPTIONS` — "", opus, sonnet, haiku). Switching model is **live, no
-  restart**, via the SDK `query.setModel()` control request (`POST /:id/butler/model`),
-  so conversation context is preserved.
+- **Model:** lives on the (global) butler definition, values from
+  `CLAUDE_MODEL_OPTIONS` ("", opus, sonnet, haiku). `POST /:id/butler/model?butler=<id>`
+  updates the definition AND applies live via the SDK `query.setModel()` control
+  request (no restart, context preserved). (Was a per-project `butler_model_<projectId>`
+  pref before multi-butler; the model is now a property of the butler itself.)
 - **Routes** (`butler.ts`, mounted under `/projects`): `POST /:id/butler/ensure`
   (start), `POST /:id/butler/message` (push a turn), `GET /:id/butler/stream`
   (SSE of `ButlerEvent`s), `DELETE /:id/butler` (stop + forget resume), `POST
