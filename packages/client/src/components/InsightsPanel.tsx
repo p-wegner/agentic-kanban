@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { apiFetch } from "../lib/api.js";
+import { PRIMARY_SERIES } from "../lib/chartColors";
 
 type InsightsRange = "7d" | "30d" | "90d" | "all";
 type SortDirection = "asc" | "desc";
