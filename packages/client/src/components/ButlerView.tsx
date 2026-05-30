@@ -263,6 +263,13 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
         appendAssistantText(e.text);
         break;
       case "tool":
+        // A tool call ends the current text run. Reset the streaming buffer + bubble
+        // id so any text that streams AFTER the tool starts a fresh bubble with an
+        // empty buffer. Without this, the next text run keeps appending to the prior
+        // run's accumulated text and — because `last` is now this activity bubble, not
+        // the assistant bubble — spawns a NEW bubble that repeats the earlier text.
+        assistantBufRef.current = "";
+        assistantMsgIdRef.current = null;
         setChatMessages((prev) => [...prev, { id: `act-${Date.now()}-${Math.random()}`, role: "activity", text: formatToolLabel(e.name), ts: Date.now() }]);
         break;
       case "result":
