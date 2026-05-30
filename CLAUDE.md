@@ -46,6 +46,7 @@ Cleanroom reimplementation of [vibe-kanban](https://github.com/BloopAI/vibe-kanb
 - **Hook paths on Windows**: Use **forward slashes** in `settings.json` hook commands. `\\` gets mangled by Claude Code's hook runner → `MODULE_NOT_FOUND`. Relative paths like `.claude/hooks/...` also fail when CWD shifts. `$CLAUDE_PROJECT_DIR` is not expanded in hook command strings.
 - **Git tests on Windows**: Use `.trim()` for file content assertions (CRLF vs LF); test git output for keywords, not exact strings.
 - **`git stash` in worktrees is dangerous**: `git stash` + `git stash pop` can silently discard ALL tracked changes, leaving only untracked files. Always verify after pop: `git diff --stat HEAD`. Prefer a WIP commit (`git commit --amend`) over stashing in a worktree.
+- **Invalid worktree handoff**: If a handoff path under `C:\andrena\.worktrees\...` has no `.git` file or lacks repo instructions/skills, treat it as a stale plain folder. Use the main checkout for git/history/docs and do not retry git commands in that directory.
 - **Migration number collisions**: Parallel feature branches independently pick the same "next" migration number because each worktree starts from the same base. Before creating a migration, check the highest number in the **main checkout** (`C:\andrena\agentic-kanban\packages\shared\drizzle`), not the worktree — multiple branches in flight will all see the same last number. Use the kanban server's copy as ground truth.
 
 ### Git service — single source of truth
@@ -137,7 +138,7 @@ Worktrees do **not** have their own `node_modules` — the directory only exists
 ## Visual Verification
 Every feature with UI must be visually verified using the `playwright-cli` skill.
 1. Determine ports: in a worktree, use `$env:KANBAN_CLIENT_PORT` / `$env:KANBAN_SERVER_PORT` — never hardcode 3001/5173. Check if server is already listening before starting `pnpm dev`.
-2. Use `/playwright-cli` to open `http://localhost:<KANBAN_CLIENT_PORT>` and confirm rendering.
+2. Use `/playwright-cli` to open `http://127.0.0.1:<KANBAN_CLIENT_PORT>` and confirm rendering.
 3. Clean up `.png` files and `.playwright-cli/` after. Delete test issues/workspaces via MCP tools — never `pnpm db:reset`.
 - **HMR lag**: After editing CSS/className files, do a hard `playwright-cli reload` and wait 5–7 s before checking computed styles. Vite HMR may not propagate before your first screenshot/eval.
 - **PowerShell npm noise**: Prefix playwright-cli invocations with `$env:npm_config_loglevel="silent"` to suppress npm warnings that PowerShell treats as errors via `$LASTEXITCODE`.
@@ -270,7 +271,7 @@ echo "Started PID: $!"
 ```powershell
 # Step 2 — PowerShell tool (run_in_background: true): single fixed delay then one HTTP check
 Start-Sleep -Seconds 15
-try { $r = Invoke-RestMethod "http://localhost:3001/api/projects" -TimeoutSec 10; Write-Host "API OK: $($r.Count) projects" } catch { Write-Host "API FAILED: $_" }
+try { $r = Invoke-RestMethod "http://127.0.0.1:3001/api/projects" -TimeoutSec 10; Write-Host "API OK: $($r.Count) projects" } catch { Write-Host "API FAILED: $_" }
 ```
 - Use `nohup` + `disown` so the process survives the Bash session exit (plain `&` gets SIGHUP).
 - Do NOT use `Start-Job` — when PowerShell exits, the job and its children die.

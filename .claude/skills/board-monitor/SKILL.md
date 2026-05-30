@@ -30,7 +30,7 @@ If any files found:
 ## SECTION 2 — Server health check & restart
 
 ```powershell
-try { Invoke-RestMethod "http://localhost:3001/health" -TimeoutSec 5 | Out-Null; "UP" } catch { "DOWN" }
+try { Invoke-RestMethod "http://127.0.0.1:3001/health" -TimeoutSec 5 | Out-Null; "UP" } catch { "DOWN" }
 ```
 
 **If DOWN:**
@@ -47,7 +47,7 @@ try { Invoke-RestMethod "http://localhost:3001/health" -TimeoutSec 5 | Out-Null;
 **Why HTTP 200 is not enough:** A blank page from a React crash (e.g. `ReferenceError`, missing useState) still returns 200. The real check reads rendered DOM content.
 
 ```bash
-playwright-cli open http://localhost:5173
+playwright-cli open http://127.0.0.1:5173
 # wait 4 seconds for React to hydrate
 sleep 4
 playwright-cli eval "document.querySelector('main')?.innerText?.substring(0,200)"
@@ -57,7 +57,7 @@ playwright-cli close
 **Interpret result:**
 - Contains `Todo`, `In Progress`, or `No projects` → **OK**
 - Empty or missing → app crashed. Diagnose:
-  1. Check Vite module errors: `GET http://localhost:5173/src/routes/BoardPage.tsx` — HTTP 500 = compile error in client source
+  1. Check Vite module errors: `GET http://127.0.0.1:5173/src/routes/BoardPage.tsx` — HTTP 500 = compile error in client source
   2. Check server watcher log: `tail -20 /tmp/kanban-monitor-srv.log` for `SyntaxError`, `Cannot find`, `error TS`
   3. Re-run Section 1 scan (conflict markers may have slipped through)
   4. Check console errors: `playwright-cli console`
@@ -74,7 +74,7 @@ The app's built-in monitor handles: idle→relaunch, reviewing→merge, active+s
 Get the board:
 ```powershell
 $proj = "<active-project-id>"  # read from GET /api/preferences/active-project if unknown
-$board = Invoke-RestMethod "http://localhost:3001/api/projects/$proj/board" -TimeoutSec 10
+$board = Invoke-RestMethod "http://127.0.0.1:3001/api/projects/$proj/board" -TimeoutSec 10
 ```
 
 For each issue in `In Progress` and `In Review` columns, check `workspaceSummary.main`. **The action depends on which column the issue is in** — `idle` means "continue work" in In Progress but "ready to land" in In Review:
@@ -95,8 +95,8 @@ For each issue in `In Progress` and `In Review` columns, check `workspaceSummary
 Whether the monitor lands not-yet-ready In-Review work is driven by **two preferences** the app owns — read them every cycle and honor them automatically:
 
 ```powershell
-$autoMerge        = (Invoke-RestMethod "http://localhost:3001/api/preferences/auto_merge" -EA SilentlyContinue).value          # default "true"
-$autoMergeInReview = (Invoke-RestMethod "http://localhost:3001/api/preferences/auto_merge_in_review" -EA SilentlyContinue).value # default "false"
+$autoMerge        = (Invoke-RestMethod "http://127.0.0.1:3001/api/preferences/auto_merge" -EA SilentlyContinue).value          # default "true"
+$autoMergeInReview = (Invoke-RestMethod "http://127.0.0.1:3001/api/preferences/auto_merge_in_review" -EA SilentlyContinue).value # default "false"
 ```
 (Both are also in `GET /api/preferences/settings`. Unset → use the defaults above.)
 
@@ -111,7 +111,7 @@ $autoMergeInReview = (Invoke-RestMethod "http://localhost:3001/api/preferences/a
 
 **User override:** if the user's `/board-monitor` argument explicitly asks to merge In-Review work (e.g. "merge in review to master", "no human gating", "unblock and merge review"), treat it as `auto_merge_in_review = true` for this run **regardless of the stored preference** — and persist it so the app monitor agrees:
 ```powershell
-Invoke-RestMethod "http://localhost:3001/api/preferences/settings" -Method Put -ContentType "application/json" -Body '{"auto_merge_in_review":"true"}'
+Invoke-RestMethod "http://127.0.0.1:3001/api/preferences/settings" -Method Put -ContentType "application/json" -Body '{"auto_merge_in_review":"true"}'
 ```
 Conversely, if they say "stop auto-merging review" / "require manual merge", set it back to `"false"`.
 
