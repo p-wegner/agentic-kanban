@@ -138,7 +138,7 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
       onDragLeave={() => setDepDragOver(false)}
       onDrop={handleDrop}
       onClick={() => onClick(issue)}
-      className={`group bg-surface-raised dark:bg-surface-raised-dark rounded-md shadow-sm p-2 border cursor-pointer hover:shadow-md transition-shadow relative isolate ${depDragOver ? "border-brand-400 bg-brand-50 shadow-brand-200" : isPendingWorkspace ? "border-brand-300 shadow-brand-100 shadow-md" : "border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600"}`}
+      className={`group bg-surface-raised dark:bg-surface-raised-dark rounded-lg shadow-sm p-2.5 border cursor-pointer hover:shadow-md hover:-translate-y-px transition-all duration-150 relative isolate ${depDragOver ? "border-brand-400 bg-brand-50 shadow-brand-200" : isPendingWorkspace ? "border-brand-300 shadow-brand-100 shadow-md" : "border-black/[0.07] dark:border-white/10 hover:border-brand-200 dark:hover:border-gray-600"}`}
     >
       <div className="flex items-start justify-between gap-2">
         <p className="text-sm text-ink dark:text-stone-100">

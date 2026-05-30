@@ -176,8 +176,8 @@ export function BoardColumn({
     <div style={{ display: "contents" }}>
     <div
       id={`column-${column.id}`}
-      className={`${width != null ? "" : "w-[calc(100vw-2rem)] sm:w-72 shrink-0"} bg-gray-100 dark:bg-gray-800 rounded-xl p-2 flex flex-col transition-all relative ${
-        dragOver ? "ring-2 ring-brand-400 ring-offset-1" : ""
+      className={`${width != null ? "" : "w-[calc(100vw-2rem)] sm:w-72 shrink-0"} bg-surface-sunken dark:bg-surface-sunken-dark rounded-xl p-2 flex flex-col transition-all relative ${
+        dragOver ? "ring-2 ring-brand-400 ring-offset-1 ring-offset-surface dark:ring-offset-surface-dark" : ""
       }`}
       style={columnStyle}
       onDragEnter={handleDragEnter}
@@ -187,9 +187,9 @@ export function BoardColumn({
     >
       <div className="flex items-center justify-between mb-2 px-1 shrink-0">
         <div className="flex flex-col gap-0.5">
-          <h2 className="font-semibold text-sm text-gray-700 dark:text-gray-300 flex items-center gap-2">
+          <h2 className="font-semibold text-sm text-ink-soft dark:text-gray-300 flex items-center gap-2 tracking-tight">
             {column.name}
-            <span className="text-[11px] text-gray-400 dark:text-gray-500 bg-white/80 dark:bg-gray-900/80 rounded-full px-2 py-0.5 font-medium shadow-sm">
+            <span className="text-[11px] text-ink-faint dark:text-gray-500 bg-surface-raised/80 dark:bg-gray-900/80 rounded-full px-2 py-0.5 font-medium shadow-sm">
               {column.issues.length}
             </span>
           </h2>
@@ -223,7 +223,7 @@ export function BoardColumn({
 
       <div className="relative flex-1 min-h-0 overflow-hidden rounded-lg">
         {(scrollState === "top" || scrollState === "middle") && (
-          <div className="absolute top-0 left-0 right-0 h-6 bg-gradient-to-b from-surface-sunken dark:from-stone-800 to-transparent z-10 pointer-events-none rounded-t-lg" />
+          <div className="absolute top-0 left-0 right-0 h-6 bg-gradient-to-b from-surface-sunken dark:from-surface-sunken-dark to-transparent z-10 pointer-events-none rounded-t-lg" />
         )}
         <div
           ref={scrollRef}
@@ -267,7 +267,7 @@ export function BoardColumn({
           )}
         </div>
         {(scrollState === "bottom" || scrollState === "middle") && (
-          <div className="absolute bottom-0 left-0 right-0 h-6 bg-gradient-to-t from-surface-sunken dark:from-stone-800 to-transparent z-10 pointer-events-none rounded-b-lg" />
+          <div className="absolute bottom-0 left-0 right-0 h-6 bg-gradient-to-t from-surface-sunken dark:from-surface-sunken-dark to-transparent z-10 pointer-events-none rounded-b-lg" />
         )}
       </div>
     </div>
