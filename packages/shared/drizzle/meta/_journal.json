@@ -435,6 +435,13 @@
       "when": 1748764527059,
       "tag": "0061_workspace_merged_at",
       "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "6",
+      "when": 1748764527060,
+      "tag": "0062_workspace_code_metrics",
+      "breakpoints": true
     }
   ]
 }

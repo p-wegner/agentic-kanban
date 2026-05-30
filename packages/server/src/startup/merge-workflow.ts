@@ -7,6 +7,7 @@ import { MOCK_AGENT_COMMAND, isMockProfile, toExecutorProvider } from "../servic
 import { createBoardEvents } from "../services/board-events.js";
 import { emitButlerSystemEvent } from "../services/butler-event-feed.js";
 import * as gitService from "../services/git.service.js";
+import { activeMerges } from "../services/workspace-internals.js";
 import { createBackup } from "../db/backup.js";
 import { killProcessesInDir } from "../services/process-cleanup.js";
 import { runScript } from "../services/script-runner.js";
@@ -95,45 +96,54 @@ export function createAutoMerge({ sessionManager, boardEvents, learningSessionId
       if (!workspace.isDirect) {
         const projectRows = await db.select({ repoPath: projects.repoPath, teardownScript: projects.teardownScript, defaultBranch: projects.defaultBranch }).from(projects).where(eq(projects.id, projectId)).limit(1);
         if (projectRows.length > 0) {
-        const { repoPath, teardownScript, defaultBranch } = projectRows[0];
-          if (workspace.workingDir) {
-            try { await killProcessesInDir(workspace.workingDir); } catch {}
-            if (teardownScript) {
-              try { await runScript(teardownScript, workspace.workingDir, `teardown:${workspace.id}`); } catch {}
+          const { repoPath, teardownScript, defaultBranch } = projectRows[0];
+
+          const mergePromise = (async () => {
+            const pendingMerge = activeMerges.get(repoPath);
+            if (pendingMerge) {
+              console.log(`[workflow] auto-merge for workspace ${workspace.id} is queued behind existing merge on ${repoPath}`);
+              await pendingMerge.catch(() => {});
             }
-          }
-          await tagIfNeedsVisualVerification(repoPath, workspace.branch, workspace.baseBranch, issueId, now);
-          // Mandatory pre-merge backup. Non-fatal: must not block a legit auto-merge.
-          try {
-            await createBackup("pre-merge");
-          } catch (err) {
-            console.warn("[backup] pre-merge backup failed (non-fatal):", err instanceof Error ? err.message : String(err));
-          }
-          // Guard: refuse merge if main checkout has uncommitted tracked changes.
-          const uncommittedInMain = await gitService.getUncommittedTrackedChanges(repoPath);
-          if (uncommittedInMain.length > 0) {
-            const preview = uncommittedInMain.slice(0, 5).join(", ");
-            const suffix = uncommittedInMain.length > 5 ? ` (and ${uncommittedInMain.length - 5} more)` : "";
-            console.error(`[workflow] auto-merge blocked: main checkout has ${uncommittedInMain.length} uncommitted tracked change(s): ${preview}${suffix}`);
-            boardEvents.broadcast(projectId, "workflow_error");
-            emitButlerSystemEvent({ projectId, kind: "merge_failed", workspaceId: workspace.id, text: `Auto-merge blocked for workspace ${workspace.id} (branch ${workspace.branch}): main checkout has ${uncommittedInMain.length} uncommitted tracked change(s).` });
-            throw new Error(`Main checkout has ${uncommittedInMain.length} uncommitted tracked change(s) — cannot merge workspace ${workspace.id}. Commit or stash those changes first.`);
-          }
 
-          const targetBranch = workspace.baseBranch || defaultBranch || "main";
-          await gitService.mergeBranch(repoPath, workspace.branch, targetBranch);
-          if (workspace.workingDir) {
-            try { await gitService.removeWorktree(repoPath, workspace.workingDir); } catch {}
-          }
-          try { await gitService.deleteBranch(repoPath, workspace.branch); } catch {}
+            return (async () => {
+              if (workspace.workingDir) {
+                try { await killProcessesInDir(workspace.workingDir); } catch {}
+                if (teardownScript) {
+                  try { await runScript(teardownScript, workspace.workingDir, `teardown:${workspace.id}`); } catch {}
+                }
+              }
+              await tagIfNeedsVisualVerification(repoPath, workspace.branch, workspace.baseBranch, issueId, now);
+              // Mandatory pre-merge backup. Non-fatal: must not block a legit auto-merge.
+              try {
+                await createBackup("pre-merge");
+              } catch (err) {
+                console.warn("[backup] pre-merge backup failed (non-fatal):", err instanceof Error ? err.message : String(err));
+              }
+              // Guard: refuse merge if main checkout has uncommitted tracked changes.
+              const uncommittedInMain = await gitService.getUncommittedTrackedChanges(repoPath);
+              if (uncommittedInMain.length > 0) {
+                const preview = uncommittedInMain.slice(0, 5).join(", ");
+                const suffix = uncommittedInMain.length > 5 ? ` (and ${uncommittedInMain.length - 5} more)` : "";
+                console.error(`[workflow] auto-merge blocked: main checkout has ${uncommittedInMain.length} uncommitted tracked change(s): ${preview}${suffix}`);
+                boardEvents.broadcast(projectId, "workflow_error");
+                emitButlerSystemEvent({ projectId, kind: "merge_failed", workspaceId: workspace.id, text: `Auto-merge blocked for workspace ${workspace.id} (branch ${workspace.branch}): main checkout has ${uncommittedInMain.length} uncommitted tracked change(s).` });
+                throw new Error(`Main checkout has ${uncommittedInMain.length} uncommitted tracked change(s) — cannot merge workspace ${workspace.id}. Commit or stash those changes first.`);
+              }
 
-          const verifyAgent = prefMapLearning.get("after_merge_verify_agent") || "none";
-          const issueTagged = await db.select({ tagId: issueTags.tagId }).from(issueTags).where(eq(issueTags.issueId, issueId)).limit(100).then((rows) => rows.some((r) => r.tagId !== null));
-          if (verifyAgent === "dedicated" && issueTagged) {
-            try {
-              const clientPort = process.env.KANBAN_CLIENT_PORT || process.env.VITE_PORT || "5173";
-              const serverPort = process.env.KANBAN_SERVER_PORT || process.env.PORT || "3001";
-              const verifyPrompt = `You are a visual verification agent. The branch '${workspace.branch}' was just merged into master.
+              const targetBranch = workspace.baseBranch || defaultBranch || "main";
+              await gitService.mergeBranch(repoPath, workspace.branch, targetBranch);
+              if (workspace.workingDir) {
+                try { await gitService.removeWorktree(repoPath, workspace.workingDir); } catch {}
+              }
+              try { await gitService.deleteBranch(repoPath, workspace.branch); } catch {}
+
+              const verifyAgent = prefMapLearning.get("after_merge_verify_agent") || "none";
+              const issueTagged = await db.select({ tagId: issueTags.tagId }).from(issueTags).where(eq(issueTags.issueId, issueId)).limit(100).then((rows) => rows.some((r) => r.tagId !== null));
+              if (verifyAgent === "dedicated" && issueTagged) {
+                try {
+                  const clientPort = process.env.KANBAN_CLIENT_PORT || process.env.VITE_PORT || "5173";
+                  const serverPort = process.env.KANBAN_SERVER_PORT || process.env.PORT || "3001";
+                  const verifyPrompt = `You are a visual verification agent. The branch '${workspace.branch}' was just merged into master.
 
 Your task: visually verify that the UI changes look correct in the browser.
 
@@ -147,18 +157,28 @@ If the dev server is not responding, wait 10 seconds and retry once.
 Issue ID: ${issueId}
 Workspace ID: ${workspace.id}
 Server: http://localhost:${serverPort}`;
-              const verifyProfile = prefMapLearning.get("claude_profile") || undefined;
-              const verifyCmd = isMockProfile(verifyProfile) ? MOCK_AGENT_COMMAND : (prefMapLearning.get("agent_command") || undefined);
-              const verifyArgs = prefMapLearning.get("agent_args") || undefined;
-              const verifyProvider = parseProviderPref(prefMapLearning);
-              const effectiveVerifyProfile = getEffectiveProfile(prefMapLearning, verifyProvider, isMockProfile(verifyProfile) ? undefined : verifyProfile);
-              const verifyProfileSelection = effectiveVerifyProfile ? { provider: verifyProvider, name: effectiveVerifyProfile } : undefined;
-              const verifySessId = await sessionManager.startSession({ workspaceId: workspace.id, prompt: verifyPrompt, agentCommand: verifyCmd, agentArgs: verifyArgs, claudeProfile: effectiveVerifyProfile, provider: toExecutorProvider(verifyProvider), triggerType: "verify", profile: verifyProfileSelection, workingDirOverride: repoPath, extraEnv: { KANBAN_SESSION_TYPE: "verify" } });
-              console.log(`[workflow] dedicated verification session started: session=${verifySessId}`);
-            } catch (err) {
-              console.warn("[workflow] dedicated verification session failed (non-fatal):", err);
+                  const verifyProfile = prefMapLearning.get("claude_profile") || undefined;
+                  const verifyCmd = isMockProfile(verifyProfile) ? MOCK_AGENT_COMMAND : (prefMapLearning.get("agent_command") || undefined);
+                  const verifyArgs = prefMapLearning.get("agent_args") || undefined;
+                  const verifyProvider = parseProviderPref(prefMapLearning);
+                  const effectiveVerifyProfile = getEffectiveProfile(prefMapLearning, verifyProvider, isMockProfile(verifyProfile) ? undefined : verifyProfile);
+                  const verifyProfileSelection = effectiveVerifyProfile ? { provider: verifyProvider, name: effectiveVerifyProfile } : undefined;
+                  const verifySessId = await sessionManager.startSession({ workspaceId: workspace.id, prompt: verifyPrompt, agentCommand: verifyCmd, agentArgs: verifyArgs, claudeProfile: effectiveVerifyProfile, provider: toExecutorProvider(verifyProvider), triggerType: "verify", profile: verifyProfileSelection, workingDirOverride: repoPath, extraEnv: { KANBAN_SESSION_TYPE: "verify" } });
+                  console.log(`[workflow] dedicated verification session started: session=${verifySessId}`);
+                } catch (err) {
+                  console.warn("[workflow] dedicated verification session failed (non-fatal):", err);
+                }
+              }
+            })();
+          })();
+
+          const trackedMerge = mergePromise.finally(() => {
+            if (activeMerges.get(repoPath) === trackedMerge) {
+              activeMerges.delete(repoPath);
             }
-          }
+          });
+          activeMerges.set(repoPath, trackedMerge);
+          await trackedMerge;
         }
       }
 

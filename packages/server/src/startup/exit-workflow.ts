@@ -178,7 +178,9 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge }:
           console.log(`[workflow] review session ${sessionId} completed  queued for scheduled auto-merge`);
           await learningAfterReview;
         } else {
-          console.log(`[workflow] review session ${sessionId} completed  auto-merge disabled, leaving in In Review`);
+          await db.update(workspaces).set({ readyForMerge: true, updatedAt: now }).where(eq(workspaces.id, workspaceId));
+          boardEvents.broadcast(projectId, "workspace_ready_for_merge");
+          console.log(`[workflow] review session ${sessionId} completed  auto-merge disabled, marked ready_for_merge and left in In Review`);
           await learningAfterReview;
         }
         return;
