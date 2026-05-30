@@ -70,6 +70,13 @@ function getSpeechRecognitionCtor(): (new () => SpeechRecognitionType) | null {
   return window.SpeechRecognition ?? window.webkitSpeechRecognition ?? null;
 }
 
+function sanitizeSpeechText(value: string): string {
+  return value
+    .replace(/[\u0000-\u001F\u007F-\u009F]/g, "")
+    .replace(/[\u200B\u200C\u200D\u2060\u180E\u200E\u200F\uFEFF]/g, "")
+    .trim();
+}
+
 /**
  * Microphone button for the butler chat input. Dictates speech into the
  * message textarea (via {@link ButlerVoiceButtonProps.onTranscript}) instead
@@ -166,10 +173,13 @@ export const ButlerVoiceButton = forwardRef<ButlerVoiceButtonHandle, ButlerVoice
       // so iterating from 0 would re-append previously-finalized text.
       for (let i = event.resultIndex; i < event.results.length; i++) {
         const res = event.results[i];
+        const chunk = sanitizeSpeechText(res[0].transcript);
         if (res.isFinal) {
-          onTranscript(res[0].transcript.trim() + " ");
+          if (chunk) {
+            onTranscript(`${chunk} `);
+          }
         } else {
-          interim += res[0].transcript;
+          interim += chunk;
         }
       }
       onInterim?.(interim);

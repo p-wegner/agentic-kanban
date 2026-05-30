@@ -83,14 +83,14 @@ function formatRelativeTs(ts: number): string {
 }
 
 function formatToolLabel(name: string): string {
-  if (name === "Read") return "ðŸ“„ Reading a file";
-  if (name === "Write" || name === "Edit") return "âœï¸ Editing a file";
-  if (name === "Bash") return "âš¡ Running a command";
-  if (name === "Glob" || name === "Grep") return "ðŸ”Ž Searching the project";
-  if (name === "WebSearch" || name === "WebFetch") return "ðŸ” Searching the web";
-  if (name.includes("list_issues")) return "ðŸ“‹ Listing board issues";
-  if (name.includes("get_board_status")) return "ðŸ“Š Checking board status";
-  return `ðŸ”§ ${name.replace(/^mcp__[^_]+__/, "").replace(/_/g, " ")}`;
+  if (name === "Read") return "Reading a file";
+  if (name === "Write" || name === "Edit") return "Editing a file";
+  if (name === "Bash") return "Running a command";
+  if (name === "Glob" || name === "Grep") return "Searching the project";
+  if (name === "WebSearch" || name === "WebFetch") return "Searching the web";
+  if (name.includes("list_issues")) return "Listing board issues";
+  if (name.includes("get_board_status")) return "Checking board status";
+  return `[tool] ${name.replace(/^mcp__[^_]+__/, "").replace(/_/g, " ")}`;
 }
 
 function ActivityStrip({ columns, liveActivity, liveStats, onIssueClick }: Omit<ButlerViewProps, "projectId">) {
@@ -213,7 +213,13 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
   const voiceButtonRef = useRef<ButlerVoiceButtonHandle>(null);
   const hasDictatedRef = useRef(false);
   const voiceInterimRef = useRef("");
-  const dictationInputRef = useRef("");
+
+  const sanitizeSpeechText = (value: string) => (
+    value
+      .replace(/[\u0000-\u001F\u007F-\u009F]/g, "")
+      .replace(/[\u200B\u200C\u200D\u2060\u180E\u200E\u200F\uFEFF]/g, "")
+      .trim()
+  );
 
   const setInputValue = (valueOrUpdater: string | ((prev: string) => string)) => {
     const nextValue = typeof valueOrUpdater === "function" ? valueOrUpdater(inputValueRef.current) : valueOrUpdater;
@@ -534,10 +540,13 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
   // Append a finalized dictation chunk to the input, inserting a space when
   // continuing an existing message. Keeps the textarea auto-grow in sync.
   function appendVoiceTranscript(chunk: string) {
+    const safeChunk = sanitizeSpeechText(chunk);
+    if (!safeChunk) return;
+
     hasDictatedRef.current = true;
     setInputValue((prev) => {
       const sep = prev.length > 0 && !/\s$/.test(prev) ? " " : "";
-      return prev + sep + chunk;
+      return prev + sep + safeChunk;
     });
     requestAnimationFrame(() => {
       const t = inputRef.current;
@@ -648,11 +657,18 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
   useEffect(() => {
     if (!hasButler) return;
 
+    const isSpaceEvent = (e: KeyboardEvent) => (
+      e.code === "Space"
+      || e.key === " "
+      || e.key === "Spacebar"
+      || (e.keyCode ?? 0) === 32
+    );
+
     const onKeyDown = (e: KeyboardEvent) => {
-      if ((e.code !== "Space" && e.key !== " ") || !e.ctrlKey || e.altKey || e.metaKey || e.shiftKey || e.repeat) {
+      const hasCtrl = e.ctrlKey || e.getModifierState?.("Control");
+      if (!isSpaceEvent(e) || !hasCtrl || e.altKey || e.metaKey || e.shiftKey || e.repeat) {
         return;
       }
-      if (sending) return;
 
       e.preventDefault();
       if (voiceButtonRef.current && !voiceButtonRef.current.isRecording()) {
@@ -663,7 +679,7 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
     };
 
     const onKeyUp = (e: KeyboardEvent) => {
-      if (e.code !== "Space" && e.key !== " ") return;
+      if (!isSpaceEvent(e)) return;
       if (!voiceButtonRef.current || !voiceButtonRef.current.isRecording()) {
         setIsDictating(false);
         return;
@@ -673,12 +689,12 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
       voiceButtonRef.current.stop();
     };
 
-    window.addEventListener("keydown", onKeyDown);
-    window.addEventListener("keyup", onKeyUp);
+    window.addEventListener("keydown", onKeyDown, true);
+    window.addEventListener("keyup", onKeyUp, true);
     return () => {
       setIsDictating(false);
-      window.removeEventListener("keydown", onKeyDown);
-      window.removeEventListener("keyup", onKeyUp);
+      window.removeEventListener("keydown", onKeyDown, true);
+      window.removeEventListener("keyup", onKeyUp, true);
     };
   }, [hasButler, sending]);
 
@@ -794,32 +810,35 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
                 onStart={() => {
                   hasDictatedRef.current = false;
                   voiceInterimRef.current = "";
-                  dictationInputRef.current = inputValueRef.current;
                   setInterimVoiceText("");
                   setIsDictating(true);
                 }}
                 onTranscript={appendVoiceTranscript}
                 onInterim={(value) => {
-                  setInterimVoiceText(value);
-                  if (value.trim()) {
-                    voiceInterimRef.current = value;
+                  const safeInterim = sanitizeSpeechText(value);
+                  setInterimVoiceText(safeInterim);
+                  if (safeInterim) {
+                    voiceInterimRef.current = safeInterim;
                   }
                 }}
                 onStop={() => {
                   setIsDictating(false);
-                  if (!hasDictatedRef.current && voiceInterimRef.current.trim()) {
+                  const safeInterim = sanitizeSpeechText(voiceInterimRef.current);
+                  if (!hasDictatedRef.current && safeInterim) {
                     const prev = inputValueRef.current;
                     const sep = prev.length > 0 && !/\s$/.test(prev) ? " " : "";
-                    const next = prev + sep + voiceInterimRef.current.trim() + " ";
+                    const next = safeInterim ? `${prev + sep}${safeInterim} ` : prev;
                     setInputValue(next);
                     hasDictatedRef.current = true;
                   }
                   voiceInterimRef.current = "";
                   setInterimVoiceText("");
-                  const currentInput = inputValueRef.current.trim();
-                  const dictationChanged = currentInput !== dictationInputRef.current.trim();
-                  if (!hasDictatedRef.current && !dictationChanged) return;
-                  void handleSend();
+                  requestAnimationFrame(() => {
+                    if (!inputRef.current) return;
+                    inputRef.current.focus();
+                    const len = inputRef.current.value.length;
+                    inputRef.current.setSelectionRange(len, len);
+                  });
                 }}
               />
               <span className="h-5 w-px bg-gray-300 dark:bg-gray-700" aria-hidden />
@@ -857,7 +876,7 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
                 className="inline-flex items-center gap-1 px-2.5 py-1 rounded border border-gray-300 dark:border-gray-600 bg-surface-raised dark:bg-surface-raised-dark text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors shadow-sm"
                 title="Customize the butler's behavior (edits the project's butler skill)"
               >
-                <span aria-hidden>âš™</span>
+                <span aria-hidden>Config</span>
                 <span>Customize</span>
               </button>
               <button
@@ -1049,7 +1068,7 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
                 />
                 {interimVoiceText && (
                   <div className="absolute bottom-full mb-1 left-0 right-0 z-10 rounded-md bg-gray-900/90 dark:bg-gray-100/90 px-2.5 py-1 text-xs italic text-white dark:text-gray-900 pointer-events-none">
-                    ðŸŽ™ï¸ {interimVoiceText}
+                    [voice] {interimVoiceText}
                   </div>
                 )}
               </div>
