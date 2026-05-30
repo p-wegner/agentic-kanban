@@ -14,10 +14,16 @@ interface Skill {
   description: string | null;
 }
 
+interface StatusOption {
+  id: string;
+  name: string;
+}
+
 interface CreateIssuePanelProps {
   projectId: string;
   statusId: string;
   statusName?: string;
+  availableStatuses?: StatusOption[];
   initialState?: Partial<CreateIssueFormState>;
   onSubmit: (data: CreateIssueRequest & { startWorkspace?: boolean; planMode?: boolean; skipAutoReview?: boolean; profile?: ProfileSelection; model?: string; isDirect?: boolean; skillId?: string }) => Promise<void>;
   onClose: () => void;
@@ -52,11 +58,13 @@ export function CreateIssuePanel({
   projectId,
   statusId,
   statusName,
+  availableStatuses,
   initialState,
   onSubmit,
   onClose,
   canStartWorkspace = false,
 }: CreateIssuePanelProps) {
+  const [selectedStatusId, setSelectedStatusId] = useState(statusId);
   const [title, setTitle] = useState(initialState?.title ?? "");
   const [description, setDescription] = useState(initialState?.description ?? "");
   const [issueType, setIssueType] = useState<CreateIssueRequest["issueType"]>(initialState?.issueType ?? "task");
@@ -157,7 +165,7 @@ export function CreateIssuePanel({
         title: title.trim(),
         description: description.trim() || undefined,
         issueType,
-        statusId,
+        statusId: selectedStatusId,
         projectId,
         startWorkspace: startWorkspace || undefined,
         planMode: (startWorkspace && planMode) || undefined,
@@ -181,7 +189,10 @@ export function CreateIssuePanel({
       <div className="fixed right-0 top-0 h-full w-full max-w-lg bg-surface-raised dark:bg-surface-raised-dark shadow-xl z-50 flex flex-col animate-slide-in-right">
         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200 dark:border-gray-700">
           <h2 className="font-semibold text-gray-800 dark:text-gray-200 text-sm">
-            New Issue{statusName ? <span className="ml-2 text-xs font-normal text-gray-400 dark:text-gray-500">in {statusName}</span> : null}
+            New Issue
+            {availableStatuses && availableStatuses.length > 1 ? null : statusName ? (
+              <span className="ml-2 text-xs font-normal text-gray-400 dark:text-gray-500">in {statusName}</span>
+            ) : null}
           </h2>
           <button
             onClick={onClose}
@@ -258,6 +269,21 @@ export function CreateIssuePanel({
               <option value="chore">Chore</option>
             </select>
           </div>
+
+          {availableStatuses && availableStatuses.length > 1 && (
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-medium text-gray-600 dark:text-gray-400">Column</label>
+              <select
+                value={selectedStatusId}
+                onChange={(e) => setSelectedStatusId(e.target.value)}
+                className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded px-3 py-2 focus:outline-none focus:ring-1 focus:ring-brand-500 dark:bg-gray-900 dark:text-gray-100"
+              >
+                {availableStatuses.map((s) => (
+                  <option key={s.id} value={s.id}>{s.name}</option>
+                ))}
+              </select>
+            </div>
+          )}
 
           {canStartWorkspace && (
             <div className="flex flex-col gap-2">
