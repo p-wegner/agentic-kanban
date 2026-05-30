@@ -125,7 +125,7 @@ export function Layout({
 
   return (
     <div className="h-screen flex flex-col bg-surface dark:bg-surface-dark">
-      <header className="bg-surface-raised dark:bg-surface-raised-dark border-b border-gray-200 dark:border-gray-700 px-4 py-2 shrink-0">
+      <header className="bg-surface-raised dark:bg-surface-raised-dark border-b border-black/[0.07] dark:border-white/10 px-4 py-2.5 shrink-0">
         <div className="flex items-center justify-between gap-4 flex-wrap">
           <div className="flex items-center gap-2 min-w-0">
             <h1 className="wordmark text-xl font-semibold text-ink dark:text-stone-100 shrink-0">

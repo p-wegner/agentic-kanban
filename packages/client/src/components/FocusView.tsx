@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { apiFetch } from "../lib/api.js";
+import { BRAND, ACCENT } from "../lib/chartColors";
 
 interface FocusIssue {
   issueId: string;
@@ -43,10 +44,10 @@ const PRIORITY_COLOR: Record<string, string> = {
 
 /** Score → bar colour. High-impact work glows warmer. */
 function scoreColor(score: number): string {
-  if (score >= 50) return "#22c55e";
-  if (score >= 35) return "#3b82f6";
-  if (score >= 20) return "#eab308";
-  return "#94a3b8";
+  if (score >= 50) return ACCENT;
+  if (score >= 35) return BRAND;
+  if (score >= 20) return "#c79a3e";
+  return "#8a8175";
 }
 
 function StatCard({ label, value, sub, color }: { label: string; value: string | number; sub?: string; color?: string }) {
@@ -68,7 +69,7 @@ function ReadyRow({ issue, onIssueClick, rank }: { issue: FocusIssue; onIssueCli
     >
       <span className="shrink-0 w-6 text-center text-xs font-mono text-gray-400 dark:text-gray-500">{rank}</span>
       <div className="min-w-0 flex-1">
-        <p className="text-sm text-gray-800 dark:text-gray-100 truncate group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
+        <p className="text-sm text-gray-800 dark:text-gray-100 truncate group-hover:text-brand-600 dark:group-hover:text-brand-400 transition-colors">
           {issue.issueNumber != null && <span className="text-gray-400 dark:text-gray-500">#{issue.issueNumber} </span>}
           {issue.title}
         </p>
@@ -81,7 +82,7 @@ function ReadyRow({ issue, onIssueClick, rank }: { issue: FocusIssue; onIssueCli
             <span className="text-[10px] uppercase px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400">{issue.estimate}</span>
           )}
           {issue.reasons.map((r) => (
-            <span key={r} className="text-[10px] px-1.5 py-0.5 rounded-full bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-300">{r}</span>
+            <span key={r} className="text-[10px] px-1.5 py-0.5 rounded-full bg-accent-50 dark:bg-accent-900/30 text-accent-700 dark:text-accent-300">{r}</span>
           ))}
         </div>
       </div>
@@ -105,7 +106,7 @@ function BlockedRow({ issue, onIssueClick }: { issue: FocusIssue; onIssueClick: 
       >
         <span className="mt-1.5 w-1.5 h-1.5 rounded-full shrink-0 bg-red-400" />
         <div className="min-w-0 flex-1">
-          <p className="text-xs text-gray-700 dark:text-gray-300 truncate group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
+          <p className="text-xs text-gray-700 dark:text-gray-300 truncate group-hover:text-brand-600 dark:group-hover:text-brand-400 transition-colors">
             {issue.issueNumber != null && <span className="text-gray-400 dark:text-gray-500">#{issue.issueNumber} </span>}
             {issue.title}
           </p>
@@ -122,7 +123,7 @@ function BlockedRow({ issue, onIssueClick }: { issue: FocusIssue; onIssueClick: 
               {idx > 0 && ", "}
               <button
                 onClick={() => onIssueClick(b.issueId)}
-                className="hover:text-blue-500 underline decoration-dotted"
+                className="hover:text-brand-500 underline decoration-dotted"
               >
                 {b.issueNumber != null ? `#${b.issueNumber}` : b.title}
               </button>
@@ -177,9 +178,9 @@ export function FocusView({ projectId, onIssueClick }: FocusViewProps) {
         {data && h && (
           <>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              <StatCard label="Ready" value={h.readyCount} sub="can start now" color={h.readyCount > 0 ? "#22c55e" : undefined} />
-              <StatCard label="Blocked" value={h.blockedCount} sub="waiting on others" color={h.blockedCount > 0 ? "#ef4444" : undefined} />
-              <StatCard label="In flight" value={h.inFlightCount} sub="already underway" color={h.inFlightCount > 0 ? "#8b5cf6" : undefined} />
+              <StatCard label="Ready" value={h.readyCount} sub="can start now" color={h.readyCount > 0 ? ACCENT : undefined} />
+              <StatCard label="Blocked" value={h.blockedCount} sub="waiting on others" color={h.blockedCount > 0 ? "#b4453a" : undefined} />
+              <StatCard label="In flight" value={h.inFlightCount} sub="already underway" color={h.inFlightCount > 0 ? BRAND : undefined} />
               <StatCard label="Top score" value={h.topScore} sub="best next pick" color={h.topScore > 0 ? scoreColor(h.topScore) : undefined} />
             </div>
 

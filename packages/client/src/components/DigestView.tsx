@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { apiFetch } from "../lib/api.js";
+import { SEMANTIC } from "../lib/chartColors";
 
 type DigestRange = "24h" | "3d" | "7d";
 
@@ -197,22 +198,22 @@ export function DigestView({ projectId, onIssueClick }: DigestViewProps) {
           <>
             {/* Headline cards */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              <StatCard label="Created" value={h.createdCount} sub="new issues" color={h.createdCount > 0 ? "#3b82f6" : undefined} />
-              <StatCard label="Completed" value={h.completedCount} sub="done + cancelled" color={h.completedCount > 0 ? "#22c55e" : undefined} />
-              <StatCard label="Merged" value={h.mergedCount} sub="workspaces" color={h.mergedCount > 0 ? "#06b6d4" : undefined} />
+              <StatCard label="Created" value={h.createdCount} sub="new issues" color={h.createdCount > 0 ? SEMANTIC.created : undefined} />
+              <StatCard label="Completed" value={h.completedCount} sub="done + cancelled" color={h.completedCount > 0 ? SEMANTIC.merged : undefined} />
+              <StatCard label="Merged" value={h.mergedCount} sub="workspaces" color={h.mergedCount > 0 ? SEMANTIC.merged : undefined} />
               <StatCard
                 label="Agent runs"
                 value={h.sessionCount}
                 sub={h.sessionCount > 0 ? `${h.sessionSuccessCount} ok · $${h.totalCostUsd.toFixed(2)}` : "no sessions"}
-                color={h.sessionCount > 0 ? "#8b5cf6" : undefined}
+                color={h.sessionCount > 0 ? SEMANTIC.agent : undefined}
               />
             </div>
 
             {(h.activeAgents > 0 || h.blockedCount > 0) && (
               <div className="flex flex-wrap gap-2">
                 {h.activeAgents > 0 && (
-                  <span className="inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full bg-violet-100 dark:bg-violet-900/40 text-violet-700 dark:text-violet-300">
-                    <span className="w-1.5 h-1.5 rounded-full bg-violet-500 animate-pulse" />
+                  <span className="inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full bg-brand-100 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300">
+                    <span className="w-1.5 h-1.5 rounded-full bg-brand-500 animate-pulse" />
                     {h.activeAgents} agent{h.activeAgents !== 1 ? "s" : ""} running now
                   </span>
                 )}
@@ -235,20 +236,20 @@ export function DigestView({ projectId, onIssueClick }: DigestViewProps) {
 
             {!nothingHappened && (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <Section title="Completed" count={data.completed.length} accent="#22c55e">
+                <Section title="Completed" count={data.completed.length} accent={SEMANTIC.merged}>
                   {data.completed.length === 0
                     ? <p className="text-xs text-gray-400 dark:text-gray-500">Nothing completed yet.</p>
-                    : data.completed.map((i) => <IssueRow key={i.issueId} issue={i} now={now} onIssueClick={onIssueClick} accent="#22c55e" />)}
+                    : data.completed.map((i) => <IssueRow key={i.issueId} issue={i} now={now} onIssueClick={onIssueClick} accent={SEMANTIC.merged} />)}
                 </Section>
 
-                <Section title="Merged" count={data.merged.length} accent="#06b6d4">
+                <Section title="Merged" count={data.merged.length} accent={SEMANTIC.merged}>
                   {data.merged.length === 0
                     ? <p className="text-xs text-gray-400 dark:text-gray-500">No merges in this window.</p>
                     : data.merged.map((m) => (
                       <button key={m.workspaceId} onClick={() => onIssueClick(m.issueId)} className="flex items-start gap-2 text-left group w-full py-1">
-                        <span className="mt-1.5 w-1.5 h-1.5 rounded-full shrink-0 bg-cyan-400" />
+                        <span className="mt-1.5 w-1.5 h-1.5 rounded-full shrink-0 bg-accent-400" />
                         <div className="min-w-0 flex-1">
-                          <p className="text-xs text-gray-700 dark:text-gray-300 truncate group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
+                          <p className="text-xs text-gray-700 dark:text-gray-300 truncate group-hover:text-brand-600 dark:group-hover:text-brand-400 transition-colors">
                             {m.issueNumber != null && <span className="text-gray-400 dark:text-gray-500">#{m.issueNumber} </span>}
                             {m.issueTitle}
                           </p>
@@ -258,10 +259,10 @@ export function DigestView({ projectId, onIssueClick }: DigestViewProps) {
                     ))}
                 </Section>
 
-                <Section title="New issues" count={data.created.length} accent="#3b82f6">
+                <Section title="New issues" count={data.created.length} accent={SEMANTIC.created}>
                   {data.created.length === 0
                     ? <p className="text-xs text-gray-400 dark:text-gray-500">No new issues.</p>
-                    : data.created.map((i) => <IssueRow key={i.issueId} issue={i} now={now} onIssueClick={onIssueClick} accent="#3b82f6" />)}
+                    : data.created.map((i) => <IssueRow key={i.issueId} issue={i} now={now} onIssueClick={onIssueClick} accent={SEMANTIC.created} />)}
                 </Section>
 
                 <Section title="Moved" count={data.moved.length} accent="#f59e0b">
@@ -276,7 +277,7 @@ export function DigestView({ projectId, onIssueClick }: DigestViewProps) {
                   </Section>
                 )}
 
-                <Section title="Agent runs" count={data.sessions.length} accent="#8b5cf6">
+                <Section title="Agent runs" count={data.sessions.length} accent={SEMANTIC.agent}>
                   {data.sessions.length === 0
                     ? <p className="text-xs text-gray-400 dark:text-gray-500">No agent sessions ran.</p>
                     : data.sessions.slice(0, 12).map((s) => (

@@ -1,5 +1,6 @@
 import { useMemo, useRef, useState } from "react";
 import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
+import { TYPE_COLORS as TYPE_DOT } from "../lib/chartColors";
 
 interface TimelineViewProps {
   columns: StatusWithIssues[];
@@ -8,10 +9,10 @@ interface TimelineViewProps {
 }
 
 const TYPE_COLORS: Record<string, { bg: string; border: string; text: string; dot: string }> = {
-  task:    { bg: "bg-blue-100 dark:bg-blue-900/50",    border: "border-blue-300 dark:border-blue-700",    text: "text-blue-800 dark:text-blue-200",    dot: "#3b82f6" },
-  bug:     { bg: "bg-red-100 dark:bg-red-900/50",      border: "border-red-300 dark:border-red-700",      text: "text-red-800 dark:text-red-200",      dot: "#ef4444" },
-  feature: { bg: "bg-brand-100 dark:bg-brand-900/50", border: "border-brand-300 dark:border-brand-700", text: "text-brand-800 dark:text-brand-200", dot: "#c25f36" },
-  chore:   { bg: "bg-amber-100 dark:bg-amber-900/50",  border: "border-amber-300 dark:border-amber-700",  text: "text-amber-800 dark:text-amber-200",  dot: "#f59e0b" },
+  task:    { bg: "bg-slate-100 dark:bg-slate-800/50",  border: "border-slate-300 dark:border-slate-600",  text: "text-slate-700 dark:text-slate-200",  dot: TYPE_DOT.task },
+  bug:     { bg: "bg-red-100 dark:bg-red-900/50",      border: "border-red-300 dark:border-red-700",      text: "text-red-800 dark:text-red-200",      dot: TYPE_DOT.bug },
+  feature: { bg: "bg-brand-100 dark:bg-brand-900/50", border: "border-brand-300 dark:border-brand-700", text: "text-brand-800 dark:text-brand-200", dot: TYPE_DOT.feature },
+  chore:   { bg: "bg-amber-100 dark:bg-amber-900/50",  border: "border-amber-300 dark:border-amber-700",  text: "text-amber-800 dark:text-amber-200",  dot: TYPE_DOT.chore },
 };
 
 const PRIORITY_COLORS: Record<string, string> = {
