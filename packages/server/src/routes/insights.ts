@@ -218,8 +218,14 @@ function finalizeAggregate(bucket: AggregateBucket) {
   };
 }
 
+function toIsoStringOrNull(value: string | null | undefined) {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}
+
 function toDateKey(value: string) {
-  return value.slice(0, 10);
+  return toIsoStringOrNull(value)?.slice(0, 10) ?? value.slice(0, 10);
 }
 
 function startOfUtcDay(date: Date) {
@@ -301,13 +307,14 @@ export function createInsightsRoute(database: Database = db) {
       const resolvedSkillName = row.sessionSkillName ?? row.skillName;
       const skillMapKey = resolvedSkillId ?? "__no_skill__";
       const skillName = resolvedSkillName ?? "No Skill";
-      const dateKey = toDateKey(row.startedAt);
+      const startedAtIso = toIsoStringOrNull(row.startedAt) ?? dateTo;
+      const dateKey = toDateKey(startedAtIso);
       const tokens = stats ? stats.inputTokens + stats.outputTokens : 0;
 
       sessionCount += 1;
       if (success) successCount += 1;
-      if (!earliestStartedAt || row.startedAt < earliestStartedAt) {
-        earliestStartedAt = row.startedAt;
+      if (!earliestStartedAt || startedAtIso < earliestStartedAt) {
+        earliestStartedAt = startedAtIso;
       }
 
       const skillBucket = bySkill.get(skillMapKey) ?? {
@@ -386,7 +393,7 @@ export function createInsightsRoute(database: Database = db) {
           numTurns: stats.numTurns,
           durationMs: stats.durationMs,
           success,
-          startedAt: row.startedAt,
+          startedAt: startedAtIso,
         });
       }
     }
