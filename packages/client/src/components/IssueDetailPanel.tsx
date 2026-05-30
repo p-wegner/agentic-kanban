@@ -143,9 +143,7 @@ export function IssueDetailPanel({
   const [preEnhanceSnapshot, setPreEnhanceSnapshot] = useState<{ title: string; description: string } | null>(null);
   const [estimating, setEstimating] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const [actionsOpen, setActionsOpen] = useState(false);
   const [togglingVisualVerify, setTogglingVisualVerify] = useState(false);
-  const actionsRef = useRef<HTMLDivElement>(null);
   const [moveToDonePending, setMoveToDonePending] = useState<{ confirm: () => Promise<void> } | null>(null);
   const [workspaceCount, setWorkspaceCount] = useState(0);
   const [issueTags, setIssueTags] = useState<{ id: string; name: string; color: string | null }[]>([]);
@@ -236,18 +234,13 @@ export function IssueDetailPanel({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [editing, hasChanges, issue, onClose]);
 
-  // Close actions dropdown on outside click
+  // Reset delete confirmation on outside click
   useEffect(() => {
-    if (!actionsOpen) return;
-    function handleClick(e: MouseEvent) {
-      if (actionsRef.current && !actionsRef.current.contains(e.target as Node)) {
-        setActionsOpen(false);
-        setConfirmDelete(false);
-      }
-    }
+    if (!confirmDelete) return;
+    function handleClick() { setConfirmDelete(false); }
     document.addEventListener("mousedown", handleClick);
     return () => document.removeEventListener("mousedown", handleClick);
-  }, [actionsOpen]);
+  }, [confirmDelete]);
 
   function handleCancelEdit() {
     if (hasChanges) {
@@ -674,46 +667,27 @@ export function IssueDetailPanel({
                     <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
                   </svg>
                 </button>
-                <div ref={actionsRef} className="relative">
+                {((issue.description?.length ?? 0) > 500 || issueTags.some(t => t.name === "epic")) && (
                   <button
-                    onClick={() => { setActionsOpen((o) => !o); setConfirmDelete(false); }}
-                    title="More actions"
-                    className="text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 p-0.5 rounded"
+                    onClick={() => setShowDecomposeModal(true)}
+                    title="Decompose into subtasks"
+                    className="text-purple-400 dark:text-purple-500 hover:text-purple-600 dark:hover:text-purple-300 p-0.5 rounded transition-colors"
                   >
                     <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 10h16M4 14h8m-8 4h8" />
                     </svg>
                   </button>
-                  {actionsOpen && (
-                    <div className="absolute right-0 top-full mt-1 w-48 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-50 py-1">
-                      {((issue.description?.length ?? 0) > 500 || issueTags.some(t => t.name === "epic")) && (
-                        <button
-                          onClick={() => { setShowDecomposeModal(true); setActionsOpen(false); }}
-                          className="w-full text-left px-3 py-2 text-sm text-purple-700 dark:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-950 flex items-center gap-2"
-                        >
-                          <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 10h16M4 14h8m-8 4h8" />
-                          </svg>
-                          Decompose…
-                        </button>
-                      )}
-                      <button
-                        onClick={() => handleDelete()}
-                        disabled={saving}
-                        className={`w-full text-left px-3 py-2 text-sm disabled:opacity-50 flex items-center gap-2 ${
-                          confirmDelete
-                            ? "text-red-600 bg-red-50 dark:bg-red-950 hover:bg-red-100 dark:hover:bg-red-900"
-                            : "text-red-600 hover:bg-red-50 dark:hover:bg-red-950"
-                        }`}
-                      >
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                        </svg>
-                        {confirmDelete ? "Confirm Delete" : "Delete"}
-                      </button>
-                    </div>
-                  )}
-                </div>
+                )}
+                <button
+                  onClick={() => handleDelete()}
+                  disabled={saving}
+                  title={confirmDelete ? "Click again to confirm delete" : "Delete issue"}
+                  className={`p-0.5 rounded transition-colors disabled:opacity-50 ${confirmDelete ? "text-red-600 dark:text-red-400" : "text-gray-400 dark:text-gray-500 hover:text-red-500 dark:hover:text-red-400"}`}
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                  </svg>
+                </button>
               </>
             )}
             <button
@@ -895,158 +869,161 @@ export function IssueDetailPanel({
             )}
           </div>
 
-          {/* Status - always visible, dropdown in view mode */}
-          <div>
-            <label className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">
-              Status
-            </label>
-            <select
-              value={issue.statusId}
-              onChange={(e) => handleStatusChange(e.target.value)}
-              disabled={editing}
-              className={`w-full text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500 ${editing ? "bg-gray-50 dark:bg-gray-950 text-gray-500 dark:text-gray-400" : ""}`}
-            >
-              {statuses.map((s) => (
-                <option key={s.id} value={s.id}>{s.name}</option>
-              ))}
-            </select>
-          </div>
-
-          {/* Type - always visible, editable in edit mode */}
-          <div>
-            <label className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">
-              Type
-            </label>
-            {editing ? (
-              <select
-                value={issueType}
-                onChange={(e) => setIssueType(e.target.value)}
-                className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500"
-              >
-                <option value="task">Task</option>
-                <option value="bug">Bug</option>
-                <option value="feature">Feature</option>
-                <option value="chore">Chore</option>
-              </select>
-            ) : (
-              <span className={`inline-block text-xs font-medium px-1.5 py-0.5 rounded capitalize ${badgeColor}`}>
-                {issue.issueType ?? "task"}
-              </span>
-            )}
-          </div>
-
-          {/* Estimate */}
-          <div>
-            <label className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">
-              Estimate
-            </label>
-            {editing ? (
-              <select
-                value={estimate}
-                onChange={(e) => setEstimate(e.target.value)}
-                className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500"
-              >
-                <option value="">None</option>
-                <option value="XS">XS</option>
-                <option value="S">S</option>
-                <option value="M">M</option>
-                <option value="L">L</option>
-                <option value="XL">XL</option>
-              </select>
-            ) : (
-              <div className="flex items-center gap-1 flex-wrap">
-                {(["XS", "S", "M", "L", "XL"] as const).map((size) => (
-                  <button
-                    key={size}
-                    type="button"
-                    onClick={() => handleQuickEstimate(size)}
-                    title={issue.estimate === size ? `Clear estimate` : `Set estimate to ${size}`}
-                    className={`text-xs font-medium px-1.5 py-0.5 rounded transition-colors ${
-                      issue.estimate === size
-                        ? "bg-teal-600 text-white"
-                        : "bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-teal-100 hover:text-teal-700 dark:hover:bg-teal-900 dark:hover:text-teal-300"
-                    }`}
-                  >
-                    {size}
-                  </button>
-                ))}
-                <button
-                  type="button"
-                  onClick={handleAiEstimate}
-                  disabled={estimating}
-                  title="Estimate with AI (Haiku)"
-                  className="ml-1 text-xs text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:hover:text-brand-300 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-0.5"
+          {/* Metadata group: Status, Type, Estimate, Due Date — compact two-column grid in view mode */}
+          {editing ? (
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">Status</label>
+                <select
+                  value={issue.statusId}
+                  onChange={(e) => handleStatusChange(e.target.value)}
+                  disabled={editing}
+                  className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500 bg-gray-50 dark:bg-gray-950 text-gray-500 dark:text-gray-400"
                 >
-                  {estimating ? (
-                    <svg className="animate-spin h-3 w-3" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
-                    </svg>
-                  ) : (
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 3l1.5 3.5L10 8l-3.5 1.5L5 13l-1.5-3.5L0 8l3.5-1.5L5 3zM19 11l1 2.5L22.5 14l-2.5 1L19 17.5l-1-2.5L15.5 14l2.5-1L19 11z" />
-                    </svg>
-                  )}
-                  {estimating ? "..." : "AI"}
-                </button>
+                  {statuses.map((s) => (
+                    <option key={s.id} value={s.id}>{s.name}</option>
+                  ))}
+                </select>
               </div>
-            )}
-          </div>
-
-          {/* Due Date */}
-          <div>
-            <label className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">
-              Due Date
-            </label>
-            {editing ? (
-              <input
-                type="date"
-                value={dueDate}
-                onChange={(e) => setDueDate(e.target.value)}
-                className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100"
-              />
-            ) : issue.dueDate ? (() => {
-              const overdue = new Date(issue.dueDate) < new Date(new Date().toDateString()) &&
-                issue.statusName !== "Done" && issue.statusName !== "Cancelled";
-              return (
-                <span className={`inline-block text-xs font-medium px-1.5 py-0.5 rounded ${overdue ? "bg-red-100 text-red-700" : "bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300"}`}>
-                  {new Date(issue.dueDate).toLocaleDateString('en-US', { month: "short", day: "numeric", year: "numeric" })}
-                  {overdue && " ⚠ overdue"}
-                </span>
-              );
-            })() : (
-              <span className="text-xs text-gray-400 dark:text-gray-500">—</span>
-            )}
-          </div>
-
-          {/* Skip auto review indicator - view mode only */}
-          {!editing && issue.skipAutoReview && (
-            <div>
-              <span className="inline-flex items-center gap-1 text-xs font-medium px-1.5 py-0.5 rounded bg-amber-100 text-amber-700">
-                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
-                </svg>
-                Skip auto review
-              </span>
-            </div>
-          )}
-
-          {/* Skip auto review toggle - edit mode only */}
-          {editing && (
-            <div>
-              <label className="flex items-center gap-2 cursor-pointer select-none">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">Type</label>
+                  <select
+                    value={issueType}
+                    onChange={(e) => setIssueType(e.target.value)}
+                    className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                  >
+                    <option value="task">Task</option>
+                    <option value="bug">Bug</option>
+                    <option value="feature">Feature</option>
+                    <option value="chore">Chore</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">Estimate</label>
+                  <select
+                    value={estimate}
+                    onChange={(e) => setEstimate(e.target.value)}
+                    className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                  >
+                    <option value="">None</option>
+                    <option value="XS">XS</option>
+                    <option value="S">S</option>
+                    <option value="M">M</option>
+                    <option value="L">L</option>
+                    <option value="XL">XL</option>
+                  </select>
+                </div>
+              </div>
+              <div>
+                <label className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">Due Date</label>
                 <input
-                  type="checkbox"
-                  checked={skipAutoReview}
-                  onChange={(e) => setSkipAutoReview(e.target.checked)}
-                  className="w-4 h-4 rounded border-gray-300 text-brand-600 focus:ring-brand-500"
+                  type="date"
+                  value={dueDate}
+                  onChange={(e) => setDueDate(e.target.value)}
+                  className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100"
                 />
-                <span className="text-sm text-gray-700 dark:text-gray-300">Skip auto AI code review</span>
-              </label>
+              </div>
+              <div>
+                <label className="flex items-center gap-2 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={skipAutoReview}
+                    onChange={(e) => setSkipAutoReview(e.target.checked)}
+                    className="w-4 h-4 rounded border-gray-300 text-brand-600 focus:ring-brand-500"
+                  />
+                  <span className="text-sm text-gray-700 dark:text-gray-300">Skip auto AI code review</span>
+                </label>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {/* Status — full width, primary control */}
+              <div>
+                <label className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">Status</label>
+                <select
+                  value={issue.statusId}
+                  onChange={(e) => handleStatusChange(e.target.value)}
+                  className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                >
+                  {statuses.map((s) => (
+                    <option key={s.id} value={s.id}>{s.name}</option>
+                  ))}
+                </select>
+              </div>
+              {/* Type + Estimate side by side */}
+              <div className="flex items-center gap-3 flex-wrap">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs text-gray-500 dark:text-gray-400">Type:</span>
+                  <span className={`inline-block text-xs font-medium px-1.5 py-0.5 rounded capitalize ${badgeColor}`}>
+                    {issue.issueType ?? "task"}
+                  </span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs text-gray-500 dark:text-gray-400">Size:</span>
+                  <div className="flex items-center gap-0.5">
+                    {(["XS", "S", "M", "L", "XL"] as const).map((size) => (
+                      <button
+                        key={size}
+                        type="button"
+                        onClick={() => handleQuickEstimate(size)}
+                        title={issue.estimate === size ? `Clear estimate` : `Set estimate to ${size}`}
+                        className={`text-xs font-medium px-1.5 py-0.5 rounded transition-colors ${
+                          issue.estimate === size
+                            ? "bg-teal-600 text-white"
+                            : "bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-teal-100 hover:text-teal-700 dark:hover:bg-teal-900 dark:hover:text-teal-300"
+                        }`}
+                      >
+                        {size}
+                      </button>
+                    ))}
+                    <button
+                      type="button"
+                      onClick={handleAiEstimate}
+                      disabled={estimating}
+                      title="Estimate with AI (Haiku)"
+                      className="ml-0.5 text-xs text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:hover:text-brand-300 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-0.5 px-1 py-0.5"
+                    >
+                      {estimating ? (
+                        <svg className="animate-spin h-3 w-3" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+                        </svg>
+                      ) : (
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M5 3l1.5 3.5L10 8l-3.5 1.5L5 13l-1.5-3.5L0 8l3.5-1.5L5 3zM19 11l1 2.5L22.5 14l-2.5 1L19 17.5l-1-2.5L15.5 14l2.5-1L19 11z" />
+                        </svg>
+                      )}
+                      {estimating ? "..." : "AI"}
+                    </button>
+                  </div>
+                </div>
+                {issue.dueDate && (() => {
+                  const overdue = new Date(issue.dueDate) < new Date(new Date().toDateString()) &&
+                    issue.statusName !== "Done" && issue.statusName !== "Cancelled";
+                  return (
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs text-gray-500 dark:text-gray-400">Due:</span>
+                      <span className={`inline-block text-xs font-medium px-1.5 py-0.5 rounded ${overdue ? "bg-red-100 text-red-700" : "bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300"}`}>
+                        {new Date(issue.dueDate).toLocaleDateString('en-US', { month: "short", day: "numeric", year: "numeric" })}
+                        {overdue && " ⚠ overdue"}
+                      </span>
+                    </div>
+                  );
+                })()}
+                {issue.skipAutoReview && (
+                  <span className="inline-flex items-center gap-1 text-xs font-medium px-1.5 py-0.5 rounded bg-amber-100 text-amber-700">
+                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
+                    </svg>
+                    Skip review
+                  </span>
+                )}
+              </div>
             </div>
           )}
 
-          {/* Workspaces section - always visible */}
+          {/* Workspaces section — placed directly below status/metadata for contextual proximity */}
           {!editing && (
             <div>
               <label className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">
@@ -1160,8 +1137,9 @@ export function IssueDetailPanel({
             </div>
           )}
 
+          {/* ── Secondary detail sections ── */}
           {/* Tags section - visible in both view and edit mode */}
-          <div>
+          <div className="border-t border-gray-100 dark:border-gray-800 pt-3">
               <label className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">
                 Tags
               </label>
