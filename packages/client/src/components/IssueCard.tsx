@@ -32,12 +32,96 @@ function getLastSessionBadge(triggerType: string | null | undefined): { label: s
   return null;
 }
 
+function coverageClass(pct: number): string {
+  if (pct >= 80) return "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300";
+  if (pct >= 60) return "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/40 dark:text-yellow-300";
+  return "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300";
+}
+
+function commitCountClass(count: number): string {
+  if (count <= 0) return "bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400";
+  if (count <= 3) return "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300";
+  if (count <= 10) return "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/40 dark:text-yellow-300";
+  return "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300";
+}
+
 const issueTypeColors: Record<string, string> = {
   task: "bg-blue-100 dark:bg-blue-900/50 text-blue-800 dark:text-blue-200",
   bug: "bg-red-100 dark:bg-red-900/50 text-red-800 dark:text-red-200",
   feature: "bg-brand-50 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300",
   chore: "bg-amber-100 dark:bg-amber-900/50 text-amber-800 dark:text-amber-200",
 };
+
+function CodeMetricsBadges({
+  commitCount,
+  metrics,
+}: {
+  commitCount?: number | null;
+  metrics: NonNullable<NonNullable<IssueWithStatus["workspaceSummary"]>["main"]>["codeMetrics"] | null | undefined;
+}) {
+  const coverage = metrics?.coverage;
+  const lint = metrics?.lint;
+  const complexity = metrics?.complexity;
+
+  return (
+    <>
+      {commitCount !== undefined && commitCount !== null ? (
+        <span
+          className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold shrink-0 ${commitCountClass(commitCount)}`}
+          title="Commits ahead of base branch"
+        >
+          +{commitCount}
+        </span>
+      ) : (
+        <span
+          className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium shrink-0 bg-gray-100 dark:bg-gray-800 text-gray-400 dark:text-gray-500"
+          title="Commit count unavailable"
+        >
+          commits -
+        </span>
+      )}
+      {coverage ? (
+        <span
+          className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold shrink-0 ${coverageClass(coverage.linesPct)}`}
+          title={`Line coverage: ${coverage.linesPct}% from ${coverage.source}`}
+        >
+          cov {Math.round(coverage.linesPct)}%
+        </span>
+      ) : (
+        <span
+          className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium shrink-0 bg-gray-100 dark:bg-gray-800 text-gray-400 dark:text-gray-500"
+          title={metrics ? "No coverage summary found" : "Code metrics not collected yet"}
+        >
+          cov -
+        </span>
+      )}
+      {lint && (
+        <span
+          className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold shrink-0 ${
+            lint.errors > 0 ? "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300" :
+            lint.warnings > 0 ? "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/40 dark:text-yellow-300" :
+            "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300"
+          }`}
+          title={`${lint.errors} lint error(s), ${lint.warnings} warning(s) from ${lint.source}`}
+        >
+          lint {lint.violations}
+        </span>
+      )}
+      {complexity && (
+        <span
+          className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold shrink-0 ${
+            complexity.average <= 20 ? "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300" :
+            complexity.average <= 40 ? "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/40 dark:text-yellow-300" :
+            "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300"
+          }`}
+          title={`Heuristic complexity: average ${complexity.average}, max ${complexity.max} across ${complexity.files} source file(s)`}
+        >
+          cx {complexity.average}
+        </span>
+      )}
+    </>
+  );
+}
 
 const priorityColors: Record<string, string> = {
   critical: "bg-red-100 dark:bg-red-900/50 text-red-700 dark:text-red-300",
@@ -313,9 +397,10 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
                 }`}
                 title={`PR Quality Score: ${ws.main.scorecard.score}/100`}
               >
-                {ws.main.scorecard.score}
-              </span>
-            )}
+            {ws.main.scorecard.score}
+          </span>
+        )}
+            <CodeMetricsBadges commitCount={ws.main.commitCount} metrics={ws.main.codeMetrics} />
             {ws.main.diffStats && liveActivity && (
               <>
                 <span className="text-green-600">+{ws.main.diffStats.insertions}</span>

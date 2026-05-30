@@ -1,9 +1,11 @@
 import { workspaces, sessions, sessionMessages, showdowns } from "@agentic-kanban/shared/schema";
 import { eq, inArray, sql, desc } from "drizzle-orm";
 import type { Database } from "../db/index.js";
-import { getDiffShortstat, detectConflicts } from "./git.service.js";
+import { detectConflicts, getCommitCountAhead, getDiffShortstat } from "./git.service.js";
 import type { ProviderName } from "./agent-provider.js";
 import { isAnalyticsNoise } from "./session-filter.js";
+import { computeWorkspaceCodeMetrics, parseStoredWorkspaceCodeMetrics } from "./workspace-code-metrics.service.js";
+import type { WorkspaceCodeMetrics } from "@agentic-kanban/shared";
 
 // Limit concurrent background git operations to avoid hammering the filesystem
 let _bgGitRunning = 0;
@@ -17,6 +19,7 @@ function runBgGit(fn: () => Promise<void>): void {
 
 const CONFLICT_CACHE_TTL_MS = 5 * 60 * 1000;
 const DIFF_STAT_CACHE_TTL_MS = 30 * 1000;
+const CODE_METRICS_CACHE_TTL_MS = 5 * 60 * 1000;
 
 export type WorkspaceSummary = {
   total: number;
@@ -51,6 +54,8 @@ export type WorkspaceSummary = {
     pendingPlanPath?: string | null;
     planOnlyWarning?: boolean;
     scorecard?: { score: number } | null;
+    commitCount?: number | null;
+    codeMetrics?: WorkspaceCodeMetrics | null;
   };
 };
 
@@ -119,6 +124,8 @@ export async function buildWorkspaceSummaryMap(
       diffStatCacheInsertions: workspaces.diffStatCacheInsertions,
       diffStatCacheDeletions: workspaces.diffStatCacheDeletions,
       scorecardScore: workspaces.scorecardScore,
+      codeMetricsJson: workspaces.codeMetricsJson,
+      codeMetricsComputedAt: workspaces.codeMetricsComputedAt,
       showdownId: workspaces.showdownId,
       mergedAt: workspaces.mergedAt,
     })
@@ -181,10 +188,16 @@ export async function buildWorkspaceSummaryMap(
       pendingPlanPath: mainWs.pendingPlanPath,
       planOnlyWarning: false,
       scorecard: mainWs.scorecardScore !== null ? { score: mainWs.scorecardScore } : null,
+      commitCount: null,
+      codeMetrics: parseStoredWorkspaceCodeMetrics(mainWs.codeMetricsJson, mainWs.codeMetricsComputedAt),
       mergedAt: mainWs.mergedAt,
     };
 
     if (mainWs.workingDir && mainWs.status !== "closed") {
+      if (!mainWs.isDirect && (mainWs.baseBranch || defaultBranch)) {
+        summary.main.commitCount = await getCommitCountAhead(mainWs.workingDir, mainWs.baseBranch || defaultBranch);
+      }
+
       const diffRef = mainWs.isDirect ? "HEAD" : (mainWs.baseBranch || defaultBranch);
       if (!diffRef) continue;
       const mainRef = summary.main;
@@ -232,6 +245,20 @@ export async function buildWorkspaceSummaryMap(
       }
 
       // Conflict detection for non-direct idle workspaces — stale-while-revalidate
+      const codeMetricsCacheAge = mainWs.codeMetricsComputedAt
+        ? Date.now() - new Date(mainWs.codeMetricsComputedAt).getTime()
+        : Infinity;
+      if (codeMetricsCacheAge >= CODE_METRICS_CACHE_TTL_MS) {
+        const wsId = mainWs.id;
+        runBgGit(() =>
+          computeWorkspaceCodeMetrics(wsId, database)
+            .then((metrics) => {
+              if (metrics && summary.main?.id === wsId) summary.main.codeMetrics = metrics;
+            })
+            .catch(() => {})
+        );
+      }
+
       if (!mainWs.isDirect && mainWs.status === "idle") {
         const conflictCacheAge = mainWs.conflictCacheCheckedAt
           ? Date.now() - new Date(mainWs.conflictCacheCheckedAt).getTime()
