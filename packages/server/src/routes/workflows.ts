@@ -83,6 +83,46 @@ function normalizeImportedTemplate(input: any) {
   };
 }
 
+function validateImportedTemplate(spec: ReturnType<typeof normalizeImportedTemplate>): string[] {
+  const errors: string[] = [];
+  if (typeof spec.name !== "string" || spec.name.trim().length === 0) {
+    errors.push("Imported workflow name is required.");
+  }
+  if (!Array.isArray(spec.nodes)) {
+    errors.push("Imported workflow nodes must be an array.");
+  } else {
+    spec.nodes.forEach((node, index) => {
+      if (!node || typeof node !== "object") {
+        errors.push(`Imported workflow node at index ${index} must be an object.`);
+        return;
+      }
+      if (typeof node.id !== "string" || node.id.trim().length === 0) {
+        errors.push(`Imported workflow node at index ${index} must have a non-empty string id.`);
+      }
+      if (typeof node.nodeType !== "string" || node.nodeType.trim().length === 0) {
+        errors.push(`Imported workflow node at index ${index} must have a non-empty string nodeType.`);
+      }
+    });
+  }
+  if (!Array.isArray(spec.edges)) {
+    errors.push("Imported workflow edges must be an array.");
+  } else {
+    spec.edges.forEach((edge, index) => {
+      if (!edge || typeof edge !== "object") {
+        errors.push(`Imported workflow edge at index ${index} must be an object.`);
+        return;
+      }
+      if (typeof edge.fromNodeId !== "string" || edge.fromNodeId.trim().length === 0) {
+        errors.push(`Imported workflow edge at index ${index} must have a non-empty string fromNodeId.`);
+      }
+      if (typeof edge.toNodeId !== "string" || edge.toNodeId.trim().length === 0) {
+        errors.push(`Imported workflow edge at index ${index} must have a non-empty string toNodeId.`);
+      }
+    });
+  }
+  return errors;
+}
+
 /** Load a template's nodes + edges as a graph payload. */
 async function loadGraph(database: Database, templateId: string) {
   const [nodes, edges] = await Promise.all([
@@ -207,11 +247,14 @@ export function createWorkflowsRoute(database: Database = db, options?: Workflow
     const projectId = (body as any)?.projectId;
     if (!projectId) return c.json({ error: "projectId is required" }, 400);
     const spec = normalizeImportedTemplate(body);
-    if (!spec.name) return c.json({ error: "Imported workflow name is required" }, 400);
+    const importErrors = validateImportedTemplate(spec);
+    if (importErrors.length > 0) {
+      return c.json({ error: "Invalid workflow import", errors: importErrors }, 400);
+    }
 
     const result = await createWorkflowTemplate(database, {
       projectId,
-      name: spec.name,
+      name: spec.name.trim(),
       description: spec.description,
       ticketType: spec.ticketType,
       isDefault: spec.isDefault,
