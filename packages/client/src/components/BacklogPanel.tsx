@@ -110,8 +110,8 @@ export function BacklogPanel({ backlogColumn, activeColumns, searchQuery, onIssu
         title={open ? "Collapse backlog" : "Open backlog"}
         className={`shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium border transition-colors ${
           open
-            ? "bg-indigo-600 border-indigo-600 text-white hover:bg-indigo-700"
-            : "bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800"
+            ? "bg-brand-600 border-brand-600 text-white hover:bg-brand-700"
+            : "bg-surface-raised dark:bg-surface-raised-dark border-black/[0.07] dark:border-white/10 text-ink-soft dark:text-gray-400 hover:bg-surface-sunken dark:hover:bg-gray-800"
         }`}
       >
         <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -119,7 +119,7 @@ export function BacklogPanel({ backlogColumn, activeColumns, searchQuery, onIssu
         </svg>
         Backlog
         {backlogCount > 0 && (
-          <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold leading-none ${open ? "bg-indigo-500 text-white" : "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400"}`}>
+          <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold leading-none ${open ? "bg-brand-500 text-white" : "bg-surface-sunken dark:bg-gray-800 text-ink-soft dark:text-gray-400"}`}>
             {backlogCount}
           </span>
         )}
@@ -128,7 +128,7 @@ export function BacklogPanel({ backlogColumn, activeColumns, searchQuery, onIssu
       {/* Side panel */}
       {open && (
         <div
-          className="fixed right-0 top-0 h-full w-72 bg-white dark:bg-gray-900 border-l border-gray-200 dark:border-gray-700 shadow-lg z-30 flex flex-col"
+          className="fixed right-0 top-0 h-full w-72 bg-surface-raised dark:bg-surface-raised-dark border-l border-black/[0.07] dark:border-white/10 shadow-xl z-30 flex flex-col"
           style={{ animation: "slide-in-right 0.2s ease-out" }}
           onDragOver={(e) => e.preventDefault()}
           onDrop={handleDrop}
@@ -136,9 +136,9 @@ export function BacklogPanel({ backlogColumn, activeColumns, searchQuery, onIssu
           {/* Header */}
           <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 dark:border-gray-800 shrink-0">
             <div className="flex items-center gap-2">
-              <span className="font-semibold text-sm text-gray-800 dark:text-gray-200">Backlog</span>
+              <span className="font-semibold text-sm text-ink dark:text-gray-200">Backlog</span>
               {backlogCount > 0 && (
-                <span className="bg-indigo-100 text-indigo-700 rounded-full px-2 py-0.5 text-xs font-medium">
+                <span className="bg-brand-100 text-brand-700 rounded-full px-2 py-0.5 text-xs font-medium">
                   {backlogCount}
                 </span>
               )}
