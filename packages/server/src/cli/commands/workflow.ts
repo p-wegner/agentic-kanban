@@ -50,9 +50,35 @@ function validateImportedTemplate(spec: ReturnType<typeof normalizeImportedTempl
   }
   if (!Array.isArray(spec.nodes)) {
     errors.push("Imported workflow nodes must be an array.");
+  } else {
+    spec.nodes.forEach((node, index) => {
+      if (!node || typeof node !== "object") {
+        errors.push(`Imported workflow node at index ${index} must be an object.`);
+        return;
+      }
+      if (typeof node.id !== "string" || node.id.trim().length === 0) {
+        errors.push(`Imported workflow node at index ${index} must have a non-empty string id.`);
+      }
+      if (typeof node.nodeType !== "string" || node.nodeType.trim().length === 0) {
+        errors.push(`Imported workflow node at index ${index} must have a non-empty string nodeType.`);
+      }
+    });
   }
   if (!Array.isArray(spec.edges)) {
     errors.push("Imported workflow edges must be an array.");
+  } else {
+    spec.edges.forEach((edge, index) => {
+      if (!edge || typeof edge !== "object") {
+        errors.push(`Imported workflow edge at index ${index} must be an object.`);
+        return;
+      }
+      if (typeof edge.fromNodeId !== "string" || edge.fromNodeId.trim().length === 0) {
+        errors.push(`Imported workflow edge at index ${index} must have a non-empty string fromNodeId.`);
+      }
+      if (typeof edge.toNodeId !== "string" || edge.toNodeId.trim().length === 0) {
+        errors.push(`Imported workflow edge at index ${index} must have a non-empty string toNodeId.`);
+      }
+    });
   }
   return errors;
 }
