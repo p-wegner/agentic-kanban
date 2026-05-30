@@ -196,6 +196,97 @@ describe("Issues API", () => {
     expect(body.success).toBe(true);
   });
 
+  it("DELETE /api/issues/:id removes incoming dependencies", async () => {
+    const targetRes = await app.request("/api/issues", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "Dependency target", statusId, projectId }),
+    });
+    const sourceRes = await app.request("/api/issues", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "Dependency source", statusId, projectId }),
+    });
+    const target = await targetRes.json() as any;
+    const source = await sourceRes.json() as any;
+
+    await database.insert(schema.issueDependencies).values({
+      id: randomUUID(),
+      issueId: source.id,
+      dependsOnId: target.id,
+      type: "depends_on",
+      createdAt: new Date().toISOString(),
+    });
+
+    const res = await app.request(`/api/issues/${target.id}`, { method: "DELETE" });
+    expect(res.status).toBe(200);
+
+    const dependencyRows = await database
+      .select()
+      .from(schema.issueDependencies)
+      .where(eq(schema.issueDependencies.dependsOnId, target.id));
+    expect(dependencyRows).toHaveLength(0);
+  });
+
+  it("DELETE /api/issues/:id removes issue rows that also reference workspaces", async () => {
+    const createRes = await app.request("/api/issues", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "Issue with attachments", statusId, projectId }),
+    });
+    const issue = await createRes.json() as any;
+    const now = new Date().toISOString();
+    const showdownId = randomUUID();
+    const workspaceId = randomUUID();
+
+    await database.insert(schema.showdowns).values({
+      id: showdownId,
+      issueId: issue.id,
+      status: "active",
+      createdAt: now,
+      updatedAt: now,
+    });
+    await database.insert(schema.workspaces).values({
+      id: workspaceId,
+      issueId: issue.id,
+      branch: "feature/delete-attachments",
+      showdownId,
+      createdAt: now,
+      updatedAt: now,
+    });
+    await database.insert(schema.issueArtifacts).values({
+      id: randomUUID(),
+      issueId: issue.id,
+      workspaceId,
+      type: "text",
+      content: "proof",
+      createdAt: now,
+    });
+    await database.insert(schema.issueComments).values({
+      id: randomUUID(),
+      issueId: issue.id,
+      workspaceId,
+      kind: "note",
+      author: "user",
+      body: "delete me",
+      createdAt: now,
+    });
+
+    const res = await app.request(`/api/issues/${issue.id}`, { method: "DELETE" });
+    expect(res.status).toBe(200);
+
+    const issueRows = await database.select().from(schema.issues).where(eq(schema.issues.id, issue.id));
+    const workspaceRows = await database.select().from(schema.workspaces).where(eq(schema.workspaces.id, workspaceId));
+    const artifactRows = await database.select().from(schema.issueArtifacts).where(eq(schema.issueArtifacts.issueId, issue.id));
+    const commentRows = await database.select().from(schema.issueComments).where(eq(schema.issueComments.issueId, issue.id));
+    const showdownRows = await database.select().from(schema.showdowns).where(eq(schema.showdowns.id, showdownId));
+    expect(issueRows).toHaveLength(0);
+    expect(workspaceRows).toHaveLength(0);
+    expect(artifactRows).toHaveLength(0);
+    expect(commentRows).toHaveLength(0);
+    expect(showdownRows).toHaveLength(0);
+  });
+
   it("POST /api/issues creates issue with estimate", async () => {
     const res = await app.request("/api/issues", {
       method: "POST",
