@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { eq, sql } from "drizzle-orm";
 import { sessionMessages, sessions } from "@agentic-kanban/shared/schema";
 import { createTestDb, type TestDb } from "./helpers/test-db.js";
-import { createBisectService } from "../services/bisect.service.js";
+import { buildBisectTestCommand, createBisectService } from "../services/bisect.service.js";
 
 function execGit(args: string[], cwd: string): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -48,6 +48,12 @@ async function seedWorkspace(db: TestDb, repoPath: string, baseCommitSha: string
     values (${workspaceId}, ${issueId}, 'feature/bisect', ${repoPath}, 'main', ${baseCommitSha}, 'active', ${now}, ${now})
   `);
   return workspaceId;
+}
+
+function repoRoot(): string {
+  return process.cwd().replace(/\\/g, "/").endsWith("/packages/server")
+    ? join(process.cwd(), "..", "..")
+    : process.cwd();
 }
 
 describe("bisect.service", () => {
@@ -109,7 +115,7 @@ describe("bisect.service", () => {
     });
 
     const service = createBisectService({ database: db });
-    await service.runBisect(workspaceId, sessionId, "related");
+    await service.runBisect(workspaceId, sessionId, "full");
 
     const rows = await db.select().from(sessionMessages).where(eq(sessionMessages.sessionId, sessionId));
     const resultMessage = rows.find((row) => row.type === "bisect");
@@ -119,6 +125,55 @@ describe("bisect.service", () => {
     expect(result.breakingCommitSha).toBe(breakingCommit);
     expect(result.failingTestName).toBe("value.test > keeps value passing");
   }, 60_000);
+
+  it("uses Vitest's related subcommand for server files in this monorepo", () => {
+    const command = buildBisectTestCommand(
+      repoRoot(),
+      "related",
+      ["packages/server/src/services/bisect.service.ts"],
+    );
+
+    expect(command.args).toEqual([
+      "--filter",
+      "agentic-kanban",
+      "exec",
+      "vitest",
+      "related",
+      "src/services/bisect.service.ts",
+      "--reporter=verbose",
+    ]);
+    expect(command.args).not.toContain("--related");
+  });
+
+  it("falls back to the full server suite when related mode has no server files", () => {
+    const command = buildBisectTestCommand(
+      repoRoot(),
+      "related",
+      ["packages/client/src/components/WorkspacePanel.tsx"],
+    );
+
+    expect(command.args).toEqual([
+      "--filter",
+      "agentic-kanban",
+      "test",
+      "--",
+      "--reporter=verbose",
+    ]);
+    expect(command.args).not.toContain("--related");
+  });
+
+  it("does not use Vitest's removed --related flag for unknown repo shapes", () => {
+    const command = buildBisectTestCommand(repoDir, "related", ["src/value.txt"]);
+
+    expect(command.args).toEqual([
+      "--filter",
+      "agentic-kanban",
+      "test",
+      "--",
+      "--reporter=verbose",
+    ]);
+    expect(command.args).not.toContain("--related");
+  });
 
   it("treats import and build failures as bad commits instead of skipping them", async () => {
     await writeFile(join(repoDir, "package.json"), JSON.stringify({

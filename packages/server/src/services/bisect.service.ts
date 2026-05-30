@@ -1,5 +1,7 @@
 import { spawn, execFile, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
+import { join, relative } from "node:path";
 import { eq } from "drizzle-orm";
 import { issues, sessionMessages, sessions, workspaces } from "@agentic-kanban/shared/schema";
 import type { AgentOutputMessage } from "@agentic-kanban/shared";
@@ -35,6 +37,13 @@ export interface BisectResult {
   changedFiles: string[];
 }
 
+interface BisectTestCommand {
+  command: string;
+  args: string[];
+  cwd: string;
+  display: string;
+}
+
 function execGit(args: string[], cwd: string, allowedExitCodes = [0]): Promise<string> {
   return new Promise((resolve, reject) => {
     execFile("git", args, { cwd, windowsHide: true, maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
@@ -61,6 +70,59 @@ function trimOutput(output: string, max = 200_000): string {
   return output.length <= max ? output : output.slice(output.length - max);
 }
 
+function toPosixPath(path: string): string {
+  return path.replace(/\\/g, "/");
+}
+
+function relatedFilesForServerPackage(repoRoot: string, changedFiles: string[]): string[] {
+  const serverDir = join(repoRoot, "packages", "server");
+  return changedFiles
+    .map(toPosixPath)
+    .filter((file) => file.startsWith("packages/server/"))
+    .map((file) => toPosixPath(relative(serverDir, join(repoRoot, file))))
+    .filter(Boolean);
+}
+
+export function buildBisectTestCommand(repoRoot: string, scope: BisectScope, changedFiles: string[]): BisectTestCommand {
+  const fullArgs = ["--filter", "agentic-kanban", "test", "--", "--reporter=verbose"];
+  if (scope !== "related" || changedFiles.length === 0) {
+    return {
+      command: "pnpm",
+      args: fullArgs,
+      cwd: repoRoot,
+      display: `pnpm ${fullArgs.join(" ")}`,
+    };
+  }
+
+  const hasServerPackage = existsSync(join(repoRoot, "packages", "server", "package.json"));
+  const hasWorkspace = existsSync(join(repoRoot, "pnpm-workspace.yaml"));
+  if (hasServerPackage && hasWorkspace) {
+    const relatedFiles = relatedFilesForServerPackage(repoRoot, changedFiles);
+    if (relatedFiles.length > 0) {
+      const args = ["--filter", "agentic-kanban", "exec", "vitest", "related", ...relatedFiles, "--reporter=verbose"];
+      return {
+        command: "pnpm",
+        args,
+        cwd: repoRoot,
+        display: `pnpm ${args.join(" ")}`,
+      };
+    }
+    return {
+      command: "pnpm",
+      args: fullArgs,
+      cwd: repoRoot,
+      display: `pnpm ${fullArgs.join(" ")}`,
+    };
+  }
+
+  return {
+    command: "pnpm",
+    args: fullArgs,
+    cwd: repoRoot,
+    display: `pnpm ${fullArgs.join(" ")}`,
+  };
+}
+
 function extractFirstBadCommit(output: string): string | null {
   const direct = output.match(/^([0-9a-f]{7,40}) is the first bad commit/im);
   if (direct) return direct[1];
@@ -71,7 +133,7 @@ function extractFirstBadCommit(output: string): string | null {
 function extractFailingTestName(output: string): string | null {
   const lines = output.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
   for (const line of lines) {
-    const match = line.match(/^(?:x\s+|FAIL\s+)(.+)$/i);
+    const match = line.match(/^(?:[x×✕]\s+|FAIL\s+)(.+)$/i);
     if (match) return match[1].trim();
   }
   for (const line of lines) {
@@ -160,17 +222,13 @@ export function createBisectService(deps: {
   }
 
   async function runTests(sessionId: string, cwd: string, scope: BisectScope, changedFiles: string[], active: ActiveBisect) {
-    const args = ["--filter", "agentic-kanban", "test", "--", "--reporter=verbose"];
-    if (scope === "related" && changedFiles.length > 0) {
-      args.push("--related", ...changedFiles);
-    }
-    const display = `pnpm ${args.join(" ")}`;
-    await emitLine(sessionId, `$ ${display}`);
+    const testCommand = buildBisectTestCommand(cwd, scope, changedFiles);
+    await emitLine(sessionId, `$ ${testCommand.display}`);
 
     return new Promise<{ exitCode: number | null; output: string }>((resolve) => {
-      const command = process.platform === "win32" ? "cmd.exe" : "pnpm";
-      const commandArgs = process.platform === "win32" ? ["/d", "/s", "/c", "pnpm", ...args] : args;
-      const child = spawn(command, commandArgs, { cwd, windowsHide: true, shell: false });
+      const command = process.platform === "win32" ? "cmd.exe" : testCommand.command;
+      const commandArgs = process.platform === "win32" ? ["/d", "/s", "/c", testCommand.command, ...testCommand.args] : testCommand.args;
+      const child = spawn(command, commandArgs, { cwd: testCommand.cwd, windowsHide: true, shell: false });
       active.child = child;
       let settled = false;
       let output = "";
