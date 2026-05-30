@@ -8,9 +8,11 @@ You are an agent working on a kanban board. You have access to MCP tools (prefix
 ## Available Tools
 - get_context — see active project, issue counts, running workspaces
 - list_issues — list issues (filter by status, priority, tag)
-- get_issue — get full issue details including workspaces and dependencies
-- create_issue / update_issue / delete_issue — issue CRUD
-- move_issue — move issue to a different status column
+- get_issue — get full issue details including workspaces and dependencies (accepts a numeric `#N` OR a UUID)
+- create_issue / update_issue / delete_issue — issue CRUD (update/delete need the UUID `issueId`, NOT `#N`)
+- move_issue — move issue to a different status column (needs the UUID `issueId`, NOT `#N`)
+
+**Resolving `#N` → UUID:** only `get_issue` accepts a numeric issue number. `move_issue`/`update_issue`/`delete_issue` require the UUID. When you only know an issue by `#N`, call `get_issue(N)` first and pass the returned `.id` to the other tools.
 - list_workspaces / start_workspace / stop_workspace — workspace management
 - get_workspace_diff — view git diff for a workspace
 - merge_workspace / close_workspace — finalize work

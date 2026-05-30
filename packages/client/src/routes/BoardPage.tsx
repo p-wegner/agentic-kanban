@@ -17,7 +17,8 @@ import { useAgentQuestionsCount } from "../components/AgentQuestionsPanel.js";
 import { BoardErrorBoundary } from "../components/BoardErrorBoundary.js";
 import { BoardKanbanView } from "../components/BoardKanbanView.js";
 import { BoardStats } from "../components/BoardStats.js";
-import { BoardToolbar, type ViewMode } from "../components/BoardToolbar.js";
+import { BoardToolbar } from "../components/BoardToolbar.js";
+import { VIEW_REGISTRY, VIEW_IDS, SHORTCUT_TO_VIEW, type ViewMode } from "../lib/viewRegistry.js";
 import { CreateIssuePanel } from "../components/CreateIssuePanel.js";
 import type { CreateIssueFormState } from "../components/CreateIssueForm.js";
 import { IssueDetailPanel } from "../components/IssueDetailPanel.js";
@@ -108,8 +109,7 @@ export function BoardPage() {
   const [expandedCreatePanel, setExpandedCreatePanel] = useState<{ statusId: string; statusName: string; state: Partial<CreateIssueFormState> } | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>(() => {
     const stored = localStorage.getItem("kanban-board-view");
-    const validViews: ViewMode[] = ["kanban", "graph", "table", "agents", "timeline", "metrics", "butler", "workflows", "insights", "swimlane", "flaky-tests", "digest", "focus"];
-    return validViews.includes(stored as ViewMode) ? (stored as ViewMode) : "kanban";
+    return VIEW_IDS.includes(stored as ViewMode) ? (stored as ViewMode) : "kanban";
   });
   const [dynamicColumnScaling, setDynamicColumnScaling] = useState(false);
   const agentQuestionsCount = useAgentQuestionsCount(activeProjectId);
@@ -846,21 +846,13 @@ export function BoardPage() {
         setShowSettings(true);
         return;
       }
-      if ((e.key === "b" || e.key === "t" || e.key === "l" || e.key === "f" || e.key === "m" || e.key === "i" || e.key === "n" || e.key === "p" || e.key === "k" || e.key === "d" || e.key === "o") && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      // Plain single-key view shortcuts, derived from the canonical view registry
+      // (#116). The `graph` chord ("g", with g+s for settings) is handled above.
+      if (SHORTCUT_TO_VIEW[e.key] && !e.ctrlKey && !e.metaKey && !e.altKey) {
         const target = e.target as HTMLElement;
         if (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT") return;
         e.preventDefault();
-        if (e.key === "b") handleViewModeChange("kanban");
-        else if (e.key === "t") handleViewModeChange("table");
-        else if (e.key === "l") handleViewModeChange("agents");
-        else if (e.key === "f") handleViewModeChange("timeline");
-        else if (e.key === "m") handleViewModeChange("metrics");
-        else if (e.key === "i") handleViewModeChange("butler");
-        else if (e.key === "n") handleViewModeChange("insights");
-        else if (e.key === "p") handleViewModeChange("swimlane");
-        else if (e.key === "k") handleViewModeChange("flaky-tests");
-        else if (e.key === "d") handleViewModeChange("digest");
-        else if (e.key === "o") handleViewModeChange("focus");
+        handleViewModeChange(SHORTCUT_TO_VIEW[e.key]);
         return;
       }
       // "a" to toggle All Workspaces panel
@@ -1023,75 +1015,19 @@ export function BoardPage() {
       handler: () => setShowCodemod(true),
     }));
 
-    unregisters.push(registerAction({
-      id: "view-board",
-      label: "Switch to Board View",
-      description: "Show kanban board columns",
-      icon: "⊟",
-      shortcut: "b",
-      category: "navigation",
-      handler: () => handleViewModeChange("kanban"),
-    }));
-
-    unregisters.push(registerAction({
-      id: "view-graph",
-      label: "Switch to Graph View",
-      description: "Show dependency graph",
-      icon: "⬡",
-      shortcut: "g",
-      category: "navigation",
-      handler: () => handleViewModeChange("graph"),
-    }));
-
-    unregisters.push(registerAction({
-      id: "view-agents",
-      label: "Switch to Agents View",
-      description: "Live grid of all active agent sessions",
-      icon: "⚡",
-      shortcut: "l",
-      category: "navigation",
-      handler: () => handleViewModeChange("agents"),
-    }));
-
-    unregisters.push(registerAction({
-      id: "view-table",
-      label: "Switch to Table View",
-      description: "Show flat table list",
-      icon: "☰",
-      shortcut: "t",
-      category: "navigation",
-      handler: () => handleViewModeChange("table"),
-    }));
-
-    unregisters.push(registerAction({
-      id: "view-timeline",
-      label: "Switch to Timeline View",
-      description: "Show issues on a chronological timeline",
-      icon: "⏱",
-      shortcut: "f",
-      category: "navigation",
-      handler: () => handleViewModeChange("timeline"),
-    }));
-
-    unregisters.push(registerAction({
-      id: "view-butler",
-      label: "Switch to Butler View",
-      description: "Chat with the persistent project butler agent",
-      icon: "💬",
-      shortcut: "i",
-      category: "navigation",
-      handler: () => handleViewModeChange("butler"),
-    }));
-
-    unregisters.push(registerAction({
-      id: "view-insights",
-      label: "Switch to Insights View",
-      description: "Show agent cost, token, success, and duration trends",
-      icon: "↗",
-      shortcut: "n",
-      category: "navigation",
-      handler: () => handleViewModeChange("insights"),
-    }));
+    // "Switch to <View> View" actions, derived from the canonical view registry
+    // (#116) so the palette never drifts out of sync with the toolbar/overlay.
+    for (const view of VIEW_REGISTRY) {
+      unregisters.push(registerAction({
+        id: `view-${view.id}`,
+        label: `Switch to ${view.label} View`,
+        description: view.paletteDescription,
+        icon: view.paletteIcon,
+        shortcut: view.shortcut,
+        category: "navigation",
+        handler: () => handleViewModeChange(view.id),
+      }));
+    }
 
     // Register "Go to: [column]" for each column
     for (const col of columns) {
