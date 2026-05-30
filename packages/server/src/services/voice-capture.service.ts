@@ -8,6 +8,8 @@ import type { BoardEvents } from "./board-events.js";
 export interface VoiceCaptureInput {
   projectId: string;
   transcript: string;
+  speechLanguage?: string | null;
+  speechLanguageLabel?: string | null;
 }
 
 export interface VoiceCaptureResult {
@@ -16,6 +18,38 @@ export interface VoiceCaptureResult {
   title: string;
   description: string;
   priority: string;
+}
+
+function cleanLanguageMetadata(value: string | null | undefined): string | null {
+  const cleaned = value?.replace(/\s+/g, " ").trim().slice(0, 80);
+  return cleaned || null;
+}
+
+function cleanLanguageCode(value: string | null | undefined): string | null {
+  const cleaned = cleanLanguageMetadata(value);
+  if (!cleaned) return null;
+  return /^[a-z]{2,3}(?:-[a-z0-9]{2,8})*$/i.test(cleaned) ? cleaned : null;
+}
+
+function cleanLanguageLabel(value: string | null | undefined): string | null {
+  const cleaned = cleanLanguageMetadata(value);
+  if (!cleaned) return null;
+  return /^[A-Za-z0-9][A-Za-z0-9 .()/-]{0,79}$/.test(cleaned) ? cleaned : null;
+}
+
+function formatSpeechLanguageContext(
+  speechLanguage?: string | null,
+  speechLanguageLabel?: string | null,
+): string {
+  const languageCode = cleanLanguageCode(speechLanguage);
+  const languageLabel = cleanLanguageLabel(speechLanguageLabel);
+
+  if (!languageCode) {
+    return "\nSpeech recognition language: browser auto/default.";
+  }
+
+  const label = languageLabel || languageCode;
+  return `\nSpeech recognition language: ${label} (${languageCode}).`;
 }
 
 /**
@@ -62,9 +96,13 @@ async function resolveBacklogStatusId(projectId: string, database: Database): Pr
 async function parseTranscript(
   transcript: string,
   database: Database,
+  speechLanguage?: string | null,
+  speechLanguageLabel?: string | null,
 ): Promise<{ title: string; description: string; priority: string }> {
+  const languageContext = formatSpeechLanguageContext(speechLanguage, speechLanguageLabel);
+
   // Use a clear delimiter instead of quoting the transcript to prevent prompt injection.
-  const prompt = `You are a project manager assistant. A developer spoke the following voice note while coding. Structure it into a clean kanban ticket.
+  const prompt = `You are a project manager assistant. A developer spoke the following voice note while coding. Structure it into a clean kanban ticket.${languageContext}
 
 <voice_transcript>
 ${transcript}
@@ -74,6 +112,8 @@ Rules:
 - title: concise, action-oriented, ≤80 chars
 - description: expand with context, acceptance criteria, and implementation hints. Include a "## Voice Transcript" section at the end (collapsed context) with the verbatim transcript.
 - priority: one of "low", "medium", "high", "urgent" — infer from urgency words in the transcript
+
+- If the transcript is not English, write the title and description in the same language as the transcript unless the speaker clearly asks otherwise.
 
 Respond ONLY with valid JSON (no markdown, no explanation):
 {"title": "...", "description": "...", "priority": "medium"}`;
@@ -108,10 +148,10 @@ export async function createVoiceCaptureIssue(
   database: Database,
   boardEvents?: BoardEvents,
 ): Promise<VoiceCaptureResult> {
-  const { projectId, transcript } = input;
+  const { projectId, transcript, speechLanguage, speechLanguageLabel } = input;
 
   const [structured, statusId, tagId] = await Promise.all([
-    parseTranscript(transcript, database),
+    parseTranscript(transcript, database, speechLanguage, speechLanguageLabel),
     resolveBacklogStatusId(projectId, database),
     ensureVoiceCaptureTag(database),
   ]);
@@ -148,7 +188,6 @@ export async function createVoiceCaptureIssue(
     id: randomUUID(),
     issueId: id,
     tagId,
-    createdAt: now,
   });
 
   boardEvents?.broadcast(projectId, "issue_created");

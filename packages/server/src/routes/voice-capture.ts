@@ -15,11 +15,15 @@ export function createVoiceCaptureRoute(
   const router = createRouter();
 
   // POST /api/projects/:id/voice-capture
-  // Body: { transcript: string }
+  // Body: { transcript: string, speechLanguage?: string | null, speechLanguageLabel?: string | null }
   // Creates a Backlog issue from a voice transcript using Claude to structure it.
   router.post("/:id/voice-capture", async (c) => {
     const projectId = c.req.param("id");
-    const body = await parseJsonBody<{ transcript: string }>(c);
+    const body = await parseJsonBody<{
+      transcript: string;
+      speechLanguage?: string | null;
+      speechLanguageLabel?: string | null;
+    }>(c);
 
     if (!body.transcript?.trim()) {
       return c.json({ error: "transcript is required" }, 400);
@@ -27,7 +31,12 @@ export function createVoiceCaptureRoute(
 
     try {
       const result = await createVoiceCaptureIssue(
-        { projectId, transcript: body.transcript.trim() },
+        {
+          projectId,
+          transcript: body.transcript.trim(),
+          speechLanguage: body.speechLanguage ?? null,
+          speechLanguageLabel: body.speechLanguageLabel ?? null,
+        },
         database,
         options?.boardEvents,
       );
