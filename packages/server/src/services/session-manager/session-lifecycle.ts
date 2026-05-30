@@ -1,6 +1,6 @@
 import { db as realDb } from "../../db/index.js";
 import type { Database } from "../../db/index.js";
-import { sessions, workspaces, issues, preferences } from "@agentic-kanban/shared/schema";
+import { sessions, workspaces, issues, preferences, agentSkills } from "@agentic-kanban/shared/schema";
 import { eq } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import * as realAgentService from "../agent.service.js";
@@ -108,6 +108,20 @@ export function createSessionLifecycle(
     const now = new Date().toISOString();
     console.log(`[session] starting: workspaceId=${workspaceId} sessionId=${sessionId} workingDir=${effectiveWorkingDir}`);
 
+    // Capture the skill the workspace launched under so Insights "By Skill" can
+    // attribute this session even if the workspace's skill changes later. The name
+    // is snapshotted because the agent_skills row may be renamed or deleted.
+    let sessionSkillId: string | null = workspace.skillId ?? null;
+    let sessionSkillName: string | null = null;
+    if (sessionSkillId) {
+      const skillRows = await db
+        .select({ name: agentSkills.name })
+        .from(agentSkills)
+        .where(eq(agentSkills.id, sessionSkillId))
+        .limit(1);
+      sessionSkillName = skillRows[0]?.name ?? null;
+    }
+
     // Cache session context for activity broadcasting
     state.sessionContexts.set(sessionId, { workspaceId, issueId: workspace.issueId, projectId });
     if (multiTurn) {
@@ -123,6 +137,8 @@ export function createSessionLifecycle(
       endedAt: null,
       resumeFromId: resumeFromId ?? null,
       triggerType: triggerType ?? null,
+      skillId: sessionSkillId,
+      skillName: sessionSkillName,
     });
     state.sessionProviders.set(sessionId, executor);
 

@@ -262,6 +262,8 @@ export function createInsightsRoute(database: Database = db) {
         exitCode: sessions.exitCode,
         wsModel: workspaces.model,
         wsSkillId: workspaces.skillId,
+        sessionSkillId: sessions.skillId,
+        sessionSkillName: sessions.skillName,
         issueType: issues.issueType,
         issuePriority: issues.priority,
         issueTitle: issues.title,
@@ -292,8 +294,13 @@ export function createInsightsRoute(database: Database = db) {
       const stats = parseStats(row.stats);
       const success = isSuccessful(stats, row.exitCode);
       const resolvedModel = stats?.model || row.wsModel || "Unknown";
-      const skillMapKey = row.wsSkillId ?? "__no_skill__";
-      const skillName = row.skillName ?? "No Skill";
+      // Prefer the skill captured on the session at launch; fall back to the
+      // workspace's current skill for historical sessions that predate per-session
+      // attribution (graceful degradation).
+      const resolvedSkillId = row.sessionSkillId ?? row.wsSkillId;
+      const resolvedSkillName = row.sessionSkillName ?? row.skillName;
+      const skillMapKey = resolvedSkillId ?? "__no_skill__";
+      const skillName = resolvedSkillName ?? "No Skill";
       const dateKey = toDateKey(row.startedAt);
       const tokens = stats ? stats.inputTokens + stats.outputTokens : 0;
 
@@ -304,7 +311,7 @@ export function createInsightsRoute(database: Database = db) {
       }
 
       const skillBucket = bySkill.get(skillMapKey) ?? {
-        skillId: row.wsSkillId,
+        skillId: resolvedSkillId,
         skillName,
         ...createAggregateBucket(),
       };
