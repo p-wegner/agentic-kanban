@@ -18,6 +18,60 @@ interface QuickTasksPanelProps {
   onLaunched: () => void;
 }
 
+type ProfileOption = {
+  provider: "claude" | "codex" | "copilot";
+  name: string;
+};
+
+const CODEX_DEFAULT_PROFILE = "default";
+const CODEX_DEFAULT_MODEL = "gpt-5.3-codex-spark";
+const CODEX_MODELS = [CODEX_DEFAULT_MODEL] as const;
+const COPILOT_DEFAULT_PROFILE = "default";
+
+function profileOptionValue(option: ProfileOption): string {
+  return `${option.provider}:${option.name}`;
+}
+
+function uniqueProfileOptions(options: ProfileOption[]): ProfileOption[] {
+  const seen = new Set<string>();
+  return options.filter((option) => {
+    const value = profileOptionValue(option);
+    if (seen.has(value)) return false;
+    seen.add(value);
+    return true;
+  });
+}
+
+function providerLabel(provider?: string | null): string {
+  if (provider === "codex") return "Codex";
+  if (provider === "copilot") return "Copilot";
+  return "Claude";
+}
+
+function profileSelectionFromValue(value: string): { provider: "claude" | "codex" | "copilot"; name: string } | undefined {
+  const colonIdx = value.indexOf(":");
+  if (colonIdx === -1) return undefined;
+  const provider = value.slice(0, colonIdx) as "claude" | "codex" | "copilot";
+  const name = value.slice(colonIdx + 1);
+  if ((provider !== "claude" && provider !== "codex" && provider !== "copilot") || !name) return undefined;
+  return { provider, name };
+}
+
+function defaultSelectedProfile(settings: Record<string, string>): string {
+  if (settings.provider === "codex") return `codex:${settings.codex_profile || CODEX_DEFAULT_PROFILE}`;
+  if (settings.provider === "copilot") return `copilot:${settings.copilot_profile || COPILOT_DEFAULT_PROFILE}`;
+  if (settings.claude_profile) return `claude:${settings.claude_profile}`;
+  return "";
+}
+
+function resolveProviderFromProfile(
+  profileValue: string,
+  fallbackProvider: "claude" | "codex" | "copilot",
+): "claude" | "codex" | "copilot" {
+  const profile = profileSelectionFromValue(profileValue);
+  return profile?.provider ?? fallbackProvider;
+}
+
 export function QuickTasksPanel({ projectId, onClose, onLaunched }: QuickTasksPanelProps) {
   const [skills, setSkills] = useState<Skill[]>([]);
   const [loading, setLoading] = useState(true);
@@ -26,12 +80,38 @@ export function QuickTasksPanel({ projectId, onClose, onLaunched }: QuickTasksPa
   const [showCustom, setShowCustom] = useState(false);
   const [extraContext, setExtraContext] = useState("");
   const [showContext, setShowContext] = useState(false);
+  const [selectedProfile, setSelectedProfile] = useState("");
+  const [selectedModel, setSelectedModel] = useState("");
+  const [defaultProfileProvider, setDefaultProfileProvider] = useState<"claude" | "codex" | "copilot">("claude");
+  const [availableProfileOptions, setAvailableProfileOptions] = useState<ProfileOption[]>([
+    { provider: "codex", name: CODEX_DEFAULT_PROFILE },
+    { provider: "copilot", name: COPILOT_DEFAULT_PROFILE },
+  ]);
 
   useEffect(() => {
     apiFetch<Skill[]>(`/api/agent-skills?projectId=${projectId}`)
       .then(setSkills)
       .catch(() => showToast("Failed to load skills", "error"))
       .finally(() => setLoading(false));
+    Promise.all([
+      apiFetch<Record<string, string>>("/api/preferences/settings"),
+      apiFetch<{ profiles: string[] }>("/api/preferences/claude-profiles").catch(() => ({ profiles: [] as string[] })),
+      apiFetch<{ profiles: string[] }>("/api/preferences/codex-profiles").catch(() => ({ profiles: [CODEX_DEFAULT_PROFILE] as string[] })),
+      apiFetch<{ profiles: string[] }>("/api/preferences/copilot-profiles").catch(() => ({ profiles: [COPILOT_DEFAULT_PROFILE] })),
+    ]).then(([settingsData, claudeData, codexData, copilotData]) => {
+      const selectedProfile = defaultSelectedProfile(settingsData);
+      const profileProvider = resolveProviderFromProfile(selectedProfile, settingsData.provider === "copilot" ? "copilot" : settingsData.provider === "codex" ? "codex" : "claude");
+      setSelectedProfile(selectedProfile);
+      setDefaultProfileProvider(profileProvider);
+      setSelectedModel(profileProvider === "codex" ? CODEX_DEFAULT_MODEL : "");
+      setAvailableProfileOptions(uniqueProfileOptions([
+        ...claudeData.profiles.map((name) => ({ provider: "claude" as const, name })),
+        { provider: "codex" as const, name: CODEX_DEFAULT_PROFILE },
+        ...codexData.profiles.map((name) => ({ provider: "codex" as const, name })),
+        { provider: "copilot" as const, name: COPILOT_DEFAULT_PROFILE },
+        ...copilotData.profiles.map((name) => ({ provider: "copilot" as const, name })),
+      ]));
+    }).catch(() => {});
   }, [projectId]);
 
   useEffect(() => {
@@ -49,6 +129,8 @@ export function QuickTasksPanel({ projectId, onClose, onLaunched }: QuickTasksPa
     const fullPrompt = extraContext.trim()
       ? `${prompt.trim()}\n\nAdditional context: ${extraContext.trim()}`
       : prompt.trim();
+    const profile = profileSelectionFromValue(selectedProfile);
+    const profileProvider = resolveProviderFromProfile(selectedProfile, defaultProfileProvider);
     try {
       // Create a temporary issue for this task, then a direct workspace
       const issue = await apiFetch<{ id: string }>("/api/issues", {
@@ -56,14 +138,20 @@ export function QuickTasksPanel({ projectId, onClose, onLaunched }: QuickTasksPa
         body: JSON.stringify({ title: fullPrompt.slice(0, 100), projectId }),
       });
       const isDisk = skill?.source === "disk";
+      const body: Record<string, unknown> = {
+        issueId: issue.id,
+        isDirect: true,
+        skillId: isDisk ? undefined : (skill?.id ?? undefined),
+        skillName: isDisk ? skill?.name : undefined,
+      };
+      if (profile) body.profile = profile;
+      if (profileProvider === "codex" && selectedModel) {
+        body.model = selectedModel;
+      }
+
       await apiFetch("/api/workspaces", {
         method: "POST",
-        body: JSON.stringify({
-          issueId: issue.id,
-          isDirect: true,
-          skillId: isDisk ? undefined : (skill?.id ?? undefined),
-          skillName: isDisk ? skill?.name : undefined,
-        }),
+        body: JSON.stringify(body),
       });
       showToast("Task launched", "success");
       onLaunched();
@@ -73,6 +161,8 @@ export function QuickTasksPanel({ projectId, onClose, onLaunched }: QuickTasksPa
       setLaunching(null);
     }
   }
+
+  const resolvedProfileProvider = resolveProviderFromProfile(selectedProfile, defaultProfileProvider);
 
   return (
     <>
@@ -85,6 +175,48 @@ export function QuickTasksPanel({ projectId, onClose, onLaunched }: QuickTasksPa
 
         <div className="p-3 space-y-1.5 overflow-y-auto flex-1 min-h-0">
           {loading && <p className="text-xs text-gray-400 dark:text-gray-500 text-center py-4">Loading skills...</p>}
+
+          {availableProfileOptions.length > 0 && (
+            <div className="px-0.5 pb-2">
+              <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">Profile</label>
+              <select
+                value={selectedProfile}
+                onChange={(e) => {
+                  const nextProfile = e.target.value;
+                  const nextProvider = resolveProviderFromProfile(nextProfile, defaultProfileProvider);
+                  setSelectedProfile(nextProfile);
+                  setSelectedModel(nextProvider === "codex" ? CODEX_DEFAULT_MODEL : "");
+                }}
+                className="w-full text-sm border border-gray-200 dark:border-gray-700 rounded px-2 py-1.5 bg-white dark:bg-gray-900"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <option value="">Default</option>
+                {availableProfileOptions.map((option) => (
+                  <option key={profileOptionValue(option)} value={profileOptionValue(option)}>
+                    {providerLabel(option.provider)}: {(option.provider === "copilot" && option.name === COPILOT_DEFAULT_PROFILE) || (option.provider === "codex" && option.name === CODEX_DEFAULT_PROFILE) ? "Default" : option.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {resolvedProfileProvider === "codex" && (
+            <div className="px-0.5 pb-2">
+              <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">Model</label>
+              <select
+                value={selectedModel}
+                onChange={(e) => setSelectedModel(e.target.value)}
+                className="w-full text-sm border border-gray-200 dark:border-gray-700 rounded px-2 py-1.5 bg-white dark:bg-gray-900"
+                onClick={(e) => e.stopPropagation()}
+              >
+                {CODEX_MODELS.map((model) => (
+                  <option key={model} value={model}>
+                    {model}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
           {!loading && skills.map((skill) => (
             <button

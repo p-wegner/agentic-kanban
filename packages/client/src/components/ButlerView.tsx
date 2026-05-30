@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+﻿import { useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { apiFetch } from "../lib/api.js";
@@ -6,7 +6,7 @@ import { CLAUDE_MODEL_OPTIONS } from "@agentic-kanban/shared";
 import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
 import type { LiveSessionStats } from "../lib/useBoardEvents.js";
 import { AgentQuestionsPanel } from "./AgentQuestionsPanel.js";
-import { ButlerVoiceButton } from "./ButlerVoiceButton.js";
+import { ButlerVoiceButton, type ButlerVoiceButtonHandle } from "./ButlerVoiceButton.js";
 
 interface ButlerState {
   active: boolean;
@@ -83,14 +83,14 @@ function formatRelativeTs(ts: number): string {
 }
 
 function formatToolLabel(name: string): string {
-  if (name === "Read") return "📄 Reading a file";
-  if (name === "Write" || name === "Edit") return "✏️ Editing a file";
-  if (name === "Bash") return "⚡ Running a command";
-  if (name === "Glob" || name === "Grep") return "🔎 Searching the project";
-  if (name === "WebSearch" || name === "WebFetch") return "🔍 Searching the web";
-  if (name.includes("list_issues")) return "📋 Listing board issues";
-  if (name.includes("get_board_status")) return "📊 Checking board status";
-  return `🔧 ${name.replace(/^mcp__[^_]+__/, "").replace(/_/g, " ")}`;
+  if (name === "Read") return "ðŸ“„ Reading a file";
+  if (name === "Write" || name === "Edit") return "âœï¸ Editing a file";
+  if (name === "Bash") return "âš¡ Running a command";
+  if (name === "Glob" || name === "Grep") return "ðŸ”Ž Searching the project";
+  if (name === "WebSearch" || name === "WebFetch") return "ðŸ” Searching the web";
+  if (name.includes("list_issues")) return "ðŸ“‹ Listing board issues";
+  if (name.includes("get_board_status")) return "ðŸ“Š Checking board status";
+  return `ðŸ”§ ${name.replace(/^mcp__[^_]+__/, "").replace(/_/g, " ")}`;
 }
 
 function ActivityStrip({ columns, liveActivity, liveStats, onIssueClick }: Omit<ButlerViewProps, "projectId">) {
@@ -140,7 +140,6 @@ function ActivityStrip({ columns, liveActivity, liveStats, onIssueClick }: Omit<
     </div>
   );
 }
-
 function ChatBubble({ msg }: { msg: ChatMessage }) {
   if (msg.role === "user") {
     return (
@@ -174,7 +173,6 @@ function ChatBubble({ msg }: { msg: ChatMessage }) {
     </div>
   );
 }
-
 export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssueClick }: ButlerViewProps) {
   const [butlerState, setButlerState] = useState<ButlerState | null>(null);
   const [loadingState, setLoadingState] = useState(true);
@@ -191,6 +189,7 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
   const [customizeOpen, setCustomizeOpen] = useState(false);
   const [customizePrompt, setCustomizePrompt] = useState("");
   const [customizeBusy, setCustomizeBusy] = useState(false);
+  const [isDictating, setIsDictating] = useState(false);
   // History panel (past butler sessions from disk JSONL).
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historySessions, setHistorySessions] = useState<ButlerSessionSummary[]>([]);
@@ -210,6 +209,17 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
   const eventSourceRef = useRef<EventSource | null>(null);
   const assistantBufRef = useRef("");
   const assistantMsgIdRef = useRef<string | null>(null);
+  const inputValueRef = useRef("");
+  const voiceButtonRef = useRef<ButlerVoiceButtonHandle>(null);
+  const hasDictatedRef = useRef(false);
+  const voiceInterimRef = useRef("");
+  const dictationInputRef = useRef("");
+
+  const setInputValue = (valueOrUpdater: string | ((prev: string) => string)) => {
+    const nextValue = typeof valueOrUpdater === "function" ? valueOrUpdater(inputValueRef.current) : valueOrUpdater;
+    inputValueRef.current = nextValue;
+    setInput(nextValue);
+  };
 
   // Append/replace the streaming assistant bubble as text deltas arrive.
   function appendAssistantText(delta: string) {
@@ -266,8 +276,8 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
         // A tool call ends the current text run. Reset the streaming buffer + bubble
         // id so any text that streams AFTER the tool starts a fresh bubble with an
         // empty buffer. Without this, the next text run keeps appending to the prior
-        // run's accumulated text and — because `last` is now this activity bubble, not
-        // the assistant bubble — spawns a NEW bubble that repeats the earlier text.
+        // run's accumulated text and â€” because `last` is now this activity bubble, not
+        // the assistant bubble â€” spawns a NEW bubble that repeats the earlier text.
         assistantBufRef.current = "";
         assistantMsgIdRef.current = null;
         setChatMessages((prev) => [...prev, { id: `act-${Date.now()}-${Math.random()}`, role: "activity", text: formatToolLabel(e.name), ts: Date.now() }]);
@@ -306,7 +316,7 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
   // Fetch the command + profile lists. Commands come from the live SDK session
   // (merged with the repo's .claude/skills server-side), so retry once if the
   // session hasn't finished discovery yet. The model list is static (the basic
-  // Claude Code tiers, CLAUDE_MODEL_OPTIONS) — only the selection is server state.
+  // Claude Code tiers, CLAUDE_MODEL_OPTIONS) â€” only the selection is server state.
   async function loadCapabilities(attempt = 0) {
     try {
       const [cmdData, profData] = await Promise.all([
@@ -424,7 +434,7 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
     openStream();
   }
 
-  // Switch model without restarting — the server uses the SDK setModel control
+  // Switch model without restarting â€” the server uses the SDK setModel control
   // request, so the conversation context is preserved.
   async function handleModelChange(value: string) {
     setSelectedModel(value);
@@ -438,7 +448,7 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
     }
   }
 
-  // Switch Claude profile — this changes auth/endpoint, so the butler is restarted
+  // Switch Claude profile â€” this changes auth/endpoint, so the butler is restarted
   // fresh (new instance, new context). We mirror that by wiping the local chat.
   async function handleProfileChange(value: string) {
     if (sending || switchingProfile) return;
@@ -524,7 +534,8 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
   // Append a finalized dictation chunk to the input, inserting a space when
   // continuing an existing message. Keeps the textarea auto-grow in sync.
   function appendVoiceTranscript(chunk: string) {
-    setInput((prev) => {
+    hasDictatedRef.current = true;
+    setInputValue((prev) => {
       const sep = prev.length > 0 && !/\s$/.test(prev) ? " " : "";
       return prev + sep + chunk;
     });
@@ -537,13 +548,14 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
     });
   }
 
-  async function handleSend() {
-    const content = input.trim();
+  async function handleSend(explicitContent?: string) {
+    const content = (explicitContent ?? inputValueRef.current).trim();
     if (!content || sending || !butlerState?.active) return;
 
     const userMsg: ChatMessage = { id: `user-${Date.now()}`, role: "user", text: content, ts: Date.now() };
     setChatMessages((prev) => [...prev, userMsg]);
-    setInput("");
+    setInputValue("");
+    hasDictatedRef.current = false;
     setSending(true);
     assistantBufRef.current = "";
     assistantMsgIdRef.current = null;
@@ -584,7 +596,7 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
     if (!m) return;
     const slashStart = m.index + m[0].length - (m[1].length + 1); // position of the "/"
     const next = `${input.slice(0, slashStart)}/${name} `;
-    setInput(next);
+    setInputValue(next);
     setCommandIndex(0);
     requestAnimationFrame(() => inputRef.current?.focus());
   }
@@ -621,7 +633,7 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
       if (e.key === "Escape") {
         e.preventDefault();
         // Collapse the menu without clearing the input by appending a space.
-        setInput((v) => `${v} `);
+        setInputValue((v) => `${v} `);
         return;
       }
     }
@@ -632,6 +644,47 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
   }
 
   const hasButler = butlerState?.active === true;
+
+  useEffect(() => {
+    if (!hasButler) return;
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if ((e.code !== "Space" && e.key !== " ") || !e.ctrlKey || e.altKey || e.metaKey || e.shiftKey || e.repeat) {
+        return;
+      }
+      if (sending) return;
+
+      e.preventDefault();
+      if (voiceButtonRef.current && !voiceButtonRef.current.isRecording()) {
+        hasDictatedRef.current = false;
+        setIsDictating(true);
+        voiceButtonRef.current.start();
+      }
+    };
+
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.code !== "Space" && e.key !== " ") return;
+      if (!voiceButtonRef.current || !voiceButtonRef.current.isRecording()) {
+        setIsDictating(false);
+        return;
+      }
+      e.preventDefault();
+      setIsDictating(false);
+      voiceButtonRef.current.stop();
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("keyup", onKeyUp);
+    return () => {
+      setIsDictating(false);
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keyup", onKeyUp);
+    };
+  }, [hasButler, sending]);
+
+  useEffect(() => {
+    inputValueRef.current = input;
+  }, [input]);
 
   if (loadingState) {
     return (
@@ -662,7 +715,7 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
             </div>
             <h2 className="text-lg font-semibold text-ink dark:text-stone-100 mb-2 heading-serif">Project Butler</h2>
             <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">
-              A warm, persistent Claude agent that lives in your repository. Ask questions, get summaries, or run quick tasks — all without creating a new workspace.
+              A warm, persistent Claude agent that lives in your repository. Ask questions, get summaries, or run quick tasks â€” all without creating a new workspace.
             </p>
             <button
               onClick={handleStart}
@@ -692,9 +745,9 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
         </>
       ) : (
         <>
-          {/* Butler toolbar: context pill + clear (left, grouped) · config selects + Customize (right) */}
+          {/* Butler toolbar: context pill + clear (left, grouped) Â· config selects + Customize (right) */}
           <div className="shrink-0 flex items-center justify-between gap-3 border-b border-gray-200 dark:border-gray-800 bg-gray-50/60 dark:bg-gray-900/40 px-4 py-2 text-xs">
-            {/* Left group — context status pill with an attached "clear" icon button.
+            {/* Left group â€” context status pill with an attached "clear" icon button.
                 Grouping them makes it obvious that the button resets the value shown in the pill. */}
             <div className="flex items-center shrink-0 min-w-0 rounded-full border border-gray-200 dark:border-gray-700 bg-surface-raised dark:bg-surface-raised-dark overflow-hidden">
               <div
@@ -730,18 +783,47 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
               </button>
             </div>
 
-            {/* Right group — prominent voice dictation, config selects, then a clearly-styled Customize button. */}
+            {/* Right group â€” prominent voice dictation, config selects, then a clearly-styled Customize button. */}
             <div className="flex items-center gap-2 shrink-0">
-              {/* Voice dictation — top-row primary action so it's easy to discover.
+              {/* Voice dictation â€” top-row primary action so it's easy to discover.
                   Feeds the message input below via the same handlers as the footer used to. */}
               <ButlerVoiceButton
+                ref={voiceButtonRef}
                 variant="prominent"
                 disabled={sending}
+                onStart={() => {
+                  hasDictatedRef.current = false;
+                  voiceInterimRef.current = "";
+                  dictationInputRef.current = inputValueRef.current;
+                  setInterimVoiceText("");
+                  setIsDictating(true);
+                }}
                 onTranscript={appendVoiceTranscript}
-                onInterim={setInterimVoiceText}
+                onInterim={(value) => {
+                  setInterimVoiceText(value);
+                  if (value.trim()) {
+                    voiceInterimRef.current = value;
+                  }
+                }}
+                onStop={() => {
+                  setIsDictating(false);
+                  if (!hasDictatedRef.current && voiceInterimRef.current.trim()) {
+                    const prev = inputValueRef.current;
+                    const sep = prev.length > 0 && !/\s$/.test(prev) ? " " : "";
+                    const next = prev + sep + voiceInterimRef.current.trim() + " ";
+                    setInputValue(next);
+                    hasDictatedRef.current = true;
+                  }
+                  voiceInterimRef.current = "";
+                  setInterimVoiceText("");
+                  const currentInput = inputValueRef.current.trim();
+                  const dictationChanged = currentInput !== dictationInputRef.current.trim();
+                  if (!hasDictatedRef.current && !dictationChanged) return;
+                  void handleSend();
+                }}
               />
               <span className="h-5 w-px bg-gray-300 dark:bg-gray-700" aria-hidden />
-              {/* Model picker — switches in place, no context loss. */}
+              {/* Model picker â€” switches in place, no context loss. */}
               <label className="flex items-center gap-1 text-gray-500 dark:text-gray-400" title="Model for the butler. Switches without losing context.">
                 <span className="hidden sm:inline text-[11px]">Model</span>
                 <select
@@ -754,7 +836,7 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
                   ))}
                 </select>
               </label>
-              {/* Profile picker — changes auth/endpoint, so it restarts the butler fresh. */}
+              {/* Profile picker â€” changes auth/endpoint, so it restarts the butler fresh. */}
               <label className="flex items-center gap-1 text-gray-500 dark:text-gray-400" title="Claude profile (auth/endpoint, e.g. zai). Switching restarts the butler with a fresh context.">
                 <span className="hidden sm:inline text-[11px]">Profile</span>
                 <select
@@ -775,7 +857,7 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
                 className="inline-flex items-center gap-1 px-2.5 py-1 rounded border border-gray-300 dark:border-gray-600 bg-surface-raised dark:bg-surface-raised-dark text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors shadow-sm"
                 title="Customize the butler's behavior (edits the project's butler skill)"
               >
-                <span aria-hidden>⚙</span>
+                <span aria-hidden>âš™</span>
                 <span>Customize</span>
               </button>
               <button
@@ -810,7 +892,7 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
                 <div className="flex items-center justify-end gap-2 mt-2">
                   <button onClick={() => setCustomizeOpen(false)} disabled={customizeBusy} className="px-3 py-1.5 text-xs rounded-lg text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-50">Cancel</button>
                   <button onClick={saveCustomize} disabled={customizeBusy} className="px-3 py-1.5 text-xs rounded-lg bg-brand-600 hover:bg-brand-700 text-white disabled:opacity-50">
-                    {customizeBusy ? "Saving…" : "Save & apply"}
+                    {customizeBusy ? "Savingâ€¦" : "Save & apply"}
                   </button>
                 </div>
                 <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-1">Saving clears the current context so the new behavior takes effect immediately.</p>
@@ -836,7 +918,7 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
                       </button>
                       <span className="text-xs font-medium text-gray-700 dark:text-gray-300 truncate">{historyTranscript.session.title}</span>
                       <span className="shrink-0 text-[10px] text-gray-400 dark:text-gray-500">
-                        {historyTranscript.session.turnCount} turns · {formatRelativeTs(new Date(historyTranscript.session.startedAt).getTime())}
+                        {historyTranscript.session.turnCount} turns Â· {formatRelativeTs(new Date(historyTranscript.session.startedAt).getTime())}
                       </span>
                     </div>
                     <button
@@ -877,7 +959,7 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
                     </button>
                   </div>
                   {historyLoading ? (
-                    <p className="text-xs text-gray-400 dark:text-gray-500 py-2">Loading…</p>
+                    <p className="text-xs text-gray-400 dark:text-gray-500 py-2">Loadingâ€¦</p>
                   ) : historySessions.length === 0 ? (
                     <p className="text-xs text-gray-400 dark:text-gray-500 py-2">No past butler sessions found.</p>
                   ) : (
@@ -952,7 +1034,7 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
                 <textarea
                   ref={inputRef}
                   value={input}
-                  onChange={(e) => setInput(e.target.value)}
+                  onChange={(e) => setInputValue(e.target.value)}
                   onKeyDown={handleKeyDown}
                   disabled={sending}
                   rows={1}
@@ -967,7 +1049,7 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
                 />
                 {interimVoiceText && (
                   <div className="absolute bottom-full mb-1 left-0 right-0 z-10 rounded-md bg-gray-900/90 dark:bg-gray-100/90 px-2.5 py-1 text-xs italic text-white dark:text-gray-900 pointer-events-none">
-                    🎙️ {interimVoiceText}
+                    ðŸŽ™ï¸ {interimVoiceText}
                   </div>
                 )}
               </div>
@@ -1005,12 +1087,19 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
                   Butler is thinking...
                 </span>
               ) : (
-                "Persistent warm butler · runs in your project repo · Enter to send · 🎙️ Dictate (top right) for voice input"
+                <span className={`flex items-center gap-1.5 ${isDictating ? "text-red-500 dark:text-red-400" : ""}`}>
+                  <span>
+                    {isDictating
+                      ? "Dictating in progress"
+                      : "Persistent warm butler runs in your project repo. Enter to send. Hold Ctrl + Space to dictate."}
+                  </span>
+                  {isDictating && <span className="inline-block w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />}
+                </span>
               )}
             </p>
           </div>
 
-          {/* Pending agent questions — secondary inbox, anchored below the chat. */}
+          {/* Pending agent questions â€” secondary inbox, anchored below the chat. */}
           <AgentQuestionsPanel projectId={projectId} />
         </>
       )}
