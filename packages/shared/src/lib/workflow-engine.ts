@@ -650,11 +650,13 @@ export async function syncCurrentNodeToStatus(db: WorkflowDb, issueId: string): 
 
 export interface GraphNodeInput {
   id: string;
+  name?: string;
   nodeType: string;
 }
 export interface GraphEdgeInput {
   fromNodeId: string;
   toNodeId: string;
+  isLoop?: boolean;
 }
 
 /**
@@ -669,35 +671,90 @@ export function validateGraph(nodes: GraphNodeInput[], edges: GraphEdgeInput[]):
   if (nodes.length === 0) return ["A workflow needs at least one node."];
 
   const ids = new Set(nodes.map((n) => n.id));
+  const nodeById = new Map(nodes.map((n) => [n.id, n]));
+  const nodeName = (id: string) => nodeById.get(id)?.name?.trim() || id;
   const starts = nodes.filter((n) => n.nodeType === "start");
   const ends = nodes.filter((n) => n.nodeType === "end");
   if (starts.length !== 1) errors.push(`A workflow must have exactly one start node (found ${starts.length}).`);
   if (ends.length < 1) errors.push("A workflow must have at least one end node.");
 
+  let hasMissingEdgeRef = false;
   for (const e of edges) {
     if (!ids.has(e.fromNodeId) || !ids.has(e.toNodeId)) {
-      errors.push("An edge references a node that no longer exists.");
-      break;
+      errors.push(`An edge references a node that no longer exists (${nodeName(e.fromNodeId)} -> ${nodeName(e.toNodeId)}).`);
+      hasMissingEdgeRef = true;
     }
   }
+  const validEdges = edges.filter((e) => ids.has(e.fromNodeId) && ids.has(e.toNodeId));
 
   const incoming = new Map<string, number>();
   const outgoing = new Map<string, number>();
-  for (const e of edges) {
+  const adjacency = new Map<string, string[]>();
+  const cycleAdjacency = new Map<string, string[]>();
+  for (const e of validEdges) {
     outgoing.set(e.fromNodeId, (outgoing.get(e.fromNodeId) ?? 0) + 1);
     incoming.set(e.toNodeId, (incoming.get(e.toNodeId) ?? 0) + 1);
+    if (!adjacency.has(e.fromNodeId)) adjacency.set(e.fromNodeId, []);
+    adjacency.get(e.fromNodeId)!.push(e.toNodeId);
+    if (!e.isLoop) {
+      if (!cycleAdjacency.has(e.fromNodeId)) cycleAdjacency.set(e.fromNodeId, []);
+      cycleAdjacency.get(e.fromNodeId)!.push(e.toNodeId);
+    }
   }
   for (const n of nodes) {
     if (n.nodeType !== "start" && (incoming.get(n.id) ?? 0) === 0) {
-      errors.push("Every non-start node must have at least one incoming edge (no orphans).");
-      break;
+      errors.push(`Node "${nodeName(n.id)}" is orphaned: every non-start node needs an incoming edge.`);
     }
   }
   for (const n of nodes) {
     if (n.nodeType !== "end" && (outgoing.get(n.id) ?? 0) === 0) {
-      errors.push("Every non-end node must have at least one outgoing edge.");
-      break;
+      errors.push(`Node "${nodeName(n.id)}" is a dead end: every non-end node needs an outgoing edge.`);
     }
+  }
+
+  if (starts.length === 1 && !hasMissingEdgeRef) {
+    const reachable = new Set<string>();
+    const stack = [starts[0].id];
+    while (stack.length > 0) {
+      const id = stack.pop()!;
+      if (reachable.has(id)) continue;
+      reachable.add(id);
+      for (const next of adjacency.get(id) ?? []) {
+        if (!reachable.has(next)) stack.push(next);
+      }
+    }
+    const disconnected = nodes.filter((n) => !reachable.has(n.id));
+    if (disconnected.length > 0) {
+      errors.push(`Disconnected workflow node(s) unreachable from start "${nodeName(starts[0].id)}": ${disconnected.map((n) => `"${nodeName(n.id)}"`).join(", ")}.`);
+    }
+  }
+
+  const visiting = new Set<string>();
+  const visited = new Set<string>();
+  const path: string[] = [];
+  let cycle: string[] | null = null;
+  const dfs = (id: string): boolean => {
+    visiting.add(id);
+    path.push(id);
+    for (const next of cycleAdjacency.get(id) ?? []) {
+      if (visiting.has(next)) {
+        const startIdx = path.indexOf(next);
+        cycle = [...path.slice(startIdx), next];
+        return true;
+      }
+      if (!visited.has(next) && dfs(next)) return true;
+    }
+    path.pop();
+    visiting.delete(id);
+    visited.add(id);
+    return false;
+  };
+  for (const n of nodes) {
+    if (!visited.has(n.id) && dfs(n.id)) break;
+  }
+  const cyclePath: string[] = cycle ?? [];
+  if (cyclePath.length > 0) {
+    errors.push(`Workflow contains a cycle: ${cyclePath.map((id) => `"${nodeName(id)}"`).join(" -> ")}. Mark intentional back-edges as loop edges.`);
   }
 
   const hasFork = nodes.some((n) => n.nodeType === "parallel-fork");
@@ -731,6 +788,7 @@ export interface TemplateEdgeInput {
   toNodeId: string;
   label?: string | null;
   condition?: string;
+  isLoop?: boolean;
   sortOrder?: number;
 }
 export interface TemplateInput {
@@ -786,6 +844,7 @@ export async function writeTemplateGraph(
       toNodeId: to,
       label: e.label ?? null,
       condition: e.condition ?? "manual",
+      isLoop: !!e.isLoop,
       sortOrder: e.sortOrder ?? esort++,
       createdAt: now,
     });
@@ -795,8 +854,8 @@ export async function writeTemplateGraph(
 /** Validate a TemplateInput's graph; returns error strings (empty = valid). */
 export function validateTemplateInput(input: { nodes: TemplateNodeInput[]; edges: TemplateEdgeInput[] }): string[] {
   return validateGraph(
-    input.nodes.map((n) => ({ id: String(n.id), nodeType: n.nodeType ?? "normal" })),
-    input.edges.map((e) => ({ fromNodeId: String(e.fromNodeId), toNodeId: String(e.toNodeId) })),
+    input.nodes.map((n) => ({ id: String(n.id), name: n.name, nodeType: n.nodeType ?? "normal" })),
+    input.edges.map((e) => ({ fromNodeId: String(e.fromNodeId), toNodeId: String(e.toNodeId), isLoop: !!e.isLoop })),
   );
 }
 
