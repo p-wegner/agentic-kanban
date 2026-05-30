@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { readdirSync, statSync } from "node:fs";
+import { join } from "node:path";
 import { issues, projectStatuses, issueDependencies, agentSkills, tags, issueTags, projects } from "@agentic-kanban/shared/schema";
 import { eq, and, inArray, sql, desc } from "drizzle-orm";
 import type { DependencyType } from "@agentic-kanban/shared/schema";
@@ -173,6 +175,28 @@ export interface AnalyzeTouchedFilesResult {
   cached: boolean;
 }
 
+/**
+ * Extract a JSON object from raw model output, tolerating prose and markdown
+ * fences around it. The `claude` CLI with `--output-format text -p` (especially
+ * the Haiku model) frequently prefixes/suffixes the JSON with conversational
+ * text ("Perfect! Here's the answer:\n```json\n{...}\n```"), so stripping only
+ * leading/trailing fences is not enough — we locate the first balanced `{...}`.
+ */
+export function extractJsonObject(text: string): unknown {
+  if (!text) throw new Error("empty model response");
+  let s = text.trim();
+  // Strip a ```json ... ``` or ``` ... ``` fence if the JSON lives inside one.
+  const fence = s.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (fence) s = fence[1].trim();
+  // Tolerate leading/trailing prose by slicing from the first `{` to the last `}`.
+  const start = s.indexOf("{");
+  const end = s.lastIndexOf("}");
+  if (start === -1 || end === -1 || end <= start) {
+    throw new Error("no JSON object found in model response");
+  }
+  return JSON.parse(s.slice(start, end + 1));
+}
+
 function buildDirTree(rootPath: string, maxDepth = 3): string {
   const lines: string[] = [];
   function walk(dir: string, depth: number, prefix: string) {
@@ -254,8 +278,7 @@ Issue title: ${issue.title}
 ${issue.description ? `Description:\n${issue.description}` : ""}`;
 
   const stdout = await invokeClaudePrompt(prompt, { database, model: "claude-haiku-4-5" });
-  const cleaned = stdout.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
-  const parsed = JSON.parse(cleaned) as { files?: TouchedFile[] };
+  const parsed = extractJsonObject(stdout) as { files?: TouchedFile[] };
   const files: TouchedFile[] = (parsed.files ?? []).slice(0, 12).filter(
     f => f.path && f.reason && ["high", "medium", "low"].includes(f.confidence),
   );
