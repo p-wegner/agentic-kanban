@@ -11,6 +11,13 @@ interface ButlerVoiceButtonProps {
   onTranscript: (chunk: string) => void;
   /** Optional live preview of the not-yet-finalized phrase. */
   onInterim?: (interim: string) => void;
+  /**
+   * Visual variant.
+   * - `"compact"` (default): square icon-only button matching the send button footprint.
+   * - `"prominent"`: larger, higher-contrast pill with an icon + "Dictate"/"Listening…" label,
+   *   for use in the top toolbar where the action should be easy to discover.
+   */
+  variant?: "compact" | "prominent";
 }
 
 type RecordingState = "idle" | "recording";
@@ -59,7 +66,7 @@ function getSpeechRecognitionCtor(): (new () => SpeechRecognitionType) | null {
  * of auto-sending, so the user can edit before submitting. Click to start,
  * click again to stop.
  */
-export function ButlerVoiceButton({ disabled, onTranscript, onInterim }: ButlerVoiceButtonProps) {
+export function ButlerVoiceButton({ disabled, onTranscript, onInterim, variant = "compact" }: ButlerVoiceButtonProps) {
   const [state, setState] = useState<RecordingState>("idle");
   const recognitionRef = useRef<SpeechRecognitionType | null>(null);
 
@@ -166,6 +173,57 @@ export function ButlerVoiceButton({ disabled, onTranscript, onInterim }: ButlerV
   }, []);
 
   const isRecording = state === "recording";
+  const isProminent = variant === "prominent";
+
+  // Icon dimensions scale up in the prominent variant so the button reads as a
+  // primary action in the top toolbar.
+  const iconSize = isProminent ? "w-5 h-5" : "w-4 h-4";
+  const waveBox = isProminent ? 20 : 16;
+
+  const icon = isRecording ? (
+    /* Animated waveform bars (sized to match the mic icon footprint) */
+    <span className={`flex items-end justify-center gap-px ${iconSize}`}>
+      {waveBars.map((h, i) => (
+        <span
+          key={i}
+          className="w-0.5 bg-white rounded-sm transition-none"
+          style={{ height: `${Math.round(h * waveBox)}px` }}
+        />
+      ))}
+    </span>
+  ) : (
+    /* Mic icon */
+    <svg className={iconSize} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M19 10v2a7 7 0 0 1-14 0v-2" />
+      <line x1="12" y1="19" x2="12" y2="23" strokeLinecap="round" />
+      <line x1="8" y1="23" x2="16" y2="23" strokeLinecap="round" />
+    </svg>
+  );
+
+  if (isProminent) {
+    return (
+      <button
+        type="button"
+        onClick={handleClick}
+        disabled={disabled}
+        title={isRecording ? "Stop dictation" : "Dictate a message (voice input)"}
+        aria-label={isRecording ? "Stop dictation" : "Dictate a message"}
+        aria-pressed={isRecording}
+        className={[
+          "shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium",
+          "transition-colors shadow-sm disabled:opacity-40 disabled:cursor-not-allowed",
+          "focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-offset-transparent",
+          isRecording
+            ? "bg-red-600 hover:bg-red-700 text-white focus:ring-red-500 animate-pulse"
+            : "bg-brand-600 hover:bg-brand-700 text-white focus:ring-brand-500",
+        ].join(" ")}
+      >
+        {icon}
+        <span>{isRecording ? "Listening…" : "Dictate"}</span>
+      </button>
+    );
+  }
 
   return (
     <button
@@ -182,26 +240,7 @@ export function ButlerVoiceButton({ disabled, onTranscript, onInterim }: ButlerV
           : "bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-600 dark:text-gray-300",
       ].join(" ")}
     >
-      {isRecording ? (
-        /* Animated waveform bars (4×4 box to match the send icon footprint) */
-        <span className="flex items-end justify-center gap-px w-4 h-4">
-          {waveBars.map((h, i) => (
-            <span
-              key={i}
-              className="w-0.5 bg-white rounded-sm transition-none"
-              style={{ height: `${Math.round(h * 16)}px` }}
-            />
-          ))}
-        </span>
-      ) : (
-        /* Mic icon */
-        <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
-          <path strokeLinecap="round" strokeLinejoin="round" d="M19 10v2a7 7 0 0 1-14 0v-2" />
-          <line x1="12" y1="19" x2="12" y2="23" strokeLinecap="round" />
-          <line x1="8" y1="23" x2="16" y2="23" strokeLinecap="round" />
-        </svg>
-      )}
+      {icon}
     </button>
   );
 }

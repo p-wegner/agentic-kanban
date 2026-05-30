@@ -730,8 +730,17 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
               </button>
             </div>
 
-            {/* Right group — config selects, then a clearly-styled Customize button. */}
+            {/* Right group — prominent voice dictation, config selects, then a clearly-styled Customize button. */}
             <div className="flex items-center gap-2 shrink-0">
+              {/* Voice dictation — top-row primary action so it's easy to discover.
+                  Feeds the message input below via the same handlers as the footer used to. */}
+              <ButlerVoiceButton
+                variant="prominent"
+                disabled={sending}
+                onTranscript={appendVoiceTranscript}
+                onInterim={setInterimVoiceText}
+              />
+              <span className="h-5 w-px bg-gray-300 dark:bg-gray-700" aria-hidden />
               {/* Model picker — switches in place, no context loss. */}
               <label className="flex items-center gap-1 text-gray-500 dark:text-gray-400" title="Model for the butler. Switches without losing context.">
                 <span className="hidden sm:inline text-[11px]">Model</span>
@@ -962,11 +971,6 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
                   </div>
                 )}
               </div>
-              <ButlerVoiceButton
-                disabled={sending}
-                onTranscript={appendVoiceTranscript}
-                onInterim={setInterimVoiceText}
-              />
               {sending ? (
                 <button
                   onClick={handleStop}
@@ -1001,7 +1005,7 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
                   Butler is thinking...
                 </span>
               ) : (
-                "Persistent warm butler · runs in your project repo · Enter to send · 🎙️ to dictate"
+                "Persistent warm butler · runs in your project repo · Enter to send · 🎙️ Dictate (top right) for voice input"
               )}
             </p>
           </div>
