@@ -618,7 +618,7 @@ export function IssueDetailPanel({
           </div>
         )}
         <div
-          className={`flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-gray-700 ${panelMode === "sidebar" || panelMode === "modal" ? "cursor-grab active:cursor-grabbing" : ""} ${panelMode === "modal" ? "rounded-t-lg" : ""}`}
+          className={`flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-gray-700 ${editing ? "bg-amber-50/60 dark:bg-amber-950/20" : ""} ${panelMode === "sidebar" || panelMode === "modal" ? "cursor-grab active:cursor-grabbing" : ""} ${panelMode === "modal" ? "rounded-t-lg" : ""}`}
           onMouseDown={panelMode === "sidebar" || panelMode === "modal" ? handleHeaderMouseDown : undefined}
         >
           <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2">
@@ -628,72 +628,93 @@ export function IssueDetailPanel({
                 <CopyButton text={`#${issue.issueNumber} ${issue.title}`} />
               </span>
             )}
-            {editing ? "Edit Issue" : "Issue Details"}
+            Issue Details
+            {editing && (
+              <span className="text-xs font-medium px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">
+                editing
+              </span>
+            )}
           </h2>
           <div className="flex items-center gap-1">
-            {!editing && (
-              <button
-                onClick={toggleVisualVerify}
-                disabled={togglingVisualVerify}
-                title={isVisualVerify ? "Unmark visual verification" : "Mark for visual verification"}
-                className={`p-0.5 rounded transition-colors disabled:opacity-50 ${isVisualVerify ? "text-amber-500 hover:text-amber-600" : "text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300"}`}
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                </svg>
-              </button>
-            )}
-            {!editing && (
-              <div ref={actionsRef} className="relative">
+            {editing ? (
+              <>
                 <button
-                  onClick={() => { setActionsOpen((o) => !o); setConfirmDelete(false); }}
-                  title="Actions"
-                  className="text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 p-0.5 rounded"
+                  onClick={handleSave}
+                  disabled={saving || !title.trim()}
+                  className="text-xs font-medium bg-brand-600 text-white px-2.5 py-1 rounded hover:bg-brand-700 disabled:opacity-50 transition-colors"
+                >
+                  {saving ? "Saving..." : "Save"}
+                </button>
+                <button
+                  onClick={handleCancelEdit}
+                  className="text-xs font-medium text-gray-500 dark:text-gray-400 px-2 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                >
+                  Cancel
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  onClick={() => setEditing(true)}
+                  title="Edit issue"
+                  className="text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 p-0.5 rounded transition-colors"
                 >
                   <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
                   </svg>
                 </button>
-                {actionsOpen && (
-                  <div className="absolute right-0 top-full mt-1 w-48 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-50 py-1">
-                    <button
-                      onClick={() => { setEditing(true); setActionsOpen(false); }}
-                      className="w-full text-left px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2"
-                    >
-                      <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                      </svg>
-                      Edit
-                    </button>
-                    {((issue.description?.length ?? 0) > 500 || issueTags.some(t => t.name === "epic")) && (
+                <button
+                  onClick={toggleVisualVerify}
+                  disabled={togglingVisualVerify}
+                  title={isVisualVerify ? "Unmark visual verification" : "Mark for visual verification"}
+                  className={`p-0.5 rounded transition-colors disabled:opacity-50 ${isVisualVerify ? "text-amber-500 hover:text-amber-600" : "text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300"}`}
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                  </svg>
+                </button>
+                <div ref={actionsRef} className="relative">
+                  <button
+                    onClick={() => { setActionsOpen((o) => !o); setConfirmDelete(false); }}
+                    title="More actions"
+                    className="text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 p-0.5 rounded"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z" />
+                    </svg>
+                  </button>
+                  {actionsOpen && (
+                    <div className="absolute right-0 top-full mt-1 w-48 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-50 py-1">
+                      {((issue.description?.length ?? 0) > 500 || issueTags.some(t => t.name === "epic")) && (
+                        <button
+                          onClick={() => { setShowDecomposeModal(true); setActionsOpen(false); }}
+                          className="w-full text-left px-3 py-2 text-sm text-purple-700 dark:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-950 flex items-center gap-2"
+                        >
+                          <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 10h16M4 14h8m-8 4h8" />
+                          </svg>
+                          Decompose…
+                        </button>
+                      )}
                       <button
-                        onClick={() => { setShowDecomposeModal(true); setActionsOpen(false); }}
-                        className="w-full text-left px-3 py-2 text-sm text-purple-700 dark:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-950 flex items-center gap-2"
+                        onClick={() => handleDelete()}
+                        disabled={saving}
+                        className={`w-full text-left px-3 py-2 text-sm disabled:opacity-50 flex items-center gap-2 ${
+                          confirmDelete
+                            ? "text-red-600 bg-red-50 dark:bg-red-950 hover:bg-red-100 dark:hover:bg-red-900"
+                            : "text-red-600 hover:bg-red-50 dark:hover:bg-red-950"
+                        }`}
                       >
                         <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 10h16M4 14h8m-8 4h8" />
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                         </svg>
-                        Decompose…
+                        {confirmDelete ? "Confirm Delete" : "Delete"}
                       </button>
-                    )}
-                    <button
-                      onClick={() => handleDelete()}
-                      disabled={saving}
-                      className={`w-full text-left px-3 py-2 text-sm disabled:opacity-50 flex items-center gap-2 ${
-                        confirmDelete
-                          ? "text-red-600 bg-red-50 dark:bg-red-950 hover:bg-red-100 dark:hover:bg-red-900"
-                          : "text-red-600 hover:bg-red-50 dark:hover:bg-red-950"
-                      }`}
-                    >
-                      <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                      </svg>
-                      {confirmDelete ? "Confirm Delete" : "Delete"}
-                    </button>
-                  </div>
-                )}
-              </div>
+                    </div>
+                  )}
+                </div>
+              </>
             )}
             <button
               onClick={() => {
