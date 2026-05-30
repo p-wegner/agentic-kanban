@@ -96,5 +96,27 @@ export interface CreateWorkspaceResult {
 /** Subset of the git service that workspace services depend on. Injectable for tests. */
 export type GitService = typeof realGitService;
 
+export const MERGE_LOCK_STALE_MS = 15 * 60 * 1000;
+
+export interface ActiveMergeLock {
+  promise: Promise<unknown>;
+  workspaceId: string;
+  repoPath: string;
+  startedAt: string;
+  startedAtMs: number;
+}
+
 /** Merge serialization: one active merge per repo at a time. Shared across services. */
-export const activeMerges = new Map<string, Promise<unknown>>();
+export const activeMerges = new Map<string, ActiveMergeLock>();
+
+export function describeMergeLock(lock: ActiveMergeLock, nowMs = Date.now()) {
+  const ageMs = Math.max(0, nowMs - lock.startedAtMs);
+  return {
+    repoPath: lock.repoPath,
+    activeWorkspaceId: lock.workspaceId,
+    startedAt: lock.startedAt,
+    ageMs,
+    staleAfterMs: MERGE_LOCK_STALE_MS,
+    isStale: ageMs > MERGE_LOCK_STALE_MS,
+  };
+}
