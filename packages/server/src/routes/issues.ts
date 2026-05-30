@@ -1,4 +1,6 @@
 import { Hono } from "hono";
+import { eq } from "drizzle-orm";
+import { issues } from "@agentic-kanban/shared/schema";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import type { BoardEvents } from "../services/board-events.js";
