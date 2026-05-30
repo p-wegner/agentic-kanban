@@ -434,6 +434,49 @@ describe("workspace.service", () => {
       });
       expect(sessionManager.startSession).not.toHaveBeenCalled();
     });
+
+    it("syncs and rebases the branch before launching fix-and-merge", async () => {
+      const { projectId, issueId } = await seedProjectAndIssue(db);
+      const wsId = await seedWorkspaceForFix(projectId, issueId);
+      const gitService = createFakeGitService({
+        syncBranchToHead: vi.fn(async () => true),
+        rebaseOntoBase: vi.fn(async () => ({ success: true })),
+      });
+      const sessionManager = createMockSessionManager();
+
+      const service = createWorkspaceService({ database: db, gitService, getSessionManager: () => sessionManager });
+      await service.fixAndMerge(wsId, "Merge conflicts detected");
+
+      expect(gitService.syncBranchToHead).toHaveBeenCalledWith(
+        "/tmp/test-repo/.worktrees/feature-1",
+        "feature/ak-1-test",
+      );
+      expect(gitService.rebaseOntoBase).toHaveBeenCalledWith(
+        "/tmp/test-repo/.worktrees/feature-1",
+        "main",
+        "feature/ak-1-test",
+      );
+      const startArgs = (sessionManager.startSession as ReturnType<typeof vi.fn>).mock.calls[0][0];
+      expect(startArgs.prompt).toContain("rebased the workspace branch onto 'main' successfully");
+    });
+
+    it("launches fix-and-merge with rebase conflict context instead of aborting the rebuild", async () => {
+      const { projectId, issueId } = await seedProjectAndIssue(db);
+      const wsId = await seedWorkspaceForFix(projectId, issueId);
+      const gitService = createFakeGitService({
+        rebaseOntoBase: vi.fn(async () => ({ success: false, conflictingFiles: ["src/foo.ts"], error: "conflict" })),
+      });
+      const sessionManager = createMockSessionManager();
+
+      const service = createWorkspaceService({ database: db, gitService, getSessionManager: () => sessionManager });
+      await service.fixAndMerge(wsId, "Merge conflicts detected");
+
+      expect(gitService.abortRebase).not.toHaveBeenCalled();
+      expect(sessionManager.startSession).toHaveBeenCalledOnce();
+      const startArgs = (sessionManager.startSession as ReturnType<typeof vi.fn>).mock.calls[0][0];
+      expect(startArgs.prompt).toContain("left the rebase in progress");
+      expect(startArgs.prompt).toContain("src/foo.ts");
+    });
   });
 
   describe("sendTurn with auto_rebase_on_continue", () => {
