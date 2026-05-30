@@ -72,8 +72,14 @@ export async function createWorktree(
       // Branch exists — reuse the worktree
       return match.path.replace(/\//g, sep);
     } catch {
-      // Branch gone (merged away) — prune stale worktree and recreate
-      await execGit(["worktree", "remove", "--force", match.path], repoPath);
+      // Branch gone (merged away) — prune stale worktree and recreate.
+      // Wrap in try/catch: on Windows the directory may be EBUSY/locked;
+      // failure here is non-fatal — pruneWorktrees below cleans up the registration.
+      try {
+        await execGit(["worktree", "remove", "--force", match.path], repoPath);
+      } catch {
+        // EBUSY or locked — fall through; pruneWorktrees will tidy the registration
+      }
     }
   }
 
