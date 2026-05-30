@@ -5,6 +5,7 @@ import { db } from "../db/index.js";
 import { createBoardEvents } from "../services/board-events.js";
 import { createSessionManager } from "../services/session.manager.js";
 import { runAutoStart } from "./monitor-auto-start.js";
+import { runBacklogEmptyStrategy } from "./monitor-backlog.js";
 import { getRecentAgentExcerpts, logMonitorAction, shouldSkipNudge, type MonitorAction } from "./monitor-helpers.js";
 import { processWorkspaceCandidates } from "./monitor-cycle.js";
 import { buildMonitorNudgePrompt } from "./review-helpers.js";
@@ -65,6 +66,7 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort }: 
         shouldSkipNudge,
       }));
       await runAutoStart(prefMap, { serverPort, boardEvents, logMonitorAction: (action, workspaceId, issueId) => logMonitorAction(monitorState.recentActions, action, workspaceId, issueId) });
+      await runBacklogEmptyStrategy(prefMap, { serverPort, boardEvents, logMonitorAction: (action, workspaceId, issueId) => logMonitorAction(monitorState.recentActions, action, workspaceId, issueId) });
     } catch (err) {
       console.warn("[monitor] Cycle error:", err);
     } finally {
