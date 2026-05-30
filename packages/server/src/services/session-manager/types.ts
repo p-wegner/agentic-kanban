@@ -55,6 +55,7 @@ export interface SessionState {
   sessionAgentToolUseIds: Map<string, Set<string>>;
   sessionTextParts: Map<string, string[]>;
   sessionFinalText: Map<string, string>;
+  sessionSubstantiveOutput: Set<string>;
   sessionTasks: Map<string, Map<string, { subject: string; status: string }>>;
   sessionHasTodoWrite: Set<string>;
   sessionExitPlanModeDenied: Set<string>;
@@ -77,6 +78,7 @@ export function createSessionState(): SessionState {
     sessionAgentToolUseIds: new Map(),
     sessionTextParts: new Map(),
     sessionFinalText: new Map(),
+    sessionSubstantiveOutput: new Set(),
     sessionTasks: new Map(),
     sessionHasTodoWrite: new Set(),
     sessionExitPlanModeDenied: new Set(),
