@@ -166,6 +166,8 @@ export interface MainWorkspaceInfo {
   conflicts?: { hasConflicts: boolean; conflictingFiles: string[] } | null;
   lastSessionAt?: string | null;
   lastSessionTriggerType?: string | null;
+  /** Set when the workspace's branch was actually merged into its base (distinguishes merged from abandoned-closed). */
+  mergedAt?: string | null;
   contextTokens?: number | null;
   lastTool?: string | null;
   lastAssistantMessage?: string | null;
@@ -261,6 +263,7 @@ export interface WorkspaceResponse {
   createdAt: string;
   updatedAt: string;
   closedAt?: string | null;
+  mergedAt?: string | null;
   contextTokens?: number | null;
   lastTool?: string | null;
   latestCommit?: { sha: string; message: string } | null;
