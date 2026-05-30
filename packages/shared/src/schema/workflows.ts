@@ -110,6 +110,9 @@ export const workflowEdges = sqliteTable(
       .references(() => workflowNodes.id, { onDelete: "cascade" }),
     label: text("label"),
     condition: text("condition").notNull().default("manual"),
+    // Intentional back-edge that may create a loop at runtime. Ignored by the
+    // save-time cycle detector, but still used for reachability/routing.
+    isLoop: integer("is_loop", { mode: "boolean" }).notNull().default(false),
     sortOrder: integer("sort_order").notNull().default(0),
     createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
   },

@@ -69,4 +69,5 @@ export const MIGRATION_FILES = [
   "0060_session_skill.sql",
   "0061_workspace_merged_at.sql",
   "0062_workspace_code_metrics.sql",
+  "0063_workflow_edge_loop_flag.sql",
 ];

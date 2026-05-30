@@ -111,7 +111,7 @@ export function WorkflowBuilder({
         source: e.fromNodeId,
         target: e.toNodeId,
         label: edgeLabel(e.label, e.condition),
-        data: { label: e.label, condition: e.condition },
+        data: { label: e.label, condition: e.condition, isLoop: !!e.isLoop },
       }));
       // Always lay out hierarchically on open. Stored coordinates today are
       // unreliable (built-ins use x=0; agent-created templates rarely supply
@@ -134,7 +134,7 @@ export function WorkflowBuilder({
 
   const onConnect = useCallback(
     (c: Connection) =>
-      setEdges((eds) => addEdge({ ...c, id: tmpId(), label: "manual", data: { label: null, condition: "manual" } }, eds)),
+      setEdges((eds) => addEdge({ ...c, id: tmpId(), label: "manual", data: { label: null, condition: "manual", isLoop: false } }, eds)),
     [setEdges],
   );
 
@@ -162,7 +162,7 @@ export function WorkflowBuilder({
       ),
     );
   }
-  function patchEdge(id: string, patch: { label?: string | null; condition?: string }) {
+  function patchEdge(id: string, patch: { label?: string | null; condition?: string; isLoop?: boolean }) {
     setEdges((eds) =>
       eds.map((e) =>
         e.id === id
@@ -219,6 +219,7 @@ export function WorkflowBuilder({
         toNodeId: e.target,
         label: (e.data as any)?.label ?? null,
         condition: (e.data as any)?.condition ?? "manual",
+        isLoop: !!(e.data as any)?.isLoop,
         sortOrder: i,
       })),
     };
@@ -377,6 +378,14 @@ export function WorkflowBuilder({
                 <select value={(selectedEdge.data as any)?.condition ?? "manual"} onChange={(e) => patchEdge(selectedEdge.id, { condition: e.target.value })} className="w-full mt-0.5 border rounded px-2 py-1 dark:bg-gray-800 dark:border-gray-600">
                   {EDGE_CONDITIONS.map((c) => <option key={c} value={c}>{c}</option>)}
                 </select>
+              </label>
+              <label className="flex items-center gap-2 text-xs">
+                <input
+                  type="checkbox"
+                  checked={!!(selectedEdge.data as any)?.isLoop}
+                  onChange={(e) => patchEdge(selectedEdge.id, { isLoop: e.target.checked })}
+                />
+                Intentional loop edge
               </label>
               <button onClick={deleteSelected} className="text-xs text-red-600 hover:text-red-700">Delete edge</button>
             </div>
