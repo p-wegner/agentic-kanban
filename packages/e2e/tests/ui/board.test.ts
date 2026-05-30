@@ -196,12 +196,12 @@ test.describe("Board interactions", () => {
       page.locator("h2", { hasText: "Issue Details" }),
     ).toBeVisible();
 
-    await page.locator('button:has-text("Delete")').click();
+    await page.getByRole("button", { name: "Delete issue" }).click();
     await expect(
-      page.locator('button:has-text("Confirm Delete")'),
+      page.getByRole("button", { name: "Confirm delete issue" }),
     ).toBeVisible();
 
-    await page.locator('button:has-text("Confirm Delete")').click();
+    await page.getByRole("button", { name: "Confirm delete issue" }).click();
 
     await expect(
       page.locator("p", { hasText: title }),

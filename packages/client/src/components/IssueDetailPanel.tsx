@@ -237,7 +237,10 @@ export function IssueDetailPanel({
   // Reset delete confirmation on outside click
   useEffect(() => {
     if (!confirmDelete) return;
-    function handleClick() { setConfirmDelete(false); }
+    function handleClick(e: MouseEvent) {
+      if ((e.target as HTMLElement).closest("[data-delete-issue-action]")) return;
+      setConfirmDelete(false);
+    }
     document.addEventListener("mousedown", handleClick);
     return () => document.removeEventListener("mousedown", handleClick);
   }, [confirmDelete]);
@@ -679,8 +682,10 @@ export function IssueDetailPanel({
                   </button>
                 )}
                 <button
+                  data-delete-issue-action
                   onClick={() => handleDelete()}
                   disabled={saving}
+                  aria-label={confirmDelete ? "Confirm delete issue" : "Delete issue"}
                   title={confirmDelete ? "Click again to confirm delete" : "Delete issue"}
                   className={`p-0.5 rounded transition-colors disabled:opacity-50 ${confirmDelete ? "text-red-600 dark:text-red-400" : "text-gray-400 dark:text-gray-500 hover:text-red-500 dark:hover:text-red-400"}`}
                 >
