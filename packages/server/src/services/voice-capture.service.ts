@@ -111,7 +111,7 @@ ${transcript}
 Rules:
 - title: concise, action-oriented, ≤80 chars
 - description: expand with context, acceptance criteria, and implementation hints. Include a "## Voice Transcript" section at the end (collapsed context) with the verbatim transcript.
-- priority: one of "low", "medium", "high", "urgent" — infer from urgency words in the transcript
+- priority: one of "low", "medium", "high", "critical" — infer from urgency words in the transcript
 
 - If the transcript is not English, write the title and description in the same language as the transcript unless the speaker clearly asks otherwise.
 
@@ -133,8 +133,12 @@ Respond ONLY with valid JSON (no markdown, no explanation):
     };
   }
 
-  const validPriorities = ["low", "medium", "high", "urgent"];
-  const priority = validPriorities.includes(parsed.priority ?? "") ? (parsed.priority as string) : "medium";
+  const parsedPriority = parsed.priority?.trim().toLowerCase();
+  const priority = parsedPriority === "urgent"
+    ? "critical"
+    : ["low", "medium", "high", "critical"].includes(parsedPriority ?? "")
+    ? parsedPriority!
+    : "medium";
 
   return {
     title: parsed.title?.trim() || transcript.slice(0, 80),
