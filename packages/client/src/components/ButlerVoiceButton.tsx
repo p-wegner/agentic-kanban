@@ -1,4 +1,10 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
+import {
+  loadVoiceLanguage,
+  resolveVoiceLanguage,
+  saveVoiceLanguage,
+  VOICE_LANGUAGE_OPTIONS,
+} from "../lib/voice-language.js";
 import { showToast } from "./Toast.js";
 
 interface ButlerVoiceButtonProps {
@@ -18,7 +24,7 @@ interface ButlerVoiceButtonProps {
   /**
    * Visual variant.
    * - `"compact"` (default): square icon-only button matching the send button footprint.
- * - `"prominent"`: larger, higher-contrast pill with an icon + "Dictate"/"Listening..." label,
+   * - `"prominent"`: larger, higher-contrast pill with an icon + "Dictate"/"Listening..." label,
    *   for use in the top toolbar where the action should be easy to discover.
    */
   variant?: "compact" | "prominent";
@@ -27,7 +33,7 @@ interface ButlerVoiceButtonProps {
 type RecordingState = "idle" | "recording";
 
 // Web Speech API types (may not be in all TS lib versions). Mirrors the
-// declarations in VoiceInboxButton.tsx â€” kept local so the two voice features
+// declarations in VoiceInboxButton.tsx - kept local so the two voice features
 // stay independent.
 interface SpeechRecognitionEvent extends Event {
   results: SpeechRecognitionResultList;
@@ -91,6 +97,7 @@ export const ButlerVoiceButton = forwardRef<ButlerVoiceButtonHandle, ButlerVoice
   variant = "compact",
 }, ref) => {
   const [state, setState] = useState<RecordingState>("idle");
+  const [voiceLanguage, setVoiceLanguage] = useState(loadVoiceLanguage);
   const recognitionRef = useRef<SpeechRecognitionType | null>(null);
   const stopRequestedRef = useRef(false);
   const pointerDownRef = useRef(false);
@@ -162,7 +169,10 @@ export const ButlerVoiceButton = forwardRef<ButlerVoiceButtonHandle, ButlerVoice
     const recognition = new SpeechRecognitionCtor();
     recognition.continuous = true;
     recognition.interimResults = true;
-    recognition.lang = (typeof navigator !== "undefined" && navigator.language) || "en-US";
+    const recognitionLanguage = resolveVoiceLanguage(voiceLanguage);
+    if (recognitionLanguage) {
+      recognition.lang = recognitionLanguage;
+    }
     stopRequestedRef.current = false;
     onStart?.();
 
@@ -201,7 +211,7 @@ export const ButlerVoiceButton = forwardRef<ButlerVoiceButtonHandle, ButlerVoice
     recognitionRef.current = recognition;
     recognition.start();
     setState("recording");
-  }, [disabled, onInterim, onStart, onTranscript, finishRecording]);
+  }, [disabled, onInterim, onStart, onTranscript, finishRecording, voiceLanguage]);
 
   const handlePointerDown = useCallback(() => {
     if (disabled) return;
@@ -271,6 +281,26 @@ export const ButlerVoiceButton = forwardRef<ButlerVoiceButtonHandle, ButlerVoice
 
   const isRecording = state === "recording";
   const isProminent = variant === "prominent";
+  const languageSelect = (
+    <select
+      value={voiceLanguage}
+      onChange={(e) => setVoiceLanguage(saveVoiceLanguage(e.target.value))}
+      disabled={disabled || isRecording}
+      aria-label="Voice input language"
+      title="Voice input language"
+      className={[
+        "shrink-0 rounded border px-1.5 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-brand-500",
+        isProminent
+          ? "border-gray-300 dark:border-gray-600 bg-surface-raised dark:bg-surface-raised-dark text-gray-700 dark:text-gray-200"
+          : "border-gray-200 dark:border-gray-700 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300",
+        "disabled:opacity-40 disabled:cursor-not-allowed",
+      ].join(" ")}
+    >
+      {VOICE_LANGUAGE_OPTIONS.map((option) => (
+        <option key={option.label} value={option.value}>{option.label}</option>
+      ))}
+    </select>
+  );
 
   // Icon dimensions scale up in the prominent variant so the button reads as a
   // primary action in the top toolbar.
@@ -314,35 +344,41 @@ export const ButlerVoiceButton = forwardRef<ButlerVoiceButtonHandle, ButlerVoice
 
   if (isProminent) {
     return (
-      <button
-        {...commonButtonProps}
-        className={[
-          "shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium",
-          "transition-colors shadow-sm disabled:opacity-40 disabled:cursor-not-allowed",
-          "focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-offset-transparent",
-          isRecording
-            ? "bg-red-600 hover:bg-red-700 text-white focus:ring-red-500 animate-pulse"
-            : "bg-brand-600 hover:bg-brand-700 text-white focus:ring-brand-500",
-        ].join(" ")}
-      >
-        {icon}
-        <span>{isRecording ? "Listening..." : "Dictate"}</span>
-      </button>
+      <div className="inline-flex items-center gap-1.5 shrink-0">
+        <button
+          {...commonButtonProps}
+          className={[
+            "shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium",
+            "transition-colors shadow-sm disabled:opacity-40 disabled:cursor-not-allowed",
+            "focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-offset-transparent",
+            isRecording
+              ? "bg-red-600 hover:bg-red-700 text-white focus:ring-red-500 animate-pulse"
+              : "bg-brand-600 hover:bg-brand-700 text-white focus:ring-brand-500",
+          ].join(" ")}
+        >
+          {icon}
+          <span>{isRecording ? "Listening..." : "Dictate"}</span>
+        </button>
+        {languageSelect}
+      </div>
     );
   }
 
   return (
-    <button
-      {...commonButtonProps}
-      className={[
-        "shrink-0 p-2.5 rounded-xl transition-colors shadow-sm disabled:opacity-40 disabled:cursor-not-allowed",
-        isRecording
-          ? "bg-red-600 hover:bg-red-700 text-white"
-          : "bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-600 dark:text-gray-300",
-      ].join(" ")}
-    >
-      {icon}
-    </button>
+    <div className="inline-flex items-center gap-1.5 shrink-0">
+      <button
+        {...commonButtonProps}
+        className={[
+          "shrink-0 p-2.5 rounded-xl transition-colors shadow-sm disabled:opacity-40 disabled:cursor-not-allowed",
+          isRecording
+            ? "bg-red-600 hover:bg-red-700 text-white"
+            : "bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-600 dark:text-gray-300",
+        ].join(" ")}
+      >
+        {icon}
+      </button>
+      {languageSelect}
+    </div>
   );
 });
 
