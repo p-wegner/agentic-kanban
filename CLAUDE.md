@@ -58,6 +58,10 @@ All git operations live in `packages/shared/src/lib/git-service.ts`. Both `packa
 - **Migration file number conflicts on rebase**: When rebasing a feature branch that added a migration, check if the target branch independently added a migration with the same sequence number (e.g., both added `0044_*.sql`). If so, rename your migration to the next available number and remove any duplicate SQL from it before pushing.
 - **Direct workspace diff only shows tracked files**: `git diff HEAD` excludes untracked files. `getWorkingTreeDiff()` also runs `git ls-files --others --exclude-standard` for new files.
 
+### In-flight workspace recovery
+- **Old in-flight workspace batches**: Do not resume many stale/idle board workspaces at once. Start one workspace first, then at most two only after the server stays healthy and touched-file overlap is clear.
+- **Zero-output provider sessions**: If a provider transcript shows a 1-second run with zero tokens or no assistant output, treat the board session as launch-failed/stale, stop it, and inspect/rebuild the branch instead of waiting through long polling loops.
+
 ### E2E testing
 - **Always use `127.0.0.1`, never `localhost`** — on Windows, `localhost` resolves to `::1` (IPv6) but Playwright and the server listen on `127.0.0.1`. Using `localhost` causes silent ECONNREFUSED failures that are extremely hard to debug.
 - **Playwright browsers are pre-installed** — do NOT run `playwright install` or `playwright install chromium` in agent sessions. The headless-shell binary is already at `%LOCALAPPDATA%\ms-playwright\chromium_headless_shell-1217\`. Running install again wastes time and may corrupt the lock file. If you see "Executable not found", check `packages/e2e/playwright.config.ts` — it auto-detects the binary path.
