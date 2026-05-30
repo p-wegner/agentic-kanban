@@ -670,7 +670,15 @@ export function validateGraph(nodes: GraphNodeInput[], edges: GraphEdgeInput[]):
   const errors: string[] = [];
   if (nodes.length === 0) return ["A workflow needs at least one node."];
 
-  const ids = new Set(nodes.map((n) => n.id));
+  const ids = new Set<string>();
+  const duplicateIds = new Set<string>();
+  for (const n of nodes) {
+    if (ids.has(n.id)) duplicateIds.add(n.id);
+    ids.add(n.id);
+  }
+  if (duplicateIds.size > 0) {
+    errors.push(`Workflow node ids must be unique (duplicate id(s): ${[...duplicateIds].join(", ")}).`);
+  }
   const nodeById = new Map(nodes.map((n) => [n.id, n]));
   const nodeName = (id: string) => nodeById.get(id)?.name?.trim() || id;
   const starts = nodes.filter((n) => n.nodeType === "start");
