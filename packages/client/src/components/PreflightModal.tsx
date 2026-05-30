@@ -108,9 +108,9 @@ export function PreflightModal({
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white dark:bg-gray-900 rounded-lg shadow-xl w-full max-w-lg border border-gray-200 dark:border-gray-700">
+      <div className="bg-white dark:bg-gray-900 rounded-lg shadow-xl w-full max-w-lg border border-gray-200 dark:border-gray-700 flex flex-col max-h-[90vh]">
         {/* Header */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-gray-700">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
           <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Pre-flight Check</h2>
           <button
             onClick={onCancel}
@@ -120,7 +120,7 @@ export function PreflightModal({
           </button>
         </div>
 
-        <div className="p-4 space-y-4">
+        <div className="p-4 space-y-4 overflow-y-auto flex-1 min-h-0">
           {/* Verdict badge */}
           <div className={`flex items-center gap-2 px-3 py-2 rounded border text-sm font-medium ${badge.color}`}>
             <span>{badge.icon}</span>
@@ -198,7 +198,7 @@ export function PreflightModal({
         </div>
 
         {/* Actions */}
-        <div className="flex items-center justify-between gap-2 px-4 py-3 border-t border-gray-200 dark:border-gray-700">
+        <div className="flex items-center justify-between gap-2 px-4 py-3 border-t border-gray-200 dark:border-gray-700 flex-shrink-0">
           <div className="flex gap-2">
             {isBlocking && !isEditing && (
               <button
