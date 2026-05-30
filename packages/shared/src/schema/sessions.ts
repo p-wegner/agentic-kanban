@@ -16,6 +16,11 @@ export const sessions = sqliteTable("sessions", {
   stats: text("stats"),
   pid: integer("pid"),
   triggerType: text("trigger_type"),
+  // The skill this session launched under, captured at launch time so attribution
+  // survives later changes to the workspace's skill. skillName is the resolved
+  // name snapshotted at launch (the skill row may be renamed/deleted later).
+  skillId: text("skill_id"),
+  skillName: text("skill_name"),
 }, (table) => ({
   workspaceIdIdx: index("idx_sessions_workspace_id").on(table.workspaceId),
   statusIdx: index("idx_sessions_status").on(table.status),

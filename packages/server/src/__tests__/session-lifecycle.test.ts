@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
-import { projects, projectStatuses, issues, workspaces, sessions } from "@agentic-kanban/shared/schema";
+import { projects, projectStatuses, issues, workspaces, sessions, agentSkills } from "@agentic-kanban/shared/schema";
 import { createTestDb, type TestDb } from "./helpers/test-db.js";
 import { createMockProc } from "./helpers/mocks.js";
 import { createSessionState } from "../services/session-manager/types.js";
@@ -14,8 +14,14 @@ import type { AgentOutputCallback } from "../services/agent.service.js";
  * node:child_process) — the process factory is injected.
  */
 
-/** Seed a project + issue + an active worktree workspace; returns the workspace id. */
-async function seedWorkspace(db: TestDb): Promise<string> {
+/**
+ * Seed a project + issue + an active worktree workspace; returns the workspace id.
+ * Pass `skill` to attach an agent skill to the workspace.
+ */
+async function seedWorkspace(
+  db: TestDb,
+  skill?: { id: string; name: string },
+): Promise<string> {
   const now = new Date().toISOString();
   const projectId = randomUUID();
   const issueId = randomUUID();
@@ -33,9 +39,16 @@ async function seedWorkspace(db: TestDb): Promise<string> {
     id: issueId, issueNumber: 1, title: "T", priority: "medium", sortOrder: 0,
     statusId, projectId, createdAt: now, updatedAt: now,
   });
+  if (skill) {
+    await db.insert(agentSkills).values({
+      id: skill.id, name: skill.name, description: "d", prompt: "p",
+      createdAt: now, updatedAt: now,
+    });
+  }
   await db.insert(workspaces).values({
     id: workspaceId, issueId, branch: "feature/ak-1", workingDir: "/tmp/repo/.worktrees/ak-1",
     baseBranch: "main", isDirect: false, status: "active", provider: "claude",
+    skillId: skill?.id ?? null,
     createdAt: now, updatedAt: now,
   });
   return workspaceId;
@@ -92,6 +105,31 @@ describe("session-lifecycle", () => {
     expect(rows).toHaveLength(1);
     expect(rows[0].status).toBe("running");
     expect(rows[0].workspaceId).toBe(workspaceId);
+  });
+
+  it("records the workspace's skill (id + snapshotted name) on the session row", async () => {
+    const skill = { id: randomUUID(), name: "code-review" };
+    const workspaceId = await seedWorkspace(db, skill);
+    const { service: agentService } = createFakeAgentService();
+
+    const lifecycle = createSessionLifecycle(createSessionState(), undefined, vi.fn(), { db, agentService });
+    const sessionId = await lifecycle.startSession({ workspaceId, prompt: "do it" });
+
+    const rows = await db.select().from(sessions).where(eq(sessions.id, sessionId));
+    expect(rows[0].skillId).toBe(skill.id);
+    expect(rows[0].skillName).toBe("code-review");
+  });
+
+  it("leaves skill fields null when the workspace has no skill", async () => {
+    const workspaceId = await seedWorkspace(db);
+    const { service: agentService } = createFakeAgentService();
+
+    const lifecycle = createSessionLifecycle(createSessionState(), undefined, vi.fn(), { db, agentService });
+    const sessionId = await lifecycle.startSession({ workspaceId, prompt: "do it" });
+
+    const rows = await db.select().from(sessions).where(eq(sessions.id, sessionId));
+    expect(rows[0].skillId).toBeNull();
+    expect(rows[0].skillName).toBeNull();
   });
 
   it("marks the session completed and fires onSessionExit when the process exits cleanly", async () => {
