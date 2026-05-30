@@ -749,13 +749,18 @@ export async function prepareForReview(
     // No remote configured — use local branches only
   }
 
-  // Determine rebase source: prefer remote ref, fall back to local
+  // Rebase onto the LOCAL base branch — that's where the board merges into
+  // (mergeBranch targets the local default branch, never origin). In this
+  // local-first app (manual merge only, no push), local master can be many
+  // commits ahead of a stale origin/master; rebasing onto origin would replay
+  // all local-only history and conflict spuriously. Fall back to the remote ref
+  // only if the local base branch doesn't exist.
   let rebaseSource: string;
   try {
-    await execGit(["rev-parse", "--verify", `remotes/origin/${baseBranch}`], worktreePath);
-    rebaseSource = `origin/${baseBranch}`;
-  } catch {
+    await execGit(["rev-parse", "--verify", baseBranch], worktreePath);
     rebaseSource = baseBranch;
+  } catch {
+    rebaseSource = `origin/${baseBranch}`;
   }
 
   // Rebase the workspace branch onto the base branch
