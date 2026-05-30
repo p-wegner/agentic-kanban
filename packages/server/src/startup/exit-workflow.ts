@@ -79,6 +79,20 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge }:
       if (issueRows.length === 0) return;
       const { projectId, id: issueId, skipAutoReview } = issueRows[0];
       const now = new Date().toISOString();
+
+      // Auto-ingest any test results from this session's output into the flaky-test
+      // radar (non-fatal, fire-and-forget). Robust to non-test sessions — they yield
+      // nothing. Idempotent per session, so a re-exit won't double-count.
+      void (async () => {
+        try {
+          const { createTestRunService } = await import("../services/test-run.service.js");
+          const inserted = await createTestRunService(db).ingestSession(sessionId);
+          if (inserted > 0) console.log(`[flaky-radar] auto-ingested ${inserted} test result(s) from session ${sessionId}`);
+        } catch (err) {
+          console.warn("[flaky-radar] auto-ingest failed (non-fatal):", err instanceof Error ? err.message : String(err));
+        }
+      })();
+
       await db.update(workspaces).set({ status: "idle", updatedAt: now }).where(eq(workspaces.id, workspaceId));
       boardEvents.broadcastActivity(projectId, { issueId, sessionId, activity: "" });
       boardEvents.broadcast(projectId, "session_completed");
