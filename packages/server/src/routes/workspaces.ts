@@ -75,6 +75,13 @@ export function createWorkspacesRoute(
     return c.json(result);
   });
 
+  // POST /api/workspaces/:id/close — close without merging (abandoned or already-merged work)
+  router.post("/:id/close", async (c) => {
+    const id = c.req.param("id");
+    const result = await workspaceService.closeWorkspace(id);
+    return c.json(result);
+  });
+
   // DELETE /api/workspaces/:id — cascade delete sessions and their messages
   router.delete("/:id", async (c) => {
     const id = c.req.param("id");

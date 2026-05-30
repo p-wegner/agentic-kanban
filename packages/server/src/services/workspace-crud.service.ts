@@ -743,6 +743,53 @@ exit 1
     return !existsSync(dir);
   }
 
+  /**
+   * Close a workspace WITHOUT merging — for work that was abandoned or already
+   * merged out-of-band. Stops any running agent, removes the worktree (non-direct),
+   * and sets status to "closed" with a closedAt timestamp. Leaves mergedAt null so
+   * the UI distinguishes a manual close from a real merge. Preserves session history
+   * (unlike deleteWorkspace, which destroys the record).
+   */
+  async function closeWorkspace(workspaceId: string): Promise<{ id: string; status: "closed" }> {
+    const workspace = await getWorkspaceById(workspaceId, database);
+    if (!workspace) throw new WorkspaceError("Workspace not found", "NOT_FOUND");
+    if (workspace.status === "closed") return { id: workspaceId, status: "closed" };
+
+    // Stop any RUNNING agent so it doesn't keep working against a closed workspace.
+    // Only target running sessions — stopSession unconditionally rewrites status to
+    // "stopped"/endedAt, so calling it on already-completed sessions would corrupt the
+    // very history this close path promises to preserve (see deleteWorkspace).
+    const wsSessions = await database
+      .select({ id: sessions.id, status: sessions.status })
+      .from(sessions)
+      .where(eq(sessions.workspaceId, workspaceId));
+    const runningSessions = wsSessions.filter((s) => s.status === "running");
+    if (getSessionManager) {
+      for (const s of runningSessions) {
+        await getSessionManager().stopSession(s.id).catch(() => {});
+      }
+    }
+
+    // Clean up the worktree for non-direct workspaces (mirrors merge/close behaviour).
+    if (!workspace.isDirect && workspace.workingDir) {
+      const { repoPath } = await resolveProjectRepo(workspaceId, database).catch(() => ({ repoPath: null as string | null }));
+      if (repoPath) {
+        try { await gitService.removeWorktree(repoPath, workspace.workingDir); } catch { /* best effort */ }
+      }
+    }
+
+    const now = new Date().toISOString();
+    await database
+      .update(workspaces)
+      .set({ status: "closed", workingDir: workspace.isDirect ? workspace.workingDir : null, closedAt: now, updatedAt: now })
+      .where(eq(workspaces.id, workspaceId));
+
+    const projectId = await resolveProjectId(workspaceId, database);
+    if (projectId) boardEvents?.broadcast(projectId, "workspace_closed");
+
+    return { id: workspaceId, status: "closed" };
+  }
+
   async function markReadyForMerge(workspaceId: string): Promise<{ id: string; readyForMerge: boolean }> {
     const wsRows = await database
       .select({ issueId: workspaces.issueId })
@@ -821,6 +868,7 @@ exit 1
   return {
     createWorkspace,
     deleteWorkspace,
+    closeWorkspace,
     markReadyForMerge,
     setupWorkspace,
     updateWorkspace,

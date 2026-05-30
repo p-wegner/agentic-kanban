@@ -40,6 +40,8 @@ export const workspaces = sqliteTable("workspaces", {
   createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
   updatedAt: text("updated_at").notNull().$defaultFn(() => new Date().toISOString()),
   closedAt: text("closed_at"),
+  /** Set when the workspace's branch was actually merged into its base (not on abandoned/direct close). */
+  mergedAt: text("merged_at"),
   conflictCacheCheckedAt: text("conflict_cache_checked_at"),
   conflictCacheHasConflicts: integer("conflict_cache_has_conflicts", { mode: "boolean" }),
   conflictCacheFiles: text("conflict_cache_files"),

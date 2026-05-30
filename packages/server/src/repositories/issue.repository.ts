@@ -304,6 +304,7 @@ export async function getIssueWorkspaces(
       createdAt: workspaces.createdAt,
       updatedAt: workspaces.updatedAt,
       closedAt: workspaces.closedAt,
+      mergedAt: workspaces.mergedAt,
     })
     .from(workspaces)
     .leftJoin(agentSkills, eq(workspaces.skillId, agentSkills.id))

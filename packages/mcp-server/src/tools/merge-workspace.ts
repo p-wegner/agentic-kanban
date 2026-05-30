@@ -74,7 +74,7 @@ export function registerMergeWorkspace(server: McpServer) {
 
         const now = new Date().toISOString();
         await db.update(schema.workspaces)
-          .set({ status: "closed", workingDir: null, updatedAt: now })
+          .set({ status: "closed", workingDir: null, updatedAt: now, closedAt: now, mergedAt: now })
           .where(eq(schema.workspaces.id, workspaceId));
 
         await autoTransitionDone(projectId, workspace.issueId, now);
