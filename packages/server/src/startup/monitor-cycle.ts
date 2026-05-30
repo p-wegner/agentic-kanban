@@ -36,6 +36,16 @@ export interface ProcessWorkspaceDeps {
    * `POST /api/workspaces/:id/merge` route, relaunch, auto-start, or nudge behavior.
    */
   autoMergeEnabled: boolean;
+  /**
+   * Whether the monitor may auto-merge In Review workspaces that are NOT marked
+   * `readyForMerge`. Gated on the `auto_merge_in_review` preference being exactly
+   * "true" (default off). When off, an idle In-Review workspace whose work is
+   * committed but not explicitly marked ready is left untouched (the agent/human
+   * `readyForMerge` handshake is respected). When on, the monitor merges it anyway
+   * — "land In Review work without the readyForMerge gate". Still also requires
+   * `autoMergeEnabled` (the operator kill-switch).
+   */
+  autoMergeInReview: boolean;
   monitorRecentActions: MonitorAction[];
   logMonitorAction: (recentActions: MonitorAction[], action: MonitorActionName, workspaceId: string, issueId: string) => void;
   buildMonitorNudgePrompt: (projectId: string) => Promise<string>;
@@ -100,7 +110,24 @@ export async function processWorkspaceCandidates(candidates: WorkspaceCandidate[
           console.log(`[monitor] Workspace ${ws.wsId} has ${sessionCount} sessions with issue in review  closing to break review loop (merge or create new workspace)`);
           deps.boardEvents.broadcast(ws.projectId, "board_changed");
         } else if (ws.issueStatusName === "In Review") {
-          console.log(`[monitor] Skipping relaunch for idle workspace ${ws.wsId}  issue #${ws.issueNumber} is in review (committed work awaiting merge)`);
+          if (deps.autoMergeEnabled && deps.autoMergeInReview) {
+            const mergeRes = await fetch(`http://localhost:${deps.serverPort}/api/workspaces/${ws.wsId}/merge`, { method: "POST" }).catch(() => null);
+            if (!mergeRes || !mergeRes.ok) {
+              const body = mergeRes ? await mergeRes.json().catch(() => ({})) : {};
+              const mergeError = (body as Record<string, string>)?.message || "merge failed";
+              await fetch(`http://localhost:${deps.serverPort}/api/workspaces/${ws.wsId}/fix-and-merge`, {
+                method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mergeError }),
+              }).catch(() => {});
+              console.log(`[monitor] Merge conflict for idle In-Review workspace ${ws.wsId} (auto_merge_in_review)  triggered fix-and-merge`);
+            } else {
+              console.log(`[monitor] Auto-merged idle In-Review workspace ${ws.wsId} (auto_merge_in_review, not marked ready)`);
+            }
+            stats.merged++;
+            logAction("merge", ws.wsId, ws.issueId);
+            deps.boardEvents.broadcast(ws.projectId, "board_changed");
+          } else {
+            console.log(`[monitor] Skipping relaunch for idle workspace ${ws.wsId}  issue #${ws.issueNumber} is in review (committed work awaiting merge; enable auto_merge_in_review to land it)`);
+          }
         } else {
           await fetch(`http://localhost:${deps.serverPort}/api/workspaces/${ws.wsId}/launch`, { method: "POST" }).catch(() => {});
           stats.relaunched++;

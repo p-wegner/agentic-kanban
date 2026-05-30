@@ -38,6 +38,7 @@ function makeDeps(): ProcessWorkspaceDeps {
     boardEvents: { broadcast: vi.fn() } as unknown as ProcessWorkspaceDeps["boardEvents"],
     serverPort: 3001,
     autoMergeEnabled: true,
+    autoMergeInReview: false,
     monitorRecentActions: [],
     logMonitorAction: vi.fn(),
     buildMonitorNudgePrompt: vi.fn().mockResolvedValue("nudge"),
@@ -148,6 +149,60 @@ describe("processWorkspaceCandidates — idle + readyForMerge=false", () => {
     expect(stats.merged).toBe(0);
     const calls = vi.mocked(fetch).mock.calls;
     expect(calls.some(([url]) => String(url).includes("/launch"))).toBe(true);
+  });
+});
+
+describe("processWorkspaceCandidates — auto_merge_in_review (not-ready In Review)", () => {
+  it("merges an idle In-Review workspace with readyForMerge=false when auto_merge_in_review is on", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({ ok: true } as Response);
+
+    const deps = { ...makeDeps(), autoMergeEnabled: true, autoMergeInReview: true };
+    const candidate: WorkspaceCandidate = { ...baseCandidate, readyForMerge: false };
+    const stats = await processWorkspaceCandidates([candidate], deps);
+
+    expect(stats.merged).toBe(1);
+    expect(stats.relaunched).toBe(0);
+    const calls = vi.mocked(fetch).mock.calls;
+    expect(calls.some(([url]) => String(url).includes("/merge"))).toBe(true);
+    expect(calls.every(([url]) => !String(url).includes("/launch"))).toBe(true);
+    expect(vi.mocked(deps.logMonitorAction)).toHaveBeenCalledWith(expect.anything(), "merge", "ws-1", "issue-1");
+  });
+
+  it("falls back to fix-and-merge on conflict when auto_merge_in_review is on", async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce({ ok: false, json: () => Promise.resolve({ message: "Merge conflicts detected" }) } as unknown as Response)
+      .mockResolvedValueOnce({ ok: true } as Response);
+
+    const deps = { ...makeDeps(), autoMergeEnabled: true, autoMergeInReview: true };
+    const candidate: WorkspaceCandidate = { ...baseCandidate, readyForMerge: false };
+    const stats = await processWorkspaceCandidates([candidate], deps);
+
+    expect(stats.merged).toBe(1);
+    const calls = vi.mocked(fetch).mock.calls;
+    expect(calls.some(([url]) => String(url).includes("/fix-and-merge"))).toBe(true);
+  });
+
+  it("does NOT merge a not-ready In-Review workspace when auto_merge_in_review is off", async () => {
+    vi.mocked(fetch).mockResolvedValue({ ok: true } as Response);
+
+    const deps = { ...makeDeps(), autoMergeEnabled: true, autoMergeInReview: false };
+    const candidate: WorkspaceCandidate = { ...baseCandidate, readyForMerge: false };
+    const stats = await processWorkspaceCandidates([candidate], deps);
+
+    expect(stats.merged).toBe(0);
+    expect(stats.relaunched).toBe(0);
+    expect(vi.mocked(fetch)).not.toHaveBeenCalled();
+  });
+
+  it("does NOT merge a not-ready In-Review workspace when the auto_merge kill-switch is off, even if auto_merge_in_review is on", async () => {
+    vi.mocked(fetch).mockResolvedValue({ ok: true } as Response);
+
+    const deps = { ...makeDeps(), autoMergeEnabled: false, autoMergeInReview: true };
+    const candidate: WorkspaceCandidate = { ...baseCandidate, readyForMerge: false };
+    const stats = await processWorkspaceCandidates([candidate], deps);
+
+    expect(stats.merged).toBe(0);
+    expect(vi.mocked(fetch)).not.toHaveBeenCalled();
   });
 });
 

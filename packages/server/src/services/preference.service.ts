@@ -9,7 +9,7 @@ import { allHarnessSettingKeys } from "./harness-settings.js";
 export const SETTINGS_KEYS = [
   "agent_command", "agent_args", "output_parser", "skip_permissions", "claude_profile",
   "codex_profile", "copilot_profile", "provider", "default_model", "mock_agent_profile", "mock_agent_delay_ms",
-  "permission_prompt_tool", "auto_review", "auto_merge", "resume_with_new_model",
+  "permission_prompt_tool", "auto_review", "auto_merge", "auto_merge_in_review", "resume_with_new_model",
   "review_auto_fix", "disabled_mcp_tools", "auto_start_followup", "require_manual_approval",
   "dynamic_column_scaling", "persistent_agent", "learning_step_after_agent",
   "learning_step_after_review", "learning_step_before_merge", "auto_monitor",

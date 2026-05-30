@@ -22,6 +22,7 @@ interface Settings {
   permission_prompt_tool?: string;
   auto_review?: string;
   auto_merge?: string;
+  auto_merge_in_review?: string;
   review_auto_fix?: string;
   resume_with_new_model?: string;
   disabled_mcp_tools?: string;
@@ -67,6 +68,7 @@ const DEFAULT_SETTINGS: Settings = {
   permission_prompt_tool: "false",
   auto_review: "true",
   auto_merge: "true",
+  auto_merge_in_review: "false",
   review_auto_fix: "true",
   resume_with_new_model: "false",
   disabled_mcp_tools: "",
@@ -814,6 +816,13 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                           label="Auto-merge after review"
                           hint="Merge the branch and close the workspace automatically once the review agent passes. When disabled, the issue moves to AI Reviewed and waits for manual merge."
                           disabled={!autoReviewOn}
+                        />
+                        <Toggle
+                          checked={settings.auto_merge_in_review === "true"}
+                          onChange={setBool("auto_merge_in_review")}
+                          label="Auto-merge In Review without 'ready' gate"
+                          hint="When on, the board monitor merges any idle In-Review workspace whose work is committed — even if the agent never marked it 'ready for merge'. This lands In-Review work to master with no human gating. When off (default), not-yet-ready In-Review work is left waiting. Still respects the Auto-merge kill-switch above."
+                          disabled={!autoReviewOn || settings.auto_merge === "false"}
                         />
                       </div>
                       <Toggle
