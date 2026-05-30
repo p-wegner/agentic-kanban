@@ -112,8 +112,8 @@ export function createWorkspaceCrudService(deps: {
         );
       }
       branch = input.branch ?? "";
+      baseCommitSha = await gitService.revParse(repoPath, baseBranch);
       worktreePath = await gitService.createWorktree(repoPath, branch, baseBranch);
-      baseCommitSha = null;
     }
 
     const { setupScript, setupBlocking, setupEnabled } = setupConfig;

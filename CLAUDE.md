@@ -120,6 +120,7 @@ When a test in the table below fails and you haven't touched the relevant code, 
   pnpm test:mine -- --changed HEAD
   ```
 - **⚠️ `pnpm test -- --related` is broken in vitest v4** — `--related` is no longer a flag of `vitest run`; it's a standalone subcommand. Use `exec vitest related` instead.
+- The command-safety hook blocks `--related` flag usage; rerun with `pnpm exec vitest related <file>` or `pnpm test:mine -- --changed HEAD`.
 - **Full suite** (`pnpm --filter agentic-kanban test`) should only be used before committing or when cross-cutting changes may affect unrelated tests.
 - **`nowOverride` pattern for time-dependent services**: inject an optional `now?: string` parameter into any service function that calls `new Date()` for staleness/expiry logic. Tests pass `new Date().toISOString()` or a relative offset — never a hardcoded ISO string that ages out.
 
@@ -227,6 +228,7 @@ When the user references `#N` (e.g., "review #70", "merge #65", "what's the stat
 **Note:** `--json` flag doesn't work through `pnpm cli --` due to argument forwarding. Use REST API for JSON output.
 
 **Note:** `pnpm cli -- <any command>` fails in git worktrees with `ERR_MODULE_NOT_FOUND` because `packages/shared/dist` is not built in the worktree. Use the main checkout CLI (`cd C:\andrena\agentic-kanban && pnpm cli -- ...`) or MCP tools / REST API instead.
+The command-safety hook blocks direct `pnpm cli --` from worktrees; switch to the main checkout, MCP, or REST instead of retrying.
 
 **Only fall back to REST API** when no MCP tool or CLI equivalent exists.
 

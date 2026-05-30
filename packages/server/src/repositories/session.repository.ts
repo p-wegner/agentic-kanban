@@ -156,7 +156,7 @@ export async function getSessionOutput(
     .orderBy(sessionMessages.id);
 
   const messages: AgentOutputMessage[] = rows.map((row) => ({
-    type: row.type as "stdout" | "stderr" | "exit",
+    type: row.type as AgentOutputMessage["type"],
     sessionId: row.sessionId,
     data: row.data ?? undefined,
     exitCode: row.exitCode != null ? Number(row.exitCode) : undefined,

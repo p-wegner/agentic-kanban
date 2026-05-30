@@ -2,6 +2,7 @@ import type { SessionManager } from "../services/session.manager.js";
 import type { BoardEvents } from "../services/board-events.js";
 import type { Database } from "../db/index.js";
 import { createWorkspaceService } from "../services/workspace.service.js";
+import { createBisectService, type BisectScope } from "../services/bisect.service.js";
 import { createRouter } from "../middleware/create-router.js";
 import { parseJsonBody, parseOptionalJsonBody } from "../middleware/parse-body.js";
 
@@ -13,6 +14,11 @@ export function createWorkspaceActionsRoute(
   const router = createRouter();
 
   const workspaceService = createWorkspaceService({
+    database,
+    getSessionManager,
+    boardEvents: options?.boardEvents,
+  });
+  const bisectService = createBisectService({
     database,
     getSessionManager,
     boardEvents: options?.boardEvents,
@@ -74,6 +80,14 @@ export function createWorkspaceActionsRoute(
     const body = await parseJsonBody(c);
     if (!body.feedback) return c.json({ error: "feedback is required" }, 400);
     return c.json(await workspaceService.rejectPlan(id, body.feedback as string), 201);
+  });
+
+  // POST /api/workspaces/:id/bisect
+  router.post("/:id/bisect", async (c) => {
+    const id = c.req.param("id");
+    const body = await parseOptionalJsonBody<{ scope?: BisectScope }>(c);
+    const scope = body.scope === "full" ? "full" : "related";
+    return c.json(await bisectService.startBisect(id, scope), 201);
   });
 
   // GET /api/workspaces/:id/latest-commit

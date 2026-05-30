@@ -28,6 +28,7 @@ import {
   type TurnResult,
   type GitService,
 } from "./workspace-internals.js";
+import { stopBisectSession } from "./bisect.service.js";
 import * as realGitService from "./git.service.js";
 
 export function createWorkspaceSessionService(deps: {
@@ -190,6 +191,10 @@ export function createWorkspaceSessionService(deps: {
     if (getSessionManager) {
       for (const session of runningSessions) {
         if (session.status === "running") {
+          if (session.executor === "auto-bisect" && stopBisectSession(session.id)) {
+            stopped = true;
+            continue;
+          }
           await getSessionManager().stopSession(session.id);
           stopped = true;
         }
