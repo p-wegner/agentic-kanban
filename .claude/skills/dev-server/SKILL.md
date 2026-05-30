@@ -63,20 +63,33 @@ Why **not** `Start-Job`: when PowerShell exits, the job and all its children die
 
 If the server isn't up after the single check, report it and let the user retry. Do **not** add a retry loop.
 
-## Step 4 — Stop (kill by process signature)
+## Step 4 — Stop (kill only this checkout's ports)
 
-Kills the main dev launcher, both vite clients, and any dangling worktree servers — without touching unrelated node processes. Also kills orphaned tsx server processes that hold the SQLite DB open (these cause `/api/projects` to hang even when `/health` responds).
+Kill only the processes bound to this checkout's `$serverPort` and `$clientPort`. Do **not** kill every `dev.mjs`, every Vite process, or every `agentic-kanban ... src/index.ts` process by command line alone: worktree agents doing visual checks run their own dev servers, and a broad command-line kill can take down the main board server while other agents are still working.
+
+This uses one `netstat` snapshot per port, not a polling loop. When the port owner is a child of `scripts/dev.mjs`, kill the parent with `/T` so its supervised child exits too. Otherwise kill just the port owner tree.
 
 ```powershell
-Get-CimInstance Win32_Process |
-    Where-Object { $_.Name -eq "node.exe" -and $_.CommandLine -like "*dev.mjs*" } |
-    ForEach-Object { taskkill /F /T /PID $_.ProcessId 2>$null }
-Get-CimInstance Win32_Process |
-    Where-Object { $_.CommandLine -like "*vite/bin/vite.js*" } |
-    ForEach-Object { taskkill /F /T /PID $_.ProcessId 2>$null }
-Get-CimInstance Win32_Process |
-    Where-Object { $_.Name -eq "node.exe" -and $_.CommandLine -like "*agentic-kanban*tsx*src/index*" } |
-    ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+$serverPort = if ($env:KANBAN_SERVER_PORT) { [int]$env:KANBAN_SERVER_PORT } else { 3001 }
+$clientPort = if ($env:KANBAN_CLIENT_PORT) { [int]$env:KANBAN_CLIENT_PORT } else { 5173 }
+
+function Stop-PortOwner([int]$port) {
+    $lines = netstat -ano | Select-String "[:.]$port\s"
+    $pids = $lines |
+        ForEach-Object { ($_ -split '\s+')[-1] } |
+        Where-Object { $_ -match '^\d+$' -and $_ -ne '0' } |
+        Sort-Object -Unique
+
+    foreach ($pid in $pids) {
+        $proc = Get-CimInstance Win32_Process -Filter "ProcessId = $pid" -ErrorAction SilentlyContinue
+        $parent = if ($proc) { Get-CimInstance Win32_Process -Filter "ProcessId = $($proc.ParentProcessId)" -ErrorAction SilentlyContinue } else { $null }
+        $targetPid = if ($parent -and $parent.CommandLine -like "*dev.mjs*") { $parent.ProcessId } else { [int]$pid }
+        taskkill /F /T /PID $targetPid 2>$null
+    }
+}
+
+Stop-PortOwner $serverPort
+Stop-PortOwner $clientPort
 ```
 
 ## Step 5 — Health check
