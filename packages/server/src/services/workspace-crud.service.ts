@@ -233,9 +233,12 @@ export function createWorkspaceCrudService(deps: {
     const { agentCommand, agentArgs, claudeProfile: resolvedProfile, profile: resolvedProfileSelection, provider, permissionPromptTool } = resolveAgentSettings(prefMap);
     const claudeProfile = resolvedProfileSelection?.name || legacyProfileOverride || prefMap.get("claude_profile") || undefined;
 
+    const requestedModel = typeof input.model === "string" ? input.model.trim() : "";
     const model = provider === "claude"
-      ? ((input.model ?? prefMap.get("default_model")) || undefined)
-      : undefined;
+      ? ((requestedModel || prefMap.get("default_model")) || undefined)
+      : provider === "codex"
+        ? (requestedModel || undefined)
+        : undefined;
 
     return { agentCommand, agentArgs, claudeProfile, resolvedProfile, resolvedProvider: provider, resolvedProfileSelection, permissionPromptTool, model };
   }

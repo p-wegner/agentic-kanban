@@ -11,7 +11,7 @@ export class CodexProvider implements AgentProvider {
   }
 
   buildLaunchConfig(options: ProviderLaunchOptions): AgentLaunchConfig {
-    const { agentArgs, providerSessionId, agentCommand, keepAlive, profile, planMode } = options;
+    const { agentArgs, providerSessionId, agentCommand, keepAlive, profile, model, planMode } = options;
     const isWindows = process.platform === "win32";
 
     const isMockAgent = !!process.env.AGENT_COMMAND || (agentCommand?.includes("mock-agent") ?? false);
@@ -40,13 +40,19 @@ export class CodexProvider implements AgentProvider {
         ? ["--sandbox", "read-only"]
         : ["--dangerously-bypass-approvals-and-sandbox"];
       if (providerSessionId) {
-        args.push("exec", "resume", "--json", ...sandboxFlags, providerSessionId);
+        args.push("exec", "resume", "--json", ...sandboxFlags);
       } else {
         args.push("exec", "--json", ...sandboxFlags);
       }
       const profileName = profile?.provider === "codex" ? profile.name : undefined;
       if (profileName && profileName !== "default") {
         args.push("--profile-v2", profileName);
+      }
+      if (model) {
+        args.push("--model", model);
+      }
+      if (providerSessionId) {
+        args.push(providerSessionId);
       }
       if (agentArgs) {
         args.push(...splitArgs(agentArgs));
