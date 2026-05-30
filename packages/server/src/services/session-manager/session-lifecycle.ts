@@ -1,6 +1,6 @@
 import { db as realDb } from "../../db/index.js";
 import type { Database } from "../../db/index.js";
-import { sessions, workspaces, issues, preferences, agentSkills } from "@agentic-kanban/shared/schema";
+import { sessions, sessionMessages, workspaces, issues, preferences, agentSkills } from "@agentic-kanban/shared/schema";
 import { eq } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import * as realAgentService from "../agent.service.js";
@@ -18,6 +18,27 @@ export type AgentService = typeof realAgentService;
 export interface SessionLifecycleDeps {
   db?: Database;
   agentService?: AgentService;
+}
+
+export const ZERO_OUTPUT_LAUNCH_FAILURE_WINDOW_MS = 10_000;
+
+function buildZeroOutputLaunchFailureStats(executor: string, durationMs: number, exitCode: number | null) {
+  const reason =
+    `Agent launch failed: provider process exited within ${Math.round(ZERO_OUTPUT_LAUNCH_FAILURE_WINDOW_MS / 1000)}s ` +
+    "without assistant output, tool activity, or usage stats.";
+  return {
+    durationMs,
+    totalCostUsd: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+    numTurns: 0,
+    model: executor,
+    success: false,
+    launchFailure: true,
+    failureReason: reason,
+    providerExitCode: exitCode,
+    agentSummary: reason,
+  };
 }
 
 export function createSessionLifecycle(
@@ -192,15 +213,42 @@ export function createSessionLifecycle(
           if (state.stoppedByUser.has(sessionId)) {
             state.stoppedByUser.delete(sessionId);
             state.sessionFinalText.delete(sessionId);
+            state.sessionSubstantiveOutput.delete(sessionId);
             options?.onSessionExit?.(workspaceId, sessionId, event.exitCode ?? null, planMode);
             return;
           }
 
           const planText = state.sessionFinalText.get(sessionId);
+          const hadSubstantiveOutput =
+            state.sessionSubstantiveOutput.has(sessionId) || Boolean(planText && planText.trim().length > 0);
+          state.sessionSubstantiveOutput.delete(sessionId);
           state.sessionFinalText.delete(sessionId);
 
           const endNow = new Date().toISOString();
           const exitCode = event.exitCode ?? null;
+          const durationMs = Math.max(0, new Date(endNow).getTime() - new Date(now).getTime());
+          if (!hadSubstantiveOutput && durationMs <= ZERO_OUTPUT_LAUNCH_FAILURE_WINDOW_MS) {
+            const stats = buildZeroOutputLaunchFailureStats(executor, durationMs, exitCode);
+            const effectiveExitCode = 1;
+            void (async () => {
+              await db.update(sessions)
+                .set({ status: "stopped", endedAt: endNow, exitCode: String(effectiveExitCode), stats: JSON.stringify(stats) })
+                .where(eq(sessions.id, sessionId));
+              await db.insert(sessionMessages).values({
+                sessionId,
+                type: "stderr",
+                data: stats.failureReason,
+                exitCode: null,
+              });
+              await db.update(workspaces)
+                .set({ status: "idle", updatedAt: endNow })
+                .where(eq(workspaces.id, workspaceId));
+            })()
+              .catch((err) => console.error("Failed to record zero-output launch failure:", err))
+              .finally(() => options?.onSessionExit?.(workspaceId, sessionId, effectiveExitCode, planMode));
+            return;
+          }
+
           db.update(sessions)
             .set({ status: "completed", endedAt: endNow, exitCode: String(exitCode ?? 0) })
             .where(eq(sessions.id, sessionId))
@@ -308,6 +356,7 @@ export function createSessionLifecycle(
       state.sessionContexts.delete(sessionId);
       state.turnStates.delete(sessionId);
       state.sessionProviders.delete(sessionId);
+      state.sessionSubstantiveOutput.delete(sessionId);
       await db.update(sessions)
         .set({ status: "stopped", endedAt: new Date().toISOString() })
         .where(eq(sessions.id, sessionId))
@@ -325,6 +374,7 @@ export function createSessionLifecycle(
     state.stoppedByUser.add(sessionId);
     // Clean up in-memory state immediately
     state.turnStates.delete(sessionId);
+    state.sessionSubstantiveOutput.delete(sessionId);
     // Try graceful shutdown first (close stdin so agent finishes)
     const closed = agentService.closeStdin(sessionId);
     if (closed) {
@@ -400,6 +450,7 @@ export function createSessionLifecycle(
     state.sessionLastTool.delete(sessionId);
     state.sessionAgentToolUseIds.delete(sessionId);
     state.sessionProviders.delete(sessionId);
+    state.sessionSubstantiveOutput.delete(sessionId);
     const now = new Date().toISOString();
     await db.update(sessions)
       .set({ status: "stopped", endedAt: now })
@@ -453,6 +504,7 @@ export function createSessionLifecycle(
     state.sessionAgentToolUseIds.delete(sessionId);
     state.sessionTextParts.delete(sessionId);
     state.sessionFinalText.delete(sessionId);
+    state.sessionSubstantiveOutput.delete(sessionId);
     state.sessionExitPlanModeDenied.delete(sessionId);
 
     // Clear activity and todos for this session
