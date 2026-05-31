@@ -4,6 +4,7 @@ import { AppError, AiOperationError } from "../errors/index.js";
 import { WorkspaceError } from "../services/workspace.service.js";
 import { IssueError } from "../services/issue.service.js";
 import { ProjectError } from "../services/project.service.js";
+import { ProjectScriptsError } from "../services/project-scripts.service.js";
 import { SessionReadError } from "../services/session-read.service.js";
 import { AgentSkillError } from "../services/agent-skill.service.js";
 import { TagError } from "../services/tag.service.js";
@@ -25,6 +26,7 @@ type DomainError =
   | WorkspaceError
   | IssueError
   | ProjectError
+  | ProjectScriptsError
   | SessionReadError
   | AgentSkillError
   | TagError
@@ -35,6 +37,7 @@ function toDomainError(err: Error): DomainError | null {
     err instanceof WorkspaceError ||
     err instanceof IssueError ||
     err instanceof ProjectError ||
+    err instanceof ProjectScriptsError ||
     err instanceof SessionReadError ||
     err instanceof AgentSkillError ||
     err instanceof TagError ||

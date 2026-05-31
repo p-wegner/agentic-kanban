@@ -1,4 +1,5 @@
 export { projects } from "./projects.js";
+export { projectScriptShortcuts, projectScriptShortcutsRelations } from "./project-script-shortcuts.js";
 export { projectStatuses, projectStatusesRelations } from "./project-statuses.js";
 export { issues, issuesRelations } from "./issues.js";
 export { tags, issueTags, tagsRelations, issueTagsRelations } from "./tags.js";

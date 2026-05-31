@@ -94,6 +94,38 @@ export interface ProjectStatsResponse {
   }>;
 }
 
+export type ProjectScriptLastRunStatus = "running" | "success" | "failed" | "error";
+
+export interface ProjectScriptShortcutResponse {
+  id: string;
+  projectId: string;
+  name: string;
+  command: string;
+  workingDir: string | null;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+  lastRun?: {
+    status: ProjectScriptLastRunStatus;
+    startedAt: string;
+    endedAt: string | null;
+    exitCode: number | null;
+  } | null;
+}
+
+export interface CreateProjectScriptShortcutRequest {
+  name: string;
+  command: string;
+  workingDir?: string | null;
+}
+
+export interface UpdateProjectScriptShortcutRequest {
+  name?: string;
+  command?: string;
+  workingDir?: string | null;
+  sortOrder?: number;
+}
+
 // ─── Flake Classifier Types ────────────────────────────────────────────────
 
 export type FlakeDecision = "flake" | "suspicious" | "real";

@@ -1,4 +1,4 @@
-import { projects, projectStatuses, issues, workspaces, preferences, tags, issueTags, scheduledRuns, agentSkills, repos, flakyTests, qualityMetrics } from "@agentic-kanban/shared/schema";
+import { projects, projectStatuses, issues, workspaces, preferences, tags, issueTags, scheduledRuns, agentSkills, repos, flakyTests, qualityMetrics, projectScriptShortcuts } from "@agentic-kanban/shared/schema";
 import { eq, sql, and, inArray } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { db } from "../db/index.js";
@@ -88,6 +88,7 @@ export async function deleteProjectCascade(
   }
 
   await database.delete(scheduledRuns).where(eq(scheduledRuns.projectId, projectId));
+  await database.delete(projectScriptShortcuts).where(eq(projectScriptShortcuts.projectId, projectId));
   await database.delete(agentSkills).where(eq(agentSkills.projectId, projectId));
   await database.delete(flakyTests).where(eq(flakyTests.projectId, projectId));
   await database.delete(qualityMetrics).where(eq(qualityMetrics.projectId, projectId));

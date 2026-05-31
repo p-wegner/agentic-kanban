@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { MonitorPopover, type MonitorStatus } from "./MonitorPopover.js";
 import { VoiceInboxButton } from "./VoiceInboxButton.js";
+import { ProjectScriptsMenu } from "./ProjectScriptsMenu.js";
 import { PRIMARY_VIEWS, SECONDARY_VIEWS } from "../lib/viewRegistry.js";
 import type { StatusWithIssues } from "@agentic-kanban/shared";
 
@@ -101,6 +102,7 @@ export function BoardToolbar({
         </svg>
         Tasks
       </button>
+      <ProjectScriptsMenu projectId={projectId} />
       {onShowMergeQueue && (
         <button
           onClick={onShowMergeQueue}
