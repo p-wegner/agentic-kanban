@@ -79,7 +79,10 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort }: 
       const candidates = await db.select({ wsId: workspaces.id, wsStatus: workspaces.status, workingDir: workspaces.workingDir, isDirect: workspaces.isDirect, projectId: issues.projectId, issueId: issues.id, issueTitle: issues.title, issueNumber: issues.issueNumber, issueStatusName: projectStatuses.name, baseBranch: workspaces.baseBranch, readyForMerge: workspaces.readyForMerge }).from(workspaces)
         .innerJoin(issues, eq(workspaces.issueId, issues.id)).innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
         .leftJoin(workflowNodes, eq(issues.currentNodeId, workflowNodes.id))
-        .where(sql`${workspaces.status} != 'closed' AND ${issues.statusId} IN (${sql.join(activeStatusIds.map((id) => sql`${id}`), sql`, `)}) AND (${issues.currentNodeId} IS NULL OR ${workflowNodes.nodeType} != 'end')`);
+        .where(sql`${workspaces.status} != 'closed' AND (
+          (${issues.currentNodeId} IS NOT NULL AND (${workflowNodes.nodeType} IS NULL OR ${workflowNodes.nodeType} != 'end'))
+          OR (${issues.currentNodeId} IS NULL AND ${issues.statusId} IN (${sql.join(activeStatusIds.map((id) => sql`${id}`), sql`, `)}))
+        )`);
       Object.assign(cycleStats, await processWorkspaceCandidates(candidates, {
         sessionManager,
         boardEvents,

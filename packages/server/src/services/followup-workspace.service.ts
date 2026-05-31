@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { workspaces, sessions, issues, projects, projectStatuses, issueDependencies } from "@agentic-kanban/shared/schema";
+import { isTerminalStatusIdView } from "@agentic-kanban/shared";
+import { workspaces, sessions, issues, projects, projectStatuses, issueDependencies, workflowNodes } from "@agentic-kanban/shared/schema";
 import { eq, and, inArray } from "drizzle-orm";
 import type { Database } from "../db/index.js";
 import * as gitService from "./git.service.js";
@@ -54,11 +55,17 @@ export async function autoStartFollowups(
     if (depIssueIds.length === 0) continue;
 
     const depIssueRows = await database
-      .select({ id: issues.id, statusId: issues.statusId })
+      .select({
+        id: issues.id,
+        statusId: issues.statusId,
+        currentNodeId: issues.currentNodeId,
+        currentNodeType: workflowNodes.nodeType,
+      })
       .from(issues)
+      .leftJoin(workflowNodes, eq(issues.currentNodeId, workflowNodes.id))
       .where(inArray(issues.id, depIssueIds));
 
-    const allResolved = depIssueRows.every(i => doneStatusIds.has(i.statusId));
+    const allResolved = depIssueRows.every(i => isTerminalStatusIdView(i, doneStatusIds));
     if (!allResolved) continue;
 
     const existingWs = await database

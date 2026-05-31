@@ -2,7 +2,7 @@ import { db } from "../db/index.js";
 import { projects, projectStatuses, issues, workspaces, sessions, sessionMessages, preferences, workflowNodes } from "@agentic-kanban/shared/schema";
 import { eq, inArray, desc } from "drizzle-orm";
 import { getDiffShortstat, detectConflicts } from "./git.service.js";
-import { extractMeaningfulOutput } from "@agentic-kanban/shared";
+import { extractMeaningfulOutput, isTerminalStatusIdView } from "@agentic-kanban/shared";
 import type { BoardStatusResponse, BoardStatusIssue } from "@agentic-kanban/shared";
 import { isAnalyticsNoise } from "./session-filter.js";
 
@@ -71,10 +71,7 @@ export async function getBoardStatus(
     .where(eq(issues.projectId, projectId));
 
   if (!includeClosed) {
-    // Terminal = nodeType 'end' (workflow-driven) OR legacy Done/Cancelled status
-    projectIssues = projectIssues.filter(i =>
-      !(i.currentNodeType === "end" || terminalStatusIds.has(i.statusId)),
-    );
+    projectIssues = projectIssues.filter(i => !isTerminalStatusIdView(i, terminalStatusIds));
   }
 
   if (projectIssues.length === 0) {

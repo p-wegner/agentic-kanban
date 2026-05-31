@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { eq } from "drizzle-orm";
+import { isResolvedDependencyStatusView } from "@agentic-kanban/shared";
 import { prodDeps, type ToolDeps } from "./deps.js";
 import { requireEntity } from "../db-utils.js";
 
@@ -49,11 +50,14 @@ export function registerGetIssue(server: McpServer, deps: ToolDeps = prodDeps) {
           createdAt: schema.issueDependencies.createdAt,
           issueTitle: schema.issues.title,
           issueStatusName: schema.projectStatuses.name,
+          issueCurrentNodeId: schema.issues.currentNodeId,
+          issueCurrentNodeType: schema.workflowNodes.nodeType,
           issueNumber: schema.issues.issueNumber,
         })
           .from(schema.issueDependencies)
           .innerJoin(schema.issues, eq(schema.issueDependencies.dependsOnId, schema.issues.id))
           .innerJoin(schema.projectStatuses, eq(schema.issues.statusId, schema.projectStatuses.id))
+          .leftJoin(schema.workflowNodes, eq(schema.issues.currentNodeId, schema.workflowNodes.id))
           .where(eq(schema.issueDependencies.issueId, resolvedId)),
         db.select({
           id: schema.issueDependencies.id,
@@ -76,7 +80,11 @@ export function registerGetIssue(server: McpServer, deps: ToolDeps = prodDeps) {
       const isBlocked = outgoing.some((dep) => {
         const type = (dep as any).type;
         return (type === "depends_on" || type === "blocked_by") &&
-          dep.issueStatusName !== "Done" && dep.issueStatusName !== "AI Reviewed";
+          !isResolvedDependencyStatusView({
+            currentNodeId: dep.issueCurrentNodeId,
+            currentNodeType: dep.issueCurrentNodeType,
+            statusName: dep.issueStatusName,
+          });
       });
 
       const result = {

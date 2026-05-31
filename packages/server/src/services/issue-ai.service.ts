@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { issues, projectStatuses, issueDependencies, agentSkills, tags, issueTags, projects } from "@agentic-kanban/shared/schema";
+import { isTerminalStatusIdView } from "@agentic-kanban/shared";
+import { issues, projectStatuses, issueDependencies, agentSkills, tags, issueTags, projects, workflowNodes } from "@agentic-kanban/shared/schema";
 import { eq, and, inArray, sql, desc } from "drizzle-orm";
 import type { DependencyType } from "@agentic-kanban/shared/schema";
 import type { IssueEstimate } from "@agentic-kanban/shared";
@@ -78,21 +79,21 @@ export async function analyzeDependencies(
     ));
   const excludeStatusIds = doneCancelledStatuses.map(s => s.id);
 
-  let openIssues: { id: string; issueNumber: number | null; title: string; description: string | null }[];
-  if (excludeStatusIds.length > 0) {
-    openIssues = await database
-      .select({ id: issues.id, issueNumber: issues.issueNumber, title: issues.title, description: issues.description })
-      .from(issues)
-      .where(and(
-        eq(issues.projectId, projectId),
-        sql`${issues.statusId} NOT IN (${sql.join(excludeStatusIds.map(id => sql`${id}`), sql`, `)})`,
-      ));
-  } else {
-    openIssues = await database
-      .select({ id: issues.id, issueNumber: issues.issueNumber, title: issues.title, description: issues.description })
-      .from(issues)
-      .where(eq(issues.projectId, projectId));
-  }
+  const terminalStatusIds = new Set(excludeStatusIds);
+  const openIssues = (await database
+    .select({
+      id: issues.id,
+      issueNumber: issues.issueNumber,
+      title: issues.title,
+      description: issues.description,
+      statusId: issues.statusId,
+      currentNodeId: issues.currentNodeId,
+      currentNodeType: workflowNodes.nodeType,
+    })
+    .from(issues)
+    .leftJoin(workflowNodes, eq(issues.currentNodeId, workflowNodes.id))
+    .where(eq(issues.projectId, projectId)))
+    .filter((issue) => !isTerminalStatusIdView(issue, terminalStatusIds));
 
   const skillRows = await database
     .select({ prompt: agentSkills.prompt })
@@ -409,18 +410,21 @@ export async function decomposeEpic(
     .where(and(eq(projectStatuses.projectId, projectId), inArray(projectStatuses.name, ["Done", "Cancelled"])));
   const doneStatusIds = doneStatuses.map(s => s.id);
 
-  let recentIssues: { title: string; description: string | null }[] = [];
-  if (doneStatusIds.length > 0) {
-    recentIssues = await database
-      .select({ title: issues.title, description: issues.description })
-      .from(issues)
-      .where(and(
-        eq(issues.projectId, projectId),
-        inArray(issues.statusId, doneStatusIds),
-      ))
-      .orderBy(desc(issues.updatedAt))
-      .limit(10);
-  }
+  const recentIssues = (await database
+    .select({
+      title: issues.title,
+      description: issues.description,
+      statusId: issues.statusId,
+      currentNodeId: issues.currentNodeId,
+      currentNodeType: workflowNodes.nodeType,
+      updatedAt: issues.updatedAt,
+    })
+    .from(issues)
+    .leftJoin(workflowNodes, eq(issues.currentNodeId, workflowNodes.id))
+    .where(eq(issues.projectId, projectId))
+    .orderBy(desc(issues.updatedAt)))
+    .filter((issue) => isTerminalStatusIdView(issue, new Set(doneStatusIds)))
+    .slice(0, 10);
 
   const projectRows = await database
     .select({ name: projects.name, repoName: projects.repoName })
