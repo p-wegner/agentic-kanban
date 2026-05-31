@@ -9,6 +9,7 @@ import { AgentQuestionsPanel } from "./AgentQuestionsPanel.js";
 import { ButlerVoiceButton, type ButlerVoiceButtonHandle } from "./ButlerVoiceButton.js";
 
 interface ButlerState {
+  backend?: "claude" | "codex";
   active: boolean;
   sessionId: string | null;
   contextTokens?: number;
@@ -184,6 +185,11 @@ interface ButlerListItem {
   contextWindow?: number;
   sessionId: string | null;
   mcpConnected?: boolean;
+  backend?: "claude" | "codex";
+}
+
+function backendLabel(backend?: string): string {
+  return backend === "codex" ? "Codex" : "Claude";
 }
 
 function modelLabel(value: string): string {
@@ -343,6 +349,7 @@ function ButlerManageModal({ onClose, onChanged }: { onClose: () => void; onChan
 
 export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssueClick }: ButlerViewProps) {
   const [butlerState, setButlerState] = useState<ButlerState | null>(null);
+  const [backend, setBackend] = useState<"claude" | "codex">("claude");
   const [loadingState, setLoadingState] = useState(true);
   const [starting, setStarting] = useState(false);
   const [sending, setSending] = useState(false);
@@ -512,6 +519,7 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
     try {
       const state = await apiFetch<ButlerState>(butlerUrl(""));
       setButlerState(state);
+      setBackend(state.backend ?? "claude");
       setContextTokens(state.contextTokens ?? 0);
       setModel(state.model);
       setContextWindow(state.contextWindow);
@@ -566,9 +574,10 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
     try {
       const [cmdData, profData] = await Promise.all([
         apiFetch<{ commands: ButlerCommand[] }>(butlerUrl("/commands")),
-        apiFetch<{ profiles: string[]; selected: string; globalDefault: string }>(`/api/projects/${projectId}/butler/profiles`),
+        apiFetch<{ provider?: "claude" | "codex"; profiles: string[]; selected: string; globalDefault: string }>(`/api/projects/${projectId}/butler/profiles`),
       ]);
       setCommands(cmdData.commands);
+      setBackend(profData.provider ?? "claude");
       setProfiles(profData.profiles);
       setSelectedProfile(profData.selected);
       setGlobalProfile(profData.globalDefault);
@@ -582,6 +591,7 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
   useEffect(() => {
     setLoadingState(true);
     setButlerState(null);
+    setBackend("claude");
     setChatMessages([]);
     setSending(false);
     setContextTokens(0);
@@ -961,7 +971,7 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
             </div>
             <h2 className="text-lg font-semibold text-ink dark:text-stone-100 mb-2 heading-serif">Project Butler</h2>
             <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">
-              A warm, persistent Claude agent that lives in your repository. Ask questions, get summaries, or run quick tasks â€” all without creating a new workspace.
+              A persistent {backendLabel(backend)} agent that lives in your repository. Ask questions, get summaries, or run quick tasks â€” all without creating a new workspace.
             </p>
             <button
               onClick={handleStart}
@@ -1001,6 +1011,7 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
               <div
                 className="flex items-center gap-1.5 px-3 py-1 text-gray-600 dark:text-gray-300 min-w-0"
                 title={[
+                  `Backend: ${backendLabel(backend)}`,
                   model ? `Model: ${model}` : null,
                   contextWindow ? `Context window: ${(contextWindow / 1000).toFixed(0)}k tokens` : null,
                   contextTokens ? `Context used: ${contextTokens.toLocaleString('en-US')} tokens` : null,
@@ -1015,7 +1026,7 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
                     ? contextWindow
                       ? `${(contextTokens / 1000).toFixed(1)}k / ${formatWindow(contextWindow)} (${Math.round((contextTokens / contextWindow) * 100)}%)`
                       : `${(contextTokens / 1000).toFixed(1)}k context`
-                    : "warm session"}
+                    : `${backendLabel(backend)} session`}
                 </span>
               </div>
               <button
@@ -1089,7 +1100,7 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
                 </select>
               </label>
               {/* Profile picker â€” changes auth/endpoint, so it restarts the butler fresh. */}
-              <label className="flex items-center gap-1 text-gray-500 dark:text-gray-400" title="Claude profile (auth/endpoint, e.g. zai). Switching restarts the butler with a fresh context.">
+              <label className="flex items-center gap-1 text-gray-500 dark:text-gray-400" title={`${backendLabel(backend)} profile. Switching restarts the butler with a fresh context.`}>
                 <span className="hidden sm:inline text-[11px]">Profile</span>
                 <select
                   value={selectedProfile}
@@ -1318,7 +1329,7 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
                 </button>
               ) : (
                 <button
-                  onClick={handleSend}
+                  onClick={() => void handleSend()}
                   disabled={!input.trim()}
                   className="shrink-0 p-2.5 rounded-xl bg-brand-600 hover:bg-brand-700 text-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors shadow-sm"
                   title="Send message"
