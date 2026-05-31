@@ -194,4 +194,48 @@ describe("materializeSpecTasksForWorkspace", () => {
     expect(result.skipped).toBe(true);
     expect(result.reason).toBe("already-materialized");
   });
+
+  it("uses the tasks artifact from the workspace being transitioned", async () => {
+    const db = createFileTestDb();
+    const { parentIssueId, workspaceId } = await seedTasksWorkspace(db);
+    const staleWorkspaceId = randomUUID();
+    const now = new Date().toISOString();
+
+    await db.insert(schema.workspaces).values({
+      id: staleWorkspaceId,
+      issueId: parentIssueId,
+      branch: "feature/stale-spec",
+      status: "idle",
+      currentNodeId: null,
+      createdAt: now,
+      updatedAt: now,
+    });
+    await db.insert(schema.issueArtifacts).values([
+      {
+        id: randomUUID(),
+        issueId: parentIssueId,
+        workspaceId,
+        type: "text",
+        mimeType: "text/markdown",
+        caption: "phase-artifact:tasks",
+        content: "# tasks\n\n## Wave 1\n- [ ] T001 Current workspace task\n",
+        createdAt: "2026-05-30T09:00:00.000Z",
+      },
+      {
+        id: randomUUID(),
+        issueId: parentIssueId,
+        workspaceId: staleWorkspaceId,
+        type: "text",
+        mimeType: "text/markdown",
+        caption: "phase-artifact:tasks",
+        content: "# tasks\n\n## Wave 1\n- [ ] T001 Stale workspace task\n",
+        createdAt: "2026-05-30T10:00:00.000Z",
+      },
+    ]);
+
+    const result = await materializeSpecTasksForWorkspace(workspaceId, db);
+
+    expect(result.skipped).toBe(false);
+    expect(result.created.map((issue) => issue.title)).toEqual(["Current workspace task"]);
+  });
 });
