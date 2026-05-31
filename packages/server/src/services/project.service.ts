@@ -376,13 +376,13 @@ export function createProjectService(deps: { database: Database }) {
     const project = await getProjectById(projectId, database);
     if (!project) throw new ProjectError("Project not found", "NOT_FOUND");
 
-    const { commitCount, recentCommits, detectedBranch } = getProjectGitStats(project.repoPath, project.defaultBranch);
+    const { commitCount, recentCommits, detectedBranch, codeMetrics, history, hotspots } = getProjectGitStats(project.repoPath, project.defaultBranch);
 
     const issueRows = await getProjectStats(projectId, database);
     const issueCounts: Record<string, number> = {};
     for (const row of issueRows) if (row.statusName != null) issueCounts[row.statusName] = Number(row.count);
 
-    return { commitCount, recentCommits, issueCounts, detectedBranch };
+    return { commitCount, recentCommits, issueCounts, detectedBranch, codeMetrics, history, hotspots };
   }
 
   async function getBoard(projectId: string) {
