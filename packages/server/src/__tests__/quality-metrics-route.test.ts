@@ -73,4 +73,18 @@ describe("quality metrics routes", () => {
     expect(res.status).toBe(400);
     await expect(res.json()).resolves.toMatchObject({ error: "metrics must be a non-empty array" });
   });
+
+  it("returns validation errors for malformed metric payloads", async () => {
+    const { app, db } = createTestApp();
+    const projectId = await seedProject(db);
+
+    const res = await app.request(`/api/projects/${projectId}/quality-metrics`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "null",
+    });
+
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toMatchObject({ error: "request body must be an object" });
+  });
 });
