@@ -16,6 +16,8 @@ import { createServer } from "node:net";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { classifyProcessExit } from "./dev-supervisor.mjs";
+import { planPortOwnerKill } from "./dev-port-guard.mjs";
+import { writeProcessAudit } from "./process-audit.mjs";
 
 const DEFAULT_SERVER_PORT = 3001;
 const DEFAULT_CLIENT_PORT = 5173;
@@ -78,14 +80,9 @@ function getProcessCommandLine(pid) {
   }
 }
 
-function isSafePortOwnerToKill(pid) {
-  const commandLine = getProcessCommandLine(pid);
-  if (!commandLine) return false;
-  return commandLine.toLowerCase().includes(process.cwd().toLowerCase());
-}
-
 async function freePort(port, label) {
   if (await isPortFree(port)) return;
+  writeProcessAudit({ action: "dev-port-cleanup-start", port, label });
   console.warn(`[dev] Port ${port} is in use — killing occupying process...`);
   try {
     // Works on Windows (netstat) and Unix (lsof)
@@ -98,33 +95,59 @@ async function freePort(port, label) {
           .filter(p => /^\d+$/.test(p) && p !== "0")
       )];
       for (const pid of pids) {
-        if (!isSafePortOwnerToKill(pid)) {
-          const commandLine = getProcessCommandLine(pid);
+        const decision = planPortOwnerKill({
+          pid,
+          port,
+          checkoutRoot: process.cwd(),
+          getCommandLine: getProcessCommandLine,
+          audit: writeProcessAudit,
+        });
+        if (!decision.allowed) {
           console.error(
             `[dev] Refusing to kill pid ${pid} on port ${port}: it does not belong to this checkout (${process.cwd()}). ` +
-            `CommandLine=${commandLine || "<unknown>"}`
+            `CommandLine=${decision.commandLine || "<unknown>"}`
           );
           continue;
         }
-        try { execSync(`taskkill /PID ${pid} /T /F`, { stdio: "pipe", windowsHide: true }); } catch {}
+        try {
+          execSync(`taskkill /PID ${pid} /T /F`, { stdio: "pipe", windowsHide: true });
+          writeProcessAudit({ action: "dev-port-kill-succeeded", port, pid, label });
+        } catch (err) {
+          writeProcessAudit({ action: "dev-port-kill-failed", port, pid, label, error: err instanceof Error ? err.message : String(err) });
+        }
       }
     } else {
       const out = execSync(`lsof -ti :${port}`, { encoding: "utf8", stdio: ["pipe", "pipe", "pipe"] });
       const pids = [...new Set(out.split("\n").map((p) => p.trim()).filter(Boolean))];
       for (const pid of pids) {
-        if (!isSafePortOwnerToKill(pid)) {
+        const decision = planPortOwnerKill({
+          pid,
+          port,
+          checkoutRoot: process.cwd(),
+          getCommandLine: getProcessCommandLine,
+          audit: writeProcessAudit,
+        });
+        if (!decision.allowed) {
           console.error(`[dev] Refusing to kill pid ${pid} on port ${port}: it does not belong to this checkout (${process.cwd()}).`);
           continue;
         }
-        try { execSync(`kill -9 ${pid}`, { stdio: "pipe" }); } catch {}
+        try {
+          execSync(`kill -9 ${pid}`, { stdio: "pipe" });
+          writeProcessAudit({ action: "dev-port-kill-succeeded", port, pid, label });
+        } catch (err) {
+          writeProcessAudit({ action: "dev-port-kill-failed", port, pid, label, error: err instanceof Error ? err.message : String(err) });
+        }
       }
     }
-  } catch {}
+  } catch (err) {
+    writeProcessAudit({ action: "dev-port-cleanup-error", port, label, error: err instanceof Error ? err.message : String(err) });
+  }
   // Wait up to 3s for the port to free
   for (let i = 0; i < 6; i++) {
     await new Promise(r => setTimeout(r, 500));
     if (await isPortFree(port)) { console.log(`[dev] Port ${port} freed.`); return; }
   }
+  writeProcessAudit({ action: "dev-port-cleanup-not-freed", port, label });
   console.error(`[dev] Could not free port ${port} — ${label} may fail to start.`);
 }
 
@@ -155,6 +178,18 @@ function configurePorts() {
   process.env.SERVER_PORT = String(serverPort);
   process.env.KANBAN_SERVER_PORT = String(serverPort);
   process.env.KANBAN_CLIENT_PORT = String(clientPort);
+  process.env.KANBAN_BOARD_SERVER_PID = String(process.pid);
+  process.env.KANBAN_PROTECTED_PIDS = [process.env.KANBAN_PROTECTED_PIDS, String(process.pid)]
+    .filter(Boolean)
+    .join(",");
+
+  writeProcessAudit({
+    action: "dev-launch-configured",
+    isWorktree,
+    branch,
+    serverPort,
+    clientPort,
+  });
 
   return { serverPort, clientPort };
 }
