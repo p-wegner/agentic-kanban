@@ -62,6 +62,28 @@ function isPortFree(port) {
   });
 }
 
+function getProcessCommandLine(pid) {
+  try {
+    if (process.platform === "win32") {
+      const script = `$p = Get-CimInstance Win32_Process -Filter "ProcessId=${pid}"; if ($p) { $p.CommandLine }`;
+      return execSync("powershell.exe", ["-NoProfile", "-Command", script], {
+        encoding: "utf8",
+        stdio: ["pipe", "pipe", "pipe"],
+        windowsHide: true,
+      }).trim();
+    }
+    return execSync(`ps -p ${pid} -o command=`, { encoding: "utf8", stdio: ["pipe", "pipe", "pipe"] }).trim();
+  } catch {
+    return "";
+  }
+}
+
+function isSafePortOwnerToKill(pid) {
+  const commandLine = getProcessCommandLine(pid);
+  if (!commandLine) return false;
+  return commandLine.toLowerCase().includes(process.cwd().toLowerCase());
+}
+
 async function freePort(port, label) {
   if (await isPortFree(port)) return;
   console.warn(`[dev] Port ${port} is in use — killing occupying process...`);
@@ -76,10 +98,26 @@ async function freePort(port, label) {
           .filter(p => /^\d+$/.test(p) && p !== "0")
       )];
       for (const pid of pids) {
+        if (!isSafePortOwnerToKill(pid)) {
+          const commandLine = getProcessCommandLine(pid);
+          console.error(
+            `[dev] Refusing to kill pid ${pid} on port ${port}: it does not belong to this checkout (${process.cwd()}). ` +
+            `CommandLine=${commandLine || "<unknown>"}`
+          );
+          continue;
+        }
         try { execSync(`taskkill /PID ${pid} /T /F`, { stdio: "pipe", windowsHide: true }); } catch {}
       }
     } else {
-      execSync(`lsof -ti :${port} | xargs kill -9`, { stdio: "pipe" });
+      const out = execSync(`lsof -ti :${port}`, { encoding: "utf8", stdio: ["pipe", "pipe", "pipe"] });
+      const pids = [...new Set(out.split("\n").map((p) => p.trim()).filter(Boolean))];
+      for (const pid of pids) {
+        if (!isSafePortOwnerToKill(pid)) {
+          console.error(`[dev] Refusing to kill pid ${pid} on port ${port}: it does not belong to this checkout (${process.cwd()}).`);
+          continue;
+        }
+        try { execSync(`kill -9 ${pid}`, { stdio: "pipe" }); } catch {}
+      }
     }
   } catch {}
   // Wait up to 3s for the port to free

@@ -4,6 +4,30 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildAgentLaunchConfig, type ProviderId, type ProviderName } from "./agent-provider.js";
 
+const DEFAULT_BOARD_SERVER_PORT = "3001";
+const DEFAULT_BOARD_CLIENT_PORT = "5173";
+
+function branchHash(branchName: string): number {
+  let hash = 0;
+  for (let i = 0; i < branchName.length; i++) {
+    hash = (hash * 31 + branchName.charCodeAt(i)) & 0xffff;
+  }
+  return (hash % 900) + 101;
+}
+
+function resolveWorktreeDevPorts(worktreePath: string): { serverPort: string; clientPort: string } | null {
+  const normalized = worktreePath.replace(/\\/g, "/");
+  if (!normalized.includes("/.worktrees/")) return null;
+
+  const leaf = normalized.split("/").filter(Boolean).at(-1) ?? "";
+  const issueMatch = leaf.match(/(?:^|[_/-])ak-(\d+)-/i) ?? leaf.match(/^feature[_/-](\d+)-/i);
+  const offset = issueMatch ? Number(issueMatch[1]) : branchHash(leaf);
+  return {
+    serverPort: String(Number(DEFAULT_BOARD_SERVER_PORT) + offset),
+    clientPort: String(Number(DEFAULT_BOARD_CLIENT_PORT) + offset),
+  };
+}
+
 export interface AgentOutputEvent {
   type: "stdout" | "stderr" | "exit";
   sessionId: string;
@@ -167,6 +191,11 @@ export function launch(
   });
   const { command, args, useShell, isMockAgent, env: spawnEnv, promptPrefix, suppressStdinPrompt } = launchConfig;
   const stdinPrompt = promptPrefix ? `${promptPrefix}\n\n${prompt}` : prompt;
+  const boardServerPort = process.env.KANBAN_SERVER_PORT || process.env.PORT || DEFAULT_BOARD_SERVER_PORT;
+  const boardClientPort = process.env.KANBAN_CLIENT_PORT || process.env.VITE_PORT || DEFAULT_BOARD_CLIENT_PORT;
+  const worktreePorts = resolveWorktreeDevPorts(worktreePath);
+  const worktreeServerPort = worktreePorts?.serverPort || boardServerPort;
+  const worktreeClientPort = worktreePorts?.clientPort || boardClientPort;
 
   console.log(`[agent] launching: command=${command} provider=${provider ?? "auto"} worktree=${worktreePath} sessionId=${sessionId} resume=${providerSessionId ?? "none"}`);
 
@@ -198,10 +227,15 @@ export function launch(
       ...spawnEnv,
       FORCE_COLOR: "0",
       NO_COLOR: "1",
-      KANBAN_SERVER_PORT: process.env.KANBAN_SERVER_PORT || process.env.PORT || "3001",
-      KANBAN_CLIENT_PORT: process.env.KANBAN_CLIENT_PORT || process.env.VITE_PORT || "5173",
-      SERVER_PORT: process.env.SERVER_PORT || process.env.PORT || "3001",
-      PORT: process.env.PORT || "3001",
+      KANBAN_BOARD_SERVER_PORT: boardServerPort,
+      KANBAN_BOARD_CLIENT_PORT: boardClientPort,
+      KANBAN_SERVER_PORT: boardServerPort,
+      KANBAN_CLIENT_PORT: worktreeClientPort,
+      KANBAN_WORKTREE_SERVER_PORT: worktreeServerPort,
+      KANBAN_WORKTREE_CLIENT_PORT: worktreeClientPort,
+      SERVER_PORT: worktreeServerPort,
+      PORT: worktreeServerPort,
+      VITE_PORT: worktreeClientPort,
       ...extraEnv,
     },
     stdio: stdioConfig,

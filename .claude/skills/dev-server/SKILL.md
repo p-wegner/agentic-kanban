@@ -16,13 +16,13 @@ Safely start, stop, and health-check the agentic-kanban dev server. This encodes
 
 ## Step 1 — Determine ports
 
-`scripts/dev.mjs` auto-detects worktree context and sets these env vars: `KANBAN_SERVER_PORT`, `KANBAN_CLIENT_PORT`, `SERVER_PORT`, `PORT`, `VITE_PORT`.
+`scripts/dev.mjs` auto-detects worktree context and sets these env vars: `KANBAN_WORKTREE_SERVER_PORT`, `KANBAN_WORKTREE_CLIENT_PORT`, `SERVER_PORT`, `PORT`, `VITE_PORT`. Agent sessions also keep `KANBAN_SERVER_PORT` pointed at the main board API; do not use it for worktree dev-server cleanup when `KANBAN_WORKTREE_SERVER_PORT` is present.
 
 **In a worktree, never hardcode 3001/5173.** Read the env vars instead:
 
 ```powershell
-$serverPort = if ($env:KANBAN_SERVER_PORT) { $env:KANBAN_SERVER_PORT } else { 3001 }
-$clientPort = if ($env:KANBAN_CLIENT_PORT) { $env:KANBAN_CLIENT_PORT } else { 5173 }
+$serverPort = if ($env:KANBAN_WORKTREE_SERVER_PORT) { $env:KANBAN_WORKTREE_SERVER_PORT } elseif ($env:KANBAN_SERVER_PORT) { $env:KANBAN_SERVER_PORT } else { 3001 }
+$clientPort = if ($env:KANBAN_WORKTREE_CLIENT_PORT) { $env:KANBAN_WORKTREE_CLIENT_PORT } elseif ($env:KANBAN_CLIENT_PORT) { $env:KANBAN_CLIENT_PORT } else { 5173 }
 ```
 
 Deterministic port scheme:
@@ -70,8 +70,8 @@ Kill only the processes bound to this checkout's `$serverPort` and `$clientPort`
 This uses one `netstat` snapshot per port, not a polling loop. When the port owner is a child of `scripts/dev.mjs`, kill the parent with `/T` so its supervised child exits too. Otherwise kill just the port owner tree.
 
 ```powershell
-$serverPort = if ($env:KANBAN_SERVER_PORT) { [int]$env:KANBAN_SERVER_PORT } else { 3001 }
-$clientPort = if ($env:KANBAN_CLIENT_PORT) { [int]$env:KANBAN_CLIENT_PORT } else { 5173 }
+$serverPort = if ($env:KANBAN_WORKTREE_SERVER_PORT) { [int]$env:KANBAN_WORKTREE_SERVER_PORT } elseif ($env:KANBAN_SERVER_PORT) { [int]$env:KANBAN_SERVER_PORT } else { 3001 }
+$clientPort = if ($env:KANBAN_WORKTREE_CLIENT_PORT) { [int]$env:KANBAN_WORKTREE_CLIENT_PORT } elseif ($env:KANBAN_CLIENT_PORT) { [int]$env:KANBAN_CLIENT_PORT } else { 5173 }
 
 function Stop-PortOwner([int]$port) {
     $lines = netstat -ano | Select-String "[:.]$port\s"
@@ -95,7 +95,7 @@ Stop-PortOwner $clientPort
 ## Step 5 — Health check
 
 ```powershell
-$serverPort = if ($env:KANBAN_SERVER_PORT) { $env:KANBAN_SERVER_PORT } else { 3001 }
+$serverPort = if ($env:KANBAN_WORKTREE_SERVER_PORT) { $env:KANBAN_WORKTREE_SERVER_PORT } elseif ($env:KANBAN_SERVER_PORT) { $env:KANBAN_SERVER_PORT } else { 3001 }
 try { $r = Invoke-RestMethod "http://localhost:$serverPort/api/projects" -TimeoutSec 10; Write-Host "API OK: $($r.Count) projects" } catch { Write-Host "API FAILED: $_" }
 ```
 
