@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { randomUUID } from "node:crypto";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createWorkflowsRoute } from "../routes/workflows.js";
 import * as schema from "@agentic-kanban/shared/schema";
 import { createTestApp as _createTestApp } from "./helpers/test-app.js";
@@ -61,6 +64,7 @@ async function seedWorkspace(
   issueId: string,
   branch: string,
   currentNodeId: string,
+  workingDir?: string,
 ) {
   const now = "2026-05-30T09:00:00.000Z";
   const workspaceId = randomUUID();
@@ -68,6 +72,7 @@ async function seedWorkspace(
     id: workspaceId,
     issueId,
     branch,
+    workingDir: workingDir ?? null,
     status: "active",
     currentNodeId,
     createdAt: now,
@@ -165,6 +170,67 @@ describe("workflows route analytics", () => {
 });
 
 describe("workflows route task approval", () => {
+  it("writes the approved phase artifact into the workspace before advancing", async () => {
+    const { app, db } = createTestApp();
+    const worktreePath = mkdtempSync(join(tmpdir(), "ak-phase-artifact-"));
+    try {
+      const { projectId, statusId } = await seedProject(db, "phase-artifact-write");
+      const now = "2026-05-30T09:00:00.000Z";
+      const templateId = randomUUID();
+      const specifyNodeId = randomUUID();
+      const designNodeId = randomUUID();
+      await db.insert(schema.workflowTemplates).values({
+        id: templateId,
+        projectId: null,
+        name: "Spec",
+        isDefault: true,
+        isBuiltin: false,
+        createdAt: now,
+        updatedAt: now,
+      });
+      await db.insert(schema.workflowNodes).values([
+        { id: specifyNodeId, templateId, name: "Specify", nodeType: "normal", statusName: "In Progress", sortOrder: 0, createdAt: now },
+        { id: designNodeId, templateId, name: "Design", nodeType: "normal", statusName: "In Progress", sortOrder: 1, createdAt: now },
+      ] as any);
+      await db.insert(schema.workflowEdges).values({
+        id: randomUUID(),
+        templateId,
+        fromNodeId: specifyNodeId,
+        toNodeId: designNodeId,
+        condition: "manual",
+        sortOrder: 0,
+        createdAt: now,
+      });
+
+      const issueId = await seedIssue(db, projectId, statusId, 7, "Persist Phase Artifacts!");
+      await db.update(schema.issues).set({ workflowTemplateId: templateId, currentNodeId: specifyNodeId }).where(eq(schema.issues.id, issueId));
+      const workspaceId = await seedWorkspace(db, issueId, "feature/spec", specifyNodeId, worktreePath);
+      await db.insert(schema.issueArtifacts).values({
+        id: randomUUID(),
+        issueId,
+        workspaceId,
+        type: "text",
+        mimeType: "text/markdown",
+        caption: "phase-artifact:specify",
+        content: "# spec\n\nApproved requirements.\n",
+        createdAt: now,
+      });
+
+      const res = await app.request(`/api/workflows/workspaces/${workspaceId}/transition`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ toNodeId: designNodeId }),
+      });
+
+      expect(res.status).toBe(200);
+      const body = await res.json() as any;
+      expect(body.phaseArtifact.relativePath).toBe("specs/7-persist-phase-artifacts/spec.md");
+      expect(readFileSync(join(worktreePath, "specs", "7-persist-phase-artifacts", "spec.md"), "utf-8").trim()).toBe("# spec\n\nApproved requirements.");
+    } finally {
+      rmSync(worktreePath, { recursive: true, force: true });
+    }
+  });
+
   it("does not materialize task children when the requested transition is invalid", async () => {
     const { app, db } = createTestApp();
     const { projectId, statusId } = await seedProject(db, "task-transition-validation");

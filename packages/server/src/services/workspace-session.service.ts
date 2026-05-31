@@ -23,6 +23,7 @@ import {
 import { getPreference } from "../repositories/preferences.repository.js";
 import { buildImplementPrompt, buildRejectPrompt, writePlanFile, PLAN_FILE } from "./plan-mode.service.js";
 import { computeWorkspaceCodeMetrics } from "./workspace-code-metrics.service.js";
+import { buildPhaseArtifactsContext, isImplementWorkflowNode } from "./phase-artifacts.service.js";
 import {
   WorkspaceError,
   applyWorkspaceAgentSelection,
@@ -58,6 +59,13 @@ export function createWorkspaceSessionService(deps: {
       }
       const iss = issueRows[0];
       prompt = iss.description ? `${iss.title}\n\n${iss.description}` : iss.title;
+    }
+
+    if (await isImplementWorkflowNode(database, ws0.currentNodeId)) {
+      const artifactContext = await buildPhaseArtifactsContext(database, ws0.issueId, id).catch(() => "");
+      if (artifactContext) {
+        prompt = `${prompt}\n\n[Approved spec-driven phase artifacts]\n\n${artifactContext}`;
+      }
     }
 
     const { agentCommand, agentArgs, claudeProfile, profile: agentProfile, provider: agentProvider, resumeWithNewModel, permissionPromptTool } =
@@ -162,6 +170,12 @@ export function createWorkspaceSessionService(deps: {
     }
 
     const planMode = ws0.planMode ?? false;
+    if (await isImplementWorkflowNode(database, ws0.currentNodeId)) {
+      const artifactContext = await buildPhaseArtifactsContext(database, ws0.issueId, id).catch(() => "");
+      if (artifactContext) {
+        content = `${content}\n\n[Approved spec-driven phase artifacts]\n\n${artifactContext}`;
+      }
+    }
     const { agentCommand, agentArgs, claudeProfile, profile, provider, resumeWithNewModel, permissionPromptTool } =
       applyWorkspaceAgentSelection(await loadAgentSettings(database), ws0);
 

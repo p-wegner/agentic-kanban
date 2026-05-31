@@ -15,6 +15,7 @@ import { execFile } from "node:child_process";
 import { eq, and, ne, like, or, inArray } from "drizzle-orm";
 import { issues, projectStatuses, workspaces, agentSkills } from "@agentic-kanban/shared/schema";
 import type { Database } from "../db/index.js";
+import { buildPhaseArtifactsContext } from "./phase-artifacts.service.js";
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -301,6 +302,14 @@ export async function buildContextPrimer(
     }).join("\n"));
     sections.push("");
   }
+
+  try {
+    const phaseArtifactContext = await buildPhaseArtifactsContext(database, issueId);
+    if (phaseArtifactContext) {
+      sections.push(phaseArtifactContext);
+      sections.push("");
+    }
+  } catch { /* best-effort */ }
 
   if (skillHints.length > 0) {
     sections.push("### Potentially Useful Skills\n");

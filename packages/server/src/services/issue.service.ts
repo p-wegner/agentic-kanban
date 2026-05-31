@@ -21,6 +21,7 @@ import {
 } from "../repositories/issue.repository.js";
 import { deleteWorkspaceCascade } from "../repositories/workspace.repository.js";
 import { enrichWorkspacesWithSessionData, wouldCreateCycle } from "./board-aggregation.service.js";
+import { materializePhaseArtifactToWorktree } from "./phase-artifacts.service.js";
 
 export class IssueError extends Error {
   constructor(
@@ -477,6 +478,15 @@ export function createIssueService(deps: {
       content: body.content,
       caption: body.caption ?? null,
     });
+
+    if (body.type === "text") {
+      await materializePhaseArtifactToWorktree(database, {
+        issueId,
+        workspaceId: body.workspaceId,
+        caption: body.caption,
+        content: body.content,
+      }).catch((err) => console.warn("[issue-artifacts] failed to write phase artifact file:", err));
+    }
 
     const projectId = await getIssueProjectId(issueId, database);
     if (projectId) boardEvents?.broadcast(projectId, "issue_updated");
