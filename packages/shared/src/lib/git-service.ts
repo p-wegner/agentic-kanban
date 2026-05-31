@@ -1085,6 +1085,24 @@ export async function getChangedFilesBetween(
   }
 }
 
+/** Stage and commit specific paths in repoPath. Returns true when a commit was created. */
+export async function commitPaths(
+  repoPath: string,
+  paths: string[],
+  message: string,
+): Promise<boolean> {
+  const unique = [...new Set(paths.filter(Boolean))];
+  if (unique.length === 0) return false;
+  await execGit(["add", "-A", "--", ...unique], repoPath);
+  try {
+    await execGit(["diff", "--cached", "--quiet", "--", ...unique], repoPath);
+    return false;
+  } catch {
+    await execGit(["commit", "-m", message, "--", ...unique], repoPath);
+    return true;
+  }
+}
+
 /** Resolve a ref to its commit SHA (e.g. "HEAD"). */
 export async function revParse(repoPath: string, ref: string): Promise<string> {
   return (await execGit(["rev-parse", ref], repoPath)).trim();
