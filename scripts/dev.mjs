@@ -11,7 +11,7 @@
  * Worktree (other): server 3001+hash, client 5173+hash
  */
 
-import { execSync, spawn } from "node:child_process";
+import { execFileSync, execSync, spawn } from "node:child_process";
 import { createServer } from "node:net";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -68,7 +68,7 @@ function getProcessCommandLine(pid) {
   try {
     if (process.platform === "win32") {
       const script = `$p = Get-CimInstance Win32_Process -Filter "ProcessId=${pid}"; if ($p) { $p.CommandLine }`;
-      return execSync("powershell.exe", ["-NoProfile", "-Command", script], {
+      return execFileSync("powershell.exe", ["-NoProfile", "-Command", script], {
         encoding: "utf8",
         stdio: ["pipe", "pipe", "pipe"],
         windowsHide: true,
