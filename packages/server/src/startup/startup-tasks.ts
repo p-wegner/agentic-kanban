@@ -8,6 +8,25 @@ import * as agentService from "../services/agent.service.js";import * as gitServ
 import type { SessionManager } from "../services/session.manager.js";
 
 /** Kill orphaned tsx server processes from previous hot-reload cycles (Windows only). */
+export function shouldKillOrphanedServerProcess(input: {
+  pid: number;
+  commandLine: string;
+  checkoutRoot: string;
+  protectedPids?: Set<number>;
+}): boolean {
+  if (input.protectedPids?.has(input.pid)) return false;
+
+  const cmd = input.commandLine.replace(/\\/g, "/").toLowerCase();
+  const checkoutRoot = input.checkoutRoot.replace(/\\/g, "/").toLowerCase();
+  if (!cmd.includes("src/index")) return false;
+  if (!cmd.includes("tsx") && !cmd.includes("ts-node")) return false;
+
+  // The startup cleanup is allowed to reap stale hot-reload children only from
+  // the checkout that is currently booting. Worktree servers must never clean up
+  // the main board checkout, and the main checkout must not clean up worktrees.
+  return cmd.includes(checkoutRoot);
+}
+
 export async function killOrphanedServers(): Promise<void> {
   if (process.platform !== "win32") return;
   try {
@@ -40,12 +59,18 @@ export async function killOrphanedServers(): Promise<void> {
       ancestor = parent;
     }
     let killed = 0;
+    const checkoutRoot = process.cwd();
+    const protectedPids = new Set(
+      [
+        process.env.KANBAN_BOARD_SERVER_PID,
+        ...(process.env.KANBAN_PROTECTED_PIDS ?? "").split(","),
+      ]
+        .map((pid) => Number(pid))
+        .filter((pid) => Number.isInteger(pid) && pid > 0),
+    );
     for (const p of procs) {
       if (p.pid === myPid || ancestors.has(p.pid)) continue;
-      const cmd = p.cmd.replace(/\\/g, "/");
-      // Match tsx-based server processes (hot-reload survivors) for the main server entry point.
-      // Avoid killing worktree-specific servers by requiring the cmd NOT to contain a worktree path marker.
-      if ((cmd.includes("tsx") || cmd.includes("ts-node")) && cmd.includes("src/index") && !cmd.includes(".worktrees")) {
+      if (shouldKillOrphanedServerProcess({ pid: p.pid, commandLine: p.cmd, checkoutRoot, protectedPids })) {
         try {
           _execSync(`taskkill /PID ${p.pid} /T /F`, { stdio: "pipe", windowsHide: true, timeout: 5000 });
           console.log(`[startup] killed orphaned tsx server PID ${p.pid}`);

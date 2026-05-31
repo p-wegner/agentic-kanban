@@ -24,7 +24,7 @@ vi.mock("../db/manual-migrate.js", () => ({ applyMigrations: vi.fn(async () => {
 vi.mock("../db/seed.js", () => ({ ensureBuiltinTags: vi.fn(async () => {}), ensureBuiltinSkills: vi.fn(async () => {}) }));
 vi.mock("../services/project-registration.js", () => ({ deduplicateProjects: vi.fn(async () => {}) }));
 
-import { abortStaleMerges } from "../startup/startup-tasks.js";
+import { abortStaleMerges, shouldKillOrphanedServerProcess } from "../startup/startup-tasks.js";
 import { db } from "../db/index.js";
 import * as gitService from "../services/git.service.js";
 
@@ -102,5 +102,32 @@ describe("abortStaleMerges", () => {
 
     // Should not throw
     await expect(abortStaleMerges()).resolves.toBeUndefined();
+  });
+});
+
+describe("shouldKillOrphanedServerProcess", () => {
+  it("allows cleanup for a server process in the same main checkout", () => {
+    expect(shouldKillOrphanedServerProcess({
+      pid: 123,
+      checkoutRoot: "C:\\andrena\\agentic-kanban\\packages\\server",
+      commandLine: "node C:\\andrena\\agentic-kanban\\packages\\server\\node_modules\\tsx\\dist\\cli.mjs watch src/index.ts",
+    })).toBe(true);
+  });
+
+  it("blocks a worktree startup from killing the main board checkout", () => {
+    expect(shouldKillOrphanedServerProcess({
+      pid: 123,
+      checkoutRoot: "C:\\andrena\\.worktrees\\feature_ak-145-workflow-analytics-drilldown\\packages\\server",
+      commandLine: "node C:\\andrena\\agentic-kanban\\packages\\server\\node_modules\\tsx\\dist\\cli.mjs watch src/index.ts",
+    })).toBe(false);
+  });
+
+  it("blocks protected board pids even when the command line matches", () => {
+    expect(shouldKillOrphanedServerProcess({
+      pid: 123,
+      protectedPids: new Set([123]),
+      checkoutRoot: "C:\\andrena\\agentic-kanban\\packages\\server",
+      commandLine: "node C:\\andrena\\agentic-kanban\\packages\\server\\node_modules\\tsx\\dist\\cli.mjs watch src/index.ts",
+    })).toBe(false);
   });
 });
