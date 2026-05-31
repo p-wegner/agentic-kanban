@@ -14,6 +14,7 @@ import type { ReactNode } from "react";
 
 export type ViewMode =
   | "kanban"
+  | "backlog"
   | "graph"
   | "table"
   | "agents"
@@ -71,6 +72,11 @@ const ICON = {
       <rect x="3" y="3" width="5" height="18" rx="1" />
       <rect x="10" y="3" width="5" height="14" rx="1" />
       <rect x="17" y="3" width="5" height="10" rx="1" />
+    </svg>
+  ),
+  backlog: (
+    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 10h16M4 14h10M4 18h8" />
     </svg>
   ),
   graph: (
@@ -155,6 +161,16 @@ export const VIEW_REGISTRY: ViewDescriptor[] = [
     paletteIcon: "⊟",
     paletteDescription: "Show kanban board columns",
     shortcut: "b",
+  },
+  {
+    id: "backlog",
+    toolbarLabel: "Backlog",
+    label: "Backlog",
+    tooltip: "Dedicated backlog view",
+    icon: ICON.backlog,
+    paletteIcon: "BL",
+    paletteDescription: "Plan, sort, group, and triage backlog issues",
+    shortcut: "r",
   },
   {
     id: "graph",
