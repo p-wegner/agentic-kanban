@@ -170,6 +170,7 @@ export function BoardToolbar({
             onNudgeAutoStartChange={onNudgeAutoStartChange}
             nudgeWipLimit={nudgeWipLimit}
             onNudgeWipLimitChange={onNudgeWipLimitChange}
+            projectId={projectId}
           />
         )}
       </div>

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import type { StatusWithIssues } from "@agentic-kanban/shared";
+import { apiFetch } from "../lib/api.js";
 
 export type MonitorAction = {
   at: string;
@@ -47,6 +48,15 @@ export type MonitorStatus = {
   } | null;
 };
 
+export type BoardHealthEvent = {
+  id: string;
+  timestamp: string;
+  level: "info" | "error";
+  type: "cycle_start" | "cycle_end" | "observation" | "action" | "error";
+  summary: string;
+  details: string | null;
+};
+
 const ACTION_LABELS: Record<MonitorAction["action"], { label: string; color: string }> = {
   relaunch:   { label: "Relaunched agent",   color: "text-blue-600" },
   merge:      { label: "Triggered merge",    color: "text-brand-600 dark:text-brand-400" },
@@ -70,6 +80,7 @@ interface MonitorPopoverProps {
   onNudgeAutoStartChange: (v: boolean) => void;
   nudgeWipLimit: string;
   onNudgeWipLimitChange: (v: string) => void;
+  projectId: string | null;
 }
 
 export function MonitorPopover({
@@ -86,19 +97,51 @@ export function MonitorPopover({
   onNudgeAutoStartChange,
   nudgeWipLimit,
   onNudgeWipLimitChange,
+  projectId,
 }: MonitorPopoverProps) {
   const [now, setNow] = useState(Date.now());
   const [running, setRunning] = useState(false);
+  const [healthEvents, setHealthEvents] = useState<BoardHealthEvent[]>([]);
+  const [healthEventsLoading, setHealthEventsLoading] = useState(false);
+  const [healthEventsError, setHealthEventsError] = useState<string | null>(null);
+
+  async function loadHealthEvents() {
+    if (!projectId) {
+      setHealthEvents([]);
+      setHealthEventsLoading(false);
+      setHealthEventsError(null);
+      return;
+    }
+    setHealthEventsLoading(true);
+    setHealthEventsError(null);
+    try {
+      const events = await apiFetch<BoardHealthEvent[]>(`/api/projects/${projectId}/board-health-events?limit=15`);
+      setHealthEvents(events);
+    } catch (err) {
+      setHealthEventsError(err instanceof Error ? err.message : "Failed to load events");
+    } finally {
+      setHealthEventsLoading(false);
+    }
+  }
 
   async function handleRunNow() {
     setRunning(true);
-    try { await onRunNow(); } finally { setRunning(false); }
+    try {
+      await onRunNow();
+      await loadHealthEvents();
+    } finally {
+      setRunning(false);
+    }
   }
 
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(t);
   }, []);
+
+  useEffect(() => {
+    loadHealthEvents();
+  }, [projectId]);
 
   useEffect(() => {
     function handler(e: KeyboardEvent) { if (e.key === "Escape") onClose(); }
@@ -342,6 +385,13 @@ export function MonitorPopover({
             </div>
           )}
 
+          <RecentBoardHealthEventsSection
+            events={healthEvents}
+            loading={healthEventsLoading}
+            error={healthEventsError}
+            formatAge={formatAge}
+          />
+
           {/* Settings */}
           <div className="px-3 py-2.5 space-y-2.5 rounded-b-xl">
             <div className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">Settings</div>
@@ -391,5 +441,53 @@ export function MonitorPopover({
       </div>
     </>,
     document.body
+  );
+}
+
+export function RecentBoardHealthEventsSection({
+  events,
+  loading,
+  error,
+  formatAge,
+}: {
+  events: BoardHealthEvent[];
+  loading: boolean;
+  error: string | null;
+  formatAge: (isoStr: string) => string;
+}) {
+  return (
+    <div className="px-3 py-2.5 border-b border-gray-100 dark:border-gray-800">
+      <div className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500 mb-1.5">Recent events</div>
+      {loading ? (
+        <div className="text-gray-400 dark:text-gray-500 text-[11px]">Loading events...</div>
+      ) : error ? (
+        <div className="text-red-600 dark:text-red-400 text-[11px] leading-snug">{error}</div>
+      ) : events.length === 0 ? (
+        <div className="text-gray-400 dark:text-gray-500 text-[11px]">No board health events yet</div>
+      ) : (
+        <div className="space-y-1.5">
+          {events.map((event) => (
+            <div key={event.id} className="flex items-start gap-2">
+              <span
+                className={`mt-1.5 h-1.5 w-1.5 rounded-full shrink-0 ${event.level === "error" ? "bg-red-500" : "bg-sky-400"}`}
+                title={event.type}
+              />
+              <div className="min-w-0 flex-1">
+                <div className="flex items-baseline gap-1.5">
+                  <span className={`font-semibold text-[10px] uppercase ${event.level === "error" ? "text-red-600 dark:text-red-400" : "text-gray-500 dark:text-gray-400"}`}>
+                    {event.type.replace(/_/g, " ")}
+                  </span>
+                  <span className="text-gray-400 dark:text-gray-500 shrink-0 text-[10px] font-mono">{formatAge(event.timestamp)}</span>
+                </div>
+                <div className="text-gray-700 dark:text-gray-300 text-[11px] leading-snug line-clamp-2">{event.summary}</div>
+                {event.details && (
+                  <div className="text-gray-400 dark:text-gray-500 text-[10px] leading-snug truncate" title={event.details}>{event.details}</div>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
