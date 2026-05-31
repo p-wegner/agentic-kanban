@@ -456,6 +456,13 @@
       "when": 1748764527062,
       "tag": "0064_quality_metrics",
       "breakpoints": true
+    },
+    {
+      "idx": 65,
+      "version": "6",
+      "when": 1748764527063,
+      "tag": "0065_project_script_shortcuts",
+      "breakpoints": true
     }
   ]
 }

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { apiFetch } from "../lib/api.js";
+import { ProjectScriptsSettingsSection } from "./ProjectScriptsSettingsSection.js";
 import { showToast } from "./Toast.js";
 import { MCP_TOOL_DEFINITIONS, MCP_TOOL_CATEGORIES } from "@agentic-kanban/shared/lib";
 import { CLAUDE_MODEL_OPTIONS } from "@agentic-kanban/shared";
@@ -1319,6 +1320,7 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                           The project color will be displayed in the project dropdown in the header.
                         </p>
                       </Field>
+                      <ProjectScriptsSettingsSection projectId={activeProjectId} />
                       <CollapsibleSection
                         title="Setup Script"
                         configured={!!projectSettings.setupScript}
