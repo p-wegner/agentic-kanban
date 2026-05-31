@@ -8,6 +8,8 @@ import { registerGetContext } from "./tools/get-context.js";
 import { registerListIssues } from "./tools/list-issues.js";
 import { registerGetIssue } from "./tools/get-issue.js";
 import { registerCreateIssue } from "./tools/create-issue.js";
+import { registerCreateSubIssue } from "./tools/create-sub-issue.js";
+import { registerAttachArtifact } from "./tools/attach-artifact.js";
 import { registerUpdateIssue } from "./tools/update-issue.js";
 import { registerDeleteIssue } from "./tools/delete-issue.js";
 import { registerMoveIssue } from "./tools/move-issue.js";
@@ -47,6 +49,7 @@ import { registerButlerSetModel } from "./tools/butler-set-model.js";
 import { registerButlerSetProfile } from "./tools/butler-set-profile.js";
 import { registerButlerState } from "./tools/butler-state.js";
 import { registerProposeTransition } from "./tools/propose-transition.js";
+import { registerClarifyOrPropose } from "./tools/clarify-or-propose.js";
 import { registerAnalyzeTouchedFiles } from "./tools/analyze-touched-files.js";
 import { registerCheckIssueOverlap } from "./tools/check-issue-overlap.js";
 import {
@@ -68,6 +71,8 @@ const TOOL_REGISTRARS: Record<string, (server: McpServer) => void> = {
   list_issues: registerListIssues,
   get_issue: registerGetIssue,
   create_issue: registerCreateIssue,
+  create_sub_issue: registerCreateSubIssue,
+  attach_artifact: registerAttachArtifact,
   update_issue: registerUpdateIssue,
   delete_issue: registerDeleteIssue,
   move_issue: registerMoveIssue,
@@ -107,6 +112,7 @@ const TOOL_REGISTRARS: Record<string, (server: McpServer) => void> = {
   butler_set_profile: registerButlerSetProfile,
   butler_state: registerButlerState,
   propose_transition: registerProposeTransition,
+  clarify_or_propose: registerClarifyOrPropose,
   analyze_touched_files: registerAnalyzeTouchedFiles,
   check_issue_overlap: registerCheckIssueOverlap,
   list_workflow_templates: registerListWorkflowTemplates,
