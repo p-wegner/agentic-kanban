@@ -2,7 +2,8 @@ import { useMemo, useState } from "react";
 import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
 import { STATUS_COLORS } from "../lib/chartColors";
 
-const ARCHIVE_STATUS_NAMES = new Set(["Done", "Cancelled", "Backlog"]);
+const COMPLETED_STATUS_NAMES = new Set(["Done", "Cancelled"]);
+const HIDDEN_STATUS_NAMES = new Set(["Backlog"]);
 
 const PRIORITY_LANES = [
   {
@@ -124,10 +125,16 @@ interface SwimlaneViewProps {
 
 export function SwimlaneView({ columns, onIssueClick, searchQuery = "" }: SwimlaneViewProps) {
   const [collapsedLanes, setCollapsedLanes] = useState<Set<string>>(new Set());
+  const [showCompleted, setShowCompleted] = useState(false);
 
   const activeColumns = useMemo(
-    () => columns.filter((col) => !ARCHIVE_STATUS_NAMES.has(col.name)),
-    [columns]
+    () =>
+      columns.filter(
+        (col) =>
+          !HIDDEN_STATUS_NAMES.has(col.name) &&
+          (showCompleted || !COMPLETED_STATUS_NAMES.has(col.name))
+      ),
+    [columns, showCompleted]
   );
 
   const filteredColumns = useMemo(() => {
@@ -181,13 +188,44 @@ export function SwimlaneView({ columns, onIssueClick, searchQuery = "" }: Swimla
     });
   }
 
-  if (totalIssues === 0 && !searchQuery) {
+  const completedToggle = (
+    <button
+      onClick={() => setShowCompleted((value) => !value)}
+      className={`ml-auto flex items-center gap-1.5 px-2 h-6 text-xs rounded border transition-colors ${
+        showCompleted
+          ? "bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
+          : "bg-amber-50 dark:bg-amber-950/30 border-amber-300 dark:border-amber-700 text-amber-700 dark:text-amber-400"
+      }`}
+      title={showCompleted ? "Hide completed issues" : "Show completed issues"}
+    >
+      <span className={`w-1.5 h-1.5 rounded-full ${showCompleted ? "bg-green-500" : "bg-gray-400"}`} />
+      Show completed
+    </button>
+  );
+
+  if (totalIssues === 0) {
+    const hasSearch = searchQuery.trim().length > 0;
     return (
-      <div className="flex flex-col items-center justify-center flex-1 gap-3 text-gray-400 dark:text-gray-500">
-        <svg className="w-12 h-12 opacity-25" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2" />
-        </svg>
-        <p className="text-sm">No active issues to display</p>
+      <div className="flex flex-col flex-1 min-h-0">
+        <div className="flex items-center gap-3 px-4 py-2 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-950">
+          <span className="text-xs text-gray-500 dark:text-gray-400">No issues in the current swimlane</span>
+          {completedToggle}
+        </div>
+        <div className="flex flex-col items-center justify-center flex-1 gap-3 px-4 text-center text-gray-500 dark:text-gray-400">
+          <svg className="w-12 h-12 opacity-25" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2" />
+          </svg>
+          <div>
+            <p className="text-sm font-medium text-gray-700 dark:text-gray-200">
+              {hasSearch ? "No issues match this search" : "No issues to show in Swimlane"}
+            </p>
+            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              {showCompleted
+                ? "Try adjusting the search or filters."
+                : "Turn on completed issues to include Done and Cancelled columns."}
+            </p>
+          </div>
+        </div>
       </div>
     );
   }
@@ -195,103 +233,112 @@ export function SwimlaneView({ columns, onIssueClick, searchQuery = "" }: Swimla
   const LANE_HEADER_W = 100;
 
   return (
-    <div className="flex-1 min-h-0 overflow-auto">
-      <div className="min-w-max">
-        {/* Column headers */}
-        <div
-          className="flex items-center sticky top-0 z-10 bg-gray-50 dark:bg-gray-950 border-b border-gray-200 dark:border-gray-700"
-          style={{ paddingLeft: LANE_HEADER_W }}
-        >
-          {filteredColumns.map((col) => {
-            const color = STATUS_COLORS[col.name];
+    <div className="flex flex-col flex-1 min-h-0">
+      <div className="flex items-center gap-3 px-4 py-2 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-950">
+        <span className="text-xs text-gray-500 dark:text-gray-400">
+          {totalIssues} issue{totalIssues !== 1 ? "s" : ""} across {filteredColumns.length} status{filteredColumns.length !== 1 ? "es" : ""}
+        </span>
+        {completedToggle}
+      </div>
+      <div className="flex-1 min-h-0 overflow-auto">
+        <div className="min-w-max">
+          {/* Column headers */}
+          <div
+            className="flex items-center sticky top-0 z-10 bg-gray-50 dark:bg-gray-950 border-b border-gray-200 dark:border-gray-700"
+            style={{ paddingLeft: LANE_HEADER_W }}
+          >
+            {filteredColumns.map((col) => {
+              const color = STATUS_COLORS[col.name];
+              return (
+                <div
+                  key={col.id}
+                  className="flex items-center gap-2 px-3 py-2.5 min-w-[180px] w-[220px] border-l border-gray-200 dark:border-gray-700"
+                >
+                  {color && (
+                    <span
+                      className="w-2 h-2 rounded-full shrink-0"
+                      style={{ backgroundColor: color }}
+                    />
+                  )}
+                  <span className="text-xs font-semibold text-gray-700 dark:text-gray-200 truncate">
+                    {col.name}
+                  </span>
+                  <span className="ml-auto text-[10px] text-gray-400 dark:text-gray-500 font-mono shrink-0">
+                    {col.issues.length}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Priority lanes */}
+          {PRIORITY_LANES.map((lane) => {
+            const count = laneIssueCounts[lane.key] ?? 0;
+            const collapsed = collapsedLanes.has(lane.key);
+
             return (
-              <div
-                key={col.id}
-                className="flex items-center gap-2 px-3 py-2.5 min-w-[180px] w-[220px] border-l border-gray-200 dark:border-gray-700"
-              >
-                {color && (
-                  <span
-                    className="w-2 h-2 rounded-full shrink-0"
-                    style={{ backgroundColor: color }}
-                  />
+              <div key={lane.key} className="flex border-b border-gray-200 dark:border-gray-700 last:border-b-0">
+                {/* Lane header */}
+                <button
+                  onClick={() => toggleLane(lane.key)}
+                  className={`flex items-center gap-2.5 px-3 py-2 sticky left-0 z-[5] self-stretch text-left shrink-0
+                    ${lane.headerBg} border-r ${lane.headerBorder} transition-colors hover:brightness-95`}
+                  style={{ width: LANE_HEADER_W, minWidth: LANE_HEADER_W }}
+                  title={collapsed ? `Expand ${lane.label}` : `Collapse ${lane.label}`}
+                >
+                  <span className={`w-2 h-2 rounded-full shrink-0 ${lane.dot}`} />
+                  <span className={`text-[10px] font-bold uppercase tracking-wider ${lane.headerText}`}>
+                    {lane.label}
+                  </span>
+                  <span className={`ml-auto text-[10px] font-mono ${lane.headerText} opacity-70`}>
+                    {count}
+                  </span>
+                  <svg
+                    className={`w-3 h-3 ${lane.headerText} transition-transform shrink-0 ${collapsed ? "" : "rotate-180"}`}
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                    strokeWidth={2.5}
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                  </svg>
+                </button>
+
+                {/* Cells row */}
+                {!collapsed && (
+                  <div className="flex flex-1">
+                    {filteredColumns.map((col) => {
+                      const issues = issuesByPriorityAndStatus[lane.key]?.[col.id] ?? [];
+                      return (
+                        <div
+                          key={col.id}
+                          className={`min-w-[180px] w-[220px] border-l border-gray-200 dark:border-gray-700 p-2 min-h-[80px] ${lane.cellBg}`}
+                        >
+                          {issues.length === 0 ? (
+                            <div
+                              className="h-full min-h-[64px] rounded-md border border-dashed border-gray-200/70 dark:border-gray-700/70 bg-white/25 dark:bg-gray-950/10"
+                              aria-label={`No ${lane.label.toLowerCase()} issues in ${col.name}`}
+                            />
+                          ) : (
+                            <div className="flex flex-col gap-1.5">
+                              {issues.map((issue) => (
+                                <SwimlaneCard
+                                  key={issue.id}
+                                  issue={issue}
+                                  onClick={onIssueClick}
+                                />
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
                 )}
-                <span className="text-xs font-semibold text-gray-700 dark:text-gray-200 truncate">
-                  {col.name}
-                </span>
-                <span className="ml-auto text-[10px] text-gray-400 dark:text-gray-500 font-mono shrink-0">
-                  {col.issues.length}
-                </span>
               </div>
             );
           })}
         </div>
-
-        {/* Priority lanes */}
-        {PRIORITY_LANES.map((lane) => {
-          const count = laneIssueCounts[lane.key] ?? 0;
-          const collapsed = collapsedLanes.has(lane.key);
-
-          return (
-            <div key={lane.key} className="flex border-b border-gray-200 dark:border-gray-700 last:border-b-0">
-              {/* Lane header */}
-              <button
-                onClick={() => toggleLane(lane.key)}
-                className={`flex items-center gap-2.5 px-3 py-2 sticky left-0 z-[5] self-stretch text-left shrink-0
-                  ${lane.headerBg} border-r ${lane.headerBorder} transition-colors hover:brightness-95`}
-                style={{ width: LANE_HEADER_W, minWidth: LANE_HEADER_W }}
-                title={collapsed ? `Expand ${lane.label}` : `Collapse ${lane.label}`}
-              >
-                <span className={`w-2 h-2 rounded-full shrink-0 ${lane.dot}`} />
-                <span className={`text-[10px] font-bold uppercase tracking-wider ${lane.headerText}`}>
-                  {lane.label}
-                </span>
-                <span className={`ml-auto text-[10px] font-mono ${lane.headerText} opacity-70`}>
-                  {count}
-                </span>
-                <svg
-                  className={`w-3 h-3 ${lane.headerText} transition-transform shrink-0 ${collapsed ? "" : "rotate-180"}`}
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                  strokeWidth={2.5}
-                >
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-                </svg>
-              </button>
-
-              {/* Cells row */}
-              {!collapsed && (
-                <div className="flex flex-1">
-                  {filteredColumns.map((col) => {
-                    const issues = issuesByPriorityAndStatus[lane.key]?.[col.id] ?? [];
-                    return (
-                      <div
-                        key={col.id}
-                        className={`min-w-[180px] w-[220px] border-l border-gray-200 dark:border-gray-700 p-2 min-h-[80px] ${lane.cellBg}`}
-                      >
-                        {issues.length === 0 ? (
-                          <div className="h-full flex items-center justify-center">
-                            <span className="text-[10px] text-gray-300 dark:text-gray-700 select-none">—</span>
-                          </div>
-                        ) : (
-                          <div className="flex flex-col gap-1.5">
-                            {issues.map((issue) => (
-                              <SwimlaneCard
-                                key={issue.id}
-                                issue={issue}
-                                onClick={onIssueClick}
-                              />
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          );
-        })}
       </div>
     </div>
   );
