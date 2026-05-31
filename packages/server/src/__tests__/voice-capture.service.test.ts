@@ -83,6 +83,30 @@ describe("createVoiceCaptureIssue", () => {
     expect(rows[0].statusId).toBe(backlogId);
   });
 
+  it("still creates a ticket from the raw transcript when AI structuring fails", async () => {
+    const { db } = createTestDb();
+    const { projectId, backlogId } = await seedProject(db);
+    const broadcast = vi.fn();
+    vi.mocked(invokeClaudePrompt).mockRejectedValue(new Error("Claude unavailable"));
+
+    const result = await createVoiceCaptureIssue({
+      projectId,
+      transcript: "Fix the voice button because submit is failing",
+    }, db, { broadcast } as any);
+
+    expect(result).toMatchObject({
+      type: "issue",
+      title: "Fix the voice button because submit is failing",
+      description: "Voice captured: Fix the voice button because submit is failing",
+      priority: "medium",
+    });
+    expect(broadcast).toHaveBeenCalledWith(projectId, "issue_created");
+
+    const rows = await db.select().from(schema.issues).where(eq(schema.issues.id, result.issueId));
+    expect(rows).toHaveLength(1);
+    expect(rows[0].statusId).toBe(backlogId);
+  });
+
   it("moves an issue from a voice command without creating a new issue", async () => {
     const { db } = createTestDb();
     const { projectId, backlogId, reviewId } = await seedProject(db);
