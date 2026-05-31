@@ -11,11 +11,15 @@
  * Worktree (other): server 3001+hash, client 5173+hash
  */
 
-import { execFileSync, execSync, spawn } from "node:child_process";
+import { execFileSync, execSync, spawn, spawnSync } from "node:child_process";
 import { createServer } from "node:net";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { classifyProcessExit } from "./dev-supervisor.mjs";
+import {
+  classifyProcessExit,
+  dependencyManifestsChanged,
+  snapshotDependencyManifests,
+} from "./dev-supervisor.mjs";
 import { planPortOwnerKill } from "./dev-port-guard.mjs";
 import { writeProcessAudit } from "./process-audit.mjs";
 
@@ -153,6 +157,31 @@ async function freePort(port, label) {
 
 const MAX_RESTARTS = 5;
 const RESTART_DELAY_MS = 1000;
+let dependencyManifestSnapshot = snapshotDependencyManifests(process.cwd());
+
+function installUpdatedDependencies(label) {
+  console.warn(
+    `[dev] ${label} exited after workspace dependency manifests changed. ` +
+    "Running `pnpm install --frozen-lockfile` before restarting...",
+  );
+  const result = spawnSync("pnpm", ["install", "--frozen-lockfile"], {
+    cwd: process.cwd(),
+    stdio: "inherit",
+    shell: false,
+    windowsHide: true,
+  });
+  if (result.status === 0) {
+    dependencyManifestSnapshot = snapshotDependencyManifests(process.cwd());
+    console.warn(`[dev] Dependency install completed. Restarting ${label}...`);
+    return true;
+  }
+
+  console.error(
+    `[dev] Dependency install failed for ${label} (exit ${result.status ?? result.signal ?? "unknown"}). ` +
+    "Run `pnpm install --frozen-lockfile`, then restart `pnpm dev`.",
+  );
+  return false;
+}
 
 function configurePorts() {
   const { isWorktree, branch } = detectWorktree();
@@ -204,6 +233,14 @@ function spawnProcess(label, cmd, args, opts) {
       const exitType = classifyProcessExit(code, signal);
       if (exitType === "clean") return;
       if (exitType === "fatal") {
+        const currentDependencySnapshot = snapshotDependencyManifests(process.cwd());
+        if (dependencyManifestsChanged(dependencyManifestSnapshot, currentDependencySnapshot)) {
+          if (installUpdatedDependencies(label)) {
+            restarts = 0;
+            setTimeout(start, RESTART_DELAY_MS);
+          }
+          return;
+        }
         console.error(`[dev] ${label} exited with fatal error (code=1) — not retrying`);
         return;
       }
