@@ -79,6 +79,7 @@ export function BoardPage() {
   const [workspaceInitial, setWorkspaceInitial] = useState<{ workspaceId: string; sessionId: string } | null>(null);
   const [workspaceOpenCreate, setWorkspaceOpenCreate] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [createdDateFilter, setCreatedDateFilter] = useState<string | null>(null);
   const [showBlocked, setShowBlocked] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showQuickTasks, setShowQuickTasks] = useState(false);
@@ -123,6 +124,11 @@ export function BoardPage() {
     setViewMode(mode);
     localStorage.setItem("kanban-board-view", mode);
   }, []);
+
+  const handleCreatedDateDrilldown = useCallback((dateKey: string) => {
+    setCreatedDateFilter(dateKey);
+    handleViewModeChange("table");
+  }, [handleViewModeChange]);
 
   const handleColumnResizeStart = useCallback((colId: string, e: React.MouseEvent) => {
     e.preventDefault();
@@ -1249,6 +1255,8 @@ export function BoardPage() {
               onIssueClick={handleIssueClick}
               searchQuery={searchQuery}
               onRefresh={() => refetchBoard()}
+              createdDateFilter={createdDateFilter}
+              onClearCreatedDateFilter={() => setCreatedDateFilter(null)}
             />
           </BoardErrorBoundary>
         )}
@@ -1280,6 +1288,7 @@ export function BoardPage() {
               columns={columns}
               projectId={activeProjectId}
               onIssueClick={handleIssueClick}
+              onCreatedDateClick={handleCreatedDateDrilldown}
             />
           </BoardErrorBoundary>
         )}

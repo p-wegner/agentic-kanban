@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
 import { apiFetch } from "../lib/api.js";
+import { formatDateKeyLong, getLocalDateKey } from "../lib/dateKey.js";
 import { showToast } from "./Toast.js";
 
 interface TableViewProps {
@@ -8,6 +9,8 @@ interface TableViewProps {
   onIssueClick: (issue: IssueWithStatus) => void;
   searchQuery?: string;
   onRefresh?: () => void;
+  createdDateFilter?: string | null;
+  onClearCreatedDateFilter?: () => void;
 }
 
 interface Tag {
@@ -75,7 +78,14 @@ function formatDate(iso: string) {
   return new Date(iso).toLocaleDateString('en-US', { month: "short", day: "numeric", year: "numeric" });
 }
 
-export function TableView({ columns, onIssueClick, searchQuery, onRefresh }: TableViewProps) {
+export function TableView({
+  columns,
+  onIssueClick,
+  searchQuery,
+  onRefresh,
+  createdDateFilter,
+  onClearCreatedDateFilter,
+}: TableViewProps) {
   const [sort, setSort] = useState<{ key: SortKey; dir: SortDir }>({ key: "number", dir: "asc" });
   const [statusFilter, setStatusFilter] = useState<string>("active");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -90,11 +100,17 @@ export function TableView({ columns, onIssueClick, searchQuery, onRefresh }: Tab
   const allIssues = columns.flatMap((col) =>
     col.issues.map((issue) => ({ ...issue, statusName: col.name }))
   );
+  const createdDateLabel = createdDateFilter ? formatDateKeyLong(createdDateFilter) : null;
+
+  useEffect(() => {
+    if (createdDateFilter) setStatusFilter("all");
+  }, [createdDateFilter]);
 
   const q = searchQuery?.toLowerCase() ?? "";
   const filtered = allIssues.filter((issue) => {
     if (statusFilter === "active" && ARCHIVE_STATUSES.has(issue.statusName)) return false;
     if (statusFilter !== "active" && statusFilter !== "all" && issue.statusName !== statusFilter) return false;
+    if (createdDateFilter && getLocalDateKey(issue.createdAt) !== createdDateFilter) return false;
     if (q) return issue.title.toLowerCase().includes(q) || (issue.description ?? "").toLowerCase().includes(q);
     return true;
   });
@@ -247,7 +263,7 @@ export function TableView({ columns, onIssueClick, searchQuery, onRefresh }: Tab
 
   return (
     <div className="flex flex-col flex-1 min-h-0 px-4 pb-4">
-      <div className="flex items-center gap-3 py-2 mb-2">
+      <div className="flex items-center gap-3 py-2 mb-2 flex-wrap">
         <span className="text-xs text-gray-500 dark:text-gray-400">{sorted.length} issue{sorted.length !== 1 ? "s" : ""}</span>
         <select
           value={statusFilter}
@@ -259,6 +275,20 @@ export function TableView({ columns, onIssueClick, searchQuery, onRefresh }: Tab
           <option value="all">All statuses</option>
           {statusNames.map((s) => <option key={s} value={s}>{s}</option>)}
         </select>
+        {createdDateFilter && createdDateLabel && (
+          <div className="inline-flex items-center gap-2 rounded-md border border-brand-200 dark:border-brand-700 bg-brand-50 dark:bg-brand-900/30 px-2 py-1 text-xs text-brand-700 dark:text-brand-200">
+            <span>Created {createdDateLabel}</span>
+            <button
+              type="button"
+              onClick={onClearCreatedDateFilter}
+              className="rounded px-1 text-brand-500 hover:bg-brand-100 hover:text-brand-800 dark:text-brand-300 dark:hover:bg-brand-900 dark:hover:text-brand-100"
+              aria-label="Clear created date filter"
+              title="Clear created date filter"
+            >
+              x
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Bulk action bar */}
