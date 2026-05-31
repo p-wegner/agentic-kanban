@@ -58,6 +58,42 @@ export interface ProjectResponse {
   updatedAt: string;
 }
 
+export interface ProjectStatsResponse {
+  commitCount: number;
+  recentCommits: { hash: string; message: string; date: string }[];
+  issueCounts: Record<string, number>;
+  detectedBranch: string | null;
+  codeMetrics: {
+    generatedAt: string;
+    productionLoc: number;
+    testLoc: number;
+    totalLoc: number;
+    testRatio: number;
+    productionFiles: number;
+    testFiles: number;
+    sourceFilesScanned: number;
+  };
+  history: {
+    weeks: Array<{
+      week: string;
+      commits: number;
+      insertions: number;
+      deletions: number;
+      net: number;
+      productionNet: number;
+      testNet: number;
+    }>;
+    contributorCount: number;
+    topContributors: Array<{ name: string; commits: number }>;
+  };
+  hotspots: Array<{
+    path: string;
+    additions: number;
+    deletions: number;
+    changes: number;
+  }>;
+}
+
 // ─── Flake Classifier Types ────────────────────────────────────────────────
 
 export type FlakeDecision = "flake" | "suspicious" | "real";
