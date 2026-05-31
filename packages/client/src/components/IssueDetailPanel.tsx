@@ -1109,7 +1109,11 @@ export function IssueDetailPanel({
                       Fix with AI
                     </button>
                   )}
-                  <WorkflowProgress workspaceId={issue.workspaceSummary.main.id} projectId={issue.projectId} />
+                  <WorkflowProgress
+                    workspaceId={issue.workspaceSummary.main.id}
+                    projectId={issue.projectId}
+                    workspaceStatus={issue.workspaceSummary.main.mergedAt ? "merged" : issue.workspaceSummary.main.status}
+                  />
                 </div>
               ) : (
                 <div className="flex items-center gap-2 flex-wrap">
