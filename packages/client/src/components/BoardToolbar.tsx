@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { MonitorPopover, type MonitorStatus } from "./MonitorPopover.js";
+import { useOrchestrator } from "../hooks/useOrchestrator.js";
 import { VoiceInboxButton } from "./VoiceInboxButton.js";
 import { ProjectScriptsMenu } from "./ProjectScriptsMenu.js";
 import { PRIMARY_VIEWS, SECONDARY_VIEWS } from "../lib/viewRegistry.js";
@@ -68,6 +69,8 @@ export function BoardToolbar({
   const moreViewsRef = useRef<HTMLDivElement>(null);
   const boardActivitySummary = formatBoardActivitySummary(activeColumns);
   const hasMonitorWarnings = (monitorStatus?.warnings?.length ?? 0) > 0;
+  // Dogfooding orchestrator loop status + opt-in notifications (hidden when no loop).
+  const { status: orchestrator, notify: orchestratorNotify, setNotify: setOrchestratorNotify } = useOrchestrator(projectId);
 
   // Close the "More" views dropdown on outside click or Escape.
   useEffect(() => {
@@ -171,6 +174,9 @@ export function BoardToolbar({
             nudgeWipLimit={nudgeWipLimit}
             onNudgeWipLimitChange={onNudgeWipLimitChange}
             projectId={projectId}
+            orchestrator={orchestrator}
+            orchestratorNotify={orchestratorNotify}
+            onOrchestratorNotifyChange={setOrchestratorNotify}
           />
         )}
       </div>

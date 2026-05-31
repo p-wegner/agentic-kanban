@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import type { StatusWithIssues } from "@agentic-kanban/shared";
 import { apiFetch } from "../lib/api.js";
+import type { OrchestratorStatus } from "../hooks/useOrchestrator.js";
 
 export type MonitorAction = {
   at: string;
@@ -81,6 +82,9 @@ interface MonitorPopoverProps {
   nudgeWipLimit: string;
   onNudgeWipLimitChange: (v: string) => void;
   projectId: string | null;
+  orchestrator?: OrchestratorStatus | null;
+  orchestratorNotify?: boolean;
+  onOrchestratorNotifyChange?: (v: boolean) => void;
 }
 
 export function MonitorPopover({
@@ -98,6 +102,9 @@ export function MonitorPopover({
   nudgeWipLimit,
   onNudgeWipLimitChange,
   projectId,
+  orchestrator,
+  orchestratorNotify = false,
+  onOrchestratorNotifyChange,
 }: MonitorPopoverProps) {
   const [now, setNow] = useState(Date.now());
   const [running, setRunning] = useState(false);
@@ -211,6 +218,16 @@ export function MonitorPopover({
 
         {/* Scrollable body */}
         <div className="overflow-y-auto flex-1 min-h-0">
+
+          {/* Orchestrator loop (dogfooding board only — hidden when no loop on disk) */}
+          {orchestrator?.available && (
+            <OrchestratorSection
+              orchestrator={orchestrator}
+              notify={orchestratorNotify}
+              onNotifyChange={onOrchestratorNotifyChange}
+              formatAge={formatAge}
+            />
+          )}
 
           {/* Auto-monitor toggle row */}
           <div className="px-3 py-2.5 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between">
@@ -441,6 +458,92 @@ export function MonitorPopover({
       </div>
     </>,
     document.body
+  );
+}
+
+function parseCycleLine(line: string): { age: string | null; text: string } {
+  // Format: "<ISO time> | <action> | <items>". Be lenient.
+  const parts = line.split("|").map((p) => p.trim());
+  if (parts.length >= 2) {
+    const ts = new Date(parts[0]);
+    const age = Number.isNaN(ts.getTime()) ? null : parts[0];
+    return { age, text: parts.slice(1).join(" · ") };
+  }
+  return { age: null, text: line };
+}
+
+export function OrchestratorSection({
+  orchestrator,
+  notify,
+  onNotifyChange,
+  formatAge,
+}: {
+  orchestrator: OrchestratorStatus;
+  notify: boolean;
+  onNotifyChange?: (v: boolean) => void;
+  formatAge: (isoStr: string) => string;
+}) {
+  const cycles = [...orchestrator.recentCycles].reverse(); // newest first
+  const hitCap = orchestrator.lastExit === 124;
+  const dead = !orchestrator.alive;
+
+  return (
+    <div className="px-3 py-2.5 border-b border-gray-100 dark:border-gray-800 bg-indigo-50/40 dark:bg-indigo-950/20">
+      <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center gap-2">
+          <span
+            className={`w-2 h-2 rounded-full shrink-0 ${dead ? "bg-red-500" : orchestrator.phase === "running" ? "bg-green-500 animate-pulse" : "bg-emerald-400"}`}
+            title={dead ? "Loop not running" : orchestrator.phase === "running" ? "Cycle in progress" : "Idle between cycles"}
+          />
+          <span className="text-[10px] font-semibold uppercase tracking-wider text-indigo-700 dark:text-indigo-300">Orchestrator loop</span>
+        </div>
+        {onNotifyChange && (
+          <label className="flex items-center gap-1.5 cursor-pointer select-none" title="Desktop notification on noteworthy cycles (merges, flags, loop death)">
+            <span className="text-[10px] text-gray-500 dark:text-gray-400">Notify</span>
+            <button
+              type="button"
+              onClick={() => onNotifyChange(!notify)}
+              className={`relative inline-flex h-4 w-7 shrink-0 items-center rounded-full transition-colors ${notify ? "bg-indigo-500" : "bg-gray-200 dark:bg-gray-600"}`}
+            >
+              <span className={`inline-block h-3 w-3 transform rounded-full bg-white shadow transition-transform ${notify ? "translate-x-3.5" : "translate-x-0.5"}`} />
+            </button>
+          </label>
+        )}
+      </div>
+
+      {/* Status line */}
+      <div className="flex flex-wrap items-center gap-1.5 mb-2 text-[11px]">
+        <span className={`font-medium ${dead ? "text-red-600 dark:text-red-400" : "text-gray-700 dark:text-gray-300"}`}>
+          {dead ? "Not running" : orchestrator.phase === "running" ? `Cycle ${orchestrator.iteration ?? "?"} running` : `Idle (after cycle ${orchestrator.iteration ?? "?"})`}
+        </span>
+        {orchestrator.lastLogAt && (
+          <span className="text-gray-400 dark:text-gray-500 font-mono text-[10px]">· {formatAge(orchestrator.lastLogAt)}</span>
+        )}
+        {hitCap && (
+          <span className="px-1.5 py-0.5 rounded-full bg-amber-50 dark:bg-amber-950 text-amber-700 dark:text-amber-300 text-[10px] font-medium" title="Last cycle hit the 30-minute cap (usually babysitting a long merge)">hit 30m cap</span>
+        )}
+      </div>
+
+      {/* Recent cycles (from state.md) */}
+      {cycles.length === 0 ? (
+        <div className="text-gray-400 dark:text-gray-500 text-[11px]">No cycles recorded yet</div>
+      ) : (
+        <div className="space-y-1">
+          {cycles.map((line, i) => {
+            const { age, text } = parseCycleLine(line);
+            return (
+              <div key={i} className="flex items-start gap-2">
+                <span className="mt-1.5 h-1 w-1 rounded-full bg-indigo-400 shrink-0" />
+                <div className="min-w-0 flex-1">
+                  <div className="text-gray-700 dark:text-gray-300 text-[11px] leading-snug line-clamp-2">{text}</div>
+                  {age && <div className="text-gray-400 dark:text-gray-500 text-[10px] font-mono">{formatAge(age)}</div>}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
   );
 }
 
