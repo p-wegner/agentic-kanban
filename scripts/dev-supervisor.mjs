@@ -71,3 +71,22 @@ export function dependencyManifestsChanged(before, after) {
   }
   return false;
 }
+
+export function createDependencyRecoveryState(initialSnapshot) {
+  let snapshot = initialSnapshot;
+  let generation = 0;
+
+  return {
+    get snapshot() {
+      return snapshot;
+    },
+    get generation() {
+      return generation;
+    },
+    markRecovered(nextSnapshot) {
+      snapshot = nextSnapshot;
+      generation++;
+      return generation;
+    },
+  };
+}

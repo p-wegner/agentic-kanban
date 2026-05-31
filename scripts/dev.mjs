@@ -17,6 +17,7 @@ import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import {
   classifyProcessExit,
+  createDependencyRecoveryState,
   dependencyManifestsChanged,
   snapshotDependencyManifests,
 } from "./dev-supervisor.mjs";
@@ -157,7 +158,7 @@ async function freePort(port, label) {
 
 const MAX_RESTARTS = 5;
 const RESTART_DELAY_MS = 1000;
-let dependencyManifestSnapshot = snapshotDependencyManifests(process.cwd());
+const dependencyRecovery = createDependencyRecoveryState(snapshotDependencyManifests(process.cwd()));
 
 function installUpdatedDependencies(label) {
   console.warn(
@@ -171,7 +172,7 @@ function installUpdatedDependencies(label) {
     windowsHide: true,
   });
   if (result.status === 0) {
-    dependencyManifestSnapshot = snapshotDependencyManifests(process.cwd());
+    dependencyRecovery.markRecovered(snapshotDependencyManifests(process.cwd()));
     console.warn(`[dev] Dependency install completed. Restarting ${label}...`);
     return true;
   }
@@ -225,20 +226,28 @@ function configurePorts() {
 
 function spawnProcess(label, cmd, args, opts) {
   let restarts = 0;
+  let observedDependencyRecoveryGeneration = dependencyRecovery.generation;
 
   function start() {
     const proc = spawn(cmd, args, { ...opts, stdio: "inherit", env: process.env });
+    observedDependencyRecoveryGeneration = dependencyRecovery.generation;
 
     proc.on("exit", (code, signal) => {
       const exitType = classifyProcessExit(code, signal);
       if (exitType === "clean") return;
       if (exitType === "fatal") {
         const currentDependencySnapshot = snapshotDependencyManifests(process.cwd());
-        if (dependencyManifestsChanged(dependencyManifestSnapshot, currentDependencySnapshot)) {
+        if (dependencyManifestsChanged(dependencyRecovery.snapshot, currentDependencySnapshot)) {
           if (installUpdatedDependencies(label)) {
             restarts = 0;
             setTimeout(start, RESTART_DELAY_MS);
           }
+          return;
+        }
+        if (observedDependencyRecoveryGeneration < dependencyRecovery.generation) {
+          restarts = 0;
+          console.warn(`[dev] ${label} exited during dependency recovery. Restarting ${label}...`);
+          setTimeout(start, RESTART_DELAY_MS);
           return;
         }
         console.error(`[dev] ${label} exited with fatal error (code=1) — not retrying`);
