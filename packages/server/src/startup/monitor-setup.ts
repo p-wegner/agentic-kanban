@@ -38,13 +38,27 @@ interface MonitorSetupDeps {
   serverPort: number;
 }
 
-export function setupMonitorRoutes(app: Hono, monitorState: MonitorState, runMonitorCycle: (force?: boolean) => Promise<void>, _syncMonitorState: () => Promise<void>) {
+export function setupMonitorRoutes(app: Hono, monitorState: MonitorState, runMonitorCycle: (force?: boolean) => Promise<void>, _syncMonitorState: () => Promise<void>, runResourceSweep?: (force?: boolean) => Promise<BoardMonitorResourceSnapshot | null>) {
   app.post("/api/internal/monitor-run", async (c) => {
     if (monitorState.timer) clearTimeout(monitorState.timer);
     monitorState.timer = setTimeout(() => {}, 0);
     monitorState.nextRunAt = null;
     runMonitorCycle(true).catch(() => {});
     return c.json({ triggered: true });
+  });
+  // Force a resource sweep now (reap orphaned worktree dev servers), regardless of
+  // whether auto_monitor is enabled. Lets an external orchestrator loop or a user
+  // reclaim resources on demand.
+  app.post("/api/internal/resource-sweep", async (c) => {
+    if (!runResourceSweep) return c.json({ error: "resource sweep unavailable" }, 503);
+    const snapshot = await runResourceSweep(true);
+    if (!snapshot) return c.json({ cleaned: 0, kept: 0, listeners: 0 });
+    return c.json({
+      cleaned: snapshot.cleaned.filter((d) => d.action === "cleaned").length,
+      cleanupFailed: snapshot.cleaned.filter((d) => d.action === "cleanup_failed").length,
+      kept: snapshot.kept.length,
+      listeners: snapshot.listeners.length,
+    });
   });
   app.get("/api/internal/monitor-status", async (c) => {
     const prefRows = await db.select().from(preferences);
@@ -162,7 +176,34 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort }: 
     }
   }
 
+  // Resource hygiene runs INDEPENDENT of board orchestration: even when auto_monitor
+  // is off (e.g. an external monitor loop drives the board), leftover worktree dev
+  // servers must still be reaped. When auto_monitor is on, its own cycle already
+  // sweeps, so this standalone pass steps aside to avoid double work.
+  async function runStandaloneResourceSweep(force = false): Promise<BoardMonitorResourceSnapshot | null> {
+    try {
+      if (!force) {
+        const prefRows = await db.select().from(preferences).catch(() => []);
+        const prefMap = new Map(prefRows.map((r: { key: string; value: string }) => [r.key, r.value]));
+        if (prefMap.get("auto_monitor") === "true") return null;
+      }
+      const snapshot = await snapshotAndCleanStaleDevProcesses(db);
+      monitorState.lastResourceSnapshot = snapshot;
+      const cleaned = snapshot.cleaned.filter((d) => d.action === "cleaned").length;
+      if (cleaned > 0) console.log(`[resource-sweep] reaped ${cleaned} stale worktree dev tree(s)`);
+      return snapshot;
+    } catch (err) {
+      console.warn("[resource-sweep] failed:", err instanceof Error ? err.message : String(err));
+      return null;
+    }
+  }
+
   setInterval(syncMonitorState, 30_000);
   syncMonitorState().catch(() => {});
-  return { setupMonitorRoutes: (app: Hono) => setupMonitorRoutes(app, monitorState, runMonitorCycle, syncMonitorState), monitorState };
+  setInterval(() => void runStandaloneResourceSweep(), 5 * 60_000);
+  runStandaloneResourceSweep().catch(() => {});
+  return {
+    setupMonitorRoutes: (app: Hono) => setupMonitorRoutes(app, monitorState, runMonitorCycle, syncMonitorState, runStandaloneResourceSweep),
+    monitorState,
+  };
 }
