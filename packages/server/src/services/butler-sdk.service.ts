@@ -101,6 +101,7 @@ interface ButlerSession {
   sessionId?: string;
   abort: AbortController;
   process?: ChildProcess;
+  interrupted?: boolean;
   busy: boolean;
   contextTokens: number;
   transcript: ButlerTurn[];
@@ -233,6 +234,7 @@ export async function setButlerModel(projectId: string, model: string, butlerId:
 export async function interruptButler(projectId: string, butlerId: string = "default"): Promise<boolean> {
   const s = sessions.get(butlerSessionKey(projectId, butlerId));
   if (s?.backend === "codex") {
+    s.interrupted = true;
     if (s.process?.pid) s.process.kill();
     s.process = undefined;
     s.busy = false;
@@ -388,6 +390,7 @@ function runProviderTurn(session: ButlerSession, content: string): void {
     stdio: ["pipe", "pipe", "pipe"],
   });
   session.process = proc;
+  session.interrupted = false;
 
   let assistantText = "";
   let finished = false;
@@ -443,6 +446,10 @@ function runProviderTurn(session: ButlerSession, content: string): void {
     finish(true, err.message);
   });
   proc.on("exit", (code) => {
+    if (session.interrupted) {
+      session.interrupted = false;
+      return;
+    }
     if (buffer.trim()) {
       const evt = provider.parseStreamEvent(buffer.trim());
       if (evt?.assistantText) {
