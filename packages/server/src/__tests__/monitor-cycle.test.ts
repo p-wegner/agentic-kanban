@@ -207,6 +207,32 @@ describe("processWorkspaceCandidates — auto_merge_in_review (not-ready In Revi
     expect(vi.mocked(deps.logMonitorAction)).not.toHaveBeenCalled();
   });
 
+  it("still repairs a zero-diff reviewing ghost workspace with no workingDir", async () => {
+    vi.mocked(db.select).mockReset();
+    vi.mocked(db.select)
+      .mockReturnValueOnce(makeSelectChain([{ id: "sess-1", status: "stopped", startedAt: new Date().toISOString() }]) as ReturnType<typeof db.select>)
+      .mockReturnValueOnce(makeSelectChain([{ count: 1 }]) as ReturnType<typeof db.select>)
+      .mockReturnValueOnce(makeSelectChain([{ id: "status-in-progress" }]) as ReturnType<typeof db.select>);
+    vi.mocked(fetch).mockResolvedValue({ ok: true } as Response);
+
+    const deps = { ...makeDeps(), autoMergeEnabled: true, autoMergeInReview: true };
+    const candidate: WorkspaceCandidate = {
+      ...baseCandidate,
+      wsStatus: "reviewing",
+      workingDir: null,
+      readyForMerge: false,
+      diffStatCacheFilesChanged: 0,
+      diffStatCacheInsertions: 0,
+      diffStatCacheDeletions: 0,
+    };
+    const stats = await processWorkspaceCandidates([candidate], deps);
+
+    expect(stats.merged).toBe(0);
+    expect(stats.relaunched).toBe(0);
+    expect(vi.mocked(fetch)).toHaveBeenCalledWith(expect.stringContaining("/api/workspaces/ws-1"), { method: "DELETE" });
+    expect(vi.mocked(deps.logMonitorAction)).toHaveBeenCalledWith(expect.anything(), "mark_idle", "ws-1", "issue-1");
+  });
+
   it("merges an idle In-Review workspace with readyForMerge=false when auto_merge_in_review is on", async () => {
     vi.mocked(fetch).mockResolvedValueOnce({ ok: true } as Response);
 

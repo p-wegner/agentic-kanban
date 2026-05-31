@@ -77,6 +77,8 @@ export async function processWorkspaceCandidates(candidates: WorkspaceCandidate[
   };
   const isZeroDiffInReviewAwaiting = (ws: WorkspaceCandidate) =>
     ws.issueStatusName === "In Review"
+    && !ws.isDirect
+    && !!ws.workingDir
     && !ws.readyForMerge
     && ws.diffStatCacheFilesChanged === 0
     && (ws.diffStatCacheInsertions ?? 0) === 0
