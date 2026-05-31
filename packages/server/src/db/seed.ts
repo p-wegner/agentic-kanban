@@ -3,6 +3,7 @@ import type { Database } from "./index.js";
 import { tags, agentSkills } from "@agentic-kanban/shared/schema";
 import { randomUUID } from "node:crypto";
 import { eq, sql } from "drizzle-orm";
+import { BUILTIN_SKILLS } from "../builtin-skills.js";
 
 /** Built-in tags that must always exist and cannot be deleted or renamed. */
 export const BUILTIN_TAGS = [
@@ -650,6 +651,15 @@ Be helpful and well-organized; lead with the answer and avoid unnecessary preamb
       await database.update(agentSkills)
         .set({ prompt: butlerDefault.prompt, description: butlerDefault.description, updatedAt: now })
         .where(sql`${agentSkills.name} = 'butler' AND ${agentSkills.projectId} IS NULL AND ${agentSkills.isBuiltin} = 1`);
+    }
+
+    // Spec-phase prompts are active workflow gates, so keep them current for
+    // existing installs as the SDD workflow evolves. Project-scoped overrides
+    // are untouched.
+    for (const specSkill of BUILTIN_SKILLS.filter((s) => ["spec-requirements", "spec-design", "spec-tasks"].includes(s.name))) {
+      await database.update(agentSkills)
+        .set({ prompt: specSkill.prompt, description: specSkill.description, updatedAt: now })
+        .where(sql`${agentSkills.name} = ${specSkill.name} AND ${agentSkills.projectId} IS NULL AND ${agentSkills.isBuiltin} = 1`);
     }
   }
 

@@ -1,3 +1,12 @@
+const SPEC_PHASE_CONSTITUTION_GATE = `## Constitution Gate
+
+Before drafting or revising this phase artifact, load the project's constitution:
+- Read the repo-root \`CLAUDE.md\`.
+- Treat its "Scope Constraints" and project-specific rules as binding.
+- If package-local \`CLAUDE.md\` files are relevant to the area being planned, read and apply those too.
+
+Every generated phase artifact must include a short \`## Constitution Alignment\` section that cites \`CLAUDE.md\` and states how the proposal respects the project's scope discipline and relevant rules. If the requested work conflicts with the constitution, stop and ask a clarifying question instead of designing around it.`;
+
 export const BUILTIN_SKILLS = [
   {
     name: "board-navigator",
@@ -411,9 +420,11 @@ Set priority to high and describe the blocker in the issue description.
 
 Goal: help the human and agent converge on what should be built before any design or implementation work starts.
 
+${SPEC_PHASE_CONSTITUTION_GATE}
+
 Work interactively:
 1. Read the issue title and description, plus any existing artifacts or linked child issues.
-2. Draft a concise spec with: problem, goals, non-goals, user scenarios, functional requirements, acceptance criteria, constraints, and open questions.
+2. Draft a concise spec with: problem, goals, non-goals, user scenarios, functional requirements, acceptance criteria, constraints, constitution alignment, and open questions.
 3. When requirements are ambiguous, call \`clarify_or_propose\` with \`action: "clarify"\` and 1-3 structured questions. Prefer a small number of high-signal questions over a long questionnaire, then stop for the interactive UI.
 4. Persist the current phase artifact with \`attach_artifact\` using \`type: "text"\`, \`mimeType: "text/markdown"\`, and \`caption: "phase-artifact:specify"\`.
 5. Incorporate the user's answers and revise the spec.
@@ -432,9 +443,11 @@ Gate:
 
 Goal: turn the accepted spec into a technical design that an implementation agent can execute without rediscovering architecture.
 
+${SPEC_PHASE_CONSTITUTION_GATE}
+
 Work interactively:
 1. Read the accepted spec, issue context, and relevant code or docs.
-2. Produce a design covering architecture, data model changes, API contracts, UI behavior, workflow changes, persistence, tests, migration/backfill needs, and rollout risks.
+2. Produce a design covering architecture, data model changes, API contracts, UI behavior, workflow changes, persistence, tests, migration/backfill needs, rollout risks, and constitution alignment.
 3. Identify tradeoffs and call out decisions that need human approval. Use \`clarify_or_propose\` with \`action: "clarify"\` for structured questions that should surface in the interactive UI.
 4. Persist the current phase artifact with \`attach_artifact\` using \`type: "text"\`, \`mimeType: "text/markdown"\`, and \`caption: "phase-artifact:design"\`.
 5. Revise the design after user feedback.
@@ -453,14 +466,17 @@ Gate:
 
 Goal: convert the accepted design into concrete, dependency-aware work the board can execute.
 
+${SPEC_PHASE_CONSTITUTION_GATE}
+
 Work interactively:
 1. Read the accepted spec and design.
 2. Break the work into small implementable tasks with clear acceptance criteria and likely files or areas.
 3. Make the approved output parseable: use markdown task checkboxes with stable task IDs, e.g. "- [ ] T001 [P] Implement parser - depends on: T000". Group tasks under "## Wave 1", "## Wave 2", etc. Tasks in the same wave must be safe to run concurrently; later waves depend on earlier waves unless explicit "depends on:" IDs say otherwise.
-4. Persist the tasks artifact with \`attach_artifact\` using \`type: "text"\`, \`mimeType: "text/markdown"\`, and \`caption: "phase-artifact:tasks"\`.
-5. When the human approves the task breakdown, create real board children by calling \`create_sub_issue\` once per task. Pass the current issue ID as \`parentIssueId\` and include acceptance criteria in each child description.
-6. After creating children, run analyze_dependencies for each child issue so inferred depends_on edges keep blocked children from launching while independent children remain unblocked.
-7. Do not implement code in this phase.
+4. Include a concise \`## Constitution Alignment\` section before the task waves that cites \`CLAUDE.md\` and explains how the task split avoids scope creep.
+5. Persist the tasks artifact with \`attach_artifact\` using \`type: "text"\`, \`mimeType: "text/markdown"\`, and \`caption: "phase-artifact:tasks"\`.
+6. When the human approves the task breakdown, create real board children by calling \`create_sub_issue\` once per task. Pass the current issue ID as \`parentIssueId\` and include acceptance criteria in each child description.
+7. After creating children, run analyze_dependencies for each child issue so inferred depends_on edges keep blocked children from launching while independent children remain unblocked.
+8. Do not implement code in this phase.
 
 Gate:
 - Stop when the task breakdown is ready for approval, child issues have been created, and dependency analysis has run.

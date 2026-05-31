@@ -60,6 +60,8 @@ function artifactTitle(phaseName: string): string {
 function assistantSeed(issue: IssueWithStatus, phaseName: string, artifact: string): string {
   return [
     `We are refining the ${phaseName} artifact for #${issue.issueNumber ?? "?"} ${issue.title}.`,
+    "Before suggesting changes, load the project constitution from CLAUDE.md and honor its Scope Constraints.",
+    "Any rewritten artifact must include a short Constitution Alignment section that cites CLAUDE.md.",
     "Keep the phase gate human-controlled. Do not advance the workflow.",
     "When you suggest artifact changes, return concise markdown the user can apply.",
     "",
@@ -330,6 +332,9 @@ export function SpecPhasePanel({
             </h4>
             <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
               Artifact: {artifactTitle(phaseName)}
+            </p>
+            <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+              Constitution: repo-root CLAUDE.md, including Scope Constraints
             </p>
           </div>
           <button

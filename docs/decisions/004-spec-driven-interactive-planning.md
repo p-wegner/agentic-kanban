@@ -30,7 +30,7 @@ The standalone tools bolt the whole pipeline onto plain markdown files because t
 | Task list → work | Sub-issues (`parent_of`/`child_of`) + `create_issues_batch` + `analyze-dependencies` |
 | Phase prompts | Agent skills → `.claude/skills/<name>/SKILL.md` (OpenSpec literally ships *as* `.claude/skills/`) |
 | Spec artifacts | `issueArtifacts` table (text/link/image) |
-| Constitution | per-worktree `CLAUDE.md` + Scope Constraints |
+| Constitution | repo-root `CLAUDE.md` + Scope Constraints, with package-local `CLAUDE.md` files applied when relevant |
 | Clarify / interview | the Butler (per-project warm Agent SDK session) |
 
 The gap is **not** runtime. It is (a) the upstream artifact pipeline (constitution → spec → design → tasks), and (b) the **interactive** planning experience.
@@ -57,7 +57,7 @@ So the headline of this work is **not** "run spec/plan/tasks agents headlessly."
 4. **Specs as worktree artifacts + persistence** — phase artifacts live in the worktree (reviewed via the existing diff/merge gate) and persist to `issueArtifacts` so they survive and carry into the implement phase.
 5. **Living-spec layer + Butler context (OpenSpec-style)** — an `openspec/specs/` truth folder, MCP read tools, merged on workspace-merge; gives the Butler persistent project knowledge.
 6. **MCP primitives** — `create_sub_issue`, `attach_artifact`, and a clarify/propose primitive so phase skills have explicit knobs.
-7. **Constitution surface** — promote per-project `CLAUDE.md` to the rules gate the Specify/Plan phases must honor.
+7. **Constitution surface** — promote per-project `CLAUDE.md` to the rules gate the Specify/Plan phases must honor. The board's spec planning panel documents this directly as "Constitution: repo-root CLAUDE.md, including Scope Constraints"; the phase skills must read it and include a `## Constitution Alignment` section in generated specs, designs, and task plans.
 
 ## Risks
 
