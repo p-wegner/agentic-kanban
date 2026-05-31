@@ -15,8 +15,25 @@ interface Template {
   edges?: unknown[];
 }
 
-interface NodeStat { nodeId: string; nodeName: string; nodeType: string; visits: number; avgDwellMs: number | null; dropoff: number }
+interface NodeStat { nodeId: string; templateId: string | null; nodeName: string; nodeType: string; visits: number; avgDwellMs: number | null; dropoff: number }
 interface Analytics { totalWorkspaces: number; nodes: NodeStat[] }
+interface StageWorkspaceVisit {
+  workspaceId: string;
+  workspaceName: string;
+  issueId: string;
+  issueNumber: number | null;
+  issueTitle: string;
+  enteredAt: string;
+  dwellMs: number | null;
+  isCurrent: boolean;
+}
+interface StageWorkspaceDetail {
+  templateId: string;
+  nodeId: string;
+  nodeName: string;
+  nodeType: string;
+  visits: StageWorkspaceVisit[];
+}
 
 function safeFileName(value: string): string {
   const cleaned = value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
@@ -36,11 +53,26 @@ function fmtDwell(ms: number | null): string {
   return `${(m / 60).toFixed(1)}h`;
 }
 
-export function WorkflowsView({ projectId }: { projectId: string }) {
+function fmtTimestamp(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+}
+
+export function WorkflowsView({
+  projectId,
+  onOpenWorkspace,
+}: {
+  projectId: string;
+  onOpenWorkspace?: (workspaceId: string, issueId: string) => void | Promise<void>;
+}) {
   const [templates, setTemplates] = useState<Template[]>([]);
   const [editing, setEditing] = useState<{ templateId: string | null } | null>(null);
   const [tab, setTab] = useState<"templates" | "analytics">("templates");
   const [analytics, setAnalytics] = useState<Analytics | null>(null);
+  const [selectedStage, setSelectedStage] = useState<NodeStat | null>(null);
+  const [stageDetail, setStageDetail] = useState<StageWorkspaceDetail | null>(null);
+  const [stageDetailLoading, setStageDetailLoading] = useState(false);
   const importInputRef = useRef<HTMLInputElement | null>(null);
 
   const load = useCallback(() => {
@@ -53,6 +85,32 @@ export function WorkflowsView({ projectId }: { projectId: string }) {
     if (tab !== "analytics") return;
     apiFetch<Analytics>(`/api/workflows/analytics?projectId=${projectId}`).then(setAnalytics).catch(() => setAnalytics(null));
   }, [tab, projectId]);
+
+  useEffect(() => {
+    if (!selectedStage?.templateId) {
+      setStageDetail(null);
+      return;
+    }
+    let active = true;
+    setStageDetailLoading(true);
+    apiFetch<StageWorkspaceDetail>(
+      `/api/workflows/analytics/${encodeURIComponent(selectedStage.templateId)}/${encodeURIComponent(selectedStage.nodeId)}/workspaces?projectId=${encodeURIComponent(projectId)}`,
+    )
+      .then((detail) => {
+        if (active) setStageDetail(detail);
+      })
+      .catch((err) => {
+        if (!active) return;
+        setStageDetail(null);
+        showToast(err instanceof Error ? err.message : "Failed to load stage visits", "error");
+      })
+      .finally(() => {
+        if (active) setStageDetailLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [selectedStage, projectId]);
 
   async function duplicate(t: Template) {
     try {
@@ -152,7 +210,21 @@ export function WorkflowsView({ projectId }: { projectId: string }) {
               </thead>
               <tbody>
                 {analytics.nodes.map((n) => (
-                  <tr key={n.nodeId} className="border-b border-gray-100 dark:border-gray-800">
+                  <tr
+                    key={n.nodeId}
+                    className={`border-b border-gray-100 dark:border-gray-800 ${n.templateId ? "cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/60" : ""}`}
+                    role={n.templateId ? "button" : undefined}
+                    tabIndex={n.templateId ? 0 : undefined}
+                    title={n.templateId ? "View workspace visits" : undefined}
+                    onClick={() => {
+                      if (n.templateId) setSelectedStage(n);
+                    }}
+                    onKeyDown={(event) => {
+                      if (!n.templateId || (event.key !== "Enter" && event.key !== " ")) return;
+                      event.preventDefault();
+                      setSelectedStage(n);
+                    }}
+                  >
                     <td className="py-1.5 text-gray-800 dark:text-gray-200">{n.nodeName}</td>
                     <td className="text-gray-500 dark:text-gray-400 text-xs">{n.nodeType}</td>
                     <td className="text-right text-gray-700 dark:text-gray-300">{n.visits}</td>
@@ -200,6 +272,67 @@ export function WorkflowsView({ projectId }: { projectId: string }) {
           onClose={() => setEditing(null)}
           onSaved={load}
         />
+      )}
+
+      {selectedStage && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setSelectedStage(null)}>
+          <div className="w-full max-w-4xl max-h-[80vh] overflow-hidden rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center gap-3 border-b border-gray-200 dark:border-gray-700 px-4 py-3">
+              <div>
+                <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">{selectedStage.nodeName}</h3>
+                <p className="text-xs text-gray-500 dark:text-gray-400">{selectedStage.visits} visits · {selectedStage.nodeType}</p>
+              </div>
+              <button
+                onClick={() => setSelectedStage(null)}
+                className="ml-auto rounded px-2 py-1 text-xs text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800"
+              >
+                Close
+              </button>
+            </div>
+            <div className="max-h-[calc(80vh-57px)] overflow-y-auto p-4">
+              {stageDetailLoading ? (
+                <p className="text-sm text-gray-400">Loading stage visits...</p>
+              ) : !stageDetail || stageDetail.visits.length === 0 ? (
+                <p className="text-sm text-gray-400">No workspace visits found for this stage.</p>
+              ) : (
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-gray-200 text-left text-xs text-gray-400 dark:border-gray-700">
+                      <th className="py-1.5">Workspace</th>
+                      <th>Issue</th>
+                      <th>Visited</th>
+                      <th className="text-right">Dwell</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {stageDetail.visits.map((visit, index) => (
+                      <tr key={`${visit.workspaceId}-${visit.enteredAt}-${index}`} className="border-b border-gray-100 dark:border-gray-800">
+                        <td className="py-2">
+                          <button
+                            onClick={() => {
+                              setSelectedStage(null);
+                              void onOpenWorkspace?.(visit.workspaceId, visit.issueId);
+                            }}
+                            className="text-left text-brand-600 hover:text-brand-700 dark:text-brand-400 dark:hover:text-brand-300"
+                          >
+                            {visit.workspaceName}
+                          </button>
+                          {visit.isCurrent && <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">current</span>}
+                        </td>
+                        <td className="text-gray-700 dark:text-gray-300">
+                          <span className="text-gray-400">{visit.issueNumber ? `#${visit.issueNumber} ` : ""}</span>
+                          {visit.issueTitle}
+                        </td>
+                        <td className="text-gray-500 dark:text-gray-400">{fmtTimestamp(visit.enteredAt)}</td>
+                        <td className="text-right text-gray-700 dark:text-gray-300">{fmtDwell(visit.dwellMs)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

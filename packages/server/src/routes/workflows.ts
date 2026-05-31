@@ -8,7 +8,7 @@ import {
   issues,
   workspaces,
 } from "@agentic-kanban/shared/schema";
-import { eq, asc, sql } from "drizzle-orm";
+import { and, eq, asc, sql } from "drizzle-orm";
 import {
   createWorkflowTemplate,
   proposeTransition,
@@ -344,11 +344,11 @@ export function createWorkflowsRoute(database: Database = db, options?: Workflow
       byWorkspace.get(r.workspaceId)!.push(r);
     }
 
-    interface Agg { nodeId: string; nodeName: string; nodeType: string; visits: number; left: number; stuck: number; totalDwellMs: number; dwellSamples: number }
+    interface Agg { nodeId: string; templateId: string | null; nodeName: string; nodeType: string; visits: number; left: number; stuck: number; totalDwellMs: number; dwellSamples: number }
     const agg = new Map<string, Agg>();
-    const ensure = (id: string, name: string, type: string): Agg => {
+    const ensure = (id: string, templateId: string | null, name: string, type: string): Agg => {
       let a = agg.get(id);
-      if (!a) { a = { nodeId: id, nodeName: name, nodeType: type, visits: 0, left: 0, stuck: 0, totalDwellMs: 0, dwellSamples: 0 }; agg.set(id, a); }
+      if (!a) { a = { nodeId: id, templateId, nodeName: name, nodeType: type, visits: 0, left: 0, stuck: 0, totalDwellMs: 0, dwellSamples: 0 }; agg.set(id, a); }
       return a;
     };
 
@@ -356,7 +356,7 @@ export function createWorkflowsRoute(database: Database = db, options?: Workflow
       seq.sort((a, b) => (a.createdAt < b.createdAt ? -1 : 1));
       for (let i = 0; i < seq.length; i++) {
         const cur = seq[i];
-        const a = ensure(cur.toNodeId, cur.nodeName ?? "(deleted)", cur.nodeType ?? "normal");
+        const a = ensure(cur.toNodeId, cur.templateId ?? null, cur.nodeName ?? "(deleted)", cur.nodeType ?? "normal");
         a.visits++;
         const next = seq[i + 1];
         if (next) {
@@ -371,6 +371,7 @@ export function createWorkflowsRoute(database: Database = db, options?: Workflow
 
     const nodes = [...agg.values()].map((a) => ({
       nodeId: a.nodeId,
+      templateId: a.templateId,
       nodeName: a.nodeName,
       nodeType: a.nodeType,
       visits: a.visits,
@@ -379,6 +380,94 @@ export function createWorkflowsRoute(database: Database = db, options?: Workflow
     })).sort((x, y) => y.visits - x.visits);
 
     return c.json({ totalWorkspaces: byWorkspace.size, nodes });
+  });
+
+  // GET /api/workflows/analytics/:templateId/:nodeId/workspaces?projectId=
+  // Lists each workspace visit to a stage, with per-visit dwell computed from
+  // the next workflow transition for that workspace.
+  router.get("/analytics/:templateId/:nodeId/workspaces", async (c) => {
+    const templateId = c.req.param("templateId");
+    const nodeId = c.req.param("nodeId");
+    const projectId = c.req.query("projectId");
+
+    const nodeRows = await database
+      .select({
+        id: workflowNodes.id,
+        name: workflowNodes.name,
+        nodeType: workflowNodes.nodeType,
+      })
+      .from(workflowNodes)
+      .where(and(eq(workflowNodes.id, nodeId), eq(workflowNodes.templateId, templateId)))
+      .limit(1);
+    if (nodeRows.length === 0) return c.json({ error: "Workflow stage not found" }, 404);
+
+    const baseQuery = database
+      .select({
+        workspaceId: workflowTransitions.workspaceId,
+        workspaceName: workspaces.branch,
+        issueId: issues.id,
+        issueNumber: issues.issueNumber,
+        issueTitle: issues.title,
+        toNodeId: workflowTransitions.toNodeId,
+        enteredAt: workflowTransitions.createdAt,
+        currentNodeId: workspaces.currentNodeId,
+      })
+      .from(workflowTransitions)
+      .innerJoin(workspaces, eq(workflowTransitions.workspaceId, workspaces.id))
+      .innerJoin(issues, eq(workspaces.issueId, issues.id));
+
+    const rows = projectId ? await baseQuery.where(eq(issues.projectId, projectId)) : await baseQuery;
+
+    const byWorkspace = new Map<string, typeof rows>();
+    for (const r of rows) {
+      if (!byWorkspace.has(r.workspaceId)) byWorkspace.set(r.workspaceId, [] as any);
+      byWorkspace.get(r.workspaceId)!.push(r);
+    }
+
+    const visits: Array<{
+      workspaceId: string;
+      workspaceName: string;
+      issueId: string;
+      issueNumber: number | null;
+      issueTitle: string;
+      enteredAt: string;
+      dwellMs: number | null;
+      isCurrent: boolean;
+    }> = [];
+
+    for (const seq of byWorkspace.values()) {
+      seq.sort((a, b) => (a.enteredAt < b.enteredAt ? -1 : 1));
+      for (let i = 0; i < seq.length; i++) {
+        const cur = seq[i];
+        if (cur.toNodeId !== nodeId) continue;
+        const next = seq[i + 1];
+        let dwellMs: number | null = null;
+        if (next) {
+          const dwell = new Date(next.enteredAt).getTime() - new Date(cur.enteredAt).getTime();
+          dwellMs = Number.isFinite(dwell) && dwell >= 0 ? dwell : null;
+        }
+        visits.push({
+          workspaceId: cur.workspaceId,
+          workspaceName: cur.workspaceName,
+          issueId: cur.issueId,
+          issueNumber: cur.issueNumber,
+          issueTitle: cur.issueTitle,
+          enteredAt: cur.enteredAt,
+          dwellMs,
+          isCurrent: cur.currentNodeId === nodeId && !next,
+        });
+      }
+    }
+
+    visits.sort((a, b) => (a.enteredAt > b.enteredAt ? -1 : 1));
+
+    return c.json({
+      templateId,
+      nodeId,
+      nodeName: nodeRows[0].name,
+      nodeType: nodeRows[0].nodeType,
+      visits,
+    });
   });
 
   // GET /api/workflows/resolve?issueId= — which template an issue uses (for the create picker default).
