@@ -19,6 +19,19 @@ export const CLAUDE_MODEL_OPTIONS: ReadonlyArray<{ value: string; label: string 
   { value: "haiku", label: "Haiku" },
 ];
 
+/**
+ * Selectable Codex models. Empty means the Codex profile/config default is used.
+ */
+export const CODEX_MODEL_OPTIONS: ReadonlyArray<{ value: string; label: string }> = [
+  { value: "", label: "Profile default" },
+  { value: "gpt-5.5", label: "GPT-5.5" },
+  { value: "gpt-5.4", label: "GPT-5.4" },
+  { value: "gpt-5.4-mini", label: "GPT-5.4 Mini" },
+  { value: "gpt-5.3-codex", label: "GPT-5.3 Codex" },
+  { value: "gpt-5.3-codex-spark", label: "GPT-5.3 Codex Spark" },
+  { value: "gpt-5.2", label: "GPT-5.2" },
+];
+
 export interface CreateProjectRequest {
   name?: string;
   repoPath: string;

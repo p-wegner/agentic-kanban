@@ -65,6 +65,33 @@ describe("Butler provider selection", () => {
     const state = await stateRes.json() as { backend: string; active: boolean };
     expect(state.backend).toBe("codex");
     expect(state.active).toBe(true);
+
+    stopButlerSession(projectId);
+  });
+
+  it("does not apply saved Claude model aliases to a Codex Butler", async () => {
+    const { app, db } = createTestApp();
+    const projectId = await createProject(db);
+    await setPreference("provider", "codex", db);
+    await setPreference("codex_profile", "default", db);
+    await setPreference("butler_definitions", JSON.stringify([{ id: "default", name: "Butler", model: "sonnet" }]), db);
+
+    const stateRes = await app.request(`/api/projects/${projectId}/butler`);
+    expect(stateRes.status).toBe(200);
+    const state = await stateRes.json() as { selectedModel: string };
+    expect(state.selectedModel).toBe("");
+
+    const ensureRes = await app.request(`/api/projects/${projectId}/butler/ensure`, {
+      method: "POST",
+      body: "{}",
+    });
+    expect(ensureRes.status).toBe(201);
+
+    const activeRes = await app.request(`/api/projects/${projectId}/butler`);
+    const active = await activeRes.json() as { model?: string };
+    expect(active.model).toBeUndefined();
+
+    stopButlerSession(projectId);
   });
 
   it("rejects overlapping Codex Butler turns instead of enqueueing ambiguous prompts", () => {
