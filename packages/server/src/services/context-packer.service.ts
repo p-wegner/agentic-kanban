@@ -12,8 +12,9 @@
  */
 
 import { execFile } from "node:child_process";
-import { eq, and, ne, like, or, inArray } from "drizzle-orm";
-import { issues, projectStatuses, workspaces, agentSkills } from "@agentic-kanban/shared/schema";
+import { eq, and, ne, like, or } from "drizzle-orm";
+import { isTerminalStatusView } from "@agentic-kanban/shared";
+import { issues, projectStatuses, workspaces, agentSkills, workflowNodes } from "@agentic-kanban/shared/schema";
 import type { Database } from "../db/index.js";
 import { buildPhaseArtifactsContext } from "./phase-artifacts.service.js";
 
@@ -150,42 +151,27 @@ export async function buildContextPrimer(
   interface IssueSummary { issueNumber: number | null; title: string; description: string | null }
   let priorIssues: IssueSummary[] = [];
   try {
-    // Find "Done" status names for this project
-    const doneStatuses = await database
-      .select({ id: projectStatuses.id })
-      .from(projectStatuses)
-      .where(
-        and(
-          eq(projectStatuses.projectId, projectId),
-          or(
-            like(projectStatuses.name, "%Done%"),
-            like(projectStatuses.name, "%Closed%"),
-            like(projectStatuses.name, "%Merged%"),
-            like(projectStatuses.name, "%Completed%"),
-          ),
-        ),
-      );
+    const candidates = await database
+      .select({
+        issueNumber: issues.issueNumber,
+        title: issues.title,
+        description: issues.description,
+        statusName: projectStatuses.name,
+        currentNodeId: issues.currentNodeId,
+        currentNodeType: workflowNodes.nodeType,
+      })
+      .from(issues)
+      .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
+      .leftJoin(workflowNodes, eq(issues.currentNodeId, workflowNodes.id))
+      .where(and(eq(issues.projectId, projectId), ne(issues.id, issueId)))
+      .limit(100);
 
-    if (doneStatuses.length > 0) {
-      const doneIds = doneStatuses.map((s) => s.id);
-      const candidates = await database
-        .select({ issueNumber: issues.issueNumber, title: issues.title, description: issues.description })
-        .from(issues)
-        .where(
-          and(
-            eq(issues.projectId, projectId),
-            ne(issues.id, issueId),
-            inArray(issues.statusId, doneIds),
-          ),
-        )
-        .limit(100);
-
-      priorIssues = candidates
-        .map((c) => ({ ...c, sim: titleSimilarity(c.title + " " + (c.description ?? ""), keywords) }))
-        .filter((c) => c.sim > 0)
-        .sort((a, b) => b.sim - a.sim)
-        .slice(0, MAX_PRIOR_ISSUES);
-    }
+    priorIssues = candidates
+      .filter((c) => isTerminalStatusView(c))
+      .map((c) => ({ ...c, sim: titleSimilarity(c.title + " " + (c.description ?? ""), keywords) }))
+      .filter((c) => c.sim > 0)
+      .sort((a, b) => b.sim - a.sim)
+      .slice(0, MAX_PRIOR_ISSUES);
   } catch { /* best-effort */ }
 
   // ---- 3. Recent commits touching relevant files ----------------------
@@ -203,46 +189,28 @@ export async function buildContextPrimer(
       .filter((n) => n.length >= 4);
 
     if (fileBaseNames.length > 0) {
-      const openStatuses = await database
-        .select({ id: projectStatuses.id })
-        .from(projectStatuses)
-        .where(
-          and(
-            eq(projectStatuses.projectId, projectId),
-            or(
-              like(projectStatuses.name, "%Todo%"),
-              like(projectStatuses.name, "%In Progress%"),
-              like(projectStatuses.name, "%Review%"),
-              like(projectStatuses.name, "%Open%"),
-              like(projectStatuses.name, "%Backlog%"),
-            ),
-          ),
-        );
+      const nameConditions = fileBaseNames
+        .slice(0, 5)
+        .map((n) => or(like(issues.title, `%${n}%`), like(issues.description, `%${n}%`)));
 
-      if (openStatuses.length > 0) {
-        const openStatusIds = openStatuses.map((s) => s.id);
-        const nameConditions = fileBaseNames
-          .slice(0, 5)
-          .map((n) => or(like(issues.title, `%${n}%`), like(issues.description, `%${n}%`)));
+      const orCondition = nameConditions.length === 1
+        ? nameConditions[0]!
+        : or(...nameConditions as [ReturnType<typeof like>, ...ReturnType<typeof like>[]]);
 
-        const orCondition = nameConditions.length === 1
-          ? nameConditions[0]!
-          : or(...nameConditions as [ReturnType<typeof like>, ...ReturnType<typeof like>[]]);
-
-        const rows = await database
-          .select({ issueNumber: issues.issueNumber, title: issues.title })
-          .from(issues)
-          .where(
-            and(
-              eq(issues.projectId, projectId),
-              ne(issues.id, issueId),
-              inArray(issues.statusId, openStatusIds),
-              orCondition,
-            ),
-          )
-          .limit(5);
-        openNeighbors = rows;
-      }
+      const rows = await database
+        .select({
+          issueNumber: issues.issueNumber,
+          title: issues.title,
+          statusName: projectStatuses.name,
+          currentNodeId: issues.currentNodeId,
+          currentNodeType: workflowNodes.nodeType,
+        })
+        .from(issues)
+        .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
+        .leftJoin(workflowNodes, eq(issues.currentNodeId, workflowNodes.id))
+        .where(and(eq(issues.projectId, projectId), ne(issues.id, issueId), orCondition))
+        .limit(20);
+      openNeighbors = rows.filter((row) => !isTerminalStatusView(row)).slice(0, 5);
     }
   } catch { /* best-effort */ }
 

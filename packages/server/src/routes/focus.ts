@@ -3,7 +3,9 @@ import {
   issueDependencies,
   issues,
   projectStatuses,
+  workflowNodes,
 } from "@agentic-kanban/shared/schema";
+import { isTerminalStatusView } from "@agentic-kanban/shared";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { createRouter } from "../middleware/create-router.js";
@@ -28,9 +30,7 @@ import { createRouter } from "../middleware/create-router.js";
  */
 
 /** Statuses considered "open" / not-yet-done — candidates for focus ranking. */
-const DONE_STATUS_NAMES = new Set(["Done", "Cancelled"]);
 /** A blocker in one of these statuses no longer gates its dependents. */
-const RESOLVED_STATUS_NAMES = DONE_STATUS_NAMES;
 /** Statuses that mean work is already underway — excluded from "ready to start". */
 const IN_FLIGHT_STATUS_NAMES = new Set(["In Progress", "In Review", "AI Reviewed"]);
 
@@ -109,18 +109,22 @@ export function createFocusRoute(database: Database = db) {
         issueNumber: issues.issueNumber,
         title: issues.title,
         statusId: issues.statusId,
+        statusName: projectStatuses.name,
+        currentNodeId: issues.currentNodeId,
+        currentNodeType: workflowNodes.nodeType,
         priority: issues.priority,
         issueType: issues.issueType,
         estimate: issues.estimate,
       })
       .from(issues)
+      .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
+      .leftJoin(workflowNodes, eq(issues.currentNodeId, workflowNodes.id))
       .where(eq(issues.projectId, projectId));
 
     const issueMeta = new Map(issueRows.map((r) => [r.id, r]));
-    const nameOf = (statusId: string) => statusName.get(statusId) ?? "Unknown";
     const isDone = (id: string) => {
       const meta = issueMeta.get(id);
-      return meta ? RESOLVED_STATUS_NAMES.has(nameOf(meta.statusId)) : false;
+      return meta ? isTerminalStatusView(meta) : false;
     };
 
     // Build the blocking graph: blockerId -> set of issues it blocks.
@@ -177,8 +181,8 @@ export function createFocusRoute(database: Database = db) {
     let openCount = 0;
 
     for (const row of issueRows) {
-      const name = nameOf(row.statusId);
-      if (DONE_STATUS_NAMES.has(name)) continue;
+      const name = row.statusName ?? statusName.get(row.statusId) ?? "Unknown";
+      if (isTerminalStatusView(row)) continue;
       openCount += 1;
       if (IN_FLIGHT_STATUS_NAMES.has(name)) {
         inFlightCount += 1;

@@ -11,7 +11,8 @@
  * as structured records, and tracks per-`tool_use_id` "answered" markers in the
  * preferences table so answered questions stop appearing.
  */
-import { sessions, sessionMessages, workspaces, issues, projects, projectStatuses, issueComments } from "@agentic-kanban/shared/schema";
+import { isTerminalStatusView } from "@agentic-kanban/shared";
+import { sessions, sessionMessages, workspaces, issues, projects, projectStatuses, issueComments, workflowNodes } from "@agentic-kanban/shared/schema";
 import { eq, desc } from "drizzle-orm";
 import type { Database } from "../db/index.js";
 import { getPreference, setPreference } from "../repositories/preferences.repository.js";
@@ -246,9 +247,6 @@ export function extractQuestionsFromSession(
   return out;
 }
 
-/** Status names that mean the issue is finished — mirrors the client's ARCHIVE_STATUS_NAMES. */
-export const ARCHIVE_STATUS_NAMES = new Set(["Done", "Cancelled"]);
-
 const STALENESS_LABELS: Record<StalenessReason, string> = {
   "workspace-merged": "stale — workspace merged",
   "issue-done": "stale — issue done",
@@ -265,6 +263,9 @@ export interface StalenessInput {
   readyForMerge: boolean;
   /** Name of the issue's current status column. */
   issueStatusName: string | null;
+  /** Current workflow node, when the issue is workflow-driven. */
+  issueCurrentNodeId?: string | null;
+  issueCurrentNodeType?: string | null;
   /** Start time of the session that produced the question. */
   questionSessionStartedAt: string | null;
   /** Start time of the newest session for the workspace (may equal the question's). */
@@ -285,8 +286,12 @@ export function computeStaleness(input: StalenessInput): Staleness | null {
   if (input.workspaceStatus === "closed" || (input.readyForMerge && input.workspaceClosedAt)) {
     return { reason: "workspace-merged", label: STALENESS_LABELS["workspace-merged"], at: input.workspaceClosedAt };
   }
-  // 2. Issue moved to a terminal status (Done / Cancelled).
-  if (input.issueStatusName && ARCHIVE_STATUS_NAMES.has(input.issueStatusName)) {
+  // 2. Issue moved to a terminal workflow node or legacy terminal status.
+  if (isTerminalStatusView({
+    currentNodeId: input.issueCurrentNodeId,
+    currentNodeType: input.issueCurrentNodeType,
+    statusName: input.issueStatusName,
+  })) {
     return { reason: "issue-done", label: STALENESS_LABELS["issue-done"], at: null };
   }
   // 3. A newer session exists than the one that produced the question.
@@ -334,10 +339,13 @@ export async function listPendingQuestionsForProject(
       issueTitle: issues.title,
       issueDescription: issues.description,
       issueStatusName: projectStatuses.name,
+      issueCurrentNodeId: issues.currentNodeId,
+      issueCurrentNodeType: workflowNodes.nodeType,
     })
     .from(workspaces)
     .innerJoin(issues, eq(workspaces.issueId, issues.id))
     .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
+    .leftJoin(workflowNodes, eq(issues.currentNodeId, workflowNodes.id))
     .where(eq(issues.projectId, projectId));
 
   const results: PendingQuestionSet[] = [];
@@ -392,6 +400,8 @@ export async function listPendingQuestionsForProject(
         workspaceClosedAt: ws.workspaceClosedAt,
         readyForMerge: ws.readyForMerge,
         issueStatusName: ws.issueStatusName,
+        issueCurrentNodeId: ws.issueCurrentNodeId,
+        issueCurrentNodeType: ws.issueCurrentNodeType,
         questionSessionStartedAt: sess.startedAt,
         latestSessionStartedAt: latestSession.startedAt,
         askedAt: sess.endedAt,

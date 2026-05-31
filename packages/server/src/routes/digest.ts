@@ -3,8 +3,10 @@ import {
   issues,
   projectStatuses,
   sessions,
+  workflowNodes,
   workspaces,
 } from "@agentic-kanban/shared/schema";
+import { isTerminalStatusView } from "@agentic-kanban/shared";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { createRouter } from "../middleware/create-router.js";
@@ -30,9 +32,6 @@ function parseRange(value: string | undefined): DigestRange {
   if (value === "24h" || value === "3d" || value === "7d") return value;
   return "24h";
 }
-
-/** Status names treated as "completed" terminal states for the digest. */
-const DONE_STATUS_NAMES = new Set(["Done", "Cancelled"]);
 
 interface DigestIssueRef {
   issueId: string;
@@ -129,12 +128,17 @@ export function createDigestRoute(database: Database = db) {
         issueNumber: issues.issueNumber,
         title: issues.title,
         statusId: issues.statusId,
+        statusName: projectStatuses.name,
+        currentNodeId: issues.currentNodeId,
+        currentNodeType: workflowNodes.nodeType,
         priority: issues.priority,
         issueType: issues.issueType,
         createdAt: issues.createdAt,
         statusChangedAt: issues.statusChangedAt,
       })
       .from(issues)
+      .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
+      .leftJoin(workflowNodes, eq(issues.currentNodeId, workflowNodes.id))
       .where(eq(issues.projectId, projectId));
 
     const created: DigestIssueRef[] = [];
@@ -142,7 +146,7 @@ export function createDigestRoute(database: Database = db) {
     const moved: DigestIssueRef[] = [];
 
     for (const row of issueRows) {
-      const name = statusName.get(row.statusId) ?? "Unknown";
+      const name = row.statusName ?? statusName.get(row.statusId) ?? "Unknown";
       const ref = (at: string): DigestIssueRef => ({
         issueId: row.id,
         issueNumber: row.issueNumber,
@@ -157,7 +161,7 @@ export function createDigestRoute(database: Database = db) {
 
       const changedAt = row.statusChangedAt;
       if (changedAt && changedAt >= sinceIso) {
-        if (DONE_STATUS_NAMES.has(name)) completed.push(ref(changedAt));
+        if (isTerminalStatusView(row)) completed.push(ref(changedAt));
         // Status change that wasn't a brand-new issue in the window = a "move".
         else if (row.createdAt < sinceIso) moved.push(ref(changedAt));
       }
@@ -261,13 +265,12 @@ export function createDigestRoute(database: Database = db) {
       for (const dep of deps) {
         if (dep.type !== "blocked_by" && dep.type !== "depends_on") continue;
         const blocker = issueMeta.get(dep.dependsOnId);
-        const blockerName = blocker ? statusName.get(blocker.statusId) ?? "" : "";
         // Still blocked only if the blocker isn't done/cancelled.
-        if (blocker && DONE_STATUS_NAMES.has(blockerName)) continue;
+        if (blocker && isTerminalStatusView(blocker)) continue;
         const meta = issueMeta.get(dep.issueId);
         if (!meta) continue;
-        const name = statusName.get(meta.statusId) ?? "Unknown";
-        if (DONE_STATUS_NAMES.has(name)) continue;
+        const name = meta.statusName ?? statusName.get(meta.statusId) ?? "Unknown";
+        if (isTerminalStatusView(meta)) continue;
         if (result.some((r) => r.issueId === meta.id)) continue;
         result.push({
           issueId: meta.id,

@@ -1,5 +1,6 @@
-import { issues, preferences, projectStatuses, workspaces } from "@agentic-kanban/shared/schema";
-import { and, eq, inArray, ne, notInArray, or } from "drizzle-orm";
+import { isTerminalStatusView } from "@agentic-kanban/shared";
+import { issues, preferences, projectStatuses, workspaces, workflowNodes } from "@agentic-kanban/shared/schema";
+import { and, eq, inArray, ne, or } from "drizzle-orm";
 import type { Database } from "../db/index.js";
 import type { BoardEvents } from "../services/board-events.js";
 import { createMergeQueueService } from "../services/merge-queue.service.js";
@@ -63,16 +64,18 @@ export function createAutoMergeOrchestrator(deps: {
       .select({
         workspaceId: workspaces.id,
         issueStatusName: projectStatuses.name,
+        issueCurrentNodeId: issues.currentNodeId,
+        issueCurrentNodeType: workflowNodes.nodeType,
         readyForMerge: workspaces.readyForMerge,
       })
       .from(workspaces)
       .innerJoin(issues, eq(workspaces.issueId, issues.id))
       .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
+      .leftJoin(workflowNodes, eq(issues.currentNodeId, workflowNodes.id))
       .where(and(
         ne(workspaces.status, "closed"),
         eq(workspaces.isDirect, false),
         eq(workspaces.status, "idle"),
-        notInArray(projectStatuses.name, ["Done", "Cancelled"]),
         or(
           eq(workspaces.readyForMerge, true),
           inArray(projectStatuses.name, [...statusNames]),
@@ -80,6 +83,11 @@ export function createAutoMergeOrchestrator(deps: {
       ));
 
     return rows
+      .filter((row) => !isTerminalStatusView({
+        currentNodeId: row.issueCurrentNodeId,
+        currentNodeType: row.issueCurrentNodeType,
+        statusName: row.issueStatusName,
+      }))
       .filter((row) => row.readyForMerge || row.issueStatusName === "AI Reviewed" || autoMergeInReview)
       .map((row) => row.workspaceId);
   }

@@ -1,3 +1,4 @@
+import { isTerminalStatusIdView } from "@agentic-kanban/shared";
 import { issueDependencies, issues, projectStatuses, workflowNodes, workspaces } from "@agentic-kanban/shared/schema";
 import { eq, sql, inArray } from "drizzle-orm";
 import { db } from "../db/index.js";
@@ -72,27 +73,16 @@ export async function runAutoStart(prefMap: Map<string, string>, { serverPort, b
       if (deps.length > 0) {
         const blockerIds = deps.map((d) => d.dependsOnId);
         const blockerIssues = await db
-          .select({ statusId: issues.statusId, currentNodeId: issues.currentNodeId })
+          .select({
+            statusId: issues.statusId,
+            currentNodeId: issues.currentNodeId,
+            currentNodeType: workflowNodes.nodeType,
+          })
           .from(issues)
+          .leftJoin(workflowNodes, eq(issues.currentNodeId, workflowNodes.id))
           .where(inArray(issues.id, blockerIds));
 
-        // Fetch node types for blockers that have a currentNodeId
-        const nodeIds = blockerIssues.map((b) => b.currentNodeId).filter(Boolean) as string[];
-        const nodeTypeMap = new Map<string, string>();
-        if (nodeIds.length > 0) {
-          const nodes = await db
-            .select({ id: workflowNodes.id, nodeType: workflowNodes.nodeType })
-            .from(workflowNodes)
-            .where(inArray(workflowNodes.id, nodeIds));
-          for (const n of nodes) nodeTypeMap.set(n.id, n.nodeType);
-        }
-
-        const allResolved = blockerIssues.every((b) => {
-          // Resolved if on an 'end' node (workflow-driven terminal)
-          if (b.currentNodeId && nodeTypeMap.get(b.currentNodeId) === "end") return true;
-          // Fallback: check legacy Done/Cancelled status names
-          return b.statusId && doneStatusIds.has(b.statusId);
-        });
+        const allResolved = blockerIssues.every((b) => isTerminalStatusIdView(b, doneStatusIds));
         if (!allResolved) continue;
       }
 

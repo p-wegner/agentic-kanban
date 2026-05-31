@@ -151,6 +151,19 @@ describe("computeStaleness", () => {
     expect(computeStaleness(freshInput({ issueStatusName: "Cancelled" }))?.reason).toBe("issue-done");
   });
 
+  it("uses workflow end node type before the derived status column", () => {
+    expect(computeStaleness(freshInput({
+      issueStatusName: "In Progress",
+      issueCurrentNodeId: "node-done",
+      issueCurrentNodeType: "end",
+    }))?.reason).toBe("issue-done");
+    expect(computeStaleness(freshInput({
+      issueStatusName: "Done",
+      issueCurrentNodeId: "node-implement",
+      issueCurrentNodeType: "normal",
+    }))).toBe(null);
+  });
+
   it("flags a question superseded by a newer session", () => {
     const s = computeStaleness(freshInput({
       questionSessionStartedAt: "2026-05-28T10:00:00.000Z",
