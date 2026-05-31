@@ -23,11 +23,13 @@ function classify(
   listeners: PortListener[],
   activeWorkspaces: ActiveWorkspaceResource[] = [],
   protectedPorts = new Set<number>([3001, 5173]),
+  cleanupScopePaths = ["C:/repo", "C:/andrena/.worktrees"],
 ) {
   return classifyStaleDevProcessTrees({
     processes,
     listeners,
     activeWorkspaces,
+    cleanupScopePaths,
     protectedPorts,
     protectedPidSet: new Set<number>(),
     now,
@@ -115,6 +117,20 @@ describe("classifyStaleDevProcessTrees", () => {
       rootPid: 300,
       listenerPorts: [5555],
       reason: "listener-port:5555",
+    });
+  });
+
+  it("keeps an unrelated dev tree outside the board cleanup scope", () => {
+    const snapshot = classify([
+      proc(350, 1, "pnpm dev", "pnpm.cmd"),
+      proc(351, 350, "node C:/unrelated-app/scripts/dev.mjs"),
+      proc(352, 351, "node C:/unrelated-app/packages/client/node_modules/vite/bin/vite.js"),
+    ], [], [], new Set([3001, 5173]), ["C:/repo"]);
+
+    expect(snapshot.cleaned).toHaveLength(0);
+    expect(snapshot.kept[0]).toMatchObject({
+      rootPid: 350,
+      reason: "outside-cleanup-scope",
     });
   });
 
