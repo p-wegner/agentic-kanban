@@ -663,6 +663,59 @@ export function BoardPage() {
     }
   }
 
+  function moveIssueLocally(issue: IssueWithStatus, targetStatus: StatusWithIssues) {
+    const changedAt = new Date().toISOString();
+    setColumns((prev) => {
+      let foundIssue: IssueWithStatus | undefined;
+      const withoutIssue = prev.map((col) => {
+        const remaining = col.issues.filter((item) => {
+          if (item.id === issue.id) {
+            foundIssue = item;
+            return false;
+          }
+          return true;
+        });
+        return remaining.length === col.issues.length ? col : { ...col, issues: remaining };
+      });
+      const sourceIssue = foundIssue ?? issue;
+      const next = withoutIssue.map((col) => {
+        if (col.id !== targetStatus.id) return col;
+        const nextSortOrder = col.issues.length > 0
+          ? Math.max(...col.issues.map((item) => item.sortOrder)) + 100
+          : 0;
+        return {
+          ...col,
+          issues: [
+            ...col.issues,
+            {
+              ...sourceIssue,
+              statusId: targetStatus.id,
+              statusName: targetStatus.name,
+              sortOrder: nextSortOrder,
+              updatedAt: changedAt,
+              statusChangedAt: changedAt,
+            },
+          ],
+        };
+      });
+      columnsRef.current = next;
+      return next;
+    });
+  }
+
+  async function handlePromoteBacklogIssue(issue: IssueWithStatus, targetStatus: StatusWithIssues) {
+    moveIssueLocally(issue, targetStatus);
+    try {
+      await apiFetch(`/api/issues/${issue.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ statusId: targetStatus.id }),
+      });
+    } catch (err) {
+      await refetchBoard();
+      throw err;
+    }
+  }
+
   function handleIssueClick(issue: IssueWithStatus) {
     setSelectedIssue(issue);
   }
@@ -1407,7 +1460,7 @@ export function BoardPage() {
               onStartWorkspace={handleStartWorkspace}
               onDragStart={handleBoardDragStart}
               onDrop={handleDrop}
-              onMoved={() => refetchBoard()}
+              onPromoteToTodo={handlePromoteBacklogIssue}
               onCreateIssue={handleCreateIssue}
               onExpandCreate={(statusId, statusName, state) => setExpandedCreatePanel({ statusId, statusName, state })}
             />
