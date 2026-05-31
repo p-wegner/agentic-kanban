@@ -99,7 +99,7 @@ export function BoardToolbar({
 
   return (
     <div className="flex items-start gap-2 flex-wrap">
-      {backlogColumn !== undefined && (
+      {backlogColumn !== undefined && viewMode !== "backlog" && (
         <BacklogPanel
           backlogColumn={backlogColumn}
           activeColumns={activeColumns}
@@ -290,7 +290,8 @@ export function formatBoardActivitySummary(activeColumns: StatusWithIssues[]) {
 
   return orderedNames
     .map((name) => columnsByName.get(name))
-    .filter((col): col is StatusWithIssues => Boolean(col) && col.issues.length > 0)
+    .filter((col): col is StatusWithIssues => col !== undefined)
+    .filter((col) => col.issues.length > 0)
     .map((col) => `${col.issues.length} ${col.name}`)
     .join(", ");
 }
