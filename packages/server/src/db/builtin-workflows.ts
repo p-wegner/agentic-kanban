@@ -329,6 +329,69 @@ export const BUILTIN_WORKFLOWS: BuiltinTemplateDef[] = [
       { from: "consolidate", to: "done", condition: "manual", label: "approved" },
     ],
   },
+  {
+    builtinKey: "spec-driven-phased-planning",
+    name: "Spec-Driven Phased Planning",
+    description:
+      "Opt-in SDD flow: specify -> design -> tasks -> implement -> review -> done, with deliberate human gates before implementation.",
+    ticketType: null,
+    isDefault: false,
+    nodes: [
+      {
+        key: "specify",
+        name: "Specify",
+        nodeType: "start",
+        statusName: "In Progress",
+        skillName: "spec-driven-specify",
+        guidance:
+          "Draft or refine the problem statement, goals, non-goals, requirements, acceptance criteria, and open questions. Keep this interactive and wait for the human gate before Design.",
+      },
+      {
+        key: "design",
+        name: "Design",
+        nodeType: "normal",
+        statusName: "In Progress",
+        skillName: "spec-driven-design",
+        guidance:
+          "Turn the accepted spec into an implementation design: architecture, data model, API/UI shape, risks, test strategy, and migration or rollout notes. Wait for approval before Tasks.",
+      },
+      {
+        key: "tasks",
+        name: "Tasks",
+        nodeType: "normal",
+        statusName: "In Progress",
+        skillName: "spec-driven-tasks",
+        guidance:
+          "Convert the accepted design into concrete board work: dependency-aware child issues or a task checklist, with clear acceptance criteria for each implementable unit. Wait for approval before Implement.",
+      },
+      {
+        key: "implement",
+        name: "Implement",
+        nodeType: "normal",
+        statusName: "In Progress",
+        guidance:
+          "Implement the approved task plan. Keep commits focused, run relevant tests, and commit before proposing Review.",
+      },
+      {
+        key: "review",
+        name: "Review",
+        nodeType: "normal",
+        statusName: "In Review",
+        skillName: "code-review",
+        guidance:
+          "Review the implementation against the accepted spec, design, and task plan. Send back to Implement if it diverges; approve only when the planned behavior is satisfied.",
+      },
+      { key: "done", name: "Done", nodeType: "end", statusName: "Done" },
+    ],
+    edges: [
+      { from: "specify", to: "design", condition: "manual", label: "spec approved" },
+      { from: "design", to: "tasks", condition: "manual", label: "design approved" },
+      { from: "tasks", to: "implement", condition: "manual", label: "tasks approved" },
+      { from: "implement", to: "review", condition: "auto_on_exit_0", label: "implementation committed" },
+      { from: "review", to: "done", condition: "manual", label: "approved" },
+      { from: "review", to: "implement", condition: "manual", label: "changes requested", isLoop: true },
+    ],
+  },
 ];
 
 /**
