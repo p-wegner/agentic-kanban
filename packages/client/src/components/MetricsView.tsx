@@ -1,9 +1,11 @@
-import { useMemo, useState } from "react";
-import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
+import { useEffect, useMemo, useState } from "react";
+import type { IssueWithStatus, ProjectStatsResponse, StatusWithIssues } from "@agentic-kanban/shared";
 import { STATUS_COLORS, PRIORITY_META, TYPE_COLORS, BRAND, ACCENT, HEATMAP_SCALE } from "../lib/chartColors";
+import { apiFetch } from "../lib/api.js";
 
 interface MetricsViewProps {
   columns: StatusWithIssues[];
+  projectId: string | null;
   onIssueClick: (issue: IssueWithStatus) => void;
 }
 
@@ -181,6 +183,74 @@ function VerticalBars({ items }: { items: { label: string; count: number; color:
   );
 }
 
+function formatCount(value: number): string {
+  return value.toLocaleString("en-US");
+}
+
+function CodeGrowthChart({ weeks }: { weeks: ProjectStatsResponse["history"]["weeks"] }) {
+  const maxAbs = Math.max(...weeks.map((week) => Math.abs(week.net)), 1);
+  return (
+    <div className="flex items-end gap-2 h-32">
+      {weeks.map((week) => {
+        const height = Math.max((Math.abs(week.net) / maxAbs) * 86, week.net !== 0 ? 4 : 2);
+        const isPositive = week.net >= 0;
+        return (
+          <div key={week.week} className="flex flex-col items-center justify-end flex-1 min-w-0 gap-1">
+            <div className="text-[10px] text-gray-500 dark:text-gray-400 tabular-nums">
+              {week.commits}
+            </div>
+            <div
+              className="w-full rounded-t-sm"
+              title={`${week.net >= 0 ? "+" : ""}${week.net} LOC net, ${week.commits} commits since ${week.week}`}
+              style={{
+                height,
+                backgroundColor: isPositive ? BRAND : "#ef4444",
+                opacity: week.net === 0 ? 0.28 : 0.85,
+              }}
+            />
+            <div className="text-[10px] text-gray-400 dark:text-gray-500">
+              {new Date(`${week.week}T00:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" })}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function LocSplit({ stats }: { stats: ProjectStatsResponse["codeMetrics"] }) {
+  const prodPct = stats.totalLoc > 0 ? (stats.productionLoc / stats.totalLoc) * 100 : 0;
+  const testPct = stats.totalLoc > 0 ? (stats.testLoc / stats.totalLoc) * 100 : 0;
+  return (
+    <div className="space-y-3">
+      <div className="h-4 rounded-full bg-gray-100 dark:bg-gray-800 overflow-hidden flex">
+        <div
+          className="h-full"
+          style={{ width: `${prodPct}%`, backgroundColor: BRAND }}
+          title={`${formatCount(stats.productionLoc)} production LOC`}
+        />
+        <div
+          className="h-full"
+          style={{ width: `${testPct}%`, backgroundColor: ACCENT }}
+          title={`${formatCount(stats.testLoc)} test LOC`}
+        />
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <p className="text-xs text-gray-500 dark:text-gray-400">Production</p>
+          <p className="text-xl font-bold text-gray-800 dark:text-gray-100">{formatCount(stats.productionLoc)}</p>
+          <p className="text-[10px] text-gray-400 dark:text-gray-500">{stats.productionFiles} files</p>
+        </div>
+        <div>
+          <p className="text-xs text-gray-500 dark:text-gray-400">Tests</p>
+          <p className="text-xl font-bold text-gray-800 dark:text-gray-100">{formatCount(stats.testLoc)}</p>
+          <p className="text-[10px] text-gray-400 dark:text-gray-500">{stats.testFiles} files / {stats.testRatio}% LOC</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ActivityHeatmap({ issues }: { issues: IssueWithStatus[] }) {
   const { cells, maxCount, weeks } = useMemo(() => {
     const today = new Date();
@@ -306,7 +376,7 @@ function ActivityHeatmap({ issues }: { issues: IssueWithStatus[] }) {
                       const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
                       const d = cell.date.toLocaleDateString('en-US', { month: "short", day: "numeric", year: "numeric" });
                       setTooltip({
-                        text: `${cell.count} issue${cell.count !== 1 ? "s" : ""} · ${d}`,
+                        text: `${cell.count} issue${cell.count !== 1 ? "s" : ""} / ${d}`,
                         x: rect.left + rect.width / 2,
                         y: rect.top,
                       });
@@ -364,8 +434,40 @@ function StatCard({
   );
 }
 
-export function MetricsView({ columns, onIssueClick }: MetricsViewProps) {
+export function MetricsView({ columns, projectId, onIssueClick }: MetricsViewProps) {
+  const [projectStats, setProjectStats] = useState<ProjectStatsResponse | null>(null);
+  const [statsError, setStatsError] = useState<string | null>(null);
   const allIssues = useMemo(() => columns.flatMap((c) => c.issues), [columns]);
+  const statsRefreshKey = useMemo(
+    () => allIssues.reduce((latest, issue) => issue.updatedAt > latest ? issue.updatedAt : latest, ""),
+    [allIssues],
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!projectId) {
+      setProjectStats(null);
+      setStatsError(null);
+      return;
+    }
+
+    apiFetch<ProjectStatsResponse>(`/api/projects/${projectId}/stats`)
+      .then((stats) => {
+        if (!cancelled) {
+          setProjectStats(stats);
+          setStatsError(null);
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setProjectStats(null);
+          setStatsError(err instanceof Error ? err.message : "Failed to load project metrics");
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, statsRefreshKey]);
 
   const statusSegments = useMemo(() =>
     columns.map((col) => ({
@@ -407,6 +509,13 @@ export function MetricsView({ columns, onIssueClick }: MetricsViewProps) {
     [allIssues]
   );
   const completionRate = allIssues.length > 0 ? Math.round((doneCount / allIssues.length) * 100) : 0;
+  const testSignal = projectStats
+    ? projectStats.codeMetrics.testRatio >= 30
+      ? "healthy test weight"
+      : projectStats.codeMetrics.testRatio > 0
+        ? "light test weight"
+        : "no tests detected"
+    : "loading code metrics";
 
   // Recently closed issues (Done/Cancelled), sorted by updatedAt desc
   const recentlyDone = useMemo(() => {
@@ -439,6 +548,76 @@ export function MetricsView({ columns, onIssueClick }: MetricsViewProps) {
           <StatCard label="Completed" value={doneCount} sub={`${completionRate}% completion rate`} color={ACCENT} />
           <StatCard label="Blocked" value={blockedCount} sub="have blocking dependencies" color={blockedCount > 0 ? "#ef4444" : undefined} />
         </div>
+
+        {/* Codebase health */}
+        <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
+          <div className="lg:col-span-2 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl p-4">
+            <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-200 mb-3">Code Footprint</h3>
+            {projectStats ? (
+              <LocSplit stats={projectStats.codeMetrics} />
+            ) : (
+              <p className="text-xs text-gray-400 dark:text-gray-500">{statsError ?? "Scanning source files..."}</p>
+            )}
+          </div>
+
+          <div className="lg:col-span-3 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl p-4">
+            <div className="flex items-baseline justify-between gap-3 mb-2">
+              <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-200">Code Growth Trend</h3>
+              {projectStats && (
+                <span className="text-xs text-gray-400 dark:text-gray-500">
+                  {projectStats.history.contributorCount} contributors / {testSignal}
+                </span>
+              )}
+            </div>
+            {projectStats ? (
+              <CodeGrowthChart weeks={projectStats.history.weeks} />
+            ) : (
+              <div className="h-32 flex items-center text-xs text-gray-400 dark:text-gray-500">
+                {statsError ?? "Loading git history..."}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {projectStats && (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl p-4">
+              <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-200 mb-3">Hot Files</h3>
+              {projectStats.hotspots.length === 0 ? (
+                <p className="text-xs text-gray-400 dark:text-gray-500">No recent source churn detected</p>
+              ) : (
+                <div className="space-y-2">
+                  {projectStats.hotspots.slice(0, 5).map((file) => (
+                    <div key={file.path} className="grid grid-cols-[minmax(0,1fr)_auto] gap-3 items-center">
+                      <span className="text-xs text-gray-600 dark:text-gray-300 truncate" title={file.path}>{file.path}</span>
+                      <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 tabular-nums">
+                        {formatCount(file.changes)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl p-4">
+              <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-200 mb-3">Recent Contributors</h3>
+              {projectStats.history.topContributors.length === 0 ? (
+                <p className="text-xs text-gray-400 dark:text-gray-500">No recent commits found</p>
+              ) : (
+                <HorizontalBars
+                  items={projectStats.history.topContributors.map((contributor, index) => ({
+                    key: contributor.name,
+                    label: contributor.name,
+                    count: contributor.commits,
+                    color: index === 0 ? BRAND : ACCENT,
+                    lightBg: "",
+                    darkBg: "",
+                  }))}
+                />
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Charts row */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
