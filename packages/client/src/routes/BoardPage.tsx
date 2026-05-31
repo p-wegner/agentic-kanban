@@ -15,6 +15,7 @@ import { SwimlaneView } from "../components/SwimlaneView.js";
 import { FlakyTestsPanel } from "../components/FlakyTestsPanel.js";
 import { useAgentQuestionsCount } from "../components/AgentQuestionsPanel.js";
 import { BoardErrorBoundary } from "../components/BoardErrorBoundary.js";
+import { BacklogView } from "../components/BacklogView.js";
 import { BoardKanbanView } from "../components/BoardKanbanView.js";
 import { BoardStats } from "../components/BoardStats.js";
 import { BoardToolbar } from "../components/BoardToolbar.js";
@@ -1352,6 +1353,29 @@ export function BoardPage() {
         {viewMode === "flaky-tests" && activeProjectId && (
           <BoardErrorBoundary columnName="Flaky Tests">
             <FlakyTestsPanel projectId={activeProjectId} />
+          </BoardErrorBoundary>
+        )}
+        {viewMode === "backlog" && (
+          <BoardErrorBoundary columnName="Backlog View">
+            <BacklogView
+              backlogColumn={backlogColumn}
+              activeColumns={activeColumns}
+              projectId={activeProjectId}
+              searchQuery={searchQuery}
+              sessionActivity={sessionActivity}
+              liveStats={liveStats}
+              sessionTodos={sessionTodos}
+              pendingWorkspaceIssueIds={pendingWorkspaceIssueIds}
+              canStartWorkspace={canStartWorkspace}
+              onIssueClick={handleIssueClick}
+              onWorkspaceClick={handleManageWorkspaces}
+              onStartWorkspace={handleStartWorkspace}
+              onDragStart={handleBoardDragStart}
+              onDrop={handleDrop}
+              onMoved={() => refetchBoard()}
+              onCreateIssue={handleCreateIssue}
+              onExpandCreate={(statusId, statusName, state) => setExpandedCreatePanel({ statusId, statusName, state })}
+            />
           </BoardErrorBoundary>
         )}
         {viewMode === "kanban" && (
