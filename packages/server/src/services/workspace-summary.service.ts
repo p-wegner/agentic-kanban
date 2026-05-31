@@ -458,9 +458,10 @@ export async function buildWorkspaceSummaryMap(
       if (sess.stats) {
         try {
           const p = JSON.parse(sess.stats) as Record<string, unknown>;
+          const explicitContextTokens = (p.contextTokens as number) ?? 0;
           const inputTokens = (p.inputTokens as number) ?? 0;
           const cachedTokens = (p.cacheReadTokens as number) ?? 0;
-          summary.main.contextTokens = inputTokens + cachedTokens || null;
+          summary.main.contextTokens = explicitContextTokens || inputTokens + cachedTokens || null;
         } catch { /* ignore */ }
       }
       summary.main.lastTool = lastToolBySession.get(sess.id) ?? null;

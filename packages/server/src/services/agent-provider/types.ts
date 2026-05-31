@@ -55,6 +55,7 @@ export interface ParsedStreamEvent {
     totalCostUsd: number;
     inputTokens: number;
     outputTokens: number;
+    contextTokens?: number;
     numTurns: number;
     model: string;
     success: boolean;
