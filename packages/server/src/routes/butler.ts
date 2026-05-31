@@ -29,6 +29,8 @@ import {
   updateButlerDefinition,
 } from "../services/butler-definitions.service.js";
 import { listButlerSessions, getButlerSessionMessages } from "../services/butler-transcripts.service.js";
+import { loadAgentSettings } from "../services/agent-settings.service.js";
+import type { ProviderName } from "../services/agent-provider.js";
 
 /** Suffix per-butler pref keys for named butlers; the "default" butler keeps the
  *  legacy unsuffixed keys so existing resume ids / history carry over unchanged. */
@@ -183,17 +185,38 @@ export function createButlerRoute(
       .replace(/\{\{boardGuidePath}}/g, boardGuidePath);
   }
 
-  /** Resolve the butler's Claude profile: per-project override, else the global default. */
-  async function resolveButlerProfile(projectId: string): Promise<string | undefined> {
+  /** Resolve the Butler's backend/profile from the global agent provider, with a per-project profile override. */
+  async function resolveButlerBackend(projectId: string): Promise<{
+    provider: Extract<ProviderName, "claude" | "codex">;
+    selectedProfile: string | undefined;
+    globalProfile: string;
+    claudeProfile?: string;
+    profile?: { provider: ProviderName; name: string };
+    agentCommand?: string;
+    agentArgs?: string;
+  }> {
+    const settings = await loadAgentSettings(database);
     const perProject = await getPreference(butlerProfilePrefKey(projectId), database);
-    if (perProject) return perProject;
-    return (await getPreference("claude_profile", database)) || undefined;
+    const provider = settings.provider === "codex" ? "codex" : "claude";
+    const availableProfiles = provider === "codex" ? preferenceService.listCodexProfiles() : preferenceService.listClaudeProfiles();
+    const profileOverride = perProject && availableProfiles.includes(perProject) ? perProject : undefined;
+    const globalProfile = settings.profile?.provider === provider ? settings.profile.name : "";
+    const selectedProfile = profileOverride || globalProfile || undefined;
+    return {
+      provider,
+      selectedProfile,
+      globalProfile,
+      claudeProfile: provider === "claude" ? selectedProfile : undefined,
+      profile: selectedProfile ? { provider, name: selectedProfile } : undefined,
+      agentCommand: settings.agentCommand,
+      agentArgs: settings.agentArgs,
+    };
   }
 
   async function startSession(projectId: string, butlerId: string = "default") {
     const project = await resolveProject(projectId);
     if (!project) return null;
-    const claudeProfile = await resolveButlerProfile(projectId);
+    const backend = await resolveButlerBackend(projectId);
     // Model is a property of the (global) butler definition, not a per-project pref.
     const model = (await getButlerDefinition(database, butlerId))?.model || undefined;
     const resumeSessionId = (await getPreference(butlerSessionPrefKey(projectId, butlerId), database)) || undefined;
@@ -204,7 +227,11 @@ export function createButlerRoute(
       butlerId,
       repoPath: project.repoPath,
       projectName: project.name,
-      claudeProfile,
+      backend: backend.provider,
+      claudeProfile: backend.claudeProfile,
+      profile: backend.profile,
+      agentCommand: backend.agentCommand,
+      agentArgs: backend.agentArgs,
       model,
       resumeSessionId,
       systemPromptAppend,
@@ -239,6 +266,7 @@ export function createButlerRoute(
         contextWindow: st?.contextWindow,
         sessionId: st?.sessionId ?? null,
         mcpConnected: st?.mcpConnected,
+        backend: st?.backend ?? "claude",
       };
     });
     return c.json({ butlers });
@@ -252,9 +280,10 @@ export function createButlerRoute(
     const persisted = (await getPreference(butlerSessionPrefKey(projectId, butlerId), database)) || null;
     // Model is sourced from the butler definition (global), profile from the project pref.
     const selectedModel = (await getButlerDefinition(database, butlerId))?.model ?? "";
-    const selectedProfile = (await getPreference(butlerProfilePrefKey(projectId), database)) || "";
+    const backend = await resolveButlerBackend(projectId);
     return c.json({
       butlerId,
+      backend: backend.provider,
       active: state.active,
       sessionId: state.sessionId ?? persisted,
       contextTokens: state.contextTokens,
@@ -263,7 +292,7 @@ export function createButlerRoute(
       mcpConnected: state.mcpConnected,
       // The user's saved picks (aliases/empty) — drive the dropdown selection.
       selectedModel,
-      selectedProfile,
+      selectedProfile: backend.selectedProfile ?? "",
     });
   });
 
@@ -296,9 +325,9 @@ export function createButlerRoute(
   // current selection ("" = inherit the global claude_profile).
   router.get("/:id/butler/profiles", async (c) => {
     const projectId = c.req.param("id");
-    const selected = (await getPreference(butlerProfilePrefKey(projectId), database)) || "";
-    const globalDefault = (await getPreference("claude_profile", database)) || "";
-    return c.json({ profiles: preferenceService.listClaudeProfiles(), selected, globalDefault });
+    const backend = await resolveButlerBackend(projectId);
+    const profiles = backend.provider === "codex" ? preferenceService.listCodexProfiles() : preferenceService.listClaudeProfiles();
+    return c.json({ provider: backend.provider, profiles, selected: backend.selectedProfile ?? "", globalDefault: backend.globalProfile });
   });
 
   // POST /api/projects/:id/butler/model — switch model for subsequent turns WITHOUT
@@ -406,6 +435,7 @@ export function createButlerRoute(
       if (!session) return c.json({ error: "Project not found" }, 404);
     }
     const ok = sendButlerTurn(projectId, body.content, { butlerId });
+    if (!ok) return c.json({ error: "Butler is already processing a turn" }, 409);
     return c.json({ ok });
   });
 
@@ -422,6 +452,9 @@ export function createButlerRoute(
     if (!getButlerSession(projectId, butlerId).active) {
       const session = await startSession(projectId, butlerId);
       if (!session) return c.json({ error: "Project not found" }, 404);
+    }
+    if (getButlerSession(projectId, butlerId).busy) {
+      return c.json({ error: "Butler is already processing a turn" }, 409);
     }
     const timeoutMs = typeof body.timeoutMs === "number" && body.timeoutMs > 0 ? body.timeoutMs : 120_000;
     const answer = await new Promise<{ text: string; isError: boolean }>((resolve) => {
@@ -442,7 +475,9 @@ export function createButlerRoute(
       const timer = setTimeout(() => finish(buf || "(timed out waiting for butler response)", true), timeoutMs);
       // Emit the prompt to SSE listeners so the UI shows what was asked (CLI/MCP
       // callers have no UI that rendered it optimistically).
-      sendButlerTurn(projectId, body.content, { emitUserText: true, butlerId });
+      if (!sendButlerTurn(projectId, body.content, { emitUserText: true, butlerId })) {
+        finish("Butler is already processing a turn", true);
+      }
     });
     return c.json({
       sessionId: getButlerSession(projectId, butlerId).sessionId ?? null,
