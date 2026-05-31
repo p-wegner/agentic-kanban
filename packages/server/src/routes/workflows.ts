@@ -23,6 +23,7 @@ import { randomUUID } from "node:crypto";
 import { createRouter } from "../middleware/create-router.js";
 import { parseJsonBody } from "../middleware/parse-body.js";
 import type { BoardEvents } from "../services/board-events.js";
+import { materializeSpecTasksForWorkspace } from "../services/spec-tasks-materialization.service.js";
 
 interface WorkflowsRouteOptions {
   boardEvents?: BoardEvents;
@@ -571,6 +572,22 @@ export function createWorkflowsRoute(database: Database = db, options?: Workflow
     if (!toNodeId && !toNodeName) {
       return c.json({ error: "toNodeId or toNodeName is required" }, 400);
     }
+    const currentRows = await database
+      .select({ nodeName: workflowNodes.name })
+      .from(workspaces)
+      .leftJoin(workflowNodes, eq(workspaces.currentNodeId, workflowNodes.id))
+      .where(eq(workspaces.id, workspaceId))
+      .limit(1);
+    const wasTasksPhase = currentRows[0]?.nodeName?.toLowerCase() === "tasks";
+    const taskMaterialization = wasTasksPhase
+      ? await materializeSpecTasksForWorkspace(workspaceId, database, { boardEvents }).catch((err) => {
+          console.warn("[workflows] failed to materialize spec tasks:", err);
+          throw err;
+        })
+      : { created: [], dependencyEdges: 0, skipped: true, reason: "not-tasks-phase" };
+    if (wasTasksPhase && taskMaterialization.skipped && taskMaterialization.reason !== "already-materialized") {
+      return c.json({ error: `Tasks artifact did not create child issues: ${taskMaterialization.reason}` }, 400);
+    }
     const signals = await computeWorkspaceSignals(database, workspaceId);
     const result = await proposeTransition(database, {
       workspaceId,
@@ -605,6 +622,7 @@ export function createWorkflowsRoute(database: Database = db, options?: Workflow
       status: result.statusName,
       nextStages: (result.nextTransitions ?? []).map((t) => t.toNodeName),
       terminal: (result.nextTransitions ?? []).length === 0,
+      taskMaterialization,
     });
   });
 
