@@ -138,6 +138,28 @@ describe("workflows route analytics", () => {
     expect(analyticsRes.status).toBe(200);
     const analytics = await analyticsRes.json() as any;
     expect(analytics.nodes.find((node: any) => node.nodeId === buildNodeId)?.templateId).toBe(templateId);
+    expect(analytics.durationTrends).toContainEqual({
+      date: "2026-05-30",
+      nodeId: buildNodeId,
+      nodeName: "Build",
+      avgDwellMs: 15 * 60 * 1000,
+      samples: 1,
+    });
+    expect(analytics.funnel.find((node: any) => node.nodeId === buildNodeId)).toMatchObject({
+      templateId,
+      templateName: "Test Workflow",
+      nodeName: "Build",
+      entered: 2,
+      advanced: 1,
+      dropoff: 1,
+      conversionRate: 50,
+    });
+    expect(analytics.burnDown).toContainEqual({
+      date: "2026-05-30",
+      started: 2,
+      completed: 0,
+      remaining: 2,
+    });
 
     const res = await app.request(
       `/api/workflows/analytics/${templateId}/${buildNodeId}/workspaces?projectId=${projectId}`,
