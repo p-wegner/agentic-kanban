@@ -7,7 +7,7 @@ import { MOCK_AGENT_COMMAND, isMockProfile, toExecutorProvider } from "../servic
 import { createBoardEvents } from "../services/board-events.js";
 import { emitButlerSystemEvent } from "../services/butler-event-feed.js";
 import * as gitService from "../services/git.service.js";
-import { activeMerges } from "../services/workspace-internals.js";
+import { activeMerges, type ActiveMergeLock } from "../services/workspace-internals.js";
 import { createBackup } from "../db/backup.js";
 import { killProcessesInDir } from "../services/process-cleanup.js";
 import { runScript } from "../services/script-runner.js";
@@ -102,7 +102,7 @@ export function createAutoMerge({ sessionManager, boardEvents, learningSessionId
             const pendingMerge = activeMerges.get(repoPath);
             if (pendingMerge) {
               console.log(`[workflow] auto-merge for workspace ${workspace.id} is queued behind existing merge on ${repoPath}`);
-              await pendingMerge.catch(() => {});
+              await pendingMerge.promise.catch(() => {});
             }
 
             return (async () => {
@@ -172,12 +172,20 @@ Server: http://localhost:${serverPort}`;
             })();
           })();
 
+          let trackedMergeLock: ActiveMergeLock;
           const trackedMerge = mergePromise.finally(() => {
-            if (activeMerges.get(repoPath) === trackedMerge) {
+            if (activeMerges.get(repoPath) === trackedMergeLock) {
               activeMerges.delete(repoPath);
             }
           });
-          activeMerges.set(repoPath, trackedMerge);
+          trackedMergeLock = {
+            promise: trackedMerge,
+            workspaceId: workspace.id,
+            repoPath,
+            startedAt: new Date().toISOString(),
+            startedAtMs: Date.now(),
+          };
+          activeMerges.set(repoPath, trackedMergeLock);
           await trackedMerge;
         }
       }
