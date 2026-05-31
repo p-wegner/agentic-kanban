@@ -414,13 +414,14 @@ Goal: help the human and agent converge on what should be built before any desig
 Work interactively:
 1. Read the issue title and description, plus any existing artifacts or linked child issues.
 2. Draft a concise spec with: problem, goals, non-goals, user scenarios, functional requirements, acceptance criteria, constraints, and open questions.
-3. Ask clarifying questions when requirements are ambiguous. Prefer a small number of high-signal questions over a long questionnaire.
-4. Incorporate the user's answers and revise the spec.
-5. Do not implement code in this phase.
+3. When requirements are ambiguous, call \`clarify_or_propose\` with \`action: "clarify"\` and 1-3 structured questions. Prefer a small number of high-signal questions over a long questionnaire, then stop for the interactive UI.
+4. Persist the current phase artifact with \`attach_artifact\` using \`type: "text"\`, \`mimeType: "text/markdown"\`, and \`caption: "phase-artifact:specify"\`.
+5. Incorporate the user's answers and revise the spec.
+6. Do not implement code in this phase.
 
 Gate:
 - Stop when the spec is explicit enough for a design agent to make technical decisions and ask the human to approve the phase.
-- Do not call propose_transition yourself; the user advances to Design from the planning panel.
+- If a non-interactive runner needs to propose the gate, use \`clarify_or_propose\` with \`action: "propose"\`; otherwise the user advances to Design from the planning panel.
 - In your final phase summary, mention the accepted requirements and any deferred questions.`,
     model: null,
   },
@@ -434,13 +435,14 @@ Goal: turn the accepted spec into a technical design that an implementation agen
 Work interactively:
 1. Read the accepted spec, issue context, and relevant code or docs.
 2. Produce a design covering architecture, data model changes, API contracts, UI behavior, workflow changes, persistence, tests, migration/backfill needs, and rollout risks.
-3. Identify tradeoffs and call out decisions that need human approval.
-4. Revise the design after user feedback.
-5. Do not implement code in this phase.
+3. Identify tradeoffs and call out decisions that need human approval. Use \`clarify_or_propose\` with \`action: "clarify"\` for structured questions that should surface in the interactive UI.
+4. Persist the current phase artifact with \`attach_artifact\` using \`type: "text"\`, \`mimeType: "text/markdown"\`, and \`caption: "phase-artifact:design"\`.
+5. Revise the design after user feedback.
+6. Do not implement code in this phase.
 
 Gate:
 - Stop when the design has clear decisions and a verification strategy and ask the human to approve the phase.
-- Do not call propose_transition yourself; the user advances to Tasks from the planning panel.
+- If a non-interactive runner needs to propose the gate, use \`clarify_or_propose\` with \`action: "propose"\`; otherwise the user advances to Tasks from the planning panel.
 - In your final phase summary, mention the chosen approach, rejected alternatives, and main risks.`,
     model: null,
   },
@@ -455,13 +457,14 @@ Work interactively:
 1. Read the accepted spec and design.
 2. Break the work into small implementable tasks with clear acceptance criteria and likely files or areas.
 3. Make the approved output parseable: use markdown task checkboxes with stable task IDs, e.g. "- [ ] T001 [P] Implement parser - depends on: T000". Group tasks under "## Wave 1", "## Wave 2", etc. Tasks in the same wave must be safe to run concurrently; later waves depend on earlier waves unless explicit "depends on:" IDs say otherwise.
-4. When the human approves the task breakdown, create real board children with create_issues_batch using parentIssueId set to the current issue ID. Create one child issue per task, with acceptance criteria in each child description.
-5. After batch creation, run analyze_dependencies for each child issue so inferred depends_on edges keep blocked children from launching while independent children remain unblocked.
-6. Do not implement code in this phase.
+4. Persist the tasks artifact with \`attach_artifact\` using \`type: "text"\`, \`mimeType: "text/markdown"\`, and \`caption: "phase-artifact:tasks"\`.
+5. When the human approves the task breakdown, create real board children by calling \`create_sub_issue\` once per task. Pass the current issue ID as \`parentIssueId\` and include acceptance criteria in each child description.
+6. After creating children, run analyze_dependencies for each child issue so inferred depends_on edges keep blocked children from launching while independent children remain unblocked.
+7. Do not implement code in this phase.
 
 Gate:
 - Stop when the task breakdown is ready for approval, child issues have been created, and dependency analysis has run.
-- Do not call propose_transition yourself; the user advances to Implement from the planning panel.
+- If a non-interactive runner needs to propose the gate, use \`clarify_or_propose\` with \`action: "propose"\`; otherwise the user advances to Implement from the planning panel.
 - In your final phase summary, mention the created child issues or the approved task list and the first implementation wave.`,
     model: null,
   },

@@ -11,7 +11,7 @@
  * as structured records, and tracks per-`tool_use_id` "answered" markers in the
  * preferences table so answered questions stop appearing.
  */
-import { sessions, sessionMessages, workspaces, issues, projects, projectStatuses } from "@agentic-kanban/shared/schema";
+import { sessions, sessionMessages, workspaces, issues, projects, projectStatuses, issueComments } from "@agentic-kanban/shared/schema";
 import { eq, desc } from "drizzle-orm";
 import type { Database } from "../db/index.js";
 import { getPreference, setPreference } from "../repositories/preferences.repository.js";
@@ -72,6 +72,50 @@ export interface PendingQuestionSet {
   askedAt: string | null;
   /** Set when the question is likely no longer actionable; null when fresh. */
   staleness: Staleness | null;
+}
+
+function parseSyntheticQuestionPayload(
+  payload: string | null,
+): { toolUseId: string; questions: AgentQuestion[] } | null {
+  if (!payload) return null;
+  try {
+    const parsed = JSON.parse(payload) as { toolUseId?: unknown; questions?: unknown; source?: unknown };
+    if (parsed.source !== "mcp_clarify_or_propose") return null;
+    if (typeof parsed.toolUseId !== "string" || !Array.isArray(parsed.questions)) return null;
+    const questions = parsed.questions
+      .map((q): AgentQuestion | null => {
+        if (!q || typeof q !== "object") return null;
+        const raw = q as {
+          question?: unknown;
+          header?: unknown;
+          multiSelect?: unknown;
+          options?: unknown;
+        };
+        if (typeof raw.question !== "string" || !raw.question.trim()) return null;
+        const rawOptions = Array.isArray(raw.options) ? raw.options : [];
+        const options = rawOptions
+          .map((opt): AgentQuestionOption | null => {
+            if (!opt || typeof opt !== "object") return null;
+            const rawOpt = opt as { label?: unknown; description?: unknown };
+            if (typeof rawOpt.label !== "string" || !rawOpt.label.trim()) return null;
+            return {
+              label: rawOpt.label,
+              ...(typeof rawOpt.description === "string" ? { description: rawOpt.description } : {}),
+            };
+          })
+          .filter((opt): opt is AgentQuestionOption => opt !== null);
+        return {
+          question: raw.question,
+          ...(typeof raw.header === "string" ? { header: raw.header } : {}),
+          ...(typeof raw.multiSelect === "boolean" ? { multiSelect: raw.multiSelect } : {}),
+          options: options.length > 0 ? options : [{ label: "Answer in free text" }],
+        };
+      })
+      .filter((q): q is AgentQuestion => q !== null);
+    return questions.length > 0 ? { toolUseId: parsed.toolUseId, questions } : null;
+  } catch {
+    return null;
+  }
 }
 
 function answeredPrefKey(toolUseId: string): string {
@@ -372,6 +416,42 @@ export async function listPendingQuestionsForProject(
       // The newest question-bearing session wins; older ones are superseded copies.
       break;
     }
+  }
+
+  const syntheticRows = await db
+    .select({
+      id: issueComments.id,
+      issueId: issueComments.issueId,
+      workspaceId: issueComments.workspaceId,
+      body: issueComments.body,
+      payload: issueComments.payload,
+      createdAt: issueComments.createdAt,
+      issueNumber: issues.issueNumber,
+      issueTitle: issues.title,
+    })
+    .from(issueComments)
+    .innerJoin(issues, eq(issueComments.issueId, issues.id))
+    .where(eq(issues.projectId, projectId))
+    .orderBy(desc(issueComments.createdAt));
+
+  const seenToolUseIds = new Set(results.map((r) => r.toolUseId));
+  for (const row of syntheticRows) {
+    if (row.workspaceId === null) continue;
+    const parsed = parseSyntheticQuestionPayload(row.payload);
+    if (!parsed || seenToolUseIds.has(parsed.toolUseId)) continue;
+    if (await isAnswered(parsed.toolUseId, db)) continue;
+    results.push({
+      toolUseId: parsed.toolUseId,
+      workspaceId: row.workspaceId,
+      sessionId: `issue-comment:${row.id}`,
+      issueId: row.issueId,
+      issueNumber: row.issueNumber,
+      issueTitle: row.issueTitle,
+      questions: parsed.questions,
+      askedAt: row.createdAt,
+      staleness: null,
+    });
+    seenToolUseIds.add(parsed.toolUseId);
   }
 
   return results;
