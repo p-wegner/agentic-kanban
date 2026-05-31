@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { classifyProcessExit } from "../../../../scripts/dev-supervisor.mjs";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import {
+  classifyProcessExit,
+  createDependencyRecoveryState,
+  dependencyManifestsChanged,
+  listDependencyManifestFiles,
+  snapshotDependencyManifests,
+} from "../../../../scripts/dev-supervisor.mjs";
 import { commandLineBelongsToCheckout, planPortOwnerKill } from "../../../../scripts/dev-port-guard.mjs";
 
 describe("dev launcher exit classification", () => {
@@ -16,6 +25,43 @@ describe("dev launcher exit classification", () => {
   it("retries unexpected nonfatal exit codes", () => {
     expect(classifyProcessExit(143, null)).toBe("retry");
     expect(classifyProcessExit(2, null)).toBe("retry");
+  });
+
+  it("detects dependency manifest changes while ignoring installed packages", () => {
+    const root = mkdtempSync(join(tmpdir(), "ak-dev-supervisor-"));
+    try {
+      mkdirSync(join(root, "packages", "server"), { recursive: true });
+      mkdirSync(join(root, "node_modules", "some-package"), { recursive: true });
+      writeFileSync(join(root, "package.json"), JSON.stringify({ dependencies: {} }));
+      writeFileSync(join(root, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n");
+      writeFileSync(join(root, "packages", "server", "package.json"), JSON.stringify({ dependencies: {} }));
+      writeFileSync(join(root, "node_modules", "some-package", "package.json"), JSON.stringify({ name: "ignored" }));
+
+      const before = snapshotDependencyManifests(root);
+      expect(dependencyManifestsChanged(before, snapshotDependencyManifests(root))).toBe(false);
+      expect(listDependencyManifestFiles(root).map((file) => file.replace(/\\/g, "/"))).not.toContain(
+        join(root, "node_modules", "some-package", "package.json").replace(/\\/g, "/"),
+      );
+
+      writeFileSync(join(root, "packages", "server", "package.json"), JSON.stringify({ dependencies: { hono: "^4.0.0" } }));
+
+      expect(dependencyManifestsChanged(before, snapshotDependencyManifests(root))).toBe(true);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("tracks dependency recovery generations for concurrent process exits", () => {
+    const initialSnapshot = new Map([["package.json", "before"]]);
+    const recovery = createDependencyRecoveryState(initialSnapshot);
+
+    expect(recovery.snapshot).toBe(initialSnapshot);
+    expect(recovery.generation).toBe(0);
+
+    const recoveredSnapshot = new Map([["package.json", "after"]]);
+    expect(recovery.markRecovered(recoveredSnapshot)).toBe(1);
+    expect(recovery.snapshot).toBe(recoveredSnapshot);
+    expect(recovery.generation).toBe(1);
   });
 });
 
