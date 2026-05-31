@@ -16,7 +16,7 @@ export interface ButlerDefinition {
   id: string;
   /** Display name shown in the switcher, e.g. "Smart". */
   name: string;
-  /** Model alias from CLAUDE_MODEL_OPTIONS ("" = profile/CLI default, "opus", "sonnet", "haiku"). */
+  /** Provider-specific model alias ("" = profile/CLI default). */
   model: string;
 }
 

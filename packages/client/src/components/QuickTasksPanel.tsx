@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { CODEX_MODEL_OPTIONS } from "@agentic-kanban/shared";
 import { apiFetch } from "../lib/api.js";
 import { showToast } from "./Toast.js";
 import TicketMentionInput from "./TicketMentionInput.js";
@@ -25,7 +26,6 @@ type ProfileOption = {
 
 const CODEX_DEFAULT_PROFILE = "default";
 const CODEX_DEFAULT_MODEL = "gpt-5.3-codex-spark";
-const CODEX_MODELS = [CODEX_DEFAULT_MODEL] as const;
 const COPILOT_DEFAULT_PROFILE = "default";
 
 function profileOptionValue(option: ProfileOption): string {
@@ -209,9 +209,9 @@ export function QuickTasksPanel({ projectId, onClose, onLaunched }: QuickTasksPa
                 className="w-full text-sm border border-gray-200 dark:border-gray-700 rounded px-2 py-1.5 bg-white dark:bg-gray-900"
                 onClick={(e) => e.stopPropagation()}
               >
-                {CODEX_MODELS.map((model) => (
-                  <option key={model} value={model}>
-                    {model}
+                {CODEX_MODEL_OPTIONS.filter((model) => model.value).map((model) => (
+                  <option key={model.value} value={model.value}>
+                    {model.label}
                   </option>
                 ))}
               </select>
