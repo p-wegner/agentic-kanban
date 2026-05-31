@@ -16,6 +16,7 @@ vi.mock("node:fs", () => ({
 // Import after mocking
 import { launch, kill, killAll, sendInput, closeStdin, isStdinOpen, getProcess, agentState } from "../services/agent.service.js";
 import { spawn as spawnMock } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { createMockProc } from "./helpers/mocks.js";
 
 describe("agent.service", () => {
@@ -49,6 +50,36 @@ describe("agent.service", () => {
       expect(cmd).toBe("mock-test-agent");
       expect(opts.cwd).toBe("/tmp/worktree");
       expect(getProcess("sess-1")).toBe(mockProc);
+    });
+
+    it("appends context file contents to the stdin prompt for Codex", () => {
+      const mockProc = createMockProc();
+      (spawnMock as any).mockReturnValue(mockProc);
+      (readFileSync as any).mockReturnValue("# Ticket context\n\nPrimer");
+
+      launch(
+        "/tmp/worktree",
+        "sess-codex-context",
+        "test prompt",
+        undefined,
+        vi.fn(),
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        "codex",
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        ["/tmp/worktree/CLAUDE.local.md"],
+      );
+
+      expect(mockProc.stdin.end).toHaveBeenCalledWith(expect.stringContaining("[Attached context files]"));
+      expect(mockProc.stdin.end).toHaveBeenCalledWith(expect.stringContaining("# Ticket context"));
+      expect(mockProc.stdin.end).toHaveBeenCalledWith(expect.stringContaining("test prompt"));
     });
 
     it("registers stdout/stderr/exit handlers", () => {

@@ -11,9 +11,9 @@ export type TicketContext = {
 
 /**
  * Filename written into the worktree root. Claude Code auto-loads `CLAUDE.local.md`
- * as project memory at session start, so the ticket context lands in the agent's
- * first-turn context with zero agent action. The file is gitignored, so it never
- * enters a diff or merge.
+ * as project memory at session start. Other providers receive this file through
+ * provider-specific launch wiring. The file is gitignored, so it never enters a
+ * diff or merge.
  */
 export const TICKET_CONTEXT_FILENAME = "CLAUDE.local.md";
 

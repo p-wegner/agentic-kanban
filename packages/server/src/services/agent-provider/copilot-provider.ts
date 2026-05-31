@@ -24,7 +24,7 @@ export class CopilotProvider implements AgentProvider {
   }
 
   buildLaunchConfig(options: ProviderLaunchOptions): AgentLaunchConfig {
-    const { agentArgs, providerSessionId, agentCommand, keepAlive, profile, planMode, prompt, skipPermissions } = options;
+    const { agentArgs, providerSessionId, agentCommand, keepAlive, profile, planMode, prompt, contextFiles, skipPermissions } = options;
     const isWindows = process.platform === "win32";
 
     const isMockAgent = !!process.env.AGENT_COMMAND || (agentCommand?.includes("mock-agent") ?? false);
@@ -55,6 +55,9 @@ export class CopilotProvider implements AgentProvider {
       args.push("-p", effectivePrompt);
       suppressStdinPrompt = true;
       args.push("--output-format", "json", "--stream", "on", "--no-ask-user", "--no-color");
+      for (const file of contextFiles ?? []) {
+        args.push("--attachment", file);
+      }
 
       if (providerSessionId) {
         args.push(`--resume=${providerSessionId}`);

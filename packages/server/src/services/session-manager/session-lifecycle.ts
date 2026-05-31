@@ -69,6 +69,7 @@ export function createSessionLifecycle(
       triggerType,
       profile,
       model,
+      contextFiles,
       extraEnv,
       workingDirOverride,
       skipPermissions: skipPermissionsOpt,
@@ -371,7 +372,7 @@ export function createSessionLifecycle(
 
         }
       // When resumeWithNewModel is true, omit --resume so the new profile/provider is used instead
-      }, resumeWithNewModel ? undefined : providerSessionId, agentCommand, claudeProfile, multiTurn, permissionPromptTool, planMode, provider, profile, extraEnv, skipPermissions, effectiveModel);
+      }, resumeWithNewModel ? undefined : providerSessionId, agentCommand, claudeProfile, multiTurn, permissionPromptTool, planMode, provider, profile, extraEnv, skipPermissions, effectiveModel, contextFiles);
 
       // Persist PID so hot-reload can detect surviving processes
       if (proc.pid) {
