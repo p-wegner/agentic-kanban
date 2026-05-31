@@ -3,6 +3,8 @@ import { randomUUID } from "node:crypto";
 import { projects } from "@agentic-kanban/shared/schema";
 import { createButlerRoute } from "../routes/butler.js";
 import { setPreference } from "../repositories/preferences.repository.js";
+import { ensureButlerSession, sendButlerTurn, stopButlerSession } from "../services/butler-sdk.service.js";
+import { MOCK_AGENT_COMMAND } from "../services/agent-settings.service.js";
 import { createTestApp as _createTestApp } from "./helpers/test-app.js";
 import { createMockSessionManager } from "./helpers/mocks.js";
 import type { TestDb } from "./helpers/test-db.js";
@@ -63,5 +65,24 @@ describe("Butler provider selection", () => {
     const state = await stateRes.json() as { backend: string; active: boolean };
     expect(state.backend).toBe("codex");
     expect(state.active).toBe(true);
+  });
+
+  it("rejects overlapping Codex Butler turns instead of enqueueing ambiguous prompts", () => {
+    const projectId = randomUUID();
+    ensureButlerSession({
+      projectId,
+      butlerId: "busy-test",
+      repoPath: process.cwd(),
+      projectName: "Butler Test",
+      backend: "codex",
+      agentCommand: MOCK_AGENT_COMMAND,
+    });
+
+    try {
+      expect(sendButlerTurn(projectId, "first", { butlerId: "busy-test" })).toBe(true);
+      expect(sendButlerTurn(projectId, "second", { butlerId: "busy-test" })).toBe(false);
+    } finally {
+      stopButlerSession(projectId, "busy-test");
+    }
   });
 });

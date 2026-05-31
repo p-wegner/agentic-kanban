@@ -435,6 +435,7 @@ export function createButlerRoute(
       if (!session) return c.json({ error: "Project not found" }, 404);
     }
     const ok = sendButlerTurn(projectId, body.content, { butlerId });
+    if (!ok) return c.json({ error: "Butler is already processing a turn" }, 409);
     return c.json({ ok });
   });
 
@@ -451,6 +452,9 @@ export function createButlerRoute(
     if (!getButlerSession(projectId, butlerId).active) {
       const session = await startSession(projectId, butlerId);
       if (!session) return c.json({ error: "Project not found" }, 404);
+    }
+    if (getButlerSession(projectId, butlerId).busy) {
+      return c.json({ error: "Butler is already processing a turn" }, 409);
     }
     const timeoutMs = typeof body.timeoutMs === "number" && body.timeoutMs > 0 ? body.timeoutMs : 120_000;
     const answer = await new Promise<{ text: string; isError: boolean }>((resolve) => {
@@ -471,7 +475,9 @@ export function createButlerRoute(
       const timer = setTimeout(() => finish(buf || "(timed out waiting for butler response)", true), timeoutMs);
       // Emit the prompt to SSE listeners so the UI shows what was asked (CLI/MCP
       // callers have no UI that rendered it optimistically).
-      sendButlerTurn(projectId, body.content, { emitUserText: true, butlerId });
+      if (!sendButlerTurn(projectId, body.content, { emitUserText: true, butlerId })) {
+        finish("Butler is already processing a turn", true);
+      }
     });
     return c.json({
       sessionId: getButlerSession(projectId, butlerId).sessionId ?? null,
