@@ -2,3 +2,6 @@
 loop.log
 STOP
 *.pid
+# Rolling cross-iteration memory: local runtime state, never committed.
+# (Gitignored so appending to it never dirties the tree and blocks the auto-merge queue.)
+state.md
