@@ -157,7 +157,11 @@ export async function materializeSpecTasksForWorkspace(
   const artifacts = await database
     .select({ content: issueArtifacts.content, createdAt: issueArtifacts.createdAt })
     .from(issueArtifacts)
-    .where(and(eq(issueArtifacts.issueId, workspace.issueId), eq(issueArtifacts.caption, "phase-artifact:tasks")))
+    .where(and(
+      eq(issueArtifacts.issueId, workspace.issueId),
+      eq(issueArtifacts.workspaceId, workspaceId),
+      eq(issueArtifacts.caption, "phase-artifact:tasks"),
+    ))
     .orderBy(sql`${issueArtifacts.createdAt} DESC`)
     .limit(1);
   const artifact = artifacts[0];
