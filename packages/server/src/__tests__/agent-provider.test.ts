@@ -548,8 +548,9 @@ describe("CodexProvider", () => {
       providerSessionId: "thread-123",
     });
     expect(config.args).toEqual([
-      "exec", "resume", "--json", "--dangerously-bypass-approvals-and-sandbox", "thread-123",
+      "exec", "resume", "--json", "--dangerously-bypass-approvals-and-sandbox", "--dangerously-bypass-hook-trust",
       "--profile-v2", "fast",
+      "thread-123",
       "-",
     ]);
   });
@@ -559,7 +560,7 @@ describe("CodexProvider", () => {
       profile: { provider: "codex", name: "fast" },
     });
     expect(config.args).toEqual([
-      "exec", "--json", "--dangerously-bypass-approvals-and-sandbox",
+      "exec", "--json", "--dangerously-bypass-approvals-and-sandbox", "--dangerously-bypass-hook-trust",
       "--profile-v2", "fast",
       "-",
     ]);
@@ -568,7 +569,7 @@ describe("CodexProvider", () => {
   it("uses read-only sandbox (not the bypass flag) in plan mode", () => {
     const config = provider.buildLaunchConfig({ planMode: true });
     expect(config.args).toEqual([
-      "exec", "--json", "--sandbox", "read-only",
+      "exec", "--json", "--sandbox", "read-only", "--dangerously-bypass-hook-trust",
       "-",
     ]);
     expect(config.args).not.toContain("--dangerously-bypass-approvals-and-sandbox");
@@ -577,7 +578,7 @@ describe("CodexProvider", () => {
   it("uses read-only sandbox on resume in plan mode", () => {
     const config = provider.buildLaunchConfig({ planMode: true, providerSessionId: "thread-9" });
     expect(config.args).toEqual([
-      "exec", "resume", "--json", "--sandbox", "read-only", "thread-9",
+      "exec", "resume", "--json", "--sandbox", "read-only", "--dangerously-bypass-hook-trust", "thread-9",
       "-",
     ]);
   });
