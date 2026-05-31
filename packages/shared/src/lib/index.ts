@@ -3,3 +3,4 @@ export * from "./mcp-tool-definitions.js";
 export * from "./session-summary.js";
 export * from "./failure-keywords.js";
 export * from "./openspec.js";
+export * from "./status-view.js";

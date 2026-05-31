@@ -1,5 +1,6 @@
-import { eq, and, inArray, sql } from "drizzle-orm";
-import { issues, projectStatuses } from "@agentic-kanban/shared/schema";
+import { eq, and, inArray } from "drizzle-orm";
+import { isTerminalStatusIdView } from "@agentic-kanban/shared";
+import { issues, projectStatuses, workflowNodes } from "@agentic-kanban/shared/schema";
 import type { Database } from "../db/index.js";
 import { invokeClaudePrompt } from "./claude-cli.service.js";
 import { NotFoundError } from "../errors/index.js";
@@ -74,23 +75,21 @@ export async function runTicketPreflight(
     );
   const excludeIds = doneOrCancelledStatuses.map((s) => s.id);
 
-  let openIssues: { id: string; issueNumber: number | null; title: string; description: string | null }[];
-  if (excludeIds.length > 0) {
-    openIssues = await database
-      .select({ id: issues.id, issueNumber: issues.issueNumber, title: issues.title, description: issues.description })
-      .from(issues)
-      .where(
-        and(
-          eq(issues.projectId, projectId),
-          sql`${issues.statusId} NOT IN (${sql.join(excludeIds.map((id) => sql`${id}`), sql`, `)})`,
-        ),
-      );
-  } else {
-    openIssues = await database
-      .select({ id: issues.id, issueNumber: issues.issueNumber, title: issues.title, description: issues.description })
-      .from(issues)
-      .where(eq(issues.projectId, projectId));
-  }
+  const allProjectIssues = await database
+    .select({
+      id: issues.id,
+      issueNumber: issues.issueNumber,
+      title: issues.title,
+      description: issues.description,
+      statusId: issues.statusId,
+      currentNodeId: issues.currentNodeId,
+      currentNodeType: workflowNodes.nodeType,
+    })
+    .from(issues)
+    .leftJoin(workflowNodes, eq(issues.currentNodeId, workflowNodes.id))
+    .where(eq(issues.projectId, projectId));
+  const terminalStatusIds = new Set(excludeIds);
+  const openIssues = allProjectIssues.filter((issue) => !isTerminalStatusIdView(issue, terminalStatusIds));
 
   const answeredClarifications = (clarifications ?? []).filter(
     (c) => c.question?.trim() && c.answer?.trim(),
