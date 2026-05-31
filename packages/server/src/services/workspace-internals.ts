@@ -1,4 +1,5 @@
 import { workspaces } from "@agentic-kanban/shared/schema";
+import type { WorkspaceSetupRun } from "@agentic-kanban/shared";
 import type { ProviderName } from "./agent-provider.js";
 import type { AgentSettings } from "./agent-settings.service.js";
 import * as realGitService from "./git.service.js";
@@ -87,6 +88,7 @@ export interface CreateWorkspaceResult {
   includeVisualProof: boolean;
   status: string;
   provider: ProviderName;
+  latestSetup?: WorkspaceSetupRun;
   sessionId?: string;
   createdAt: string;
   updatedAt: string;
