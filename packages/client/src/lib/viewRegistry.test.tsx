@@ -31,7 +31,7 @@ describe("VIEW_REGISTRY", () => {
     expect(VIEW_IDS.slice().sort()).toEqual(expected.slice().sort());
   });
 
-  it("preserves the existing view shortcuts (b/g/t/f/l/m/i/p, etc.)", () => {
+  it("preserves the existing view shortcuts (b/g/t/f/l/m/i/p/u, etc.)", () => {
     const byId = Object.fromEntries(VIEW_REGISTRY.map((v) => [v.id, v.shortcut]));
     expect(byId.kanban).toBe("b");
     expect(byId.graph).toBe("g");
@@ -45,8 +45,7 @@ describe("VIEW_REGISTRY", () => {
     expect(byId["flaky-tests"]).toBe("k");
     expect(byId.digest).toBe("d");
     expect(byId.focus).toBe("o");
-    // workflows intentionally has no shortcut
-    expect(byId.workflows).toBeUndefined();
+    expect(byId.workflows).toBe("u");
   });
 
   it("every view has the fields the three consumers need", () => {
