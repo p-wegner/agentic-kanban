@@ -143,7 +143,25 @@ function isBroadNodeKill(command) {
     /CommandLine\s+-like\s+["']?\*agentic-kanban\*tsx\*src\/index\*/i.test(normalized) ||
     /CommandLine\s+-like\s+["']?\*agentic-kanban\*tsx\*src\\index\*/i.test(normalized);
   const killsMatches = /\b(?:taskkill|Stop-Process)\b/i.test(normalized);
-  return hasBroadDevMatcher && killsMatches;
+  // Exempt the dev-server skill's own Stop-PortOwner recipe: it derives target PIDs
+  // from a specific listening port and kills them by /PID, so it is inherently
+  // port-scoped. The `CommandLine -like "*dev.mjs*"` it contains is only used to walk
+  // from the port owner up to its supervisor parent, not to select processes broadly.
+  return hasBroadDevMatcher && killsMatches && !isPortScopedKill(normalized);
+}
+
+// True when a command derives the PID(s) it kills from a specific listening port
+// (netstat / Get-NetTCPConnection) and kills by /PID — the safe, port-scoped pattern,
+// not a broad command-line sweep. (Killing the *main board* port from a worktree is
+// still independently blocked by isMainBoardPortKill.)
+function isPortScopedKill(normalized) {
+  const derivesPidsFromPort =
+    /\bGet-NetTCPConnection\b[\s\S]*-LocalPort\b/i.test(normalized) ||
+    (/\bnetstat\b[\s\S]*-ano\b/i.test(normalized) && /\b(?:Select-String|findstr)\b/i.test(normalized));
+  const killsByPid =
+    /\btaskkill\b[\s\S]*\/PID\b/i.test(normalized) ||
+    /\bStop-Process\b[\s\S]*-Id\b/i.test(normalized);
+  return derivesPidsFromPort && killsByPid;
 }
 
 function isMainBoardPortKill(command) {
