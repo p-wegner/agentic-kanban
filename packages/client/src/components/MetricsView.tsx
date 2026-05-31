@@ -2,11 +2,13 @@ import { useEffect, useMemo, useState } from "react";
 import type { IssueWithStatus, ProjectStatsResponse, StatusWithIssues } from "@agentic-kanban/shared";
 import { STATUS_COLORS, PRIORITY_META, TYPE_COLORS, BRAND, ACCENT, HEATMAP_SCALE } from "../lib/chartColors";
 import { apiFetch } from "../lib/api.js";
+import { formatDateKeyLong, getLocalDateKey } from "../lib/dateKey.js";
 
 interface MetricsViewProps {
   columns: StatusWithIssues[];
   projectId: string | null;
   onIssueClick: (issue: IssueWithStatus) => void;
+  onCreatedDateClick?: (dateKey: string) => void;
 }
 
 const TYPE_META: Array<{ key: string; label: string; color: string }> = [
@@ -251,7 +253,13 @@ function LocSplit({ stats }: { stats: ProjectStatsResponse["codeMetrics"] }) {
   );
 }
 
-function ActivityHeatmap({ issues }: { issues: IssueWithStatus[] }) {
+function ActivityHeatmap({
+  issues,
+  onCreatedDateClick,
+}: {
+  issues: IssueWithStatus[];
+  onCreatedDateClick?: (dateKey: string) => void;
+}) {
   const { cells, maxCount, weeks } = useMemo(() => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -259,9 +267,7 @@ function ActivityHeatmap({ issues }: { issues: IssueWithStatus[] }) {
     // Build a map of date → count
     const countMap: Record<string, number> = {};
     for (const issue of issues) {
-      const d = new Date(issue.createdAt);
-      d.setHours(0, 0, 0, 0);
-      const key = d.toISOString().slice(0, 10);
+      const key = getLocalDateKey(issue.createdAt);
       countMap[key] = (countMap[key] ?? 0) + 1;
     }
 
@@ -278,7 +284,7 @@ function ActivityHeatmap({ issues }: { issues: IssueWithStatus[] }) {
     for (let w = 0; w < HEATMAP_WEEKS; w++) {
       const week: Array<{ date: Date; count: number; key: string }> = [];
       for (let d = 0; d < 7; d++) {
-        const key = current.toISOString().slice(0, 10);
+        const key = getLocalDateKey(current);
         const count = countMap[key] ?? 0;
         if (count > max) max = count;
         week.push({ date: new Date(current), count, key });
@@ -290,8 +296,8 @@ function ActivityHeatmap({ issues }: { issues: IssueWithStatus[] }) {
     return { cells: weeksArr, maxCount: max, weeks: weeksArr };
   }, [issues]);
 
-  function cellColor(count: number): string {
-    if (count === 0) return undefined as unknown as string;
+  function cellColor(count: number): string | undefined {
+    if (count === 0) return undefined;
     const intensity = Math.min(1, count / Math.max(maxCount, 1));
     if (intensity < 0.25) return HEATMAP_SCALE[1];
     if (intensity < 0.5)  return HEATMAP_SCALE[2];
@@ -360,10 +366,17 @@ function ActivityHeatmap({ issues }: { issues: IssueWithStatus[] }) {
             <div key={wi} className="flex flex-col" style={{ gap: GAP }}>
               {week.map((cell) => {
                 const color = cellColor(cell.count);
-                const isToday = cell.key === new Date().toISOString().slice(0, 10);
+                const isToday = cell.key === getLocalDateKey(new Date());
+                const interactive = cell.count > 0 && !!onCreatedDateClick;
+                const tooltipText = `${cell.count} issue${cell.count !== 1 ? "s" : ""} / ${formatDateKeyLong(cell.key)}`;
                 return (
-                  <div
+                  <button
+                    type="button"
                     key={cell.key}
+                    aria-disabled={!interactive}
+                    tabIndex={interactive ? 0 : -1}
+                    aria-label={`${tooltipText}${interactive ? ", filter issues created that day" : ""}`}
+                    title={tooltipText}
                     style={{
                       width: CELL,
                       height: CELL,
@@ -371,12 +384,14 @@ function ActivityHeatmap({ issues }: { issues: IssueWithStatus[] }) {
                       outline: isToday ? `2px solid ${BRAND}` : undefined,
                       outlineOffset: "1px",
                     }}
-                    className={`rounded-sm cursor-default transition-opacity hover:opacity-80 ${!color ? "bg-gray-100 dark:bg-gray-800" : ""}`}
+                    className={`rounded-sm border-0 p-0 transition-opacity ${interactive ? "cursor-pointer hover:opacity-80 focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-1 focus-visible:ring-offset-white dark:focus-visible:ring-offset-gray-900" : "cursor-default"} ${!color ? "bg-gray-100 dark:bg-gray-800" : ""}`}
+                    onClick={() => {
+                      if (interactive) onCreatedDateClick?.(cell.key);
+                    }}
                     onMouseEnter={(e) => {
                       const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-                      const d = cell.date.toLocaleDateString('en-US', { month: "short", day: "numeric", year: "numeric" });
                       setTooltip({
-                        text: `${cell.count} issue${cell.count !== 1 ? "s" : ""} / ${d}`,
+                        text: tooltipText,
                         x: rect.left + rect.width / 2,
                         y: rect.top,
                       });
@@ -434,7 +449,7 @@ function StatCard({
   );
 }
 
-export function MetricsView({ columns, projectId, onIssueClick }: MetricsViewProps) {
+export function MetricsView({ columns, projectId, onIssueClick, onCreatedDateClick }: MetricsViewProps) {
   const [projectStats, setProjectStats] = useState<ProjectStatsResponse | null>(null);
   const [statsError, setStatsError] = useState<string | null>(null);
   const allIssues = useMemo(() => columns.flatMap((c) => c.issues), [columns]);
@@ -649,7 +664,7 @@ export function MetricsView({ columns, projectId, onIssueClick }: MetricsViewPro
                 past {HEATMAP_WEEKS} weeks
               </span>
             </h3>
-            <ActivityHeatmap issues={allIssues} />
+            <ActivityHeatmap issues={allIssues} onCreatedDateClick={onCreatedDateClick} />
           </div>
 
           <div className="md:col-span-2 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl p-4">
