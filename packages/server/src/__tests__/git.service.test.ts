@@ -192,6 +192,35 @@ describe("GitService", () => {
     expect(fsExistsSync(join(repoPath, "interrupted-retry.txt"))).toBe(true);
   }, 30000);
 
+  it("does not reset dirty already-merged targets unless they match an interrupted plumbing merge", async () => {
+    const worktreePath = await gitService.createWorktree(repoPath, "feature/already-ancestor-dirty");
+
+    const { writeFileSync, existsSync: fsExistsSync } = await import("node:fs");
+    writeFileSync(join(worktreePath, "ancestor-file.txt"), "Ancestor content\n");
+
+    await exec("git", ["add", "."], worktreePath);
+    await exec("git", ["config", "user.email", "test@test.com"], worktreePath);
+    await exec("git", ["config", "user.name", "Test"], worktreePath);
+    await exec("git", ["commit", "-m", "Add ancestor file"], worktreePath);
+    await gitService.removeWorktree(repoPath, worktreePath);
+
+    await exec("git", ["merge", "--ff-only", "feature/already-ancestor-dirty"], repoPath);
+    writeFileSync(join(repoPath, "target-only.txt"), "Target-only content\n");
+    await exec("git", ["add", "."], repoPath);
+    await exec("git", ["commit", "-m", "Add target-only file"], repoPath);
+
+    try {
+      await exec("git", ["rm", "target-only.txt"], repoPath);
+
+      const result = await gitService.mergeBranch(repoPath, "feature/already-ancestor-dirty", "main");
+
+      expect(result).toContain("already merged");
+      expect(fsExistsSync(join(repoPath, "target-only.txt"))).toBe(false);
+    } finally {
+      await exec("git", ["reset", "--hard", "HEAD"], repoPath);
+    }
+  }, 30000);
+
   it("refuses to merge into a checked-out branch with uncommitted tracked changes", async () => {
     const { writeFileSync, readFileSync } = await import("node:fs");
 
