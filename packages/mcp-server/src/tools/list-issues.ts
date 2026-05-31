@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { eq, inArray, and } from "drizzle-orm";
+import { isResolvedDependencyStatusView } from "@agentic-kanban/shared";
 import { prodDeps, type ToolDeps } from "./deps.js";
 
 export function registerListIssues(server: McpServer, deps: ToolDeps = prodDeps) {
@@ -39,7 +40,6 @@ export function registerListIssues(server: McpServer, deps: ToolDeps = prodDeps)
       let results = await query;
 
       if (tag) {
-        // Find all issue IDs that have the specified tag
         const matchingIssueIds = (await db
           .select({ issueId: schema.issueTags.issueId })
           .from(schema.issueTags)
@@ -66,43 +66,29 @@ export function registerListIssues(server: McpServer, deps: ToolDeps = prodDeps)
           .where(inArray(schema.issueDependencies.issueId, issueIds)) : [];
 
         const dependsOnIds = [...new Set(depRows.map(d => d.dependsOnId))];
-        const depStatusMap = new Map<string, string>();
-        const depNodeTypeMap = new Map<string, string>();
+        const depStatusMap = new Map<string, { currentNodeId: string | null; currentNodeType: string | null; statusName: string }>();
 
         if (dependsOnIds.length > 0) {
-          // Fetch status names for blockers
           const depStatuses = await db
-            .select({ id: schema.issues.id, statusName: schema.projectStatuses.name, currentNodeId: schema.issues.currentNodeId })
+            .select({
+              id: schema.issues.id,
+              currentNodeId: schema.issues.currentNodeId,
+              currentNodeType: schema.workflowNodes.nodeType,
+              statusName: schema.projectStatuses.name,
+            })
             .from(schema.issues)
             .innerJoin(schema.projectStatuses, eq(schema.issues.statusId, schema.projectStatuses.id))
+            .leftJoin(schema.workflowNodes, eq(schema.issues.currentNodeId, schema.workflowNodes.id))
             .where(inArray(schema.issues.id, dependsOnIds));
-          for (const ds of depStatuses) depStatusMap.set(ds.id, ds.statusName);
-
-          // Fetch node types for blockers that have a currentNodeId
-          const nodeIds = depStatuses.map(d => d.currentNodeId).filter(Boolean) as string[];
-          if (nodeIds.length > 0) {
-            const nodes = await db
-              .select({ id: schema.workflowNodes.id, nodeType: schema.workflowNodes.nodeType })
-              .from(schema.workflowNodes)
-              .where(inArray(schema.workflowNodes.id, nodeIds));
-            // Map dep issue id → nodeType via currentNodeId
-            const nodeIdToType = new Map(nodes.map(n => [n.id, n.nodeType]));
-            for (const ds of depStatuses) {
-              if (ds.currentNodeId) depNodeTypeMap.set(ds.id, nodeIdToType.get(ds.currentNodeId) ?? "");
-            }
-          }
+          for (const ds of depStatuses) depStatusMap.set(ds.id, ds);
         }
 
         const blockedSet = new Set<string>();
         for (const dep of depRows) {
           const isBlockingType = dep.type === "depends_on" || dep.type === "blocked_by";
           if (!isBlockingType) continue;
-          // Resolved if on an 'end' node (workflow-driven terminal)
-          const depNodeType = depNodeTypeMap.get(dep.dependsOnId);
-          if (depNodeType === "end") continue;
-          // Fallback: legacy Done/AI Reviewed status names
-          const depStatus = depStatusMap.get(dep.dependsOnId);
-          if (depStatus === "Done" || depStatus === "AI Reviewed") continue;
+          const blocker = depStatusMap.get(dep.dependsOnId);
+          if (blocker && isResolvedDependencyStatusView(blocker)) continue;
           blockedSet.add(dep.issueId);
         }
 

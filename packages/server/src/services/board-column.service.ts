@@ -1,4 +1,5 @@
-import { issues, projectStatuses, issueDependencies, tags, issueTags } from "@agentic-kanban/shared/schema";
+import { isResolvedDependencyStatusView } from "@agentic-kanban/shared";
+import { issues, projectStatuses, issueDependencies, tags, issueTags, workflowNodes } from "@agentic-kanban/shared/schema";
 import { eq, inArray } from "drizzle-orm";
 import type { Database } from "../db/index.js";
 
@@ -29,14 +30,20 @@ export async function buildBlockedMap(
     .where(inArray(issueDependencies.issueId, issueIds));
 
   const dependsOnIds = [...new Set(depRows.map(d => d.dependsOnId))];
-  const depStatusMap = new Map<string, string>();
+  const depStatusMap = new Map<string, { currentNodeId: string | null; currentNodeType: string | null; statusName: string }>();
   if (dependsOnIds.length > 0) {
     const depStatuses = await database
-      .select({ id: issues.id, statusName: projectStatuses.name })
+      .select({
+        id: issues.id,
+        currentNodeId: issues.currentNodeId,
+        currentNodeType: workflowNodes.nodeType,
+        statusName: projectStatuses.name,
+      })
       .from(issues)
       .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
+      .leftJoin(workflowNodes, eq(issues.currentNodeId, workflowNodes.id))
       .where(inArray(issues.id, dependsOnIds));
-    for (const ds of depStatuses) depStatusMap.set(ds.id, ds.statusName);
+    for (const ds of depStatuses) depStatusMap.set(ds.id, ds);
   }
 
   const depsByIssue = new Map<string, { dependsOnId: string; type: string }[]>();
@@ -49,8 +56,8 @@ export async function buildBlockedMap(
   for (const [issueId, deps] of depsByIssue) {
     const isBlocked = deps.some(dep => {
       if (dep.type !== "depends_on" && dep.type !== "blocked_by") return false;
-      const s = depStatusMap.get(dep.dependsOnId);
-      return s !== "Done" && s !== "AI Reviewed";
+      const blocker = depStatusMap.get(dep.dependsOnId);
+      return blocker ? !isResolvedDependencyStatusView(blocker) : true;
     });
     result.set(issueId, { isBlocked, dependencyCount: deps.length });
   }

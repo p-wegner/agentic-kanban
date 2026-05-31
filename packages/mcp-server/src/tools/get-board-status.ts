@@ -1,7 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { eq, inArray, desc } from "drizzle-orm";
-import { extractMeaningfulOutput } from "@agentic-kanban/shared";
+import { extractMeaningfulOutput, isTerminalStatusIdView } from "@agentic-kanban/shared";
 import type { BoardStatusIssue } from "@agentic-kanban/shared";
 import { prodDeps, type ToolDeps } from "./deps.js";
 import { requireEntity } from "../db-utils.js";
@@ -53,7 +53,7 @@ export function registerGetBoardStatus(server: McpServer, deps: ToolDeps = prodD
           statuses.filter(s => s.name === "Done" || s.name === "Cancelled").map(s => s.id),
         );
 
-        // 3. Get issues with status names
+        // 3. Get issues with status names and workflow node type
         let projectIssues = await db
           .select({
             id: schema.issues.id,
@@ -63,13 +63,16 @@ export function registerGetBoardStatus(server: McpServer, deps: ToolDeps = prodD
             issueType: schema.issues.issueType,
             statusId: schema.issues.statusId,
             statusName: schema.projectStatuses.name,
+            currentNodeId: schema.issues.currentNodeId,
+            currentNodeType: schema.workflowNodes.nodeType,
           })
           .from(schema.issues)
           .innerJoin(schema.projectStatuses, eq(schema.issues.statusId, schema.projectStatuses.id))
+          .leftJoin(schema.workflowNodes, eq(schema.issues.currentNodeId, schema.workflowNodes.id))
           .where(eq(schema.issues.projectId, pid));
 
         if (!includeClosed) {
-          projectIssues = projectIssues.filter(i => !terminalStatusIds.has(i.statusId));
+          projectIssues = projectIssues.filter(i => !isTerminalStatusIdView(i, terminalStatusIds));
         }
 
         if (projectIssues.length === 0) {
