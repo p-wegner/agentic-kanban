@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { issues, projects, projectStatuses, workflowEdges, workflowNodes, workflowTemplates, workspaces } from "@agentic-kanban/shared/schema";
+import { issues, projects, projectStatuses, sessions, workflowEdges, workflowNodes, workflowTemplates, workspaces } from "@agentic-kanban/shared/schema";
 import { createTestDb } from "./helpers/test-db.js";
 import { buildWorkspaceSummaryMap } from "../services/workspace-summary.service.js";
 
@@ -155,5 +155,62 @@ describe("workspace-summary.service", () => {
       state: "waiting",
       nextStages: ["Review"],
     });
+  });
+
+  it("prefers stored contextTokens over cumulative input token totals", async () => {
+    const { db } = createTestDb();
+    const now = new Date().toISOString();
+    const projectId = randomUUID();
+    const statusId = randomUUID();
+    const issueId = randomUUID();
+    const workspaceId = randomUUID();
+
+    await db.insert(projects).values({
+      id: projectId,
+      name: "Context Project",
+      repoPath: "/tmp/context-project",
+      repoName: "context-project",
+      defaultBranch: "main",
+      createdAt: now,
+      updatedAt: now,
+    });
+    await db.insert(projectStatuses).values({
+      id: statusId,
+      projectId,
+      name: "In Progress",
+      sortOrder: 0,
+      isDefault: true,
+      createdAt: now,
+    });
+    await db.insert(issues).values({
+      id: issueId,
+      issueNumber: 3,
+      title: "Show context",
+      statusId,
+      projectId,
+      createdAt: now,
+      updatedAt: now,
+    });
+    await db.insert(workspaces).values({
+      id: workspaceId,
+      issueId,
+      branch: "feature/context",
+      status: "idle",
+      createdAt: now,
+      updatedAt: now,
+    });
+    await db.insert(sessions).values({
+      id: randomUUID(),
+      workspaceId,
+      executor: "codex",
+      status: "completed",
+      startedAt: now,
+      endedAt: now,
+      stats: JSON.stringify({ inputTokens: 300_000, outputTokens: 1_000, contextTokens: 42_000 }),
+    });
+
+    const summaryMap = await buildWorkspaceSummaryMap([issueId], "main", db);
+
+    expect(summaryMap.get(issueId)?.main?.contextTokens).toBe(42_000);
   });
 });
