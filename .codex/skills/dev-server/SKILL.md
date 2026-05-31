@@ -80,10 +80,12 @@ function Stop-PortOwner([int]$port) {
         Where-Object { $_ -match '^\d+$' -and $_ -ne '0' } |
         Sort-Object -Unique
 
-    foreach ($pid in $pids) {
-        $proc = Get-CimInstance Win32_Process -Filter "ProcessId = $pid" -ErrorAction SilentlyContinue
+    # NOTE: do not name this loop var $pid — $PID is a read-only automatic variable
+    # in PowerShell and assigning to it throws "Variable PID cannot be overwritten".
+    foreach ($ownerPid in $pids) {
+        $proc = Get-CimInstance Win32_Process -Filter "ProcessId = $ownerPid" -ErrorAction SilentlyContinue
         $parent = if ($proc) { Get-CimInstance Win32_Process -Filter "ProcessId = $($proc.ParentProcessId)" -ErrorAction SilentlyContinue } else { $null }
-        $targetPid = if ($parent -and $parent.CommandLine -like "*dev.mjs*") { $parent.ProcessId } else { [int]$pid }
+        $targetPid = if ($parent -and $parent.CommandLine -like "*dev.mjs*") { $parent.ProcessId } else { [int]$ownerPid }
         taskkill /F /T /PID $targetPid 2>$null
     }
 }
