@@ -3,10 +3,10 @@
  * Prevent cross-worktree writes — keep each Claude Code instance inside its own
  * git worktree.
  *
- * Runs as a PreToolUse hook on the structured file-writing tools (Write, Edit,
- * MultiEdit, NotebookEdit). It blocks any write whose target path lives inside a
- * *different* git worktree of the same repo than the one this instance is
- * operating in.
+ * Runs as a PreToolUse hook on structured file-writing tools (Write, Edit,
+ * MultiEdit, NotebookEdit) and Codex patch tools. It blocks any write whose
+ * target path lives inside a *different* git worktree of the same repo than the
+ * one this instance is operating in.
  *
  * Why: agents are launched in a dedicated worktree (cwd = worktree). When an
  * agent writes into the main checkout or a sibling worktree, that work lands
@@ -30,7 +30,16 @@ const path = require("path");
 const readline = require("readline");
 const { execFileSync } = require("child_process");
 
-const WRITE_TOOLS = new Set(["Write", "Edit", "MultiEdit", "NotebookEdit"]);
+const WRITE_TOOLS = new Set([
+  "Write",
+  "Edit",
+  "MultiEdit",
+  "NotebookEdit",
+  "apply_patch",
+  "apply_patch_freeform",
+  "functions.apply_patch",
+]);
+const PATCH_TOOLS = new Set(["apply_patch", "apply_patch_freeform", "functions.apply_patch"]);
 
 /** Normalise a path for case-insensitive, separator-insensitive comparison (Windows-friendly). */
 function norm(p) {
@@ -81,8 +90,11 @@ function listWorktrees(cwd) {
 }
 
 /** Extract the target file path(s) from a write-tool input. */
-function targetPaths(toolInput) {
+function targetPaths(toolName, toolInput) {
   if (!toolInput) return [];
+  if (PATCH_TOOLS.has(toolName)) {
+    return patchTargetPaths(toolInput.patch || toolInput.input || toolInput.text || toolInput);
+  }
   const p =
     toolInput.file_path ||
     toolInput.filePath ||
@@ -90,6 +102,16 @@ function targetPaths(toolInput) {
     toolInput.notebookPath ||
     toolInput.path;
   return p ? [p] : [];
+}
+
+function patchTargetPaths(input) {
+  const text = typeof input === "string" ? input : JSON.stringify(input);
+  const paths = [];
+  for (const line of text.split(/\r?\n/)) {
+    const match = line.match(/^\*\*\* (?:Add File|Update File|Delete File|Move to):\s+(.+?)\s*$/);
+    if (match) paths.push(match[1]);
+  }
+  return paths;
 }
 
 async function readInput() {
@@ -121,7 +143,7 @@ async function main() {
   const toolName = input.tool_name || input.toolName;
   if (!WRITE_TOOLS.has(toolName)) allow();
 
-  const targets = targetPaths(input.tool_input || input.toolInput);
+  const targets = targetPaths(toolName, input.tool_input || input.toolInput);
   if (targets.length === 0) allow();
 
   // The worktree this instance is operating in.

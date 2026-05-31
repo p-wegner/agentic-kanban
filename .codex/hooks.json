@@ -12,6 +12,18 @@
             "statusMessage": "Checking command safety"
           }
         ]
+      },
+      {
+        "matcher": "Write|Edit|MultiEdit|NotebookEdit|apply_patch|apply_patch_freeform|functions.apply_patch",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$(git rev-parse --show-toplevel)/.claude/hooks/prevent-cross-worktree-writes.js\"",
+            "commandWindows": "node C:/andrena/agentic-kanban/.claude/hooks/prevent-cross-worktree-writes.js",
+            "timeout": 10,
+            "statusMessage": "Checking worktree write scope"
+          }
+        ]
       }
     ]
   }
