@@ -5,6 +5,38 @@ import { parseJsonBody } from "../middleware/parse-body.js";
 import { createRouter } from "../middleware/create-router.js";
 import { wrapAiOperation } from "../middleware/ai-operation.js";
 import { checkIssueOverlap } from "../services/issue-ai.service.js";
+import { listBoardHealthEvents } from "../repositories/board-health-events.repository.js";
+
+function parseBoardHealthEventsLimit(raw: string | undefined): number {
+  const parsed = Number.parseInt(raw ?? "", 10);
+  if (!Number.isFinite(parsed)) return 20;
+  return Math.min(50, Math.max(1, parsed));
+}
+
+function compactBoardHealthEventDetails(raw: string | null): string | null {
+  if (!raw) return null;
+  try {
+    const details = JSON.parse(raw) as unknown;
+    if (details === null || details === undefined) return null;
+    if (typeof details !== "object") return String(details);
+    if (Array.isArray(details)) return `${details.length} item${details.length === 1 ? "" : "s"}`;
+
+    const entries = Object.entries(details as Record<string, unknown>)
+      .filter(([, value]) => value !== null && value !== undefined)
+      .slice(0, 4);
+    if (entries.length === 0) return null;
+
+    return entries
+      .map(([key, value]) => {
+        if (Array.isArray(value)) return `${key}: ${value.length} item${value.length === 1 ? "" : "s"}`;
+        if (typeof value === "object") return `${key}: ${Object.keys(value as Record<string, unknown>).length} fields`;
+        return `${key}: ${String(value)}`;
+      })
+      .join(", ");
+  } catch {
+    return raw.slice(0, 160);
+  }
+}
 
 export function createProjectsRoute(database: Database = db) {
   const router = createRouter();
@@ -97,6 +129,21 @@ export function createProjectsRoute(database: Database = db) {
     const projectId = c.req.param("id");
     const result = await projectService.getStats(projectId);
     return c.json(result);
+  });
+
+  // GET /api/projects/:id/board-health-events
+  router.get("/:id/board-health-events", async (c) => {
+    const projectId = c.req.param("id");
+    const limit = parseBoardHealthEventsLimit(c.req.query("limit"));
+    const events = await listBoardHealthEvents({ projectId, limit }, database);
+    return c.json(events.map((event) => ({
+      id: event.id,
+      timestamp: event.createdAt,
+      level: event.eventType === "error" ? "error" : "info",
+      type: event.eventType,
+      summary: event.summary,
+      details: compactBoardHealthEventDetails(event.details),
+    })));
   });
 
   // GET /api/projects/:id/worktrees
