@@ -4,6 +4,73 @@ import { auditProcessEvent, guardProcessKill } from "./process-guard.js";
 
 const execFileAsync = promisify(execFile);
 
+/**
+ * Kill the process (tree) listening on each of the given ports. Used to free the
+ * deterministic dev-server ports the app assigns to a worktree, since those dev
+ * servers resolve vite/tsx from the SHARED main-checkout node_modules and so never
+ * match a worktree-dir command-line filter (killProcessesInDir misses them).
+ *
+ * Targets the EXACT ports given — never a range — so it can't hit unrelated OS
+ * services. Every kill still passes through guardProcessKill (protected board PIDs /
+ * ports are spared).
+ */
+export async function killProcessesOnPorts(ports: number[]): Promise<number> {
+  const unique = [...new Set(ports.filter((p) => Number.isInteger(p) && p > 0))];
+  if (unique.length === 0) return 0;
+  let killed = 0;
+  for (const port of unique) {
+    let pids: number[] = [];
+    try {
+      pids = await listenerPidsForPort(port);
+    } catch {
+      continue;
+    }
+    for (const pid of pids) {
+      if (!guardProcessKill(pid, { reason: "process-cleanup-port-match", port })) continue;
+      auditProcessEvent({ action: "process-cleanup-candidate", pid, port });
+      try {
+        if (process.platform === "win32") {
+          await execFileAsync("taskkill", ["/pid", String(pid), "/T", "/F"], { timeout: 5000 });
+        } else {
+          process.kill(pid, "SIGTERM");
+        }
+        console.log(`[process-cleanup] killed PID ${pid} (listening on port ${port})`);
+        auditProcessEvent({ action: "process-cleanup-killed", pid, port });
+        killed++;
+      } catch (err) {
+        auditProcessEvent({ action: "process-cleanup-kill-failed", pid, port, error: err instanceof Error ? err.message : String(err) });
+        // Process may have already exited.
+      }
+    }
+  }
+  return killed;
+}
+
+/** PIDs currently LISTENING on a specific TCP port (best-effort, cross-platform). */
+async function listenerPidsForPort(port: number): Promise<number[]> {
+  if (process.platform === "win32") {
+    const { stdout } = await execFileAsync("netstat", ["-ano", "-p", "TCP"], { timeout: 10000 });
+    const pids = new Set<number>();
+    for (const line of stdout.split("\n")) {
+      // e.g. "  TCP    0.0.0.0:3180   0.0.0.0:0   LISTENING   12345"
+      if (!/\bLISTENING\b/i.test(line)) continue;
+      const cols = line.trim().split(/\s+/);
+      const local = cols[1] ?? "";
+      const localPort = Number(local.split(":").pop());
+      if (localPort !== port) continue;
+      const pid = Number(cols[cols.length - 1]);
+      if (Number.isInteger(pid) && pid > 0) pids.add(pid);
+    }
+    return [...pids];
+  }
+  try {
+    const { stdout } = await execFileAsync("lsof", ["-ti", `tcp:${port}`, "-sTCP:LISTEN"], { timeout: 10000 });
+    return stdout.trim().split("\n").map(Number).filter((n) => Number.isInteger(n) && n > 0);
+  } catch {
+    return [];
+  }
+}
+
 export async function killProcessesInDir(dir: string): Promise<number> {
   let killed = 0;
   auditProcessEvent({ action: "process-cleanup-start", dir });

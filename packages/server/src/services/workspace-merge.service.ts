@@ -15,6 +15,7 @@ import {
 } from "../repositories/workspace.repository.js";
 import { killProcessesInDir } from "./process-cleanup.js";
 import { runScript } from "./script-runner.js";
+import { teardownWorktree } from "./workspace-teardown.service.js";
 import {
   getConflictingFiles,
   buildConflictResolutionPrompt,
@@ -129,13 +130,19 @@ export function createWorkspaceMergeService(deps: {
     defaultBranch: string | null,
   ) {
     if (workspace.workingDir && !workspace.isDirect) {
-      await killWorktreeProcesses(workspace.workingDir, "merge:pre");
-      if (project?.teardownScript && project.setupEnabled !== false) {
-        try {
-          const r = await runScript(project.teardownScript, workspace.workingDir, `teardown:${id}`);
-          console.log(`[workspace-service] teardown script: ${r.ok ? "ok" : "failed"} — ${r.output.slice(0, 100)}`);
-        } catch { /* ignore */ }
-      }
+      // Full teardown before merge: kill dir procs + free the worktree's dev ports +
+      // run the project's generic teardownScript (with worktree context env).
+      await teardownWorktree(
+        {
+          workingDir: workspace.workingDir,
+          branch: workspace.branch,
+          isDirect: workspace.isDirect,
+          teardownScript: project?.teardownScript,
+          setupEnabled: project?.setupEnabled,
+          label: "merge",
+        },
+        { killDir: killProcesses },
+      );
     }
 
     if (workspace.isDirect) {
