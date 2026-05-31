@@ -15,6 +15,9 @@ interface VoiceInboxButtonProps {
 }
 
 type RecordingState = "idle" | "recording" | "review" | "processing";
+type VoiceCaptureResult =
+  | { type: "issue"; issueId: string; issueNumber: number; title: string }
+  | { type: "action"; action: "move_issue"; issueId: string; issueNumber: number; title: string; targetStatus: string; message: string };
 
 // Web Speech API types (may not be in all TS lib versions)
 interface SpeechRecognitionEvent extends Event {
@@ -104,7 +107,7 @@ export function VoiceInboxButton({ projectId, onIssueCreated }: VoiceInboxButton
     const speechRecognitionLanguage = resolveVoiceLanguage(voiceLanguage);
     setState("processing");
     try {
-      const result = await apiFetch<{ issueId: string; issueNumber: number; title: string }>(
+      const result = await apiFetch<VoiceCaptureResult>(
         `/api/projects/${projectId}/voice-capture`,
         {
           method: "POST",
@@ -115,8 +118,13 @@ export function VoiceInboxButton({ projectId, onIssueCreated }: VoiceInboxButton
           }),
         },
       );
-      showToast(`🎙️ Created #${result.issueNumber}: ${result.title}`, "success");
-      onIssueCreated?.();
+      if (result.type === "action") {
+        showToast(result.message, "success");
+        onIssueCreated?.();
+      } else {
+        showToast(`Created #${result.issueNumber}: ${result.title}`, "success");
+        onIssueCreated?.();
+      }
     } catch (err: any) {
       showToast(`Voice capture failed: ${err.message}`, "error");
     } finally {
@@ -264,12 +272,12 @@ export function VoiceInboxButton({ projectId, onIssueCreated }: VoiceInboxButton
   const isLanguageDisabled = isDisabled || isRecording;
 
   const title = isRecording
-    ? "Recording… click to stop and review before creating an issue"
+    ? "Recording… click to stop and review before submitting"
     : isProcessing
     ? "Processing voice note…"
     : isReviewing
-    ? "Review the transcript before creating an issue"
-    : "Voice inbox — record an idea and auto-create a Backlog issue (shift+v)";
+    ? "Review the transcript before creating an issue or running a command"
+    : "Voice inbox — record an idea or quick board command (shift+v)";
 
   return (
     <div className="relative shrink-0 inline-flex items-center gap-1">
@@ -357,7 +365,7 @@ export function VoiceInboxButton({ projectId, onIssueCreated }: VoiceInboxButton
           <div className="bg-white dark:bg-gray-900 rounded-lg shadow-xl w-full max-w-lg border border-gray-200 dark:border-gray-700">
             {/* Header */}
             <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-gray-700">
-              <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Review voice note</h2>
+              <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Review voice input</h2>
               <button
                 onClick={discardReview}
                 aria-label="Discard"
@@ -369,8 +377,8 @@ export function VoiceInboxButton({ projectId, onIssueCreated }: VoiceInboxButton
 
             <div className="p-4 space-y-3">
               <p className="text-sm text-gray-600 dark:text-gray-400">
-                Review the transcribed text below. The title and description will be generated from it
-                when you create the issue.
+                Review the transcribed text below. Commands like "move #10 to review" run directly;
+                other notes create an issue.
               </p>
               <label className="text-xs font-medium text-gray-600 dark:text-gray-400 block">Transcript</label>
               <textarea
@@ -396,7 +404,7 @@ export function VoiceInboxButton({ projectId, onIssueCreated }: VoiceInboxButton
                 disabled={!reviewText.trim()}
                 className="text-sm px-3 py-1.5 bg-brand-600 text-white rounded hover:bg-brand-700 disabled:opacity-50"
               >
-                Create issue
+                Submit
               </button>
             </div>
           </div>

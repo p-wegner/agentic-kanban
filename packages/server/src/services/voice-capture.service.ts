@@ -1,9 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { issues, issueTags, tags, projectStatuses } from "@agentic-kanban/shared/schema";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import type { Database } from "../db/index.js";
 import { invokeClaudePrompt } from "./claude-cli.service.js";
 import type { BoardEvents } from "./board-events.js";
+import { syncCurrentNodeToStatus } from "@agentic-kanban/shared/lib/workflow-engine";
 
 export interface VoiceCaptureInput {
   projectId: string;
@@ -12,12 +13,49 @@ export interface VoiceCaptureInput {
   speechLanguageLabel?: string | null;
 }
 
-export interface VoiceCaptureResult {
+export interface VoiceCaptureIssueResult {
+  type: "issue";
   issueId: string;
   issueNumber: number;
   title: string;
   description: string;
   priority: string;
+}
+
+export interface VoiceCaptureActionResult {
+  type: "action";
+  action: "move_issue";
+  issueId: string;
+  issueNumber: number;
+  title: string;
+  targetStatus: string;
+  message: string;
+}
+
+export type VoiceCaptureResult = VoiceCaptureIssueResult | VoiceCaptureActionResult;
+
+type VoiceCommandIntent =
+  | { type: "create_issue" }
+  | { type: "move_issue"; issueNumber: number; targetStatus: string };
+
+function cleanCommandText(value: string): string {
+  return value
+    .replace(/[.!?]+$/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+export function parseVoiceCommandIntent(transcript: string): VoiceCommandIntent {
+  const text = cleanCommandText(transcript);
+  const moveMatch = /^(?:please\s+)?(?:move|put|send)\s+(?:(?:issue|ticket)(?:\s+number)?\s+)?#?\s*(\d+)\s+(?:to|into)\s+(.+)$/i.exec(text);
+  if (moveMatch) {
+    return {
+      type: "move_issue",
+      issueNumber: Number(moveMatch[1]),
+      targetStatus: cleanCommandText(moveMatch[2]).replace(/^(?:the\s+)?/i, ""),
+    };
+  }
+  return { type: "create_issue" };
 }
 
 function cleanLanguageMetadata(value: string | null | undefined): string | null {
@@ -90,6 +128,72 @@ async function resolveBacklogStatusId(projectId: string, database: Database): Pr
   return def.id;
 }
 
+function normalizeStatusName(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+function findTargetStatus(
+  targetStatus: string,
+  statuses: Array<{ id: string; name: string }>,
+): { id: string; name: string } | null {
+  const wanted = targetStatus.trim();
+  const normalized = normalizeStatusName(wanted);
+  const exact = statuses.find((s) => s.name.toLowerCase() === wanted.toLowerCase())
+    ?? statuses.find((s) => normalizeStatusName(s.name) === normalized);
+  if (exact) return exact;
+
+  if (normalized === "review") {
+    return statuses.find((s) => normalizeStatusName(s.name) === "inreview")
+      ?? statuses.find((s) => normalizeStatusName(s.name).includes("review"))
+      ?? null;
+  }
+
+  return statuses.find((s) => normalizeStatusName(s.name).includes(normalized)) ?? null;
+}
+
+async function moveIssueFromVoiceCommand(
+  projectId: string,
+  intent: Extract<VoiceCommandIntent, { type: "move_issue" }>,
+  database: Database,
+  boardEvents?: BoardEvents,
+): Promise<VoiceCaptureActionResult> {
+  const issueRows = await database
+    .select({ id: issues.id, issueNumber: issues.issueNumber, title: issues.title })
+    .from(issues)
+    .where(and(eq(issues.projectId, projectId), eq(issues.issueNumber, intent.issueNumber)))
+    .limit(1);
+  const issue = issueRows[0];
+  if (!issue) throw new Error(`Issue #${intent.issueNumber} not found`);
+
+  const statusRows = await database
+    .select({ id: projectStatuses.id, name: projectStatuses.name })
+    .from(projectStatuses)
+    .where(eq(projectStatuses.projectId, projectId));
+  const target = findTargetStatus(intent.targetStatus, statusRows);
+  if (!target) {
+    throw new Error(`Status '${intent.targetStatus}' not found. Available: ${statusRows.map((s) => s.name).join(", ")}`);
+  }
+
+  const now = new Date().toISOString();
+  await database
+    .update(issues)
+    .set({ statusId: target.id, statusChangedAt: now, updatedAt: now })
+    .where(eq(issues.id, issue.id));
+  await syncCurrentNodeToStatus(database, issue.id).catch(() => {});
+
+  boardEvents?.broadcast(projectId, "issue_updated");
+
+  return {
+    type: "action",
+    action: "move_issue",
+    issueId: issue.id,
+    issueNumber: intent.issueNumber,
+    title: issue.title,
+    targetStatus: target.name,
+    message: `Moved #${intent.issueNumber}: ${issue.title} to ${target.name}`,
+  };
+}
+
 /**
  * Parses a free-form voice transcript into a structured ticket using Claude.
  */
@@ -153,6 +257,10 @@ export async function createVoiceCaptureIssue(
   boardEvents?: BoardEvents,
 ): Promise<VoiceCaptureResult> {
   const { projectId, transcript, speechLanguage, speechLanguageLabel } = input;
+  const intent = parseVoiceCommandIntent(transcript);
+  if (intent.type === "move_issue") {
+    return moveIssueFromVoiceCommand(projectId, intent, database, boardEvents);
+  }
 
   const [structured, statusId, tagId] = await Promise.all([
     parseTranscript(transcript, database, speechLanguage, speechLanguageLabel),
@@ -196,5 +304,5 @@ export async function createVoiceCaptureIssue(
 
   boardEvents?.broadcast(projectId, "issue_created");
 
-  return { issueId: id, issueNumber, title: structured.title, description: structured.description, priority: structured.priority };
+  return { type: "issue", issueId: id, issueNumber, title: structured.title, description: structured.description, priority: structured.priority };
 }
