@@ -305,6 +305,14 @@ export async function getIssueWorkspaces(
       updatedAt: workspaces.updatedAt,
       closedAt: workspaces.closedAt,
       mergedAt: workspaces.mergedAt,
+      latestSetupCommand: workspaces.latestSetupCommand,
+      latestSetupState: workspaces.latestSetupState,
+      latestSetupStartedAt: workspaces.latestSetupStartedAt,
+      latestSetupEndedAt: workspaces.latestSetupEndedAt,
+      latestSetupExitCode: workspaces.latestSetupExitCode,
+      latestSetupDurationMs: workspaces.latestSetupDurationMs,
+      latestSetupStdoutTail: workspaces.latestSetupStdoutTail,
+      latestSetupStderrTail: workspaces.latestSetupStderrTail,
     })
     .from(workspaces)
     .leftJoin(agentSkills, eq(workspaces.skillId, agentSkills.id))

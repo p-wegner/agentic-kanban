@@ -54,6 +54,14 @@ export const workspaces = sqliteTable("workspaces", {
   scorecardComputedAt: text("scorecard_computed_at"),
   codeMetricsJson: text("code_metrics_json"),
   codeMetricsComputedAt: text("code_metrics_computed_at"),
+  latestSetupCommand: text("latest_setup_command"),
+  latestSetupState: text("latest_setup_state"),
+  latestSetupStartedAt: text("latest_setup_started_at"),
+  latestSetupEndedAt: text("latest_setup_ended_at"),
+  latestSetupExitCode: integer("latest_setup_exit_code"),
+  latestSetupDurationMs: integer("latest_setup_duration_ms"),
+  latestSetupStdoutTail: text("latest_setup_stdout_tail"),
+  latestSetupStderrTail: text("latest_setup_stderr_tail"),
   /** Context primer assembled by the context-packer at workspace creation. Injected into CLAUDE.local.md. */
   contextPrimer: text("context_primer"),
 }, (table) => ({
