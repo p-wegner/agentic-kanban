@@ -249,6 +249,7 @@ export const VIEW_REGISTRY: ViewDescriptor[] = [
     icon: ICON.workflows,
     paletteIcon: "⛓",
     paletteDescription: "Design ticket-type pipelines",
+    shortcut: "u",
     group: "secondary",
   },
   {
