@@ -1,10 +1,10 @@
 import { randomUUID } from "node:crypto";
-import { issues, issueTags, issueDependencies, issueArtifacts, issueComments, showdowns, workspaces, projectStatuses } from "@agentic-kanban/shared/schema";
+import { issues, issueTags, issueDependencies, issueArtifacts, issueComments, showdowns, workspaces, projectStatuses, workflowTemplates } from "@agentic-kanban/shared/schema";
 import { eq, and, or, sql, inArray } from "drizzle-orm";
 import type { Database } from "../db/index.js";
 import type { BoardEvents } from "./board-events.js";
 import type { DependencyType } from "@agentic-kanban/shared/schema";
-import { syncCurrentNodeToStatus } from "@agentic-kanban/shared/lib/workflow-engine";
+import { getStartNode, resolveStatusId, syncCurrentNodeToStatus } from "@agentic-kanban/shared/lib/workflow-engine";
 import {
   resolveNewIssueDefaults,
   getIssueProjectId,
@@ -69,6 +69,10 @@ export function createIssueService(deps: {
       throw err;
     }
 
+    const workflowDefaults = input.workflowTemplateId
+      ? await resolveInitialWorkflowState(input.projectId, input.workflowTemplateId, statusId)
+      : { currentNodeId: null, statusId };
+
     await database.insert(issues).values({
       id,
       issueNumber,
@@ -80,7 +84,8 @@ export function createIssueService(deps: {
       estimate: input.estimate ?? null,
       sortOrder: input.sortOrder ?? 0,
       workflowTemplateId: input.workflowTemplateId ?? null,
-      statusId,
+      currentNodeId: workflowDefaults.currentNodeId,
+      statusId: workflowDefaults.statusId,
       projectId: input.projectId,
       createdAt: now,
       updatedAt: now,
@@ -89,6 +94,32 @@ export function createIssueService(deps: {
     if (input.projectId) boardEvents?.broadcast(input.projectId, "issue_created");
 
     return { id, issueNumber, title: input.title };
+  }
+
+  async function resolveInitialWorkflowState(
+    projectId: string,
+    templateId: string,
+    fallbackStatusId: string,
+  ): Promise<{ currentNodeId: string | null; statusId: string }> {
+    const templateRows = await database
+      .select({ id: workflowTemplates.id, projectId: workflowTemplates.projectId })
+      .from(workflowTemplates)
+      .where(eq(workflowTemplates.id, templateId))
+      .limit(1);
+    const template = templateRows[0];
+    if (!template || (template.projectId !== null && template.projectId !== projectId)) {
+      throw new IssueError("Workflow template not found for project", "BAD_REQUEST");
+    }
+
+    const startNode = await getStartNode(database as any, templateId);
+    if (!startNode) return { currentNodeId: null, statusId: fallbackStatusId };
+    const mappedStatusId = startNode.statusName
+      ? await resolveStatusId(database as any, projectId, startNode.statusName)
+      : null;
+    return {
+      currentNodeId: startNode.id,
+      statusId: mappedStatusId ?? fallbackStatusId,
+    };
   }
 
   async function createIssuesBatch(

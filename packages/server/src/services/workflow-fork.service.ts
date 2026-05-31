@@ -7,6 +7,7 @@ import {
   projects,
   preferences,
   workspaces,
+  workflowTemplates,
   agentSkills,
   sessions,
   sessionMessages,
@@ -32,6 +33,9 @@ import { resolveAgentSettings, toExecutorProvider } from "./agent-settings.servi
 const MAX_CONCURRENT_PER_WORKSPACE = 2;
 const MAX_CONCURRENT_PER_PROJECT = 4;
 const CHILD_TIMEOUT_MS = 30 * 60 * 1000;
+const SPEC_PHASE_SKILLS = new Set(["spec-requirements", "spec-design", "spec-tasks"]);
+const SPEC_PHASE_SESSION_START_TIMEOUT_MS = 2 * 60 * 1000;
+const SPEC_PHASE_SESSION_POLL_MS = 1000;
 
 type GitService = typeof realGitService;
 
@@ -113,6 +117,97 @@ export function createWorkflowForkService(deps: {
       await database.insert(workspaces).values({ ...insertValues, createdAt: now });
     }
     console.warn(`[fork] child launch failed (${childWorkspaceId}, ${entry.name}): ${failure}`);
+  }
+
+  async function isSpecDrivenPhaseNode(node: WorkflowNodeRow): Promise<boolean> {
+    if (!node.skillName || !SPEC_PHASE_SKILLS.has(node.skillName)) return false;
+    const rows = await database
+      .select({ builtinKey: workflowTemplates.builtinKey })
+      .from(workflowTemplates)
+      .where(eq(workflowTemplates.id, node.templateId))
+      .limit(1);
+    return rows[0]?.builtinKey === "spec-driven-phased-planning";
+  }
+
+  async function waitForWorkspaceSessionSlot(workspaceId: string, triggerType: string): Promise<boolean> {
+    const deadline = Date.now() + SPEC_PHASE_SESSION_START_TIMEOUT_MS;
+    while (true) {
+      const running = await database
+        .select({ id: sessions.id })
+        .from(sessions)
+        .where(and(eq(sessions.workspaceId, workspaceId), eq(sessions.status, "running")))
+        .limit(1);
+      if (running.length === 0) return true;
+      if (Date.now() >= deadline) {
+        console.warn(`[fork] skipped ${triggerType} launch for workspace ${workspaceId}: another session is still running.`);
+        return false;
+      }
+      await new Promise((resolve) => setTimeout(resolve, SPEC_PHASE_SESSION_POLL_MS));
+    }
+  }
+
+  async function launchSpecPhaseSession(workspaceId: string, node: WorkflowNodeRow): Promise<void> {
+    if (!getSessionManager || !(await isSpecDrivenPhaseNode(node))) return;
+
+    const triggerType = `phase:${node.skillName}`;
+    const phaseSessions = () => database
+      .select({ id: sessions.id })
+      .from(sessions)
+      .where(and(eq(sessions.workspaceId, workspaceId), eq(sessions.triggerType, triggerType)))
+      .limit(1);
+    const existing = await phaseSessions();
+    if (existing.length > 0) return;
+    if (!(await waitForWorkspaceSessionSlot(workspaceId, triggerType))) return;
+    if ((await phaseSessions()).length > 0) return;
+
+    const rows = await database
+      .select({
+        workspaceId: workspaces.id,
+        issueId: workspaces.issueId,
+        branch: workspaces.branch,
+        workingDir: workspaces.workingDir,
+        projectId: issues.projectId,
+        issueNumber: issues.issueNumber,
+        title: issues.title,
+        description: issues.description,
+        repoPath: projects.repoPath,
+      })
+      .from(workspaces)
+      .innerJoin(issues, eq(workspaces.issueId, issues.id))
+      .innerJoin(projects, eq(issues.projectId, projects.id))
+      .where(eq(workspaces.id, workspaceId))
+      .limit(1);
+    const ws = rows[0];
+    if (!ws?.workingDir) return;
+
+    const skillName = await injectNodeSkill(node, ws.workingDir, ws.repoPath);
+    if (!skillName) return;
+
+    await database.update(workspaces).set({
+      skillId: node.skillId ?? null,
+      updatedAt: new Date().toISOString(),
+    }).where(eq(workspaces.id, workspaceId));
+
+    const transitions = await getOutgoingTransitions(database, node.id);
+    const prompt =
+      `You are working on issue #${ws.issueNumber ?? "?"} - "${ws.title}", on branch \`${ws.branch}\`.\n` +
+      `This workspace has entered the "${node.name}" phase of the Spec-Driven workflow. Do only this phase's work and use the workflow gate when the phase is ready for promotion.\n\n` +
+      `${ws.description ?? ""}\n\n` +
+      buildTransitionBlock(node, transitions, workspaceId);
+
+    const cfg = await resolveAgentConfig();
+    await getSessionManager().startSession({
+      workspaceId,
+      prompt,
+      agentCommand: cfg.agentCommand,
+      agentArgs: cfg.agentArgs,
+      claudeProfile: cfg.claudeProfile,
+      permissionPromptTool: cfg.permissionPromptTool,
+      provider: toExecutorProvider(cfg.provider),
+      triggerType,
+      profile: cfg.profile,
+      model: cfg.model,
+    });
   }
 
   /** Count fork-child sessions currently running across the whole project. */
@@ -626,6 +721,8 @@ export function createWorkflowForkService(deps: {
         await spawnForkChildren(ws.id, node);
       } else if (node.nodeType === "parallel-join" && ws.parentWorkspaceId && ws.forkStatus === "running") {
         await handleChildJoined(ws.id);
+      } else if (!ws.parentWorkspaceId) {
+        await launchSpecPhaseSession(ws.id, node);
       }
     } catch (err) {
       console.error(`[fork] onWorkspaceEnteredNode(${workspaceId}) failed:`, err instanceof Error ? err.message : String(err));
