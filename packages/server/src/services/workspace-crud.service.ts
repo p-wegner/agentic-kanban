@@ -166,8 +166,7 @@ export function createWorkspaceCrudService(deps: {
       prompt = `${input.clarifications.trim()}\n\n${prompt}`;
     }
     if (input.includeVisualProof) {
-      const serverPort = process.env.KANBAN_SERVER_PORT || process.env.PORT || "3001";
-      prompt += `\n\nAfter completing the implementation, attach visual proof to this ticket. Use the playwright-cli skill to open the running app, take a screenshot of the working result, and post it as an artifact:\nPOST http://localhost:${serverPort}/api/issues/${issueId}/artifacts\nBody: { "type": "image", "mimeType": "image/png", "content": "<base64 data URL>", "caption": "Screenshot of the working result" }`;
+      prompt += `\n\nAfter completing the implementation, attach visual proof to this ticket. Use the playwright-cli skill to open the running app, take a screenshot of the working result, and call the MCP tool \`attach_artifact\` with { "issueId": "${issueId}", "type": "image", "mimeType": "image/png", "content": "<base64 data URL>", "caption": "Screenshot of the working result" }.`;
     }
     // Claude Code treats prompts that start with `/` as slash-command invocations
     // (e.g. ticket title "/merge endpoint ..." → "Unknown command: /merge", agent exits in 3s).
