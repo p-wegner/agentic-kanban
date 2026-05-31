@@ -1221,11 +1221,7 @@ export function BoardPage() {
           nudgeWipLimit={nudgeWipLimit}
           onNudgeWipLimitChange={handleNudgeWipLimitChange}
           columns={columns}
-          onOpenWorkspace={(workspaceId, issueId) => {
-            const issue = columns.flatMap(c => c.issues).find(i => i.id === issueId);
-            if (issue) setWorkspaceIssue(issue);
-            setWorkspaceInitial({ workspaceId, sessionId: "" });
-          }}
+          onOpenWorkspace={handleOpenWorkspaceById}
           viewMode={viewMode}
           onViewModeChange={handleViewModeChange}
           butlerBadgeCount={agentQuestionsCount}
@@ -1417,6 +1413,7 @@ export function BoardPage() {
       )}
       {workspaceIssue && (
         <WorkspacePanel
+          key={`${workspaceIssue.id}:${workspaceInitial?.workspaceId ?? "new"}:${workspaceOpenCreate ? "create" : "view"}`}
           issue={workspaceIssue}
           project={activeProject ?? null}
           onClose={() => { setWorkspaceIssue(null); setWorkspaceInitial(null); setWorkspaceOpenCreate(false); }}
