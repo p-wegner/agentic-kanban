@@ -82,13 +82,13 @@ describe("classifyStaleDevProcessTrees", () => {
     });
   });
 
-  it("keeps a tree associated with an active worktree even when it has no listeners yet", () => {
+  it("keeps a tree associated with a running workspace session even when it has no listeners yet", () => {
     const activeWorkspaces: ActiveWorkspaceResource[] = [{
       workspaceId: "ws-active",
       issueId: "issue-active",
       issueNumber: 147,
       workingDir: "C:/andrena/.worktrees/feature_ak-147-active",
-      sessionPid: null,
+      sessionPid: 900,
       ports: [3148, 5320],
     }];
     const snapshot = classify([
@@ -101,7 +101,30 @@ describe("classifyStaleDevProcessTrees", () => {
     expect(snapshot.kept[0]).toMatchObject({
       rootPid: 200,
       associatedWorkspaceIds: ["ws-active"],
-      reason: "active-workspace",
+      reason: "active-workspace-session",
+    });
+  });
+
+  it("cleans a no-listener tree in an idle workspace when no session is running", () => {
+    const activeWorkspaces: ActiveWorkspaceResource[] = [{
+      workspaceId: "ws-idle",
+      issueId: "issue-idle",
+      issueNumber: 148,
+      workingDir: "C:/andrena/.worktrees/feature_ak-148-idle",
+      sessionPid: null,
+      ports: [3149, 5321],
+    }];
+    const snapshot = classify([
+      proc(250, 1, "pnpm dev", "pnpm.cmd"),
+      proc(251, 250, "node C:/andrena/.worktrees/feature_ak-148-idle/scripts/dev.mjs"),
+      proc(252, 251, "node C:/andrena/.worktrees/feature_ak-148-idle/packages/client/node_modules/vite/bin/vite.js"),
+    ], [], activeWorkspaces, new Set([3001, 5173, 3149, 5321]));
+
+    expect(snapshot.kept).toHaveLength(0);
+    expect(snapshot.cleaned[0]).toMatchObject({
+      rootPid: 250,
+      associatedWorkspaceIds: [],
+      reason: "stale-dev-tree-no-listeners",
     });
   });
 
