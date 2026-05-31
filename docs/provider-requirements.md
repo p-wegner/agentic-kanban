@@ -19,6 +19,7 @@ Local CLI surfaces verified on 2026-05-31:
 | Permission controls | Board-launched agents must run without interactive approval prompts. |
 | Plan/read-only mode | High-priority issues can run a planning pass before implementation. |
 | Initial context delivery | Ticket description, generated context primer, and handoff context must reach the first turn. |
+| Stop / turn-complete lifecycle hook | The commit-discipline guardrail (`check-uncommitted`) fires on stop. Without it, stranded uncommitted fixes go undetected. See "Harness Lifecycle Hook Requirements". |
 
 ## Compatibility Matrix
 
@@ -59,9 +60,43 @@ Provider handling:
 | Interactive approval prompts | All board launches | Unsupported by design; board sessions must run unattended or fail clearly. |
 | Cloud-hosted/multi-user auth flows | All | Out of scope for this local-first app. |
 
+## Harness Lifecycle Hook Requirements
+
+The board's safety guardrails are enforced by harness **hooks**, so any harness used to run
+board agents — and especially the long-running **monitor harness** that drives the board from
+*outside* it (launched via a `/goal`-style command or cron to pull tickets, nudge agents,
+auto-merge, and fix setup bugs) — must support the lifecycle hook events those guards depend on.
+
+| Hook event | Guard it powers | Why it is required |
+|---|---|---|
+| `PreToolUse` (shell) | `validate-command-safety.js` | Blocks destructive DB/file commands before they run. |
+| `PreToolUse` (write/patch) | `prevent-cross-worktree-writes.js` | Stops a worktree agent writing outside its worktree. |
+| `Stop` / turn-complete | `check-uncommitted.js` | Catches uncommitted source changes left stranded in a worktree **or the main checkout**. |
+
+**Why the monitor harness specifically needs the Stop hook.** The monitor changes `master`
+when it finds setup bugs (provider flags, hooks, git logic). If it edits the main checkout but
+does **not commit**, the fixes are stranded: they block the auto-merge queue (a dirty main
+checkout refuses merges) and can be lost to a `git restore` or hot-reload. **A monitor that
+changes master without committing stalls the whole board.** `check-uncommitted` exists to catch
+exactly this — but only fires if the harness emits a Stop event. See
+`docs/learnings/2026-05-31-monitor-harness-requires-stop-hooks.md`.
+
+Harness support, verified 2026-05-31:
+
+| Harness | Stop hook | Notes |
+|---|---|---|
+| Claude Code | Yes | `.claude/settings.json` → `smart-hooks-runner.js Stop`. |
+| Codex 0.132+ | Yes | Matcher-less `Stop`, fires per **turn** (not reliably on Esc-interrupt; no `SessionEnd` yet — openai/codex#20603). Wired in `.codex/hooks.json` straight to `check-uncommitted.js` (not the heavy Stop suite). Board launches codex with `--dangerously-bypass-hook-trust`, so new hooks run untrusted. |
+| Copilot | Verify before relying on it | Confirm the installed CLI emits a stop/turn-complete hook before using it as a monitor harness; without one there is no commit-discipline net. |
+
+**Rule:** before adopting a new harness for board agents or the monitor, confirm it supports
+`PreToolUse` and a `Stop`/turn-complete hook. A harness without a Stop hook silently loses the
+stranded-commit guardrail.
+
 ## Update Rules
 
 - Verify provider flags against the installed CLI before changing launch construction.
 - Add or update tests in `packages/server/src/__tests__/agent-provider.test.ts` for every provider flag change.
 - Keep context delivery equivalent across providers. If a provider lacks native attachment, document and test the fallback.
 - Do not assume Claude-specific files are read by Codex or Copilot unless the launch path explicitly bridges them.
+- Before adopting a harness for board agents or the monitor, verify it emits the lifecycle hook events in "Harness Lifecycle Hook Requirements" (`PreToolUse` + `Stop`). A harness without a Stop hook silently loses the stranded-commit guard.
