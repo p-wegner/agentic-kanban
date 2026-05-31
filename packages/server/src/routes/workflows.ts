@@ -27,6 +27,7 @@ import { createRouter } from "../middleware/create-router.js";
 import { parseJsonBody } from "../middleware/parse-body.js";
 import type { BoardEvents } from "../services/board-events.js";
 import { materializeSpecTasksForWorkspace } from "../services/spec-tasks-materialization.service.js";
+import { materializeLatestPhaseArtifactForWorkspace } from "../services/phase-artifacts.service.js";
 
 interface WorkflowsRouteOptions {
   boardEvents?: BoardEvents;
@@ -635,7 +636,13 @@ export function createWorkflowsRoute(database: Database = db, options?: Workflow
       return c.json({ error: transitionError }, 400);
     }
 
-    const wasTasksPhase = currentRows[0]?.nodeName?.toLowerCase() === "tasks";
+    const currentNodeName = currentRows[0]?.nodeName ?? null;
+    const phaseArtifact = await materializeLatestPhaseArtifactForWorkspace(database, workspaceId, currentNodeName).catch((err) => {
+      console.warn("[workflows] failed to write phase artifact file:", err);
+      throw err;
+    });
+
+    const wasTasksPhase = currentNodeName?.toLowerCase() === "tasks";
     const taskMaterialization = wasTasksPhase
       ? await materializeSpecTasksForWorkspace(workspaceId, database, { boardEvents }).catch((err) => {
           console.warn("[workflows] failed to materialize spec tasks:", err);
@@ -679,6 +686,7 @@ export function createWorkflowsRoute(database: Database = db, options?: Workflow
       nextStages: (result.nextTransitions ?? []).map((t) => t.toNodeName),
       terminal: (result.nextTransitions ?? []).length === 0,
       taskMaterialization,
+      phaseArtifact,
     });
   });
 
