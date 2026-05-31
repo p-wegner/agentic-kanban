@@ -1,0 +1,152 @@
+import { randomUUID } from "node:crypto";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { issues, projects, projectStatuses, sessionMessages, sessions, workspaces } from "@agentic-kanban/shared/schema";
+import { createTestDb } from "./helpers/test-db.js";
+
+const getDiffShortstat = vi.fn();
+
+vi.mock("../services/git.service.js", () => ({
+  getDiffShortstat: (...args: unknown[]) => getDiffShortstat(...args),
+  detectConflicts: vi.fn(async () => ({ hasConflicts: false, conflictingFiles: [] })),
+}));
+
+import { getBoardStatus } from "../services/board-status.js";
+
+describe("board-status", () => {
+  beforeEach(() => {
+    getDiffShortstat.mockReset();
+  });
+
+  it("flags zero-diff In Review workspaces that are not ready for merge", async () => {
+    const { db } = createTestDb();
+    const now = new Date().toISOString();
+    const projectId = randomUUID();
+    const statusId = randomUUID();
+    const issueId = randomUUID();
+    const workspaceId = randomUUID();
+    const sessionId = randomUUID();
+
+    getDiffShortstat.mockResolvedValue({ filesChanged: 0, insertions: 0, deletions: 0 });
+
+    await db.insert(projects).values({
+      id: projectId,
+      name: "Status Project",
+      repoPath: "/tmp/status-project",
+      repoName: "status-project",
+      defaultBranch: "main",
+      createdAt: now,
+      updatedAt: now,
+    });
+    await db.insert(projectStatuses).values({
+      id: statusId,
+      projectId,
+      name: "In Review",
+      sortOrder: 0,
+      isDefault: true,
+      createdAt: now,
+    });
+    await db.insert(issues).values({
+      id: issueId,
+      issueNumber: 191,
+      title: "Zero diff review",
+      statusId,
+      projectId,
+      createdAt: now,
+      updatedAt: now,
+    });
+    await db.insert(workspaces).values({
+      id: workspaceId,
+      issueId,
+      branch: "feature/zero-diff",
+      workingDir: "/tmp/status-project/.worktrees/zero-diff",
+      baseBranch: "main",
+      status: "active",
+      readyForMerge: false,
+      createdAt: now,
+      updatedAt: now,
+    });
+    await db.insert(sessions).values({
+      id: sessionId,
+      workspaceId,
+      executor: "codex",
+      status: "running",
+      startedAt: now,
+    });
+    await db.insert(sessionMessages).values({
+      sessionId,
+      type: "stdout",
+      data: JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: "I am still checking the change set." } }),
+      createdAt: now,
+    });
+
+    const status = await getBoardStatus({ projectId }, db);
+
+    expect(status.issues).toHaveLength(1);
+    expect(status.issues[0]).toMatchObject({
+      issueNumber: 191,
+      title: "Zero diff review",
+      statusName: "In Review",
+      workspace: { status: "active", readyForMerge: false },
+      diffStats: { filesChanged: 0, insertions: 0, deletions: 0 },
+      lastAgentMessage: "I am still checking the change set.",
+      attention: {
+        bucket: "needs_attention",
+        reason: "idle-awaiting",
+      },
+    });
+  });
+
+  it("leaves ready-for-merge In Review workspaces unflagged", async () => {
+    const { db } = createTestDb();
+    const now = new Date().toISOString();
+    const projectId = randomUUID();
+    const statusId = randomUUID();
+    const issueId = randomUUID();
+    const workspaceId = randomUUID();
+
+    getDiffShortstat.mockResolvedValue({ filesChanged: 0, insertions: 0, deletions: 0 });
+
+    await db.insert(projects).values({
+      id: projectId,
+      name: "Ready Project",
+      repoPath: "/tmp/ready-project",
+      repoName: "ready-project",
+      defaultBranch: "main",
+      createdAt: now,
+      updatedAt: now,
+    });
+    await db.insert(projectStatuses).values({
+      id: statusId,
+      projectId,
+      name: "In Review",
+      sortOrder: 0,
+      isDefault: true,
+      createdAt: now,
+    });
+    await db.insert(issues).values({
+      id: issueId,
+      issueNumber: 192,
+      title: "Ready review",
+      statusId,
+      projectId,
+      createdAt: now,
+      updatedAt: now,
+    });
+    await db.insert(workspaces).values({
+      id: workspaceId,
+      issueId,
+      branch: "feature/ready",
+      workingDir: "/tmp/ready-project/.worktrees/ready",
+      baseBranch: "main",
+      status: "idle",
+      readyForMerge: true,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const status = await getBoardStatus({ projectId }, db);
+
+    expect(status.issues[0]?.workspace?.readyForMerge).toBe(true);
+    expect(status.issues[0]?.attention).toBeNull();
+  });
+});
