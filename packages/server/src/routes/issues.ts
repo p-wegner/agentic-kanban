@@ -126,6 +126,25 @@ export function createIssuesRoute(database: Database = db, options?: { boardEven
     }
   });
 
+  // PATCH /api/issues/bulk - update N issues in one request
+  router.patch("/bulk", async (c) => {
+    const body = await parseJsonBody<{ issueIds?: string[]; updates?: Record<string, unknown> }>(c);
+    if (!Array.isArray(body.issueIds) || body.issueIds.length === 0) {
+      return c.json({ error: "issueIds must be a non-empty array" }, 400);
+    }
+    if (!body.updates || typeof body.updates !== "object") {
+      return c.json({ error: "updates is required" }, 400);
+    }
+    try {
+      const result = await issueService.updateIssuesBulk(body.issueIds, body.updates);
+      return c.json({ updated: result.updated });
+    } catch (err: any) {
+      if (err.code === "BAD_REQUEST") return c.json({ error: err.message }, 400);
+      if (err.code === "NOT_FOUND") return c.json({ error: err.message }, 404);
+      throw err;
+    }
+  });
+
   // POST /api/issues
   router.post("/", async (c) => {
     const body = await parseJsonBody(c);

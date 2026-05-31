@@ -218,6 +218,54 @@ export function createIssueService(deps: {
     return { id, projectId };
   }
 
+  async function updateIssuesBulk(
+    ids: string[],
+    body: Record<string, unknown>,
+  ): Promise<{ updated: number; projectId: string }> {
+    if (!Array.isArray(ids) || ids.length === 0) {
+      throw new IssueError("issueIds must be a non-empty array", "BAD_REQUEST");
+    }
+
+    const rows = await database
+      .select({ id: issues.id, projectId: issues.projectId })
+      .from(issues)
+      .where(inArray(issues.id, ids));
+
+    if (rows.length !== new Set(ids).size) {
+      throw new IssueError("One or more issues were not found", "NOT_FOUND");
+    }
+
+    const projectIds = new Set(rows.map((row) => row.projectId));
+    if (projectIds.size !== 1) {
+      throw new IssueError("Cannot bulk-update issues across projects", "BAD_REQUEST");
+    }
+
+    const now = new Date().toISOString();
+    const updates: Record<string, unknown> = { updatedAt: now };
+    if (body.title !== undefined) updates.title = body.title;
+    if (body.description !== undefined) updates.description = body.description;
+    if (body.priority !== undefined) updates.priority = body.priority;
+    if (body.issueType !== undefined) updates.issueType = body.issueType;
+    if (body.statusId !== undefined) { updates.statusId = body.statusId; updates.statusChangedAt = now; }
+    if (body.sortOrder !== undefined) updates.sortOrder = body.sortOrder;
+    if (body.estimate !== undefined) updates.estimate = body.estimate;
+    if (body.skipAutoReview !== undefined) updates.skipAutoReview = body.skipAutoReview;
+    if (body.dueDate !== undefined) updates.dueDate = body.dueDate;
+    if (body.workflowTemplateId !== undefined) updates.workflowTemplateId = body.workflowTemplateId;
+
+    const uniqueIds = [...new Set(ids)];
+    await database.update(issues).set(updates).where(inArray(issues.id, uniqueIds));
+
+    if (body.statusId !== undefined) {
+      await Promise.all(uniqueIds.map((id) => syncCurrentNodeToStatus(database, id).catch(() => {})));
+    }
+
+    const projectId = rows[0].projectId;
+    boardEvents?.broadcast(projectId, "issue_updated");
+
+    return { updated: uniqueIds.length, projectId };
+  }
+
   async function deleteIssue(id: string): Promise<string | null> {
     const projectId = await getIssueProjectId(id, database);
     if (!projectId) throw new IssueError("Issue not found", "NOT_FOUND");
@@ -546,6 +594,7 @@ export function createIssueService(deps: {
     createIssuesBatch,
     updateDependenciesBatch,
     updateIssue,
+    updateIssuesBulk,
     deleteIssue,
     addDependency,
     removeDependency,

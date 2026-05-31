@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
+import type { IssueWithStatus, StatusWithIssues, UpdateIssueRequest } from "@agentic-kanban/shared";
 import { apiFetch } from "../lib/api.js";
 import { formatDateKeyLong, getLocalDateKey } from "../lib/dateKey.js";
 import { showToast } from "./Toast.js";
@@ -48,10 +48,13 @@ type SortKey = "number" | "title" | "status" | "priority" | "type" | "estimate" 
 type SortDir = "asc" | "desc";
 
 const ISSUE_TYPE_ORDER: Record<string, number> = { bug: 0, feature: 1, task: 2, chore: 3 };
+const ESTIMATE_OPTIONS = ["XS", "S", "M", "L", "XL"] as const;
+const PRIORITY_OPTIONS = ["critical", "high", "medium", "low"] as const;
 const ESTIMATE_ORDER: Record<string, number> = { XS: 0, S: 1, M: 2, L: 3, XL: 4 };
-const PRIORITY_ORDER: Record<string, number> = { urgent: 0, high: 1, medium: 2, low: 3 };
-const PRIORITY_LABEL: Record<string, string> = { urgent: "Urgent", high: "High", medium: "Medium", low: "Low" };
+const PRIORITY_ORDER: Record<string, number> = { critical: 0, urgent: 0, high: 1, medium: 2, low: 3 };
+const PRIORITY_LABEL: Record<string, string> = { critical: "Critical", urgent: "Urgent", high: "High", medium: "Medium", low: "Low" };
 const PRIORITY_CLASS: Record<string, string> = {
+  critical: "text-red-700 bg-red-50",
   urgent: "text-red-700 bg-red-50",
   high: "text-orange-700 bg-orange-50",
   medium: "text-yellow-700 bg-yellow-50",
@@ -91,11 +94,20 @@ export function TableView({
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkLoading, setBulkLoading] = useState(false);
   const [bulkStatusOpen, setBulkStatusOpen] = useState(false);
+  const [bulkPriorityOpen, setBulkPriorityOpen] = useState(false);
+  const [bulkEstimateOpen, setBulkEstimateOpen] = useState(false);
+  const [bulkDueDateOpen, setBulkDueDateOpen] = useState(false);
   const [bulkTagOpen, setBulkTagOpen] = useState(false);
+  const [bulkRemoveTagOpen, setBulkRemoveTagOpen] = useState(false);
+  const [bulkDueDate, setBulkDueDate] = useState("");
   const [allTags, setAllTags] = useState<Tag[]>([]);
   const [tagsLoaded, setTagsLoaded] = useState(false);
   const statusDropdownRef = useRef<HTMLDivElement>(null);
+  const priorityDropdownRef = useRef<HTMLDivElement>(null);
+  const estimateDropdownRef = useRef<HTMLDivElement>(null);
+  const dueDateDropdownRef = useRef<HTMLDivElement>(null);
   const tagDropdownRef = useRef<HTMLDivElement>(null);
+  const removeTagDropdownRef = useRef<HTMLDivElement>(null);
 
   const allIssues = columns.flatMap((col) =>
     col.issues.map((issue) => ({ ...issue, statusName: col.name }))
@@ -185,17 +197,35 @@ export function TableView({
     setBulkLoading(true);
     const ids = [...activeSelectedIds];
     try {
-      const results = await Promise.allSettled(ids.map((id) =>
-        apiFetch(`/api/issues/${id}`, { method: "PATCH", body: JSON.stringify({ statusId }) })
-      ));
-      const failed = results.filter((r) => r.status === "rejected").length;
-      const succeeded = ids.length - failed;
+      await apiFetch("/api/issues/bulk", {
+        method: "PATCH",
+        body: JSON.stringify({ issueIds: ids, updates: { statusId } }),
+      });
       setSelectedIds(new Set());
-      if (failed === 0) {
-        showToast(`Moved ${succeeded} issue${succeeded !== 1 ? "s" : ""} to "${statusName}"`, "success");
-      } else {
-        showToast(`Moved ${succeeded} issue${succeeded !== 1 ? "s" : ""} to "${statusName}"; ${failed} failed`, "error");
-      }
+      showToast(`Moved ${ids.length} issue${ids.length !== 1 ? "s" : ""} to "${statusName}"`, "success");
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Bulk move failed", "error");
+    } finally {
+      onRefresh?.();
+      setBulkLoading(false);
+    }
+  }
+
+  async function handleBulkUpdate(data: UpdateIssueRequest, successLabel: string) {
+    setBulkPriorityOpen(false);
+    setBulkEstimateOpen(false);
+    setBulkDueDateOpen(false);
+    setBulkLoading(true);
+    const ids = [...activeSelectedIds];
+    try {
+      await apiFetch("/api/issues/bulk", {
+        method: "PATCH",
+        body: JSON.stringify({ issueIds: ids, updates: data }),
+      });
+      setSelectedIds(new Set());
+      showToast(`${successLabel} for ${ids.length} issue${ids.length !== 1 ? "s" : ""}`, "success");
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Bulk update failed", "error");
     } finally {
       onRefresh?.();
       setBulkLoading(false);
@@ -217,6 +247,28 @@ export function TableView({
         showToast(`Added tag "${tag.name}" to ${succeeded} issue${succeeded !== 1 ? "s" : ""}`, "success");
       } else {
         showToast(`Added tag to ${succeeded} issue${succeeded !== 1 ? "s" : ""}; ${failed} failed`, "error");
+      }
+    } finally {
+      onRefresh?.();
+      setBulkLoading(false);
+    }
+  }
+
+  async function handleBulkRemoveTag(tag: Tag) {
+    setBulkRemoveTagOpen(false);
+    setBulkLoading(true);
+    const ids = [...activeSelectedIds];
+    try {
+      const results = await Promise.allSettled(ids.map((id) =>
+        apiFetch(`/api/issues/${id}/tags/${tag.id}`, { method: "DELETE" })
+      ));
+      const failed = results.filter((r) => r.status === "rejected").length;
+      const succeeded = ids.length - failed;
+      setSelectedIds(new Set());
+      if (failed === 0) {
+        showToast(`Removed tag "${tag.name}" from ${succeeded} issue${succeeded !== 1 ? "s" : ""}`, "success");
+      } else {
+        showToast(`Removed tag from ${succeeded} issue${succeeded !== 1 ? "s" : ""}; ${failed} failed`, "error");
       }
     } finally {
       onRefresh?.();
@@ -248,18 +300,30 @@ export function TableView({
 
   // Close dropdowns on outside click
   useEffect(() => {
-    if (!bulkStatusOpen && !bulkTagOpen) return;
+    if (!bulkStatusOpen && !bulkPriorityOpen && !bulkEstimateOpen && !bulkDueDateOpen && !bulkTagOpen && !bulkRemoveTagOpen) return;
     function handle(e: MouseEvent) {
       if (bulkStatusOpen && statusDropdownRef.current && !statusDropdownRef.current.contains(e.target as Node)) {
         setBulkStatusOpen(false);
       }
+      if (bulkPriorityOpen && priorityDropdownRef.current && !priorityDropdownRef.current.contains(e.target as Node)) {
+        setBulkPriorityOpen(false);
+      }
+      if (bulkEstimateOpen && estimateDropdownRef.current && !estimateDropdownRef.current.contains(e.target as Node)) {
+        setBulkEstimateOpen(false);
+      }
+      if (bulkDueDateOpen && dueDateDropdownRef.current && !dueDateDropdownRef.current.contains(e.target as Node)) {
+        setBulkDueDateOpen(false);
+      }
       if (bulkTagOpen && tagDropdownRef.current && !tagDropdownRef.current.contains(e.target as Node)) {
         setBulkTagOpen(false);
+      }
+      if (bulkRemoveTagOpen && removeTagDropdownRef.current && !removeTagDropdownRef.current.contains(e.target as Node)) {
+        setBulkRemoveTagOpen(false);
       }
     }
     document.addEventListener("mousedown", handle);
     return () => document.removeEventListener("mousedown", handle);
-  }, [bulkStatusOpen, bulkTagOpen]);
+  }, [bulkStatusOpen, bulkPriorityOpen, bulkEstimateOpen, bulkDueDateOpen, bulkTagOpen, bulkRemoveTagOpen]);
 
   return (
     <div className="flex flex-col flex-1 min-h-0 px-4 pb-4">
@@ -293,7 +357,7 @@ export function TableView({
 
       {/* Bulk action bar */}
       {someChecked && (
-        <div className="flex items-center gap-2 px-3 py-2 mb-2 rounded-lg bg-brand-50 dark:bg-brand-900/30 border border-brand-200 dark:border-brand-700">
+        <div className="flex items-center gap-2 px-3 py-2 mb-2 rounded-lg bg-brand-50 dark:bg-brand-900/30 border border-brand-200 dark:border-brand-700 flex-wrap">
           <span className="text-xs font-medium text-brand-700 dark:text-brand-300">
             {activeSelectedIds.length} selected
           </span>
@@ -309,7 +373,14 @@ export function TableView({
           <div className="relative" ref={statusDropdownRef}>
             <button
               disabled={bulkLoading}
-              onClick={() => { setBulkStatusOpen((v) => !v); setBulkTagOpen(false); }}
+              onClick={() => {
+                setBulkStatusOpen((v) => !v);
+                setBulkPriorityOpen(false);
+                setBulkEstimateOpen(false);
+                setBulkDueDateOpen(false);
+                setBulkTagOpen(false);
+                setBulkRemoveTagOpen(false);
+              }}
               className="flex items-center gap-1 text-xs px-2.5 py-1 rounded bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50"
             >
               Move to status ▾
@@ -329,6 +400,119 @@ export function TableView({
             )}
           </div>
 
+          {/* Set priority */}
+          <div className="relative" ref={priorityDropdownRef}>
+            <button
+              disabled={bulkLoading}
+              onClick={() => {
+                setBulkPriorityOpen((v) => !v);
+                setBulkStatusOpen(false);
+                setBulkEstimateOpen(false);
+                setBulkDueDateOpen(false);
+                setBulkTagOpen(false);
+                setBulkRemoveTagOpen(false);
+              }}
+              className="flex items-center gap-1 text-xs px-2.5 py-1 rounded bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50"
+            >
+              Set priority ▾
+            </button>
+            {bulkPriorityOpen && (
+              <div className="absolute right-0 top-full mt-1 z-50 min-w-[150px] rounded-lg border border-gray-200 dark:border-gray-700 bg-surface-raised dark:bg-surface-raised-dark shadow-lg py-1">
+                {PRIORITY_OPTIONS.map((priority) => (
+                  <button
+                    key={priority}
+                    onClick={() => handleBulkUpdate({ priority }, `Set priority to "${PRIORITY_LABEL[priority]}"`)}
+                    className="w-full text-left px-3 py-1.5 text-xs text-gray-700 dark:text-gray-300 hover:bg-brand-50 dark:hover:bg-brand-900/30"
+                  >
+                    {PRIORITY_LABEL[priority]}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Set estimate */}
+          <div className="relative" ref={estimateDropdownRef}>
+            <button
+              disabled={bulkLoading}
+              onClick={() => {
+                setBulkEstimateOpen((v) => !v);
+                setBulkStatusOpen(false);
+                setBulkPriorityOpen(false);
+                setBulkDueDateOpen(false);
+                setBulkTagOpen(false);
+                setBulkRemoveTagOpen(false);
+              }}
+              className="flex items-center gap-1 text-xs px-2.5 py-1 rounded bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50"
+            >
+              Set estimate ▾
+            </button>
+            {bulkEstimateOpen && (
+              <div className="absolute right-0 top-full mt-1 z-50 min-w-[140px] rounded-lg border border-gray-200 dark:border-gray-700 bg-surface-raised dark:bg-surface-raised-dark shadow-lg py-1">
+                {ESTIMATE_OPTIONS.map((estimate) => (
+                  <button
+                    key={estimate}
+                    onClick={() => handleBulkUpdate({ estimate }, `Set estimate to "${estimate}"`)}
+                    className="w-full text-left px-3 py-1.5 text-xs text-gray-700 dark:text-gray-300 hover:bg-brand-50 dark:hover:bg-brand-900/30"
+                  >
+                    {estimate}
+                  </button>
+                ))}
+                <div className="my-1 border-t border-gray-100 dark:border-gray-700" />
+                <button
+                  onClick={() => handleBulkUpdate({ estimate: null }, "Cleared estimate")}
+                  className="w-full text-left px-3 py-1.5 text-xs text-gray-500 dark:text-gray-400 hover:bg-brand-50 dark:hover:bg-brand-900/30"
+                >
+                  Clear estimate
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Set due date */}
+          <div className="relative" ref={dueDateDropdownRef}>
+            <button
+              disabled={bulkLoading}
+              onClick={() => {
+                setBulkDueDateOpen((v) => !v);
+                setBulkStatusOpen(false);
+                setBulkPriorityOpen(false);
+                setBulkEstimateOpen(false);
+                setBulkTagOpen(false);
+                setBulkRemoveTagOpen(false);
+              }}
+              className="flex items-center gap-1 text-xs px-2.5 py-1 rounded bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50"
+            >
+              Set due date ▾
+            </button>
+            {bulkDueDateOpen && (
+              <div className="absolute right-0 top-full mt-1 z-50 w-56 rounded-lg border border-gray-200 dark:border-gray-700 bg-surface-raised dark:bg-surface-raised-dark shadow-lg p-2">
+                <input
+                  type="date"
+                  value={bulkDueDate}
+                  onChange={(e) => setBulkDueDate(e.target.value)}
+                  className="w-full text-xs border border-gray-200 dark:border-gray-700 rounded px-2 py-1 bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-200"
+                  aria-label="Bulk due date"
+                />
+                <div className="mt-2 flex items-center justify-end gap-2">
+                  <button
+                    onClick={() => handleBulkUpdate({ dueDate: null }, "Cleared due date")}
+                    className="text-xs px-2 py-1 rounded text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800"
+                  >
+                    Clear
+                  </button>
+                  <button
+                    disabled={!bulkDueDate}
+                    onClick={() => handleBulkUpdate({ dueDate: bulkDueDate }, `Set due date to ${bulkDueDate}`)}
+                    className="text-xs px-2 py-1 rounded bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50"
+                  >
+                    Apply
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
           {/* Add tag */}
           <div className="relative" ref={tagDropdownRef}>
             <button
@@ -336,6 +520,10 @@ export function TableView({
               onClick={() => {
                 setBulkTagOpen((v) => !v);
                 setBulkStatusOpen(false);
+                setBulkPriorityOpen(false);
+                setBulkEstimateOpen(false);
+                setBulkDueDateOpen(false);
+                setBulkRemoveTagOpen(false);
                 loadTags();
               }}
               className="flex items-center gap-1 text-xs px-2.5 py-1 rounded bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50"
@@ -350,6 +538,42 @@ export function TableView({
                   <button
                     key={tag.id}
                     onClick={() => handleBulkAddTag(tag)}
+                    className="w-full text-left px-3 py-1.5 text-xs hover:bg-brand-50 dark:hover:bg-brand-900/30 flex items-center gap-2"
+                  >
+                    <span className={`inline-flex px-1.5 py-0.5 rounded text-xs font-medium ${tagClass(tag.color)}`}>
+                      {tag.name}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Remove tag */}
+          <div className="relative" ref={removeTagDropdownRef}>
+            <button
+              disabled={bulkLoading}
+              onClick={() => {
+                setBulkRemoveTagOpen((v) => !v);
+                setBulkStatusOpen(false);
+                setBulkPriorityOpen(false);
+                setBulkEstimateOpen(false);
+                setBulkDueDateOpen(false);
+                setBulkTagOpen(false);
+                loadTags();
+              }}
+              className="flex items-center gap-1 text-xs px-2.5 py-1 rounded bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50"
+            >
+              Remove tag ▾
+            </button>
+            {bulkRemoveTagOpen && (
+              <div className="absolute right-0 top-full mt-1 z-50 min-w-[160px] rounded-lg border border-gray-200 dark:border-gray-700 bg-surface-raised dark:bg-surface-raised-dark shadow-lg py-1">
+                {allTags.length === 0 ? (
+                  <div className="px-3 py-2 text-xs text-gray-400 dark:text-gray-500">No tags available</div>
+                ) : allTags.map((tag) => (
+                  <button
+                    key={tag.id}
+                    onClick={() => handleBulkRemoveTag(tag)}
                     className="w-full text-left px-3 py-1.5 text-xs hover:bg-brand-50 dark:hover:bg-brand-900/30 flex items-center gap-2"
                   >
                     <span className={`inline-flex px-1.5 py-0.5 rounded text-xs font-medium ${tagClass(tag.color)}`}>
