@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { projects } from "@agentic-kanban/shared/schema";
+import { projects, qualityMetrics } from "@agentic-kanban/shared/schema";
 import { createQualityMetricsService } from "../services/quality-metrics.service.js";
+import { deleteProjectCascade } from "../repositories/project.repository.js";
 import { createTestDb } from "./helpers/test-db.js";
 
 async function seedProject(db: ReturnType<typeof createTestDb>["db"]) {
@@ -104,5 +105,22 @@ describe("createQualityMetricsService", () => {
 
     expect(listed.trend.map((metric) => metric.value)).toEqual([82]);
     expect(listed.latest.map((metric) => metric.metricKey)).toEqual(["coverage.lines"]);
+  });
+
+  it("cleans up quality metrics when deleting a project", async () => {
+    const { db } = createTestDb();
+    const projectId = await seedProject(db);
+    const service = createQualityMetricsService(db);
+
+    await service.recordBatch(projectId, {
+      metrics: [{ metricKey: "coverage.lines", value: 82 }],
+    });
+
+    await deleteProjectCascade(projectId, db);
+
+    const metricRows = await db.select().from(qualityMetrics);
+    const projectRows = await db.select().from(projects);
+    expect(metricRows).toHaveLength(0);
+    expect(projectRows).toHaveLength(0);
   });
 });
