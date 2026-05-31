@@ -39,6 +39,10 @@ rm -f "$STOP"
 if [ ! -f "$STATE" ]; then
   printf '# board-monitor rolling memory — newest entry last; trimmed to last %s lines each iteration.\n# One line per cycle: <ISO time> | <action taken> | <items touched + how many cycles running>\n' "$STATE_KEEP" > "$STATE"
 fi
+# Record our PID so the README's stop/observe commands (kill "$(cat loop.pid)")
+# target the live driver. loop.sh never wrote this before, so it drifted stale
+# on every restart.
+echo "$$" > "$DIR/loop.pid"
 log "board-monitor loop START (pid $$, sleep ${SLEEP}s, max ${MAX}, iter-timeout ${ITER_TIMEOUT}s, state-keep ${STATE_KEEP})"
 
 short_streak=0
