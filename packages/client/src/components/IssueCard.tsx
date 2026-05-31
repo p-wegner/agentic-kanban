@@ -283,8 +283,8 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
       onClick={() => onClick(issue)}
       className={`group bg-surface-raised dark:bg-surface-raised-dark rounded-lg shadow-sm p-2.5 border cursor-pointer hover:shadow-md hover:-translate-y-px transition-all duration-150 relative isolate ${depDragOver ? "border-brand-400 bg-brand-50 shadow-brand-200" : isPendingWorkspace ? "border-brand-300 shadow-brand-100 shadow-md" : "border-black/[0.07] dark:border-white/10 hover:border-brand-200 dark:hover:border-gray-600"}`}
     >
-      <div className="flex items-start justify-between gap-2">
-        <p className="text-sm text-ink dark:text-stone-100">
+      <div className="flex min-w-0 items-start justify-between gap-2">
+        <p className="min-w-0 text-sm text-ink dark:text-stone-100 break-words">
           {issue.issueNumber != null && (
             <span className="text-gray-400 dark:text-gray-500 font-mono mr-1">#{issue.issueNumber}</span>
           )}
@@ -316,12 +316,12 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
           </span>
         ) : null}
         {typeBadgeColor && (
-          <span className={`inline-block text-xs font-medium px-1.5 py-0.5 rounded capitalize ${typeBadgeColor}`}>
+          <span className={`inline-block max-w-full truncate text-xs font-medium px-1.5 py-0.5 rounded capitalize ${typeBadgeColor}`}>
             {issue.issueType}
           </span>
         )}
         {priorityBadgeColor && (
-          <span className={`inline-block text-xs font-medium px-1.5 py-0.5 rounded capitalize ${priorityBadgeColor}`}>
+          <span className={`inline-block max-w-full truncate text-xs font-medium px-1.5 py-0.5 rounded capitalize ${priorityBadgeColor}`}>
             {issue.priority}
           </span>
         )}
@@ -366,8 +366,9 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
           ) : (
             <span
               key={tag.id}
-              className="inline-block text-xs px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400"
+              className="inline-block max-w-full truncate text-xs px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400"
               style={tag.color ? { backgroundColor: tag.color + "22", color: tag.color } : undefined}
+              title={tag.name}
             >
               {tag.name}
             </span>
@@ -393,7 +394,7 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
       </div>
       {ws && ws.main && (
         <div
-          className={`group/ws flex items-center gap-1.5 mt-1.5 text-xs cursor-pointer rounded px-1 py-0.5 -mx-1 border-t transition-colors ${
+          className={`group/ws flex min-w-0 flex-wrap items-center gap-1.5 mt-1.5 text-xs cursor-pointer rounded px-1 py-1 -mx-1 border-t transition-colors overflow-hidden ${
             ws.main.status === "reviewing" ? "border-accent-200 bg-accent-50 hover:bg-accent-100 dark:border-accent-700 dark:bg-accent-900/40" :
             ws.main.status === "fixing" ? "border-orange-100 bg-orange-50 hover:bg-orange-100" :
             ws.main.status === "awaiting-plan-approval" ? "border-amber-200 bg-amber-50 hover:bg-amber-100" :
@@ -406,25 +407,25 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
           {ws.main.status === "reviewing" ? (
             <>
               <span className="inline-block w-2 h-2 rounded-full shrink-0 bg-accent-500 animate-pulse" />
-              <span className="font-medium text-accent-700 dark:text-accent-300">AI Reviewing</span>
+              <span className="min-w-0 truncate font-medium text-accent-700 dark:text-accent-300">AI Reviewing</span>
               {ws.main.workflow && <WorkflowMiniIndicator workflow={ws.main.workflow} />}
             </>
           ) : ws.main.status === "fixing" ? (
             <>
               <span className="inline-block w-2 h-2 rounded-full shrink-0 bg-orange-500 animate-pulse" />
-              <span className="font-medium text-orange-700">AI Fixing Conflicts</span>
+              <span className="min-w-0 truncate font-medium text-orange-700">AI Fixing Conflicts</span>
               {ws.main.workflow && <WorkflowMiniIndicator workflow={ws.main.workflow} />}
             </>
           ) : ws.main.status === "awaiting-plan-approval" ? (
             <>
               <span className="inline-block w-2 h-2 rounded-full shrink-0 bg-amber-500" />
-              <span className="font-medium text-amber-700">Plan Awaiting Approval</span>
+              <span className="min-w-0 truncate font-medium text-amber-700">Plan Awaiting Approval</span>
               {ws.main.workflow && <WorkflowMiniIndicator workflow={ws.main.workflow} />}
             </>
           ) : ws.main.conflicts?.hasConflicts ? (
             <>
               <span className="inline-block w-2 h-2 rounded-full shrink-0 bg-red-500" />
-              <span className="font-medium text-red-700">Merge Conflicts</span>
+              <span className="min-w-0 truncate font-medium text-red-700">Merge Conflicts</span>
               {ws.main.workflow && <WorkflowMiniIndicator workflow={ws.main.workflow} />}
             </>
           ) : (
@@ -434,24 +435,24 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
                 ws.main.status === "idle" ? "bg-amber-500" :
                 "bg-gray-400"
               }`} />
-              <span className="font-mono text-gray-600 dark:text-gray-400 truncate">{ws.main.branch}</span>
+              <span className="min-w-0 flex-1 basis-24 font-mono text-gray-600 dark:text-gray-400 truncate">{ws.main.branch}</span>
               {ws.main.workflow && <WorkflowMiniIndicator workflow={ws.main.workflow} />}
               {ws.main.status === "idle" && liveActivity && (() => {
                 const badge = getLastSessionBadge(ws.main.lastSessionTriggerType);
-                return badge ? <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded shrink-0 ${badge.className}`}>{badge.label}</span> : null;
+                return badge ? <span className={`order-last text-[10px] font-medium px-1.5 py-0.5 rounded shrink-0 ${badge.className}`}>{badge.label}</span> : null;
               })()}
             </>
           )}
           {ws.main.status === "closed" && (
             ws.main.lastSessionTriggerType === "fix-conflicts" ? (
-              <span className="inline-flex items-center gap-1 font-medium shrink-0 text-orange-700"><span className="inline-block w-2 h-2 rounded-full shrink-0 bg-orange-400" />merged conflicts</span>
+              <span className="order-last inline-flex items-center gap-1 font-medium shrink-0 text-orange-700"><span className="inline-block w-2 h-2 rounded-full shrink-0 bg-orange-400" />merged conflicts</span>
             ) : ws.main.mergedAt ? (
-              <span className="text-green-600 font-medium shrink-0">merged</span>
+              <span className="order-last text-green-600 font-medium shrink-0">merged</span>
             ) : (
-              <span className="text-gray-500 font-medium shrink-0">closed</span>
+              <span className="order-last text-gray-500 font-medium shrink-0">closed</span>
             )
           )}
-          <span className="inline-flex items-center gap-1 text-[10px] font-mono shrink-0 ml-auto">
+          <span className="order-last inline-flex basis-full min-w-0 flex-wrap items-center gap-1 pt-0.5 text-[10px] font-mono">
             {ws.main.scorecard && (
               <span
                 className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold shrink-0 ${
@@ -477,37 +478,37 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
             )}
           </span>
           {ws.main.conflicts?.hasConflicts && ws.main.status !== "fixing" && (
-            <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-red-100 text-red-700 text-[10px] font-medium shrink-0">
+            <span className="order-last inline-flex items-center px-1.5 py-0.5 rounded bg-red-100 text-red-700 text-[10px] font-medium shrink-0">
               {ws.main.conflicts.conflictingFiles.length} file{ws.main.conflicts.conflictingFiles.length !== 1 ? "s" : ""}
             </span>
           )}
           {ws.main.planMode && (
-            <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-brand-50 text-brand-700 dark:bg-brand-900/40 dark:text-brand-300 text-[10px] font-medium shrink-0">
+            <span className="order-last inline-flex items-center px-1.5 py-0.5 rounded bg-brand-50 text-brand-700 dark:bg-brand-900/40 dark:text-brand-300 text-[10px] font-medium shrink-0">
               Plan Mode
             </span>
           )}
           {ws.main.planOnlyWarning && (
-            <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-400 text-[10px] font-medium shrink-0" title="Session completed but produced no file changes">
+            <span className="order-last inline-flex items-center px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-400 text-[10px] font-medium shrink-0" title="Session completed but produced no file changes">
               No changes
             </span>
           )}
           {ws.main.profile?.provider && ws.main.profile.provider !== "claude" && (
-            <span className={`inline-flex items-center px-1 rounded font-medium text-[10px] shrink-0 ${
+            <span className={`order-last inline-flex items-center px-1 rounded font-medium text-[10px] shrink-0 ${
               ws.main.profile.provider === "copilot" ? "bg-emerald-50 dark:bg-emerald-950 text-emerald-600 dark:text-emerald-400" :
               ws.main.profile.provider === "codex" ? "bg-amber-50 dark:bg-amber-950 text-amber-600 dark:text-amber-400" :
               "bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400"
             }`}>{ws.main.profile.provider === "copilot" ? "Copilot" : ws.main.profile.provider === "codex" ? "Codex" : ws.main.profile.provider}</span>
           )}
           {(ws.main.profile?.name ?? ws.main.claudeProfile) && (
-            <span className="inline-flex items-center px-1 rounded bg-brand-50 dark:bg-brand-900/40 text-brand-600 dark:text-brand-400 font-medium shrink-0">{ws.main.profile?.name ?? ws.main.claudeProfile}</span>
+            <span className="order-last inline-flex max-w-full items-center truncate px-1 rounded bg-brand-50 dark:bg-brand-900/40 text-brand-600 dark:text-brand-400 font-medium shrink">{ws.main.profile?.name ?? ws.main.claudeProfile}</span>
           )}
           {!ws.main.profile?.name && !ws.main.claudeProfile && ws.main.agentCommand && ws.main.agentCommand !== "claude" && (
-            <span className="inline-flex items-center px-1 rounded bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 font-mono text-[10px] shrink-0">{ws.main.agentCommand}</span>
+            <span className="order-last inline-flex max-w-full items-center truncate px-1 rounded bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 font-mono text-[10px] shrink">{ws.main.agentCommand}</span>
           )}
           {ws.total > 1 && (
-            <span className="text-gray-400 dark:text-gray-500 shrink-0">+{ws.total - 1} more</span>
+            <span className="order-last text-gray-400 dark:text-gray-500 shrink-0">+{ws.total - 1} more</span>
           )}
-          <svg className="w-3 h-3 shrink-0 text-gray-300 dark:text-gray-600 group-hover/ws:text-brand-400 transition-colors ml-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <svg className="w-3 h-3 shrink-0 text-gray-300 dark:text-gray-600 group-hover/ws:text-brand-400 transition-colors ml-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
           </svg>
         </div>
