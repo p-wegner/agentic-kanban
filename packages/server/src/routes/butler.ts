@@ -1,6 +1,7 @@
 import type { SessionManager } from "../services/session.manager.js";
 import type { BoardEvents } from "../services/board-events.js";
 import type { Database } from "../db/index.js";
+import { CLAUDE_MODEL_OPTIONS, CODEX_MODEL_OPTIONS } from "@agentic-kanban/shared";
 import { projects, agentSkills } from "@agentic-kanban/shared/schema";
 import { eq, sql, desc } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
@@ -72,6 +73,13 @@ async function appendToSessionHistory(projectId: string, butlerId: string, sessi
  *  Profile is auth/endpoint, shared by ALL of a project's butlers — not per-butler. */
 function butlerProfilePrefKey(projectId: string): string {
   return `butler_profile_${projectId}`;
+}
+
+function normalizeModelForBackend(model: string | null | undefined, backend: "claude" | "codex"): string {
+  const value = model?.trim() ?? "";
+  if (!value) return "";
+  const options = backend === "codex" ? CODEX_MODEL_OPTIONS : CLAUDE_MODEL_OPTIONS;
+  return options.some((option) => option.value === value) ? value : "";
 }
 
 /** Fallback butler instructions, used when the editable `butler` agent skill is absent.
@@ -220,7 +228,7 @@ export function createButlerRoute(
     if (!project) return null;
     const backend = await resolveButlerBackend(projectId);
     // Model is a property of the (global) butler definition, not a per-project pref.
-    const model = (await getButlerDefinition(database, butlerId))?.model || undefined;
+    const model = normalizeModelForBackend((await getButlerDefinition(database, butlerId))?.model, backend.provider) || undefined;
     const resumeSessionId = (await getPreference(butlerSessionPrefKey(projectId, butlerId), database)) || undefined;
     const systemPromptAppend = await resolveButlerPrompt(projectId, project.name, project.repoPath);
     const wasActive = getButlerSession(projectId, butlerId).active;
@@ -256,19 +264,21 @@ export function createButlerRoute(
     const projectId = c.req.param("id");
     const defs = await listButlerDefinitions(database);
     const states = new Map(listProjectButlerStates(projectId).map((s) => [s.butlerId, s]));
+    const backend = await resolveButlerBackend(projectId);
     const butlers = defs.map((d) => {
       const st = states.get(d.id);
+      const itemBackend = st?.backend ?? backend.provider;
       return {
         id: d.id,
         name: d.name,
-        model: d.model,
+        model: normalizeModelForBackend(d.model, itemBackend),
         active: !!st,
         busy: st?.busy ?? false,
         contextTokens: st?.contextTokens ?? 0,
         contextWindow: st?.contextWindow,
         sessionId: st?.sessionId ?? null,
         mcpConnected: st?.mcpConnected,
-        backend: st?.backend ?? "claude",
+        backend: itemBackend,
       };
     });
     return c.json({ butlers });
@@ -280,12 +290,13 @@ export function createButlerRoute(
     const butlerId = resolveButlerId(c);
     const state = getButlerSession(projectId, butlerId);
     const persisted = (await getPreference(butlerSessionPrefKey(projectId, butlerId), database)) || null;
-    // Model is sourced from the butler definition (global), profile from the project pref.
-    const selectedModel = (await getButlerDefinition(database, butlerId))?.model ?? "";
     const backend = await resolveButlerBackend(projectId);
+    const effectiveBackend = state.active ? state.backend : backend.provider;
+    // Model is sourced from the butler definition (global), profile from the project pref.
+    const selectedModel = normalizeModelForBackend((await getButlerDefinition(database, butlerId))?.model, effectiveBackend);
     return c.json({
       butlerId,
-      backend: backend.provider,
+      backend: effectiveBackend,
       active: state.active,
       sessionId: state.sessionId ?? persisted,
       contextTokens: state.contextTokens,
@@ -340,7 +351,9 @@ export function createButlerRoute(
     const projectId = c.req.param("id");
     const butlerId = resolveButlerId(c);
     const body = await parseJsonBody<{ model?: string }>(c);
-    const model = (body.model ?? "").trim();
+    const backend = await resolveButlerBackend(projectId);
+    const state = getButlerSession(projectId, butlerId);
+    const model = normalizeModelForBackend(body.model, state.active ? state.backend : backend.provider);
     try {
       await updateButlerDefinition(database, butlerId, { model });
     } catch (err) {
