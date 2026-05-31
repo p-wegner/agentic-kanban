@@ -86,14 +86,14 @@ This snapshot focuses on the current test inventory under:
 
 ## 3. MCP Tools
 
-The requested scan did not cover `packages/mcp-server/src/__tests__`, but a spot check for workspace diff tooling also found no match in that package.
+The requested scan did not cover `packages/mcp-server/src/__tests__`, but MCP tool coverage lives there.
 
 | Tool / Behavior | Coverage | Evidence |
 |-----------------|----------|----------|
 | Board/issue context tools | Covered outside this scan | MCP test files live under `packages/mcp-server/src/__tests__` |
-| `get_workspace_diff` / `get-workspace-diff` | Gap | No match found in `packages/e2e/tests`, `packages/server/src/__tests__`, or `packages/mcp-server/src/__tests__` |
+| `get_workspace_diff` / `get-workspace-diff` | Covered | `packages/mcp-server/src/__tests__/tools/get-workspace-diff.test.ts` seeds a git workspace branch and asserts changed files, diff text, and non-zero stats |
 
-Remaining MCP gap: add an MCP tool test that seeds a workspace with a known diff, calls `get_workspace_diff`, and asserts file stats plus diff content/error behavior for a missing workspace.
+Remaining MCP gap: add error-path coverage for a missing workspace if this tool grows more fallback behavior.
 
 ---
 
@@ -164,7 +164,7 @@ Known stale areas:
 |----------|---------------|---------------------------|
 | API routes | Previously stale gaps for health, tags, statuses, branches, and active-project are covered | `POST /api/internal/board-notify`, WebSocket edge cases, shared error format |
 | UI flows | Previously stale gaps for archive columns, shortcut help, search highlighting, diff viewer, and merge UI are covered | Skeleton loading state, broader failure-toast coverage, direct header project-switch workflow |
-| MCP tools | Most MCP coverage lives outside the requested scan | `get_workspace_diff` needs a direct MCP test |
+| MCP tools | Most MCP coverage lives outside the requested scan | Add command-specific MCP error-path cases as tools change |
 | CLI commands | Root CLI commands are covered in `cli.test.ts` | Keep adding command-specific failure-path cases for new commands |
 | Unit tests | Agent service, session manager, board events, tags, issue numbers, and preferences are no longer untested | Add focused edge-case and contract tests where listed above |
 
