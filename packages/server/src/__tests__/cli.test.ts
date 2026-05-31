@@ -308,6 +308,24 @@ describe("CLI issue list", () => {
     expect(result.stdout).toContain("#1");
   });
 
+  it("prints JSON when --json is forwarded through the pnpm wrapper separator", async () => {
+    const { id: projectId } = await seedProject(ctx.dbPath);
+    await seedIssue(ctx.dbPath, projectId, { title: "JSON Test Issue", priority: "high" });
+
+    const result = runCli(["--", "issue", "list", "--json"], ctx.dbPath);
+
+    expect(result.status).toBe(0);
+    const parsed = JSON.parse(result.stdout);
+    expect(parsed).toEqual([
+      expect.objectContaining({
+        issueNumber: 1,
+        title: "JSON Test Issue",
+        priority: "high",
+        statusName: "Todo",
+      }),
+    ]);
+  });
+
   it("filters by status", async () => {
     const { id: projectId } = await seedProject(ctx.dbPath);
     await seedIssue(ctx.dbPath, projectId, { title: "Todo Issue", statusName: "Todo" });
