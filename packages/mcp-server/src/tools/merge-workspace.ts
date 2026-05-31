@@ -5,6 +5,7 @@ import { eq } from "drizzle-orm";
 import * as gitService from "../git-service.js";
 import { notifyBoard } from "../notify.js";
 import { requireEntity } from "../db-utils.js";
+import { applyOpenSpecDeltas, OPENSPEC_CHANGES_DIR, OPENSPEC_SPECS_DIR, validateOpenSpecChange } from "@agentic-kanban/shared/lib/openspec";
 
 export function registerMergeWorkspace(server: McpServer) {
   server.tool(
@@ -63,9 +64,73 @@ export function registerMergeWorkspace(server: McpServer) {
         // Sync branch ref to worktree HEAD first — agent may have committed in detached HEAD
         if (workspace.workingDir) {
           await gitService.syncBranchToHead(workspace.workingDir, workspace.branch);
+          const specValidation = await validateOpenSpecChange(workspace.workingDir);
+          if (specValidation.deltas.length > 0) {
+            const targetBranch = projectRows[0].defaultBranch || "main";
+            const currentBranch = await gitService.getCurrentBranch(repoPath);
+            if (currentBranch !== targetBranch) {
+              return {
+                content: [{
+                  type: "text" as const,
+                  text: `Cannot apply OpenSpec deltas: main checkout HEAD is on '${currentBranch}' but this workspace targets '${targetBranch}'. Check out '${targetBranch}' in the main checkout before merging OpenSpec changes.`,
+                }],
+              };
+            }
+            for (const warning of specValidation.warnings) {
+              console.warn(`[merge-workspace] OpenSpec warning: ${warning}`);
+            }
+            if (workspace.baseCommitSha) {
+              const domains = new Set(specValidation.deltas.map((delta) => delta.domain));
+              const baseSpecChanges = await gitService.getChangedFilesBetween(
+                repoPath,
+                workspace.baseCommitSha,
+                projectRows[0].defaultBranch || "main",
+              );
+              for (const domain of domains) {
+                if (baseSpecChanges.includes(`openspec/specs/${domain}/spec.md`)) {
+                  console.warn(
+                    `[merge-workspace] OpenSpec warning: '${domain}' changed on ${projectRows[0].defaultBranch || "main"} since this workspace branched; review the living spec merge carefully.`,
+                  );
+                }
+              }
+            }
+            if (!specValidation.valid) {
+              return {
+                content: [{ type: "text" as const, text: `OpenSpec change is invalid: ${specValidation.errors.join("; ")}` }],
+              };
+            }
+          }
         }
 
-        const mergeOutput = await gitService.mergeBranch(repoPath, workspace.branch, projectRows[0].defaultBranch || "main");
+        let preMergeHead = "";
+        try { preMergeHead = await gitService.revParse(repoPath, "HEAD"); } catch { /* tolerate */ }
+        let mergeOutput = await gitService.mergeBranch(repoPath, workspace.branch, projectRows[0].defaultBranch || "main");
+
+        const changedFiles = preMergeHead
+          ? await gitService.getChangedFilesBetween(repoPath, preMergeHead, "HEAD")
+          : [];
+        const specChangeIds = [...new Set(changedFiles
+          .map((file) => file.match(/^openspec\/changes\/([^/]+)\/specs\/[^/]+\/spec\.md$/)?.[1])
+          .filter((id): id is string => !!id))];
+        let appliedCount = 0;
+        for (const changeId of specChangeIds) {
+          const specResult = await applyOpenSpecDeltas(repoPath, changeId, { removeAppliedDeltas: true });
+          if (!specResult.valid) {
+            throw new Error(`OpenSpec change '${changeId}' is invalid: ${specResult.errors.join("; ")}`);
+          }
+          appliedCount += specResult.applied.length;
+          for (const warning of specResult.warnings) {
+            console.warn(`[merge-workspace] OpenSpec warning: ${warning}`);
+          }
+        }
+        if (appliedCount > 0) {
+          const committed = await gitService.commitPaths(
+            repoPath,
+            [OPENSPEC_SPECS_DIR, OPENSPEC_CHANGES_DIR],
+            `Update living OpenSpec specs for ${workspace.branch}`,
+          );
+          mergeOutput += `\nOpenSpec: applied ${appliedCount} domain delta(s)${committed ? " and committed living specs" : ""}.`;
+        }
 
         // Cleanup worktree
         if (workspace.workingDir) {
