@@ -33,6 +33,17 @@ describe("createQualityMetricsService", () => {
       collectedAt: "not-a-date",
       metrics: [{ metricKey: "coverage.lines", value: 81.5 }],
     })).rejects.toThrow("collectedAt must be an ISO timestamp");
+    await expect(service.recordBatch(projectId, null as any)).rejects.toThrow("request body must be an object");
+    await expect(service.recordBatch(projectId, {
+      commitSha: 123 as any,
+      metrics: [{ metricKey: "coverage.lines", value: 81.5 }],
+    })).rejects.toThrow("commitSha must be a string");
+    await expect(service.recordBatch(projectId, {
+      metrics: [null as any],
+    })).rejects.toThrow("metric entries must be objects");
+    await expect(service.recordBatch(projectId, {
+      metrics: [{ metricKey: "coverage.lines", value: 81.5, unit: 1 as any }],
+    })).rejects.toThrow("unit for coverage.lines must be a string");
   });
 
   it("records a batch and returns the latest metric per key", async () => {

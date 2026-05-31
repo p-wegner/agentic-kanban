@@ -9,26 +9,36 @@ Collect a small, defensible batch of quality metrics for the current repository 
 
 ## Endpoint
 
-Use the worktree board API port when available:
+Use the main board API port when available. In agent worktrees, `KANBAN_SERVER_PORT`
+usually points at the worktree dev server; `KANBAN_BOARD_SERVER_PORT` is the board
+that owns the issue and stores metrics.
 
 ```powershell
-$serverPort = if ($env:KANBAN_SERVER_PORT) { $env:KANBAN_SERVER_PORT } elseif ($env:KANBAN_BOARD_SERVER_PORT) { $env:KANBAN_BOARD_SERVER_PORT } else { "3001" }
+$serverPort = if ($env:KANBAN_BOARD_SERVER_PORT) { $env:KANBAN_BOARD_SERVER_PORT } elseif ($env:KANBAN_SERVER_PORT) { $env:KANBAN_SERVER_PORT } else { "3001" }
 $baseUrl = "http://127.0.0.1:$serverPort"
 ```
 
-Resolve the project id by matching the current git root to `/api/projects`:
+Resolve the project id from the issue description first. The Quality Metrics view
+creates collector issues with a `Project ID: <uuid>` line; use that exact id. Only
+fall back to matching the current git root to `/api/projects` for manual runs from
+the registered checkout, because launched collector agents run inside worktrees
+whose paths do not match the registered project path.
 
 ```powershell
-$repoRoot = (git rev-parse --show-toplevel).Trim()
-$projects = Invoke-RestMethod "$baseUrl/api/projects"
-$project = $projects | Where-Object { [IO.Path]::GetFullPath($_.repoPath).TrimEnd('\') -eq [IO.Path]::GetFullPath($repoRoot).TrimEnd('\') } | Select-Object -First 1
-if (-not $project) { throw "No registered project matches $repoRoot" }
+$projectId = "<Project ID from the issue description>"
+if (-not $projectId -or $projectId -like "<*") {
+  $repoRoot = (git rev-parse --show-toplevel).Trim()
+  $projects = Invoke-RestMethod "$baseUrl/api/projects"
+  $project = $projects | Where-Object { [IO.Path]::GetFullPath($_.repoPath).TrimEnd('\') -eq [IO.Path]::GetFullPath($repoRoot).TrimEnd('\') } | Select-Object -First 1
+  if (-not $project) { throw "No registered project matches $repoRoot" }
+  $projectId = $project.id
+}
 ```
 
 Post to:
 
 ```powershell
-POST $baseUrl/api/projects/$($project.id)/quality-metrics
+POST $baseUrl/api/projects/$projectId/quality-metrics
 ```
 
 ## Metrics
@@ -54,13 +64,17 @@ Do not run destructive setup, cleanup, database reset, or broad formatting comma
 This PowerShell sketch is acceptable to run from the repo root. If `scc` is unavailable, report that blocker and skip LOC metrics instead of inventing numbers.
 
 ```powershell
-$serverPort = if ($env:KANBAN_SERVER_PORT) { $env:KANBAN_SERVER_PORT } elseif ($env:KANBAN_BOARD_SERVER_PORT) { $env:KANBAN_BOARD_SERVER_PORT } else { "3001" }
+$serverPort = if ($env:KANBAN_BOARD_SERVER_PORT) { $env:KANBAN_BOARD_SERVER_PORT } elseif ($env:KANBAN_SERVER_PORT) { $env:KANBAN_SERVER_PORT } else { "3001" }
 $baseUrl = "http://127.0.0.1:$serverPort"
+$projectId = "<Project ID from the issue description>"
 $repoRoot = (git rev-parse --show-toplevel).Trim()
 $commitSha = (git rev-parse HEAD).Trim()
-$projects = Invoke-RestMethod "$baseUrl/api/projects"
-$project = $projects | Where-Object { [IO.Path]::GetFullPath($_.repoPath).TrimEnd('\') -eq [IO.Path]::GetFullPath($repoRoot).TrimEnd('\') } | Select-Object -First 1
-if (-not $project) { throw "No registered project matches $repoRoot" }
+if (-not $projectId -or $projectId -like "<*") {
+  $projects = Invoke-RestMethod "$baseUrl/api/projects"
+  $project = $projects | Where-Object { [IO.Path]::GetFullPath($_.repoPath).TrimEnd('\') -eq [IO.Path]::GetFullPath($repoRoot).TrimEnd('\') } | Select-Object -First 1
+  if (-not $project) { throw "No registered project matches $repoRoot" }
+  $projectId = $project.id
+}
 
 $metrics = @()
 $sccJson = scc packages/client/src packages/server/src packages/shared/src packages/mcp-server/src packages/e2e packages/desktop/src --include-ext ts,tsx,css --no-complexity --format json | ConvertFrom-Json
@@ -85,7 +99,7 @@ $body = @{
   metrics = $metrics
 } | ConvertTo-Json -Depth 8
 
-Invoke-RestMethod "$baseUrl/api/projects/$($project.id)/quality-metrics" -Method Post -ContentType "application/json" -Body $body
+Invoke-RestMethod "$baseUrl/api/projects/$projectId/quality-metrics" -Method Post -ContentType "application/json" -Body $body
 ```
 
 ## Report

@@ -18,6 +18,10 @@ export interface QualityMetricsBatchInput {
   metrics?: QualityMetricInput[];
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 function parseMeta(value: string | null): unknown {
   if (!value) return null;
   try {
@@ -54,8 +58,18 @@ export function createQualityMetricsService(database: Database) {
 
   async function recordBatch(projectId: string, input: QualityMetricsBatchInput): Promise<{ inserted: number; metrics: QualityMetricRecord[] }> {
     await assertProject(projectId);
+    if (!isRecord(input)) {
+      throw new ValidationError("request body must be an object");
+    }
     if (!Array.isArray(input.metrics) || input.metrics.length === 0) {
       throw new ValidationError("metrics must be a non-empty array");
+    }
+
+    if (input.collectedAt !== undefined && input.collectedAt !== null && typeof input.collectedAt !== "string") {
+      throw new ValidationError("collectedAt must be an ISO timestamp");
+    }
+    if (input.commitSha !== undefined && input.commitSha !== null && typeof input.commitSha !== "string") {
+      throw new ValidationError("commitSha must be a string");
     }
 
     const collectedAt = input.collectedAt ?? new Date().toISOString();
@@ -63,11 +77,17 @@ export function createQualityMetricsService(database: Database) {
     const commitSha = input.commitSha?.trim() || null;
 
     const rows = input.metrics.map((metric) => {
-      if (!metric.metricKey?.trim()) {
+      if (!isRecord(metric)) {
+        throw new ValidationError("metric entries must be objects");
+      }
+      if (typeof metric.metricKey !== "string" || !metric.metricKey.trim()) {
         throw new ValidationError("metricKey is required");
       }
       if (typeof metric.value !== "number" || !Number.isFinite(metric.value)) {
         throw new ValidationError(`value for ${metric.metricKey} must be a finite number`);
+      }
+      if (metric.unit !== undefined && metric.unit !== null && typeof metric.unit !== "string") {
+        throw new ValidationError(`unit for ${metric.metricKey} must be a string`);
       }
       return {
         id: randomUUID(),
