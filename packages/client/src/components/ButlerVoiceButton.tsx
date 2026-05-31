@@ -100,8 +100,6 @@ export const ButlerVoiceButton = forwardRef<ButlerVoiceButtonHandle, ButlerVoice
   const [voiceLanguage, setVoiceLanguage] = useState(loadVoiceLanguage);
   const recognitionRef = useRef<SpeechRecognitionType | null>(null);
   const stopRequestedRef = useRef(false);
-  const pointerDownRef = useRef(false);
-  const suppressClickRef = useRef(false);
 
   // Animated waveform bars (3 bars, sine-wave phase offset) while recording.
   const [waveBars, setWaveBars] = useState([0.3, 0.7, 0.4]);
@@ -213,40 +211,7 @@ export const ButlerVoiceButton = forwardRef<ButlerVoiceButtonHandle, ButlerVoice
     setState("recording");
   }, [disabled, onInterim, onStart, onTranscript, finishRecording, voiceLanguage]);
 
-  const handlePointerDown = useCallback(() => {
-    if (disabled) return;
-    pointerDownRef.current = true;
-    suppressClickRef.current = true;
-    if (state === "idle") {
-      startRecording();
-    } else if (state === "recording") {
-      stopRecording();
-    }
-  }, [disabled, state, startRecording, stopRecording]);
-
-  const handlePointerUp = useCallback(() => {
-    if (disabled) return;
-    pointerDownRef.current = false;
-    if (state === "recording") {
-      stopRecording();
-    }
-  }, [disabled, state, stopRecording]);
-
-  const handlePointerLeave = useCallback(() => {
-    if (pointerDownRef.current) {
-      pointerDownRef.current = false;
-      if (state === "recording") {
-        stopRecording();
-      }
-    }
-  }, [state, stopRecording]);
-
   const handleClick = useCallback(() => {
-    if (suppressClickRef.current) {
-      suppressClickRef.current = false;
-      return;
-    }
-
     if (disabled) return;
     if (state === "idle") {
       startRecording();
@@ -331,11 +296,6 @@ export const ButlerVoiceButton = forwardRef<ButlerVoiceButtonHandle, ButlerVoice
   const commonButtonProps = {
     type: "button" as const,
     onClick: handleClick,
-    onMouseDown: handlePointerDown,
-    onMouseUp: handlePointerUp,
-    onMouseLeave: handlePointerLeave,
-    onTouchStart: handlePointerDown,
-    onTouchEnd: handlePointerUp,
     disabled,
     title: isRecording ? "Stop dictation" : "Dictate a message (voice input)",
     "aria-label": isRecording ? "Stop dictation" : "Dictate a message",
