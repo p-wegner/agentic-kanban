@@ -172,6 +172,46 @@ describe("workflow-engine", () => {
     expect(node.name).toBe("Backlog");
   });
 
+  it("rejects a workflow template from another project when creating an issue", async () => {
+    const { projectId } = await seedProject(db);
+    const { projectId: otherProjectId } = await seedProject(db);
+    const now = new Date().toISOString();
+    const templateId = randomUUID();
+    const nodeId = randomUUID();
+
+    await db.insert(schema.workflowTemplates).values({
+      id: templateId,
+      projectId: otherProjectId,
+      name: "Other project workflow",
+      description: null,
+      ticketType: null,
+      isDefault: false,
+      isBuiltin: false,
+      builtinKey: null,
+      createdAt: now,
+      updatedAt: now,
+    });
+    await db.insert(schema.workflowNodes).values({
+      id: nodeId,
+      templateId,
+      name: "Other start",
+      nodeType: "start",
+      statusName: "In Progress",
+      maxVisits: 0,
+      posX: 0,
+      posY: 0,
+      sortOrder: 0,
+      createdAt: now,
+    } as any);
+
+    const service = createIssueService({ database: db as any });
+    await expect(service.createIssue({
+      projectId,
+      title: "Cross-project workflow",
+      workflowTemplateId: templateId,
+    })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+  });
+
   it("initialises a workspace on the start node and syncs status", async () => {
     const { projectId, statusIds } = await seedProject(db);
     const issueId = await seedIssue(db, projectId, statusIds["Todo"], "bug");
