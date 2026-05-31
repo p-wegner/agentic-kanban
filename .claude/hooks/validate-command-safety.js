@@ -146,6 +146,19 @@ function isBroadNodeKill(command) {
   return hasBroadDevMatcher && killsMatches;
 }
 
+function isMainBoardPortKill(command) {
+  if (!isWorktreeProjectDir()) return false;
+  const normalized = command.replace(/\r\n/g, "\n");
+  const killsMatches = /\b(?:taskkill|Stop-Process|kill\s+-9)\b/i.test(normalized);
+  if (!killsMatches) return false;
+
+  return (
+    /\bGet-NetTCPConnection\b[\s\S]*(?:-LocalPort\s+3001|\$env:KANBAN_BOARD_SERVER_PORT)\b/i.test(normalized) ||
+    /\bnetstat\b[\s\S]*(?::3001|\$env:KANBAN_BOARD_SERVER_PORT)[\s\S]*\b(?:taskkill|Stop-Process)\b/i.test(normalized) ||
+    /\blsof\b[\s\S]*:3001[\s\S]*\bkill\s+-9\b/i.test(normalized)
+  );
+}
+
 function getBlockedNonDbReason(command) {
   if (isBroadNodeKill(command)) {
     return (
@@ -154,6 +167,14 @@ function getBlockedNonDbReason(command) {
       "Use port-scoped cleanup for only this checkout's ports. In this repo, use the dev-server " +
       "skill's Stop-PortOwner recipe with $KANBAN_SERVER_PORT / $KANBAN_CLIENT_PORT, or stop the " +
       "specific workspace through the board API."
+    );
+  }
+
+  if (isMainBoardPortKill(command)) {
+    return (
+      "Stopping the main board port from a worktree is blocked. Port 3001 / " +
+      "$KANBAN_BOARD_SERVER_PORT belongs to the orchestration board, not the worktree dev server.\n\n" +
+      "Use $KANBAN_WORKTREE_SERVER_PORT / $KANBAN_WORKTREE_CLIENT_PORT for worktree dev-server cleanup."
     );
   }
 
