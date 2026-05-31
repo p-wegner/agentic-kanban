@@ -2,6 +2,16 @@ import type { AgentLaunchConfig, AgentProvider, FileSystem, ParsedStreamEvent, P
 import { PLAN_BEGIN_MARKER, PLAN_END_MARKER } from "./types.js";
 import { resolveCodexDirect, splitArgs, nodeFileSystem } from "./helpers.js";
 
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined;
+}
+
+function numberValue(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
 export class CodexProvider implements AgentProvider {
   readonly name = "codex";
   private readonly fs: FileSystem;
@@ -101,22 +111,25 @@ export class CodexProvider implements AgentProvider {
     }
 
     if (obj.type === "turn.completed") {
-      const usage = obj.usage as Record<string, unknown> | undefined;
-      const inputTokens = (usage?.input_tokens as number) ?? 0;
-      const cachedTokens = (usage?.cached_input_tokens as number) ?? 0;
-      const outputTokens = (usage?.output_tokens as number) ?? 0;
+      const usage = asRecord(obj.usage);
+      const totalUsage = asRecord(usage?.total_token_usage) ?? usage;
+      const currentUsage = asRecord(usage?.last_token_usage) ?? asRecord(obj.last_token_usage) ?? usage;
+      const inputTokens = numberValue(totalUsage?.input_tokens);
+      const outputTokens = numberValue(totalUsage?.output_tokens);
+      const contextTokens = numberValue(currentUsage?.input_tokens) || inputTokens;
       result.stats = {
         durationMs: 0,
         totalCostUsd: 0,
         inputTokens,
         outputTokens,
+        contextTokens,
         numTurns: 1,
         model: "",
         success: true,
       };
       result.liveStats = {
         model: "",
-        contextTokens: inputTokens + cachedTokens,
+        contextTokens,
       };
       result.turnComplete = true;
     }

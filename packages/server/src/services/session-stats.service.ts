@@ -4,7 +4,7 @@ import type { Database } from "../db/index.js";
 
 /**
  * For a list of workspace IDs, query their latest sessions and return:
- * - contextTokens per workspace (input + cache-read tokens from session stats)
+ * - contextTokens per workspace (contextTokens from session stats, falling back to input + cache-read)
  * - lastTool per workspace (name of last tool_use block in session messages)
  */
 export async function enrichWorkspacesWithSessionData(
@@ -29,7 +29,8 @@ export async function enrichWorkspacesWithSessionData(
     if (sess.stats) {
       try {
         const p = JSON.parse(sess.stats) as Record<string, unknown>;
-        const tokens = ((p.inputTokens as number) ?? 0) + ((p.cacheReadTokens as number) ?? 0);
+        const explicitContextTokens = (p.contextTokens as number) ?? 0;
+        const tokens = explicitContextTokens || ((p.inputTokens as number) ?? 0) + ((p.cacheReadTokens as number) ?? 0);
         if (tokens) contextTokensMap.set(wsId, tokens);
       } catch { /* ignore */ }
     }

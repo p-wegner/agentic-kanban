@@ -645,6 +645,29 @@ describe("CodexProvider", () => {
     expect(evt?.toolResult?.toolUseId).toBe("mcp-2");
     expect(evt?.toolResult?.agentResultText).toBeUndefined();
   });
+
+  it("uses Codex last token usage for context display instead of cumulative totals", () => {
+    const evt = provider.parseStreamEvent(JSON.stringify({
+      type: "turn.completed",
+      usage: {
+        total_token_usage: { input_tokens: 300_000, output_tokens: 1_000 },
+        last_token_usage: { input_tokens: 42_000, cached_input_tokens: 40_000, output_tokens: 200 },
+      },
+    }));
+
+    expect(evt?.stats?.inputTokens).toBe(300_000);
+    expect(evt?.stats?.contextTokens).toBe(42_000);
+    expect(evt?.liveStats?.contextTokens).toBe(42_000);
+  });
+
+  it("does not add cached Codex tokens to context usage", () => {
+    const evt = provider.parseStreamEvent(JSON.stringify({
+      type: "turn.completed",
+      usage: { input_tokens: 10, cached_input_tokens: 2, output_tokens: 4 },
+    }));
+
+    expect(evt?.liveStats?.contextTokens).toBe(10);
+  });
 });
 
 describe("CopilotProvider", () => {
