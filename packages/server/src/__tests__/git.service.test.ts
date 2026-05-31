@@ -131,6 +131,67 @@ describe("GitService", () => {
     expect(dirty).toEqual([]);
   }, 30000);
 
+  it("is idempotent when merging a branch that is already reachable from the target", async () => {
+    const worktreePath = await gitService.createWorktree(repoPath, "feature/already-merged");
+
+    const { writeFileSync } = await import("node:fs");
+    writeFileSync(join(worktreePath, "already-merged.txt"), "Merge once\n");
+
+    await exec("git", ["add", "."], worktreePath);
+    await exec("git", ["config", "user.email", "test@test.com"], worktreePath);
+    await exec("git", ["config", "user.name", "Test"], worktreePath);
+    await exec("git", ["commit", "-m", "Add already merged file"], worktreePath);
+    await gitService.removeWorktree(repoPath, worktreePath);
+
+    const first = await gitService.mergeBranch(repoPath, "feature/already-merged", "main");
+    const headAfterFirst = (await exec("git", ["rev-parse", "main"], repoPath)).trim();
+    const countAfterFirst = (await exec("git", ["rev-list", "--count", "main"], repoPath)).trim();
+
+    const second = await gitService.mergeBranch(repoPath, "feature/already-merged", "main");
+    const headAfterSecond = (await exec("git", ["rev-parse", "main"], repoPath)).trim();
+    const countAfterSecond = (await exec("git", ["rev-list", "--count", "main"], repoPath)).trim();
+
+    expect(first).toContain("Merge branch");
+    expect(second).toContain("already merged");
+    expect(headAfterSecond).toBe(headAfterFirst);
+    expect(countAfterSecond).toBe(countAfterFirst);
+  }, 30000);
+
+  it("syncs a clean checked-out target when retrying after the target ref already contains the feature", async () => {
+    const worktreePath = await gitService.createWorktree(repoPath, "feature/interrupted-merge-retry");
+
+    const { writeFileSync, existsSync: fsExistsSync } = await import("node:fs");
+    writeFileSync(join(worktreePath, "interrupted-retry.txt"), "Recovered on retry\n");
+
+    await exec("git", ["add", "."], worktreePath);
+    await exec("git", ["config", "user.email", "test@test.com"], worktreePath);
+    await exec("git", ["config", "user.name", "Test"], worktreePath);
+    await exec("git", ["commit", "-m", "Add interrupted retry file"], worktreePath);
+    await gitService.removeWorktree(repoPath, worktreePath);
+
+    const oldHead = (await exec("git", ["rev-parse", "main"], repoPath)).trim();
+    const newTree = (await exec("git", ["merge-tree", "--write-tree", "--no-messages", "main", "feature/interrupted-merge-retry"], repoPath)).trim().split("\n")[0];
+    const featureSha = (await exec("git", ["rev-parse", "feature/interrupted-merge-retry"], repoPath)).trim();
+    const newCommit = (await exec(
+      "git",
+      ["commit-tree", newTree, "-p", oldHead, "-p", featureSha, "-m", "Simulate interrupted merge"],
+      repoPath,
+    )).trim();
+
+    // Simulate an interruption after update-ref but before reset --hard:
+    // HEAD resolves through main to the merge commit, while the index/worktree
+    // still match the old commit because reset --hard never ran.
+    await exec("git", ["update-ref", "refs/heads/main", newCommit], repoPath);
+    expect((await exec("git", ["rev-parse", "HEAD"], repoPath)).trim()).toBe(newCommit);
+    expect(fsExistsSync(join(repoPath, "interrupted-retry.txt"))).toBe(false);
+
+    const result = await gitService.mergeBranch(repoPath, "feature/interrupted-merge-retry", "main");
+
+    expect(result).toContain("already merged");
+    expect((await exec("git", ["rev-parse", "HEAD"], repoPath)).trim()).toBe(newCommit);
+    expect(fsExistsSync(join(repoPath, "interrupted-retry.txt"))).toBe(true);
+  }, 30000);
+
   it("refuses to merge into a checked-out branch with uncommitted tracked changes", async () => {
     const { writeFileSync, readFileSync } = await import("node:fs");
 
