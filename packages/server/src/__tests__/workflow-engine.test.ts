@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { randomUUID } from "node:crypto";
-import { eq } from "drizzle-orm";
+import { asc, eq } from "drizzle-orm";
 import * as schema from "@agentic-kanban/shared/schema";
 import {
   resolveTemplateForIssue,
@@ -110,6 +110,43 @@ describe("workflow-engine", () => {
       .from(schema.workflowTemplates)
       .where(eq(schema.workflowTemplates.id, templateId!));
     expect(tpl[0].builtinKey).toBe("simple-ticket");
+  });
+
+  it("seeds an opt-in spec-driven phased planning template with interactive gates", async () => {
+    const templates = await db
+      .select()
+      .from(schema.workflowTemplates)
+      .where(eq(schema.workflowTemplates.builtinKey, "spec-driven-phased-planning"));
+    expect(templates).toHaveLength(1);
+    expect(templates[0].ticketType).toBeNull();
+    expect(templates[0].isDefault).toBe(false);
+
+    const nodes = await db
+      .select()
+      .from(schema.workflowNodes)
+      .where(eq(schema.workflowNodes.templateId, templates[0].id))
+      .orderBy(asc(schema.workflowNodes.sortOrder));
+    expect(nodes.map((n) => n.name)).toEqual([
+      "Backlog",
+      "Specify",
+      "Design",
+      "Tasks",
+      "Implement",
+      "Review",
+      "Done",
+    ]);
+    expect(nodes.find((n) => n.name === "Specify")?.skillName).toBe("spec-driven-specify");
+    expect(nodes.find((n) => n.name === "Design")?.skillName).toBe("spec-driven-design");
+    expect(nodes.find((n) => n.name === "Tasks")?.skillName).toBe("spec-driven-tasks");
+    expect(nodes.find((n) => n.name === "Review")?.skillName).toBe("code-review");
+
+    const edges = await db
+      .select()
+      .from(schema.workflowEdges)
+      .where(eq(schema.workflowEdges.templateId, templates[0].id));
+    expect(edges.filter((e) => e.condition === "manual")).toHaveLength(6);
+    expect(edges.filter((e) => e.condition === "auto_on_exit_0")).toHaveLength(1);
+    expect(edges.some((e) => e.isLoop)).toBe(true);
   });
 
   it("initialises a workspace on the start node and syncs status", async () => {
