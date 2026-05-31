@@ -405,7 +405,7 @@ Set priority to high and describe the blocker in the issue description.
     model: null,
   },
   {
-    name: "spec-driven-specify",
+    name: "spec-requirements",
     description: "Spec-driven planning phase: turn intent into an interactive requirements spec with human approval gates",
     prompt: `You are guiding the Specify phase of a spec-driven planning workflow.
 
@@ -419,12 +419,13 @@ Work interactively:
 5. Do not implement code in this phase.
 
 Gate:
-- Only propose the transition to Design after the spec is explicit enough for a design agent to make technical decisions.
-- In your transition summary, mention the accepted requirements and any deferred questions.`,
+- Stop when the spec is explicit enough for a design agent to make technical decisions and ask the human to approve the phase.
+- Do not call propose_transition yourself; the user advances to Design from the planning panel.
+- In your final phase summary, mention the accepted requirements and any deferred questions.`,
     model: null,
   },
   {
-    name: "spec-driven-design",
+    name: "spec-design",
     description: "Spec-driven planning phase: convert an accepted spec into a concrete implementation design",
     prompt: `You are guiding the Design phase of a spec-driven planning workflow.
 
@@ -438,12 +439,13 @@ Work interactively:
 5. Do not implement code in this phase.
 
 Gate:
-- Only propose the transition to Tasks after the design has clear decisions and a verification strategy.
-- In your transition summary, mention the chosen approach, rejected alternatives, and main risks.`,
+- Stop when the design has clear decisions and a verification strategy and ask the human to approve the phase.
+- Do not call propose_transition yourself; the user advances to Tasks from the planning panel.
+- In your final phase summary, mention the chosen approach, rejected alternatives, and main risks.`,
     model: null,
   },
   {
-    name: "spec-driven-tasks",
+    name: "spec-tasks",
     description: "Spec-driven planning phase: break an accepted design into board-ready child issues and dependency waves",
     prompt: `You are guiding the Tasks phase of a spec-driven planning workflow.
 
@@ -457,8 +459,9 @@ Work interactively:
 5. Do not implement code in this phase.
 
 Gate:
-- Only propose the transition to Implement after the task breakdown is approved and dependencies are explicit.
-- In your transition summary, mention the created child issues or the approved task list and the first implementation wave.`,
+- Stop when the task breakdown is ready for approval and dependencies are explicit.
+- Do not call propose_transition yourself; the user advances to Implement from the planning panel.
+- In your final phase summary, mention the created child issues or the approved task list and the first implementation wave.`,
     model: null,
   },
   {

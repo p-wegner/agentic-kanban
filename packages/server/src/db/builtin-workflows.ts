@@ -4,6 +4,9 @@ import {
   workflowTemplates,
   workflowNodes,
   workflowEdges,
+  workflowTransitions,
+  issues,
+  workspaces,
   agentSkills,
 } from "@agentic-kanban/shared/schema";
 import { randomUUID } from "node:crypto";
@@ -57,6 +60,12 @@ export interface BuiltinTemplateDef {
   nodes: BuiltinNodeDef[];
   edges: BuiltinEdgeDef[];
 }
+
+const SPEC_DRIVEN_SKILL_BY_NODE = {
+  specify: "spec-requirements",
+  design: "spec-design",
+  tasks: "spec-tasks",
+} as const;
 
 export const BUILTIN_WORKFLOWS: BuiltinTemplateDef[] = [
   {
@@ -331,18 +340,26 @@ export const BUILTIN_WORKFLOWS: BuiltinTemplateDef[] = [
   },
   {
     builtinKey: "spec-driven-phased-planning",
-    name: "Spec-Driven Phased Planning",
+    name: "Spec-Driven",
     description:
-      "Opt-in SDD flow: specify -> design -> tasks -> implement -> review -> done, with deliberate human gates before implementation.",
+      "Opt-in SDD flow: backlog -> specify -> design -> tasks -> implement -> review -> done, with deliberate human gates before implementation.",
     ticketType: null,
     isDefault: false,
     nodes: [
       {
+        key: "backlog",
+        name: "Backlog",
+        nodeType: "start",
+        statusName: "Todo",
+        guidance:
+          "This issue is waiting to enter the spec-driven planning flow. When the human is ready to begin requirements discovery, propose a transition to Specify.",
+      },
+      {
         key: "specify",
         name: "Specify",
-        nodeType: "start",
+        nodeType: "normal",
         statusName: "In Progress",
-        skillName: "spec-driven-specify",
+        skillName: SPEC_DRIVEN_SKILL_BY_NODE.specify,
         guidance:
           "Draft or refine the problem statement, goals, non-goals, requirements, acceptance criteria, and open questions. Keep this interactive and wait for the human gate before Design.",
       },
@@ -351,7 +368,7 @@ export const BUILTIN_WORKFLOWS: BuiltinTemplateDef[] = [
         name: "Design",
         nodeType: "normal",
         statusName: "In Progress",
-        skillName: "spec-driven-design",
+        skillName: SPEC_DRIVEN_SKILL_BY_NODE.design,
         guidance:
           "Turn the accepted spec into an implementation design: architecture, data model, API/UI shape, risks, test strategy, and migration or rollout notes. Wait for approval before Tasks.",
       },
@@ -360,7 +377,7 @@ export const BUILTIN_WORKFLOWS: BuiltinTemplateDef[] = [
         name: "Tasks",
         nodeType: "normal",
         statusName: "In Progress",
-        skillName: "spec-driven-tasks",
+        skillName: SPEC_DRIVEN_SKILL_BY_NODE.tasks,
         guidance:
           "Convert the accepted design into concrete board work: dependency-aware child issues or a task checklist, with clear acceptance criteria for each implementable unit. Wait for approval before Implement.",
       },
@@ -384,6 +401,7 @@ export const BUILTIN_WORKFLOWS: BuiltinTemplateDef[] = [
       { key: "done", name: "Done", nodeType: "end", statusName: "Done" },
     ],
     edges: [
+      { from: "backlog", to: "specify", condition: "manual", label: "begin specification" },
       { from: "specify", to: "design", condition: "manual", label: "spec approved" },
       { from: "design", to: "tasks", condition: "manual", label: "design approved" },
       { from: "tasks", to: "implement", condition: "manual", label: "tasks approved" },
@@ -415,7 +433,12 @@ export async function ensureBuiltinWorkflows(database: Database = db): Promise<v
 
   let added = 0;
   for (const tpl of BUILTIN_WORKFLOWS) {
-    if (existingKeys.has(tpl.builtinKey)) continue;
+    if (existingKeys.has(tpl.builtinKey)) {
+      if (tpl.builtinKey === "spec-driven-phased-planning") {
+        await syncBuiltinWorkflowGraph(database, tpl, skillIdByName, now);
+      }
+      continue;
+    }
 
     const templateId = randomUUID();
     await database.insert(workflowTemplates).values({
@@ -477,5 +500,94 @@ export async function ensureBuiltinWorkflows(database: Database = db): Promise<v
 
   if (added > 0) {
     console.log(`Seeded ${added} built-in workflow template(s).`);
+  }
+}
+
+async function syncBuiltinWorkflowGraph(
+  database: Database,
+  tpl: BuiltinTemplateDef,
+  skillIdByName: Map<string, string>,
+  now: string,
+): Promise<void> {
+  const existingRows = await database
+    .select({ id: workflowTemplates.id })
+    .from(workflowTemplates)
+    .where(eq(workflowTemplates.builtinKey, tpl.builtinKey))
+    .limit(1);
+  const templateId = existingRows[0]?.id;
+  if (!templateId) return;
+
+  await database.update(workflowTemplates).set({
+    name: tpl.name,
+    description: tpl.description,
+    ticketType: tpl.ticketType,
+    isDefault: tpl.isDefault,
+    isBuiltin: true,
+    updatedAt: now,
+  }).where(eq(workflowTemplates.id, templateId));
+
+  const oldNodes = await database
+    .select({ id: workflowNodes.id, name: workflowNodes.name })
+    .from(workflowNodes)
+    .where(eq(workflowNodes.templateId, templateId));
+  const oldNodeIdByName = new Map(oldNodes.map((node) => [node.name, node.id]));
+
+  await database.delete(workflowEdges).where(eq(workflowEdges.templateId, templateId));
+
+  const nodeIdByKey = new Map<string, string>();
+  const newNodeIdByName = new Map<string, string>();
+  let sort = 0;
+  for (const node of tpl.nodes) {
+    const nodeId = randomUUID();
+    nodeIdByKey.set(node.key, nodeId);
+    newNodeIdByName.set(node.name, nodeId);
+    await database.insert(workflowNodes).values({
+      id: nodeId,
+      templateId,
+      name: node.name,
+      nodeType: node.nodeType,
+      statusName: node.statusName,
+      skillId: node.skillName ? skillIdByName.get(node.skillName) ?? null : null,
+      skillName: node.skillName ?? null,
+      maxVisits: node.maxVisits ?? 0,
+      config: node.guidance ? JSON.stringify({ guidance: node.guidance }) : null,
+      posX: 0,
+      posY: sort * 120,
+      sortOrder: sort,
+      createdAt: now,
+    });
+    sort++;
+  }
+
+  for (const [nodeName, oldNodeId] of oldNodeIdByName) {
+    const newNodeId = newNodeIdByName.get(nodeName);
+    if (!newNodeId) continue;
+    await database.update(issues).set({ currentNodeId: newNodeId }).where(eq(issues.currentNodeId, oldNodeId));
+    await database.update(workspaces).set({ currentNodeId: newNodeId }).where(eq(workspaces.currentNodeId, oldNodeId));
+    await database.update(workflowTransitions).set({ fromNodeId: newNodeId }).where(eq(workflowTransitions.fromNodeId, oldNodeId));
+    await database.update(workflowTransitions).set({ toNodeId: newNodeId }).where(eq(workflowTransitions.toNodeId, oldNodeId));
+  }
+
+  for (const oldNode of oldNodes) {
+    await database.delete(workflowNodes).where(eq(workflowNodes.id, oldNode.id));
+  }
+
+  let edgeSort = 0;
+  for (const edge of tpl.edges) {
+    const fromId = nodeIdByKey.get(edge.from);
+    const toId = nodeIdByKey.get(edge.to);
+    if (!fromId || !toId) continue;
+    await database.insert(workflowEdges).values({
+      id: randomUUID(),
+      templateId,
+      fromNodeId: fromId,
+      toNodeId: toId,
+      label: edge.label ?? null,
+      condition: edge.condition ?? "manual",
+      isLoop: !!edge.isLoop,
+      sortOrder: edgeSort,
+      createdAt: now,
+    });
+    edgeSort++;
   }
 }
