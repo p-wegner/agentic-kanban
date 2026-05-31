@@ -13,6 +13,7 @@ import { WorkflowAnalyticsDashboard } from "../components/WorkflowAnalyticsDashb
 import { InsightsPanel } from "../components/InsightsPanel.js";
 import { DigestView } from "../components/DigestView.js";
 import { FocusView } from "../components/FocusView.js";
+import { StrategyTargetsView } from "../components/StrategyTargetsView.js";
 import { SwimlaneView } from "../components/SwimlaneView.js";
 import { FlakyTestsPanel } from "../components/FlakyTestsPanel.js";
 import { useAgentQuestionsCount } from "../components/AgentQuestionsPanel.js";
@@ -1355,6 +1356,16 @@ export function BoardPage() {
                 const issue = columns.flatMap(c => c.issues).find(i => i.id === issueId);
                 if (issue) handleIssueClick(issue);
               }}
+            />
+          </BoardErrorBoundary>
+        )}
+        {viewMode === "strategy" && activeProjectId && (
+          <BoardErrorBoundary columnName="Strategic Targets">
+            <StrategyTargetsView
+              columns={columns}
+              projectId={activeProjectId}
+              onIssueClick={handleIssueClick}
+              searchQuery={searchQuery}
             />
           </BoardErrorBoundary>
         )}

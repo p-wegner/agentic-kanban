@@ -19,14 +19,14 @@ describe("VIEW_REGISTRY", () => {
     expect(new Set(shortcuts).size).toBe(shortcuts.length);
   });
 
-  it("enumerates all 16 board views", () => {
-    expect(VIEW_REGISTRY).toHaveLength(16);
+  it("enumerates all 17 board views", () => {
+    expect(VIEW_REGISTRY).toHaveLength(17);
   });
 
   it("preserves the existing view ids", () => {
     const expected: ViewMode[] = [
       "kanban", "backlog", "graph", "table", "agents", "timeline", "metrics",
-      "quality-metrics", "digest", "focus", "butler", "workflows", "workflow-analytics", "insights", "swimlane", "flaky-tests",
+      "quality-metrics", "digest", "strategy", "focus", "butler", "workflows", "workflow-analytics", "insights", "swimlane", "flaky-tests",
     ];
     expect(VIEW_IDS.slice().sort()).toEqual(expected.slice().sort());
   });
@@ -46,6 +46,7 @@ describe("VIEW_REGISTRY", () => {
     expect(byId.insights).toBe("n");
     expect(byId["flaky-tests"]).toBe("k");
     expect(byId.digest).toBe("d");
+    expect(byId.strategy).toBe("z");
     expect(byId.focus).toBe("o");
     expect(byId.workflows).toBe("u");
     expect(byId["workflow-analytics"]).toBe("w");
@@ -76,7 +77,7 @@ describe("VIEW_REGISTRY", () => {
     );
     // Analytics/secondary views live behind the "More" overflow dropdown.
     expect([...secondaryIds].sort()).toEqual(
-      ["digest", "flaky-tests", "focus", "insights", "metrics", "quality-metrics", "swimlane", "workflows", "workflow-analytics"].sort(),
+      ["digest", "flaky-tests", "focus", "insights", "metrics", "quality-metrics", "strategy", "swimlane", "workflows", "workflow-analytics"].sort(),
     );
   });
 
