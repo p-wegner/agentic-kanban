@@ -12,6 +12,7 @@ import type { ProviderName } from "./agent-provider.js";
 import * as realGitService from "./git.service.js";
 import { kill as killAgent } from "./agent.service.js";
 import { runSetupScript } from "./setup-script.js";
+import type { SetupScriptResult } from "./setup-script.js";
 import { writeAgentSkillFile, readLocalSkillPrompt, copySkillToWorktree } from "@agentic-kanban/shared/lib/agent-skill-files";
 import { writeTicketContextFile } from "@agentic-kanban/shared/lib/ticket-context";
 import {
@@ -46,6 +47,85 @@ export function createWorkspaceCrudService(deps: {
 }) {
   const { database, getSessionManager, boardEvents } = deps;
   const gitService = deps.gitService ?? realGitService;
+
+  type SetupRunState = "running" | "success" | "failed" | "skipped";
+  type LatestSetupRun = {
+    command: string | null;
+    state: SetupRunState;
+    startedAt: string | null;
+    endedAt: string | null;
+    exitCode: number | null;
+    durationMs: number | null;
+    stdoutTail: string | null;
+    stderrTail: string | null;
+  };
+
+  function tailOutput(output: string): string | null {
+    const trimmed = output.trim();
+    if (!trimmed) return null;
+    const lines = trimmed.split(/\r?\n/).slice(-8).join("\n");
+    return lines.length > 2000 ? lines.slice(-2000) : lines;
+  }
+
+  function buildSetupRunFromResult(command: string, startedAt: string, result: SetupScriptResult): LatestSetupRun {
+    const endedAt = new Date().toISOString();
+    return {
+      command,
+      state: result.exitCode === 0 ? "success" : "failed",
+      startedAt,
+      endedAt,
+      exitCode: result.exitCode,
+      durationMs: Math.max(0, new Date(endedAt).getTime() - new Date(startedAt).getTime()),
+      stdoutTail: tailOutput(result.stdout),
+      stderrTail: tailOutput(result.stderr),
+    };
+  }
+
+  function buildSetupRunFromError(command: string, startedAt: string, err: unknown): LatestSetupRun {
+    const endedAt = new Date().toISOString();
+    return {
+      command,
+      state: "failed",
+      startedAt,
+      endedAt,
+      exitCode: null,
+      durationMs: Math.max(0, new Date(endedAt).getTime() - new Date(startedAt).getTime()),
+      stdoutTail: null,
+      stderrTail: tailOutput(err instanceof Error ? err.message : String(err)),
+    };
+  }
+
+  function skippedSetupRun(command: string | null): LatestSetupRun {
+    const now = new Date().toISOString();
+    return {
+      command,
+      state: "skipped",
+      startedAt: now,
+      endedAt: now,
+      exitCode: null,
+      durationMs: 0,
+      stdoutTail: null,
+      stderrTail: null,
+    };
+  }
+
+  async function updateLatestSetupRun(workspaceId: string, run: LatestSetupRun, projectId?: string): Promise<void> {
+    await database
+      .update(workspaces)
+      .set({
+        latestSetupCommand: run.command,
+        latestSetupState: run.state,
+        latestSetupStartedAt: run.startedAt,
+        latestSetupEndedAt: run.endedAt,
+        latestSetupExitCode: run.exitCode,
+        latestSetupDurationMs: run.durationMs,
+        latestSetupStdoutTail: run.stdoutTail,
+        latestSetupStderrTail: run.stderrTail,
+        updatedAt: new Date().toISOString(),
+      })
+      .where(eq(workspaces.id, workspaceId));
+    if (projectId) boardEvents?.broadcast(projectId, "workspace_setup");
+  }
 
   async function resolveIssueAndProject(issueId: string): Promise<{
     issue: { projectId: string; issueNumber: number | null; title: string; description: string | null; priority: string | null };
@@ -93,7 +173,14 @@ export function createWorkspaceCrudService(deps: {
     input: Pick<CreateWorkspaceInput, "branch" | "baseBranch" | "skipSetup">,
     setupConfig: { setupScript: string | null; setupBlocking: boolean; setupEnabled: boolean },
     workspaceId: string,
-  ): Promise<{ branch: string; worktreePath: string; baseBranch: string | null; baseCommitSha: string | null }> {
+  ): Promise<{
+    branch: string;
+    worktreePath: string;
+    baseBranch: string | null;
+    baseCommitSha: string | null;
+    latestSetup: LatestSetupRun;
+    setupCompletion?: Promise<LatestSetupRun>;
+  }> {
     let branch: string;
     let worktreePath: string;
     let baseBranch: string | null;
@@ -118,32 +205,49 @@ export function createWorkspaceCrudService(deps: {
     }
 
     const { setupScript, setupBlocking, setupEnabled } = setupConfig;
+    let latestSetup = skippedSetupRun(setupScript);
+    let setupCompletion: Promise<LatestSetupRun> | undefined;
     if (!isDirect && setupScript && setupEnabled && !input.skipSetup) {
+      const startedAt = new Date().toISOString();
       if (setupBlocking) {
         try {
           const result = await runSetupScript(worktreePath, setupScript);
+          latestSetup = buildSetupRunFromResult(setupScript, startedAt, result);
           if (result.exitCode === 0) {
             console.log(`[workspaces] setup complete: workspaceId=${workspaceId}`);
           } else {
             console.warn(`[workspaces] setup failed (exit ${result.exitCode}): ${result.stderr || result.stdout}`);
           }
         } catch (err) {
+          latestSetup = buildSetupRunFromError(setupScript, startedAt, err);
           console.warn(`[workspaces] setup error: ${err instanceof Error ? err.message : String(err)}`);
         }
       } else {
-        runSetupScript(worktreePath, setupScript).then(result => {
+        latestSetup = {
+          command: setupScript,
+          state: "running",
+          startedAt,
+          endedAt: null,
+          exitCode: null,
+          durationMs: null,
+          stdoutTail: null,
+          stderrTail: null,
+        };
+        setupCompletion = runSetupScript(worktreePath, setupScript).then(result => {
           if (result.exitCode === 0) {
             console.log(`[workspaces] parallel setup complete: workspaceId=${workspaceId}`);
           } else {
             console.warn(`[workspaces] parallel setup failed (exit ${result.exitCode}): ${result.stderr || result.stdout}`);
           }
+          return buildSetupRunFromResult(setupScript, startedAt, result);
         }).catch(err => {
           console.warn(`[workspaces] parallel setup error: ${err instanceof Error ? err.message : String(err)}`);
+          return buildSetupRunFromError(setupScript, startedAt, err);
         });
       }
     }
 
-    return { branch, worktreePath, baseBranch, baseCommitSha };
+    return { branch, worktreePath, baseBranch, baseCommitSha, latestSetup, setupCompletion };
   }
 
   function buildAgentPrompt(
@@ -262,6 +366,7 @@ export function createWorkspaceCrudService(deps: {
     resolvedProvider: ProviderName;
     model: string | undefined;
     contextPrimer: string | null;
+    latestSetup: LatestSetupRun;
     now: string;
   }): Promise<void> {
     await database.insert(workspaces).values({
@@ -283,6 +388,14 @@ export function createWorkspaceCrudService(deps: {
       agentCommand: params.agentCommand ?? null,
       provider: params.resolvedProvider,
       model: params.model ?? null,
+      latestSetupCommand: params.latestSetup.command,
+      latestSetupState: params.latestSetup.state,
+      latestSetupStartedAt: params.latestSetup.startedAt,
+      latestSetupEndedAt: params.latestSetup.endedAt,
+      latestSetupExitCode: params.latestSetup.exitCode,
+      latestSetupDurationMs: params.latestSetup.durationMs,
+      latestSetupStdoutTail: params.latestSetup.stdoutTail,
+      latestSetupStderrTail: params.latestSetup.stderrTail,
       contextPrimer: params.contextPrimer,
       createdAt: params.now,
       updatedAt: params.now,
@@ -450,6 +563,8 @@ exit 1
     let repoPath: string | null = null;
     let baseBranch: string | null = null;
     let baseCommitSha: string | null = null;
+    let latestSetup: LatestSetupRun = skippedSetupRun(null);
+    let setupCompletion: Promise<LatestSetupRun> | undefined;
     let claudeProfile: string | undefined;
     let agentCommand: string | undefined;
     let resolvedProvider: ProviderName = "claude";
@@ -470,7 +585,7 @@ exit 1
       const isHighPriority = issue.priority === "high" || issue.priority === "critical";
       planMode = input.planMode !== undefined ? input.planMode === true : isHighPriority;
 
-      ({ branch, worktreePath, baseBranch, baseCommitSha } = await setupWorktree(
+      ({ branch, worktreePath, baseBranch, baseCommitSha, latestSetup, setupCompletion } = await setupWorktree(
         isDirect, project.repoPath, project.defaultBranch, input, setupConfig, id,
       ));
 
@@ -537,9 +652,15 @@ exit 1
         id, issueId: input.issueId, branch, worktreePath, baseBranch, isDirect,
         baseCommitSha, requiresReview, thoroughReview, planMode, tddMode, includeVisualProof,
         skillId: effectiveSkillId, claudeProfile, agentCommand, resolvedProvider, model: agentConfig.model,
-        contextPrimer, now,
+        contextPrimer, latestSetup, now,
       });
       workspaceInserted = true;
+
+      if (setupCompletion) {
+        setupCompletion
+          .then((run) => updateLatestSetupRun(id, run, issue.projectId))
+          .catch((err) => console.warn(`[workspaces] failed to persist setup status: ${err instanceof Error ? err.message : String(err)}`));
+      }
 
       if (tddMode && worktreePath) {
         installTddHook(worktreePath);
@@ -580,6 +701,7 @@ exit 1
         includeVisualProof,
         status: "active",
         provider: resolvedProvider,
+        latestSetup,
         sessionId,
         createdAt: now,
         updatedAt: now,

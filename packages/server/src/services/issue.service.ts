@@ -546,11 +546,34 @@ export function createIssueService(deps: {
     const wsRows = await getIssueWorkspaces(issueId, database);
     const wsIds = wsRows.map(w => w.id);
     const { contextTokensMap, lastToolMap } = await enrichWorkspacesWithSessionData(wsIds, database);
-    return wsRows.map(w => ({
-      ...w,
-      contextTokens: contextTokensMap.get(w.id) ?? null,
-      lastTool: lastToolMap.get(w.id) ?? null,
-    }));
+    return wsRows.map(w => {
+      const {
+        latestSetupCommand,
+        latestSetupState,
+        latestSetupStartedAt,
+        latestSetupEndedAt,
+        latestSetupExitCode,
+        latestSetupDurationMs,
+        latestSetupStdoutTail,
+        latestSetupStderrTail,
+        ...workspace
+      } = w;
+      return {
+        ...workspace,
+        latestSetup: latestSetupState ? {
+          command: latestSetupCommand,
+          state: latestSetupState,
+          startedAt: latestSetupStartedAt,
+          endedAt: latestSetupEndedAt,
+          exitCode: latestSetupExitCode,
+          durationMs: latestSetupDurationMs,
+          stdoutTail: latestSetupStdoutTail,
+          stderrTail: latestSetupStderrTail,
+        } : null,
+        contextTokens: contextTokensMap.get(w.id) ?? null,
+        lastTool: lastToolMap.get(w.id) ?? null,
+      };
+    });
   }
 
   async function listIssues(projectId: string, issueNumber?: number) {
