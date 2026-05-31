@@ -188,19 +188,29 @@ interface GraphViewProps {
 }
 
 interface GraphFilterControlsProps {
-  statusFilter: string;
+  statusFilters: string[];
   statusNames: string[];
-  onStatusFilterChange: (status: string) => void;
+  onStatusFiltersChange: (statuses: string[]) => void;
 }
 
-function GraphFilterControls({ statusFilter, statusNames, onStatusFilterChange }: GraphFilterControlsProps) {
+function GraphFilterControls({ statusFilters, statusNames, onStatusFiltersChange }: GraphFilterControlsProps) {
   return (
     <div className="absolute top-3 left-3 z-10 flex items-center gap-2 rounded-md border border-gray-200 bg-white/95 px-2.5 py-1.5 shadow-sm dark:border-gray-700 dark:bg-gray-900/95">
       <span className="text-xs font-medium text-gray-500 dark:text-gray-400">Status</span>
       <select
-        value={statusFilter}
-        onChange={(e) => onStatusFilterChange(e.target.value)}
-        className="text-xs border border-gray-200 dark:border-gray-700 rounded px-2 py-1 bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-300"
+        multiple
+        size={Math.min(statusNames.length + 2, 5)}
+        value={statusFilters}
+        onChange={(e) => {
+          const selected = Array.from(e.target.selectedOptions, (option) => option.value);
+          if (selected.includes("all")) {
+            onStatusFiltersChange(["all"]);
+            return;
+          }
+          const statuses = selected.filter((status) => status !== "active");
+          onStatusFiltersChange(statuses.length > 0 ? statuses : ["active"]);
+        }}
+        className="min-w-32 text-xs border border-gray-200 dark:border-gray-700 rounded px-2 py-1 bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-300"
         aria-label="Graph status filter"
       >
         <option value="active">Active only</option>
@@ -216,7 +226,7 @@ function GraphFilterControls({ statusFilter, statusNames, onStatusFilterChange }
 export function GraphView({ columns, projectId, onIssueClick, searchQuery }: GraphViewProps) {
   const [graphData, setGraphData] = useState<GraphData | null>(null);
   const [loading, setLoading] = useState(true);
-  const [statusFilter, setStatusFilter] = useState("active");
+  const [statusFilters, setStatusFilters] = useState<string[]>(["active"]);
   const [nodes, setNodes] = useState<Node[]>([]);
   const [colHeaders, setColHeaders] = useState<{ status: string; count: number; x: number }[]>([]);
   const [dragNode, setDragNode] = useState<string | null>(null);
@@ -257,10 +267,11 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery }: Gra
 
   useLayoutEffect(() => {
     if (!graphData) return;
+    const visibleStatuses = new Set(statusFilters);
     const visibleNodes = graphData.nodes.filter((n) => {
-      if (statusFilter === "active") return !DEFAULT_HIDDEN_STATUS_NAMES.has(n.statusName);
-      if (statusFilter === "all") return true;
-      return n.statusName === statusFilter;
+      if (visibleStatuses.has("all")) return true;
+      if (visibleStatuses.has("active")) return !DEFAULT_HIDDEN_STATUS_NAMES.has(n.statusName);
+      return visibleStatuses.has(n.statusName);
     });
     const filtered = searchQuery
       ? visibleNodes.filter(
@@ -295,7 +306,7 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery }: Gra
       setZoom(z);
       setPan({ x: px, y: py });
     });
-  }, [graphData, searchQuery, statusFilter]);
+  }, [graphData, searchQuery, statusFilters]);
 
   const fitView = useCallback(() => {
     if (nodes.length === 0 || !containerRef.current) return;
@@ -399,9 +410,9 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery }: Gra
     return (
       <div ref={containerRef} className="relative h-full w-full overflow-hidden bg-gray-50 dark:bg-gray-950 select-none">
         <GraphFilterControls
-          statusFilter={statusFilter}
+          statusFilters={statusFilters}
           statusNames={statusNames}
-          onStatusFilterChange={setStatusFilter}
+          onStatusFiltersChange={setStatusFilters}
         />
         <div className="flex h-full flex-col items-center justify-center gap-3 text-gray-500 dark:text-gray-400 text-sm">
           <span>No issues to display</span>
@@ -415,9 +426,9 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery }: Gra
   return (
     <div ref={containerRef} className="relative h-full w-full overflow-hidden bg-gray-50 dark:bg-gray-950 select-none">
       <GraphFilterControls
-        statusFilter={statusFilter}
+        statusFilters={statusFilters}
         statusNames={statusNames}
-        onStatusFilterChange={setStatusFilter}
+        onStatusFiltersChange={setStatusFilters}
       />
       {/* Controls */}
       <div className="absolute top-3 right-3 z-10 flex flex-col gap-1">
