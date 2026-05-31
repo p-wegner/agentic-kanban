@@ -119,7 +119,7 @@ export interface BacklogViewProps {
   onStartWorkspace: (issue: IssueWithStatus) => void;
   onDragStart: (e: React.DragEvent, issue: IssueWithStatus) => void;
   onDrop: (statusId: string, sortOrder?: number) => void;
-  onMoved: () => void;
+  onPromoteToTodo: (issue: IssueWithStatus, targetStatus: StatusWithIssues) => Promise<void>;
   onCreateIssue: (data: CreateIssueRequest & { startWorkspace?: boolean; planMode?: boolean; skipAutoReview?: boolean; profile?: ProfileSelection; model?: string; isDirect?: boolean; skillId?: string }) => Promise<void>;
   onExpandCreate: (statusId: string, statusName: string, state: Partial<CreateIssueFormState>) => void;
 }
@@ -140,7 +140,7 @@ export function BacklogView({
   onStartWorkspace,
   onDragStart,
   onDrop,
-  onMoved,
+  onPromoteToTodo,
   onCreateIssue,
   onExpandCreate,
 }: BacklogViewProps) {
@@ -155,6 +155,7 @@ export function BacklogView({
   const [selectedPresetId, setSelectedPresetId] = useState("");
   const [presets, setPresets] = useState<BacklogPreset[]>([]);
   const [presetsSaving, setPresetsSaving] = useState(false);
+  const [promotingIssueIds, setPromotingIssueIds] = useState<Set<string>>(new Set());
 
   const backlogIssues = backlogColumn?.issues ?? [];
   const q = searchQuery.toLowerCase();
@@ -260,36 +261,39 @@ export function BacklogView({
     setSelectedIds((prev) => new Set([...prev, ...sortedIssues.map((issue) => issue.id)]));
   }
 
-  async function moveIssue(issue: IssueWithStatus, statusId: string, statusName: string) {
+  async function promoteIssue(issue: IssueWithStatus, targetStatus: StatusWithIssues) {
+    setPromotingIssueIds((prev) => new Set([...prev, issue.id]));
     try {
-      await apiFetch(`/api/issues/${issue.id}`, {
-        method: "PATCH",
-        body: JSON.stringify({ statusId }),
-      });
-      onMoved();
-      showToast(`Moved to ${statusName}`, "success");
+      await onPromoteToTodo(issue, targetStatus);
+      showToast(`Moved to ${targetStatus.name}`, "success");
     } catch {
       showToast("Failed to move issue", "error");
+    } finally {
+      setPromotingIssueIds((prev) => {
+        const next = new Set(prev);
+        next.delete(issue.id);
+        return next;
+      });
     }
   }
 
-  async function bulkMove(statusId: string, statusName: string) {
+  async function bulkMove(targetStatus: StatusWithIssues) {
     setBulkMoving(true);
     const ids = [...selectedVisibleIds];
     try {
-      const results = await Promise.allSettled(ids.map((id) =>
-        apiFetch(`/api/issues/${id}`, {
-          method: "PATCH",
-          body: JSON.stringify({ statusId }),
-        }),
-      ));
+      const selectedIssues = ids.flatMap((id) => {
+        const issue = backlogIssues.find((item) => item.id === id);
+        return issue ? [issue] : [];
+      });
+      const results = await Promise.allSettled(
+        selectedIssues.map((issue) => onPromoteToTodo(issue, targetStatus)),
+      );
       const failed = results.filter((result) => result.status === "rejected").length;
       setSelectedIds(new Set());
-      onMoved();
       showToast(
         failed === 0
-          ? `Moved ${ids.length} issue${ids.length === 1 ? "" : "s"} to ${statusName}`
-          : `Moved ${ids.length - failed}; ${failed} failed`,
+          ? `Moved ${selectedIssues.length} issue${selectedIssues.length === 1 ? "" : "s"} to ${targetStatus.name}`
+          : `Moved ${selectedIssues.length - failed}; ${failed} failed`,
         failed === 0 ? "success" : "error",
       );
     } finally {
@@ -387,7 +391,10 @@ export function BacklogView({
           <div>
             <div className="flex items-center gap-2">
               <h2 className="text-base font-semibold text-ink dark:text-gray-100">Backlog</h2>
-              <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600 dark:bg-gray-800 dark:text-gray-300">
+              <span
+                aria-label="Backlog issue count"
+                className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600 dark:bg-gray-800 dark:text-gray-300"
+              >
                 {backlogIssues.length}
               </span>
             </div>
@@ -521,7 +528,7 @@ export function BacklogView({
               <button
                 key={status.id}
                 disabled={bulkMoving}
-                onClick={() => bulkMove(status.id, status.name)}
+                onClick={() => bulkMove(status)}
                 className="rounded border border-gray-200 bg-white px-2 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-800"
               >
                 Move to {status.name}
@@ -590,7 +597,7 @@ export function BacklogView({
                           onWorkspaceClick={onWorkspaceClick}
                           onStartWorkspace={onStartWorkspace}
                           onDragStart={onDragStart}
-                          onMoveToNext={defaultTargetStatus ? (iss) => moveIssue(iss, defaultTargetStatus.id, defaultTargetStatus.name) : undefined}
+                          onMoveToNext={defaultTargetStatus ? (iss) => promoteIssue(iss, defaultTargetStatus) : undefined}
                           nextStatusName={defaultTargetStatus?.name}
                           searchQuery={searchQuery}
                           liveActivity={sessionActivity[issue.id]}
@@ -602,10 +609,17 @@ export function BacklogView({
                           {moveTargetColumns.map((status) => (
                             <button
                               key={status.id}
-                              onClick={() => moveIssue(issue, status.id, status.name)}
+                              type="button"
+                              aria-label={`Promote issue ${issue.issueNumber ?? issue.title} to Todo`}
+                              title="Promote to Todo"
+                              disabled={promotingIssueIds.has(issue.id)}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                promoteIssue(issue, status);
+                              }}
                               className="rounded border border-gray-200 bg-white px-2 py-0.5 text-[10px] font-medium text-gray-500 hover:border-brand-200 hover:text-brand-700 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-400 dark:hover:text-brand-300"
                             >
-                              {status.name}
+                              Promote
                             </button>
                           ))}
                         </div>
