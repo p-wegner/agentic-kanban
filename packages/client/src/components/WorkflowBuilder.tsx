@@ -5,17 +5,26 @@ import {
   Controls,
   MiniMap,
   addEdge,
-  useNodesState,
-  useEdgesState,
+  applyNodeChanges,
+  applyEdgeChanges,
   type Node,
   type Edge,
   type Connection,
+  type NodeChange,
+  type EdgeChange,
   type ReactFlowInstance,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { apiFetch } from "../lib/api.js";
 import { showToast } from "./Toast.js";
 import { layoutGraph } from "../lib/workflowLayout.js";
+import {
+  emptyWorkflowHistory,
+  pushWorkflowHistory,
+  redoWorkflowHistory,
+  undoWorkflowHistory,
+  type WorkflowHistoryState,
+} from "./workflowHistory.js";
 
 const NODE_TYPES = ["start", "normal", "parallel-fork", "parallel-join", "end"] as const;
 const EDGE_CONDITIONS = ["manual", "auto_on_exit_0", "tests_pass", "tests_fail", "diff_clean", "diff_touches"] as const;
@@ -41,6 +50,13 @@ type NodeData = {
   config: string | null;
 };
 
+type WorkflowSnapshot = {
+  nodes: Node<NodeData>[];
+  edges: Edge[];
+  selectedNodeId: string | null;
+  selectedEdgeId: string | null;
+};
+
 let tmpCounter = 0;
 const tmpId = () => `tmp-${Date.now()}-${tmpCounter++}`;
 
@@ -55,8 +71,8 @@ export function WorkflowBuilder({
   onClose: () => void;
   onSaved: () => void;
 }) {
-  const [nodes, setNodes, onNodesChange] = useNodesState<Node<NodeData>>([]);
-  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
+  const [nodes, setNodes] = useState<Node<NodeData>[]>([]);
+  const [edges, setEdges] = useState<Edge[]>([]);
   const [name, setName] = useState("New Workflow");
   const [description, setDescription] = useState("");
   const [ticketType, setTicketType] = useState<string>("");
@@ -67,7 +83,61 @@ export function WorkflowBuilder({
   const [isBuiltin, setIsBuiltin] = useState(false);
   const [saving, setSaving] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
+  const [history, setHistory] = useState<WorkflowHistoryState<WorkflowSnapshot>>(() => emptyWorkflowHistory<WorkflowSnapshot>());
   const rfRef = useRef<ReactFlowInstance<Node<NodeData>, Edge> | null>(null);
+  const nodesRef = useRef(nodes);
+  const edgesRef = useRef(edges);
+  const selectedNodeIdRef = useRef(selectedNodeId);
+  const selectedEdgeIdRef = useRef(selectedEdgeId);
+  const dragStartSnapshotRef = useRef<WorkflowSnapshot | null>(null);
+  const skipNextEdgeRemoveHistoryRef = useRef(false);
+
+  useEffect(() => { nodesRef.current = nodes; }, [nodes]);
+  useEffect(() => { edgesRef.current = edges; }, [edges]);
+  useEffect(() => { selectedNodeIdRef.current = selectedNodeId; }, [selectedNodeId]);
+  useEffect(() => { selectedEdgeIdRef.current = selectedEdgeId; }, [selectedEdgeId]);
+
+  const currentSnapshot = useCallback((): WorkflowSnapshot => ({
+    nodes: cloneNodes(nodesRef.current),
+    edges: cloneEdges(edgesRef.current),
+    selectedNodeId: selectedNodeIdRef.current,
+    selectedEdgeId: selectedEdgeIdRef.current,
+  }), []);
+
+  const recordHistory = useCallback((snapshot: WorkflowSnapshot = currentSnapshot()) => {
+    setHistory((h) => pushWorkflowHistory(h, snapshot));
+  }, [currentSnapshot]);
+
+  const restoreSnapshot = useCallback((snapshot: WorkflowSnapshot) => {
+    const restoredNodes = cloneNodes(snapshot.nodes);
+    const restoredEdges = cloneEdges(snapshot.edges);
+    nodesRef.current = restoredNodes;
+    edgesRef.current = restoredEdges;
+    selectedNodeIdRef.current = snapshot.selectedNodeId;
+    selectedEdgeIdRef.current = snapshot.selectedEdgeId;
+    setNodes(restoredNodes);
+    setEdges(restoredEdges);
+    setSelectedNodeId(snapshot.selectedNodeId);
+    setSelectedEdgeId(snapshot.selectedEdgeId);
+  }, []);
+
+  const undo = useCallback(() => {
+    const current = currentSnapshot();
+    setHistory((h) => {
+      const result = undoWorkflowHistory(h, current);
+      if (result.snapshot) restoreSnapshot(result.snapshot);
+      return result.history;
+    });
+  }, [currentSnapshot, restoreSnapshot]);
+
+  const redo = useCallback(() => {
+    const current = currentSnapshot();
+    setHistory((h) => {
+      const result = redoWorkflowHistory(h, current);
+      if (result.snapshot) restoreSnapshot(result.snapshot);
+      return result.history;
+    });
+  }, [currentSnapshot, restoreSnapshot]);
 
   // Zoom-to-fit after node positions change (layout / load). react-flow needs a
   // beat to apply the new positions and measure node sizes before fitView can
@@ -126,20 +196,67 @@ export function WorkflowBuilder({
       }
       setNodes(rawNodes);
       setEdges(rawEdges);
+      setSelectedNodeId(null);
+      setSelectedEdgeId(null);
+      setHistory(emptyWorkflowHistory<WorkflowSnapshot>());
       // Always zoom-to-fit on open (the initial `fitView` prop fits the empty
       // graph because nodes load async, so it never refits the loaded graph).
       fitSoon();
     }).catch(() => showToast("Failed to load workflow", "error"));
   }, [templateId, setNodes, setEdges, fitSoon]);
 
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const isModifier = event.ctrlKey || event.metaKey;
+      if (!isModifier) return;
+      const key = event.key.toLowerCase();
+      if (key === "z" && event.shiftKey && history.future.length > 0) {
+        event.preventDefault();
+        redo();
+      } else if (key === "z" && !event.shiftKey && history.past.length > 0) {
+        event.preventDefault();
+        undo();
+      } else if (key === "y" && history.future.length > 0) {
+        event.preventDefault();
+        redo();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [history.future.length, history.past.length, redo, undo]);
+
+  const onNodesChange = useCallback((changes: NodeChange<Node<NodeData>>[]) => {
+    const shouldRecord = changes.some((change) =>
+      change.type === "remove" || (change.type === "position" && !change.dragging && !dragStartSnapshotRef.current)
+    );
+    if (changes.some((change) => change.type === "remove")) {
+      skipNextEdgeRemoveHistoryRef.current = true;
+    }
+    const before = shouldRecord ? currentSnapshot() : null;
+    setNodes((nds) => applyNodeChanges(changes, nds));
+    if (before) recordHistory(before);
+  }, [currentSnapshot, recordHistory]);
+
+  const onEdgesChange = useCallback((changes: EdgeChange<Edge>[]) => {
+    const hasRemove = changes.some((change) => change.type === "remove");
+    const shouldRecord = hasRemove && !skipNextEdgeRemoveHistoryRef.current;
+    const before = shouldRecord ? currentSnapshot() : null;
+    setEdges((eds) => applyEdgeChanges(changes, eds));
+    if (before) recordHistory(before);
+    if (hasRemove) skipNextEdgeRemoveHistoryRef.current = false;
+  }, [currentSnapshot, recordHistory]);
+
   const onConnect = useCallback(
-    (c: Connection) =>
-      setEdges((eds) => addEdge({ ...c, id: tmpId(), label: "manual", data: { label: null, condition: "manual", isLoop: false } }, eds)),
-    [setEdges],
+    (c: Connection) => {
+      recordHistory();
+      setEdges((eds) => addEdge({ ...c, id: tmpId(), label: "manual", data: { label: null, condition: "manual", isLoop: false } }, eds));
+    },
+    [recordHistory],
   );
 
   function addNode(type: string) {
     const id = tmpId();
+    recordHistory();
     setNodes((nds) => [
       ...nds,
       {
@@ -154,6 +271,7 @@ export function WorkflowBuilder({
   }
 
   function patchNode(id: string, patch: Partial<NodeData>) {
+    recordHistory();
     setNodes((nds) =>
       nds.map((n) =>
         n.id === id
@@ -163,6 +281,7 @@ export function WorkflowBuilder({
     );
   }
   function patchEdge(id: string, patch: { label?: string | null; condition?: string; isLoop?: boolean }) {
+    recordHistory();
     setEdges((eds) =>
       eds.map((e) =>
         e.id === id
@@ -172,6 +291,7 @@ export function WorkflowBuilder({
     );
   }
   function autoLayout() {
+    recordHistory();
     setNodes((nds) => {
       const pos = layoutGraph(
         nds.map((n) => ({ id: n.id })),
@@ -184,12 +304,26 @@ export function WorkflowBuilder({
 
   function deleteSelected() {
     if (selectedNodeId) {
+      recordHistory();
       setNodes((nds) => nds.filter((n) => n.id !== selectedNodeId));
       setEdges((eds) => eds.filter((e) => e.source !== selectedNodeId && e.target !== selectedNodeId));
       setSelectedNodeId(null);
     } else if (selectedEdgeId) {
+      recordHistory();
       setEdges((eds) => eds.filter((e) => e.id !== selectedEdgeId));
       setSelectedEdgeId(null);
+    }
+  }
+
+  function onNodeDragStart() {
+    dragStartSnapshotRef.current = currentSnapshot();
+  }
+
+  function onNodeDragStop() {
+    const before = dragStartSnapshotRef.current;
+    dragStartSnapshotRef.current = null;
+    if (before && !sameNodePositions(before.nodes, nodesRef.current)) {
+      recordHistory(before);
     }
   }
 
@@ -263,6 +397,24 @@ export function WorkflowBuilder({
         </select>
         {isBuiltin && <span className="text-[11px] text-amber-600">built-in → saving creates an editable copy</span>}
         <div className="ml-auto flex items-center gap-2">
+          <button
+            onClick={undo}
+            disabled={history.past.length === 0}
+            className="text-xs border border-gray-300 dark:border-gray-600 px-3 py-1.5 rounded hover:bg-gray-50 dark:hover:bg-gray-800 dark:text-gray-200 disabled:opacity-50 disabled:cursor-not-allowed"
+            title="Undo (Ctrl+Z)"
+            aria-label="Undo workflow change"
+          >
+            Undo
+          </button>
+          <button
+            onClick={redo}
+            disabled={history.future.length === 0}
+            className="text-xs border border-gray-300 dark:border-gray-600 px-3 py-1.5 rounded hover:bg-gray-50 dark:hover:bg-gray-800 dark:text-gray-200 disabled:opacity-50 disabled:cursor-not-allowed"
+            title="Redo (Ctrl+Shift+Z or Ctrl+Y)"
+            aria-label="Redo workflow change"
+          >
+            Redo
+          </button>
           <button onClick={autoLayout} className="text-xs border border-gray-300 dark:border-gray-600 px-3 py-1.5 rounded hover:bg-gray-50 dark:hover:bg-gray-800 dark:text-gray-200" title="Arrange nodes top-to-bottom">
             Auto layout
           </button>
@@ -299,6 +451,8 @@ export function WorkflowBuilder({
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
             onConnect={onConnect}
+            onNodeDragStart={onNodeDragStart}
+            onNodeDragStop={onNodeDragStop}
             onNodeClick={(_, n) => { setSelectedNodeId(n.id); setSelectedEdgeId(null); }}
             onEdgeClick={(_, e) => { setSelectedEdgeId(e.id); setSelectedNodeId(null); }}
             onPaneClick={() => { setSelectedNodeId(null); setSelectedEdgeId(null); }}
@@ -490,4 +644,29 @@ function nodeStyle(type: string) {
     padding: 6,
     color: "#111",
   };
+}
+
+function cloneNodes(nodes: Node<NodeData>[]): Node<NodeData>[] {
+  return nodes.map((node) => ({
+    ...node,
+    position: { ...node.position },
+    data: { ...node.data },
+    style: node.style ? { ...node.style } : node.style,
+  }));
+}
+
+function cloneEdges(edges: Edge[]): Edge[] {
+  return edges.map((edge) => ({
+    ...edge,
+    data: edge.data ? { ...edge.data } : edge.data,
+  }));
+}
+
+function sameNodePositions(a: Node<NodeData>[], b: Node<NodeData>[]): boolean {
+  if (a.length !== b.length) return false;
+  const byId = new Map(b.map((node) => [node.id, node]));
+  return a.every((node) => {
+    const other = byId.get(node.id);
+    return other?.position.x === node.position.x && other.position.y === node.position.y;
+  });
 }
