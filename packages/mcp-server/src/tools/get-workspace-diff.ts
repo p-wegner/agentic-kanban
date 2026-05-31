@@ -1,11 +1,21 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { db, schema } from "../db.js";
 import { eq } from "drizzle-orm";
-import * as gitService from "../git-service.js";
 import { requireEntity } from "../db-utils.js";
+import { prodDeps, type ToolDeps } from "./deps.js";
 
-export function registerGetWorkspaceDiff(server: McpServer) {
+function extractChangedFiles(diff: string): string[] {
+  const files = new Set<string>();
+  for (const line of diff.split("\n")) {
+    if (!line.startsWith("diff --git ")) continue;
+    const match = line.match(/^diff --git a\/(.+) b\/(.+)$/);
+    if (match) files.add(match[2]);
+  }
+  return [...files];
+}
+
+export function registerGetWorkspaceDiff(server: McpServer, deps: ToolDeps = prodDeps) {
+  const { db, schema, getDiff, getDiffShortstat } = deps;
   server.tool(
     "get_workspace_diff",
     "Get the git diff for a workspace's working directory",
@@ -45,14 +55,26 @@ export function registerGetWorkspaceDiff(server: McpServer) {
           return { content: [{ type: "text" as const, text: "No base branch configured for this workspace or project." }] };
         }
 
-        const diff = await gitService.getDiff(ws.workingDir, resolvedBaseBranch);
+        const [diff, stats] = await Promise.all([
+          getDiff(ws.workingDir, resolvedBaseBranch),
+          getDiffShortstat(ws.workingDir, resolvedBaseBranch),
+        ]);
 
         if (!diff.trim()) {
           return { content: [{ type: "text" as const, text: "No changes detected." }] };
         }
 
         return {
-          content: [{ type: "text" as const, text: diff }],
+          content: [{
+            type: "text" as const,
+            text: JSON.stringify({
+              workspaceId,
+              baseBranch: resolvedBaseBranch,
+              changedFiles: extractChangedFiles(diff),
+              stats,
+              diff,
+            }, null, 2),
+          }],
         };
       } catch (err) {
         return {

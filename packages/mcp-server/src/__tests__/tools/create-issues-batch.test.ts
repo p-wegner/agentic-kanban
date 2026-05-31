@@ -23,6 +23,7 @@ function setupTool(register: (server: any, deps: ToolDeps) => void) {
     db,
     schema,
     notifyBoard: vi.fn(),
+    getDiff: vi.fn(async () => ""),
     getDiffShortstat: vi.fn(async () => ({ filesChanged: 0, insertions: 0, deletions: 0 })),
   };
   const { server, getHandler } = createToolHarness();
