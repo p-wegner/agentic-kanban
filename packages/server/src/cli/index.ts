@@ -51,6 +51,17 @@ registerSessionCommand(program);
 registerButlerCommand(program);
 registerSystemCommands(program);
 
+// ── `pnpm cli -- <args>` forwards a literal "--" as the first script argument.
+// Commander treats a leading "--" as "end of options", so every token after it
+// (including --help, --version, --json, -d) is parsed as a positional operand
+// instead of a flag — which made `pnpm cli -- issue create --help` create an
+// issue literally titled "--help", and broke --json through the wrapper. Strip a
+// single leading "--" (the wrapper artifact) so flags work as written. A bare
+// `pnpm cli --` then collapses to no args and starts the server, same as `pnpm cli`.
+if (process.argv[2] === "--") {
+  process.argv.splice(2, 1);
+}
+
 // ── Default action: the bare `agentic-kanban` invocation (no args) auto-inits,
 // auto-registers the cwd repo, and starts the server. ANY args — a subcommand OR a
 // flag like --help / --version — are handed to commander instead. (Previously this
