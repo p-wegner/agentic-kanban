@@ -1,5 +1,6 @@
 import { type ReactNode, useRef, useState } from "react";
 import { useTheme, type Theme } from "../hooks/useTheme.js";
+import { ProjectTabs } from "./ProjectTabs.js";
 
 interface Project {
   id: string;
@@ -131,6 +132,11 @@ export function Layout({
             <h1 className="wordmark text-xl font-semibold text-ink dark:text-stone-100 shrink-0">
               Agentic Kanban
             </h1>
+            <ProjectTabs
+              projects={projects}
+              activeProjectId={activeProjectId ?? null}
+              onProjectChange={onProjectChange}
+            />
             {projects.length > 1 && (
               <div className="flex items-center gap-2">
                 <select
