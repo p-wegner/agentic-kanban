@@ -1379,6 +1379,7 @@ export function BoardPage() {
               activeColumns={activeColumns}
               projectId={activeProjectId}
               searchQuery={searchQuery}
+              onSearchChange={setSearchQuery}
               sessionActivity={sessionActivity}
               liveStats={liveStats}
               sessionTodos={sessionTodos}
