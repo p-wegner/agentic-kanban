@@ -161,6 +161,10 @@ Every feature with UI must be visually verified using the `playwright-cli` skill
 - `docs/prd/06-testability-strategy.md` — test pyramid, per-stage test plans
 - `docs/decisions/` — numbered decision records
 - `docs/state.md` — current progress tracking
+- `scripts/board-monitor/README.md` — the autonomous board-monitor **orchestrator** loop (how to run/stop/observe); architecture & the A/B/C choice in `docs/decisions/006-board-monitor-orchestrator-architecture.md`
+
+## Board-Monitor Orchestrator (this dev board)
+The autonomous control plane that keeps **this** board moving (server alive, merge finished work, unstick stale sessions, refill backlog) is **`scripts/board-monitor/`** — a fresh short-lived `codex exec` session every ~5 min (`loop.sh` + `objective.md`), **not** one long-running agent and **not** the in-process app monitor. Durable memory lives outside the model: board + git + a bounded, gitignored rolling `state.md` (last ~40 cycles), so each run is disposable and crash-resilient. This is our **dogfooding** choice; the shipped app default for other projects is the in-process monitor (`runMonitorCycle`). Rationale and the measured A/B/C tradeoff: `docs/decisions/006-board-monitor-orchestrator-architecture.md`. The `board-monitor` **skill** (`.claude/skills/board-monitor/`) is the system-level health checklist a run invokes — the loop is the harness. Restart the loop after editing `objective.md`/`loop.sh` (read once at start).
 
 ## Getting a Ticket Description
 

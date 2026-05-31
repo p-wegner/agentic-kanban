@@ -20,17 +20,26 @@ REPO="C:/andrena/agentic-kanban"
 DIR="$REPO/scripts/board-monitor"
 LOG="$DIR/loop.log"
 STOP="$DIR/STOP"
+STATE="$DIR/state.md"
 OBJ="$(cat "$DIR/objective.md")"
 SLEEP="${MONITOR_SLEEP:-300}"
 MAX="${MONITOR_MAX_ITERS:-500}"
 ITER_TIMEOUT="${MONITOR_ITER_TIMEOUT:-1800}"
+# Rolling cross-iteration memory: each fresh session reads state.md for what
+# recent cycles did (so it can ESCALATE instead of repeating), then appends one
+# line. Bounded here (not by the LLM) to the last N lines so context stays flat.
+STATE_KEEP="${MONITOR_STATE_KEEP:-40}"
 
 ts() { date -Iseconds; }
 log() { echo "[$(ts)] $*" >> "$LOG"; }
 
 # Clear any stale STOP from a previous run.
 rm -f "$STOP"
-log "board-monitor loop START (pid $$, sleep ${SLEEP}s, max ${MAX}, iter-timeout ${ITER_TIMEOUT}s)"
+# Seed the rolling-memory file (gitignored) if it doesn't exist yet.
+if [ ! -f "$STATE" ]; then
+  printf '# board-monitor rolling memory — newest entry last; trimmed to last %s lines each iteration.\n# One line per cycle: <ISO time> | <action taken> | <items touched + how many cycles running>\n' "$STATE_KEEP" > "$STATE"
+fi
+log "board-monitor loop START (pid $$, sleep ${SLEEP}s, max ${MAX}, iter-timeout ${ITER_TIMEOUT}s, state-keep ${STATE_KEEP})"
 
 short_streak=0
 for (( i=1; i<=MAX; i++ )); do
@@ -46,6 +55,13 @@ for (( i=1; i<=MAX; i++ )); do
   code=$?
   dur=$(( $(date +%s) - start ))
   log "--- iteration $i END exit=$code dur=${dur}s ---"
+
+  # Bound the rolling memory deterministically (don't trust the LLM to trim):
+  # keep only the last STATE_KEEP lines so each fresh session reads a small,
+  # recent window and per-iteration context stays flat.
+  if [ -f "$STATE" ]; then
+    tail -n "$STATE_KEEP" "$STATE" > "$STATE.tmp" 2>/dev/null && mv -f "$STATE.tmp" "$STATE"
+  fi
 
   # Launch-failure guard (the 2026-05-31 learning): repeated instant exits mean
   # the launch is broken (bad flag, auth, etc.) — stop hammering and bail.
