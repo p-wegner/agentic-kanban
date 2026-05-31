@@ -10,6 +10,27 @@ import { isAnalyticsNoise } from "./session-filter.js";
 const conflictCache = new Map<string, { result: { hasConflicts: boolean; conflictingFiles: string[] }; ts: number }>();
 const CONFLICT_CACHE_TTL = 60_000; // 60 seconds
 
+function isZeroDiff(stats: BoardStatusIssue["diffStats"]): boolean {
+  return !!stats && stats.filesChanged === 0 && stats.insertions === 0 && stats.deletions === 0;
+}
+
+export function classifyBoardStatusIssueAttention(issue: BoardStatusIssue): BoardStatusIssue["attention"] {
+  if (
+    issue.statusName === "In Review"
+    && issue.workspace
+    && issue.workspace.status !== "closed"
+    && !issue.workspace.readyForMerge
+    && isZeroDiff(issue.diffStats)
+  ) {
+    return {
+      bucket: "needs_attention",
+      reason: "idle-awaiting",
+      label: "In Review workspace has no file changes and is not ready for merge",
+    };
+  }
+  return null;
+}
+
 export interface BoardStatusOptions {
   projectId?: string;
   includeClosed?: boolean;
@@ -155,6 +176,7 @@ export async function getBoardStatus(
       workspace: mainWs ? {
         id: mainWs.id, branch: mainWs.branch, status: mainWs.status,
         workingDir: mainWs.workingDir, baseBranch: mainWs.baseBranch, isDirect: mainWs.isDirect,
+        readyForMerge: mainWs.readyForMerge,
       } : null,
       session: latestSession ? {
         id: latestSession.id, status: latestSession.status,
@@ -166,6 +188,7 @@ export async function getBoardStatus(
       lastActivity: null,
       lastOutput: [],
       lastAgentMessage: null,
+      attention: null,
     };
 
     // For non-closed workspaces with a workingDir: compute diff stats + last output
@@ -267,6 +290,10 @@ export async function getBoardStatus(
   }
 
   await Promise.all(asyncWork);
+
+  for (const issue of result) {
+    issue.attention = classifyBoardStatusIssueAttention(issue);
+  }
 
   return {
     project: { id: project.id, name: project.name, repoPath: project.repoPath, defaultBranch: project.defaultBranch },

@@ -24,6 +24,9 @@ export interface WorkspaceCandidate {
   issueStatusName: string;
   baseBranch: string | null;
   readyForMerge: boolean;
+  diffStatCacheFilesChanged?: number | null;
+  diffStatCacheInsertions?: number | null;
+  diffStatCacheDeletions?: number | null;
 }
 
 export interface ProcessWorkspaceDeps {
@@ -72,6 +75,12 @@ export async function processWorkspaceCandidates(candidates: WorkspaceCandidate[
     console.log(`[monitor] Merge cap reached (${maxMerges}/cycle)  leaving workspace ${ws.wsId} queued until the next monitor run`);
     return false;
   };
+  const isZeroDiffInReviewAwaiting = (ws: WorkspaceCandidate) =>
+    ws.issueStatusName === "In Review"
+    && !ws.readyForMerge
+    && ws.diffStatCacheFilesChanged === 0
+    && (ws.diffStatCacheInsertions ?? 0) === 0
+    && (ws.diffStatCacheDeletions ?? 0) === 0;
   for (const ws of candidates) {
     try {
       const [sess] = await db.select({ id: sessions.id, status: sessions.status, startedAt: sessions.startedAt }).from(sessions)
@@ -84,6 +93,10 @@ export async function processWorkspaceCandidates(candidates: WorkspaceCandidate[
       const sessionCount = Number(sessionCountRows[0]?.count ?? 0);
 
       if (ws.wsStatus === "idle") {
+        if (isZeroDiffInReviewAwaiting(ws)) {
+          console.log(`[monitor] Needs attention: idle-awaiting workspace ${ws.wsId} for issue #${ws.issueNumber ?? "?"} is In Review with no file changes and is not ready for merge`);
+          continue;
+        }
         if (ws.isDirect) {
           const now = new Date().toISOString();
           await db.update(workspaces).set({ status: "closed", workingDir: null, updatedAt: now }).where(eq(workspaces.id, ws.wsId)).catch(() => {});
@@ -155,6 +168,10 @@ export async function processWorkspaceCandidates(candidates: WorkspaceCandidate[
           deps.boardEvents.broadcast(ws.projectId, "board_changed");
         }
       } else if (ws.wsStatus === "reviewing") {
+        if (isZeroDiffInReviewAwaiting(ws)) {
+          console.log(`[monitor] Needs attention: idle-awaiting workspace ${ws.wsId} for issue #${ws.issueNumber ?? "?"} is In Review with no file changes and is not ready for merge`);
+          continue;
+        }
         if (!ws.workingDir) {
           console.log(`[monitor] Ghost workspace ${ws.wsId} (workingDir empty)  deleting and resetting issue to In Progress`);
           await fetch(`http://localhost:${deps.serverPort}/api/workspaces/${ws.wsId}`, { method: "DELETE" }).catch(() => {});

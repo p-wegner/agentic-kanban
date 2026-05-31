@@ -506,6 +506,7 @@ export interface BoardStatusIssue {
     workingDir: string | null;
     baseBranch: string | null;
     isDirect: boolean;
+    readyForMerge: boolean;
   } | null;
   session: {
     id: string;
@@ -528,6 +529,11 @@ export interface BoardStatusIssue {
   lastActivity: string | null;
   lastOutput: string[];
   lastAgentMessage: string | null;
+  attention?: {
+    bucket: "needs_attention";
+    reason: "idle-awaiting";
+    label: string;
+  } | null;
 }
 
 export interface BoardStatusResponse {
