@@ -1,5 +1,8 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { randomUUID } from "node:crypto";
+import { mkdtemp } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { eq } from "drizzle-orm";
 import * as schema from "@agentic-kanban/shared/schema";
 import {
@@ -149,6 +152,58 @@ describe("workflow fork/join orchestration", () => {
     const after = await db.select().from(schema.workspaces).where(eq(schema.workspaces.parentWorkspaceId, parentId));
     expect(after.map((c) => c.forkStatus).sort()).toEqual(["failed", "joined"]);
     expect(startSession).toHaveBeenCalledTimes(2);
+  });
+
+  it("launches the attached spec phase skill when entering a spec-driven phase", async () => {
+    const { projectId, statusIds } = await seedProject(db);
+    const repoPath = await mkdtemp(join(tmpdir(), "ak-spec-repo-"));
+    await db.update(schema.projects).set({ repoPath }).where(eq(schema.projects.id, projectId));
+    const templateId = (await resolveTemplateForIssueByKey(db, projectId, "spec-driven-phased-planning"))!;
+    const issueId = randomUUID();
+    const workspaceId = randomUUID();
+    const now = new Date().toISOString();
+    const worktreePath = await mkdtemp(join(tmpdir(), "ak-spec-worktree-"));
+
+    await db.insert(schema.issues).values({
+      id: issueId,
+      issueNumber: 2,
+      title: "Spec demo",
+      issueType: "task",
+      priority: "medium",
+      sortOrder: 0,
+      statusId: statusIds["Todo"],
+      projectId,
+      workflowTemplateId: templateId,
+      createdAt: now,
+      updatedAt: now,
+    });
+    await db.insert(schema.workspaces).values({
+      id: workspaceId,
+      issueId,
+      branch: "feature/spec-demo",
+      workingDir: worktreePath,
+      baseBranch: "main",
+      status: "active",
+      createdAt: now,
+      updatedAt: now,
+    });
+    await initWorkspaceWorkflow(db as any, { workspaceId, issueId });
+
+    const transition = await proposeTransition(db as any, { workspaceId, toNodeName: "Specify" });
+    expect(transition.ok).toBe(true);
+
+    await svc.onWorkspaceEnteredNode(workspaceId);
+
+    expect(startSession).toHaveBeenCalledTimes(1);
+    const call = startSession.mock.calls[0][0];
+    expect(call.triggerType).toBe("phase:spec-requirements");
+    expect(call.prompt).toContain('entered the "Specify" phase');
+    expect(call.prompt).toContain("propose_transition");
+
+    const ws = (await db.select().from(schema.workspaces).where(eq(schema.workspaces.id, workspaceId)))[0];
+    const specifyNode = (await db.select().from(schema.workflowNodes).where(eq(schema.workflowNodes.id, ws.currentNodeId!)))[0];
+    expect(specifyNode.skillName).toBe("spec-requirements");
+    expect(ws.skillId).toBe(specifyNode.skillId);
   });
 });
 

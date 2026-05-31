@@ -19,6 +19,7 @@ import {
 import { createTestDb, type TestDb } from "./helpers/test-db.js";
 import { ensureBuiltinSkills } from "../db/seed.js";
 import { ensureBuiltinWorkflows } from "../db/builtin-workflows.js";
+import { createIssueService } from "../services/issue.service.js";
 
 async function seedProject(db: TestDb) {
   const projectId = randomUUID();
@@ -127,6 +128,7 @@ describe("workflow-engine", () => {
       .where(eq(schema.workflowNodes.templateId, templates[0].id))
       .orderBy(asc(schema.workflowNodes.sortOrder));
     expect(nodes.map((n) => n.name)).toEqual([
+      "Backlog",
       "Specify",
       "Design",
       "Tasks",
@@ -134,19 +136,40 @@ describe("workflow-engine", () => {
       "Review",
       "Done",
     ]);
-    expect(nodes.find((n) => n.name === "Specify")?.nodeType).toBe("start");
-    expect(nodes.find((n) => n.name === "Specify")?.skillName).toBe("spec-driven-specify");
-    expect(nodes.find((n) => n.name === "Design")?.skillName).toBe("spec-driven-design");
-    expect(nodes.find((n) => n.name === "Tasks")?.skillName).toBe("spec-driven-tasks");
+    expect(nodes.find((n) => n.name === "Backlog")?.nodeType).toBe("start");
+    expect(nodes.find((n) => n.name === "Specify")?.skillName).toBe("spec-requirements");
+    expect(nodes.find((n) => n.name === "Design")?.skillName).toBe("spec-design");
+    expect(nodes.find((n) => n.name === "Tasks")?.skillName).toBe("spec-tasks");
     expect(nodes.find((n) => n.name === "Review")?.skillName).toBe("code-review");
 
     const edges = await db
       .select()
       .from(schema.workflowEdges)
       .where(eq(schema.workflowEdges.templateId, templates[0].id));
-    expect(edges.filter((e) => e.condition === "manual")).toHaveLength(5);
+    expect(edges.filter((e) => e.condition === "manual")).toHaveLength(6);
     expect(edges.filter((e) => e.condition === "auto_on_exit_0")).toHaveLength(1);
     expect(edges.some((e) => e.isLoop)).toBe(true);
+  });
+
+  it("sets a new explicitly spec-driven issue to the workflow start phase", async () => {
+    const { projectId, statusIds } = await seedProject(db);
+    const template = (await db
+      .select()
+      .from(schema.workflowTemplates)
+      .where(eq(schema.workflowTemplates.builtinKey, "spec-driven-phased-planning")))[0];
+
+    const service = createIssueService({ database: db as any });
+    const created = await service.createIssue({
+      projectId,
+      title: "Spec-driven issue",
+      workflowTemplateId: template.id,
+    });
+
+    const issue = (await db.select().from(schema.issues).where(eq(schema.issues.id, created.id)))[0];
+    const node = (await db.select().from(schema.workflowNodes).where(eq(schema.workflowNodes.id, issue.currentNodeId!)))[0];
+    expect(issue.workflowTemplateId).toBe(template.id);
+    expect(issue.statusId).toBe(statusIds["Todo"]);
+    expect(node.name).toBe("Backlog");
   });
 
   it("initialises a workspace on the start node and syncs status", async () => {
