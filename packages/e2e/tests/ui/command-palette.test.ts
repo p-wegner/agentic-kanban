@@ -1,4 +1,8 @@
 import { test, expect, type APIRequestContext } from "@playwright/test";
+import { execSync } from "node:child_process";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { SERVER_URL } from "../helpers/port.js";
 
 async function ensureProjectActive(request: APIRequestContext) {
@@ -131,7 +135,128 @@ test.describe("Command Palette", () => {
   });
 });
 
-test.describe("Command Palette — workspace-scoped Review and Merge actions", () => {
+test.describe("Command Palette project switching", () => {
+  const suffix = Date.now().toString(36);
+  const projectAName = `cmd-palette-switch-a-${suffix}`;
+  const projectBName = `cmd-palette-switch-b-${suffix}`;
+  const projectBIssueTitle = `Project B command palette issue ${suffix}`;
+  const createdProjectIds: string[] = [];
+  const tempDirs: string[] = [];
+  let originalActiveProjectId: string | null = null;
+  let projectAId: string;
+  let projectBId: string;
+
+  function createGitRepo(prefix: string) {
+    const dir = mkdtempSync(join(tmpdir(), prefix));
+    tempDirs.push(dir);
+    execSync("git init", { cwd: dir, stdio: "pipe" });
+    execSync("git config user.email test@test.com", { cwd: dir, stdio: "pipe" });
+    execSync("git config user.name Test", { cwd: dir, stdio: "pipe" });
+    return dir;
+  }
+
+  async function createProject(request: APIRequestContext, name: string) {
+    const repoPath = createGitRepo(`${name}-`);
+    const res = await request.post(`${SERVER_URL}/api/projects`, {
+      data: { name, repoPath },
+    });
+    expect(res.status()).toBe(201);
+    const project = await res.json();
+    createdProjectIds.push(project.id);
+    return project.id as string;
+  }
+
+  test.beforeAll(async ({ request }) => {
+    const prefRes = await request.get(`${SERVER_URL}/api/preferences/active-project`);
+    if (prefRes.ok()) {
+      originalActiveProjectId = (await prefRes.json()).projectId ?? null;
+    }
+
+    projectAId = await createProject(request, projectAName);
+    projectBId = await createProject(request, projectBName);
+
+    const statusesRes = await request.get(`${SERVER_URL}/api/projects/${projectBId}/statuses`);
+    expect(statusesRes.ok()).toBeTruthy();
+    const statuses = await statusesRes.json();
+    const todoStatus = statuses.find((s: { name: string }) => s.name === "Todo") ?? statuses[0];
+    expect(todoStatus?.id).toBeTruthy();
+
+    const issueRes = await request.post(`${SERVER_URL}/api/issues`, {
+      data: {
+        title: projectBIssueTitle,
+        statusId: todoStatus.id,
+        projectId: projectBId,
+      },
+    });
+    expect(issueRes.status()).toBe(201);
+
+    await request.put(`${SERVER_URL}/api/preferences/active-project`, {
+      data: { projectId: projectAId },
+    });
+  });
+
+  test.afterAll(async ({ request }) => {
+    try {
+      await request.put(`${SERVER_URL}/api/preferences/active-project`, {
+        data: { projectId: originalActiveProjectId },
+      });
+    } catch { /* best-effort */ }
+
+    for (const projectId of createdProjectIds) {
+      try { await request.delete(`${SERVER_URL}/api/projects/${projectId}`); } catch { /* best-effort */ }
+    }
+
+    for (const dir of tempDirs) {
+      try { rmSync(dir, { recursive: true, force: true }); } catch { /* best-effort */ }
+    }
+  });
+
+  async function openCommandPalette(page: import("@playwright/test").Page) {
+    await page.evaluate(() => {
+      window.dispatchEvent(new KeyboardEvent("keydown", {
+        key: "k",
+        ctrlKey: true,
+        bubbles: true,
+        cancelable: true,
+      }));
+    });
+  }
+
+  test("switches active project and refreshes board data", async ({ page, request }) => {
+    await request.put(`${SERVER_URL}/api/preferences/active-project`, {
+      data: { projectId: projectAId },
+    });
+
+    await page.goto("/");
+    await page.waitForSelector("h2");
+    await expect(page.getByText(projectBIssueTitle)).not.toBeVisible();
+
+    await openCommandPalette(page);
+    const input = page.locator('input[placeholder="Search actions..."]');
+    await expect(input).toBeVisible({ timeout: 5000 });
+
+    await input.fill(projectAName);
+    await expect(
+      page.locator("div.text-sm.font-medium", { hasText: `Switch project: ${projectAName} (current)` }),
+    ).toBeVisible({ timeout: 5000 });
+
+    await input.fill(projectBName);
+    const switchToProjectB = page
+      .locator("div.text-sm.font-medium", { hasText: `Switch project: ${projectBName}` })
+      .first();
+    await expect(switchToProjectB).toBeVisible({ timeout: 5000 });
+    await switchToProjectB.click({ force: true });
+
+    await expect(input).not.toBeVisible({ timeout: 3000 });
+    await expect(page.getByText(projectBIssueTitle)).toBeVisible({ timeout: 10000 });
+
+    const activeRes = await request.get(`${SERVER_URL}/api/preferences/active-project`);
+    expect(activeRes.ok()).toBeTruthy();
+    expect((await activeRes.json()).projectId).toBe(projectBId);
+  });
+});
+
+test.describe("Command Palette workspace actions", () => {
   const suffix = Date.now().toString(36);
   let projectId: string;
   let statusId: string;
