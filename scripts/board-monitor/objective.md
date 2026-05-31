@@ -9,12 +9,12 @@ Each run, make ONE meaningful unit of progress toward a healthy, moving board, t
 1. KEEP THE SERVER ALIVE. If the dev server / API (http://127.0.0.1:3001/api/projects) is down, that is the top priority — restart it (see the $dev-server skill) before anything else.
 2. LAND FINISHED WORK. Merge idle "In Review" workspaces via the board's review/merge endpoints, and verify master actually advanced afterward.
 3. UNSTICK PROBLEMS. Watch sessions for trouble. A 1-second / zero-token provider session = a FAILED launch — stop it and inspect the branch; do not wait through polling. Don't resume many stale workspaces at once.
-4. KEEP WORK FLOWING. Pull backlog items into progress and start workspaces for them — but DON'T start too many in parallel (WIP cap ~3). Drive work THROUGH the board (POST /api/workspaces), do NOT implement tickets yourself on master.
-5. REFILL THE BACKLOG. When the backlog is nearly empty (act BEFORE it hits zero), run the $backlog-refill skill to add a small, balanced batch of new tickets — an intelligent mix of quality-improving and feature-adding work.
+4. KEEP 3 AGENTS RUNNING. The target is **3 workspaces actively In Progress at all times**. Each cycle, count how many agents are running and healthy; if fewer than 3, pull the next backlog item into progress and start a workspace for it (POST /api/workspaces) to fill the gap. To stay safe, launch **at most 2 new workspaces per cycle** and verify the server stays healthy between launches — this ramps up to 3 within a cycle or two without a thundering herd. Never exceed 3 concurrent. Drive work THROUGH the board, do NOT implement tickets yourself on master. (Don't bulk-RESUME stale/idle workspaces — that caution is about relaunching existing sessions, not starting fresh backlog items.)
+5. REFILL THE BACKLOG AGGRESSIVELY. The backlog must always hold enough to keep 3 agents fed. When it falls **below ~5 items** (act early, well before zero), run the $backlog-refill skill to add a batch of **at least 5 new tickets**, weighted toward substantial features with some quality work mixed in.
 
 COMMIT DISCIPLINE (critical, learned the hard way): if you fix a setup bug or change master yourself, COMMIT it immediately. Never leave uncommitted changes in the main checkout — they block the auto-merge queue and stall the whole board. See docs/learnings/2026-05-31-monitor-harness-requires-stop-hooks.md.
 
-STAY AT THE CONTROL PLANE: your job is to orchestrate (start / monitor / merge / sequence / refill), not to implement features by hand. Fall back to implementing directly only to keep the system alive (e.g. the server is broken). Don't start too many items in parallel.
+STAY AT THE CONTROL PLANE: your job is to orchestrate (start / monitor / merge / sequence / refill), not to implement features by hand. Fall back to implementing directly only to keep the system alive (e.g. the server is broken). Keep up to 3 agents running in parallel (per priority 4) — but never more.
 
 Be decisive and bounded: do the single highest-value action available right now, leave the tree clean and committed, then stop. The loop will invoke you again shortly.
 
