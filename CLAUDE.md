@@ -225,6 +225,8 @@ When the user references `#N` (e.g., "review #70", "merge #65", "what's the stat
 - `mcp__agentic-kanban__get_board_status` — comprehensive overview: all active agents, workspace state, diff stats, session stats, last output
 - `mcp__agentic-kanban__list_tags`, `mcp__agentic-kanban__create_tag` — tag management
 
+Avoid unbounded `list_workspaces` for narrow questions like "open issues" or "what can merge?" — it can return every historical workspace and blow the tool output budget. Use `list_issues` / `get_board_status`, or a status-specific CLI/API query, then inspect individual workspaces only as needed.
+
 **Use the CLI (`pnpm cli -- ...`) when MCP is unavailable:**
 - `pnpm cli -- issue list/create/move`
 - `pnpm cli -- issue status <N>` — single-issue deep dive: workspace state, session info, last agent message. Prefer over `issue get` for state checks.
