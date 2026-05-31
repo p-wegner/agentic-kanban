@@ -1,219 +1,181 @@
 # Coverage Gaps Analysis
 
-Comparison of what the app implements vs. what's documented vs. what's tested.
+Comparison of what the app implements vs. what is covered by tests.
+
+This snapshot focuses on the current test inventory under:
+
+- `packages/e2e/tests`
+- `packages/server/src/__tests__`
 
 ## Legend
-- **UNTESTED**: Feature exists in code, has no unit or E2E test
-- **UNDOCUMENTED**: Feature exists in code, not mentioned in docs/CLAUDE.md
-- **STALE DOC**: Documentation describes behavior that differs from implementation
+
+- **Covered**: Direct test coverage was found in the scanned test trees.
+- **Partially covered**: Tests exercise the behavior indirectly or cover only happy-path UI/API behavior.
+- **Gap**: No direct match was found in the scanned test trees; add a focused test before relying on the behavior.
 
 ---
 
 ## 1. API Routes
 
-### Route Coverage Matrix
+### Current Coverage Snapshot
 
-| Method | Path | Unit Test | E2E Test | Notes |
-|--------|------|-----------|----------|-------|
-| GET | /health | - | - | No test at all |
-| GET | /api/projects | - | partial | Used in global setup, not directly tested |
-| POST | /api/projects | - | - | **UNTESTED** — only tested indirectly via global setup |
-| GET | /api/projects/:id/statuses | - | - | **UNTESTED** |
-| POST | /api/projects/:id/statuses | - | - | **UNTESTED** |
-| GET | /api/projects/:id/branches | - | - | **UNTESTED** |
-| GET | /api/projects/:id/board | - | yes | `board.test.ts` (3 tests) |
-| GET | /api/issues | - | yes | `issues.test.ts` (2 tests) |
-| POST | /api/issues | - | yes | `issues.test.ts` (1 test) |
-| PATCH | /api/issues/:id | - | yes | `issues.test.ts` (1 test) |
-| DELETE | /api/issues/:id | - | yes | `issues.test.ts` (1 test) |
-| GET | /api/issues/:id/workspaces | - | yes | `workspaces.test.ts` |
-| GET | /api/issues/:id/tags | - | - | **UNTESTED** |
-| POST | /api/issues/:id/tags | - | - | **UNTESTED** |
-| DELETE | /api/issues/:id/tags/:tagId | - | - | **UNTESTED** |
-| POST | /api/workspaces | - | yes | `workspaces.test.ts`, `workspace-lifecycle.test.ts` |
-| GET | /api/workspaces/:id | - | yes | `workspaces.test.ts` |
-| PATCH | /api/workspaces/:id | - | yes | `workspaces.test.ts` |
-| DELETE | /api/workspaces/:id | - | yes | `workspaces.test.ts` |
-| POST | /api/workspaces/:id/setup | - | yes | `workspaces.test.ts` |
-| POST | /api/workspaces/:id/launch | - | yes | `workspace-lifecycle.test.ts` |
-| POST | /api/workspaces/:id/stop | - | yes | `workspace-lifecycle.test.ts` |
-| GET | /api/workspaces/:id/diff | - | yes | `workspace-lifecycle.test.ts` |
-| POST | /api/workspaces/:id/merge | - | yes | `workspace-lifecycle.test.ts` |
-| GET | /api/workspaces/:id/sessions | - | yes | `workspace-lifecycle.test.ts` |
-| GET | /api/tags | - | - | **UNTESTED** (standalone route) |
-| POST | /api/tags | - | - | **UNTESTED** |
-| PATCH | /api/tags/:id | - | - | **UNTESTED** |
-| DELETE | /api/tags/:id | - | - | **UNTESTED** |
-| GET | /api/preferences/active-project | - | - | **UNTESTED** |
-| PUT | /api/preferences/active-project | - | - | **UNTESTED** |
-| GET | /api/preferences/settings | - | yes | `settings.test.ts` |
-| PUT | /api/preferences/settings | - | yes | `settings.test.ts` |
-| GET | /api/sessions/:sessionId/output | - | yes | `session-history.test.ts` |
-| POST | /api/internal/board-notify | - | - | **UNTESTED** (internal route) |
-| GET | /ws/sessions/:sessionId | - | - | Tested indirectly via session-lifecycle E2E |
-| GET | /ws/board/:projectId | - | yes | `board-events.test.ts` |
+| Method | Path | Coverage | Evidence |
+|--------|------|----------|----------|
+| GET | `/health` | Covered | `packages/e2e/tests/api/health.test.ts` |
+| GET | `/api/projects` | Covered | `packages/e2e/tests/api/projects.test.ts`, `packages/server/src/__tests__/api.test.ts` |
+| POST | `/api/projects` | Covered | `packages/e2e/tests/api/projects.test.ts`, project registration UI flow |
+| GET | `/api/projects/:id/statuses` | Covered | `packages/e2e/tests/api/projects.test.ts`, many E2E setup paths |
+| POST | `/api/projects/:id/statuses` | Covered | `packages/e2e/tests/api/projects.test.ts`, `packages/e2e/tests/ui/backlog-presets.test.ts` |
+| GET | `/api/projects/:id/branches` | Covered | `packages/e2e/tests/api/projects.test.ts`, `packages/server/src/__tests__/api.test.ts` |
+| GET | `/api/projects/:id/board` | Covered | `packages/e2e/tests/api/board.test.ts`, `packages/server/src/__tests__/api.test.ts` |
+| GET | `/api/issues` | Covered | `packages/e2e/tests/api/issues.test.ts`, `packages/server/src/__tests__/api.test.ts` |
+| POST | `/api/issues` | Covered | `packages/e2e/tests/api/issues.test.ts`, `packages/server/src/__tests__/api.test.ts` |
+| PATCH | `/api/issues/:id` | Covered | `packages/e2e/tests/api/issues.test.ts`, `packages/server/src/__tests__/api.test.ts` |
+| DELETE | `/api/issues/:id` | Covered | `packages/e2e/tests/api/issues.test.ts`, `packages/server/src/__tests__/api.test.ts` |
+| GET | `/api/issues/:id/workspaces` | Covered | `packages/e2e/tests/api/workspaces.test.ts`, `packages/server/src/__tests__/api.test.ts` |
+| GET | `/api/issues/:id/tags` | Covered | `packages/e2e/tests/api/tags.test.ts`, `packages/server/src/__tests__/tags.test.ts` |
+| POST | `/api/issues/:id/tags` | Covered | `packages/e2e/tests/api/tags.test.ts`, `packages/server/src/__tests__/tags.test.ts` |
+| DELETE | `/api/issues/:id/tags/:tagId` | Covered | `packages/e2e/tests/api/tags.test.ts`, `packages/server/src/__tests__/tags.test.ts` |
+| GET | `/api/tags` | Covered | `packages/e2e/tests/api/tags.test.ts`, `packages/server/src/__tests__/tags.test.ts` |
+| POST | `/api/tags` | Covered | `packages/e2e/tests/api/tags.test.ts`, `packages/server/src/__tests__/tags.test.ts` |
+| PATCH | `/api/tags/:id` | Covered | `packages/e2e/tests/api/tags.test.ts`, `packages/server/src/__tests__/tags.test.ts` |
+| DELETE | `/api/tags/:id` | Covered | `packages/e2e/tests/api/tags.test.ts`, `packages/server/src/__tests__/tags.test.ts` |
+| GET | `/api/preferences/active-project` | Covered | `packages/e2e/tests/api/preferences.test.ts`, `packages/server/src/__tests__/preferences.test.ts`, `packages/server/src/__tests__/api.test.ts` |
+| PUT | `/api/preferences/active-project` | Covered | `packages/e2e/tests/api/preferences.test.ts`, `packages/server/src/__tests__/preferences.test.ts`, `packages/server/src/__tests__/api.test.ts` |
+| GET | `/api/preferences/settings` | Covered | `packages/e2e/tests/api/settings.test.ts`, `packages/e2e/tests/ui/settings.test.ts` |
+| PUT | `/api/preferences/settings` | Covered | `packages/e2e/tests/api/settings.test.ts`, `packages/e2e/tests/ui/settings.test.ts` |
+| GET | `/api/sessions/:sessionId/output` | Covered | `packages/e2e/tests/ui/session-history.test.ts`, server session output tests |
+| POST | `/api/internal/board-notify` | Gap | No direct match found for `board-notify` in the scanned test trees |
+| GET | `/ws/sessions/:sessionId` | Partially covered | Session lifecycle/history tests exercise session output paths; direct reconnect/error behavior remains a gap |
+| GET | `/ws/board/:projectId` | Covered | `packages/e2e/tests/api/board-events.test.ts`, `packages/server/src/__tests__/board-events.test.ts` |
 
-### Routes with ZERO test coverage (8 routes)
-1. `GET /health` — no test at all
-2. `POST /api/projects/:id/statuses` — status CRUD never tested
-3. `GET /api/issues/:id/tags` — tag listing per issue
-4. `POST /api/issues/:id/tags` — tag assignment
-5. `DELETE /api/issues/:id/tags/:tagId` — tag removal
-6. `GET /api/tags` — list all tags (no standalone test)
-7. `POST /api/tags` — create tag
-8. `PATCH /api/tags/:id` / `DELETE /api/tags/:id` — tag update/delete
-9. `GET/PUT /api/preferences/active-project` — project switching
-10. `GET /api/projects/:id/branches` — branch listing
-11. `POST /api/internal/board-notify` — internal board refresh trigger
+### Remaining API Gaps
 
-Note: Tags ARE tested via UI E2E (`board.test.ts` tag tests), but the API routes themselves have no direct test. Status CRUD is only tested indirectly (seed creates 5 statuses, but no test creates/reads them via API).
+1. `POST /api/internal/board-notify` has no direct test match. Add a route-level server test that posts to the internal endpoint and asserts the board notification side effect or expected no-op response.
+2. WebSocket reconnect/error scenarios are not directly covered. Add focused tests for `/ws/sessions/:sessionId` and `/ws/board/:projectId` reconnect behavior, invalid IDs, and close handling.
+3. Error response shape is still inconsistently asserted. Several API tests check status codes and happy-path bodies, but there is no shared contract test for `{ error }` formatting across representative routes.
 
 ---
 
-## 2. Client Components vs E2E Coverage
+## 2. Client Components and UI Flows
 
-| Component | File | E2E Coverage | Notes |
-|-----------|------|-------------|-------|
-| BoardColumn | `BoardColumn.tsx` | partial | DnD tested in `board.test.ts`; column rendering tested |
-| ColumnGroup | `ColumnGroup.tsx` | none | **UNTESTED** — collapse/expand of archive columns |
-| CommandPalette | `CommandPalette.tsx` | yes | `command-palette.test.ts` (5 tests) |
-| CreateIssueForm | `CreateIssueForm.tsx` | yes | `board.test.ts` (create + cancel tests) |
-| DiffViewer | `DiffViewer.tsx` | none | **UNTESTED** — no E2E test views a diff in the UI |
-| IssueCard | `IssueCard.tsx` | partial | Rendered in board tests; highlighting not tested |
-| IssueDetailPanel | `IssueDetailPanel.tsx` | yes | `board.test.ts` (open/edit/delete/status/tags) |
-| Layout | `Layout.tsx` | partial | Header rendering tested in board tests |
-| SettingsPanel | `SettingsPanel.tsx` | yes | `settings.test.ts` (6 tests) |
-| ShortcutHelp | `ShortcutHelp.tsx` | none | **UNTESTED** — ? key overlay never tested |
-| SkeletonBoard | `SkeletonBoard.tsx` | none | **UNTESTED** — loading state not tested |
-| TerminalView | `TerminalView.tsx` | partial | Tested in `workspace.test.ts` and `session-history.test.ts` |
-| Toast | `Toast.tsx` | none | **UNTESTED** — toast notifications never asserted |
-| WorkspacePanel | `WorkspacePanel.tsx` | yes | `workspace.test.ts`, `session-history.test.ts` |
+| Component / Flow | Coverage | Evidence |
+|------------------|----------|----------|
+| Board columns and issue cards | Covered | `packages/e2e/tests/ui/board.test.ts`, `board-stats-bar.test.ts`, `priority-sort.test.ts` |
+| Archive column group | Covered | `packages/e2e/tests/ui/archive-columns.test.ts` |
+| Command palette | Covered | `packages/e2e/tests/ui/command-palette.test.ts`, `command-palette-workspace.test.ts` |
+| Create issue form | Covered | `packages/e2e/tests/ui/board.test.ts`, `expandable-create-panel.test.ts` |
+| Diff viewer | Covered | `packages/e2e/tests/ui/diff-viewer.test.ts`, `workspace.test.ts` |
+| Issue detail panel | Covered | `packages/e2e/tests/ui/board.test.ts`, issue description tests |
+| Settings panel | Covered | `packages/e2e/tests/ui/settings.test.ts`, settings-specific API/UI tests |
+| Shortcut help overlay | Covered | `packages/e2e/tests/ui/shortcuts.test.ts` |
+| Search highlighting | Covered | `packages/e2e/tests/ui/search.test.ts` |
+| Terminal/session views | Covered | `packages/e2e/tests/ui/workspace.test.ts`, `session-history.test.ts`, `workspace-chat.test.ts` |
+| Workspace panel diff and merge actions | Covered | `packages/e2e/tests/ui/workspace.test.ts`, `diff-viewer.test.ts` |
+| Project registration/switching support | Covered | `packages/e2e/tests/ui/register-project.test.ts`, active-project preference tests |
+| Toast notifications | Partially covered | Specific toasts are asserted in `settings.test.ts`, `command-palette.test.ts`, and `settings-scheduled-runs.test.ts`; broad error/success toast coverage is still incomplete |
+| Skeleton/loading state | Gap | Only comments mention waiting past the skeleton phase; no direct assertion of `SkeletonBoard` rendering was found |
 
-### UI Flows with NO E2E Test
-1. **Archive column group** — expanding/collapsing Done/Cancelled group (`ColumnGroup.tsx`)
-2. **DiffViewer** — viewing a workspace diff in the panel (`DiffViewer.tsx`)
-3. **ShortcutHelp overlay** — pressing `?` to show keyboard shortcuts (`ShortcutHelp.tsx`)
-4. **Search result highlighting** — typing in search and seeing `<mark>` highlights on cards
-5. **Toast notifications** — tag CRUD error toasts, success toasts
-6. **Project switcher** — switching between registered projects via header dropdown
-7. **Skeleton/loading state** — initial board load skeleton
-8. **Merge from UI** — no E2E test clicks "Merge" button in workspace panel
-9. **Workspace creation with base branch** — selecting a non-default base branch in create form
+### Remaining UI Gaps
+
+1. `SkeletonBoard.tsx` loading state: add a UI test that delays the board response and asserts the skeleton appears before board content.
+2. Toast coverage is selective. Add tests for representative failure toasts, especially tag CRUD and dependency-cycle errors, instead of only save/review/delete success paths.
+3. Project switching through the header dropdown is indirectly supported by active-project API tests and project registration tests, but a direct header switcher workflow test would make regressions easier to catch.
 
 ---
 
 ## 3. MCP Tools
 
-| Tool | File | E2E Test | Notes |
-|------|------|----------|-------|
-| get_context | `get-context.ts` | yes | `mcp.test.ts` round-trip |
-| list_issues | `list-issues.ts` | yes | `mcp.test.ts` round-trip |
-| get_issue | `get-issue.ts` | yes | `mcp.test.ts` round-trip |
-| create_issue | `create-issue.ts` | yes | `mcp.test.ts` round-trip |
-| update_issue | `update-issue.ts` | yes | `mcp.test.ts` round-trip |
-| list_workspaces | `list-workspaces.ts` | partial | Covered in round-trip but no standalone test |
-| start_workspace | `start-workspace.ts` | partial | Covered in round-trip but no standalone test |
-| get_workspace_diff | `get-workspace-diff.ts` | none | **UNTESTED** — no E2E test calls this tool |
+The requested scan did not cover `packages/mcp-server/src/__tests__`, but a spot check for workspace diff tooling also found no match in that package.
 
-MCP tests are all in a single round-trip test file (`mcp.test.ts`). No individual tool has isolated tests for error cases or edge cases.
+| Tool / Behavior | Coverage | Evidence |
+|-----------------|----------|----------|
+| Board/issue context tools | Covered outside this scan | MCP test files live under `packages/mcp-server/src/__tests__` |
+| `get_workspace_diff` / `get-workspace-diff` | Gap | No match found in `packages/e2e/tests`, `packages/server/src/__tests__`, or `packages/mcp-server/src/__tests__` |
+
+Remaining MCP gap: add an MCP tool test that seeds a workspace with a known diff, calls `get_workspace_diff`, and asserts file stats plus diff content/error behavior for a missing workspace.
 
 ---
 
 ## 4. CLI Commands
 
-| Command | File:Line | Test | Notes |
-|---------|-----------|------|-------|
-| register | `cli.ts:30` | none | **UNTESTED** — only tested manually via E2E global setup using API |
-| unregister | `cli.ts:107` | none | **UNTESTED** |
-| list | `cli.ts:182` | none | **UNTESTED** |
-| cleanup | `cli.ts:221` | none | **UNTESTED** |
+The previous document claimed all root CLI commands were untested. That is stale.
 
-All CLI commands have zero test coverage. The E2E tests use the API directly to register projects, bypassing the CLI entirely.
+| Command | Coverage | Evidence |
+|---------|----------|----------|
+| `register` | Covered | `packages/server/src/__tests__/cli.test.ts` |
+| `unregister` | Covered | `packages/server/src/__tests__/cli.test.ts` |
+| `list` | Covered | `packages/server/src/__tests__/cli.test.ts` |
+| `cleanup` | Covered | `packages/server/src/__tests__/cli.test.ts` |
+| `issue list` / issue workflows | Covered | `packages/server/src/__tests__/cli.test.ts` |
+| `workspace list` | Covered | `packages/server/src/__tests__/cli.test.ts` |
+| `skill list` | Covered | `packages/server/src/__tests__/cli.test.ts` |
+| Butler CLI commands | Covered | `packages/server/src/__tests__/cli-butler.test.ts` |
+
+Remaining CLI gap: the tests are spawn-based and broad. For new CLI commands, add command-specific cases to `cli.test.ts` or `cli-butler.test.ts` and include at least one failure path, not only `--help`.
 
 ---
 
-## 5. Unit Tests
+## 5. Unit Test Subjects
 
-Current unit tests (28 total) are in:
-- `packages/server/src/__tests__/api.test.ts` — DB migration + API setup validation
-- `packages/server/src/__tests__/git.service.test.ts` — Git worktree operations
-- `packages/server/src/__tests__/git-info.service.test.ts` — Git repo info detection
+Several older unit-test gaps are now stale:
 
-### No Unit Tests For
-- `agent.service.ts` — agent subprocess launch/kill
-- `session.manager.ts` — session lifecycle, WS broadcast, message persistence
-- `board-events.ts` — board event broadcasting
-- Any route handler logic (routes are only tested via E2E)
-- Tag CRUD service logic
-- Issue number auto-increment logic
-- Preferences whitelist validation
-- Output parser logic
+- `agent.service.ts` has focused tests in `packages/server/src/__tests__/agent.service.test.ts` and `process-guard.test.ts`.
+- `session.manager.ts` has coverage in `packages/server/src/__tests__/session.manager.test.ts`.
+- `board-events.ts` has coverage in `packages/server/src/__tests__/board-events.test.ts`.
+- Tag CRUD routes and services are covered in `packages/server/src/__tests__/tags.test.ts`.
+- Issue number auto-increment is covered in `packages/server/src/__tests__/issue-number.test.ts`.
+- Preferences validation and active-project behavior are covered in `packages/server/src/__tests__/preferences.test.ts`.
+
+Remaining unit gaps to keep actionable:
+
+1. Shared error response formatting: add route-level tests that assert consistent `{ error: string }` responses across representative project, issue, tag, and workspace endpoints.
+2. WebSocket lifecycle edge cases: add server-level tests for stale session IDs, reconnects, and cleanup after close.
+3. Loading-state UI logic is still only E2E-observable; if `SkeletonBoard` gains conditional logic, add a component-level or route-delay E2E test.
 
 ---
 
 ## 6. Documentation vs Implementation
 
-### STALE DOC — docs/prd/ describes original vibe-kanban, not this implementation
-The `docs/prd/` folder documents the *original* vibe-kanban project analysis, not the current implementation. While useful as historical reference, several features listed there don't match:
-- `01-features-catalog.md` lists many features we deliberately skipped (assignees, relationships, etc.)
-- `03-data-model.md` describes the original schema, not our Drizzle schema
-- `05-mvp-scope.md` defined a 6-stage plan; we implemented 12 stages
+### Historical PRD docs
 
-### Missing from docs
-1. **No API reference** — state.md has a route table but no request/response schemas
-2. **No WebSocket protocol docs** — message format for `/ws/sessions/:id` and `/ws/board/:id`
-3. **No MCP tool schemas** — input/output formats for each tool
-4. **No deployment guide** — how to run in production (just dev mode documented)
-5. **Stream-json format** — referenced in CLAUDE.md but example file is in `docs/reference/`, not explained inline
-6. **Session resume chain** — `--resume` flow documented in CLAUDE.md only, not in user-facing docs
-7. **Error handling** — no documentation of error response formats
-8. **Windows compatibility** — agent launch uses `shell:true`, path normalization, not documented for users
+The `docs/prd/` folder still describes the original vibe-kanban analysis and early implementation plan. Treat it as historical context unless a page explicitly says it has been refreshed.
 
-### Docs describe features that behave differently
-1. `docs/state.md` says "28 unit tests + 60 E2E tests passing" — still accurate but test count is fixed
-2. `CLAUDE.md` says "Session history: past sessions with replayable output in workspace panel" — was updated but could be more specific about inline selector
+Known stale areas:
+
+1. `docs/prd/01-features-catalog.md` includes features that were deliberately skipped or later replaced.
+2. `docs/prd/03-data-model.md` does not fully describe the current Drizzle schema.
+3. `docs/prd/05-mvp-scope.md` reflects the original staged MVP plan, not the current stage 13+ implementation.
+
+### Missing or thin user-facing docs
+
+1. API reference with request/response schemas.
+2. WebSocket protocol docs for `/ws/sessions/:sessionId` and `/ws/board/:projectId`.
+3. MCP tool schema/reference docs for inputs, outputs, and common errors.
+4. Deployment/production runbook beyond development mode.
+5. Error response format conventions.
+6. Windows compatibility notes for users, separate from agent-only `CLAUDE.md` instructions.
 
 ---
 
-## 7. Summary Statistics
+## 7. Summary
 
-| Category | Total | Tested | Gap |
-|----------|-------|--------|-----|
-| API routes | ~28 | ~26 | **2 untested** |
-| Client components | 14 | ~13 | **1 untested** |
-| MCP tools | 8 | 7 | **1 untested** |
-| CLI commands | 4 | 0 | **4 untested** |
-| Unit test subjects | 7+ services | 6 | **1+ untested** |
+| Category | Current state | Remaining actionable gaps |
+|----------|---------------|---------------------------|
+| API routes | Previously stale gaps for health, tags, statuses, branches, and active-project are covered | `POST /api/internal/board-notify`, WebSocket edge cases, shared error format |
+| UI flows | Previously stale gaps for archive columns, shortcut help, search highlighting, diff viewer, and merge UI are covered | Skeleton loading state, broader failure-toast coverage, direct header project-switch workflow |
+| MCP tools | Most MCP coverage lives outside the requested scan | `get_workspace_diff` needs a direct MCP test |
+| CLI commands | Root CLI commands are covered in `cli.test.ts` | Keep adding command-specific failure-path cases for new commands |
+| Unit tests | Agent service, session manager, board events, tags, issue numbers, and preferences are no longer untested | Add focused edge-case and contract tests where listed above |
 
-### Previously identified gaps — now addressed
+## Last Verified
 
-| Gap | Status | Tests Added |
-|-----|--------|-------------|
-| Tags API (5 routes) | **FIXED** | 12 E2E tests + 13 unit tests |
-| Status CRUD API | **FIXED** | 2 E2E tests (projects.test.ts) |
-| Active project switching | **FIXED** | 3 E2E tests (preferences.test.ts) + 10 unit tests |
-| Branch listing API | **FIXED** | 2 E2E tests (projects.test.ts) |
-| Health endpoint | **FIXED** | 1 E2E test (health.test.ts) |
-| ColumnGroup collapse/expand | **FIXED** | 4 E2E tests (archive-columns.test.ts) |
-| Search highlighting | **FIXED** | 6 E2E tests (search.test.ts) |
-| DiffViewer UI | **FIXED** | 1 E2E test (workspace.test.ts) |
-| Merge from UI | **FIXED** | 1 E2E test (workspace.test.ts) |
-| ShortcutHelp overlay | **FIXED** | 5 E2E tests (shortcuts.test.ts) |
-| Issue number auto-increment | **FIXED** | 11 unit tests (issue-number.test.ts) |
-| Preferences whitelist | **FIXED** | 10 unit tests (preferences.test.ts) |
+Verified on 2026-05-31 with these repository searches:
 
-### Remaining gaps
-
-**Untested:**
-1. `POST /api/internal/board-notify` — internal route, low priority
-2. CLI commands (register, unregister, list, cleanup) — no test infrastructure for CLI
-3. `get_workspace_diff` MCP tool — no standalone test
-4. Toast notifications — no E2E test
-5. Skeleton/loading state — no E2E test
-
-**Low priority:**
-6. WebSocket reconnection scenarios
-7. Error response format testing
-8. Agent service unit tests
-9. Session manager unit tests
-10. Board events service unit tests
+```powershell
+rg --files packages/e2e/tests packages/server/src/__tests__
+rg -n "GET /health|POST /api/projects|/api/preferences/active-project|/api/projects/.*/branches|/api/projects/.*statuses|/api/issues/.*/tags|/api/tags|/api/internal/board-notify" packages/e2e/tests packages/server/src/__tests__
+rg -n "shortcut|Keyboard shortcuts|archive|Completed|DiffViewer|View Diff|Merge button|skeleton|toast|Toast|project switch|active project|base branch" packages/e2e/tests packages/server/src/__tests__
+rg -n "register|unregister|list|cleanup" packages/server/src/__tests__/cli.test.ts packages/server/src/__tests__/cli-butler.test.ts packages/e2e/tests packages/server/src/__tests__
+rg -n "get_workspace_diff|get-workspace-diff|getWorkspaceDiff|workspace diff" packages/e2e/tests packages/server/src/__tests__ packages/mcp-server/src/__tests__
+```
