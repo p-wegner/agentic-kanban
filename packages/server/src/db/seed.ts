@@ -635,6 +635,22 @@ Be helpful and well-organized; lead with the answer and avoid unnecessary preamb
         createdAt: now,
         updatedAt: now,
       });
+      existingByName.set(skill.name, true);
+      added++;
+    }
+    for (const skill of BUILTIN_SKILLS) {
+      if (existingByName.has(skill.name)) continue;
+      await database.insert(agentSkills).values({
+        id: randomUUID(),
+        name: skill.name,
+        description: skill.description,
+        prompt: skill.prompt,
+        model: skill.model,
+        isBuiltin: true,
+        createdAt: now,
+        updatedAt: now,
+      });
+      existingByName.set(skill.name, true);
       added++;
     }
     if (added > 0) {

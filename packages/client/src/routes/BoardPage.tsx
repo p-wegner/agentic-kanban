@@ -6,6 +6,7 @@ import { TableView } from "../components/TableView.js";
 import { AgentGrid } from "../components/AgentGrid.js";
 import { TimelineView } from "../components/TimelineView.js";
 import { MetricsView } from "../components/MetricsView.js";
+import { QualityMetricsView } from "../components/QualityMetricsView.js";
 import { ButlerView } from "../components/ButlerView.js";
 import { WorkflowsView } from "../components/WorkflowsView.js";
 import { WorkflowAnalyticsDashboard } from "../components/WorkflowAnalyticsDashboard.js";
@@ -1290,6 +1291,11 @@ export function BoardPage() {
               onIssueClick={handleIssueClick}
               onCreatedDateClick={handleCreatedDateDrilldown}
             />
+          </BoardErrorBoundary>
+        )}
+        {viewMode === "quality-metrics" && activeProjectId && (
+          <BoardErrorBoundary columnName="Quality Metrics View">
+            <QualityMetricsView projectId={activeProjectId} />
           </BoardErrorBoundary>
         )}
         {viewMode === "butler" && activeProjectId && (

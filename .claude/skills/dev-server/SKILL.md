@@ -35,7 +35,7 @@ Deterministic port scheme:
 Do this with **one** HTTP check — do not loop. If it succeeds, the server is up; skip the start step.
 
 ```powershell
-try { $r = Invoke-RestMethod "http://localhost:$serverPort/api/projects" -TimeoutSec 5; Write-Host "Already running: $($r.Count) projects" } catch { Write-Host "Not running" }
+try { $r = Invoke-RestMethod "http://127.0.0.1:$serverPort/api/projects" -TimeoutSec 5; Write-Host "Already running: $($r.Count) projects" } catch { Write-Host "Not running" }
 ```
 
 ## Step 3 — Start (two steps, no polling)
@@ -54,7 +54,7 @@ Use `nohup` + `disown` so the process survives the Bash session exiting (a plain
 
 ```powershell
 Start-Sleep -Seconds 15
-try { $r = Invoke-RestMethod "http://localhost:3001/api/projects" -TimeoutSec 10; Write-Host "API OK: $($r.Count) projects" } catch { Write-Host "API FAILED: $_" }
+try { $r = Invoke-RestMethod "http://127.0.0.1:3001/api/projects" -TimeoutSec 10; Write-Host "API OK: $($r.Count) projects" } catch { Write-Host "API FAILED: $_" }
 ```
 
 (Substitute `$serverPort` for `3001` when in a worktree.)
@@ -96,7 +96,7 @@ Stop-PortOwner $clientPort
 
 ```powershell
 $serverPort = if ($env:KANBAN_WORKTREE_SERVER_PORT) { $env:KANBAN_WORKTREE_SERVER_PORT } elseif ($env:KANBAN_SERVER_PORT) { $env:KANBAN_SERVER_PORT } else { 3001 }
-try { $r = Invoke-RestMethod "http://localhost:$serverPort/api/projects" -TimeoutSec 10; Write-Host "API OK: $($r.Count) projects" } catch { Write-Host "API FAILED: $_" }
+try { $r = Invoke-RestMethod "http://127.0.0.1:$serverPort/api/projects" -TimeoutSec 10; Write-Host "API OK: $($r.Count) projects" } catch { Write-Host "API FAILED: $_" }
 ```
 
 A 200 with a project array means server + DB are both healthy. If `/health` responds but `/api/projects` hangs, an orphaned tsx process is holding the DB open — run the STOP step, then restart.
