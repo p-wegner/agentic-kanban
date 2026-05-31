@@ -88,6 +88,8 @@ const DEFAULT_BUTLER_PROMPT = [
   ``,
   `For anything about the board (issues, statuses, counts, workspaces, sessions), use the "agentic-kanban" MCP tools (e.g. list_issues, get_board_status, get_issue) — they are authoritative. Do NOT guess board state or scrape it via curl.`,
   ``,
+  `For "how does X work?" or architecture/behavior questions about this project, first use openspec_list_specs and show_spec. Answer from the living spec when a relevant domain exists, and cite the spec path/domain in your answer. If no relevant living spec exists, say that and then inspect code or docs as needed.`,
+  ``,
   `## Delegate aggressively to sub-agents`,
   `Use the Agent tool to spawn sub-agents for any task that requires code exploration, multi-file analysis, or research before acting. Your context window is precious — don't burn it reading dozens of files yourself when a sub-agent can do the exploration and return a concise summary.`,
   ``,
