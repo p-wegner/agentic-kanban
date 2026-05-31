@@ -85,6 +85,8 @@ describe("workflows route analytics", () => {
     const startNodeId = randomUUID();
     const buildNodeId = randomUUID();
     const doneNodeId = randomUUID();
+    const otherTemplateId = randomUUID();
+    const otherTemplateNodeId = randomUUID();
     await db.insert(schema.workflowTemplates).values({
       id: templateId,
       projectId: null,
@@ -94,14 +96,24 @@ describe("workflows route analytics", () => {
       createdAt: "2026-05-30T09:00:00.000Z",
       updatedAt: "2026-05-30T09:00:00.000Z",
     });
+    await db.insert(schema.workflowTemplates).values({
+      id: otherTemplateId,
+      projectId: null,
+      name: "Other Workflow",
+      isDefault: false,
+      isBuiltin: false,
+      createdAt: "2026-05-30T09:00:00.000Z",
+      updatedAt: "2026-05-30T09:00:00.000Z",
+    });
     await db.insert(schema.workflowNodes).values([
       { id: startNodeId, templateId, name: "Start", nodeType: "start", statusName: "In Progress", sortOrder: 0, createdAt: "2026-05-30T09:00:00.000Z" },
       { id: buildNodeId, templateId, name: "Build", nodeType: "normal", statusName: "In Progress", sortOrder: 1, createdAt: "2026-05-30T09:00:00.000Z" },
       { id: doneNodeId, templateId, name: "Done", nodeType: "end", statusName: "Done", sortOrder: 2, createdAt: "2026-05-30T09:00:00.000Z" },
+      { id: otherTemplateNodeId, templateId: otherTemplateId, name: "External", nodeType: "normal", statusName: "In Progress", sortOrder: 0, createdAt: "2026-05-30T09:00:00.000Z" },
     ] as any);
 
     const firstIssueId = await seedIssue(db, projectId, statusId, 11, "First issue");
-    const firstWorkspaceId = await seedWorkspace(db, firstIssueId, "feature/first", doneNodeId);
+    const firstWorkspaceId = await seedWorkspace(db, firstIssueId, "feature/first", otherTemplateNodeId);
     const secondIssueId = await seedIssue(db, projectId, statusId, 12, "Second issue");
     const secondWorkspaceId = await seedWorkspace(db, secondIssueId, "feature/second", buildNodeId);
     const otherIssueId = await seedIssue(db, other.projectId, other.statusId, 99, "Other project issue");
@@ -110,7 +122,7 @@ describe("workflows route analytics", () => {
     await db.insert(schema.workflowTransitions).values([
       { id: randomUUID(), workspaceId: firstWorkspaceId, fromNodeId: null, toNodeId: startNodeId, createdAt: "2026-05-30T10:00:00.000Z", triggeredBy: "system" },
       { id: randomUUID(), workspaceId: firstWorkspaceId, fromNodeId: startNodeId, toNodeId: buildNodeId, createdAt: "2026-05-30T10:05:00.000Z", triggeredBy: "manual" },
-      { id: randomUUID(), workspaceId: firstWorkspaceId, fromNodeId: buildNodeId, toNodeId: doneNodeId, createdAt: "2026-05-30T10:20:00.000Z", triggeredBy: "manual" },
+      { id: randomUUID(), workspaceId: firstWorkspaceId, fromNodeId: buildNodeId, toNodeId: otherTemplateNodeId, createdAt: "2026-05-30T10:20:00.000Z", triggeredBy: "manual" },
       { id: randomUUID(), workspaceId: secondWorkspaceId, fromNodeId: null, toNodeId: startNodeId, createdAt: "2026-05-30T11:00:00.000Z", triggeredBy: "system" },
       { id: randomUUID(), workspaceId: secondWorkspaceId, fromNodeId: startNodeId, toNodeId: buildNodeId, createdAt: "2026-05-30T11:10:00.000Z", triggeredBy: "manual" },
       { id: randomUUID(), workspaceId: otherWorkspaceId, fromNodeId: null, toNodeId: buildNodeId, createdAt: "2026-05-30T12:00:00.000Z", triggeredBy: "system" },
