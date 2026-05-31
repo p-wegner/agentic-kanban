@@ -154,3 +154,34 @@ describe("POST /api/issues/dependencies/batch", () => {
     expect(rows).toHaveLength(0);
   });
 });
+
+describe("PATCH /api/issues/bulk", () => {
+  it("updates priority, estimate, and due date for multiple issues in one request", async () => {
+    const { app, db } = createTestApp();
+    const { projectId, statusId } = await seed(db);
+    const a = await insertIssue(db, projectId, statusId, 1);
+    const b = await insertIssue(db, projectId, statusId, 2);
+
+    const res = await app.request("/api/issues/bulk", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        issueIds: [a, b],
+        updates: { priority: "critical", estimate: "L", dueDate: "2026-06-15" },
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({ updated: 2 });
+
+    const rows = await db.select().from(schema.issues);
+    expect(rows.map((row) => ({
+      priority: row.priority,
+      estimate: row.estimate,
+      dueDate: row.dueDate,
+    }))).toEqual([
+      { priority: "critical", estimate: "L", dueDate: "2026-06-15" },
+      { priority: "critical", estimate: "L", dueDate: "2026-06-15" },
+    ]);
+  });
+});
