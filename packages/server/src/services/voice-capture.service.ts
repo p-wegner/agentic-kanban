@@ -96,6 +96,14 @@ function formatSpeechLanguageContext(
   return `\nSpeech recognition language: ${label} (${languageCode}).`;
 }
 
+function fallbackStructuredTranscript(transcript: string): { title: string; description: string; priority: string } {
+  return {
+    title: transcript.slice(0, 80),
+    description: `Voice captured: ${transcript}`,
+    priority: "medium",
+  };
+}
+
 /**
  * Find or create the `voice-capture` tag for the given database.
  * Returns the tag id.
@@ -248,7 +256,13 @@ Rules:
 Respond ONLY with valid JSON (no markdown, no explanation):
 {"title": "...", "description": "...", "priority": "medium"}`;
 
-  const stdout = await invokeClaudePrompt(prompt, { database, model: "claude-haiku-4-5" });
+  let stdout: string;
+  try {
+    stdout = await invokeClaudePrompt(prompt, { database, model: "claude-haiku-4-5" });
+  } catch (err) {
+    console.warn("[voice-capture] AI structuring failed; creating issue from raw transcript:", err);
+    return fallbackStructuredTranscript(transcript);
+  }
   const cleaned = stdout.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
 
   let parsed: { title?: string; description?: string; priority?: string };
@@ -256,11 +270,7 @@ Respond ONLY with valid JSON (no markdown, no explanation):
     parsed = JSON.parse(cleaned) as { title?: string; description?: string; priority?: string };
   } catch {
     // Claude returned non-JSON (e.g. explanation text). Fall back to raw transcript.
-    return {
-      title: transcript.slice(0, 80),
-      description: `Voice captured: ${transcript}`,
-      priority: "medium",
-    };
+    return fallbackStructuredTranscript(transcript);
   }
 
   const parsedPriority = parsed.priority?.trim().toLowerCase();
