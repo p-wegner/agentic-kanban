@@ -2,7 +2,7 @@
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { apiFetch } from "../lib/api.js";
-import { CLAUDE_MODEL_OPTIONS } from "@agentic-kanban/shared";
+import { CLAUDE_MODEL_OPTIONS, CODEX_MODEL_OPTIONS } from "@agentic-kanban/shared";
 import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
 import type { LiveSessionStats } from "../lib/useBoardEvents.js";
 import { AgentQuestionsPanel } from "./AgentQuestionsPanel.js";
@@ -193,8 +193,12 @@ function backendLabel(backend?: string): string {
   return backend === "codex" ? "Codex" : "Claude";
 }
 
-function modelLabel(value: string): string {
-  return CLAUDE_MODEL_OPTIONS.find((m) => m.value === value)?.label ?? value;
+function modelOptionsForBackend(backend?: "claude" | "codex") {
+  return backend === "codex" ? CODEX_MODEL_OPTIONS : CLAUDE_MODEL_OPTIONS;
+}
+
+function modelLabel(value: string, backend?: "claude" | "codex"): string {
+  return modelOptionsForBackend(backend).find((m) => m.value === value)?.label ?? value;
 }
 
 /** Compact butler switcher — a labelled select of the defined butlers plus a gear
@@ -220,7 +224,7 @@ function ButlerSwitcher({ butlers, activeId, onSelect, onManage, disabled }: {
       >
         {butlers.map((b) => (
           <option key={b.id} value={b.id}>
-            {b.active ? "● " : "○ "}{b.name}{b.model ? ` · ${modelLabel(b.model)}` : ""}
+            {b.active ? "● " : "○ "}{b.name}{b.model ? ` · ${modelLabel(b.model, b.backend)}` : ""}
           </option>
         ))}
       </select>
@@ -241,13 +245,14 @@ function ButlerSwitcher({ butlers, activeId, onSelect, onManage, disabled }: {
 interface ButlerDef { id: string; name: string; model: string; }
 
 /** Modal for managing the global set of butlers: add, rename, set model, remove. Capped server-side. */
-function ButlerManageModal({ onClose, onChanged }: { onClose: () => void; onChanged: () => void }) {
+function ButlerManageModal({ backend, onClose, onChanged }: { backend: "claude" | "codex"; onClose: () => void; onChanged: () => void }) {
   const [items, setItems] = useState<ButlerDef[]>([]);
   const [max, setMax] = useState(4);
   const [newName, setNewName] = useState("");
   const [newModel, setNewModel] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const modelOptions = modelOptionsForBackend(backend);
 
   async function refresh() {
     try {
@@ -309,7 +314,7 @@ function ButlerManageModal({ onClose, onChanged }: { onClose: () => void; onChan
                 disabled={busy}
                 className="rounded border border-gray-300 dark:border-gray-600 bg-surface-raised dark:bg-surface-raised-dark px-1.5 py-1 text-xs text-gray-700 dark:text-gray-200 focus:outline-none focus:ring-1 focus:ring-brand-500"
               >
-                {CLAUDE_MODEL_OPTIONS.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
+                {modelOptions.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
               </select>
               <button
                 onClick={() => void run(() => callDef(`/${b.id}`, { method: "DELETE" }))}
@@ -331,7 +336,7 @@ function ButlerManageModal({ onClose, onChanged }: { onClose: () => void; onChan
                 className="flex-1 min-w-0 rounded border border-gray-300 dark:border-gray-600 bg-surface-raised dark:bg-surface-raised-dark px-2 py-1 text-sm text-gray-800 dark:text-gray-100 focus:outline-none focus:ring-1 focus:ring-brand-500"
               />
               <select value={newModel} onChange={(e) => setNewModel(e.target.value)} disabled={busy} className="rounded border border-gray-300 dark:border-gray-600 bg-surface-raised dark:bg-surface-raised-dark px-1.5 py-1 text-xs text-gray-700 dark:text-gray-200 focus:outline-none focus:ring-1 focus:ring-brand-500">
-                {CLAUDE_MODEL_OPTIONS.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
+                {modelOptions.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
               </select>
               <button
                 onClick={() => { if (newName.trim()) void run(async () => { await callDef("", { method: "POST", body: { name: newName.trim(), model: newModel } }); setNewName(""); setNewModel(""); }); }}
@@ -398,6 +403,7 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
   const profileSelectRef = useRef<HTMLSelectElement>(null);
   const hasDictatedRef = useRef(false);
   const voiceInterimRef = useRef("");
+  const activeModelOptions = modelOptionsForBackend(backend);
 
   const sanitizeSpeechText = (value: string) => (
     value
@@ -585,8 +591,8 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
 
   // Fetch the command + profile lists. Commands come from the live SDK session
   // (merged with the repo's .claude/skills server-side), so retry once if the
-  // session hasn't finished discovery yet. The model list is static (the basic
-  // Claude Code tiers, CLAUDE_MODEL_OPTIONS) â€” only the selection is server state.
+  // session hasn't finished discovery yet. The model list follows the Butler
+  // backend; only the selection is server state.
   async function loadCapabilities(attempt = 0) {
     try {
       const [cmdData, profData] = await Promise.all([
@@ -715,10 +721,10 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
   }
 
   function cycleModel() {
-    if (sending || CLAUDE_MODEL_OPTIONS.length === 0) return;
-    const current = selectedModel || model || CLAUDE_MODEL_OPTIONS[0]?.value;
-    const currentIndex = CLAUDE_MODEL_OPTIONS.findIndex((item) => item.value === current);
-    const next = CLAUDE_MODEL_OPTIONS[(currentIndex + 1 + CLAUDE_MODEL_OPTIONS.length) % CLAUDE_MODEL_OPTIONS.length];
+    if (sending || activeModelOptions.length === 0) return;
+    const current = selectedModel || model || activeModelOptions[0]?.value;
+    const currentIndex = activeModelOptions.findIndex((item) => item.value === current);
+    const next = activeModelOptions[(currentIndex + 1 + activeModelOptions.length) % activeModelOptions.length];
     if (next) {
       void handleModelChange(next.value);
       modelSelectRef.current?.focus();
@@ -1219,7 +1225,7 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
                   title="Model for the butler. Ctrl+M cycles models without losing context."
                   className="rounded border border-gray-300 dark:border-gray-600 bg-surface-raised dark:bg-surface-raised-dark px-1.5 py-1 text-xs text-gray-700 dark:text-gray-200 focus:outline-none focus:ring-1 focus:ring-brand-500"
                 >
-                  {CLAUDE_MODEL_OPTIONS.map((m) => (
+                  {activeModelOptions.map((m) => (
                     <option key={m.value} value={m.value}>{m.label}</option>
                   ))}
                 </select>
@@ -1493,7 +1499,7 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
           <AgentQuestionsPanel projectId={projectId} />
         </>
       )}
-      {manageOpen && <ButlerManageModal onClose={() => setManageOpen(false)} onChanged={() => { void fetchButlers(); }} />}
+      {manageOpen && <ButlerManageModal backend={backend} onClose={() => setManageOpen(false)} onChanged={() => { void fetchButlers(); }} />}
     </div>
   );
 }
