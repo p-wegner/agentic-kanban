@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   classifyProcessExit,
+  createDependencyRecoveryState,
   dependencyManifestsChanged,
   listDependencyManifestFiles,
   snapshotDependencyManifests,
@@ -48,6 +49,19 @@ describe("dev launcher exit classification", () => {
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
+  });
+
+  it("tracks dependency recovery generations for concurrent process exits", () => {
+    const initialSnapshot = new Map([["package.json", "before"]]);
+    const recovery = createDependencyRecoveryState(initialSnapshot);
+
+    expect(recovery.snapshot).toBe(initialSnapshot);
+    expect(recovery.generation).toBe(0);
+
+    const recoveredSnapshot = new Map([["package.json", "after"]]);
+    expect(recovery.markRecovered(recoveredSnapshot)).toBe(1);
+    expect(recovery.snapshot).toBe(recoveredSnapshot);
+    expect(recovery.generation).toBe(1);
   });
 });
 
