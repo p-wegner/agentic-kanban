@@ -9,6 +9,7 @@ export async function runScript(
   script: string,
   cwd: string,
   label: string = "script",
+  extraEnv?: Record<string, string>,
 ): Promise<{ ok: boolean; output: string }> {
   try {
     const isWindows = process.platform === "win32";
@@ -20,6 +21,7 @@ export async function runScript(
       timeout: SCRIPT_TIMEOUT_MS,
       maxBuffer: 1024 * 1024,
       windowsHide: true,
+      env: extraEnv ? { ...process.env, ...extraEnv } : process.env,
     });
 
     const output = (stdout || "") + (stderr || "");

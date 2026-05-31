@@ -4,29 +4,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildAgentLaunchConfig, type ProviderId, type ProviderName } from "./agent-provider.js";
 import { guardProcessKill, auditProcessEvent } from "./process-guard.js";
+import { resolveWorktreeDevPorts as resolveWorktreeDevPortsShared } from "./worktree-ports.js";
 
 const DEFAULT_BOARD_SERVER_PORT = "3001";
 const DEFAULT_BOARD_CLIENT_PORT = "5173";
 
-function branchHash(branchName: string): number {
-  let hash = 0;
-  for (let i = 0; i < branchName.length; i++) {
-    hash = (hash * 31 + branchName.charCodeAt(i)) & 0xffff;
-  }
-  return (hash % 900) + 101;
-}
-
 function resolveWorktreeDevPorts(worktreePath: string): { serverPort: string; clientPort: string } | null {
-  const normalized = worktreePath.replace(/\\/g, "/");
-  if (!normalized.includes("/.worktrees/")) return null;
-
-  const leaf = normalized.split("/").filter(Boolean).at(-1) ?? "";
-  const issueMatch = leaf.match(/(?:^|[_/-])ak-(\d+)-/i) ?? leaf.match(/^feature[_/-](\d+)-/i);
-  const offset = issueMatch ? Number(issueMatch[1]) : branchHash(leaf);
-  return {
-    serverPort: String(Number(DEFAULT_BOARD_SERVER_PORT) + offset),
-    clientPort: String(Number(DEFAULT_BOARD_CLIENT_PORT) + offset),
-  };
+  const ports = resolveWorktreeDevPortsShared(worktreePath);
+  if (!ports) return null;
+  return { serverPort: String(ports.serverPort), clientPort: String(ports.clientPort) };
 }
 
 export interface AgentOutputEvent {

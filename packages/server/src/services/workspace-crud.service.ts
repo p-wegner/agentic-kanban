@@ -11,6 +11,7 @@ import type { BoardEvents } from "./board-events.js";
 import type { ProviderName } from "./agent-provider.js";
 import * as realGitService from "./git.service.js";
 import { kill as killAgent } from "./agent.service.js";
+import { teardownWorktree } from "./workspace-teardown.service.js";
 import { runSetupScript } from "./setup-script.js";
 import type { SetupScriptResult } from "./setup-script.js";
 import { writeAgentSkillFile, readLocalSkillPrompt, copySkillToWorktree } from "@agentic-kanban/shared/lib/agent-skill-files";
@@ -773,7 +774,14 @@ exit 1
     }
 
     const wsRow = await database
-      .select({ workingDir: workspaces.workingDir, isDirect: workspaces.isDirect, repoPath: projects.repoPath })
+      .select({
+        workingDir: workspaces.workingDir,
+        isDirect: workspaces.isDirect,
+        branch: workspaces.branch,
+        repoPath: projects.repoPath,
+        teardownScript: projects.teardownScript,
+        setupEnabled: projects.setupEnabled,
+      })
       .from(workspaces)
       .leftJoin(issues, eq(workspaces.issueId, issues.id))
       .leftJoin(projects, eq(issues.projectId, projects.id))
@@ -807,6 +815,18 @@ exit 1
     }
 
     if (workingDir && !isDirect && repoPath && !sharedByOthers) {
+      // Free everything the worktree spun up BEFORE removing it: dir procs + the
+      // worktree's dev ports + the project's generic teardownScript. Killing the
+      // dir/port holders first also prevents the EBUSY/ENOTEMPTY removal race.
+      await teardownWorktree({
+        workingDir,
+        branch: wsRow[0]?.branch,
+        isDirect,
+        teardownScript: wsRow[0]?.teardownScript,
+        setupEnabled: wsRow[0]?.setupEnabled,
+        label: "delete",
+      });
+
       // Use git as the authoritative step to drop the worktree registration + branch
       // (`git worktree remove --force` also deletes the directory). This succeeds even
       // when a stray file handle survives, and unlike `git worktree prune` it does not

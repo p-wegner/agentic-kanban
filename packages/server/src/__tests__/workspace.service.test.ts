@@ -10,9 +10,10 @@ import { createMockSessionManager } from "./helpers/mocks.js";
 import { createWorkspaceService, WorkspaceError, type GitService } from "../services/workspace.service.js";
 import { activeMerges, MERGE_LOCK_STALE_MS } from "../services/workspace-internals.js";
 
-// Mock process-cleanup so killWorktreeProcesses doesn't run real wmic/lsof in unit tests.
+// Mock process-cleanup so teardown doesn't run real wmic/lsof/netstat in unit tests.
 vi.mock("../services/process-cleanup.js", () => ({
   killProcessesInDir: vi.fn(async () => 0),
+  killProcessesOnPorts: vi.fn(async () => 0),
 }));
 
 /**

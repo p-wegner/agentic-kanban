@@ -16,6 +16,7 @@ import type { Database } from "../db/index.js";
 import type { SessionManager } from "./session.manager.js";
 import type { BoardEvents } from "./board-events.js";
 import * as realGitService from "./git.service.js";
+import { teardownWorktree } from "./workspace-teardown.service.js";
 import {
   getNode,
   getOutgoingTransitions,
@@ -639,9 +640,12 @@ export function createWorkflowForkService(deps: {
     });
 
     // Clean up child sub-worktrees now that diffs are captured. NEVER remove a
-    // shared-mode child's workingDir — it IS the parent worktree.
+    // shared-mode child's workingDir — it IS the parent worktree. Built-in cleanup
+    // only (free the child's dir procs + dev ports); the project teardownScript is
+    // deliberately NOT run per-child — it operates on resources shared with the parent.
     for (const c of children) {
       if (c.workingDir && c.workingDir !== parent.workingDir) {
+        await teardownWorktree({ workingDir: c.workingDir, label: "fork-join" });
         await gitService.removeWorktree(project.repoPath, c.workingDir).catch(() => {});
       }
     }
