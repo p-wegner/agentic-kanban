@@ -24,14 +24,33 @@
 
 const fs = require("fs");
 const path = require("path");
+const { execSync } = require("child_process");
 const readline = require("readline");
 
+let hookInput = {};
+
 function getProjectDir() {
-  return process.env.CLAUDE_PROJECT_DIR || "C:\\andrena\\agentic-kanban";
+  const startDir = process.env.CLAUDE_PROJECT_DIR || hookInput.cwd || "C:\\andrena\\agentic-kanban";
+  try {
+    return execSync("git rev-parse --show-toplevel", {
+      cwd: startDir,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      windowsHide: true,
+    }).trim();
+  } catch {
+    return startDir;
+  }
+}
+
+function getDbProjectDir() {
+  const mainCheckout = process.env.KANBAN_MAIN_CHECKOUT || "C:\\andrena\\agentic-kanban";
+  if (fs.existsSync(path.join(mainCheckout, "packages", "server"))) return mainCheckout;
+  return getProjectDir();
 }
 
 function getDbPath() {
-  return path.join(getProjectDir(), "packages", "server", "kanban.db");
+  return path.join(getDbProjectDir(), "packages", "server", "kanban.db");
 }
 
 // References to the vital database file, in any path form (Windows, POSIX, WSL).
@@ -106,7 +125,38 @@ function usesWorktreeCli(command) {
   return /(?:^|[;&|]\s*)pnpm(?:\.cmd)?\s+cli\s+--(?:\s|$)/i.test(command);
 }
 
+function isBroadNodeKill(command) {
+  const normalized = command.replace(/\r\n/g, "\n");
+
+  // Whole-node kills are never acceptable in this repo; they can terminate the
+  // board, worktree dev servers, MCP helpers, and unrelated agents.
+  if (/\bStop-Process\b[^\n|;]*(?:-Name\s+node\b|node\.exe\b)/i.test(normalized)) return true;
+  if (/\btaskkill\b[^\n|;]*(?:\/IM\s+node(?:\.exe)?\b)/i.test(normalized)) return true;
+  if (/\bGet-Process\b[^\n|;]*\bnode\b[\s\S]*\bStop-Process\b/i.test(normalized)) return true;
+  if (/\b(?:pkill|killall)\b[^\n|;]*\bnode\b/i.test(normalized)) return true;
+
+  // These command-line-only process filters are too broad for worktree cleanup:
+  // worktree agents can match and kill the main checkout server/client.
+  const hasBroadDevMatcher =
+    /CommandLine\s+-like\s+["']?\*dev\.mjs\*/i.test(normalized) ||
+    /CommandLine\s+-like\s+["']?\*vite\/bin\/vite\.js\*/i.test(normalized) ||
+    /CommandLine\s+-like\s+["']?\*agentic-kanban\*tsx\*src\/index\*/i.test(normalized) ||
+    /CommandLine\s+-like\s+["']?\*agentic-kanban\*tsx\*src\\index\*/i.test(normalized);
+  const killsMatches = /\b(?:taskkill|Stop-Process)\b/i.test(normalized);
+  return hasBroadDevMatcher && killsMatches;
+}
+
 function getBlockedNonDbReason(command) {
+  if (isBroadNodeKill(command)) {
+    return (
+      "Broad Node/dev-server process kills are blocked. They can take down the main board server " +
+      "or other agents' worktree servers.\n\n" +
+      "Use port-scoped cleanup for only this checkout's ports. In this repo, use the dev-server " +
+      "skill's Stop-PortOwner recipe with $KANBAN_SERVER_PORT / $KANBAN_CLIENT_PORT, or stop the " +
+      "specific workspace through the board API."
+    );
+  }
+
   if (usesBrokenRelatedFlag(command)) {
     return (
       "Vitest 4 does not support the --related flag. Use the related subcommand instead:\n" +
@@ -139,7 +189,7 @@ function backupDatabase() {
   }
 
   try {
-    const backupDir = path.join(getProjectDir(), "packages", "server", ".db-backups");
+    const backupDir = path.join(getDbProjectDir(), "packages", "server", ".db-backups");
     fs.mkdirSync(backupDir, { recursive: true });
     const stamp = new Date().toISOString().replace(/[:.]/g, "-");
     for (const suffix of ["", "-wal", "-shm"]) {
@@ -181,14 +231,18 @@ async function main() {
   const lines = [];
   for await (const line of rl) lines.push(line);
 
-  let input = {};
   try {
-    input = JSON.parse(lines.join(""));
+    hookInput = JSON.parse(lines.join(""));
   } catch {
     process.exit(0);
   }
 
-  const command = input.command || input.Command || "";
+  const command =
+    hookInput.command ||
+    hookInput.Command ||
+    hookInput.tool_input?.command ||
+    hookInput.tool_input?.Command ||
+    "";
   const nonDbReason = getBlockedNonDbReason(command);
   if (nonDbReason) {
     console.error("[safety] Command blocked.");

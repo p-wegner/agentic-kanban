@@ -1,0 +1,18 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|PowerShell|shell|shell_command|exec_command|command_execution",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$(git rev-parse --show-toplevel)/.claude/hooks/smart-hooks-runner.js\" PreToolUse",
+            "commandWindows": "node C:/andrena/agentic-kanban/.claude/hooks/smart-hooks-runner.js PreToolUse",
+            "timeout": 10,
+            "statusMessage": "Checking command safety"
+          }
+        ]
+      }
+    ]
+  }
+}

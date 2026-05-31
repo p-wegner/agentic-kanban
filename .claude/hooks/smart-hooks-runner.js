@@ -19,21 +19,37 @@ const path = require("path");
 const { execSync } = require("child_process");
 const readline = require("readline");
 
+let hookInput = {};
+
 function getProjectDir() {
-  return process.env.CLAUDE_PROJECT_DIR || process.cwd();
+  const startDir = process.env.CLAUDE_PROJECT_DIR || hookInput.cwd || process.cwd();
+  try {
+    return execSync("git rev-parse --show-toplevel", {
+      cwd: startDir,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      windowsHide: true,
+    }).trim();
+  } catch {
+    return startDir;
+  }
 }
 
-function getConfigPath() {
-  return path.join(getProjectDir(), ".claude", "hooks", "smart-hooks-config.json");
+function getScriptProjectDir() {
+  return path.resolve(__dirname, "..", "..");
+}
+
+function getConfigPath(projectDir = getProjectDir()) {
+  return path.join(projectDir, ".claude", "hooks", "smart-hooks-config.json");
 }
 
 function getStatePath() {
   return path.join(getProjectDir(), ".claude", "hooks", ".smart-hooks-state.json");
 }
 
-function loadConfig() {
+function loadConfig(projectDir) {
   try {
-    return JSON.parse(fs.readFileSync(getConfigPath(), "utf8"));
+    return JSON.parse(fs.readFileSync(getConfigPath(projectDir), "utf8"));
   } catch {
     return { hooks: {} };
   }
@@ -106,23 +122,38 @@ function runCheck(check, inputData, editedFiles) {
 
 // --- PreToolUse: prevent destructive operations before execution ---
 
+function isShellTool(toolName) {
+  return ["Bash", "PowerShell", "shell", "shell_command", "exec_command", "command_execution"].includes(toolName);
+}
+
+function extractCommand(input) {
+  return (
+    input.tool_input?.command ||
+    input.tool_input?.Command ||
+    input.command ||
+    input.Command ||
+    ""
+  );
+}
+
 function handlePreToolUse(input) {
   const toolName = input.tool_name;
-  const toolInput = input.tool_input;
 
-  // Only validate Bash and PowerShell commands
-  if (toolName !== "Bash" && toolName !== "PowerShell") {
+  // Only validate shell commands. Codex reports canonical shell hooks as Bash,
+  // but older/local harnesses may use their implementation-specific names.
+  if (!isShellTool(toolName)) {
     process.exit(0);
   }
 
-  const command = toolInput?.command || toolInput?.Command || "";
-  const config = loadConfig();
+  const command = extractCommand(input);
+  const policyDir = getScriptProjectDir();
+  const config = loadConfig(policyDir);
   const checks = config.hooks?.PreToolUse || [];
 
   for (const check of checks) {
     if (!check.enabled) continue;
 
-    const result = runCheck({ ...check }, { command }, []);
+    const result = runCheck({ ...check, cwd: check.cwd || policyDir }, { command, cwd: input.cwd }, []);
 
     if (!result.success) {
       console.error(`[smart-hooks] ${check.name}: PREVENTED`);
@@ -244,6 +275,7 @@ async function main() {
   let input = {};
   try {
     input = JSON.parse(lines.join(""));
+    hookInput = input;
   } catch {
     process.exit(0);
   }
