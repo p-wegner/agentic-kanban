@@ -72,6 +72,7 @@ interface ButlerViewProps {
   liveActivity: Record<string, string>;
   liveStats: Record<string, LiveSessionStats>;
   onIssueClick: (issue: IssueWithStatus) => void;
+  onExit?: () => void;
 }
 
 function formatRelativeTs(ts: number): string {
@@ -214,6 +215,7 @@ function ButlerSwitcher({ butlers, activeId, onSelect, onManage, disabled }: {
         value={activeId}
         onChange={(e) => onSelect(e.target.value)}
         disabled={disabled}
+        data-testid="butler-switcher"
         className="rounded border border-gray-300 dark:border-gray-600 bg-surface-raised dark:bg-surface-raised-dark px-1.5 py-1 text-xs font-medium text-gray-700 dark:text-gray-200 focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:opacity-50 max-w-[180px]"
       >
         {butlers.map((b) => (
@@ -347,7 +349,7 @@ function ButlerManageModal({ onClose, onChanged }: { onClose: () => void; onChan
   );
 }
 
-export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssueClick }: ButlerViewProps) {
+export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssueClick, onExit }: ButlerViewProps) {
   const [butlerState, setButlerState] = useState<ButlerState | null>(null);
   const [backend, setBackend] = useState<"claude" | "codex">("claude");
   const [loadingState, setLoadingState] = useState(true);
@@ -392,6 +394,8 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
   const assistantTextSeenRef = useRef(false);
   const inputValueRef = useRef("");
   const voiceButtonRef = useRef<ButlerVoiceButtonHandle>(null);
+  const modelSelectRef = useRef<HTMLSelectElement>(null);
+  const profileSelectRef = useRef<HTMLSelectElement>(null);
   const hasDictatedRef = useRef(false);
   const voiceInterimRef = useRef("");
 
@@ -690,6 +694,11 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
     void fetchButlers();
   }
 
+  async function handleNewSession() {
+    await handleClearContext();
+    inputRef.current?.focus();
+  }
+
   // Switch model without restarting â€” the server uses the SDK setModel control
   // request, so the conversation context is preserved.
   async function handleModelChange(value: string) {
@@ -702,6 +711,17 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
       void fetchButlers(); // reflect the new model label in the switcher
     } catch (err) {
       console.error("Failed to switch butler model", err);
+    }
+  }
+
+  function cycleModel() {
+    if (sending || CLAUDE_MODEL_OPTIONS.length === 0) return;
+    const current = selectedModel || model || CLAUDE_MODEL_OPTIONS[0]?.value;
+    const currentIndex = CLAUDE_MODEL_OPTIONS.findIndex((item) => item.value === current);
+    const next = CLAUDE_MODEL_OPTIONS[(currentIndex + 1 + CLAUDE_MODEL_OPTIONS.length) % CLAUDE_MODEL_OPTIONS.length];
+    if (next) {
+      void handleModelChange(next.value);
+      modelSelectRef.current?.focus();
     }
   }
 
@@ -732,6 +752,42 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
     } finally {
       setSwitchingProfile(false);
     }
+  }
+
+  function cycleProfile() {
+    const options = ["", ...profiles];
+    if (sending || switchingProfile || options.length === 0) return;
+    if (options.length === 1) {
+      profileSelectRef.current?.focus();
+      return;
+    }
+    const currentIndex = options.indexOf(selectedProfile);
+    const next = options[(currentIndex + 1 + options.length) % options.length];
+    void handleProfileChange(next);
+  }
+
+  function closeOpenPanel(): boolean {
+    if (manageOpen) {
+      setManageOpen(false);
+      return true;
+    }
+    if (historyTranscript) {
+      setHistoryTranscript(null);
+      return true;
+    }
+    if (historyOpen) {
+      setHistoryOpen(false);
+      return true;
+    }
+    if (customizeOpen) {
+      setCustomizeOpen(false);
+      return true;
+    }
+    return false;
+  }
+
+  function shouldExitButler() {
+    return !inputValueRef.current.trim() && !commandMenuOpen && !customizeOpen && !historyOpen && !manageOpen;
   }
 
   async function openCustomize() {
@@ -899,9 +955,25 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
         return;
       }
     }
+    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault();
+      void handleSend();
+      return;
+    }
+    if (e.key === "Escape") {
+      if (closeOpenPanel()) {
+        e.preventDefault();
+        return;
+      }
+      if (shouldExitButler()) {
+        e.preventDefault();
+        onExit?.();
+      }
+      return;
+    }
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      handleSend();
+      void handleSend();
     }
   }
 
@@ -918,6 +990,40 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
     );
 
     const onKeyDown = (e: KeyboardEvent) => {
+      const hasCommandModifier = e.ctrlKey || e.metaKey;
+      const key = e.key.toLowerCase();
+
+      if ((e.key === "Enter" && hasCommandModifier) || (key === "l" && hasCommandModifier) || (key === "p" && hasCommandModifier) || (key === "m" && hasCommandModifier) || (key === "x" && hasCommandModifier && e.shiftKey) || (key === "n" && hasCommandModifier && e.shiftKey)) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (e.key === "Enter") {
+          void handleSend();
+        } else if (key === "l" || key === "x") {
+          void handleClearContext();
+        } else if (key === "p") {
+          cycleProfile();
+        } else if (key === "m") {
+          cycleModel();
+        } else if (key === "n") {
+          void handleNewSession();
+        }
+        return;
+      }
+
+      if (e.key === "Escape") {
+        if (closeOpenPanel()) {
+          e.preventDefault();
+          e.stopPropagation();
+          return;
+        }
+        if (shouldExitButler()) {
+          e.preventDefault();
+          e.stopPropagation();
+          onExit?.();
+          return;
+        }
+      }
+
       const hasCtrl = e.ctrlKey || e.getModifierState?.("Control");
       if (!isSpaceEvent(e) || !hasCtrl || e.altKey || e.metaKey || e.shiftKey || e.repeat) {
         return;
@@ -949,7 +1055,7 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
       window.removeEventListener("keydown", onKeyDown, true);
       window.removeEventListener("keyup", onKeyUp, true);
     };
-  }, [hasButler, sending]);
+  }, [hasButler, sending, selectedModel, model, profiles, selectedProfile, switchingProfile, butlers, customizeOpen, historyOpen, historyTranscript, manageOpen, commandMenuOpen, onExit]);
 
   useEffect(() => {
     inputValueRef.current = input;
@@ -1050,7 +1156,7 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
                 onClick={handleClearContext}
                 disabled={sending}
                 className="inline-flex items-center gap-1 border-l border-gray-200 dark:border-gray-700 px-2.5 py-1 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 hover:text-gray-900 dark:hover:text-gray-100 transition-colors disabled:opacity-40 disabled:hover:bg-transparent"
-                title="Clear the butler's conversation context and start fresh"
+                title="Clear the butler's conversation context and start fresh (Ctrl+L or Ctrl+Shift+X)"
               >
                 <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
                   <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6h14z" />
@@ -1107,8 +1213,10 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
               <label className="flex items-center gap-1 text-gray-500 dark:text-gray-400" title="Model for the butler. Switches without losing context.">
                 <span className="hidden sm:inline text-[11px]">Model</span>
                 <select
+                  ref={modelSelectRef}
                   value={selectedModel}
                   onChange={(e) => void handleModelChange(e.target.value)}
+                  title="Model for the butler. Ctrl+M cycles models without losing context."
                   className="rounded border border-gray-300 dark:border-gray-600 bg-surface-raised dark:bg-surface-raised-dark px-1.5 py-1 text-xs text-gray-700 dark:text-gray-200 focus:outline-none focus:ring-1 focus:ring-brand-500"
                 >
                   {CLAUDE_MODEL_OPTIONS.map((m) => (
@@ -1120,9 +1228,11 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
               <label className="flex items-center gap-1 text-gray-500 dark:text-gray-400" title={`${backendLabel(backend)} profile. Switching restarts the butler with a fresh context.`}>
                 <span className="hidden sm:inline text-[11px]">Profile</span>
                 <select
+                  ref={profileSelectRef}
                   value={selectedProfile}
                   onChange={(e) => void handleProfileChange(e.target.value)}
                   disabled={switchingProfile || sending}
+                  title={`${backendLabel(backend)} profile. Ctrl+P cycles profiles and restarts the butler fresh.`}
                   className="rounded border border-gray-300 dark:border-gray-600 bg-surface-raised dark:bg-surface-raised-dark px-1.5 py-1 text-xs text-gray-700 dark:text-gray-200 focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:opacity-50"
                 >
                   <option value="">{globalProfile ? `Default (${globalProfile})` : "Default"}</option>
@@ -1318,7 +1428,7 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
                   onKeyDown={handleKeyDown}
                   disabled={sending}
                   rows={1}
-                  placeholder="Message the butler... (Enter to send, Shift+Enter for new line, / for commands)"
+                  placeholder="Message the butler... (Enter or Ctrl+Enter to send, Shift+Enter for new line, / for commands)"
                   className="block w-full resize-none rounded-xl border border-gray-300 dark:border-gray-600 bg-surface-raised dark:bg-surface-raised-dark px-4 py-2.5 pr-10 text-sm text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-brand-500 dark:focus:ring-brand-600 transition-all disabled:opacity-50"
                   style={{ minHeight: "42px", maxHeight: "160px", overflowY: "auto" }}
                   onInput={(e) => {
@@ -1371,7 +1481,7 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
                   <span>
                     {isDictating
                       ? "Dictating in progress"
-                      : "Persistent warm butler runs in your project repo. Enter to send. Hold Ctrl + Space to dictate."}
+                      : "Persistent warm butler runs in your project repo. Enter or Ctrl + Enter sends. Ctrl + L clears context. Hold Ctrl + Space to dictate."}
                   </span>
                   {isDictating && <span className="inline-block w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />}
                 </span>

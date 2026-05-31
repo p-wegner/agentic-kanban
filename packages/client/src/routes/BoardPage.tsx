@@ -777,6 +777,15 @@ export function BoardPage() {
 
   // Keyboard shortcuts
   useEffect(() => {
+    function isTextEntryTarget(target: EventTarget | null) {
+      if (!(target instanceof HTMLElement)) return false;
+      return target.tagName === "INPUT"
+        || target.tagName === "TEXTAREA"
+        || target.tagName === "SELECT"
+        || target.isContentEditable
+        || target.closest("[contenteditable='true']") !== null;
+    }
+
     function handleKeyDown(e: KeyboardEvent) {
       // Ctrl+K to open command palette
       if (e.key === "k" && (e.ctrlKey || e.metaKey)) {
@@ -787,8 +796,7 @@ export function BoardPage() {
       }
       // "/" to focus search
       if (e.key === "/" && !e.ctrlKey && !e.metaKey) {
-        const target = e.target as HTMLElement;
-        if (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT") return;
+        if (isTextEntryTarget(e.target)) return;
         e.preventDefault();
         const input = document.getElementById("search-input") as HTMLInputElement | null;
         if (input) {
@@ -834,15 +842,13 @@ export function BoardPage() {
       }
       // "?" to show keyboard shortcuts
       if (e.key === "?" && !e.ctrlKey && !e.metaKey) {
-        const target = e.target as HTMLElement;
-        if (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT") return;
+        if (isTextEntryTarget(e.target)) return;
         e.preventDefault();
         setShowShortcutHelp((prev) => !prev);
       }
       // "g+s" chord to open settings; "g" alone switches to graph view
       if (e.key === "g" && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        const target = e.target as HTMLElement;
-        if (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT") return;
+        if (isTextEntryTarget(e.target)) return;
         e.preventDefault();
         pendingGRef.current = true;
         if (pendingGTimerRef.current) clearTimeout(pendingGTimerRef.current);
@@ -865,48 +871,42 @@ export function BoardPage() {
       // Plain single-key view shortcuts, derived from the canonical view registry
       // (#116). The `graph` chord ("g", with g+s for settings) is handled above.
       if (SHORTCUT_TO_VIEW[e.key] && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        const target = e.target as HTMLElement;
-        if (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT") return;
+        if (isTextEntryTarget(e.target)) return;
         e.preventDefault();
         handleViewModeChange(SHORTCUT_TO_VIEW[e.key]);
         return;
       }
       // "a" to toggle All Workspaces panel
       if (e.key === "a" && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        const target = e.target as HTMLElement;
-        if (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT") return;
+        if (isTextEntryTarget(e.target)) return;
         e.preventDefault();
         setShowAllWorkspaces(prev => !prev);
         return;
       }
       // "q" to open Quick Tasks panel
       if (e.key === "q" && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        const target = e.target as HTMLElement;
-        if (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT") return;
+        if (isTextEntryTarget(e.target)) return;
         e.preventDefault();
         setShowQuickTasks(true);
         return;
       }
       // "x" to open Codemod Factory
       if (e.key === "x" && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        const target = e.target as HTMLElement;
-        if (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT") return;
+        if (isTextEntryTarget(e.target)) return;
         e.preventDefault();
         setShowCodemod((prev) => !prev);
         return;
       }
       // "V" (shift+v) to trigger voice inbox
       if (e.key === "V" && e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        const target = e.target as HTMLElement;
-        if (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT") return;
+        if (isTextEntryTarget(e.target)) return;
         e.preventDefault();
         window.dispatchEvent(new CustomEvent("voice-inbox-trigger"));
         return;
       }
       // "c" to create issue, "w" to create issue + workspace
       if ((e.key === "c" || e.key === "w") && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        const target = e.target as HTMLElement;
-        if (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT") return;
+        if (isTextEntryTarget(e.target)) return;
         e.preventDefault();
         const col = activeColumns[0] ?? filteredColumns[0] ?? columns[0];
         if (!col) return;
@@ -1293,6 +1293,7 @@ export function BoardPage() {
               liveActivity={sessionActivity}
               liveStats={liveStats}
               onIssueClick={handleIssueClick}
+              onExit={() => handleViewModeChange("kanban")}
             />
           </BoardErrorBoundary>
         )}
@@ -1509,7 +1510,7 @@ export function BoardPage() {
         <CommandPalette onClose={() => setShowCommandPalette(false)} />
       )}
       {showShortcutHelp && (
-        <ShortcutHelp onClose={() => setShowShortcutHelp(false)} />
+        <ShortcutHelp onClose={() => setShowShortcutHelp(false)} currentView={viewMode} />
       )}
       {expandedCreatePanel && activeProjectId && (
         <CreateIssuePanel
