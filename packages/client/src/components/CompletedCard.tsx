@@ -44,8 +44,8 @@ export function CompletedCard({ issue, onClick, onDragStart, searchQuery }: Comp
           : "bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600")
       }
     >
-      <div className="flex items-start justify-between gap-1.5">
-        <p className={`text-xs leading-snug min-w-0 ${isCancelled ? "line-through text-gray-400 dark:text-gray-500" : "text-gray-800 dark:text-gray-200"}`}>
+      <div className="flex min-w-0 items-start justify-between gap-1.5">
+        <p className={`text-xs leading-snug min-w-0 break-words ${isCancelled ? "line-through text-gray-400 dark:text-gray-500" : "text-gray-800 dark:text-gray-200"}`}>
           {issue.issueNumber != null && (
             <span className="text-gray-400 dark:text-gray-500 font-mono mr-0.5">#{issue.issueNumber}</span>
           )}
@@ -65,10 +65,10 @@ export function CompletedCard({ issue, onClick, onDragStart, searchQuery }: Comp
       </div>
 
       {mainWs && (
-        <div className="flex items-center gap-1.5 mt-1.5 text-[10px] text-gray-500 dark:text-gray-400">
-          <span className="font-mono truncate">{mainWs.branch}</span>
+        <div className="flex min-w-0 flex-wrap items-center gap-1.5 mt-1.5 text-[10px] text-gray-500 dark:text-gray-400">
+          <span className="min-w-0 flex-1 basis-24 font-mono truncate">{mainWs.branch}</span>
           {mainWs.diffStats && (
-            <span className="inline-flex items-center gap-0.5 font-mono shrink-0 ml-auto">
+            <span className="inline-flex items-center gap-0.5 font-mono shrink-0">
               <span className="text-green-600">+{mainWs.diffStats.insertions}</span>
               <span className="text-red-500">-{mainWs.diffStats.deletions}</span>
               <span className="text-gray-400 dark:text-gray-500">{mainWs.diffStats.filesChanged}f</span>
