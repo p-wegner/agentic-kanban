@@ -232,7 +232,7 @@ describe("agent.service", () => {
 
       const opts = (spawnMock as any).mock.calls[0][2];
       expect(opts.env.KANBAN_BOARD_SERVER_PORT).toBe("3001");
-      expect(opts.env.KANBAN_SERVER_PORT).toBe("3001");
+      expect(opts.env.KANBAN_SERVER_PORT).toBe("3146");
       expect(opts.env.KANBAN_WORKTREE_SERVER_PORT).toBe("3146");
       expect(opts.env.KANBAN_CLIENT_PORT).toBe("5318");
       expect(opts.env.KANBAN_WORKTREE_CLIENT_PORT).toBe("5318");

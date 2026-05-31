@@ -16,7 +16,7 @@ Safely start, stop, and health-check the agentic-kanban dev server. This encodes
 
 ## Step 1 — Determine ports
 
-`scripts/dev.mjs` auto-detects worktree context and sets these env vars: `KANBAN_WORKTREE_SERVER_PORT`, `KANBAN_WORKTREE_CLIENT_PORT`, `SERVER_PORT`, `PORT`, `VITE_PORT`. Agent sessions also keep `KANBAN_SERVER_PORT` pointed at the main board API; do not use it for worktree dev-server cleanup when `KANBAN_WORKTREE_SERVER_PORT` is present.
+`scripts/dev.mjs` auto-detects worktree context and sets these env vars: `KANBAN_WORKTREE_SERVER_PORT`, `KANBAN_WORKTREE_CLIENT_PORT`, `KANBAN_SERVER_PORT`, `KANBAN_CLIENT_PORT`, `SERVER_PORT`, `PORT`, `VITE_PORT`. In worktree agent sessions, board REST calls use `KANBAN_BOARD_SERVER_PORT`; dev-server cleanup uses the worktree ports below.
 
 **In a worktree, never hardcode 3001/5173.** Read the env vars instead:
 

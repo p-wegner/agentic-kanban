@@ -115,6 +115,10 @@ export function WorkflowProgress({
 
   async function transition(toNodeId: string, toNodeName: string) {
     if (transitioning) return;
+    const confirmed = window.confirm(
+      `Advance workflow to "${toNodeName}"? This changes the workspace state and cannot be easily undone.`,
+    );
+    if (!confirmed) return;
     setTransitioning(true);
     try {
       await apiFetch(`/api/workflows/workspaces/${workspaceId}/transition`, {
