@@ -468,6 +468,15 @@ export function createIssueService(deps: {
       throw new IssueError(`type must be one of: ${validTypes.join(", ")}`, "BAD_REQUEST");
     }
 
+    if (body.type === "text") {
+      await materializePhaseArtifactToWorktree(database, {
+        issueId,
+        workspaceId: body.workspaceId,
+        caption: body.caption,
+        content: body.content,
+      });
+    }
+
     const id = randomUUID();
     await database.insert(issueArtifacts).values({
       id,
@@ -478,15 +487,6 @@ export function createIssueService(deps: {
       content: body.content,
       caption: body.caption ?? null,
     });
-
-    if (body.type === "text") {
-      await materializePhaseArtifactToWorktree(database, {
-        issueId,
-        workspaceId: body.workspaceId,
-        caption: body.caption,
-        content: body.content,
-      }).catch((err) => console.warn("[issue-artifacts] failed to write phase artifact file:", err));
-    }
 
     const projectId = await getIssueProjectId(issueId, database);
     if (projectId) boardEvents?.broadcast(projectId, "issue_updated");
