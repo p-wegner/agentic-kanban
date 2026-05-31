@@ -1,5 +1,5 @@
-import { syncCurrentNodeToStatus } from "@agentic-kanban/shared/lib/workflow-engine";
-import { issues, preferences, projectStatuses, projects, scheduledRuns, sessions, workspaces } from "@agentic-kanban/shared/schema";
+import { isSpecPlanningStageName, syncCurrentNodeToStatus } from "@agentic-kanban/shared/lib/workflow-engine";
+import { issues, preferences, projectStatuses, projects, scheduledRuns, sessions, workflowNodes, workspaces } from "@agentic-kanban/shared/schema";
 import { eq } from "drizzle-orm";
 import { execFile } from "node:child_process";
 import { db } from "../db/index.js";
@@ -66,6 +66,16 @@ async function hasCommittedChanges(workspace: WorkspaceRow, defaultBranch: strin
     }
     return await new Promise<boolean>((resolve) => execFile("git", ["diff", "--quiet", baseBranch], { cwd: workspace.workingDir! }, (err: Error | null) => resolve(!!err)));
   } catch { return false; }
+}
+
+async function isSpecPlanningNode(currentNodeId: string | null): Promise<boolean> {
+  if (!currentNodeId) return false;
+  const rows = await db
+    .select({ name: workflowNodes.name })
+    .from(workflowNodes)
+    .where(eq(workflowNodes.id, currentNodeId))
+    .limit(1);
+  return isSpecPlanningStageName(rows[0]?.name);
 }
 
 export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge }: WorkflowDeps) {
@@ -187,6 +197,11 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge }:
       }
 
       const committedChanges = await hasCommittedChanges(workspace, defaultBranch, workspaceId);
+      if (await isSpecPlanningNode(workspace.currentNodeId)) {
+        console.log(`[workflow] planning phase session ${sessionId} completed; waiting for explicit user approval before advancing`);
+        boardEvents.broadcast(projectId, "issue_updated");
+        return;
+      }
       // Direct workspaces with no committed changes: close immediately (nothing to review).
       // Direct workspaces WITH changes fall through to the review flow below.
       if (workspace.isDirect && !committedChanges) {

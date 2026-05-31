@@ -159,6 +159,11 @@ export function getNodeGuidance(config: string | null): string | null {
   }
 }
 
+export function isSpecPlanningStageName(name: string | null | undefined): boolean {
+  const normalized = name?.trim().toLowerCase();
+  return normalized === "specify" || normalized === "design" || normalized === "tasks";
+}
+
 /**
  * How a parallel-join node consolidates its fork children:
  *  - "artifacts" (default): collect each child branch's diff into an artifacts
@@ -373,6 +378,21 @@ export function buildTransitionBlock(
       "",
       "This is a **parallel fork**. The system will now spawn the parallel branches automatically — you do NOT need to call `propose_transition`. Your work at this stage is complete; stop here.",
     );
+    return lines.join("\n");
+  }
+
+  if (isSpecPlanningStageName(node.name)) {
+    lines.push(
+      "",
+      "This is an interactive planning phase. Draft or refine the phase artifact and ask clarifying questions when needed, then stop. Do NOT call `propose_transition`; the user advances this phase from the planning panel with **Approve & continue**.",
+    );
+    if (transitions.length > 0) {
+      lines.push("", "The next phase options shown to the user are:");
+      for (const t of transitions) {
+        const why = t.label ? ` - ${t.label}` : "";
+        lines.push(`- **${t.toNodeName}**${why}`);
+      }
+    }
     return lines.join("\n");
   }
 
