@@ -67,6 +67,7 @@ interface RuntimeSnapshotInput {
   processes: ProcessRecord[];
   listeners: PortListener[];
   activeWorkspaces: ActiveWorkspaceResource[];
+  cleanupScopePaths?: string[];
   protectedPorts: Set<number>;
   protectedPidSet: Set<number>;
   now: Date;
@@ -74,6 +75,14 @@ interface RuntimeSnapshotInput {
 
 function normalizePath(value: string | null | undefined): string {
   return (value ?? "").replace(/\\/g, "/").toLowerCase();
+}
+
+function worktreeScopeRoot(value: string | null | undefined): string | null {
+  const normalized = normalizePath(value);
+  const marker = "/.worktrees/";
+  const markerIndex = normalized.indexOf(marker);
+  if (markerIndex < 0) return null;
+  return normalized.slice(0, markerIndex + marker.length - 1);
 }
 
 function branchHash(branchName: string): number {
@@ -196,6 +205,7 @@ function workspaceAssociations(tree: ProcessRecord[], activeWorkspaces: ActiveWo
 
 export function classifyStaleDevProcessTrees(input: RuntimeSnapshotInput): BoardMonitorResourceSnapshot {
   const allPids = new Set(input.processes.map((proc) => proc.pid));
+  const cleanupScopePaths = [...new Set((input.cleanupScopePaths ?? []).map(normalizePath).filter(Boolean))];
   const relevantProcesses = input.processes
     .filter(isRelevantProcess)
     .map((proc) => ({ ...proc, parentAlive: proc.ppid > 0 && allPids.has(proc.ppid) }))
@@ -209,12 +219,14 @@ export function classifyStaleDevProcessTrees(input: RuntimeSnapshotInput): Board
 
   for (const root of treeRoots(input.processes)) {
     const tree = descendants(root, children);
+    const treeCommand = normalizePath(tree.map((proc) => proc.commandLine).join("\n"));
     const treePids = new Set(tree.map((proc) => proc.pid));
     const listenerPorts = listeners
       .filter((listener) => treePids.has(listener.pid))
       .map((listener) => listener.port)
       .sort((a, b) => a - b);
     const associatedWorkspaceIds = workspaceAssociations(tree, input.activeWorkspaces);
+    const inCleanupScope = cleanupScopePaths.some((scope) => treeCommand.includes(scope));
     const protectedTreePids = tree.filter((proc) => input.protectedPidSet.has(proc.pid)).map((proc) => proc.pid);
     const protectedTreePorts = listenerPorts.filter((port) => input.protectedPorts.has(port));
     const decisionBase = {
@@ -231,6 +243,8 @@ export function classifyStaleDevProcessTrees(input: RuntimeSnapshotInput): Board
       kept.push({ ...decisionBase, action: "kept", reason: `protected-port:${protectedTreePorts.join(",")}` });
     } else if (associatedWorkspaceIds.length > 0) {
       kept.push({ ...decisionBase, action: "kept", reason: "active-workspace" });
+    } else if (!inCleanupScope) {
+      kept.push({ ...decisionBase, action: "kept", reason: "outside-cleanup-scope" });
     } else if (listenerPorts.length > 0) {
       kept.push({ ...decisionBase, action: "kept", reason: `listener-port:${listenerPorts.join(",")}` });
     } else {
@@ -249,6 +263,19 @@ export function classifyStaleDevProcessTrees(input: RuntimeSnapshotInput): Board
     kept,
     cleaned,
   };
+}
+
+async function getWorkspaceCleanupScopePaths(database: Database): Promise<string[]> {
+  const rows = await database.select({ workingDir: workspaces.workingDir }).from(workspaces);
+  const paths = new Set<string>();
+  for (const row of rows) {
+    const dir = normalizePath(row.workingDir);
+    if (!dir) continue;
+    paths.add(dir);
+    const root = worktreeScopeRoot(dir);
+    if (root) paths.add(root);
+  }
+  return [...paths].sort();
 }
 
 async function defaultKillTree(pid: number): Promise<void> {
@@ -344,6 +371,7 @@ export async function snapshotAndCleanStaleDevProcesses(
   deps: StaleDevProcessDeps = {},
 ): Promise<BoardMonitorResourceSnapshot> {
   const activeWorkspaces = await getActiveWorkspaceResources(database);
+  const cleanupScopePaths = await getWorkspaceCleanupScopePaths(database);
   const protectedPorts = envProtectedPorts();
   for (const ws of activeWorkspaces) for (const port of ws.ports) protectedPorts.add(port);
 
@@ -351,6 +379,7 @@ export async function snapshotAndCleanStaleDevProcesses(
     processes: await (deps.listProcesses ?? listProcesses)(),
     listeners: await (deps.listListeners ?? listPortListeners)(),
     activeWorkspaces,
+    cleanupScopePaths,
     protectedPorts,
     protectedPidSet: protectedPids(),
     now: deps.now?.() ?? new Date(),
