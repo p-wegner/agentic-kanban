@@ -667,6 +667,22 @@ export function BoardPage() {
     }
   }
 
+  async function handleOpenWorkspaceById(workspaceId: string, issueId: string) {
+    let issue = columnsRef.current.flatMap((c) => c.issues).find((i) => i.id === issueId);
+    if (!issue) {
+      const board = await refetchBoard();
+      issue = (board ?? []).flatMap((c) => c.issues).find((i) => i.id === issueId);
+    }
+    if (!issue) {
+      showToast("Issue is not visible on the current board", "error");
+      return;
+    }
+    setSelectedIssue(null);
+    setWorkspaceIssue(issue);
+    setWorkspaceOpenCreate(false);
+    setWorkspaceInitial({ workspaceId, sessionId: "" });
+  }
+
   function handleStartWorkspace(issue: IssueWithStatus) {
     setSelectedIssue(null);
     setWorkspaceIssue(issue);
@@ -1286,7 +1302,7 @@ export function BoardPage() {
         )}
         {viewMode === "workflows" && activeProjectId && (
           <BoardErrorBoundary columnName="Workflows View">
-            <WorkflowsView projectId={activeProjectId} />
+            <WorkflowsView projectId={activeProjectId} onOpenWorkspace={handleOpenWorkspaceById} />
           </BoardErrorBoundary>
         )}
         {viewMode === "insights" && activeProjectId && (
