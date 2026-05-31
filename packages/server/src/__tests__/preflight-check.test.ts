@@ -139,6 +139,8 @@ describe("workspaceLaunchPreflight", () => {
       ["worktree:.claude/hooks/smart-hooks-runner.js", "runner"],
       ["main:.claude/hooks/validate-command-safety.js", "validator"],
       ["worktree:.claude/hooks/validate-command-safety.js", "validator"],
+      ["main:.claude/hooks/prevent-cross-worktree-writes.js", "cross-worktree"],
+      ["worktree:.claude/hooks/prevent-cross-worktree-writes.js", "cross-worktree"],
       ["main:CLAUDE.md", "current safety guidance"],
       ["worktree:CLAUDE.md", "old safety guidance"],
     ]);
@@ -181,6 +183,8 @@ describe("workspaceLaunchPreflight", () => {
       ["worktree:.claude/hooks/smart-hooks-runner.js", "runner"],
       ["main:.claude/hooks/validate-command-safety.js", "validator"],
       ["worktree:.claude/hooks/validate-command-safety.js", "validator"],
+      ["main:.claude/hooks/prevent-cross-worktree-writes.js", "cross-worktree"],
+      ["worktree:.claude/hooks/prevent-cross-worktree-writes.js", "cross-worktree"],
       ["main:CLAUDE.md", "current safety guidance"],
       ["worktree:CLAUDE.md", "old safety guidance"],
     ]);
@@ -216,6 +220,8 @@ describe("workspaceLaunchPreflight", () => {
       ["worktree:.claude/hooks/smart-hooks-runner.js", "runner"],
       ["main:.claude/hooks/validate-command-safety.js", "validator"],
       ["worktree:.claude/hooks/validate-command-safety.js", "validator"],
+      ["main:.claude/hooks/prevent-cross-worktree-writes.js", "cross-worktree"],
+      ["worktree:.claude/hooks/prevent-cross-worktree-writes.js", "cross-worktree"],
       ["main:CLAUDE.md", "guidance"],
       ["worktree:CLAUDE.md", "guidance"],
     ]);

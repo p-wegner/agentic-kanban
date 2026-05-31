@@ -12,6 +12,7 @@ const SAFETY_POLICY_FILES = [
   ".codex/hooks.json",
   ".claude/hooks/smart-hooks-runner.js",
   ".claude/hooks/validate-command-safety.js",
+  ".claude/hooks/prevent-cross-worktree-writes.js",
   "CLAUDE.md",
 ] as const;
 
