@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { apiFetch } from "../lib/api.js";
 import { formatRelativeTime } from "../lib/formatRelativeTime.js";
+import { getWorkspacePreviewUrl } from "../lib/workspace-preview.js";
 import { getOutputFormatForAgent, getOutputFormatForProvider, type AgentOutputFormat } from "../lib/agent-output-parser.js";
 import { useWebSocket } from "../lib/useWebSocket.js";
 import { TerminalView } from "./TerminalView.js";
@@ -12,6 +13,7 @@ import TicketMentionInput from "./TicketMentionInput.js";
 import { useWorkspaceSession } from "../hooks/useWorkspaceSession.js";
 import { usePanelLayout } from "../hooks/usePanelLayout.js";
 import { SessionReplay } from "./SessionReplay.js";
+import { showToast } from "./Toast.js";
 import type {
   AgentOutputMessage,
   IssueWithStatus,
@@ -806,6 +808,16 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
     }
   }
 
+  async function copyPreviewUrl(url: string) {
+    try {
+      if (!navigator.clipboard) throw new Error("Clipboard API unavailable");
+      await navigator.clipboard.writeText(url);
+      showToast("Preview URL copied", "success");
+    } catch {
+      window.prompt("Copy preview URL", url);
+    }
+  }
+
   async function handleUpdateBase(wsId: string, mode: "rebase" | "merge") {
     setActionLoading(true);
     setError(null);
@@ -1396,6 +1408,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
             const runningSession = sessions.find((s) => s.status === "running");
             const workspaceProvider = ws.profile?.provider ?? ws.provider;
             const workspaceProfile = ws.profile?.name ?? ws.claudeProfile;
+            const preview = getWorkspacePreviewUrl(ws);
             const runningTriggerLabel = runningSession
               ? (getTriggerTypeLabel(runningSession.triggerType, runningSession.skillName) ?? { label: "Agent", className: "bg-blue-50 text-blue-600" })
               : null;
@@ -2300,6 +2313,45 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                         >
                           VS Code
                         </button>
+                        )}
+                        {ws.workingDir && preview.ok && (
+                          <div className="flex gap-1">
+                            <button
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                window.open(preview.url, "_blank", "noopener,noreferrer");
+                              }}
+                              disabled={actionLoading}
+                              className="text-sm bg-sky-600 text-white px-3 py-1.5 rounded-l hover:bg-sky-700 disabled:opacity-50"
+                              title={`Open dev preview at ${preview.url}`}
+                            >
+                              Preview
+                            </button>
+                            <button
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                void copyPreviewUrl(preview.url);
+                              }}
+                              disabled={actionLoading}
+                              className="text-sm bg-sky-700 text-white px-2 py-1.5 rounded-r hover:bg-sky-800 disabled:opacity-50 border-l border-sky-500"
+                              title={`Copy ${preview.url}`}
+                            >
+                              <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                                <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                              </svg>
+                              <span className="sr-only">Copy preview URL</span>
+                            </button>
+                          </div>
+                        )}
+                        {ws.workingDir && !preview.ok && (
+                          <button
+                            disabled
+                            className="text-sm bg-gray-200 dark:bg-gray-800 text-gray-500 dark:text-gray-400 px-3 py-1.5 rounded cursor-not-allowed"
+                            title={preview.reason}
+                          >
+                            Preview unavailable
+                          </button>
                         )}
                         {ws.workingDir && (
                         <button
