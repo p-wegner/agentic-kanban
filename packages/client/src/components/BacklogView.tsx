@@ -154,7 +154,8 @@ export function BacklogView({
 
   const selectedVisibleIds = sortedIssues.map((issue) => issue.id).filter((id) => selectedIds.has(id));
   const allVisibleSelected = sortedIssues.length > 0 && sortedIssues.every((issue) => selectedIds.has(issue.id));
-  const defaultTargetStatus = activeColumns[0];
+  const moveTargetColumns = activeColumns.filter((status) => status.name === "Todo");
+  const defaultTargetStatus = moveTargetColumns[0];
   const blockedCount = backlogIssues.filter((issue) => issue.isBlocked).length;
   const workspaceCount = backlogIssues.filter((issue) => issue.workspaceSummary?.main).length;
   const readyCount = backlogIssues.filter((issue) => !issue.isBlocked && !issue.workspaceSummary?.main).length;
@@ -334,7 +335,7 @@ export function BacklogView({
               Clear
             </button>
             <div className="h-4 w-px bg-brand-200 dark:bg-brand-800" />
-            {activeColumns.map((status) => (
+            {moveTargetColumns.map((status) => (
               <button
                 key={status.id}
                 disabled={bulkMoving}
@@ -416,7 +417,7 @@ export function BacklogView({
                           isPendingWorkspace={pendingWorkspaceIssueIds.has(issue.id)}
                         />
                         <div className="mt-1 flex flex-wrap gap-1">
-                          {activeColumns.map((status) => (
+                          {moveTargetColumns.map((status) => (
                             <button
                               key={status.id}
                               onClick={() => moveIssue(issue, status.id, status.name)}
