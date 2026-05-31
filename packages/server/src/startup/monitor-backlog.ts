@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { issues, projectStatuses, workspaces } from "@agentic-kanban/shared/schema";
 import { eq, sql } from "drizzle-orm";
 import { db } from "../db/index.js";
@@ -17,6 +18,7 @@ interface HostIssue {
 /** Default host-issue creator: inserts the row and returns its id (null on failure). */
 async function defaultCreateHostIssue(issue: HostIssue, nowIso: string): Promise<string | null> {
   const rows = await db.insert(issues).values({
+    id: randomUUID(),
     projectId: issue.projectId,
     issueNumber: issue.issueNumber,
     title: issue.title,
