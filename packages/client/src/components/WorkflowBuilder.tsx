@@ -199,7 +199,7 @@ export function WorkflowBuilder({
     const payload = {
       projectId,
       name,
-      description,
+      description: description || null,
       ticketType: ticketType || null,
       nodes: nodes.map((n, i) => ({
         id: n.id,
@@ -375,10 +375,30 @@ export function WorkflowBuilder({
                 <input value={(selectedEdge.data as any)?.label ?? ""} onChange={(e) => patchEdge(selectedEdge.id, { label: e.target.value || null })} className="w-full mt-0.5 border rounded px-2 py-1 dark:bg-gray-800 dark:border-gray-600" />
               </label>
               <label className="block text-xs">Condition
-                <select value={(selectedEdge.data as any)?.condition ?? "manual"} onChange={(e) => patchEdge(selectedEdge.id, { condition: e.target.value })} className="w-full mt-0.5 border rounded px-2 py-1 dark:bg-gray-800 dark:border-gray-600">
+                <select
+                  value={edgeConditionBase((selectedEdge.data as any)?.condition ?? "manual")}
+                  onChange={(e) => {
+                    const currentCondition = (selectedEdge.data as any)?.condition ?? "manual";
+                    const nextCondition = e.target.value === "diff_touches"
+                      ? writeDiffTouchesCondition(readDiffTouchesGlob(currentCondition))
+                      : e.target.value;
+                    patchEdge(selectedEdge.id, { condition: nextCondition });
+                  }}
+                  className="w-full mt-0.5 border rounded px-2 py-1 dark:bg-gray-800 dark:border-gray-600"
+                >
                   {EDGE_CONDITIONS.map((c) => <option key={c} value={c}>{c}</option>)}
                 </select>
               </label>
+              {edgeConditionBase((selectedEdge.data as any)?.condition ?? "manual") === "diff_touches" && (
+                <label className="block text-xs">Glob
+                  <input
+                    value={readDiffTouchesGlob((selectedEdge.data as any)?.condition ?? "")}
+                    onChange={(e) => patchEdge(selectedEdge.id, { condition: writeDiffTouchesCondition(e.target.value) })}
+                    placeholder="packages/server/**"
+                    className="w-full mt-0.5 border rounded px-2 py-1 dark:bg-gray-800 dark:border-gray-600"
+                  />
+                </label>
+              )}
               <label className="flex items-center gap-2 text-xs">
                 <input
                   type="checkbox"
@@ -441,6 +461,16 @@ function writeForkMode(config: string | null, mode: string): string | null {
 }
 
 function cap(s: string) { return s.charAt(0).toUpperCase() + s.slice(1).replace(/-/g, " "); }
+function edgeConditionBase(condition: string): string {
+  const idx = condition.indexOf(":");
+  return idx === -1 ? condition : condition.slice(0, idx);
+}
+function readDiffTouchesGlob(condition: string): string {
+  return edgeConditionBase(condition) === "diff_touches" ? condition.slice("diff_touches:".length) : "";
+}
+function writeDiffTouchesCondition(glob: string): string {
+  return `diff_touches:${glob}`;
+}
 function defaultStatus(type: string): string | null {
   if (type === "start") return "In Progress";
   if (type === "end") return "Done";

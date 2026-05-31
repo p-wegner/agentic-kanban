@@ -229,7 +229,7 @@ export function launch(
       NO_COLOR: "1",
       KANBAN_BOARD_SERVER_PORT: boardServerPort,
       KANBAN_BOARD_CLIENT_PORT: boardClientPort,
-      KANBAN_SERVER_PORT: boardServerPort,
+      KANBAN_SERVER_PORT: worktreeServerPort,
       KANBAN_CLIENT_PORT: worktreeClientPort,
       KANBAN_WORKTREE_SERVER_PORT: worktreeServerPort,
       KANBAN_WORKTREE_CLIENT_PORT: worktreeClientPort,
