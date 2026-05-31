@@ -16,14 +16,16 @@ export function registerIssueCommand(program: Command) {
     .description("List issues for the active project.\n\nShows issue number, priority, status, and title. Filters can be combined.")
     .option("-s, --status <status>", "Filter by status name (e.g. Todo, 'In Progress', Done)")
     .option("-p, --priority <priority>", "Filter by priority (low, medium, high, critical)")
+    .option("--json", "Output raw JSON instead of formatted text")
     .addHelpText("after", `
 Examples:
   $ agentic-kanban issue list                        # all issues
   $ agentic-kanban issue list -s Todo                # only todo issues
   $ agentic-kanban issue list -p critical            # only critical priority
   $ agentic-kanban issue list -s "In Progress" -p high
+  $ agentic-kanban issue list --json                 # machine-readable output
 `)
-    .action(async (options: { status?: string; priority?: string }) => {
+    .action(async (options: { status?: string; priority?: string; json?: boolean }) => {
       try {
         await runMigrations();
         const projectId = await getActiveProjectId();
@@ -44,6 +46,11 @@ Examples:
 
         if (options.status) rows = rows.filter((r) => r.statusName === options.status);
         if (options.priority) rows = rows.filter((r) => r.priority === options.priority);
+
+        if (options.json) {
+          console.log(JSON.stringify(rows, null, 2));
+          process.exit(0);
+        }
 
         if (rows.length === 0) {
           console.log("No issues found.");
