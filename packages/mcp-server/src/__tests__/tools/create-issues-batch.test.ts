@@ -93,4 +93,27 @@ describe("create_issues_batch tool", () => {
     const data = parseResult(result);
     expect(data.issues.map((i: any) => i.issueNumber)).toEqual([8, 9]);
   });
+
+  it("links created issues to parent with child_of when parentIssueId is provided", async () => {
+    const { invoke, db } = setupTool(registerCreateIssuesBatch);
+    const { projectId, statusIds } = await seedProject(db);
+
+    await db.insert(schema.issues).values({
+      id: "parent-1", issueNumber: 1, title: "Parent", priority: "medium",
+      sortOrder: 0, statusId: statusIds.Todo, projectId,
+      createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+    });
+
+    const result = await invoke({
+      projectId,
+      parentIssueId: "parent-1",
+      issues: [{ title: "Child A" }, { title: "Child B" }],
+    });
+    const data = parseResult(result);
+    expect(data.issues).toHaveLength(2);
+
+    const deps = await db.select().from(schema.issueDependencies).where(eq(schema.issueDependencies.dependsOnId, "parent-1"));
+    expect(deps).toHaveLength(2);
+    expect(deps.every((dep) => dep.type === "child_of")).toBe(true);
+  });
 });

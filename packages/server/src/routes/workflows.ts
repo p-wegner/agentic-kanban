@@ -14,15 +14,19 @@ import {
   proposeTransition,
   resolveTemplateForIssue,
   getOutgoingTransitions,
+  getNode,
+  countNodeVisits,
   validateGraph,
   writeTemplateGraph,
   computeWorkspaceSignals,
   evaluateCondition,
 } from "@agentic-kanban/shared/lib/workflow-engine";
+import type { SignalContext } from "@agentic-kanban/shared/lib/workflow-engine";
 import { randomUUID } from "node:crypto";
 import { createRouter } from "../middleware/create-router.js";
 import { parseJsonBody } from "../middleware/parse-body.js";
 import type { BoardEvents } from "../services/board-events.js";
+import { materializeSpecTasksForWorkspace } from "../services/spec-tasks-materialization.service.js";
 
 interface WorkflowsRouteOptions {
   boardEvents?: BoardEvents;
@@ -47,6 +51,48 @@ interface WorkflowTemplateJson {
   };
   nodes: unknown[];
   edges: unknown[];
+}
+
+async function validateTransitionRequest(
+  database: Database,
+  input: {
+    currentNodeId: string | null;
+    toNodeId?: string;
+    toNodeName?: string;
+    signals: SignalContext;
+    workspaceId: string;
+  },
+): Promise<string | null> {
+  if (!input.currentNodeId) {
+    return "This workspace is not running a workflow (no current node).";
+  }
+
+  const transitions = await getOutgoingTransitions(database, input.currentNodeId);
+  const target = input.toNodeId
+    ? transitions.find((t) => t.toNodeId === input.toNodeId)
+    : transitions.find((t) => t.toNodeName === input.toNodeName)
+      ?? transitions.find((t) => t.toNodeName.toLowerCase() === input.toNodeName?.toLowerCase());
+
+  if (!target) {
+    const valid = transitions.map((t) => t.toNodeName).join(", ") || "(none - terminal stage)";
+    return `No valid transition to "${input.toNodeName ?? input.toNodeId}" from the current stage. Valid next stages: ${valid}`;
+  }
+
+  const verdict = evaluateCondition(target.condition, input.signals);
+  if (verdict === "block") {
+    return `Transition to "${target.toNodeName}" is gated by condition "${target.condition}", which is not satisfied by the current workspace state.`;
+  }
+
+  const toNode = await getNode(database, target.toNodeId);
+  if (!toNode) return `Target node ${target.toNodeId} not found`;
+  if (toNode.maxVisits > 0) {
+    const visits = await countNodeVisits(database, input.workspaceId, toNode.id);
+    if (visits >= toNode.maxVisits) {
+      return `Node "${toNode.name}" has reached its visit budget (${toNode.maxVisits}). Escalate to a human instead of looping further.`;
+    }
+  }
+
+  return null;
 }
 
 function toTemplateJson(template: any, graph: { nodes: unknown[]; edges: unknown[] }): WorkflowTemplateJson {
@@ -571,7 +617,34 @@ export function createWorkflowsRoute(database: Database = db, options?: Workflow
     if (!toNodeId && !toNodeName) {
       return c.json({ error: "toNodeId or toNodeName is required" }, 400);
     }
+    const currentRows = await database
+      .select({ currentNodeId: workspaces.currentNodeId, nodeName: workflowNodes.name })
+      .from(workspaces)
+      .leftJoin(workflowNodes, eq(workspaces.currentNodeId, workflowNodes.id))
+      .where(eq(workspaces.id, workspaceId))
+      .limit(1);
     const signals = await computeWorkspaceSignals(database, workspaceId);
+    const transitionError = await validateTransitionRequest(database, {
+      workspaceId,
+      currentNodeId: currentRows[0]?.currentNodeId ?? null,
+      toNodeId,
+      toNodeName,
+      signals,
+    });
+    if (transitionError) {
+      return c.json({ error: transitionError }, 400);
+    }
+
+    const wasTasksPhase = currentRows[0]?.nodeName?.toLowerCase() === "tasks";
+    const taskMaterialization = wasTasksPhase
+      ? await materializeSpecTasksForWorkspace(workspaceId, database, { boardEvents }).catch((err) => {
+          console.warn("[workflows] failed to materialize spec tasks:", err);
+          throw err;
+        })
+      : { created: [], dependencyEdges: 0, skipped: true, reason: "not-tasks-phase" };
+    if (wasTasksPhase && taskMaterialization.skipped && taskMaterialization.reason !== "already-materialized") {
+      return c.json({ error: `Tasks artifact did not create child issues: ${taskMaterialization.reason}` }, 400);
+    }
     const result = await proposeTransition(database, {
       workspaceId,
       toNodeId,
@@ -605,6 +678,7 @@ export function createWorkflowsRoute(database: Database = db, options?: Workflow
       status: result.statusName,
       nextStages: (result.nextTransitions ?? []).map((t) => t.toNodeName),
       terminal: (result.nextTransitions ?? []).length === 0,
+      taskMaterialization,
     });
   });
 

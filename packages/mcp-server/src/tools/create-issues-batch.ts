@@ -22,9 +22,10 @@ export function registerCreateIssuesBatch(server: McpServer, deps: ToolDeps = pr
     "Create multiple issues atomically in a single call. Returns each created issue with its assigned issueNumber. All-or-nothing: any validation failure rolls back.",
     {
       projectId: z.string().optional().describe("Project ID (defaults to active project)"),
+      parentIssueId: z.string().optional().describe("Optional parent issue ID. When provided, every created issue is linked to it with a child_of dependency."),
       issues: z.array(issueInputSchema).describe("Array of issue payloads"),
     },
-    async ({ projectId, issues }) => {
+    async ({ projectId, parentIssueId, issues }) => {
       let pid = projectId;
       if (!pid) {
         const pref = await db
@@ -54,6 +55,20 @@ export function registerCreateIssuesBatch(server: McpServer, deps: ToolDeps = pr
         }
       }
 
+      if (parentIssueId) {
+        const parent = await db
+          .select({ projectId: schema.issues.projectId })
+          .from(schema.issues)
+          .where(eq(schema.issues.id, parentIssueId))
+          .limit(1);
+        if (parent.length === 0) {
+          return { content: [{ type: "text" as const, text: `Error: parent issue not found: ${parentIssueId}` }] };
+        }
+        if (parent[0].projectId !== pid) {
+          return { content: [{ type: "text" as const, text: "Error: parent issue must be in the same project" }] };
+        }
+      }
+
       let nextNumber = await nextIssueNumber(db, schema, pid);
 
       const now = new Date().toISOString();
@@ -80,11 +95,21 @@ export function registerCreateIssuesBatch(server: McpServer, deps: ToolDeps = pr
             createdAt: now,
             updatedAt: now,
           });
+          if (parentIssueId) {
+            await tx.insert(schema.issueDependencies).values({
+              id: randomUUID(),
+              issueId: id,
+              dependsOnId: parentIssueId,
+              type: "child_of",
+              createdAt: now,
+            });
+          }
           created.push({ id, issueNumber, title: input.title });
         }
       });
 
       notifyBoard(pid, "mcp_create_issues_batch");
+      if (parentIssueId) notifyBoard(pid, "mcp_dependency_added");
 
       return { content: [{ type: "text" as const, text: JSON.stringify({ issues: created }, null, 2) }] };
     },
