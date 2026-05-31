@@ -43,7 +43,7 @@ export function createVoiceCaptureRoute(
       return c.json(result, 201);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Internal error";
-      if (message.includes("No statuses configured")) {
+      if (message.includes("No statuses configured") || message.includes("not found")) {
         return c.json({ error: message }, 422);
       }
       console.error("[voice-capture] failed:", err);
