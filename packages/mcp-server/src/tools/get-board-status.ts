@@ -6,6 +6,27 @@ import type { BoardStatusIssue } from "@agentic-kanban/shared";
 import { prodDeps, type ToolDeps } from "./deps.js";
 import { requireEntity } from "../db-utils.js";
 
+function classifyAttention(issue: BoardStatusIssue): BoardStatusIssue["attention"] {
+  const stats = issue.diffStats;
+  if (
+    issue.statusName === "In Review"
+    && issue.workspace
+    && issue.workspace.status !== "closed"
+    && !issue.workspace.readyForMerge
+    && stats
+    && stats.filesChanged === 0
+    && stats.insertions === 0
+    && stats.deletions === 0
+  ) {
+    return {
+      bucket: "needs_attention",
+      reason: "idle-awaiting",
+      label: "In Review workspace has no file changes and is not ready for merge",
+    };
+  }
+  return null;
+}
+
 export function registerGetBoardStatus(server: McpServer, deps: ToolDeps = prodDeps) {
   const { db, schema, getDiffShortstat } = deps;
   server.tool(
@@ -162,6 +183,7 @@ export function registerGetBoardStatus(server: McpServer, deps: ToolDeps = prodD
             workspace: mainWs ? {
               id: mainWs.id, branch: mainWs.branch, status: mainWs.status,
               workingDir: mainWs.workingDir, baseBranch: mainWs.baseBranch, isDirect: mainWs.isDirect,
+              readyForMerge: mainWs.readyForMerge,
             } : null,
             session: latestSession ? {
               id: latestSession.id, status: latestSession.status,
@@ -173,6 +195,7 @@ export function registerGetBoardStatus(server: McpServer, deps: ToolDeps = prodD
             lastActivity: null,
             lastOutput: [],
             lastAgentMessage: null,
+            attention: null,
           };
 
           // For non-closed workspaces with a workingDir: compute diff stats + last output
@@ -211,6 +234,10 @@ export function registerGetBoardStatus(server: McpServer, deps: ToolDeps = prodD
         }
 
         await Promise.all(asyncWork);
+
+        for (const issue of result) {
+          issue.attention = classifyAttention(issue);
+        }
 
         const response = {
           project: { id: project.id, name: project.name, repoPath: project.repoPath, defaultBranch: project.defaultBranch },
