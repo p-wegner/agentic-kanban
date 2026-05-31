@@ -28,6 +28,7 @@ import { registerGetSessionStats } from "./tools/get-session-stats.js";
 import { registerGetDiffComments } from "./tools/get-diff-comments.js";
 import { registerCreateDiffComment } from "./tools/create-diff-comment.js";
 import { registerAddDependency } from "./tools/add-dependency.js";
+import { registerAnalyzeDependencies } from "./tools/analyze-dependencies.js";
 import { registerRemoveDependency } from "./tools/remove-dependency.js";
 import { registerCreateIssuesBatch } from "./tools/create-issues-batch.js";
 import { registerUpdateDependenciesBatch } from "./tools/update-dependencies-batch.js";
@@ -82,6 +83,7 @@ const TOOL_REGISTRARS: Record<string, (server: McpServer) => void> = {
   get_diff_comments: registerGetDiffComments,
   create_diff_comment: registerCreateDiffComment,
   add_dependency: registerAddDependency,
+  analyze_dependencies: registerAnalyzeDependencies,
   remove_dependency: registerRemoveDependency,
   create_issues_batch: registerCreateIssuesBatch,
   update_dependencies_batch: registerUpdateDependenciesBatch,

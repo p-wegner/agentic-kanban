@@ -316,12 +316,13 @@ Goal: convert the accepted design into concrete, dependency-aware work the board
 Work interactively:
 1. Read the accepted spec and design.
 2. Break the work into small implementable tasks with clear acceptance criteria and likely files or areas.
-3. Prefer real board child issues for independent units. Use create_issues_batch when several tasks should be created together, then add parent/child and dependency links with add_dependency where available.
-4. Identify dependency waves: what can run in parallel, what must wait, and what should be reviewed together.
-5. Do not implement code in this phase.
+3. Make the approved output parseable: use markdown task checkboxes with stable task IDs, e.g. "- [ ] T001 [P] Implement parser - depends on: T000". Group tasks under "## Wave 1", "## Wave 2", etc. Tasks in the same wave must be safe to run concurrently; later waves depend on earlier waves unless explicit "depends on:" IDs say otherwise.
+4. When the human approves the task breakdown, create real board children with create_issues_batch using parentIssueId set to the current issue ID. Create one child issue per task, with acceptance criteria in each child description.
+5. After batch creation, run analyze_dependencies for each child issue so inferred depends_on edges keep blocked children from launching while independent children remain unblocked.
+6. Do not implement code in this phase.
 
 Gate:
-- Stop when the task breakdown is ready for approval and dependencies are explicit.
+- Stop when the task breakdown is ready for approval, child issues have been created, and dependency analysis has run.
 - Do not call propose_transition yourself; the user advances to Implement from the planning panel.
 - In your final phase summary, mention the created child issues or the approved task list and the first implementation wave.`,
         model: null,
