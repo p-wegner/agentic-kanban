@@ -1282,6 +1282,7 @@ export function BoardPage() {
           <BoardErrorBoundary columnName="Metrics View">
             <MetricsView
               columns={columns}
+              projectId={activeProjectId}
               onIssueClick={handleIssueClick}
             />
           </BoardErrorBoundary>

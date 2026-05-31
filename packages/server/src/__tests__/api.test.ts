@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll } from "vitest";
 import { createRoutes } from "../routes/index.js";
 import * as schema from "@agentic-kanban/shared/schema";
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { eq } from "drizzle-orm";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -111,6 +111,35 @@ describe("Projects API", () => {
 
       const rows = await database.select({ defaultBranch: schema.projects.defaultBranch }).from(schema.projects).where(eq(schema.projects.id, gitProjectId));
       expect(rows[0].defaultBranch).toBe("main");
+    } finally {
+      rmSync(repoPath, { recursive: true, force: true });
+    }
+  });
+
+  it("GET /api/projects/:id/stats includes code metrics and history", async () => {
+    const repoPath = mkdtempSync(join(tmpdir(), "kanban-project-metrics-"));
+    execFileSync("git", ["init", "-b", "main"], { cwd: repoPath });
+    execFileSync("git", ["config", "user.email", "test@test.com"], { cwd: repoPath });
+    execFileSync("git", ["config", "user.name", "Metrics Tester"], { cwd: repoPath });
+    mkdirSync(join(repoPath, "src"), { recursive: true });
+    mkdirSync(join(repoPath, "src", "__tests__"), { recursive: true });
+    writeFileSync(join(repoPath, "src", "feature.ts"), "export const value = 1;\nexport const next = 2;\n");
+    writeFileSync(join(repoPath, "src", "__tests__", "feature.test.ts"), "import './feature';\nexpect(1).toBe(1);\n");
+    execFileSync("git", ["add", "."], { cwd: repoPath });
+    execFileSync("git", ["commit", "-m", "add code metrics fixture"], { cwd: repoPath });
+
+    const gitProjectId = await createProjectDirectly(database, { repoPath, defaultBranch: "main" });
+    try {
+      const res = await app.request(`/api/projects/${gitProjectId}/stats`);
+      expect(res.status).toBe(200);
+      const body = await res.json() as any;
+
+      expect(body.codeMetrics.productionLoc).toBe(2);
+      expect(body.codeMetrics.testLoc).toBe(2);
+      expect(body.codeMetrics.testRatio).toBe(50);
+      expect(body.history.weeks).toHaveLength(12);
+      expect(body.history.contributorCount).toBe(1);
+      expect(body.hotspots.some((file: any) => file.path === "src/feature.ts")).toBe(true);
     } finally {
       rmSync(repoPath, { recursive: true, force: true });
     }
