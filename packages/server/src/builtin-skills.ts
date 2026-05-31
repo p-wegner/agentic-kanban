@@ -405,7 +405,7 @@ Set priority to high and describe the blocker in the issue description.
     model: null,
   },
   {
-    name: "spec-driven-specify",
+    name: "spec-requirements",
     description: "Spec-driven planning phase: turn intent into an interactive requirements spec with human approval gates",
     prompt: `You are guiding the Specify phase of a spec-driven planning workflow.
 
@@ -424,7 +424,7 @@ Gate:
     model: null,
   },
   {
-    name: "spec-driven-design",
+    name: "spec-design",
     description: "Spec-driven planning phase: convert an accepted spec into a concrete implementation design",
     prompt: `You are guiding the Design phase of a spec-driven planning workflow.
 
@@ -443,7 +443,7 @@ Gate:
     model: null,
   },
   {
-    name: "spec-driven-tasks",
+    name: "spec-tasks",
     description: "Spec-driven planning phase: break an accepted design into board-ready child issues and dependency waves",
     prompt: `You are guiding the Tasks phase of a spec-driven planning workflow.
 
