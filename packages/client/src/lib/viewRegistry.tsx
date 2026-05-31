@@ -28,6 +28,7 @@ export type ViewMode =
   | "swimlane"
   | "flaky-tests"
   | "digest"
+  | "strategy"
   | "focus";
 
 export interface ViewDescriptor {
@@ -121,6 +122,14 @@ const ICON = {
   digest: (
     <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+    </svg>
+  ),
+  strategy: (
+    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <circle cx="12" cy="12" r="8" />
+      <circle cx="12" cy="12" r="4" />
+      <circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v2M12 18v2M4 12h2M18 12h2" />
     </svg>
   ),
   focus: (
@@ -259,6 +268,18 @@ export const VIEW_REGISTRY: ViewDescriptor[] = [
     paletteIcon: "◷",
     paletteDescription: "What changed since you were away",
     shortcut: "d",
+    group: "secondary",
+  },
+  {
+    id: "strategy",
+    toolbarLabel: "Strategy",
+    label: "Strategic Targets",
+    tooltip: "Strategic Targets - weighted focus board",
+    icon: ICON.strategy,
+    paletteIcon: "ST",
+    paletteDescription: "Map strategic directions onto a target board",
+    shortcut: "z",
+    activeClass: "bg-brand-600 text-white",
     group: "secondary",
   },
   {
