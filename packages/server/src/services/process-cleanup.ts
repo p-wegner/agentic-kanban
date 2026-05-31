@@ -1,10 +1,12 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { auditProcessEvent, guardProcessKill } from "./process-guard.js";
 
 const execFileAsync = promisify(execFile);
 
 export async function killProcessesInDir(dir: string): Promise<number> {
   let killed = 0;
+  auditProcessEvent({ action: "process-cleanup-start", dir });
   try {
     if (process.platform === "win32") {
       const { stdout } = await execFileAsync("wmic", [
@@ -53,11 +55,15 @@ export async function killProcessesInDir(dir: string): Promise<number> {
         if (ancestors.has(proc.pid)) continue;
         const cmdNormalized = proc.cmd.replace(/\\/g, "/");
         if (cmdNormalized.includes(dirNormalized)) {
+          auditProcessEvent({ action: "process-cleanup-candidate", pid: proc.pid, ppid: proc.ppid, dir, commandLine: proc.cmd });
+          if (!guardProcessKill(proc.pid, { reason: "process-cleanup-dir-match", dir, commandLine: proc.cmd })) continue;
           try {
             await execFileAsync("taskkill", ["/pid", String(proc.pid), "/T", "/F"], { timeout: 5000 });
             console.log(`[process-cleanup] killed PID ${proc.pid} (CWD match: ${dir})`);
+            auditProcessEvent({ action: "process-cleanup-killed", pid: proc.pid, dir });
             killed++;
-          } catch {
+          } catch (err) {
+            auditProcessEvent({ action: "process-cleanup-kill-failed", pid: proc.pid, dir, error: err instanceof Error ? err.message : String(err) });
             // Process may have already exited
           }
         }
@@ -67,11 +73,15 @@ export async function killProcessesInDir(dir: string): Promise<number> {
         const { stdout } = await execFileAsync("lsof", ["+D", dir, "-t"], { timeout: 10000 });
         const pids = stdout.trim().split("\n").filter(Boolean);
         for (const pid of pids) {
+          const numericPid = Number(pid);
+          if (!guardProcessKill(numericPid, { reason: "process-cleanup-dir-match", dir })) continue;
           try {
-            process.kill(Number(pid), "SIGTERM");
+            process.kill(numericPid, "SIGTERM");
             console.log(`[process-cleanup] killed PID ${pid} (CWD: ${dir})`);
+            auditProcessEvent({ action: "process-cleanup-killed", pid: numericPid, dir });
             killed++;
-          } catch {
+          } catch (err) {
+            auditProcessEvent({ action: "process-cleanup-kill-failed", pid: numericPid, dir, error: err instanceof Error ? err.message : String(err) });
             // Already gone
           }
         }
@@ -80,7 +90,9 @@ export async function killProcessesInDir(dir: string): Promise<number> {
       }
     }
   } catch (err) {
+    auditProcessEvent({ action: "process-cleanup-error", dir, error: err instanceof Error ? err.message : String(err) });
     console.warn(`[process-cleanup] error killing processes in ${dir}:`, err instanceof Error ? err.message : String(err));
   }
+  auditProcessEvent({ action: "process-cleanup-finished", dir, killed });
   return killed;
 }
