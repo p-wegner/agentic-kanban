@@ -21,6 +21,7 @@ import {
   workspaces,
   sessions,
   sessionMessages,
+  issueComments,
 } from "@agentic-kanban/shared/schema";
 
 const HOUR = 60 * 60 * 1000;
@@ -311,6 +312,42 @@ describe("listPendingQuestionsForProject — dismiss + staleness integration", (
     });
     const pending = await listPendingQuestionsForProject(projectId, db);
     expect(pending.find((p) => p.toolUseId === "tu-d")).toBeUndefined();
+  });
+
+  it("lists MCP-created structured clarifying questions", async () => {
+    const { db } = createTestDb();
+    const { projectId, workspaceId, issueId } = await seed(db, { toolUseId: "tu-session" });
+    await db.insert(issueComments).values({
+      id: "comment-mcp-question",
+      issueId,
+      workspaceId,
+      kind: "agent-question",
+      author: "agent",
+      body: "Need clarification.",
+      payload: JSON.stringify({
+        source: "mcp_clarify_or_propose",
+        toolUseId: "mcp-clarify-1",
+        questions: [{
+          header: "Gate",
+          question: "Approve the design?",
+          options: [{ label: "Yes" }, { label: "No" }],
+        }],
+      }),
+      createdAt: new Date().toISOString(),
+    });
+
+    const pending = await listPendingQuestionsForProject(projectId, db);
+    const synthetic = pending.find((p) => p.toolUseId === "mcp-clarify-1");
+    expect(synthetic?.workspaceId).toBe(workspaceId);
+    expect(synthetic?.issueId).toBe(issueId);
+    expect(synthetic?.questions[0]).toMatchObject({
+      header: "Gate",
+      question: "Approve the design?",
+    });
+
+    await markAnswered("mcp-clarify-1", db);
+    const afterAnswer = await listPendingQuestionsForProject(projectId, db);
+    expect(afterAnswer.find((p) => p.toolUseId === "mcp-clarify-1")).toBeUndefined();
   });
 });
 
