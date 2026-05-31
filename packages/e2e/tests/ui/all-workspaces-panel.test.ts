@@ -3,17 +3,21 @@ import { SERVER_URL } from "../helpers/port.js";
 
 // Ensure the board has an active project so the All Workspaces panel can render.
 // The active project may change between test runs (other test files modify it).
-async function ensureProjectActive(request: APIRequestContext) {
+async function ensureProjectActive(request: APIRequestContext): Promise<string> {
   const res = await request.get(`${SERVER_URL}/api/projects`);
-  if (!res.ok()) return;
-  const projects = await res.json();
+  expect(res.ok(), `GET /api/projects failed with ${res.status()}`).toBe(true);
+  const projects: { id: string; name: string }[] = await res.json();
   const proj =
-    projects.find((p: { name: string }) => p.name === "agentic-kanban") ??
+    projects.find((p) => p.name === "agentic-kanban") ??
     projects[0];
-  if (!proj) return;
-  await request.put(`${SERVER_URL}/api/preferences/active-project`, {
+  if (!proj) {
+    throw new Error("No project is registered; cannot render All Workspaces panel");
+  }
+  const prefRes = await request.put(`${SERVER_URL}/api/preferences/active-project`, {
     data: { projectId: proj.id },
   });
+  expect(prefRes.ok(), `PUT active-project failed with ${prefRes.status()}`).toBe(true);
+  return proj.id;
 }
 
 // Wait for the board columns to appear (i.e. a project is loaded and rendered).
@@ -125,17 +129,17 @@ test.describe("All Workspaces Panel — filters and search", () => {
     const chips = page.locator("div.flex.gap-1\\.5");
     await expect(
       chips.locator("button", { hasText: /^All$/ }),
-    ).toHaveClass(/bg-blue-600/);
+    ).toHaveClass(/bg-brand-600/);
   });
 
   test("clicking a filter chip selects it", async ({ page }) => {
     const chips = page.locator("div.flex.gap-1\\.5");
     const idleChip = chips.locator("button", { hasText: /^Idle$/ });
     await idleChip.click();
-    await expect(idleChip).toHaveClass(/bg-blue-600/);
+    await expect(idleChip).toHaveClass(/bg-brand-600/);
     await expect(
       chips.locator("button", { hasText: /^All$/ }),
-    ).not.toHaveClass(/bg-blue-600/);
+    ).not.toHaveClass(/bg-brand-600/);
   });
 
   test("clicking All chip resets selection", async ({ page }) => {
@@ -144,7 +148,7 @@ test.describe("All Workspaces Panel — filters and search", () => {
     await chips.locator("button", { hasText: /^All$/ }).click();
     await expect(
       chips.locator("button", { hasText: /^All$/ }),
-    ).toHaveClass(/bg-blue-600/);
+    ).toHaveClass(/bg-brand-600/);
   });
 
   test("shows search input", async ({ page }) => {
@@ -158,7 +162,6 @@ test.describe("All Workspaces Panel — filters and search", () => {
       'input[placeholder*="Search by title or branch"]',
     );
     await searchInput.fill("ZZZNOMATCH_xyzzy_99999");
-    await page.waitForTimeout(300);
     const noMatch = page.locator("text=No workspaces match the current filter.");
     const noWs = page.locator("text=No workspaces yet.");
     await expect(noMatch.or(noWs).first()).toBeVisible({ timeout: 3000 });
@@ -169,12 +172,10 @@ test.describe("All Workspaces Panel — filters and search", () => {
       'input[placeholder*="Search by title or branch"]',
     );
     await searchInput.fill("ZZZNOMATCH");
-    await page.waitForTimeout(300);
     const noMatch = page.locator("text=No workspaces match the current filter.");
     const noWs = page.locator("text=No workspaces yet.");
     await expect(noMatch.or(noWs).first()).toBeVisible({ timeout: 3000 });
     await searchInput.fill("");
-    await page.waitForTimeout(300);
     await expect(noMatch).not.toBeVisible({ timeout: 3000 });
   });
 
@@ -182,63 +183,125 @@ test.describe("All Workspaces Panel — filters and search", () => {
     const chips = page.locator("div.flex.gap-1\\.5");
     const reviewingChip = chips.locator("button", { hasText: /^Reviewing$/ });
     await reviewingChip.click();
-    await expect(reviewingChip).toHaveClass(/bg-blue-600/);
-    await page.waitForTimeout(300);
-    const items = await page.locator(".divide-y > div").count();
-    const hasEmpty = await page
-      .locator("text=No workspaces match the current filter.")
-      .isVisible()
-      .catch(() => false);
-    const hasNoWs = await page
-      .locator("text=No workspaces yet.")
-      .isVisible()
-      .catch(() => false);
-    expect(items > 0 || hasEmpty || hasNoWs).toBe(true);
+    await expect(reviewingChip).toHaveClass(/bg-brand-600/);
+    await expect
+      .poll(
+        async () => {
+          const items = await page.locator(".divide-y > div").count();
+          const hasEmpty = await page
+            .locator("text=No workspaces match the current filter.")
+            .isVisible()
+            .catch(() => false);
+          const hasNoWs = await page
+            .locator("text=No workspaces yet.")
+            .isVisible()
+            .catch(() => false);
+          return items > 0 || hasEmpty || hasNoWs;
+        },
+        { timeout: 3000 },
+      )
+      .toBe(true);
   });
 });
 
 test.describe("All Workspaces Panel — workspace list content", () => {
-  let hasWorkspaces = false;
   let firstIssueTitle = "";
   let firstBranch = "";
+  let issueId = "";
+  let workspaceId = "";
+  let originalClaudeProfile = "";
+  const suffix = Date.now().toString(36);
 
   test.beforeAll(async ({ request }) => {
-    await ensureProjectActive(request);
-    try {
-      const prefRes = await request.get(
-        `${SERVER_URL}/api/preferences/active-project`,
-      );
-      if (!prefRes.ok()) return;
-      const { projectId } = await prefRes.json();
-      if (!projectId) return;
+    const projectId = await ensureProjectActive(request);
 
-      const boardRes = await request.get(
-        `${SERVER_URL}/api/projects/${projectId}/board`,
-      );
-      if (!boardRes.ok()) return;
-      const columns = await boardRes.json();
-      type IssueRow = {
-        title: string;
-        workspaceSummary?: { total: number; main?: { branch?: string } };
-      };
-      const allIssues: IssueRow[] = (
-        Array.isArray(columns) ? columns : []
-      ).flatMap((c: { issues?: IssueRow[] }) => c.issues ?? []);
-      const issueWithWs = allIssues.find(
-        (i) => (i.workspaceSummary?.total ?? 0) > 0,
-      );
-      if (issueWithWs) {
-        hasWorkspaces = true;
-        firstIssueTitle = issueWithWs.title;
-        firstBranch = issueWithWs.workspaceSummary?.main?.branch ?? "";
-      }
-    } catch {
-      /* skip via hasWorkspaces guard */
+    const settingsRes = await request.get(
+      `${SERVER_URL}/api/preferences/settings`,
+    );
+    expect(
+      settingsRes.ok(),
+      `GET settings failed with ${settingsRes.status()}`,
+    ).toBe(true);
+    originalClaudeProfile = ((await settingsRes.json()).claude_profile ??
+      "") as string;
+    const mockSettingsRes = await request.put(
+      `${SERVER_URL}/api/preferences/settings`,
+      {
+        data: { claude_profile: "mock" },
+      },
+    );
+    expect(
+      mockSettingsRes.ok(),
+      `PUT mock settings failed with ${mockSettingsRes.status()}`,
+    ).toBe(true);
+
+    const statusesRes = await request.get(
+      `${SERVER_URL}/api/projects/${projectId}/statuses`,
+    );
+    expect(
+      statusesRes.ok(),
+      `GET statuses failed with ${statusesRes.status()}`,
+    ).toBe(true);
+    const statuses = await statusesRes.json();
+    const todoStatus = statuses.find((s: { name: string }) => s.name === "Todo");
+    const statusId = todoStatus?.id ?? statuses[0]?.id;
+    if (!statusId) {
+      throw new Error("Project has no statuses; cannot create test issue");
+    }
+
+    firstIssueTitle = `All workspaces panel E2E ${suffix}`;
+    firstBranch = `feature/all-workspaces-panel-${suffix}`;
+
+    const issueRes = await request.post(`${SERVER_URL}/api/issues`, {
+      data: {
+        title: firstIssueTitle,
+        statusId,
+        projectId,
+        skipAutoReview: true,
+      },
+    });
+    expect(issueRes.status(), `POST issue failed with ${issueRes.status()}`).toBe(
+      201,
+    );
+    issueId = (await issueRes.json()).id;
+    if (!issueId) {
+      throw new Error("Issue setup did not return an id");
+    }
+
+    const workspaceRes = await request.post(`${SERVER_URL}/api/workspaces`, {
+      data: {
+        issueId,
+        branch: firstBranch,
+        requiresReview: false,
+      },
+    });
+    expect(
+      workspaceRes.status(),
+      `POST workspace failed with ${workspaceRes.status()}`,
+    ).toBe(201);
+    workspaceId = (await workspaceRes.json()).id;
+    if (!workspaceId) {
+      throw new Error("Workspace setup did not return an id");
     }
   });
 
+  test.afterAll(async ({ request }) => {
+    if (workspaceId) {
+      await request
+        .delete(`${SERVER_URL}/api/workspaces/${workspaceId}`)
+        .catch(() => {});
+    }
+    if (issueId) {
+      await request.delete(`${SERVER_URL}/api/issues/${issueId}`).catch(() => {});
+    }
+    await request
+      .put(`${SERVER_URL}/api/preferences/settings`, {
+        data: { claude_profile: originalClaudeProfile },
+      })
+      .catch(() => {});
+  });
+
   test.beforeEach(async ({ page, request }) => {
-    if (!hasWorkspaces) test.skip();
     await ensureProjectActive(request);
     await page.goto("/");
     await openPanel(page);
@@ -275,21 +338,18 @@ test.describe("All Workspaces Panel — workspace list content", () => {
   });
 
   test("shows issue title in list", async ({ page }) => {
-    if (!firstIssueTitle) test.skip();
     await expect(
       page.locator(`text=${firstIssueTitle}`).first(),
     ).toBeVisible({ timeout: 5000 });
   });
 
   test("shows branch name in list", async ({ page }) => {
-    if (!firstBranch) test.skip();
     await expect(
       page.locator(`text=${firstBranch}`).first(),
     ).toBeVisible({ timeout: 5000 });
   });
 
   test("text search filters by issue title", async ({ page }) => {
-    if (!firstIssueTitle) test.skip();
     const queryWord = firstIssueTitle.split(" ").at(-1)!;
     const searchInput = page.locator(
       'input[placeholder*="Search by title or branch"]',
@@ -301,7 +361,6 @@ test.describe("All Workspaces Panel — workspace list content", () => {
   });
 
   test("text search filters by branch name", async ({ page }) => {
-    if (!firstBranch) test.skip();
     const queryPart = firstBranch.split("/").at(-1)!.slice(0, 12);
     const searchInput = page.locator(
       'input[placeholder*="Search by title or branch"]',
@@ -315,7 +374,6 @@ test.describe("All Workspaces Panel — workspace list content", () => {
   test("clicking an issue row opens issue detail and closes panel", async ({
     page,
   }) => {
-    if (!firstIssueTitle) test.skip();
     await page.locator(`text=${firstIssueTitle}`).first().click();
     await expect(
       page.locator("h2", { hasText: "Issue Details" }),
