@@ -19,9 +19,9 @@ export default defineConfig({
     strictPort: true,
     allowedHosts: [".ts.net"],
     proxy: {
-      "/api": `http://localhost:${serverPort}`,
-      "/health": `http://localhost:${serverPort}`,
-      "/ws": { target: `http://localhost:${serverPort}`, ws: true },
+      "/api": `http://127.0.0.1:${serverPort}`,
+      "/health": `http://127.0.0.1:${serverPort}`,
+      "/ws": { target: `http://127.0.0.1:${serverPort}`, ws: true },
     },
   },
 });
