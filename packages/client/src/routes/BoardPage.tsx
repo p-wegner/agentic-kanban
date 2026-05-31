@@ -382,14 +382,13 @@ export function BoardPage() {
   }, [loadProjects]);
 
   useEffect(() => {
-    if (!autoMonitor) return;
     const t = setInterval(() => {
       apiFetch<MonitorStatus>("/api/internal/monitor-status")
         .then((r) => setMonitorStatus(r))
         .catch(() => {});
     }, 30_000);
     return () => clearInterval(t);
-  }, [autoMonitor]);
+  }, []);
 
   async function toggleAutoMonitor() {
     const next = !autoMonitor;

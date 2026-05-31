@@ -26,9 +26,20 @@ export type MonitorStatus = {
       cleanedCount: number;
       cleanupFailedCount: number;
     } | null;
+    warnings?: number;
   } | null;
   nextRunAt: string | null;
   recentActions: MonitorAction[];
+  warnings?: Array<{
+    projectId: string;
+    projectName: string;
+    repoPath: string;
+    detectedAt: string;
+    fileCount: number;
+    files: string[];
+    message: string;
+  }>;
+  lastHealthCheckAt?: string | null;
   resourceSnapshot?: {
     at: string;
     kept: Array<{ rootPid: number; pids: number[]; listenerPorts: number[]; associatedWorkspaceIds: string[]; reason: string }>;
@@ -117,6 +128,7 @@ export function MonitorPopover({
     (iss.workspaceSummary.main.status === "active" || iss.workspaceSummary.main.status === "reviewing" || iss.workspaceSummary.main.status === "fixing") &&
     iss.workspaceSummary.main.lastAssistantMessage
   );
+  const warnings = status?.warnings ?? [];
 
   return createPortal(
     <>
@@ -212,6 +224,11 @@ export function MonitorPopover({
               <div className="space-y-1.5">
                 <div className="text-gray-400 dark:text-gray-500 text-[11px]">{formatAge(status.lastRun.at)}</div>
                 <div className="flex flex-wrap gap-1">
+                  {(status.lastRun.warnings ?? 0) > 0 && (
+                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-red-50 dark:bg-red-950 text-red-700 dark:text-red-300 font-medium text-[11px]">
+                      <span className="w-1 h-1 rounded-full bg-red-400 shrink-0" />{status.lastRun.warnings} warning{status.lastRun.warnings === 1 ? "" : "s"}
+                    </span>
+                  )}
                   {status.lastRun.relaunched > 0 && (
                     <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-blue-50 dark:bg-blue-950 text-blue-700 font-medium text-[11px]">
                       <span className="w-1 h-1 rounded-full bg-blue-400 shrink-0" />{status.lastRun.relaunched} relaunched
@@ -227,7 +244,7 @@ export function MonitorPopover({
                       <span className="w-1 h-1 rounded-full bg-amber-400 shrink-0" />{status.lastRun.nudged} nudged
                     </span>
                   )}
-                  {status.lastRun.relaunched === 0 && status.lastRun.merged === 0 && status.lastRun.nudged === 0 && (
+                  {status.lastRun.relaunched === 0 && status.lastRun.merged === 0 && status.lastRun.nudged === 0 && (status.lastRun.warnings ?? 0) === 0 && (
                     <span className="text-gray-400 dark:text-gray-500 text-[11px]">No actions needed</span>
                   )}
                 </div>
@@ -236,6 +253,29 @@ export function MonitorPopover({
               <div className="text-gray-400 dark:text-gray-500 text-[11px]">No runs yet this session</div>
             )}
           </div>
+
+          {/* Health warnings */}
+          {warnings.length > 0 && (
+            <div className="px-3 py-2.5 border-b border-red-100 dark:border-red-900/50 bg-red-50/70 dark:bg-red-950/25">
+              <div className="flex items-center justify-between gap-2 mb-1.5">
+                <div className="text-[10px] font-semibold uppercase tracking-wider text-red-700 dark:text-red-300">Monitor warnings</div>
+                {status?.lastHealthCheckAt && (
+                  <div className="text-[10px] text-red-500 dark:text-red-400">{formatAge(status.lastHealthCheckAt)}</div>
+                )}
+              </div>
+              <div className="space-y-2">
+                {warnings.map((warning) => (
+                  <div key={warning.projectId} className="text-[11px] text-red-800 dark:text-red-200 leading-snug">
+                    <div className="font-semibold">{warning.projectName}: dirty main checkout</div>
+                    <div>{warning.fileCount} tracked source change{warning.fileCount === 1 ? "" : "s"} must be committed or reverted.</div>
+                    <div className="mt-1 font-mono text-[10px] text-red-600 dark:text-red-300 truncate" title={warning.files.join(", ")}>
+                      {warning.files.slice(0, 3).join(", ")}{warning.files.length > 3 ? `, +${warning.files.length - 3}` : ""}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Resource audit */}
           {status?.lastRun?.resources && (
