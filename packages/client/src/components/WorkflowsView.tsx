@@ -91,16 +91,25 @@ export function WorkflowsView({
       setStageDetail(null);
       return;
     }
+    let active = true;
     setStageDetailLoading(true);
     apiFetch<StageWorkspaceDetail>(
       `/api/workflows/analytics/${encodeURIComponent(selectedStage.templateId)}/${encodeURIComponent(selectedStage.nodeId)}/workspaces?projectId=${encodeURIComponent(projectId)}`,
     )
-      .then(setStageDetail)
+      .then((detail) => {
+        if (active) setStageDetail(detail);
+      })
       .catch((err) => {
+        if (!active) return;
         setStageDetail(null);
         showToast(err instanceof Error ? err.message : "Failed to load stage visits", "error");
       })
-      .finally(() => setStageDetailLoading(false));
+      .finally(() => {
+        if (active) setStageDetailLoading(false);
+      });
+    return () => {
+      active = false;
+    };
   }, [selectedStage, projectId]);
 
   async function duplicate(t: Template) {

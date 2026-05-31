@@ -401,7 +401,7 @@ export function createWorkflowsRoute(database: Database = db, options?: Workflow
       .limit(1);
     if (nodeRows.length === 0) return c.json({ error: "Workflow stage not found" }, 404);
 
-    const rows = await database
+    const baseQuery = database
       .select({
         workspaceId: workflowTransitions.workspaceId,
         workspaceName: workspaces.branch,
@@ -410,18 +410,13 @@ export function createWorkflowsRoute(database: Database = db, options?: Workflow
         issueTitle: issues.title,
         toNodeId: workflowTransitions.toNodeId,
         enteredAt: workflowTransitions.createdAt,
-        nodeType: workflowNodes.nodeType,
         currentNodeId: workspaces.currentNodeId,
       })
       .from(workflowTransitions)
       .innerJoin(workspaces, eq(workflowTransitions.workspaceId, workspaces.id))
-      .innerJoin(issues, eq(workspaces.issueId, issues.id))
-      .innerJoin(workflowNodes, eq(workflowTransitions.toNodeId, workflowNodes.id))
-      .where(
-        projectId
-          ? sql`${workflowNodes.templateId} = ${templateId} AND ${issues.projectId} = ${projectId}`
-          : eq(workflowNodes.templateId, templateId),
-      );
+      .innerJoin(issues, eq(workspaces.issueId, issues.id));
+
+    const rows = projectId ? await baseQuery.where(eq(issues.projectId, projectId)) : await baseQuery;
 
     const byWorkspace = new Map<string, typeof rows>();
     for (const r of rows) {
