@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type APIRequestContext, type Page } from "@playwright/test";
 import { writeFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -10,6 +10,101 @@ test.describe("Session History UI", () => {
   const tmpFiles: string[] = [];
   const createdWorkspaceIds: string[] = [];
   const createdIssueIds: string[] = [];
+  let originalProvider = "";
+  let originalClaudeProfile = "";
+  let originalMockAgentProfile = "";
+
+  function buildCompletedAgentScript(output: string) {
+    const sessionId = `mock-history-${Date.now().toString(36)}`;
+    const assistantEvent = {
+      type: "assistant",
+      message: {
+        type: "message",
+        role: "assistant",
+        content: [{ type: "text", text: output }],
+        model: "mock-claude-opus-4",
+        usage: { input_tokens: 1, output_tokens: 1 },
+      },
+    };
+    const resultEvent = {
+      type: "result",
+      subtype: "success",
+      is_error: false,
+      duration_ms: 1,
+      duration_api_ms: 1,
+      num_turns: 1,
+      result: output,
+      session_id: sessionId,
+      usage: { input_tokens: 1, output_tokens: 1 },
+    };
+
+    return [
+      `console.log(${JSON.stringify(JSON.stringify(assistantEvent))});`,
+      `console.log(${JSON.stringify(JSON.stringify(resultEvent))});`,
+      "process.exit(0);",
+    ].join("\n");
+  }
+
+  async function waitForNoRunningSessions(
+    request: APIRequestContext,
+    workspaceId: string,
+  ) {
+    await expect.poll(
+      async () => {
+        const sessionsRes = await request.get(
+          `${SERVER_URL}/api/workspaces/${workspaceId}/sessions`,
+        );
+        if (!sessionsRes.ok()) return "sessions-unavailable";
+
+        const sessions = await sessionsRes.json();
+        return sessions.some((s: { status: string }) => s.status === "running")
+          ? "running"
+          : "idle";
+      },
+      { timeout: 10000, intervals: [250, 500, 1000] },
+    ).toBe("idle");
+  }
+
+  async function waitForSessionCompletion(
+    request: APIRequestContext,
+    workspaceId: string,
+    sessionId: string,
+    expectedOutput: string,
+  ) {
+    await expect.poll(
+      async () => {
+        const sessionsRes = await request.get(
+          `${SERVER_URL}/api/workspaces/${workspaceId}/sessions`,
+        );
+        if (!sessionsRes.ok()) return "sessions-unavailable";
+
+        const sessions = await sessionsRes.json();
+        const session = sessions.find((s: { id: string }) => s.id === sessionId);
+        if (!session) return "session-missing";
+
+        const outputRes = await request.get(
+          `${SERVER_URL}/api/sessions/${sessionId}/output`,
+        );
+        if (!outputRes.ok()) return `output-${outputRes.status()}`;
+
+        const messages = await outputRes.json();
+        const hasExpectedOutput = messages.some(
+          (m: { type: string; data?: string | null }) =>
+            m.type === "stdout" && m.data?.includes(expectedOutput),
+        );
+        const hasExit = messages.some((m: { type: string }) => m.type === "exit");
+        const exitCode = session.exitCode ?? session.exit_code;
+
+        return [
+          session.status,
+          String(exitCode ?? ""),
+          hasExpectedOutput ? "output" : "no-output",
+          hasExit ? "exit" : "no-exit",
+        ].join(":");
+      },
+      { timeout: 15000, intervals: [250, 500, 1000] },
+    ).toBe("completed:0:output:exit");
+  }
 
   test.beforeAll(async ({ request }) => {
     const activeRes = await request.get(`${SERVER_URL}/api/preferences/active-project`);
@@ -22,27 +117,58 @@ test.describe("Session History UI", () => {
     const statuses = await statusesRes.json();
     const todoStatus = statuses.find((s: { name: string }) => s.name === "Todo");
     statusId = todoStatus ? todoStatus.id : statuses[0].id;
+
+    const settingsRes = await request.get(`${SERVER_URL}/api/preferences/settings`);
+    if (settingsRes.ok()) {
+      const settings = await settingsRes.json();
+      originalProvider = settings.provider ?? "";
+      originalClaudeProfile = settings.claude_profile ?? "";
+      originalMockAgentProfile = settings.mock_agent_profile ?? "";
+    }
+
+    await request.put(`${SERVER_URL}/api/preferences/settings`, {
+      data: { provider: "claude", claude_profile: "mock", mock_agent_profile: "" },
+    });
   });
 
-  async function openWorkspaceForIssue(page: import("@playwright/test").Page, issueTitle: string) {
+  async function openWorkspaceForIssue(page: Page, issueTitle: string, branchName: string) {
     const issueEl = page.locator("p", { hasText: issueTitle }).first();
     await issueEl.click();
     await expect(page.locator("h2", { hasText: "Issue Details" })).toBeVisible();
 
-    // Click the workspace button in the Workspaces section of the detail panel
-    const wsLabel = page.locator("label", { hasText: "Workspaces" });
-    const wsSection = wsLabel.locator("..");
-    await wsSection.locator("button").first().click();
+    await page.locator("button", { hasText: branchName }).first().click();
 
-    await expect(page.locator("h2", { hasText: "Workspaces —" })).toBeVisible({ timeout: 5000 });
+    await expect(page.locator("h2", { hasText: issueTitle })).toBeVisible({ timeout: 5000 });
+  }
 
-    // Close the detail panel backdrop that blocks clicks on the workspace panel content
-    // The detail panel backdrop is z-40, the workspace panel is z-50
-    const backdrop = page.locator("div.fixed.inset-0.bg-black\\/30").first();
-    if (await backdrop.isVisible()) {
-      await backdrop.click({ force: true });
-      await page.waitForTimeout(300);
+  async function stubWorkspacePanelMetadata(page: Page) {
+    await page.route(/\/api\/workspaces\/[^/]+\/latest-commit$/, (route) =>
+      route.fulfill({ json: { sha: null, message: null } }),
+    );
+    await page.route(/\/api\/workspaces\/[^/]+\/handoff$/, (route) =>
+      route.fulfill({ json: { content: null } }),
+    );
+    await page.route(/\/api\/workspaces\/[^/]+\/plan$/, (route) =>
+      route.fulfill({ json: { content: null } }),
+    );
+  }
+
+  async function ensureWorkspaceSelected(page: Page, issueTitle: string, branchName: string) {
+    const wsPanel = page
+      .locator("h2", { hasText: issueTitle })
+      .locator('xpath=ancestor::div[contains(@class, "fixed") and contains(@class, "z-50")][1]');
+    const workspaceCard = wsPanel
+      .locator("text=" + branchName)
+      .first()
+      .locator('xpath=ancestor::div[contains(@class, "border rounded")][1]');
+
+    await expect(workspaceCard).toBeVisible({ timeout: 5000 });
+    const className = await workspaceCard.getAttribute("class");
+    if (!className?.includes("bg-blue-50")) {
+      await workspaceCard.click();
     }
+
+    return wsPanel;
   }
 
   test("completed sessions show in workspace panel", async ({ page, request }) => {
@@ -51,13 +177,13 @@ test.describe("Session History UI", () => {
     const branchName = `feature/history-ui-${suffix}`;
 
     const issueRes = await request.post(`${SERVER_URL}/api/issues`, {
-      data: { title: issueTitle, statusId, projectId },
+      data: { title: issueTitle, statusId, projectId, skipAutoReview: true },
     });
     const issueId = (await issueRes.json()).id;
     createdIssueIds.push(issueId);
 
     const wsRes = await request.post(`${SERVER_URL}/api/workspaces`, {
-      data: { issueId, branch: branchName },
+      data: { issueId, branch: branchName, requiresReview: false },
     });
     const workspaceId = (await wsRes.json()).id;
     createdWorkspaceIds.push(workspaceId);
@@ -68,15 +194,11 @@ test.describe("Session History UI", () => {
       { data: {} },
     );
 
-    // Stop auto-launched session (workspace creation auto-launches claude.exe)
-    await request.post(
-      `${SERVER_URL}/api/workspaces/${workspaceId}/stop`,
-      { data: {} },
-    );
-    await new Promise((r) => setTimeout(r, 500));
+    // Workspace creation auto-launches the configured mock agent.
+    await waitForNoRunningSessions(request, workspaceId);
 
     // Launch and wait for completion (write to temp file to avoid Windows cmd.exe quoting issues)
-    const script1 = "console.log('history test output'); process.exit(0);";
+    const script1 = buildCompletedAgentScript("history test output");
     const tmp1 = join(tmpdir(), `mock-agent-history-${Date.now()}.mjs`);
     writeFileSync(tmp1, script1);
     tmpFiles.push(tmp1);
@@ -90,26 +212,25 @@ test.describe("Session History UI", () => {
         },
       },
     );
+    expect(launchRes.status()).toBe(201);
 
-    if (launchRes.status() !== 201) {
-      test.skip();
-      return;
-    }
+    const { sessionId } = await launchRes.json();
+    await waitForSessionCompletion(
+      request,
+      workspaceId,
+      sessionId,
+      "history test output",
+    );
 
-    // Wait for session to complete
-    await new Promise((resolve) => setTimeout(resolve, 2000));
+    await stubWorkspacePanelMetadata(page);
 
     // Go to the board and open workspace panel
     await page.goto("/");
     await page.waitForSelector("h2");
 
-    await openWorkspaceForIssue(page, issueTitle);
+    await openWorkspaceForIssue(page, issueTitle, branchName);
 
-    // Expand the workspace (click on the branch name)
-    await page.locator(`text=${branchName}`).first().click();
-
-    // Should show session selector with "Latest" tab
-    await expect(page.locator('button:has-text("Latest")').first()).toBeVisible({ timeout: 5000 });
+    await expect(page.locator(`button[data-session-id="${sessionId}"]`)).toBeVisible({ timeout: 5000 });
   });
 
   test("click past session shows output in TerminalView", async ({ page, request }) => {
@@ -118,13 +239,13 @@ test.describe("Session History UI", () => {
     const branchName = `feature/history-output-${suffix}`;
 
     const issueRes = await request.post(`${SERVER_URL}/api/issues`, {
-      data: { title: issueTitle, statusId, projectId },
+      data: { title: issueTitle, statusId, projectId, skipAutoReview: true },
     });
     const issueId = (await issueRes.json()).id;
     createdIssueIds.push(issueId);
 
     const wsRes = await request.post(`${SERVER_URL}/api/workspaces`, {
-      data: { issueId, branch: branchName },
+      data: { issueId, branch: branchName, requiresReview: false },
     });
     const workspaceId = (await wsRes.json()).id;
     createdWorkspaceIds.push(workspaceId);
@@ -135,15 +256,11 @@ test.describe("Session History UI", () => {
       { data: {} },
     );
 
-    // Stop auto-launched session (workspace creation auto-launches claude.exe)
-    await request.post(
-      `${SERVER_URL}/api/workspaces/${workspaceId}/stop`,
-      { data: {} },
-    );
-    await new Promise((r) => setTimeout(r, 500));
+    // Workspace creation auto-launches the configured mock agent.
+    await waitForNoRunningSessions(request, workspaceId);
 
     // Launch and wait for completion (write to temp file to avoid Windows cmd.exe quoting issues)
-    const script2 = "console.log('viewable output'); process.exit(0);";
+    const script2 = buildCompletedAgentScript("viewable output");
     const tmp2 = join(tmpdir(), `mock-agent-output-${Date.now()}.mjs`);
     writeFileSync(tmp2, script2);
     tmpFiles.push(tmp2);
@@ -157,28 +274,29 @@ test.describe("Session History UI", () => {
         },
       },
     );
+    expect(launchRes.status()).toBe(201);
 
-    if (launchRes.status() !== 201) {
-      test.skip();
-      return;
-    }
+    const { sessionId } = await launchRes.json();
+    await waitForSessionCompletion(
+      request,
+      workspaceId,
+      sessionId,
+      "viewable output",
+    );
 
-    await new Promise((resolve) => setTimeout(resolve, 2000));
+    await stubWorkspacePanelMetadata(page);
 
     // Navigate and open workspace panel
     await page.goto("/");
     await page.waitForSelector("h2");
 
-    await openWorkspaceForIssue(page, issueTitle);
+    await openWorkspaceForIssue(page, issueTitle, branchName);
 
-    // Expand workspace
-    await page.locator(`text=${branchName}`).first().click();
-
-    // Wait for session selector to appear
-    const wsPanel = page.locator("h2", { hasText: "Workspaces —" }).locator("..").locator("..");
-    await expect(wsPanel.locator('button:has-text("Latest")').first()).toBeVisible({ timeout: 5000 });
-    // Click the first completed session in the list (not the "Latest" tab)
-    await wsPanel.locator('button:has-text("completed")').first().click();
+    // Wait for the completed session to render, then open that historical output.
+    const wsPanel = await ensureWorkspaceSelected(page, issueTitle, branchName);
+    const completedSessionButton = wsPanel.locator(`button[data-session-id="${sessionId}"]`);
+    await expect(completedSessionButton).toBeVisible({ timeout: 5000 });
+    await completedSessionButton.click();
 
     // TerminalView should show "Disconnected" status (history output loaded inline)
     await expect(page.locator("text=Disconnected").first()).toBeVisible({ timeout: 5000 });
@@ -189,10 +307,17 @@ test.describe("Session History UI", () => {
       try { unlinkSync(f); } catch { /* ignore */ }
     }
     for (const id of createdWorkspaceIds) {
-      await request.delete(`${SERVER_URL}/api/workspaces/${id}`);
+      await request.delete(`${SERVER_URL}/api/workspaces/${id}`).catch(() => {});
     }
     for (const id of createdIssueIds) {
-      await request.delete(`${SERVER_URL}/api/issues/${id}`);
+      await request.delete(`${SERVER_URL}/api/issues/${id}`).catch(() => {});
     }
+    await request.put(`${SERVER_URL}/api/preferences/settings`, {
+      data: {
+        provider: originalProvider,
+        claude_profile: originalClaudeProfile,
+        mock_agent_profile: originalMockAgentProfile,
+      },
+    }).catch(() => {});
   });
 });
