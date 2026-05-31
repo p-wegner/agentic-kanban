@@ -34,6 +34,7 @@ export function createTestDeps(overrides: Partial<ToolDeps> = {}): { deps: ToolD
     db,
     schema,
     notifyBoard: vi.fn(),
+    getDiff: vi.fn(async () => ""),
     getDiffShortstat: vi.fn(async () => ({ filesChanged: 0, insertions: 0, deletions: 0 })),
     ...overrides,
   };

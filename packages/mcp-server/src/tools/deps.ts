@@ -2,7 +2,7 @@ import { drizzle } from "drizzle-orm/libsql";
 import * as schema from "@agentic-kanban/shared/schema";
 import { db as prodDb, schema as prodSchema } from "../db.js";
 import { notifyBoard as prodNotifyBoard } from "../notify.js";
-import { getDiffShortstat as prodGetDiffShortstat } from "../git-service.js";
+import { getDiff as prodGetDiff, getDiffShortstat as prodGetDiffShortstat } from "../git-service.js";
 
 /** Drizzle DB instance typed over the shared schema. */
 export type ToolDb = ReturnType<typeof drizzle<typeof schema>>;
@@ -17,6 +17,7 @@ export interface ToolDeps {
   db: ToolDb;
   schema: typeof schema;
   notifyBoard: (projectId: string, reason: string) => void;
+  getDiff: (workingDir: string, baseRef: string) => Promise<string>;
   getDiffShortstat: (workingDir: string, baseRef: string) => Promise<{ filesChanged: number; insertions: number; deletions: number }>;
 }
 
@@ -25,5 +26,6 @@ export const prodDeps: ToolDeps = {
   db: prodDb,
   schema: prodSchema,
   notifyBoard: prodNotifyBoard,
+  getDiff: prodGetDiff,
   getDiffShortstat: prodGetDiffShortstat,
 };
