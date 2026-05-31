@@ -8,6 +8,7 @@ import { TimelineView } from "../components/TimelineView.js";
 import { MetricsView } from "../components/MetricsView.js";
 import { ButlerView } from "../components/ButlerView.js";
 import { WorkflowsView } from "../components/WorkflowsView.js";
+import { WorkflowAnalyticsDashboard } from "../components/WorkflowAnalyticsDashboard.js";
 import { InsightsPanel } from "../components/InsightsPanel.js";
 import { DigestView } from "../components/DigestView.js";
 import { FocusView } from "../components/FocusView.js";
@@ -1307,6 +1308,11 @@ export function BoardPage() {
         {viewMode === "workflows" && activeProjectId && (
           <BoardErrorBoundary columnName="Workflows View">
             <WorkflowsView projectId={activeProjectId} onOpenWorkspace={handleOpenWorkspaceById} />
+          </BoardErrorBoundary>
+        )}
+        {viewMode === "workflow-analytics" && activeProjectId && (
+          <BoardErrorBoundary columnName="Workflow Analytics">
+            <WorkflowAnalyticsDashboard projectId={activeProjectId} />
           </BoardErrorBoundary>
         )}
         {viewMode === "insights" && activeProjectId && (

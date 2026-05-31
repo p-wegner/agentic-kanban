@@ -377,11 +377,14 @@ export function createWorkflowsRoute(database: Database = db, options?: Workflow
         nodeName: workflowNodes.name,
         nodeType: workflowNodes.nodeType,
         templateId: workflowNodes.templateId,
+        templateName: workflowTemplates.name,
+        sortOrder: workflowNodes.sortOrder,
       })
       .from(workflowTransitions)
       .innerJoin(workspaces, eq(workflowTransitions.workspaceId, workspaces.id))
       .innerJoin(issues, eq(workspaces.issueId, issues.id))
       .leftJoin(workflowNodes, eq(workflowTransitions.toNodeId, workflowNodes.id))
+      .leftJoin(workflowTemplates, eq(workflowNodes.templateId, workflowTemplates.id))
       .where(eq(issues.projectId, projectId));
 
     // Group by workspace and order chronologically to compute dwell times.
@@ -391,27 +394,97 @@ export function createWorkflowsRoute(database: Database = db, options?: Workflow
       byWorkspace.get(r.workspaceId)!.push(r);
     }
 
-    interface Agg { nodeId: string; templateId: string | null; nodeName: string; nodeType: string; visits: number; left: number; stuck: number; totalDwellMs: number; dwellSamples: number }
+    interface Agg {
+      nodeId: string;
+      templateId: string | null;
+      templateName: string | null;
+      nodeName: string;
+      nodeType: string;
+      sortOrder: number;
+      visits: number;
+      left: number;
+      stuck: number;
+      totalDwellMs: number;
+      dwellSamples: number;
+    }
     const agg = new Map<string, Agg>();
-    const ensure = (id: string, templateId: string | null, name: string, type: string): Agg => {
+    const ensure = (
+      id: string,
+      templateId: string | null,
+      templateName: string | null,
+      name: string,
+      type: string,
+      sortOrder: number | null,
+    ): Agg => {
       let a = agg.get(id);
-      if (!a) { a = { nodeId: id, templateId, nodeName: name, nodeType: type, visits: 0, left: 0, stuck: 0, totalDwellMs: 0, dwellSamples: 0 }; agg.set(id, a); }
+      if (!a) {
+        a = {
+          nodeId: id,
+          templateId,
+          templateName,
+          nodeName: name,
+          nodeType: type,
+          sortOrder: sortOrder ?? 0,
+          visits: 0,
+          left: 0,
+          stuck: 0,
+          totalDwellMs: 0,
+          dwellSamples: 0,
+        };
+        agg.set(id, a);
+      }
       return a;
     };
+    const dwellBuckets = new Map<string, {
+      date: string;
+      nodeId: string;
+      nodeName: string;
+      totalDwellMs: number;
+      samples: number;
+    }>();
+    const startedByDate = new Map<string, number>();
+    const completedByDate = new Map<string, number>();
+    const dateKey = (value: string) => value.slice(0, 10);
+    const addCount = (map: Map<string, number>, key: string) => map.set(key, (map.get(key) ?? 0) + 1);
 
     for (const seq of byWorkspace.values()) {
       seq.sort((a, b) => (a.createdAt < b.createdAt ? -1 : 1));
+      if (seq[0]) addCount(startedByDate, dateKey(seq[0].createdAt));
       for (let i = 0; i < seq.length; i++) {
         const cur = seq[i];
-        const a = ensure(cur.toNodeId, cur.templateId ?? null, cur.nodeName ?? "(deleted)", cur.nodeType ?? "normal");
+        const nodeType = cur.nodeType ?? "normal";
+        const a = ensure(
+          cur.toNodeId,
+          cur.templateId ?? null,
+          cur.templateName ?? null,
+          cur.nodeName ?? "(deleted)",
+          nodeType,
+          cur.sortOrder,
+        );
         a.visits++;
         const next = seq[i + 1];
         if (next) {
           a.left++;
           const dwell = new Date(next.createdAt).getTime() - new Date(cur.createdAt).getTime();
-          if (Number.isFinite(dwell) && dwell >= 0) { a.totalDwellMs += dwell; a.dwellSamples++; }
-        } else if (cur.nodeType !== "end") {
+          if (Number.isFinite(dwell) && dwell >= 0) {
+            a.totalDwellMs += dwell;
+            a.dwellSamples++;
+            const bucketKey = `${dateKey(cur.createdAt)}:${cur.toNodeId}`;
+            const bucket = dwellBuckets.get(bucketKey) ?? {
+              date: dateKey(cur.createdAt),
+              nodeId: cur.toNodeId,
+              nodeName: cur.nodeName ?? "(deleted)",
+              totalDwellMs: 0,
+              samples: 0,
+            };
+            bucket.totalDwellMs += dwell;
+            bucket.samples++;
+            dwellBuckets.set(bucketKey, bucket);
+          }
+        } else if (nodeType !== "end") {
           a.stuck++; // currently sitting here / dropped off (not a terminal node)
+        } else {
+          addCount(completedByDate, dateKey(cur.createdAt));
         }
       }
     }
@@ -419,14 +492,62 @@ export function createWorkflowsRoute(database: Database = db, options?: Workflow
     const nodes = [...agg.values()].map((a) => ({
       nodeId: a.nodeId,
       templateId: a.templateId,
+      templateName: a.templateName,
       nodeName: a.nodeName,
       nodeType: a.nodeType,
+      sortOrder: a.sortOrder,
       visits: a.visits,
       avgDwellMs: a.dwellSamples > 0 ? Math.round(a.totalDwellMs / a.dwellSamples) : null,
       dropoff: a.stuck,
     })).sort((x, y) => y.visits - x.visits);
 
-    return c.json({ totalWorkspaces: byWorkspace.size, nodes });
+    const durationTrends = [...dwellBuckets.values()]
+      .map((bucket) => ({
+        date: bucket.date,
+        nodeId: bucket.nodeId,
+        nodeName: bucket.nodeName,
+        avgDwellMs: Math.round(bucket.totalDwellMs / bucket.samples),
+        samples: bucket.samples,
+      }))
+      .sort((a, b) => a.date.localeCompare(b.date) || a.nodeName.localeCompare(b.nodeName));
+
+    const funnel = [...agg.values()]
+      .sort((a, b) => {
+        const template = (a.templateName ?? "").localeCompare(b.templateName ?? "");
+        if (template !== 0) return template;
+        return a.sortOrder - b.sortOrder || a.nodeName.localeCompare(b.nodeName);
+      })
+      .map((a) => {
+        const advanced = a.nodeType === "end" ? a.visits : a.left;
+        return {
+          nodeId: a.nodeId,
+          templateId: a.templateId,
+          templateName: a.templateName,
+          nodeName: a.nodeName,
+          nodeType: a.nodeType,
+          sortOrder: a.sortOrder,
+          entered: a.visits,
+          advanced,
+          dropoff: a.stuck,
+          conversionRate: a.visits > 0 ? Math.round((advanced / a.visits) * 100) : 0,
+        };
+      });
+
+    const dates = [...new Set([...startedByDate.keys(), ...completedByDate.keys()])].sort();
+    let cumulativeStarted = 0;
+    let cumulativeCompleted = 0;
+    const burnDown = dates.map((date) => {
+      cumulativeStarted += startedByDate.get(date) ?? 0;
+      cumulativeCompleted += completedByDate.get(date) ?? 0;
+      return {
+        date,
+        started: cumulativeStarted,
+        completed: cumulativeCompleted,
+        remaining: Math.max(0, cumulativeStarted - cumulativeCompleted),
+      };
+    });
+
+    return c.json({ totalWorkspaces: byWorkspace.size, nodes, durationTrends, funnel, burnDown });
   });
 
   // GET /api/workflows/analytics/:templateId/:nodeId/workspaces?projectId=

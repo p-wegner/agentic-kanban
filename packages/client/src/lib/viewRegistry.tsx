@@ -22,6 +22,7 @@ export type ViewMode =
   | "metrics"
   | "butler"
   | "workflows"
+  | "workflow-analytics"
   | "insights"
   | "swimlane"
   | "flaky-tests"
@@ -129,6 +130,12 @@ const ICON = {
   workflows: (
     <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h4.5v4.5h-4.5v-4.5zM15.75 12.75h4.5v4.5h-4.5v-4.5zM8.25 9h4.5m-2.25 0v6.75m0 0h3" />
+    </svg>
+  ),
+  "workflow-analytics": (
+    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M4 19V5m0 14h16M7 15l3-4 3 2 4-7" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M7 19v-4m6 4v-6m4 6V6" />
     </svg>
   ),
   insights: (
@@ -266,6 +273,18 @@ export const VIEW_REGISTRY: ViewDescriptor[] = [
     paletteIcon: "⛓",
     paletteDescription: "Design ticket-type pipelines",
     shortcut: "u",
+    group: "secondary",
+  },
+  {
+    id: "workflow-analytics",
+    toolbarLabel: "Flow Stats",
+    label: "Workflow Analytics",
+    tooltip: "Workflow Analytics - stage trends and drop-off",
+    icon: ICON["workflow-analytics"],
+    paletteIcon: "WA",
+    paletteDescription: "Show workflow stage trends, funnel drop-off, and burn-down",
+    shortcut: "w",
+    activeClass: "bg-emerald-600 text-white",
     group: "secondary",
   },
   {
