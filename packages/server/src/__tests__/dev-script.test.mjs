@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { classifyProcessExit } from "../../../../scripts/dev-supervisor.mjs";
-import { planPortOwnerKill } from "../../../../scripts/dev-port-guard.mjs";
+import { commandLineBelongsToCheckout, planPortOwnerKill } from "../../../../scripts/dev-port-guard.mjs";
 
 describe("dev launcher exit classification", () => {
   it("treats intentional exits and termination signals as clean", () => {
@@ -20,6 +20,20 @@ describe("dev launcher exit classification", () => {
 });
 
 describe("dev launcher port guard", () => {
+  it("matches checkout paths on path boundaries", () => {
+    expect(commandLineBelongsToCheckout(
+      "node C:\\andrena\\.worktrees\\feature_ak-175-harden-board-shutdowns\\packages\\server\\src\\index.ts",
+      "C:\\andrena\\.worktrees\\feature_ak-175-harden-board-shutdowns",
+    )).toBe(true);
+  });
+
+  it("does not treat similarly prefixed checkout paths as the same checkout", () => {
+    expect(commandLineBelongsToCheckout(
+      "node C:\\andrena\\.worktrees\\feature_ak-175-harden-board-shutdowns-old\\packages\\server\\src\\index.ts",
+      "C:\\andrena\\.worktrees\\feature_ak-175-harden-board-shutdowns",
+    )).toBe(false);
+  });
+
   it("refuses to kill port 3001 when the owner belongs to another checkout", () => {
     const auditEvents = [];
     const decision = planPortOwnerKill({

@@ -1,10 +1,27 @@
 function normalizePath(value) {
-  return value.replace(/\\/g, "/").toLowerCase();
+  return value.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
+}
+
+function isCheckoutBoundary(char) {
+  return char === undefined || /[\s"'/:=]/.test(char);
 }
 
 export function commandLineBelongsToCheckout(commandLine, checkoutRoot) {
   if (!commandLine || !checkoutRoot) return false;
-  return normalizePath(commandLine).includes(normalizePath(checkoutRoot));
+  const normalizedCommand = normalizePath(commandLine);
+  const normalizedRoot = normalizePath(checkoutRoot);
+  let index = normalizedCommand.indexOf(normalizedRoot);
+
+  while (index !== -1) {
+    const before = normalizedCommand[index - 1];
+    const after = normalizedCommand[index + normalizedRoot.length];
+    const startsAtBoundary = isCheckoutBoundary(before);
+    const endsAtBoundary = isCheckoutBoundary(after);
+    if (startsAtBoundary && endsAtBoundary) return true;
+    index = normalizedCommand.indexOf(normalizedRoot, index + normalizedRoot.length);
+  }
+
+  return false;
 }
 
 export function planPortOwnerKill({ pid, port, checkoutRoot, getCommandLine, audit }) {
