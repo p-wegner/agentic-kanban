@@ -1,9 +1,8 @@
 import { useState, useRef, useEffect } from "react";
-import { BacklogPanel } from "./BacklogPanel.js";
 import { MonitorPopover, type MonitorStatus } from "./MonitorPopover.js";
 import { VoiceInboxButton } from "./VoiceInboxButton.js";
 import { PRIMARY_VIEWS, SECONDARY_VIEWS } from "../lib/viewRegistry.js";
-import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
+import type { StatusWithIssues } from "@agentic-kanban/shared";
 
 // Re-exported from the canonical view registry (#116). Kept here for back-compat
 // with the many components that import `ViewMode` from BoardToolbar.
@@ -15,11 +14,7 @@ const INACTIVE = "text-ink-soft dark:text-gray-400 hover:bg-surface-sunken dark:
 const BOARD_ACTIVITY_STATUS_ORDER = ["In Progress", "In Review", "AI Reviewed", "Todo"];
 
 interface BoardToolbarProps {
-  backlogColumn: StatusWithIssues | undefined;
   activeColumns: StatusWithIssues[];
-  searchQuery: string;
-  onIssueClick: (issue: IssueWithStatus) => void;
-  onBacklogMoved: () => void;
   onShowQuickTasks: () => void;
   autoMonitor: boolean;
   monitorRunning: boolean;
@@ -44,11 +39,7 @@ interface BoardToolbarProps {
 }
 
 export function BoardToolbar({
-  backlogColumn,
   activeColumns,
-  searchQuery,
-  onIssueClick,
-  onBacklogMoved,
   onShowQuickTasks,
   autoMonitor,
   monitorRunning,
@@ -99,15 +90,6 @@ export function BoardToolbar({
 
   return (
     <div className="flex items-start gap-2 flex-wrap">
-      {backlogColumn !== undefined && viewMode !== "backlog" && (
-        <BacklogPanel
-          backlogColumn={backlogColumn}
-          activeColumns={activeColumns}
-          searchQuery={searchQuery}
-          onIssueClick={onIssueClick}
-          onMoved={onBacklogMoved}
-        />
-      )}
       <button
         onClick={onShowQuickTasks}
         title="Quick Tasks - run a skill directly on the current checkout (q)"
