@@ -60,6 +60,12 @@ export interface PendingQuestionSet {
 
 interface Props {
   projectId: string;
+  /** Optional issue filter for focused planning/review surfaces. */
+  issueId?: string;
+  /** Optional workspace filter for focused planning/review surfaces. */
+  workspaceId?: string;
+  /** Optional compact heading when the panel is embedded in another workflow. */
+  title?: string;
   /** Notifies parent (Board) when the count changes, so the nav badge updates. */
   onCountChange?: (count: number) => void;
 }
@@ -376,7 +382,7 @@ function projectIdFromHash(): string {
   return _projectIdRef;
 }
 
-export function AgentQuestionsPanel({ projectId, onCountChange }: Props) {
+export function AgentQuestionsPanel({ projectId, issueId, workspaceId, title, onCountChange }: Props) {
   _projectIdRef = projectId;
   const [sets, setSets] = useState<PendingQuestionSet[]>([]);
   const [loading, setLoading] = useState(true);
@@ -391,8 +397,13 @@ export function AgentQuestionsPanel({ projectId, onCountChange }: Props) {
       const data = await apiFetch<{ questions: PendingQuestionSet[] }>(
         `/api/projects/${projectId}/agent-questions`,
       );
-      setSets(data.questions);
-      onCountChange?.(data.questions.length);
+      const filtered = data.questions.filter((set) => {
+        if (issueId && set.issueId !== issueId) return false;
+        if (workspaceId && set.workspaceId !== workspaceId) return false;
+        return true;
+      });
+      setSets(filtered);
+      onCountChange?.(filtered.length);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load questions");
     } finally {
@@ -410,7 +421,7 @@ export function AgentQuestionsPanel({ projectId, onCountChange }: Props) {
     const interval = setInterval(() => void load(), 15_000);
     return () => clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId]);
+  }, [projectId, issueId, workspaceId]);
 
   function removeSet(toolUseId: string) {
     setSets((prev) => {
@@ -473,7 +484,7 @@ export function AgentQuestionsPanel({ projectId, onCountChange }: Props) {
       <div className="max-w-3xl mx-auto px-4 py-2">
         <div className="flex items-center justify-between mb-2">
           <h3 className="text-xs font-semibold text-amber-800 dark:text-amber-300">
-            {sets.length} pending agent question{sets.length === 1 ? "" : "s"}
+            {title ?? `${sets.length} pending agent question${sets.length === 1 ? "" : "s"}`}
           </h3>
           {sets.length >= 2 && (
             <button

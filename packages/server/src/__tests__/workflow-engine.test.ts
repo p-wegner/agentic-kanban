@@ -386,6 +386,18 @@ describe("workflow-engine", () => {
     expect(block).toContain("Review");
   });
 
+  it("keeps spec planning phases behind the human approval panel", async () => {
+    const { projectId } = await seedProject(db);
+    const templateId = await resolveTemplateForIssue(db as any, { projectId, issueType: "bug" });
+    const node = await getStartNode(db as any, templateId!);
+    const block = buildTransitionBlock({ ...node!, name: "Specify" } as any, [
+      { edgeId: "e", toNodeId: "n", toNodeName: "Design", toStatusName: "In Progress", label: "approved", condition: "manual" },
+    ], "ws-123");
+    expect(block).not.toContain("propose_transition({");
+    expect(block).toContain("Approve & continue");
+    expect(block).toContain("Design");
+  });
+
   it("parses join strategy from node config (defaults to artifacts)", () => {
     expect(getJoinStrategy(null)).toBe("artifacts");
     expect(getJoinStrategy("")).toBe("artifacts");

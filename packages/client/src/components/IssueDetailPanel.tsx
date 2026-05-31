@@ -6,6 +6,7 @@ import { formatRelativeTime } from "../lib/formatRelativeTime.js";
 import { showToast } from "./Toast.js";
 import { MoveToDoneDialog } from "./MoveToDoneDialog.js";
 import { WorkflowProgress } from "./WorkflowProgress.js";
+import { isSpecPlanningPhase, SpecPhasePanel } from "./SpecPhasePanel.js";
 import { EpicDecomposerModal } from "./EpicDecomposerModal.js";
 import { ShowdownDialog } from "./ShowdownDialog.js";
 import { ShowdownPanel } from "./ShowdownPanel.js";
@@ -1114,6 +1115,13 @@ export function IssueDetailPanel({
                     projectId={issue.projectId}
                     workspaceStatus={issue.workspaceSummary.main.mergedAt ? "merged" : issue.workspaceSummary.main.status}
                   />
+                  {isSpecPlanningPhase(issue.workspaceSummary.main.workflow?.currentNodeName) && (
+                    <SpecPhasePanel
+                      issue={issue}
+                      workspace={issue.workspaceSummary.main}
+                      onApproved={() => onIssueUpdate(issue)}
+                    />
+                  )}
                 </div>
               ) : (
                 <div className="flex items-center gap-2 flex-wrap">
