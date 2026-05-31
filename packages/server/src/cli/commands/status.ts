@@ -48,6 +48,24 @@ Status indicators:
             return;
           }
 
+          const needsAttention = status.issues.filter((issue) => issue.attention?.reason === "idle-awaiting");
+          if (needsAttention.length > 0) {
+            console.log("  Needs attention");
+            for (const issue of needsAttention) {
+              const num = issue.issueNumber != null ? `#${issue.issueNumber}` : "???";
+              const wsStatus = issue.workspace?.status ?? "no workspace";
+              console.log(`    idle-awaiting ${num.padEnd(4)} ${issue.title}`);
+              console.log(`         [${issue.statusName}]  workspace: ${wsStatus}`);
+              if (issue.lastAgentMessage) {
+                const msg = issue.lastAgentMessage.length > 200 ? issue.lastAgentMessage.slice(0, 197) + "..." : issue.lastAgentMessage;
+                console.log(`         last: ${msg.split("\n")[0]}`);
+              } else if (issue.lastOutput.length > 0) {
+                console.log(`         last: ${issue.lastOutput[0]}`);
+              }
+            }
+            console.log("");
+          }
+
           for (const issue of status.issues) {
             const num = issue.issueNumber != null ? `#${issue.issueNumber}` : "???";
             const wsStatus = issue.workspace?.status ?? "no workspace";
