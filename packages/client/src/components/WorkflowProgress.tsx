@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from "react";
+import type { IssueWithStatus } from "@agentic-kanban/shared";
 import { apiFetch } from "../lib/api.js";
 import { showToast } from "./Toast.js";
 
@@ -41,6 +42,8 @@ interface Progress {
   nodes: WfNode[];
   edges: WfEdge[];
 }
+type WorkspaceStatus =
+  NonNullable<NonNullable<IssueWithStatus["workspaceSummary"]>["main"]>["status"] | "merged";
 
 const NODE_TYPE_BADGE: Record<string, string> = {
   start: "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300",
@@ -54,25 +57,45 @@ const NODE_TYPE_BADGE: Record<string, string> = {
  * one highlighted, the transition history, and (when not terminal) buttons to
  * advance the workflow manually.
  */
-export function WorkflowProgress({ workspaceId, projectId }: { workspaceId: string; projectId: string }) {
+export function WorkflowProgress({
+  workspaceId,
+  projectId,
+  workspaceStatus,
+}: {
+  workspaceId: string;
+  projectId: string;
+  workspaceStatus: WorkspaceStatus;
+}) {
+  const isWorkflowComplete = workspaceStatus === "closed" || workspaceStatus === "merged";
   const [progress, setProgress] = useState<Progress | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!isWorkflowComplete);
   const [transitioning, setTransitioning] = useState(false);
 
   const load = useCallback(() => {
+    if (isWorkflowComplete) {
+      setProgress(null);
+      setLoading(false);
+      return;
+    }
     apiFetch<Progress>(`/api/workflows/workspaces/${workspaceId}/progress`)
       .then(setProgress)
       .catch(() => setProgress(null))
       .finally(() => setLoading(false));
-  }, [workspaceId]);
+  }, [isWorkflowComplete, workspaceId]);
 
   useEffect(() => {
+    if (isWorkflowComplete) {
+      setProgress(null);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     load();
-  }, [load]);
+  }, [isWorkflowComplete, load]);
 
   // Auto-refresh when a workflow_transition event arrives via the board WebSocket
   useEffect(() => {
+    if (isWorkflowComplete) return;
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     const url = `${protocol}//${window.location.host}/ws/board/${projectId}`;
     const ws = new WebSocket(url);
@@ -88,7 +111,7 @@ export function WorkflowProgress({ workspaceId, projectId }: { workspaceId: stri
       ws.onclose = null;
       ws.close();
     };
-  }, [projectId, load]);
+  }, [isWorkflowComplete, projectId, load]);
 
   async function transition(toNodeId: string, toNodeName: string) {
     if (transitioning) return;
@@ -108,11 +131,32 @@ export function WorkflowProgress({ workspaceId, projectId }: { workspaceId: stri
   }
 
   if (loading) return null;
+  if (isWorkflowComplete) {
+    return (
+      <div className="mt-3 rounded-md border border-gray-200 dark:border-gray-700 p-3">
+        <h4 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">
+          Workflow
+        </h4>
+        <p className="text-sm text-gray-700 dark:text-gray-300">Workflow complete</p>
+      </div>
+    );
+  }
   if (!progress || !progress.templateId || progress.nodes.length === 0) return null;
 
   const visitedNodeIds = new Set(progress.transitions.map((t) => t.toNodeId));
   const nodeName = (id: string | null) =>
     id ? progress.nodes.find((n) => n.id === id)?.name ?? "?" : "start";
+  const formatTimestamp = (createdAt: string) => {
+    const date = new Date(createdAt);
+    if (Number.isNaN(date.getTime())) return createdAt;
+    return date.toLocaleString("en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    });
+  };
 
   return (
     <div className="mt-3 rounded-md border border-gray-200 dark:border-gray-700 p-3">
@@ -214,6 +258,7 @@ export function WorkflowProgress({ workspaceId, projectId }: { workspaceId: stri
                 <span className="text-gray-700 dark:text-gray-300">{nodeName(t.toNodeId)}</span>
                 {t.summary ? ` — ${t.summary}` : ""}
                 <span className="opacity-60"> [{t.triggeredBy}]</span>
+                <span className="text-gray-400 dark:text-gray-500"> {formatTimestamp(t.createdAt)}</span>
               </li>
             ))}
           </ul>
