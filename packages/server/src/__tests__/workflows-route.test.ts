@@ -4,6 +4,7 @@ import { createWorkflowsRoute } from "../routes/workflows.js";
 import * as schema from "@agentic-kanban/shared/schema";
 import { createTestApp as _createTestApp } from "./helpers/test-app.js";
 import type { TestDb } from "./helpers/test-db.js";
+import { eq } from "drizzle-orm";
 
 function createTestApp() {
   return _createTestApp((app, db) => {
@@ -160,5 +161,65 @@ describe("workflows route analytics", () => {
       dwellMs: 15 * 60 * 1000,
       isCurrent: false,
     });
+  });
+});
+
+describe("workflows route task approval", () => {
+  it("does not materialize task children when the requested transition is invalid", async () => {
+    const { app, db } = createTestApp();
+    const { projectId, statusId } = await seedProject(db, "task-transition-validation");
+    const backlogStatusId = randomUUID();
+    const now = "2026-05-30T09:00:00.000Z";
+    await db.insert(schema.projectStatuses).values({
+      id: backlogStatusId,
+      projectId,
+      name: "Backlog",
+      sortOrder: -1,
+      isDefault: false,
+      createdAt: now,
+    });
+
+    const templateId = randomUUID();
+    const tasksNodeId = randomUUID();
+    const implementNodeId = randomUUID();
+    await db.insert(schema.workflowTemplates).values({
+      id: templateId,
+      projectId: null,
+      name: "Spec",
+      isDefault: true,
+      isBuiltin: false,
+      createdAt: now,
+      updatedAt: now,
+    });
+    await db.insert(schema.workflowNodes).values([
+      { id: tasksNodeId, templateId, name: "Tasks", nodeType: "normal", statusName: "In Progress", sortOrder: 0, createdAt: now },
+      { id: implementNodeId, templateId, name: "Implement", nodeType: "normal", statusName: "In Progress", sortOrder: 1, createdAt: now },
+    ] as any);
+
+    const issueId = await seedIssue(db, projectId, statusId, 1, "Parent spec issue");
+    await db.update(schema.issues).set({ workflowTemplateId: templateId, currentNodeId: tasksNodeId }).where(eq(schema.issues.id, issueId));
+    const workspaceId = await seedWorkspace(db, issueId, "feature/spec", tasksNodeId);
+    await db.insert(schema.issueArtifacts).values({
+      id: randomUUID(),
+      issueId,
+      workspaceId,
+      type: "text",
+      mimeType: "text/markdown",
+      caption: "phase-artifact:tasks",
+      content: "# tasks\n\n## Wave 1\n- [ ] T001 Build the thing\n",
+      createdAt: now,
+    });
+
+    const res = await app.request(`/api/workflows/workspaces/${workspaceId}/transition`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ toNodeId: implementNodeId }),
+    });
+
+    expect(res.status).toBe(400);
+    const projectIssues = await db.select().from(schema.issues).where(eq(schema.issues.projectId, projectId));
+    expect(projectIssues).toHaveLength(1);
+    const deps = await db.select().from(schema.issueDependencies);
+    expect(deps).toHaveLength(0);
   });
 });

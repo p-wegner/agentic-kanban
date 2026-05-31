@@ -173,8 +173,22 @@ export async function materializeSpecTasksForWorkspace(
   const now = new Date().toISOString();
   const created: MaterializeResult["created"] = [];
   let dependencyEdges = 0;
+  let alreadyMaterialized = false;
 
   await database.transaction(async (tx) => {
+    const childLinks = await tx
+      .select({ id: issueDependencies.id })
+      .from(issueDependencies)
+      .where(or(
+        and(eq(issueDependencies.dependsOnId, workspace.issueId), eq(issueDependencies.type, "child_of")),
+        and(eq(issueDependencies.issueId, workspace.issueId), eq(issueDependencies.type, "parent_of")),
+      ))
+      .limit(1);
+    if (childLinks.length > 0) {
+      alreadyMaterialized = true;
+      return;
+    }
+
     const maxRow = await tx
       .select({ maxNum: sql<number | null>`max(${issues.issueNumber})` })
       .from(issues)
@@ -243,6 +257,10 @@ export async function materializeSpecTasksForWorkspace(
       dependencyEdges++;
     }
   });
+
+  if (alreadyMaterialized) {
+    return { created: [], dependencyEdges: 0, skipped: true, reason: "already-materialized" };
+  }
 
   options?.boardEvents?.broadcast(workspace.projectId, "issue_created");
   options?.boardEvents?.broadcast(workspace.projectId, "dependency_added");
