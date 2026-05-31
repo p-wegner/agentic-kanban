@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { IssueWithStatus } from "@agentic-kanban/shared";
 import type { LiveSessionStats, TodoItem } from "../lib/useBoardEvents.js";
 import { apiFetch } from "../lib/api.js";
@@ -238,6 +239,9 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
   const hasActiveWorkspace = ws?.main && ws.main.status !== "closed";
   const [depDragOver, setDepDragOver] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
+  const cardRef = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
 
   // Determine which action buttons to show in the action row
   const showActionRow = issue.statusName !== "Done" && issue.statusName !== "Cancelled";
@@ -245,6 +249,80 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
   const showStartWorkspace = showActionRow && !hasActiveWorkspace && !!onStartWorkspace;
   const showMoveToNext = showActionRow && !!onMoveToNext && !!nextStatusName;
   const hasAnyAction = showResume || showStartWorkspace || showMoveToNext;
+
+  useEffect(() => {
+    if (!contextMenu) return;
+
+    const firstItem = menuRef.current?.querySelector<HTMLButtonElement>('[role="menuitem"]');
+    firstItem?.focus();
+
+    function handlePointerDown(event: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) setContextMenu(null);
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setContextMenu(null);
+        cardRef.current?.focus();
+      }
+    }
+
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [contextMenu]);
+
+  function openContextMenu(x: number, y: number) {
+    setContextMenu({
+      x: Math.min(x, window.innerWidth - 220),
+      y: Math.min(y, window.innerHeight - 190),
+    });
+  }
+
+  function handleContextMenu(e: React.MouseEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    openContextMenu(e.clientX, e.clientY);
+  }
+
+  function handleCardKeyDown(e: React.KeyboardEvent) {
+    if (e.key !== "ContextMenu" && !(e.shiftKey && e.key === "F10")) return;
+    e.preventDefault();
+    const rect = cardRef.current?.getBoundingClientRect();
+    openContextMenu((rect?.left ?? 0) + 12, (rect?.top ?? 0) + 12);
+  }
+
+  function handleMenuKeyDown(e: React.KeyboardEvent) {
+    if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+    e.preventDefault();
+    const items = Array.from(menuRef.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]') ?? []);
+    if (items.length === 0) return;
+    const currentIndex = items.findIndex((item) => item === document.activeElement);
+    const nextIndex = e.key === "ArrowDown"
+      ? (currentIndex + 1) % items.length
+      : (currentIndex - 1 + items.length) % items.length;
+    items[nextIndex].focus();
+  }
+
+  async function copyIssueReference() {
+    const prefix = issue.issueNumber != null ? `#${issue.issueNumber}` : issue.id;
+    try {
+      await navigator.clipboard.writeText(`${prefix} ${issue.title}`);
+      showToast("Issue reference copied", "success");
+    } catch {
+      showToast("Failed to copy issue reference", "error");
+    } finally {
+      setContextMenu(null);
+    }
+  }
+
+  function runContextAction(action: () => void) {
+    action();
+    setContextMenu(null);
+  }
 
   function handleDragOver(e: React.DragEvent) {
     const dragData = (window as unknown as Record<string, unknown>).__dragData as { issueId?: string; sourceStatusId?: string } | undefined;
@@ -274,15 +352,84 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
 
   return (
     <div
+      ref={cardRef}
       draggable
+      tabIndex={0}
       onDragStart={(e) => { setIsDragging(true); onDragStart(e, issue); }}
       onDragEnd={() => setIsDragging(false)}
       onDragOver={handleDragOver}
       onDragLeave={() => setDepDragOver(false)}
       onDrop={handleDrop}
       onClick={() => onClick(issue)}
+      onContextMenu={handleContextMenu}
+      onKeyDown={handleCardKeyDown}
       className={`group bg-surface-raised dark:bg-surface-raised-dark rounded-lg shadow-sm p-2.5 border cursor-pointer hover:shadow-md hover:-translate-y-px transition-all duration-150 relative isolate ${depDragOver ? "border-brand-400 bg-brand-50 shadow-brand-200" : isPendingWorkspace ? "border-brand-300 shadow-brand-100 shadow-md" : "border-black/[0.07] dark:border-white/10 hover:border-brand-200 dark:hover:border-gray-600"}`}
     >
+      {contextMenu && createPortal(
+        <div
+          ref={menuRef}
+          role="menu"
+          aria-label={`Issue actions for ${issue.title}`}
+          onClick={(e) => e.stopPropagation()}
+          onContextMenu={(e) => e.preventDefault()}
+          onKeyDown={handleMenuKeyDown}
+          className="fixed z-50 w-52 rounded-md border border-gray-200 bg-white p-1 shadow-lg dark:border-gray-700 dark:bg-gray-900"
+          style={{ left: contextMenu.x, top: contextMenu.y }}
+        >
+          <button
+            type="button"
+            role="menuitem"
+            onClick={copyIssueReference}
+            className="flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left text-xs text-gray-700 hover:bg-gray-50 focus:bg-gray-50 focus:outline-none dark:text-gray-200 dark:hover:bg-gray-800 dark:focus:bg-gray-800"
+          >
+            <svg className="h-3.5 w-3.5 shrink-0 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+            </svg>
+            <span className="truncate">Copy issue reference</span>
+          </button>
+          {hasAnyAction && <div className="my-1 border-t border-gray-100 dark:border-gray-800" />}
+          {showResume && (
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => runContextAction(() => onWorkspaceClick!(issue, ws?.main?.id))}
+              className="flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left text-xs text-gray-700 hover:bg-gray-50 focus:bg-gray-50 focus:outline-none dark:text-gray-200 dark:hover:bg-gray-800 dark:focus:bg-gray-800"
+            >
+              <svg className="h-3.5 w-3.5 shrink-0 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 0 1 0 1.972l-11.54 6.347a1.125 1.125 0 0 1-1.667-.986V5.653Z" />
+              </svg>
+              <span className="truncate">Resume</span>
+            </button>
+          )}
+          {showStartWorkspace && (
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => runContextAction(() => onStartWorkspace!(issue))}
+              className="flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left text-xs text-gray-700 hover:bg-gray-50 focus:bg-gray-50 focus:outline-none dark:text-gray-200 dark:hover:bg-gray-800 dark:focus:bg-gray-800"
+            >
+              <svg className="h-3.5 w-3.5 shrink-0 text-brand-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+              </svg>
+              <span className="truncate">Start Workspace</span>
+            </button>
+          )}
+          {showMoveToNext && (
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => runContextAction(() => onMoveToNext!(issue))}
+              className="flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left text-xs text-gray-700 hover:bg-gray-50 focus:bg-gray-50 focus:outline-none dark:text-gray-200 dark:hover:bg-gray-800 dark:focus:bg-gray-800"
+            >
+              <svg className="h-3.5 w-3.5 shrink-0 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" />
+              </svg>
+              <span className="truncate">Move to {nextStatusName}</span>
+            </button>
+          )}
+        </div>,
+        document.body,
+      )}
       <div className="flex min-w-0 items-start justify-between gap-2">
         <p className="min-w-0 text-sm text-ink dark:text-stone-100 break-words">
           {issue.issueNumber != null && (
