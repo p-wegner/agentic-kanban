@@ -19,13 +19,13 @@ describe("VIEW_REGISTRY", () => {
     expect(new Set(shortcuts).size).toBe(shortcuts.length);
   });
 
-  it("enumerates all 13 board views", () => {
-    expect(VIEW_REGISTRY).toHaveLength(13);
+  it("enumerates all 14 board views", () => {
+    expect(VIEW_REGISTRY).toHaveLength(14);
   });
 
   it("preserves the existing view ids", () => {
     const expected: ViewMode[] = [
-      "kanban", "graph", "table", "agents", "timeline", "metrics",
+      "kanban", "backlog", "graph", "table", "agents", "timeline", "metrics",
       "digest", "focus", "butler", "workflows", "insights", "swimlane", "flaky-tests",
     ];
     expect(VIEW_IDS.slice().sort()).toEqual(expected.slice().sort());
@@ -34,6 +34,7 @@ describe("VIEW_REGISTRY", () => {
   it("preserves the existing view shortcuts (b/g/t/f/l/m/i/p/u, etc.)", () => {
     const byId = Object.fromEntries(VIEW_REGISTRY.map((v) => [v.id, v.shortcut]));
     expect(byId.kanban).toBe("b");
+    expect(byId.backlog).toBe("r");
     expect(byId.graph).toBe("g");
     expect(byId.table).toBe("t");
     expect(byId.timeline).toBe("f");
@@ -69,7 +70,7 @@ describe("VIEW_REGISTRY", () => {
 
     // Primary views (no `group` or group === "primary") stay one click away.
     expect([...primaryIds].sort()).toEqual(
-      ["agents", "butler", "graph", "kanban", "table", "timeline"].sort(),
+      ["agents", "backlog", "butler", "graph", "kanban", "table", "timeline"].sort(),
     );
     // Analytics/secondary views live behind the "More" overflow dropdown.
     expect([...secondaryIds].sort()).toEqual(
@@ -90,6 +91,7 @@ describe("VIEW_REGISTRY", () => {
     // graph is reached via a `g` chord (g+s -> settings), handled separately
     expect(SHORTCUT_TO_VIEW["g"]).toBeUndefined();
     expect(SHORTCUT_TO_VIEW["b"]).toBe("kanban");
+    expect(SHORTCUT_TO_VIEW["r"]).toBe("backlog");
     expect(SHORTCUT_TO_VIEW["k"]).toBe("flaky-tests");
   });
 });
