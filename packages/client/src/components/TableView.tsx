@@ -253,6 +253,7 @@ export function TableView({ columns, onIssueClick, searchQuery, onRefresh }: Tab
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value)}
           className="text-xs border border-gray-200 dark:border-gray-700 rounded px-2 py-1 bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-300"
+          aria-label="Table status filter"
         >
           <option value="active">Active only</option>
           <option value="all">All statuses</option>
