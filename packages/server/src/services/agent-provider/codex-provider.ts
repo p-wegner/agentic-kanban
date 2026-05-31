@@ -36,9 +36,10 @@ export class CodexProvider implements AgentProvider {
         useShell = false;
       }
 
+      const hookTrustFlags = ["--dangerously-bypass-hook-trust"];
       const sandboxFlags = planMode
-        ? ["--sandbox", "read-only"]
-        : ["--dangerously-bypass-approvals-and-sandbox"];
+        ? ["--sandbox", "read-only", ...hookTrustFlags]
+        : ["--dangerously-bypass-approvals-and-sandbox", ...hookTrustFlags];
       if (providerSessionId) {
         args.push("exec", "resume", "--json", ...sandboxFlags);
       } else {
