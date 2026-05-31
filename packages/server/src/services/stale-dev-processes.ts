@@ -196,7 +196,7 @@ function workspaceAssociations(tree: ProcessRecord[], activeWorkspaces: ActiveWo
   const associated: string[] = [];
   for (const ws of activeWorkspaces) {
     const dir = normalizePath(ws.workingDir);
-    if ((ws.sessionPid && pids.has(ws.sessionPid)) || (dir && command.includes(dir))) {
+    if ((ws.sessionPid && pids.has(ws.sessionPid)) || (ws.sessionPid && dir && command.includes(dir))) {
       associated.push(ws.workspaceId);
     }
   }
@@ -242,7 +242,7 @@ export function classifyStaleDevProcessTrees(input: RuntimeSnapshotInput): Board
     } else if (protectedTreePorts.length > 0) {
       kept.push({ ...decisionBase, action: "kept", reason: `protected-port:${protectedTreePorts.join(",")}` });
     } else if (associatedWorkspaceIds.length > 0) {
-      kept.push({ ...decisionBase, action: "kept", reason: "active-workspace" });
+      kept.push({ ...decisionBase, action: "kept", reason: "active-workspace-session" });
     } else if (!inCleanupScope) {
       kept.push({ ...decisionBase, action: "kept", reason: "outside-cleanup-scope" });
     } else if (listenerPorts.length > 0) {
