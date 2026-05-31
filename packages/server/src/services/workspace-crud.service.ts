@@ -303,6 +303,7 @@ export function createWorkspaceCrudService(deps: {
     resolvedProvider: ProviderName;
     resolvedProfileSelection: { provider: ProviderName; name: string } | undefined;
     model: string | undefined;
+    contextFiles?: string[];
     skillName: string | null;
   }): Promise<string | undefined> {
     if (!getSessionManager) return undefined;
@@ -321,6 +322,7 @@ export function createWorkspaceCrudService(deps: {
       triggerType: params.skillName ? `skill:${params.skillName}` : "agent",
       profile: params.resolvedProfileSelection,
       model: params.model,
+      contextFiles: params.contextFiles,
     });
   }
 
@@ -497,8 +499,9 @@ exit 1
       // `CLAUDE.local.md` so the agent's first turn has the spec without foraging.
       // Gitignored — never enters the merge. Best-effort: a write failure must not
       // block workspace creation. Skipped for direct workspaces.
+      let ticketContextPath: string | null = null;
       if (!isDirect && worktreePath) {
-        await writeTicketContextFile(worktreePath, {
+        ticketContextPath = await writeTicketContextFile(worktreePath, {
           issueNumber: issue.issueNumber,
           title: issue.title,
           description: issue.description,
@@ -561,6 +564,7 @@ exit 1
         planMode, resolvedProvider,
         resolvedProfileSelection: agentConfig.resolvedProfileSelection,
         model: agentConfig.model,
+        contextFiles: ticketContextPath ? [ticketContextPath] : undefined,
         skillName,
       });
 

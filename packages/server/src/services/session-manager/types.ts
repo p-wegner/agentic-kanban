@@ -36,6 +36,8 @@ export interface StartSessionOptions {
   profile?: { provider: ProviderName; name: string };
   /** Claude model tier (e.g. "opus"). When omitted, the workspace's stored model is used. */
   model?: string;
+  /** Files to expose to the provider on this session's initial turn when supported. */
+  contextFiles?: string[];
   extraEnv?: Record<string, string>;
   workingDirOverride?: string;
   skipPermissions?: boolean;

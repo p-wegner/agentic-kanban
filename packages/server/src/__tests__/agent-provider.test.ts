@@ -566,6 +566,14 @@ describe("CodexProvider", () => {
     ]);
   });
 
+  it("does not add text context files as native Codex attachments", () => {
+    const config = provider.buildLaunchConfig({
+      contextFiles: ["C:/worktree/CLAUDE.local.md"],
+    });
+    expect(config.args).not.toContain("--attachment");
+    expect(config.args).not.toContain("C:/worktree/CLAUDE.local.md");
+  });
+
   it("uses read-only sandbox (not the bypass flag) in plan mode", () => {
     const config = provider.buildLaunchConfig({ planMode: true });
     expect(config.args).toEqual([
@@ -667,6 +675,15 @@ describe("CopilotProvider", () => {
   it("uses --resume=<id> for Copilot resume", () => {
     const config = provider.buildLaunchConfig({ prompt: "Continue", providerSessionId: "sess-123" });
     expect(config.args).toContain("--resume=sess-123");
+  });
+
+  it("attaches context files to Copilot non-interactive runs", () => {
+    const config = provider.buildLaunchConfig({
+      prompt: "Run",
+      contextFiles: ["C:/worktree/CLAUDE.local.md"],
+    });
+    expect(config.args).toContain("--attachment");
+    expect(config.args).toContain("C:/worktree/CLAUDE.local.md");
   });
 
   it("maps plain and model-prefixed Copilot profiles to --model", () => {

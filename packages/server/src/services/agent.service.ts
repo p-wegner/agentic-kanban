@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { openSync, closeSync, readSync, statSync, unlinkSync, existsSync, writeFileSync } from "node:fs";
+import { openSync, closeSync, readSync, statSync, unlinkSync, existsSync, writeFileSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildAgentLaunchConfig, type ProviderId, type ProviderName } from "./agent-provider.js";
@@ -60,6 +60,25 @@ export class AgentState {
 
 /** Module-level singleton used by all exported functions. */
 export const agentState = new AgentState();
+
+function appendContextFilesToPrompt(prompt: string, contextFiles: string[] | undefined): string {
+  if (!contextFiles?.length) return prompt;
+
+  const sections: string[] = [];
+  for (const file of contextFiles) {
+    try {
+      const content = readFileSync(file, "utf-8").trim();
+      if (content) {
+        sections.push(`### ${file}\n\n${content}`);
+      }
+    } catch (err) {
+      console.warn(`[agent] failed to read context file for prompt injection: file=${file}`, err);
+    }
+  }
+
+  if (sections.length === 0) return prompt;
+  return `${prompt}\n\n[Attached context files]\n\n${sections.join("\n\n---\n\n")}`;
+}
 
 /** Get the output file path for a session. */
 export function sessionOutputPath(sessionId: string): string {
@@ -177,7 +196,11 @@ export function launch(
   extraEnv?: Record<string, string>,
   skipPermissions?: boolean,
   model?: string,
+  contextFiles?: string[],
 ): ChildProcess {
+  const effectivePrompt = provider === "codex"
+    ? appendContextFilesToPrompt(prompt, contextFiles)
+    : prompt;
   const launchConfig = buildAgentLaunchConfig({
     agentArgs,
     providerSessionId,
@@ -189,11 +212,12 @@ export function launch(
     permissionPromptTool,
     planMode,
     provider,
-    prompt,
+    prompt: effectivePrompt,
+    contextFiles,
     skipPermissions,
   });
   const { command, args, useShell, isMockAgent, env: spawnEnv, promptPrefix, suppressStdinPrompt } = launchConfig;
-  const stdinPrompt = promptPrefix ? `${promptPrefix}\n\n${prompt}` : prompt;
+  const stdinPrompt = promptPrefix ? `${promptPrefix}\n\n${effectivePrompt}` : effectivePrompt;
   const boardServerPort = process.env.KANBAN_SERVER_PORT || process.env.PORT || DEFAULT_BOARD_SERVER_PORT;
   const boardClientPort = process.env.KANBAN_CLIENT_PORT || process.env.VITE_PORT || DEFAULT_BOARD_CLIENT_PORT;
   const worktreePorts = resolveWorktreeDevPorts(worktreePath);

@@ -34,6 +34,8 @@ export interface ProviderLaunchOptions {
   planMode?: boolean;
   provider?: ProviderId;
   prompt?: string;
+  /** Provider-readable files to attach or otherwise expose to the initial turn. */
+  contextFiles?: string[];
   /** Skip permission prompts (use Copilot --allow-all, Claude system setting). */
   skipPermissions?: boolean;
 }

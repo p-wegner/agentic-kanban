@@ -169,6 +169,9 @@ describe("workspace.service", () => {
         // Seed issue: number 1, title "Implement feature", description "Do the thing"
         expect(ctx).toContain("# Ticket #1: Implement feature");
         expect(ctx).toContain("Do the thing");
+        expect(sessionManager.startSession).toHaveBeenCalledWith(expect.objectContaining({
+          contextFiles: [join(worktreeDir, "CLAUDE.local.md")],
+        }));
       } finally {
         await rm(worktreeDir, { recursive: true, force: true });
       }
