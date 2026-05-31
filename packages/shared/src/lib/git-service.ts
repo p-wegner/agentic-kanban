@@ -986,16 +986,19 @@ export async function rebaseOntoBase(
   worktreePath: string,
   baseBranch: string,
   branch?: string,
+  options: { preferLocalBase?: boolean } = {},
 ): Promise<{ success: boolean; conflictingFiles?: string[]; error?: string }> {
   try {
     await execGit(["fetch", "origin", baseBranch], worktreePath);
   } catch { /* no remote */ }
 
   let source = baseBranch;
-  try {
-    await execGit(["rev-parse", "--verify", `remotes/origin/${baseBranch}`], worktreePath);
-    source = `origin/${baseBranch}`;
-  } catch { /* use local */ }
+  if (!options.preferLocalBase) {
+    try {
+      await execGit(["rev-parse", "--verify", `remotes/origin/${baseBranch}`], worktreePath);
+      source = `origin/${baseBranch}`;
+    } catch { /* use local */ }
+  }
 
   try {
     await execGit(["rebase", source], worktreePath);

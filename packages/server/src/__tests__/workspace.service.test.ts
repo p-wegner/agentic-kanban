@@ -489,9 +489,11 @@ describe("workspace.service", () => {
         "/tmp/test-repo/.worktrees/feature-1",
         "main",
         "feature/ak-1-test",
+        { preferLocalBase: true },
       );
       const startArgs = (sessionManager.startSession as ReturnType<typeof vi.fn>).mock.calls[0][0];
       expect(startArgs.prompt).toContain("rebased the workspace branch onto 'main' successfully");
+      expect(startArgs.skipLaunchPreflight).toBe(true);
     });
 
     it("launches fix-and-merge with rebase conflict context instead of aborting the rebuild", async () => {
@@ -510,6 +512,7 @@ describe("workspace.service", () => {
       const startArgs = (sessionManager.startSession as ReturnType<typeof vi.fn>).mock.calls[0][0];
       expect(startArgs.prompt).toContain("left the rebase in progress");
       expect(startArgs.prompt).toContain("src/foo.ts");
+      expect(startArgs.skipLaunchPreflight).toBe(true);
     });
   });
 

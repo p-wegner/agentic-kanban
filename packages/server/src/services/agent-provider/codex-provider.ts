@@ -57,7 +57,7 @@ export class CodexProvider implements AgentProvider {
       }
       const profileName = profile?.provider === "codex" ? profile.name : undefined;
       if (profileName && profileName !== "default") {
-        args.push("--profile-v2", profileName);
+        args.push("--profile", profileName);
       }
       if (model) {
         args.push("--model", model);

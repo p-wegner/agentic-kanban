@@ -515,41 +515,41 @@ describe("buildAgentLaunchConfig (backward compat)", () => {
 describe("CodexProvider", () => {
   const provider = new CodexProvider();
 
-  it("appends --profile-v2 when codex profile is set", () => {
+  it("appends --profile when codex profile is set", () => {
     const config = provider.buildLaunchConfig({
       profile: { provider: "codex", name: "my-config" },
     });
-    expect(config.args).toContain("--profile-v2");
+    expect(config.args).toContain("--profile");
     expect(config.args).toContain("my-config");
   });
 
-  it("does not append --profile-v2 when no profile is set", () => {
+  it("does not append --profile when no profile is set", () => {
     const config = provider.buildLaunchConfig({});
-    expect(config.args).not.toContain("--profile-v2");
+    expect(config.args).not.toContain("--profile");
   });
 
-  it("does not append --profile-v2 when codex profile is 'default'", () => {
+  it("does not append --profile when codex profile is 'default'", () => {
     const config = provider.buildLaunchConfig({
       profile: { provider: "codex", name: "default" },
     });
-    expect(config.args).not.toContain("--profile-v2");
+    expect(config.args).not.toContain("--profile");
   });
 
-  it("does not append --profile-v2 when profile is for claude", () => {
+  it("does not append --profile when profile is for claude", () => {
     const config = provider.buildLaunchConfig({
       profile: { provider: "claude", name: "sonnet" },
     });
-    expect(config.args).not.toContain("--profile-v2");
+    expect(config.args).not.toContain("--profile");
   });
 
-  it("uses codex exec with profile-v2 and resume", () => {
+  it("uses codex exec with profile and resume", () => {
     const config = provider.buildLaunchConfig({
       profile: { provider: "codex", name: "fast" },
       providerSessionId: "thread-123",
     });
     expect(config.args).toEqual([
       "exec", "resume", "--json", "--dangerously-bypass-approvals-and-sandbox", "--dangerously-bypass-hook-trust",
-      "--profile-v2", "fast",
+      "--profile", "fast",
       "thread-123",
       "-",
     ]);
@@ -561,7 +561,7 @@ describe("CodexProvider", () => {
     });
     expect(config.args).toEqual([
       "exec", "--json", "--dangerously-bypass-approvals-and-sandbox", "--dangerously-bypass-hook-trust",
-      "--profile-v2", "fast",
+      "--profile", "fast",
       "-",
     ]);
   });
