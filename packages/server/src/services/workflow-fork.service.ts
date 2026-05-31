@@ -34,6 +34,8 @@ const MAX_CONCURRENT_PER_WORKSPACE = 2;
 const MAX_CONCURRENT_PER_PROJECT = 4;
 const CHILD_TIMEOUT_MS = 30 * 60 * 1000;
 const SPEC_PHASE_SKILLS = new Set(["spec-requirements", "spec-design", "spec-tasks"]);
+const SPEC_PHASE_SESSION_START_TIMEOUT_MS = 2 * 60 * 1000;
+const SPEC_PHASE_SESSION_POLL_MS = 1000;
 
 type GitService = typeof realGitService;
 
@@ -127,16 +129,36 @@ export function createWorkflowForkService(deps: {
     return rows[0]?.builtinKey === "spec-driven-phased-planning";
   }
 
+  async function waitForWorkspaceSessionSlot(workspaceId: string, triggerType: string): Promise<boolean> {
+    const deadline = Date.now() + SPEC_PHASE_SESSION_START_TIMEOUT_MS;
+    while (true) {
+      const running = await database
+        .select({ id: sessions.id })
+        .from(sessions)
+        .where(and(eq(sessions.workspaceId, workspaceId), eq(sessions.status, "running")))
+        .limit(1);
+      if (running.length === 0) return true;
+      if (Date.now() >= deadline) {
+        console.warn(`[fork] skipped ${triggerType} launch for workspace ${workspaceId}: another session is still running.`);
+        return false;
+      }
+      await new Promise((resolve) => setTimeout(resolve, SPEC_PHASE_SESSION_POLL_MS));
+    }
+  }
+
   async function launchSpecPhaseSession(workspaceId: string, node: WorkflowNodeRow): Promise<void> {
     if (!getSessionManager || !(await isSpecDrivenPhaseNode(node))) return;
 
     const triggerType = `phase:${node.skillName}`;
-    const existing = await database
+    const phaseSessions = () => database
       .select({ id: sessions.id })
       .from(sessions)
       .where(and(eq(sessions.workspaceId, workspaceId), eq(sessions.triggerType, triggerType)))
       .limit(1);
+    const existing = await phaseSessions();
     if (existing.length > 0) return;
+    if (!(await waitForWorkspaceSessionSlot(workspaceId, triggerType))) return;
+    if ((await phaseSessions()).length > 0) return;
 
     const rows = await database
       .select({
