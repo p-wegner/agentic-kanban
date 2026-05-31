@@ -227,9 +227,11 @@ function configurePorts() {
 function spawnProcess(label, cmd, args, opts) {
   let restarts = 0;
   let observedDependencyRecoveryGeneration = dependencyRecovery.generation;
+  let currentProc = null;
 
   function start() {
     const proc = spawn(cmd, args, { ...opts, stdio: "inherit", env: process.env });
+    currentProc = proc;
     observedDependencyRecoveryGeneration = dependencyRecovery.generation;
 
     proc.on("exit", (code, signal) => {
@@ -265,7 +267,12 @@ function spawnProcess(label, cmd, args, opts) {
     return proc;
   }
 
-  return start();
+  start();
+  return {
+    kill() {
+      currentProc?.kill();
+    },
+  };
 }
 
 async function main() {
