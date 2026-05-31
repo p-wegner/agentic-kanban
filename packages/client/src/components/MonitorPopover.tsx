@@ -13,9 +13,27 @@ export type MonitorStatus = {
   enabled: boolean;
   intervalMin: number;
   active: boolean;
-  lastRun: { at: string; relaunched: number; merged: number; nudged: number } | null;
+  lastRun: {
+    at: string;
+    relaunched: number;
+    merged: number;
+    nudged: number;
+    resources?: {
+      processCount: number;
+      listenerCount: number;
+      activeWorkspaceCount: number;
+      keptCount: number;
+      cleanedCount: number;
+      cleanupFailedCount: number;
+    } | null;
+  } | null;
   nextRunAt: string | null;
   recentActions: MonitorAction[];
+  resourceSnapshot?: {
+    at: string;
+    kept: Array<{ rootPid: number; pids: number[]; listenerPorts: number[]; associatedWorkspaceIds: string[]; reason: string }>;
+    cleaned: Array<{ rootPid: number; pids: number[]; listenerPorts: number[]; associatedWorkspaceIds: string[]; action: "cleaned" | "cleanup_failed"; reason: string }>;
+  } | null;
 };
 
 const ACTION_LABELS: Record<MonitorAction["action"], { label: string; color: string }> = {
@@ -218,6 +236,47 @@ export function MonitorPopover({
               <div className="text-gray-400 dark:text-gray-500 text-[11px]">No runs yet this session</div>
             )}
           </div>
+
+          {/* Resource audit */}
+          {status?.lastRun?.resources && (
+            <div className="px-3 py-2.5 border-b border-gray-100 dark:border-gray-800">
+              <div className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500 mb-1.5">Resource audit</div>
+              <div className="grid grid-cols-3 gap-1.5 mb-2">
+                <div className="rounded-md bg-gray-50 dark:bg-gray-800 px-2 py-1">
+                  <div className="text-[10px] text-gray-400 dark:text-gray-500">Processes</div>
+                  <div className="font-semibold text-gray-700 dark:text-gray-300">{status.lastRun.resources.processCount}</div>
+                </div>
+                <div className="rounded-md bg-gray-50 dark:bg-gray-800 px-2 py-1">
+                  <div className="text-[10px] text-gray-400 dark:text-gray-500">Kept</div>
+                  <div className="font-semibold text-gray-700 dark:text-gray-300">{status.lastRun.resources.keptCount}</div>
+                </div>
+                <div className="rounded-md bg-gray-50 dark:bg-gray-800 px-2 py-1">
+                  <div className="text-[10px] text-gray-400 dark:text-gray-500">Cleaned</div>
+                  <div className={`font-semibold ${status.lastRun.resources.cleanupFailedCount > 0 ? "text-red-600" : "text-gray-700 dark:text-gray-300"}`}>
+                    {status.lastRun.resources.cleanedCount}
+                  </div>
+                </div>
+              </div>
+              {status.resourceSnapshot && (
+                <div className="space-y-1">
+                  {status.resourceSnapshot.cleaned.slice(0, 3).map((item) => (
+                    <div key={`cleaned-${item.rootPid}`} className="flex items-center gap-1.5 text-[11px]">
+                      <span className={item.action === "cleanup_failed" ? "text-red-600" : "text-emerald-600"}>{item.action === "cleanup_failed" ? "Failed" : "Cleaned"}</span>
+                      <span className="font-mono text-gray-500 dark:text-gray-400">PID {item.rootPid}</span>
+                      <span className="truncate text-gray-400 dark:text-gray-500">{item.reason}</span>
+                    </div>
+                  ))}
+                  {status.resourceSnapshot.kept.slice(0, 3).map((item) => (
+                    <div key={`kept-${item.rootPid}`} className="flex items-center gap-1.5 text-[11px]">
+                      <span className="text-gray-500 dark:text-gray-400">Kept</span>
+                      <span className="font-mono text-gray-500 dark:text-gray-400">PID {item.rootPid}</span>
+                      <span className="truncate text-gray-400 dark:text-gray-500">{item.reason}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Recent actions */}
           {status?.recentActions && status.recentActions.length > 0 && (
