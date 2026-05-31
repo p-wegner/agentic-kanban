@@ -89,6 +89,13 @@ async function main() {
     input = JSON.parse(lines.join(""));
   } catch {}
 
+  // Loop safety: when a Stop hook is wired directly (e.g. codex .codex/hooks.json,
+  // which fires per-turn and can "continue" the turn on a non-zero exit), only
+  // nudge on the first stop. On re-entry (stop_hook_active=true) let it through.
+  // For Claude this is redundant — smart-hooks-runner already skips non-alwaysRun
+  // checks on re-prompt — but harmless.
+  if (input.stop_hook_active === true) process.exit(0);
+
   const ws = lookupWorkspace(input.session_id);
 
   if (ws) {
