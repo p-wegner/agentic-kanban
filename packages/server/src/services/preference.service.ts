@@ -27,7 +27,8 @@ export const SETTINGS_KEYS = [
 /** Per-project override keys (no fixed list — project IDs are dynamic). */
 function isAllowedDynamicKey(key: string): boolean {
   return /^butler_event_feed_[0-9a-f-]+$/.test(key) ||
-    /^tdd_mode_[0-9a-f-]+$/.test(key);
+    /^tdd_mode_[0-9a-f-]+$/.test(key) ||
+    /^backlog_filter_presets_[0-9a-f-]+$/.test(key);
 }
 
 export function createPreferenceService({ database }: { database: Database }) {
