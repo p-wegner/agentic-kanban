@@ -72,6 +72,7 @@ export function createSessionLifecycle(
       contextFiles,
       extraEnv,
       workingDirOverride,
+      skipLaunchPreflight,
       skipPermissions: skipPermissionsOpt,
     } = opts;
 
@@ -105,7 +106,7 @@ export function createSessionLifecycle(
       .limit(1);
     const projectId = issueRows.length > 0 ? issueRows[0].projectId : "";
 
-    if (!workspace.isDirect && !workingDirOverride && projectId) {
+    if (!skipLaunchPreflight && !workspace.isDirect && !workingDirOverride && projectId) {
       const projectRows = await db
         .select({ repoPath: projects.repoPath, defaultBranch: projects.defaultBranch })
         .from(projects)

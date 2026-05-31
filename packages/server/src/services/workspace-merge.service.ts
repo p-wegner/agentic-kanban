@@ -420,10 +420,11 @@ export function createWorkspaceMergeService(deps: {
 
     const { agentCommand, agentArgs, claudeProfile, profile, provider } =
       applyWorkspaceAgentSelection(await loadAgentSettings(database), workspace);
+    const executorProvider = toExecutorProvider(provider);
 
     const sessionId = await getSessionManager().startSession({
       workspaceId: id, prompt, agentCommand, agentArgs, claudeProfile, profile,
-      provider: toExecutorProvider(provider), multiTurn: true, triggerType: "fix-conflicts",
+      provider: executorProvider, multiTurn: executorProvider === "codex" ? false : true, triggerType: "fix-conflicts",
     });
 
     await updateWorkspaceStatus(id, "fixing", {}, database);
@@ -465,7 +466,9 @@ export function createWorkspaceMergeService(deps: {
       if (synced) {
         console.log(`[workspace-merge] fix-and-merge synced branch ${workspace.branch} to worktree HEAD`);
       }
-      const rebaseResult = await gitService.rebaseOntoBase(workspace.workingDir, baseBranch, workspace.branch);
+      const rebaseResult = await gitService.rebaseOntoBase(workspace.workingDir, baseBranch, workspace.branch, {
+        preferLocalBase: true,
+      });
       if (rebaseResult.success) {
         rebuildNote = `Before launching this fix-and-merge agent, the app rebased the workspace branch onto '${baseBranch}' successfully.`;
         await computeWorkspaceCodeMetrics(id, database).catch(() => null);
@@ -487,10 +490,12 @@ export function createWorkspaceMergeService(deps: {
 
     const { agentCommand, agentArgs, claudeProfile, profile, provider } =
       applyWorkspaceAgentSelection(await loadAgentSettings(database), workspace);
+    const executorProvider = toExecutorProvider(provider);
 
     const sessionId = await getSessionManager().startSession({
       workspaceId: id, prompt, agentCommand, agentArgs, claudeProfile, profile,
-      provider: toExecutorProvider(provider), multiTurn: true, triggerType: "fix-and-merge",
+      provider: executorProvider, multiTurn: executorProvider === "codex" ? false : true, triggerType: "fix-and-merge",
+      skipLaunchPreflight: true,
     });
 
     await updateWorkspaceStatus(id, "fixing", {}, database);

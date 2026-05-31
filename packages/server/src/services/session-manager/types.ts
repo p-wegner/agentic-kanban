@@ -40,6 +40,8 @@ export interface StartSessionOptions {
   contextFiles?: string[];
   extraEnv?: Record<string, string>;
   workingDirOverride?: string;
+  /** Skip the generic launch preflight when the caller already prepared the worktree. */
+  skipLaunchPreflight?: boolean;
   skipPermissions?: boolean;
 }
 
