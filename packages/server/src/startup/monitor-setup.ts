@@ -9,13 +9,24 @@ import { runBacklogEmptyStrategy } from "./monitor-backlog.js";
 import { getRecentAgentExcerpts, logMonitorAction, shouldSkipNudge, type MonitorAction } from "./monitor-helpers.js";
 import { processWorkspaceCandidates } from "./monitor-cycle.js";
 import { buildMonitorNudgePrompt } from "./review-helpers.js";
+import { snapshotAndCleanStaleDevProcesses, type BoardMonitorResourceSnapshot } from "../services/stale-dev-processes.js";
 
 export interface MonitorState {
   timer: ReturnType<typeof setTimeout> | null;
   nextRunAt: string | null;
-  lastRun: { at: string; relaunched: number; merged: number; nudged: number } | null;
+  lastRun: { at: string; relaunched: number; merged: number; nudged: number; resources: MonitorResourceSummary | null } | null;
   currentIntervalMin: number | null;
   recentActions: MonitorAction[];
+  lastResourceSnapshot: BoardMonitorResourceSnapshot | null;
+}
+
+export interface MonitorResourceSummary {
+  processCount: number;
+  listenerCount: number;
+  activeWorkspaceCount: number;
+  keptCount: number;
+  cleanedCount: number;
+  cleanupFailedCount: number;
 }
 
 interface MonitorSetupDeps {
@@ -35,18 +46,33 @@ export function setupMonitorRoutes(app: Hono, monitorState: MonitorState, runMon
   app.get("/api/internal/monitor-status", async (c) => {
     const prefRows = await db.select().from(preferences);
     const prefMap = new Map(prefRows.map((r) => [r.key, r.value]));
-    return c.json({ enabled: prefMap.get("auto_monitor") === "true", intervalMin: parseInt(prefMap.get("auto_monitor_interval") || "4", 10), active: monitorState.timer !== null, lastRun: monitorState.lastRun, nextRunAt: monitorState.nextRunAt, recentActions: monitorState.recentActions });
+    return c.json({ enabled: prefMap.get("auto_monitor") === "true", intervalMin: parseInt(prefMap.get("auto_monitor_interval") || "4", 10), active: monitorState.timer !== null, lastRun: monitorState.lastRun, nextRunAt: monitorState.nextRunAt, recentActions: monitorState.recentActions, resourceSnapshot: monitorState.lastResourceSnapshot });
   });
 }
 
 export function createMonitorSetup({ sessionManager, boardEvents, serverPort }: MonitorSetupDeps) {
-  const monitorState: MonitorState = { timer: null, nextRunAt: null, lastRun: null, currentIntervalMin: null, recentActions: [] };
+  const monitorState: MonitorState = { timer: null, nextRunAt: null, lastRun: null, currentIntervalMin: null, recentActions: [], lastResourceSnapshot: null };
   async function runMonitorCycle(force = false) {
     const cycleStats = { relaunched: 0, merged: 0, nudged: 0 };
+    let resourceSummary: MonitorResourceSummary | null = null;
     try {
       const prefRows = await db.select().from(preferences);
       const prefMap = new Map(prefRows.map((r) => [r.key, r.value]));
       if (!force && prefMap.get("auto_monitor") !== "true") return;
+      const resourceSnapshot = await snapshotAndCleanStaleDevProcesses(db);
+      monitorState.lastResourceSnapshot = resourceSnapshot;
+      resourceSummary = {
+        processCount: resourceSnapshot.processes.length,
+        listenerCount: resourceSnapshot.listeners.length,
+        activeWorkspaceCount: resourceSnapshot.activeWorkspaces.length,
+        keptCount: resourceSnapshot.kept.length,
+        cleanedCount: resourceSnapshot.cleaned.filter((item) => item.action === "cleaned").length,
+        cleanupFailedCount: resourceSnapshot.cleaned.filter((item) => item.action === "cleanup_failed").length,
+      };
+      console.log(
+        `[monitor] Resource snapshot: processes=${resourceSummary.processCount} listeners=${resourceSummary.listenerCount} ` +
+        `activeWorkspaces=${resourceSummary.activeWorkspaceCount} kept=${resourceSummary.keptCount} cleaned=${resourceSummary.cleanedCount} failed=${resourceSummary.cleanupFailedCount}`,
+      );
       const activeStatuses = await db.select({ id: projectStatuses.id }).from(projectStatuses).where(sql`${projectStatuses.name} NOT IN ('Done', 'Cancelled')`);
       const activeStatusIds = activeStatuses.map((s) => s.id);
       if (activeStatusIds.length === 0) return;
@@ -71,7 +97,7 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort }: 
     } catch (err) {
       console.warn("[monitor] Cycle error:", err);
     } finally {
-      monitorState.lastRun = { at: new Date().toISOString(), ...cycleStats };
+      monitorState.lastRun = { at: new Date().toISOString(), ...cycleStats, resources: resourceSummary };
       const prefRows = await db.select().from(preferences).catch(() => []);
       const prefMap = new Map(prefRows.map((r: { key: string; value: string }) => [r.key, r.value]));
       if (prefMap.get("auto_monitor") === "true") {
