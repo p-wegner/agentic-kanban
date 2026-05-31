@@ -3,6 +3,7 @@ import { openSync, closeSync, readSync, statSync, unlinkSync, existsSync, writeF
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildAgentLaunchConfig, type ProviderId, type ProviderName } from "./agent-provider.js";
+import { guardProcessKill, auditProcessEvent } from "./process-guard.js";
 
 const DEFAULT_BOARD_SERVER_PORT = "3001";
 const DEFAULT_BOARD_CLIENT_PORT = "5173";
@@ -65,7 +66,8 @@ export function sessionOutputPath(sessionId: string): string {
   return join(tmpdir(), `kanban-session-${sessionId}.out`);
 }
 
-function killPid(pid: number): void {
+function killPid(pid: number, context: Record<string, unknown>): boolean {
+  if (!guardProcessKill(pid, context)) return false;
   if (process.platform === "win32") {
     spawn("taskkill", ["/pid", String(pid), "/T", "/F"], { shell: true, windowsHide: true });
   } else {
@@ -75,6 +77,7 @@ function killPid(pid: number): void {
       console.warn(`[agent] failed to kill pid=${pid}`, err);
     }
   }
+  return true;
 }
 
 /** Watch a session output file for new content and feed it to onOutput. */
@@ -229,6 +232,8 @@ export function launch(
       NO_COLOR: "1",
       KANBAN_BOARD_SERVER_PORT: boardServerPort,
       KANBAN_BOARD_CLIENT_PORT: boardClientPort,
+      KANBAN_BOARD_SERVER_PID: String(process.pid),
+      KANBAN_PROTECTED_PIDS: [process.env.KANBAN_PROTECTED_PIDS, String(process.pid)].filter(Boolean).join(","),
       KANBAN_SERVER_PORT: worktreeServerPort,
       KANBAN_CLIENT_PORT: worktreeClientPort,
       KANBAN_WORKTREE_SERVER_PORT: worktreeServerPort,
@@ -340,7 +345,7 @@ export function kill(sessionId: string): boolean {
   if (!pid) return false;
 
   console.log(`[agent] killing: sessionId=${sessionId} pid=${pid}`);
-  killPid(pid);
+  const killed = killPid(pid, { reason: "agent-session-stop", sessionId });
 
   agentState.activeProcesses.delete(sessionId);
   agentState.activePids.delete(sessionId);
@@ -350,7 +355,7 @@ export function kill(sessionId: string): boolean {
   const pidW = agentState.pidWatchers.get(sessionId);
   if (pidW) { pidW.close(); agentState.pidWatchers.delete(sessionId); }
   cleanupOutputFile(sessionId);
-  return true;
+  return killed;
 }
 
 /** Send a follow-up message to a running agent via stdin JSONL. */
@@ -388,7 +393,7 @@ export function killAll(): number {
   console.log(`[agent] killAll: terminating ${count} active process(es)`);
   for (const [sessionId, pid] of agentState.activePids) {
     console.log(`[agent] killAll: sessionId=${sessionId} pid=${pid}`);
-    killPid(pid);
+    killPid(pid, { reason: "agent-kill-all", sessionId });
   }
   agentState.activeProcesses.clear();
   agentState.activePids.clear();
@@ -407,6 +412,7 @@ export function getProcess(sessionId: string): ChildProcess | undefined {
 
 /** Register a persisted PID for a surviving process whose ChildProcess handle was lost. */
 export function registerPid(sessionId: string, pid: number): void {
+  auditProcessEvent({ action: "agent-pid-registered", sessionId, pid });
   agentState.activePids.set(sessionId, pid);
 }
 

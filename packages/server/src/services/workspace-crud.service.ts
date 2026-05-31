@@ -36,6 +36,7 @@ import {
   type GitService,
 } from "./workspace-internals.js";
 import { buildContextPrimer } from "./context-packer.service.js";
+import { auditProcessEvent, guardProcessKill } from "./process-guard.js";
 
 export function createWorkspaceCrudService(deps: {
   database: Database;
@@ -710,6 +711,7 @@ exit 1
   /** Force-kill a process tree by pid. Windows: taskkill /F /T; otherwise SIGKILL. Guards already-dead pids. */
   async function killProcessTree(pid: number): Promise<void> {
     if (!pid || pid <= 0) return;
+    if (!guardProcessKill(pid, { reason: "workspace-cleanup-fallback" })) return;
     if (process.platform === "win32") {
       const { spawn } = await import("node:child_process");
       await new Promise<void>((resolve) => {
@@ -717,11 +719,16 @@ exit 1
         p.on("error", () => resolve());
         p.on("close", () => resolve());
       });
+      auditProcessEvent({ action: "workspace-cleanup-taskkill-issued", pid });
     } else {
       try {
         process.kill(-pid, "SIGKILL");
+        auditProcessEvent({ action: "workspace-cleanup-sigkill-group-issued", pid });
       } catch {
-        try { process.kill(pid, "SIGKILL"); } catch { /* already dead */ }
+        try {
+          process.kill(pid, "SIGKILL");
+          auditProcessEvent({ action: "workspace-cleanup-sigkill-issued", pid });
+        } catch { /* already dead */ }
       }
     }
   }
