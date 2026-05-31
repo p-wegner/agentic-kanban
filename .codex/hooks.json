@@ -25,6 +25,19 @@
           }
         ]
       }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$(git rev-parse --show-toplevel)/.claude/hooks/check-uncommitted.js\"",
+            "commandWindows": "node C:/andrena/agentic-kanban/.claude/hooks/check-uncommitted.js",
+            "timeout": 10,
+            "statusMessage": "Checking for stranded uncommitted source changes"
+          }
+        ]
+      }
     ]
   }
 }
