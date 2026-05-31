@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
-import type { IssueWithStatus, UpdateIssueRequest, DependencyInfo } from "@agentic-kanban/shared";
+import type { IssueArtifact, IssueWithStatus, UpdateIssueRequest, DependencyInfo } from "@agentic-kanban/shared";
 import { apiFetch } from "../lib/api.js";
 import { formatRelativeTime } from "../lib/formatRelativeTime.js";
 import { showToast } from "./Toast.js";
@@ -41,6 +41,13 @@ const COMMENT_KIND_LABELS: Record<string, string> = {
   "agent-question": "Agent question",
   note: "Note",
 };
+
+function phaseArtifactName(caption: string | null): string {
+  const key = caption?.replace(/^phase-artifact:/, "").toLowerCase();
+  if (key === "tasks") return "tasks.md";
+  if (key === "design") return "design.md";
+  return "spec.md";
+}
 
 interface IssueDetailPanelProps {
   issue: IssueWithStatus;
@@ -162,6 +169,7 @@ export function IssueDetailPanel({
   const [activeShowdownId, setActiveShowdownId] = useState<string | null>(null);
   const [availableSkills, setAvailableSkills] = useState<{ id: string; name: string; description: string }[]>([]);
   const [comments, setComments] = useState<IssueComment[]>([]);
+  const [artifacts, setArtifacts] = useState<IssueArtifact[]>([]);
 
   // Track unsaved changes for warning
   const hasChanges = editing && (
@@ -176,7 +184,7 @@ export function IssueDetailPanel({
   useEffect(() => {
     async function loadData() {
       try {
-        const [ws, tags, available, deps, issues, skills, commentsResp] = await Promise.all([
+        const [ws, tags, available, deps, issues, skills, commentsResp, artifactsResp] = await Promise.all([
           apiFetch<{ id: string }[]>(`/api/issues/${issue.id}/workspaces`),
           apiFetch<{ id: string; name: string; color: string | null }[]>(`/api/issues/${issue.id}/tags`),
           apiFetch<{ id: string; name: string; color: string | null }[]>(`/api/tags`),
@@ -184,6 +192,7 @@ export function IssueDetailPanel({
           apiFetch<IssueWithStatus[]>(`/api/issues?projectId=${issue.projectId}`),
           apiFetch<{ id: string; name: string; description: string }[]>(`/api/agent-skills?projectId=${issue.projectId}`).catch(() => [] as { id: string; name: string; description: string }[]),
           apiFetch<{ comments: IssueComment[] }>(`/api/issues/${issue.id}/comments`).catch(() => ({ comments: [] as IssueComment[] })),
+          apiFetch<IssueArtifact[]>(`/api/issues/${issue.id}/artifacts`).catch(() => [] as IssueArtifact[]),
         ]);
         setWorkspaceCount(ws.length);
         setIssueTags(tags);
@@ -192,6 +201,7 @@ export function IssueDetailPanel({
         setAvailableIssues(issues.filter(i => i.id !== issue.id));
         setAvailableSkills(skills);
         setComments(commentsResp.comments);
+        setArtifacts(artifactsResp);
         // Check for active showdown
         apiFetch<{ id: string }>(`/api/issues/${issue.id}/showdown`)
           .then(sd => setActiveShowdownId(sd.id))
@@ -1552,6 +1562,35 @@ export function IssueDetailPanel({
               </div>
             )}
           </div>
+
+          {!editing && artifacts.some((artifact) => artifact.type === "text" && artifact.caption?.startsWith("phase-artifact:")) && (
+            <div className="pt-2 border-t border-gray-100 dark:border-gray-800">
+              <label className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-2">
+                Phase artifacts
+              </label>
+              <ul className="space-y-2">
+                {artifacts
+                  .filter((artifact) => artifact.type === "text" && artifact.caption?.startsWith("phase-artifact:"))
+                  .sort((a, b) => a.caption!.localeCompare(b.caption!) || b.createdAt.localeCompare(a.createdAt))
+                  .map((artifact) => (
+                    <li
+                      key={artifact.id}
+                      className="border border-gray-200 dark:border-gray-700 rounded px-2.5 py-2 bg-gray-50 dark:bg-gray-800/50"
+                    >
+                      <div className="mb-1 flex items-center gap-2 text-[11px]">
+                        <span className="font-medium px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300">
+                          {phaseArtifactName(artifact.caption)}
+                        </span>
+                        <span className="text-gray-400 dark:text-gray-500 ml-auto">{formatRelativeTime(artifact.createdAt)}</span>
+                      </div>
+                      <div className="markdown-body max-h-80 overflow-y-auto text-sm">
+                        <ReactMarkdown>{normalizeMarkdown(artifact.content)}</ReactMarkdown>
+                      </div>
+                    </li>
+                  ))}
+              </ul>
+            </div>
+          )}
 
           {/* Comments / activity thread (preflight clarifications + agent questions) */}
           {!editing && comments.length > 0 && (
