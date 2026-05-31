@@ -6,7 +6,8 @@ export type McpToolCategory =
   | "tags"
   | "review"
   | "dependencies"
-  | "skills";
+  | "skills"
+  | "specs";
 
 export interface McpToolDefinition {
   name: string;
@@ -23,6 +24,7 @@ export const MCP_TOOL_CATEGORIES: { id: McpToolCategory; label: string }[] = [
   { id: "review", label: "Code Review" },
   { id: "dependencies", label: "Dependencies" },
   { id: "skills", label: "Agent Skills" },
+  { id: "specs", label: "Living Specs" },
 ];
 
 export const MCP_TOOL_DEFINITIONS: McpToolDefinition[] = [
@@ -63,4 +65,8 @@ export const MCP_TOOL_DEFINITIONS: McpToolDefinition[] = [
   { name: "get_agent_skill", description: "Get full details of an agent skill including its prompt", category: "skills" },
   { name: "create_agent_skill", description: "Create a new agent skill with a name, description, and prompt template", category: "skills" },
   { name: "export_agent_skills", description: "Export agent skills as SKILL.md files for Claude Code and Codex", category: "skills" },
+  // specs
+  { name: "openspec_list_specs", description: "List living OpenSpec domain specs for a project", category: "specs" },
+  { name: "show_spec", description: "Show a living OpenSpec domain spec for a project", category: "specs" },
+  { name: "validate_change", description: "Validate OpenSpec change deltas and warn about same-domain collisions", category: "specs" },
 ];

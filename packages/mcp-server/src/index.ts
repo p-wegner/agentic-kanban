@@ -57,6 +57,11 @@ import {
   registerDeleteWorkflowTemplate,
 } from "./tools/workflow-templates.js";
 import { registerFindSimilarFailures } from "./tools/find-similar-failures.js";
+import {
+  registerOpenSpecListSpecs,
+  registerShowSpec,
+  registerValidateChange,
+} from "./tools/openspec.js";
 
 const TOOL_REGISTRARS: Record<string, (server: McpServer) => void> = {
   get_context: registerGetContext,
@@ -110,6 +115,9 @@ const TOOL_REGISTRARS: Record<string, (server: McpServer) => void> = {
   update_workflow_template: registerUpdateWorkflowTemplate,
   delete_workflow_template: registerDeleteWorkflowTemplate,
   find_similar_failures: registerFindSimilarFailures,
+  openspec_list_specs: registerOpenSpecListSpecs,
+  show_spec: registerShowSpec,
+  validate_change: registerValidateChange,
 };
 
 async function getDisabledTools(): Promise<Set<string>> {
