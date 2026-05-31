@@ -283,7 +283,7 @@ export async function mergeBranch(
       const dirty = targetIsCheckedOut ? await getUncommittedTrackedChanges(repoPath) : [];
       const canResetDesyncedCheckout =
         targetIsCheckedOut && dirty.length > 0
-          ? await canResetInterruptedMergeCheckout(repoPath, targetSha)
+          ? await canResetInterruptedMergeCheckout(repoPath, targetSha, featureSha)
           : false;
       const needsReset =
         currentHead !== targetSha ||
@@ -364,8 +364,10 @@ export async function mergeBranch(
   return `Merge branch '${featureBranch}' into ${targetBranch} (plumbing-merge: ${newCommitSha})`;
 }
 
-async function canResetInterruptedMergeCheckout(repoPath: string, targetSha: string): Promise<boolean> {
+async function canResetInterruptedMergeCheckout(repoPath: string, targetSha: string, featureSha: string): Promise<boolean> {
   try {
+    const secondParent = (await execGit(["rev-parse", `${targetSha}^2`], repoPath)).trim();
+    if (secondParent !== featureSha) return false;
     await execGit(["diff-files", "--quiet"], repoPath);
     const indexTree = (await execGit(["write-tree"], repoPath)).trim();
     const firstParentTree = (await execGit(["rev-parse", `${targetSha}^1^{tree}`], repoPath)).trim();
