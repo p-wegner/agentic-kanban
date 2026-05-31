@@ -273,6 +273,37 @@ describe("workspace.service", () => {
       expect(statusRow[0].name).toBe("Done");
     });
 
+    it("closes the workspace when a retry finds the branch is already merged", { timeout: 30000 }, async () => {
+      const { projectId, issueId } = await seedProjectAndIssue(db);
+      const wsId = await seedWorkspaceForMerge(projectId, issueId);
+      const gitService = createFakeGitService({
+        mergeBranch: vi.fn(async () => "Branch 'feature/ak-1-test' is already merged into main (plumbing-merge: abc123)"),
+      });
+
+      const service = createWorkspaceService({
+        database: db,
+        gitService,
+        createBackup: vi.fn(async () => ({})),
+        processKiller: vi.fn(async () => 0),
+      });
+
+      const result = await service.mergeWorkspace(wsId);
+
+      expect(result.mergeOutput).toContain("already merged");
+      expect(gitService.mergeBranch).toHaveBeenCalledWith("/tmp/test-repo", "feature/ak-1-test", "main");
+      expect(gitService.removeWorktree).toHaveBeenCalledWith("/tmp/test-repo", "/tmp/test-repo/.worktrees/feature-1");
+      expect(gitService.deleteBranch).toHaveBeenCalledWith("/tmp/test-repo", "feature/ak-1-test");
+
+      const wsRows = await db.select().from(workspaces).where(eq(workspaces.id, wsId));
+      expect(wsRows[0].status).toBe("closed");
+      expect(wsRows[0].workingDir).toBeNull();
+      expect(wsRows[0].mergedAt).toBeTruthy();
+
+      const issueRow = await db.select().from(issues).where(eq(issues.id, issueId));
+      const statusRow = await db.select().from(projectStatuses).where(eq(projectStatuses.id, issueRow[0].statusId));
+      expect(statusRow[0].name).toBe("Done");
+    });
+
     it("throws a BAD_REQUEST WorkspaceError with the conflicting files when merge conflicts are detected", { timeout: 30000 }, async () => {
       const { projectId, issueId } = await seedProjectAndIssue(db);
       const wsId = await seedWorkspaceForMerge(projectId, issueId);

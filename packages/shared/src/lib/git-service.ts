@@ -272,6 +272,38 @@ export async function mergeBranch(
   // on a detached checkout — never a real branch name — so this stays false there.
   const checkedOutBranch = await getCurrentBranch(repoPath).catch(() => "");
   const targetIsCheckedOut = checkedOutBranch === targetBranch;
+
+  // Idempotent retry path: a previous merge attempt may have advanced the
+  // target ref, then been interrupted before the workspace DB row was closed.
+  // If the feature is already reachable from the target, do not create another
+  // merge commit. Still repair a desynced checked-out worktree when needed.
+  if (await isAncestor(repoPath, featureSha, targetSha)) {
+    if (options?.syncWorkingTree || targetIsCheckedOut) {
+      const currentHead = (await execGit(["rev-parse", "HEAD"], repoPath)).trim();
+      const dirty = targetIsCheckedOut ? await getUncommittedTrackedChanges(repoPath) : [];
+      const canResetDesyncedCheckout =
+        targetIsCheckedOut && dirty.length > 0
+          ? await canResetInterruptedMergeCheckout(repoPath, targetSha)
+          : false;
+      const needsReset =
+        currentHead !== targetSha ||
+        canResetDesyncedCheckout;
+
+      if (needsReset) {
+        if (targetIsCheckedOut && dirty.length > 0 && !canResetDesyncedCheckout) {
+          const preview = dirty.slice(0, 5).join(", ");
+          const more = dirty.length > 5 ? ` (and ${dirty.length - 5} more)` : "";
+          throw new Error(
+            `Cannot sync already-merged '${targetBranch}' in ${repoPath}: it has ${dirty.length} uncommitted tracked change(s): ${preview}${more}. Commit or stash them first.`,
+          );
+        }
+        await execGit(["reset", "--hard", targetSha], repoPath);
+      }
+    }
+
+    return `Branch '${featureBranch}' is already merged into ${targetBranch} (plumbing-merge: ${targetSha})`;
+  }
+
   if (targetIsCheckedOut) {
     const dirty = await getUncommittedTrackedChanges(repoPath);
     if (dirty.length > 0) {
@@ -330,6 +362,18 @@ export async function mergeBranch(
   }
 
   return `Merge branch '${featureBranch}' into ${targetBranch} (plumbing-merge: ${newCommitSha})`;
+}
+
+async function canResetInterruptedMergeCheckout(repoPath: string, targetSha: string): Promise<boolean> {
+  try {
+    await execGit(["diff-files", "--quiet"], repoPath);
+    const indexTree = (await execGit(["write-tree"], repoPath)).trim();
+    const firstParentTree = (await execGit(["rev-parse", `${targetSha}^1^{tree}`], repoPath)).trim();
+    const targetTree = (await execGit(["rev-parse", `${targetSha}^{tree}`], repoPath)).trim();
+    return indexTree === firstParentTree && indexTree !== targetTree;
+  } catch {
+    return false;
+  }
 }
 
 // --- Drizzle migration auto-renumber -------------------------------------
