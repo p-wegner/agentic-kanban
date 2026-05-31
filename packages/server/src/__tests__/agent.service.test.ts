@@ -221,6 +221,27 @@ describe("agent.service", () => {
       expect(opts.env.KANBAN_SERVER_PORT).toBe("3005");
       delete process.env.KANBAN_SERVER_PORT;
     });
+
+    it("sets separate board and worktree dev ports for issue worktrees", () => {
+      const mockProc = createMockProc();
+      (spawnMock as any).mockReturnValue(mockProc);
+
+      process.env.KANBAN_SERVER_PORT = "3001";
+      process.env.KANBAN_CLIENT_PORT = "5173";
+      launch("C:\\andrena\\.worktrees\\feature_ak-145-workflow-analytics-drilldown", "sess-ports", "prompt", undefined, vi.fn());
+
+      const opts = (spawnMock as any).mock.calls[0][2];
+      expect(opts.env.KANBAN_BOARD_SERVER_PORT).toBe("3001");
+      expect(opts.env.KANBAN_SERVER_PORT).toBe("3001");
+      expect(opts.env.KANBAN_WORKTREE_SERVER_PORT).toBe("3146");
+      expect(opts.env.KANBAN_CLIENT_PORT).toBe("5318");
+      expect(opts.env.KANBAN_WORKTREE_CLIENT_PORT).toBe("5318");
+      expect(opts.env.PORT).toBe("3146");
+      expect(opts.env.SERVER_PORT).toBe("3146");
+      expect(opts.env.VITE_PORT).toBe("5318");
+      delete process.env.KANBAN_SERVER_PORT;
+      delete process.env.KANBAN_CLIENT_PORT;
+    });
   });
 
   describe("kill", () => {
