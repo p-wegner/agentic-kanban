@@ -966,11 +966,17 @@ export function BoardPage() {
       const isActive = project.id === activeProjectId;
       unregisters.push(registerAction({
         id: `switch-project-${project.id}`,
-        label: `Switch to: ${project.name}`,
-        description: isActive ? "Active project" : "Switch to this project",
+        label: `Switch project: ${project.name}${isActive ? " (current)" : ""}`,
+        description: isActive ? "Current active project" : "Switch to this project",
         icon: isActive ? "✓" : "⇄",
         category: "navigation",
-        handler: () => handleProjectChange(project.id),
+        handler: () => {
+          if (isActive) {
+            showToast(`"${project.name}" is already active`, "success");
+            return;
+          }
+          handleProjectChange(project.id);
+        },
       }));
     }
 
