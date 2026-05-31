@@ -26,7 +26,7 @@ interface Node {
 }
 
 // Ordered workflow columns for status-based layout
-const STATUS_ORDER = ["Todo", "In Progress", "In Review", "AI Reviewed", "Done", "Cancelled"];
+const STATUS_ORDER = ["Backlog", "Todo", "In Progress", "In Review", "AI Reviewed", "Done", "Cancelled"];
 
 const DEPENDENCY_COLORS: Record<string, string> = {
   depends_on: "#8a8175",
@@ -43,6 +43,7 @@ const H_GAP = 48;
 const V_GAP = 16;
 const COL_HEADER_H = 28;
 const SWIMLANE_NODES_PER_ROW = 2;
+const DEPENDENCY_ROWS_PER_COLUMN = 8;
 const BAND_GAP = 64; // gap between status groups in swimlane layout
 
 function computeLayout(nodes: IssueWithStatus[], edges: Dependency[]): Node[] {
@@ -94,13 +95,18 @@ function computeLayout(nodes: IssueWithStatus[], edges: Dependency[]): Node[] {
 
     const result: Node[] = [];
     const sortedLevels = Array.from(byLevel.keys()).sort((a, b) => a - b);
+    let levelX = 40;
     for (const lv of sortedLevels) {
       const group = byLevel.get(lv)!;
-      const x = lv * (NODE_W + H_GAP) + 40;
       for (let i = 0; i < group.length; i++) {
-        const y = i * (NODE_H + V_GAP) + 40;
+        const subCol = Math.floor(i / DEPENDENCY_ROWS_PER_COLUMN);
+        const row = i % DEPENDENCY_ROWS_PER_COLUMN;
+        const x = levelX + subCol * (NODE_W + H_GAP);
+        const y = row * (NODE_H + V_GAP) + 40;
         result.push({ id: group[i].id, x, y, issue: group[i] });
       }
+      const levelCols = Math.max(1, Math.ceil(group.length / DEPENDENCY_ROWS_PER_COLUMN));
+      levelX += levelCols * (NODE_W + H_GAP) + BAND_GAP;
     }
     return result;
   }
@@ -161,7 +167,18 @@ function computeColumns(nodes: IssueWithStatus[], edges: Dependency[]) {
   return result;
 }
 
+const BACKLOG_STATUS_NAME = "Backlog";
 const ARCHIVE_STATUS_NAMES = new Set(["Done", "Cancelled"]);
+const DEFAULT_HIDDEN_STATUS_NAMES = new Set([BACKLOG_STATUS_NAME, ...ARCHIVE_STATUS_NAMES]);
+
+function orderedStatusNames(statusNames: string[]) {
+  const unique = [...new Set(statusNames)];
+  const knownOrder = STATUS_ORDER.filter((s) => unique.includes(s));
+  const extraStatuses = unique
+    .filter((s) => !STATUS_ORDER.includes(s))
+    .sort();
+  return [...knownOrder, ...extraStatuses];
+}
 
 interface GraphViewProps {
   columns: StatusWithIssues[];
@@ -170,10 +187,36 @@ interface GraphViewProps {
   searchQuery?: string;
 }
 
+interface GraphFilterControlsProps {
+  statusFilter: string;
+  statusNames: string[];
+  onStatusFilterChange: (status: string) => void;
+}
+
+function GraphFilterControls({ statusFilter, statusNames, onStatusFilterChange }: GraphFilterControlsProps) {
+  return (
+    <div className="absolute top-3 left-3 z-10 flex items-center gap-2 rounded-md border border-gray-200 bg-white/95 px-2.5 py-1.5 shadow-sm dark:border-gray-700 dark:bg-gray-900/95">
+      <span className="text-xs font-medium text-gray-500 dark:text-gray-400">Status</span>
+      <select
+        value={statusFilter}
+        onChange={(e) => onStatusFilterChange(e.target.value)}
+        className="text-xs border border-gray-200 dark:border-gray-700 rounded px-2 py-1 bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-300"
+        aria-label="Graph status filter"
+      >
+        <option value="active">Active only</option>
+        <option value="all">All statuses</option>
+        {statusNames.map((s) => (
+          <option key={s} value={s}>{s}</option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
 export function GraphView({ columns, projectId, onIssueClick, searchQuery }: GraphViewProps) {
   const [graphData, setGraphData] = useState<GraphData | null>(null);
   const [loading, setLoading] = useState(true);
-  const [showCompleted, setShowCompleted] = useState(false);
+  const [statusFilter, setStatusFilter] = useState("active");
   const [nodes, setNodes] = useState<Node[]>([]);
   const [colHeaders, setColHeaders] = useState<{ status: string; count: number; x: number }[]>([]);
   const [dragNode, setDragNode] = useState<string | null>(null);
@@ -189,6 +232,10 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery }: Gra
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
 
   const allIssues = columns.flatMap((c) => c.issues);
+  const statusNames = orderedStatusNames([
+    ...columns.map((c) => c.name),
+    ...(graphData?.nodes.map((n) => n.statusName) ?? []),
+  ]);
 
   useEffect(() => {
     async function load() {
@@ -210,9 +257,11 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery }: Gra
 
   useLayoutEffect(() => {
     if (!graphData) return;
-    const visibleNodes = graphData.nodes.filter(
-      (n) => showCompleted || !ARCHIVE_STATUS_NAMES.has(n.statusName)
-    );
+    const visibleNodes = graphData.nodes.filter((n) => {
+      if (statusFilter === "active") return !DEFAULT_HIDDEN_STATUS_NAMES.has(n.statusName);
+      if (statusFilter === "all") return true;
+      return n.statusName === statusFilter;
+    });
     const filtered = searchQuery
       ? visibleNodes.filter(
           (n) =>
@@ -246,7 +295,7 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery }: Gra
       setZoom(z);
       setPan({ x: px, y: py });
     });
-  }, [graphData, searchQuery, showCompleted]);
+  }, [graphData, searchQuery, statusFilter]);
 
   const fitView = useCallback(() => {
     if (nodes.length === 0 || !containerRef.current) return;
@@ -348,16 +397,15 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery }: Gra
 
   if (nodes.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center h-full gap-3 text-gray-500 dark:text-gray-400 text-sm">
-        <span>No issues to display</span>
-        {!showCompleted && (
-          <button
-            onClick={() => setShowCompleted(true)}
-            className="px-3 py-1.5 text-xs rounded border shadow-sm font-medium transition-colors bg-white dark:bg-gray-900 border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800"
-          >
-            Show completed
-          </button>
-        )}
+      <div ref={containerRef} className="relative h-full w-full overflow-hidden bg-gray-50 dark:bg-gray-950 select-none">
+        <GraphFilterControls
+          statusFilter={statusFilter}
+          statusNames={statusNames}
+          onStatusFilterChange={setStatusFilter}
+        />
+        <div className="flex h-full flex-col items-center justify-center gap-3 text-gray-500 dark:text-gray-400 text-sm">
+          <span>No issues to display</span>
+        </div>
       </div>
     );
   }
@@ -366,15 +414,11 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery }: Gra
 
   return (
     <div ref={containerRef} className="relative h-full w-full overflow-hidden bg-gray-50 dark:bg-gray-950 select-none">
-      {/* Top-left controls */}
-      <div className="absolute top-3 left-3 z-10 flex items-start gap-2">
-        <button
-          onClick={() => setShowCompleted((v) => !v)}
-          className="px-2.5 py-1 text-xs rounded border shadow-sm font-medium transition-colors bg-white dark:bg-gray-900 border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800"
-        >
-          {showCompleted ? "Hide completed" : "Show completed"}
-        </button>
-      </div>
+      <GraphFilterControls
+        statusFilter={statusFilter}
+        statusNames={statusNames}
+        onStatusFilterChange={setStatusFilter}
+      />
       {/* Controls */}
       <div className="absolute top-3 right-3 z-10 flex flex-col gap-1">
         <button

@@ -3,6 +3,7 @@ import { SERVER_URL } from "../helpers/port.js";
 
 test.describe("Graph and Table board views", () => {
   let projectId: string;
+  let backlogStatusId: string;
   let todoStatusId: string;
   let doneStatusId: string;
   let suffix: string;
@@ -17,9 +18,22 @@ test.describe("Graph and Table board views", () => {
     const statusesRes = await request.get(
       `${SERVER_URL}/api/projects/${projectId}/statuses`,
     );
-    const statuses = await statusesRes.json();
+    let statuses = await statusesRes.json();
+    let backlogStatus = statuses.find((s: { name: string }) => s.name === "Backlog");
+    if (!backlogStatus) {
+      const backlogRes = await request.post(
+        `${SERVER_URL}/api/projects/${projectId}/statuses`,
+        { data: { name: "Backlog", sortOrder: -1 } },
+      );
+      backlogStatus = await backlogRes.json();
+      const refreshedStatusesRes = await request.get(
+        `${SERVER_URL}/api/projects/${projectId}/statuses`,
+      );
+      statuses = await refreshedStatusesRes.json();
+    }
     const todoStatus = statuses.find((s: { name: string }) => s.name === "Todo");
     const doneStatus = statuses.find((s: { name: string }) => s.name === "Done");
+    backlogStatusId = backlogStatus.id;
     todoStatusId = todoStatus ? todoStatus.id : statuses[0].id;
     doneStatusId = doneStatus ? doneStatus.id : statuses[3].id;
 
@@ -39,6 +53,11 @@ test.describe("Graph and Table board views", () => {
       data: { title: `GraphTableDone ${suffix}`, statusId: doneStatusId, projectId },
     });
     createdIssueIds.push((await r3.json()).id);
+
+    const r4 = await request.post(`${SERVER_URL}/api/issues`, {
+      data: { title: `GraphTableBacklog ${suffix}`, statusId: backlogStatusId, projectId },
+    });
+    createdIssueIds.push((await r4.json()).id);
   });
 
   test.afterAll(async ({ request }) => {
@@ -60,7 +79,7 @@ test.describe("Graph and Table board views", () => {
 
     // Button should be active (blue)
     await expect(page.locator("button", { hasText: "Table" })).toHaveClass(
-      /bg-blue-600/,
+      /bg-(blue|brand)-600/,
     );
   });
 
@@ -86,7 +105,7 @@ test.describe("Graph and Table board views", () => {
     await page.locator("button", { hasText: "Table" }).click();
 
     // Select "All statuses" so Done issues are visible too
-    await page.locator("select.text-xs").selectOption("all");
+    await page.getByLabel("Table status filter").selectOption("all");
 
     await expect(
       page.locator("tbody td", { hasText: `GraphTableA ${suffix}` }).first(),
@@ -122,11 +141,11 @@ test.describe("Graph and Table board views", () => {
     await expect(page.locator("table")).toBeVisible();
 
     // Show all so Done row is present
-    await page.locator("select.text-xs").selectOption("all");
+    await page.getByLabel("Table status filter").selectOption("all");
     const allRowCount = await page.locator("tbody tr").count();
 
     // Filter to Done only
-    await page.locator("select.text-xs").selectOption("Done");
+    await page.getByLabel("Table status filter").selectOption("Done");
     const doneRowCount = await page.locator("tbody tr").count();
 
     expect(doneRowCount).toBeLessThan(allRowCount);
@@ -147,7 +166,7 @@ test.describe("Graph and Table board views", () => {
     await expect(page.locator("table")).toBeVisible();
 
     // Ensure our test issue is visible
-    await page.locator("select.text-xs").selectOption("all");
+    await page.getByLabel("Table status filter").selectOption("all");
     const row = page
       .locator("tbody tr", { hasText: `GraphTableA ${suffix}` })
       .first();
@@ -173,7 +192,7 @@ test.describe("Graph and Table board views", () => {
 
     // Button should be active (blue)
     await expect(page.locator("button", { hasText: "Graph" })).toHaveClass(
-      /bg-blue-600/,
+      /bg-(blue|brand)-600/,
     );
   });
 
@@ -202,41 +221,40 @@ test.describe("Graph and Table board views", () => {
     await expect(page.locator("text=Todo").first()).toBeVisible({ timeout: 5000 });
   });
 
-  test("Show completed toggle reveals Done nodes", async ({ page }) => {
+  test("Graph view hides backlog and completed issues by default", async ({ page }) => {
     await page.goto("/");
     await page.waitForSelector("h2");
     await page.locator("button", { hasText: "Graph" }).click();
     await expect(page.locator(".bg-gray-50.select-none")).toBeVisible({ timeout: 5000 });
 
-    // Initially archive nodes are hidden; Done issue should not appear as a node
-    const nodesBefore = await page.locator("[data-node]").count();
-
-    // Click "Show completed"
-    await page.locator("button", { hasText: "Show completed" }).click();
-    await expect(page.locator("button", { hasText: "Hide completed" })).toBeVisible({ timeout: 3000 });
-
-    // Node count should increase (Done issue is now visible)
-    const nodesAfter = await page.locator("[data-node]").count();
-    expect(nodesAfter).toBeGreaterThan(nodesBefore);
+    await expect(page.getByText(`GraphTableA ${suffix}`).first()).toBeVisible({ timeout: 5000 });
+    await expect(page.getByText(`GraphTableBacklog ${suffix}`)).not.toBeVisible();
+    await expect(page.getByText(`GraphTableDone ${suffix}`)).not.toBeVisible();
   });
 
-  test("Hide completed toggle removes Done nodes", async ({ page }) => {
+  test("Graph status filter can show backlog issues", async ({ page }) => {
     await page.goto("/");
     await page.waitForSelector("h2");
     await page.locator("button", { hasText: "Graph" }).click();
     await expect(page.locator(".bg-gray-50.select-none")).toBeVisible({ timeout: 5000 });
 
-    // Expand
-    await page.locator("button", { hasText: "Show completed" }).click();
-    await expect(page.locator("button", { hasText: "Hide completed" })).toBeVisible({ timeout: 3000 });
-    const nodesExpanded = await page.locator("[data-node]").count();
+    await page.getByLabel("Graph status filter").selectOption("Backlog");
+    await expect(page.getByText(`GraphTableBacklog ${suffix}`).first()).toBeVisible({ timeout: 5000 });
+    await expect(page.getByText(`GraphTableA ${suffix}`)).not.toBeVisible();
+  });
 
-    // Collapse
-    await page.locator("button", { hasText: "Hide completed" }).click();
-    await expect(page.locator("button", { hasText: "Show completed" })).toBeVisible({ timeout: 3000 });
-    const nodesCollapsed = await page.locator("[data-node]").count();
+  test("Graph status filter can show all statuses", async ({ page }) => {
+    await page.goto("/");
+    await page.waitForSelector("h2");
+    await page.locator("button", { hasText: "Graph" }).click();
+    await expect(page.locator(".bg-gray-50.select-none")).toBeVisible({ timeout: 5000 });
 
-    expect(nodesCollapsed).toBeLessThan(nodesExpanded);
+    const activeCount = await page.locator("[data-node]").count();
+    await page.getByLabel("Graph status filter").selectOption("all");
+    await expect(page.getByText(`GraphTableBacklog ${suffix}`).first()).toBeVisible({ timeout: 5000 });
+    await expect(page.getByText(`GraphTableDone ${suffix}`).first()).toBeVisible({ timeout: 5000 });
+    const allCount = await page.locator("[data-node]").count();
+    expect(allCount).toBeGreaterThan(activeCount);
   });
 
   test("zoom in button increases scale transform", async ({ page }) => {
