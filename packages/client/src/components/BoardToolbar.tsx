@@ -66,6 +66,7 @@ export function BoardToolbar({
   const [showMoreViews, setShowMoreViews] = useState(false);
   const moreViewsRef = useRef<HTMLDivElement>(null);
   const boardActivitySummary = formatBoardActivitySummary(activeColumns);
+  const hasMonitorWarnings = (monitorStatus?.warnings?.length ?? 0) > 0;
 
   // Close the "More" views dropdown on outside click or Escape.
   useEffect(() => {
@@ -122,10 +123,20 @@ export function BoardToolbar({
       <div className="relative shrink-0 flex items-center gap-0.5">
         <button
           onClick={() => setShowMonitorPopover(v => !v)}
-          className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium border transition-colors ${autoMonitor ? "bg-accent-50 dark:bg-accent-950 border-accent-200 dark:border-accent-800 text-accent-700 hover:bg-accent-100 dark:hover:bg-accent-900" : "bg-surface-raised dark:bg-surface-raised-dark border-black/[0.07] dark:border-white/10 text-ink-soft dark:text-gray-400 hover:bg-surface-sunken dark:hover:bg-gray-800"}`}
-          title={autoMonitor ? "Board monitor active — click for details" : "Board monitor — click to configure"}
+          className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium border transition-colors ${
+            hasMonitorWarnings
+              ? "bg-red-50 dark:bg-red-950 border-red-200 dark:border-red-800 text-red-700 dark:text-red-300 hover:bg-red-100 dark:hover:bg-red-900"
+              : autoMonitor
+                ? "bg-accent-50 dark:bg-accent-950 border-accent-200 dark:border-accent-800 text-accent-700 hover:bg-accent-100 dark:hover:bg-accent-900"
+                : "bg-surface-raised dark:bg-surface-raised-dark border-black/[0.07] dark:border-white/10 text-ink-soft dark:text-gray-400 hover:bg-surface-sunken dark:hover:bg-gray-800"
+          }`}
+          title={hasMonitorWarnings ? "Board monitor warning - dirty main checkout" : autoMonitor ? "Board monitor active - click for details" : "Board monitor - click to configure"}
         >
-          {autoMonitor && <span className="w-2 h-2 rounded-full bg-accent-500 animate-pulse" />}
+          {hasMonitorWarnings ? (
+            <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v4m0 4h.01M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z" />
+            </svg>
+          ) : autoMonitor && <span className="w-2 h-2 rounded-full bg-accent-500 animate-pulse" />}
           Monitor
         </button>
         <button
