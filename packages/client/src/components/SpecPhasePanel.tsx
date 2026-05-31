@@ -294,7 +294,7 @@ export function SpecPhasePanel({
   async function approve() {
     const next = progress?.nextTransitions.find((t) => t.verdict !== "block") ?? progress?.nextTransitions[0];
     if (!next || transitioning) return;
-    if (artifactText !== savedText) {
+    if (!artifactId || artifactText !== savedText) {
       const saved = await saveArtifact();
       if (!saved) return;
     }
