@@ -127,7 +127,6 @@ describe("workflow-engine", () => {
       .where(eq(schema.workflowNodes.templateId, templates[0].id))
       .orderBy(asc(schema.workflowNodes.sortOrder));
     expect(nodes.map((n) => n.name)).toEqual([
-      "Backlog",
       "Specify",
       "Design",
       "Tasks",
@@ -135,6 +134,7 @@ describe("workflow-engine", () => {
       "Review",
       "Done",
     ]);
+    expect(nodes.find((n) => n.name === "Specify")?.nodeType).toBe("start");
     expect(nodes.find((n) => n.name === "Specify")?.skillName).toBe("spec-driven-specify");
     expect(nodes.find((n) => n.name === "Design")?.skillName).toBe("spec-driven-design");
     expect(nodes.find((n) => n.name === "Tasks")?.skillName).toBe("spec-driven-tasks");
@@ -144,7 +144,7 @@ describe("workflow-engine", () => {
       .select()
       .from(schema.workflowEdges)
       .where(eq(schema.workflowEdges.templateId, templates[0].id));
-    expect(edges.filter((e) => e.condition === "manual")).toHaveLength(6);
+    expect(edges.filter((e) => e.condition === "manual")).toHaveLength(5);
     expect(edges.filter((e) => e.condition === "auto_on_exit_0")).toHaveLength(1);
     expect(edges.some((e) => e.isLoop)).toBe(true);
   });

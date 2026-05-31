@@ -333,22 +333,14 @@ export const BUILTIN_WORKFLOWS: BuiltinTemplateDef[] = [
     builtinKey: "spec-driven-phased-planning",
     name: "Spec-Driven Phased Planning",
     description:
-      "Opt-in SDD flow: backlog -> specify -> design -> tasks -> implement -> review -> done, with deliberate human gates before implementation.",
+      "Opt-in SDD flow: specify -> design -> tasks -> implement -> review -> done, with deliberate human gates before implementation.",
     ticketType: null,
     isDefault: false,
     nodes: [
       {
-        key: "backlog",
-        name: "Backlog",
-        nodeType: "start",
-        statusName: "Todo",
-        guidance:
-          "Confirm this issue should use the spec-driven path. Keep the fast path available for small changes; when the user wants deliberate planning, propose Specify.",
-      },
-      {
         key: "specify",
         name: "Specify",
-        nodeType: "normal",
+        nodeType: "start",
         statusName: "In Progress",
         skillName: "spec-driven-specify",
         guidance:
@@ -392,7 +384,6 @@ export const BUILTIN_WORKFLOWS: BuiltinTemplateDef[] = [
       { key: "done", name: "Done", nodeType: "end", statusName: "Done" },
     ],
     edges: [
-      { from: "backlog", to: "specify", condition: "manual", label: "opt in" },
       { from: "specify", to: "design", condition: "manual", label: "spec approved" },
       { from: "design", to: "tasks", condition: "manual", label: "design approved" },
       { from: "tasks", to: "implement", condition: "manual", label: "tasks approved" },
