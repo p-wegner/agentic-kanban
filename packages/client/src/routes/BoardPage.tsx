@@ -1204,11 +1204,7 @@ export function BoardPage() {
           />
         )}
         <BoardToolbar
-          backlogColumn={backlogColumn}
           activeColumns={activeColumns}
-          searchQuery={searchQuery}
-          onIssueClick={handleIssueClick}
-          onBacklogMoved={() => refetchBoard()}
           onShowQuickTasks={() => setShowQuickTasks(true)}
           autoMonitor={autoMonitor}
           monitorRunning={monitorRunning}
