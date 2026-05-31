@@ -4,7 +4,7 @@ import { and, eq, sql } from "drizzle-orm";
 import type { Database } from "../db/index.js";
 import { invokeClaudePrompt } from "./claude-cli.service.js";
 import type { BoardEvents } from "./board-events.js";
-import { syncCurrentNodeToStatus } from "@agentic-kanban/shared/lib/workflow-engine";
+import { getOutgoingTransitions, syncCurrentNodeToStatus } from "@agentic-kanban/shared/lib/workflow-engine";
 
 export interface VoiceCaptureInput {
   projectId: string;
@@ -34,6 +34,12 @@ export interface VoiceCaptureActionResult {
 
 export type VoiceCaptureResult = VoiceCaptureIssueResult | VoiceCaptureActionResult;
 
+export class VoiceCaptureCommandError extends Error {
+  constructor(message: string) {
+    super(message);
+  }
+}
+
 type VoiceCommandIntent =
   | { type: "create_issue" }
   | { type: "move_issue"; issueNumber: number; targetStatus: string };
@@ -47,12 +53,12 @@ function cleanCommandText(value: string): string {
 
 export function parseVoiceCommandIntent(transcript: string): VoiceCommandIntent {
   const text = cleanCommandText(transcript);
-  const moveMatch = /^(?:please\s+)?(?:move|put|send)\s+(?:(?:issue|ticket)(?:\s+number)?\s+)?#?\s*(\d+)\s+(?:to|into)\s+(.+)$/i.exec(text);
+  const moveMatch = /^(?:please\s+)?(?:move|put|send)\s+(?:(?:issue|ticket)(?:\s+number)?\s+)?#?\s*(\d+)\s+(?:to|into)(?:\s+(.*))?$/i.exec(text);
   if (moveMatch) {
     return {
       type: "move_issue",
       issueNumber: Number(moveMatch[1]),
-      targetStatus: cleanCommandText(moveMatch[2]).replace(/^(?:the\s+)?/i, ""),
+      targetStatus: cleanCommandText(moveMatch[2] ?? "").replace(/^(?:the\s+)?/i, ""),
     };
   }
   return { type: "create_issue" };
@@ -158,12 +164,15 @@ async function moveIssueFromVoiceCommand(
   boardEvents?: BoardEvents,
 ): Promise<VoiceCaptureActionResult> {
   const issueRows = await database
-    .select({ id: issues.id, issueNumber: issues.issueNumber, title: issues.title })
+    .select({ id: issues.id, issueNumber: issues.issueNumber, title: issues.title, currentNodeId: issues.currentNodeId })
     .from(issues)
     .where(and(eq(issues.projectId, projectId), eq(issues.issueNumber, intent.issueNumber)))
     .limit(1);
   const issue = issueRows[0];
-  if (!issue) throw new Error(`Issue #${intent.issueNumber} not found`);
+  if (!issue) throw new VoiceCaptureCommandError(`Issue #${intent.issueNumber} not found`);
+  if (!intent.targetStatus.trim()) {
+    throw new VoiceCaptureCommandError("Target status is required for move commands");
+  }
 
   const statusRows = await database
     .select({ id: projectStatuses.id, name: projectStatuses.name })
@@ -171,7 +180,24 @@ async function moveIssueFromVoiceCommand(
     .where(eq(projectStatuses.projectId, projectId));
   const target = findTargetStatus(intent.targetStatus, statusRows);
   if (!target) {
-    throw new Error(`Status '${intent.targetStatus}' not found. Available: ${statusRows.map((s) => s.name).join(", ")}`);
+    throw new VoiceCaptureCommandError(`Status '${intent.targetStatus}' not found. Available: ${statusRows.map((s) => s.name).join(", ")}`);
+  }
+
+  if (issue.currentNodeId) {
+    const transitions = await getOutgoingTransitions(database, issue.currentNodeId);
+    const reachable = transitions.some(
+      (transition) => transition.toStatusName === target.name
+        || transition.toStatusName?.toLowerCase() === target.name.toLowerCase(),
+    );
+    if (transitions.length > 0 && !reachable) {
+      const validNames = transitions
+        .map((transition) => transition.toStatusName ?? transition.toNodeName)
+        .filter(Boolean)
+        .join(", ");
+      throw new VoiceCaptureCommandError(
+        `Transition to "${target.name}" is not a valid next step from the current workflow stage. Valid next stages: ${validNames || "(none - terminal stage)"}.`,
+      );
+    }
   }
 
   const now = new Date().toISOString();
