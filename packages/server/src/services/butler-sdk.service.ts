@@ -13,10 +13,12 @@
  * Auth/model come from the active Claude profile env (Bedrock/z.ai/API key),
  * reusing `buildSpawnEnv` so the butler behaves like the rest of the agents.
  */
+import { spawn, type ChildProcess } from "node:child_process";
 import { query, type Options, type Query, type SDKUserMessage, type SlashCommand } from "@anthropic-ai/claude-agent-sdk";
 import { buildSpawnEnv, getMcpServersConfig } from "./agent-provider/helpers.js";
 import { ensureBoardGuideFile } from "../butler/board-guide.js";
 import { isTransientNetworkError } from "../startup/transient-errors.js";
+import { getProvider, type ProviderId, type ProviderName } from "./agent-provider.js";
 
 /** Compact slash-command descriptor surfaced to the UI autocomplete. */
 export interface ButlerCommand {
@@ -94,9 +96,12 @@ interface ButlerSession {
   /** Composite map key: plain projectId for the default butler (backward compat),
    *  `${projectId}::${butlerId}` for any other. */
   key: string;
-  input: Pushable<SDKUserMessage>;
+  backend: "claude" | "codex";
+  input?: Pushable<SDKUserMessage>;
   sessionId?: string;
   abort: AbortController;
+  process?: ChildProcess;
+  interrupted?: boolean;
   busy: boolean;
   contextTokens: number;
   transcript: ButlerTurn[];
@@ -109,6 +114,11 @@ interface ButlerSession {
   query?: Query;
   /** Slash commands available to this session, fetched once after init (for the UI autocomplete). */
   commands?: ButlerCommand[];
+  repoPath: string;
+  systemPromptAppend: string;
+  profile?: { provider: ProviderName; name: string };
+  agentCommand?: string;
+  agentArgs?: string;
 }
 
 /**
@@ -164,6 +174,7 @@ function buildButlerSystemPrompt(projectName: string, repoPath: string): string 
 
 export interface ButlerSessionState {
   butlerId: string;
+  backend: "claude" | "codex";
   sessionId?: string;
   active: boolean;
   busy: boolean;
@@ -176,7 +187,7 @@ export interface ButlerSessionState {
 
 export function getButlerSession(projectId: string, butlerId: string = "default"): ButlerSessionState {
   const s = sessions.get(butlerSessionKey(projectId, butlerId));
-  return { butlerId, sessionId: s?.sessionId, active: !!s, busy: s?.busy ?? false, contextTokens: s?.contextTokens ?? 0, model: s?.model, contextWindow: s?.contextWindow, mcpConnected: s?.mcpConnected, claudeProfile: s?.claudeProfile };
+  return { butlerId, backend: s?.backend ?? "claude", sessionId: s?.sessionId, active: !!s, busy: s?.busy ?? false, contextTokens: s?.contextTokens ?? 0, model: s?.model, contextWindow: s?.contextWindow, mcpConnected: s?.mcpConnected, claudeProfile: s?.claudeProfile };
 }
 
 /** Runtime state of every warm butler session for a project (for the butler switcher). */
@@ -184,7 +195,7 @@ export function listProjectButlerStates(projectId: string): ButlerSessionState[]
   const out: ButlerSessionState[] = [];
   for (const s of sessions.values()) {
     if (s.projectId !== projectId) continue;
-    out.push({ butlerId: s.butlerId, sessionId: s.sessionId, active: true, busy: s.busy, contextTokens: s.contextTokens, model: s.model, contextWindow: s.contextWindow, mcpConnected: s.mcpConnected, claudeProfile: s.claudeProfile });
+    out.push({ butlerId: s.butlerId, backend: s.backend, sessionId: s.sessionId, active: true, busy: s.busy, contextTokens: s.contextTokens, model: s.model, contextWindow: s.contextWindow, mcpConnected: s.mcpConnected, claudeProfile: s.claudeProfile });
   }
   return out;
 }
@@ -202,6 +213,11 @@ export function getButlerCommands(projectId: string, butlerId: string = "default
  */
 export async function setButlerModel(projectId: string, model: string, butlerId: string = "default"): Promise<boolean> {
   const s = sessions.get(butlerSessionKey(projectId, butlerId));
+  if (s?.backend === "codex") {
+    s.model = model || undefined;
+    broadcast(s, { type: "meta", model: s.model, contextWindow: s.contextWindow, mcpConnected: s.mcpConnected });
+    return true;
+  }
   if (!s?.query) return false;
   await s.query.setModel(model || undefined);
   s.model = model || undefined;
@@ -217,6 +233,14 @@ export async function setButlerModel(projectId: string, model: string, butlerId:
  */
 export async function interruptButler(projectId: string, butlerId: string = "default"): Promise<boolean> {
   const s = sessions.get(butlerSessionKey(projectId, butlerId));
+  if (s?.backend === "codex") {
+    s.interrupted = true;
+    if (s.process?.pid) s.process.kill();
+    s.process = undefined;
+    s.busy = false;
+    broadcast(s, { type: "result", isError: false });
+    return true;
+  }
   if (!s?.query) return false;
   try {
     await s.query.interrupt();
@@ -264,6 +288,10 @@ export function ensureButlerSession(opts: {
   repoPath: string;
   projectName: string;
   claudeProfile?: string;
+  backend?: "claude" | "codex";
+  profile?: { provider: ProviderName; name: string };
+  agentCommand?: string;
+  agentArgs?: string;
   resumeSessionId?: string;
   /** Model alias/id for the session (e.g. "opus", "sonnet"). Empty/omitted = profile/CLI default. */
   model?: string;
@@ -277,11 +305,14 @@ export function ensureButlerSession(opts: {
   const existing = sessions.get(key);
   if (existing) return existing;
 
-  const input = new Pushable<SDKUserMessage>();
+  const backend = opts.backend ?? "claude";
+  const systemPromptAppend = opts.systemPromptAppend ?? buildButlerSystemPrompt(opts.projectName, opts.repoPath);
+  const input = backend === "claude" ? new Pushable<SDKUserMessage>() : undefined;
   const session: ButlerSession = {
     projectId: opts.projectId,
     butlerId,
     key,
+    backend,
     input,
     abort: new AbortController(),
     busy: false,
@@ -289,8 +320,25 @@ export function ensureButlerSession(opts: {
     transcript: [],
     claudeProfile: opts.claudeProfile,
     model: opts.model || undefined,
+    repoPath: opts.repoPath,
+    systemPromptAppend,
+    profile: opts.profile,
+    agentCommand: opts.agentCommand,
+    agentArgs: opts.agentArgs,
   };
   sessions.set(key, session);
+
+  if (backend === "codex") {
+    session.sessionId = opts.resumeSessionId;
+    session.mcpConnected = undefined;
+    console.log(`[butler-provider] starting logical session: project=${opts.projectId} butler=${butlerId} backend=codex cwd=${opts.repoPath} resume=${opts.resumeSessionId ?? "none"}`);
+    queueMicrotask(() => {
+      broadcast(session, { type: "ready" });
+      if (session.sessionId) broadcast(session, { type: "session", sessionId: session.sessionId });
+      broadcast(session, { type: "meta", model: session.model, contextWindow: session.contextWindow, mcpConnected: session.mcpConnected });
+    });
+    return session;
+  }
 
   const env = buildSpawnEnv(opts.claudeProfile);
   const options: Options = {
@@ -300,15 +348,120 @@ export function ensureButlerSession(opts: {
     allowDangerouslySkipPermissions: true,
     env: env as Options["env"],
     abortController: session.abort,
-    systemPrompt: { type: "preset", preset: "claude_code", append: opts.systemPromptAppend ?? buildButlerSystemPrompt(opts.projectName, opts.repoPath) },
+    systemPrompt: { type: "preset", preset: "claude_code", append: systemPromptAppend },
     mcpServers: getMcpServersConfig(),
     ...(opts.model ? { model: opts.model } : {}),
     ...(opts.resumeSessionId ? { resume: opts.resumeSessionId } : {}),
   };
 
   console.log(`[butler-sdk] starting warm session: project=${opts.projectId} butler=${butlerId} cwd=${opts.repoPath} resume=${opts.resumeSessionId ?? "none"}`);
-  void runLoop(session, input, options);
+  void runLoop(session, input as Pushable<SDKUserMessage>, options);
   return session;
+}
+
+function buildProviderTurnPrompt(session: ButlerSession, content: string): string {
+  return [
+    "System instructions for the project Butler:",
+    session.systemPromptAppend,
+    "",
+    "User message:",
+    content,
+  ].join("\n");
+}
+
+function runProviderTurn(session: ButlerSession, content: string): void {
+  const provider = getProvider("codex");
+  const prompt = buildProviderTurnPrompt(session, content);
+  const config = provider.buildLaunchConfig({
+    provider: "codex" satisfies ProviderId,
+    providerSessionId: session.sessionId,
+    agentCommand: session.agentCommand,
+    agentArgs: session.agentArgs,
+    profile: session.profile,
+    model: session.model,
+    prompt,
+  });
+  const stdinPrompt = config.promptPrefix ? `${config.promptPrefix}\n\n${prompt}` : prompt;
+  const proc = spawn(config.command, config.args, {
+    cwd: session.repoPath,
+    shell: config.useShell,
+    windowsHide: true,
+    env: { ...config.env, FORCE_COLOR: "0", NO_COLOR: "1" },
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  session.process = proc;
+  session.interrupted = false;
+
+  let assistantText = "";
+  let finished = false;
+  const finish = (isError: boolean, text?: string) => {
+    if (finished) return;
+    finished = true;
+    session.busy = false;
+    session.process = undefined;
+    if (!isError && (text ?? assistantText)) {
+      session.transcript.push({ role: "assistant", text: text ?? assistantText, ts: Date.now() });
+    }
+    broadcast(session, { type: "result", text: text ?? assistantText, isError });
+  };
+
+  let buffer = "";
+  proc.stdout?.on("data", (chunk: Buffer) => {
+    buffer += chunk.toString();
+    const lines = buffer.split(/\r?\n/);
+    buffer = lines.pop() ?? "";
+    for (const line of lines) {
+      const evt = provider.parseStreamEvent(line);
+      if (!evt) continue;
+      if (evt.providerSessionId) {
+        session.sessionId = evt.providerSessionId;
+        broadcast(session, { type: "session", sessionId: evt.providerSessionId });
+      }
+      if (evt.assistantText) {
+        assistantText += evt.assistantText;
+        broadcast(session, { type: "text", text: evt.assistantText });
+      }
+      if (evt.toolActivity) {
+        broadcast(session, { type: "tool", name: evt.toolActivity.name });
+      }
+      if (evt.liveStats?.contextTokens) {
+        session.contextTokens = evt.liveStats.contextTokens;
+        broadcast(session, { type: "usage", contextTokens: session.contextTokens });
+      }
+      if (evt.liveStats?.model) {
+        session.model = evt.liveStats.model;
+        broadcast(session, { type: "meta", model: session.model, contextWindow: session.contextWindow, mcpConnected: session.mcpConnected });
+      }
+      if (evt.turnComplete) finish(false);
+    }
+  });
+
+  proc.stderr?.on("data", (chunk: Buffer) => {
+    const text = chunk.toString().trim();
+    if (text) console.warn(`[butler-provider] codex stderr: ${text}`);
+  });
+
+  proc.on("error", (err) => {
+    broadcast(session, { type: "error", message: err.message });
+    finish(true, err.message);
+  });
+  proc.on("exit", (code) => {
+    if (session.interrupted) {
+      session.interrupted = false;
+      return;
+    }
+    if (buffer.trim()) {
+      const evt = provider.parseStreamEvent(buffer.trim());
+      if (evt?.assistantText) {
+        assistantText += evt.assistantText;
+        broadcast(session, { type: "text", text: evt.assistantText });
+      }
+    }
+    finish(code !== 0, code === 0 ? undefined : `Codex Butler exited with code ${code ?? "unknown"}`);
+  });
+
+  if (config.suppressStdinPrompt) proc.stdin?.end();
+  else proc.stdin?.end(stdinPrompt + "\n");
 }
 
 /** Pull the available slash commands from the live session (best-effort). */
@@ -421,6 +574,7 @@ export function sendButlerTurn(
 ): boolean {
   const s = sessions.get(butlerSessionKey(projectId, opts?.butlerId));
   if (!s) return false;
+  if (s.busy) return false;
   s.busy = true;
   s.transcript.push({ role: "user", text: content, ts: Date.now() });
   // For turns the UI itself didn't type (CLI/MCP `ask`), broadcast the prompt so
@@ -429,7 +583,11 @@ export function sendButlerTurn(
   // so it leaves this off to avoid a duplicate bubble.
   if (opts?.emitUserText) broadcast(s, { type: "user", text: content });
   broadcast(s, { type: "turn-start" });
-  s.input.push({ type: "user", message: { role: "user", content }, parent_tool_use_id: null });
+  if (s.backend === "codex") {
+    runProviderTurn(s, content);
+  } else {
+    s.input?.push({ type: "user", message: { role: "user", content }, parent_tool_use_id: null });
+  }
   return true;
 }
 
@@ -438,7 +596,8 @@ export function stopButlerSession(projectId: string, butlerId: string = "default
   const s = sessions.get(key);
   if (!s) return;
   console.log(`[butler-sdk] stopping session: project=${s.projectId} butler=${s.butlerId}`);
-  s.input.end();
+  if (s.process?.pid) s.process.kill();
+  s.input?.end();
   s.abort.abort();
   sessions.delete(key);
 }
