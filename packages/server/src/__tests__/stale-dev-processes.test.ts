@@ -128,7 +128,9 @@ describe("classifyStaleDevProcessTrees", () => {
     });
   });
 
-  it("keeps a tree with a non-protected listener instead of treating it as orphaned", () => {
+  it("keeps a NON-worktree tree with a non-protected listener (conservative)", () => {
+    // Main-checkout / arbitrary server (no /.worktrees/ in the tree) — a listener is a
+    // reason to keep, since we can't be sure it's board-managed.
     const snapshot = classify([
       proc(300, 1, "pnpm dev", "pnpm.cmd"),
       proc(301, 300, "node C:/repo/scripts/dev.mjs"),
@@ -140,6 +142,26 @@ describe("classifyStaleDevProcessTrees", () => {
       rootPid: 300,
       listenerPorts: [5555],
       reason: "listener-port:5555",
+    });
+  });
+
+  it("reaps an orphaned WORKTREE dev tree even though it holds a listener port", () => {
+    // Real-world shape: the dev.mjs parent is under the worktree, but its vite child
+    // resolves from the SHARED main-checkout node_modules (worktrees have none). The
+    // worktree-path reference in the tree is what marks it reapable.
+    const snapshot = classify([
+      proc(500, 1, "pnpm dev", "pnpm.cmd"),
+      proc(501, 500, "node C:/andrena/.worktrees/feature_ak-200-foo/scripts/dev.mjs"),
+      proc(502, 501, "node C:/andrena/agentic-kanban/packages/client/node_modules/vite/bin/vite.js"),
+    ], [listener(502, 5373)]);
+
+    expect(snapshot.kept).toHaveLength(0);
+    expect(snapshot.cleaned).toHaveLength(1);
+    expect(snapshot.cleaned[0]).toMatchObject({
+      rootPid: 500,
+      listenerPorts: [5373],
+      action: "cleaned",
+      reason: "stale-worktree-dev-orphan:5373",
     });
   });
 

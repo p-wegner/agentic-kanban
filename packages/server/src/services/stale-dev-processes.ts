@@ -4,6 +4,7 @@ import { issues, sessions, workspaces } from "@agentic-kanban/shared/schema";
 import { and, eq, isNull, or, sql } from "drizzle-orm";
 import { db, type Database } from "../db/index.js";
 import { auditProcessEvent, guardProcessKill, protectedPids } from "./process-guard.js";
+import { resolveWorktreeDevPorts as resolveWorktreeDevPortsByPath } from "./worktree-ports.js";
 
 const execFileAsync = promisify(execFile);
 const DEFAULT_BOARD_SERVER_PORT = 3001;
@@ -85,24 +86,13 @@ function worktreeScopeRoot(value: string | null | undefined): string | null {
   return normalized.slice(0, markerIndex + marker.length - 1);
 }
 
-function branchHash(branchName: string): number {
-  let hash = 0;
-  for (let i = 0; i < branchName.length; i++) {
-    hash = (hash * 31 + branchName.charCodeAt(i)) & 0xffff;
-  }
-  return (hash % 900) + 101;
-}
-
 export function resolveWorktreeDevPorts(workingDir: string | null, issueNumber: number | null): number[] {
   if (issueNumber && Number.isInteger(issueNumber) && issueNumber > 0) {
     return [DEFAULT_BOARD_SERVER_PORT + issueNumber, DEFAULT_BOARD_CLIENT_PORT + issueNumber];
   }
-  const normalized = normalizePath(workingDir);
-  if (!normalized.includes("/.worktrees/")) return [];
-  const leaf = normalized.split("/").filter(Boolean).at(-1) ?? "";
-  const issueMatch = leaf.match(/(?:^|[_/-])ak-(\d+)-/i) ?? leaf.match(/^feature[_/-](\d+)-/i);
-  const offset = issueMatch ? Number(issueMatch[1]) : branchHash(leaf);
-  return [DEFAULT_BOARD_SERVER_PORT + offset, DEFAULT_BOARD_CLIENT_PORT + offset];
+  // Delegate the path-based scheme to the single source of truth (worktree-ports.ts).
+  const ports = resolveWorktreeDevPortsByPath(workingDir ?? "");
+  return ports ? [ports.serverPort, ports.clientPort] : [];
 }
 
 function parsePort(value: string | undefined): number | null {
@@ -227,6 +217,10 @@ export function classifyStaleDevProcessTrees(input: RuntimeSnapshotInput): Board
       .sort((a, b) => a - b);
     const associatedWorkspaceIds = workspaceAssociations(tree, input.activeWorkspaces);
     const inCleanupScope = cleanupScopePaths.some((scope) => treeCommand.includes(scope));
+    // A worktree dev tree references the worktrees dir somewhere in its command lines.
+    // These are board-managed + ephemeral, so an orphaned one (no active workspace) is
+    // safe to reap even while it holds a port; an arbitrary/main-checkout server is not.
+    const isWorktreeTree = treeCommand.includes("/.worktrees/");
     const protectedTreePids = tree.filter((proc) => input.protectedPidSet.has(proc.pid)).map((proc) => proc.pid);
     const protectedTreePorts = listenerPorts.filter((port) => input.protectedPorts.has(port));
     const decisionBase = {
@@ -245,7 +239,12 @@ export function classifyStaleDevProcessTrees(input: RuntimeSnapshotInput): Board
       kept.push({ ...decisionBase, action: "kept", reason: "active-workspace-session" });
     } else if (!inCleanupScope) {
       kept.push({ ...decisionBase, action: "kept", reason: "outside-cleanup-scope" });
+    } else if (listenerPorts.length > 0 && isWorktreeTree) {
+      // Orphaned worktree dev server (in scope, not protected, no active workspace)
+      // outliving its workspace — the port it holds is the signal to REAP, not keep.
+      cleaned.push({ ...decisionBase, action: "cleaned", reason: `stale-worktree-dev-orphan:${listenerPorts.join(",")}` });
     } else if (listenerPorts.length > 0) {
+      // Non-worktree listener (main checkout / arbitrary server): stay conservative.
       kept.push({ ...decisionBase, action: "kept", reason: `listener-port:${listenerPorts.join(",")}` });
     } else {
       cleaned.push({ ...decisionBase, action: "cleaned", reason: "stale-dev-tree-no-listeners" });
