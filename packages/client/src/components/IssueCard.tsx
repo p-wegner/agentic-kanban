@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { IssueWithStatus } from "@agentic-kanban/shared";
 import type { LiveSessionStats, TodoItem } from "../lib/useBoardEvents.js";
 import { apiFetch } from "../lib/api.js";
@@ -364,7 +365,7 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
       onKeyDown={handleCardKeyDown}
       className={`group bg-surface-raised dark:bg-surface-raised-dark rounded-lg shadow-sm p-2.5 border cursor-pointer hover:shadow-md hover:-translate-y-px transition-all duration-150 relative isolate ${depDragOver ? "border-brand-400 bg-brand-50 shadow-brand-200" : isPendingWorkspace ? "border-brand-300 shadow-brand-100 shadow-md" : "border-black/[0.07] dark:border-white/10 hover:border-brand-200 dark:hover:border-gray-600"}`}
     >
-      {contextMenu && (
+      {contextMenu && createPortal(
         <div
           ref={menuRef}
           role="menu"
@@ -426,7 +427,8 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
               <span className="truncate">Move to {nextStatusName}</span>
             </button>
           )}
-        </div>
+        </div>,
+        document.body,
       )}
       <div className="flex min-w-0 items-start justify-between gap-2">
         <p className="min-w-0 text-sm text-ink dark:text-stone-100 break-words">
