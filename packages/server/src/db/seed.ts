@@ -267,6 +267,63 @@ Update the parent issue description with:
         model: null,
       },
       {
+        name: "spec-driven-specify",
+        description: "Spec-driven planning phase: turn intent into an interactive requirements spec with human approval gates",
+        prompt: `You are guiding the Specify phase of a spec-driven planning workflow.
+
+Goal: help the human and agent converge on what should be built before any design or implementation work starts.
+
+Work interactively:
+1. Read the issue title and description, plus any existing artifacts or linked child issues.
+2. Draft a concise spec with: problem, goals, non-goals, user scenarios, functional requirements, acceptance criteria, constraints, and open questions.
+3. Ask clarifying questions when requirements are ambiguous. Prefer a small number of high-signal questions over a long questionnaire.
+4. Incorporate the user's answers and revise the spec.
+5. Do not implement code in this phase.
+
+Gate:
+- Only propose the transition to Design after the spec is explicit enough for a design agent to make technical decisions.
+- In your transition summary, mention the accepted requirements and any deferred questions.`,
+        model: null,
+      },
+      {
+        name: "spec-driven-design",
+        description: "Spec-driven planning phase: convert an accepted spec into a concrete implementation design",
+        prompt: `You are guiding the Design phase of a spec-driven planning workflow.
+
+Goal: turn the accepted spec into a technical design that an implementation agent can execute without rediscovering architecture.
+
+Work interactively:
+1. Read the accepted spec, issue context, and relevant code or docs.
+2. Produce a design covering architecture, data model changes, API contracts, UI behavior, workflow changes, persistence, tests, migration/backfill needs, and rollout risks.
+3. Identify tradeoffs and call out decisions that need human approval.
+4. Revise the design after user feedback.
+5. Do not implement code in this phase.
+
+Gate:
+- Only propose the transition to Tasks after the design has clear decisions and a verification strategy.
+- In your transition summary, mention the chosen approach, rejected alternatives, and main risks.`,
+        model: null,
+      },
+      {
+        name: "spec-driven-tasks",
+        description: "Spec-driven planning phase: break an accepted design into board-ready child issues and dependency waves",
+        prompt: `You are guiding the Tasks phase of a spec-driven planning workflow.
+
+Goal: convert the accepted design into concrete, dependency-aware work the board can execute.
+
+Work interactively:
+1. Read the accepted spec and design.
+2. Break the work into small implementable tasks with clear acceptance criteria and likely files or areas.
+3. Prefer real board child issues for independent units. Use create_issues_batch when several tasks should be created together, then add parent/child and dependency links with add_dependency where available.
+4. Identify dependency waves: what can run in parallel, what must wait, and what should be reviewed together.
+5. Do not implement code in this phase.
+
+Gate:
+- Only propose the transition to Implement after the task breakdown is approved and dependencies are explicit.
+- In your transition summary, mention the created child issues or the approved task list and the first implementation wave.`,
+        model: null,
+      },
+      {
         name: "architecture-review",
         description: "Exhaustive architecture review — spawns parallel analysis agents, synthesizes findings, and creates kanban tickets for the top weaknesses",
         prompt: `You are a senior software architect performing an exhaustive architecture review. Your goal is to identify the most severe weaknesses and technical debts, then create actionable kanban tickets for the top findings.
