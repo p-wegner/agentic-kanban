@@ -10,14 +10,17 @@ import { getRecentAgentExcerpts, logMonitorAction, shouldSkipNudge, type Monitor
 import { processWorkspaceCandidates } from "./monitor-cycle.js";
 import { buildMonitorNudgePrompt } from "./review-helpers.js";
 import { snapshotAndCleanStaleDevProcesses, type BoardMonitorResourceSnapshot } from "../services/stale-dev-processes.js";
+import { scanDirtyMainCheckouts, type DirtyMainCheckoutWarning } from "../services/dirty-main-checkout.js";
 
 export interface MonitorState {
   timer: ReturnType<typeof setTimeout> | null;
   nextRunAt: string | null;
-  lastRun: { at: string; relaunched: number; merged: number; nudged: number; resources: MonitorResourceSummary | null } | null;
+  lastRun: { at: string; relaunched: number; merged: number; nudged: number; resources: MonitorResourceSummary | null; warnings: number } | null;
   currentIntervalMin: number | null;
   recentActions: MonitorAction[];
   lastResourceSnapshot: BoardMonitorResourceSnapshot | null;
+  warnings: DirtyMainCheckoutWarning[];
+  lastHealthCheckAt: string | null;
 }
 
 export interface MonitorResourceSummary {
@@ -46,19 +49,38 @@ export function setupMonitorRoutes(app: Hono, monitorState: MonitorState, runMon
   app.get("/api/internal/monitor-status", async (c) => {
     const prefRows = await db.select().from(preferences);
     const prefMap = new Map(prefRows.map((r) => [r.key, r.value]));
-    return c.json({ enabled: prefMap.get("auto_monitor") === "true", intervalMin: parseInt(prefMap.get("auto_monitor_interval") || "4", 10), active: monitorState.timer !== null, lastRun: monitorState.lastRun, nextRunAt: monitorState.nextRunAt, recentActions: monitorState.recentActions, resourceSnapshot: monitorState.lastResourceSnapshot });
+    return c.json({ enabled: prefMap.get("auto_monitor") === "true", intervalMin: parseInt(prefMap.get("auto_monitor_interval") || "4", 10), active: monitorState.timer !== null, lastRun: monitorState.lastRun, nextRunAt: monitorState.nextRunAt, recentActions: monitorState.recentActions, resourceSnapshot: monitorState.lastResourceSnapshot, warnings: monitorState.warnings, lastHealthCheckAt: monitorState.lastHealthCheckAt });
   });
 }
 
 export function createMonitorSetup({ sessionManager, boardEvents, serverPort }: MonitorSetupDeps) {
-  const monitorState: MonitorState = { timer: null, nextRunAt: null, lastRun: null, currentIntervalMin: null, recentActions: [], lastResourceSnapshot: null };
+  const monitorState: MonitorState = { timer: null, nextRunAt: null, lastRun: null, currentIntervalMin: null, recentActions: [], lastResourceSnapshot: null, warnings: [], lastHealthCheckAt: null };
+  let lastWarningFingerprint = "";
+  async function refreshDirtyMainCheckoutWarnings() {
+    const warnings = await scanDirtyMainCheckouts(db);
+    monitorState.warnings = warnings;
+    monitorState.lastHealthCheckAt = new Date().toISOString();
+    const warningFingerprint = warnings
+      .map((warning) => `${warning.projectId}:${warning.files.join("|")}`)
+      .join(";");
+    if (warningFingerprint && warningFingerprint !== lastWarningFingerprint) {
+      for (const warning of warnings) {
+        console.warn(`[monitor] ${warning.message} (${warning.repoPath})`);
+      }
+    }
+    lastWarningFingerprint = warningFingerprint;
+    return warnings;
+  }
+
   async function runMonitorCycle(force = false) {
     const cycleStats = { relaunched: 0, merged: 0, nudged: 0 };
     let resourceSummary: MonitorResourceSummary | null = null;
+    let warningCount = monitorState.warnings.length;
     try {
       const prefRows = await db.select().from(preferences);
       const prefMap = new Map(prefRows.map((r) => [r.key, r.value]));
       if (!force && prefMap.get("auto_monitor") !== "true") return;
+      warningCount = (await refreshDirtyMainCheckoutWarnings()).length;
       const resourceSnapshot = await snapshotAndCleanStaleDevProcesses(db);
       monitorState.lastResourceSnapshot = resourceSnapshot;
       resourceSummary = {
@@ -100,7 +122,7 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort }: 
     } catch (err) {
       console.warn("[monitor] Cycle error:", err);
     } finally {
-      monitorState.lastRun = { at: new Date().toISOString(), ...cycleStats, resources: resourceSummary };
+      monitorState.lastRun = { at: new Date().toISOString(), ...cycleStats, resources: resourceSummary, warnings: warningCount };
       const prefRows = await db.select().from(preferences).catch(() => []);
       const prefMap = new Map(prefRows.map((r: { key: string; value: string }) => [r.key, r.value]));
       if (prefMap.get("auto_monitor") === "true") {
@@ -114,6 +136,7 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort }: 
   }
 
   async function syncMonitorState() {
+    await refreshDirtyMainCheckoutWarnings().catch((err) => console.warn("[monitor] Dirty main-checkout health check failed:", err));
     const prefRows = await db.select().from(preferences).catch(() => []);
     const prefMap = new Map(prefRows.map((r: { key: string; value: string }) => [r.key, r.value]));
     const enabled = prefMap.get("auto_monitor") === "true";
