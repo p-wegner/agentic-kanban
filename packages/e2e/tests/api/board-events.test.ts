@@ -1,5 +1,94 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
 import { SERVER_URL, SERVER_PORT } from "../helpers/port.js";
+
+const BOARD_EVENT_TIMEOUT_MS = 5_000;
+
+function withEventTimeout<T>(
+  promise: Promise<T>,
+  expectedEvent: string,
+): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<never>((_, reject) => {
+      setTimeout(() => {
+        reject(
+          new Error(
+            `Timed out after ${BOARD_EVENT_TIMEOUT_MS}ms waiting for ${expectedEvent}`,
+          ),
+        );
+      }, BOARD_EVENT_TIMEOUT_MS);
+    }),
+  ]);
+}
+
+async function listenForBoardEvent(
+  page: Page,
+  projectId: string,
+  reason: string,
+): Promise<{ messagePromise: Promise<string> }> {
+  await withEventTimeout(
+    page.evaluate(
+      ([pid, port, expectedReason]) => {
+        const state = window as unknown as {
+          __boardEventTestEventPromise: Promise<string>;
+        };
+
+        return new Promise<void>((resolveOpen, rejectOpen) => {
+          let opened = false;
+          const ws = new WebSocket(`ws://127.0.0.1:${port}/ws/board/${pid}`);
+
+          state.__boardEventTestEventPromise = new Promise<string>(
+            (resolveMessage, rejectMessage) => {
+              const rejectConnection = (message: string) => {
+                const error = new Error(message);
+                if (!opened) {
+                  rejectOpen(error);
+                }
+                rejectMessage(error);
+              };
+
+              ws.onopen = () => {
+                if (ws.readyState === WebSocket.OPEN) {
+                  opened = true;
+                  resolveOpen();
+                }
+              };
+              ws.onerror = () => {
+                rejectConnection(
+                  `WebSocket error before board_changed event with reason "${expectedReason}"`,
+                );
+              };
+              ws.onmessage = (event) => {
+                const data = JSON.parse(event.data as string);
+                if (
+                  data.type === "board_changed" &&
+                  data.reason === expectedReason
+                ) {
+                  resolveMessage(event.data as string);
+                  ws.close();
+                }
+              };
+            },
+          );
+        });
+      },
+      [projectId, SERVER_PORT, reason] as [string, number, string],
+    ),
+    `WebSocket OPEN before board_changed event with reason "${reason}"`,
+  );
+
+  return {
+    messagePromise: withEventTimeout(
+      page.evaluate(() => {
+        const state = window as unknown as {
+          __boardEventTestEventPromise: Promise<string>;
+        };
+        return state.__boardEventTestEventPromise;
+      }),
+      `board_changed event with reason "${reason}"`,
+    ),
+  };
+}
 
 test.describe("Board Events API", () => {
   let projectId: string;
@@ -33,22 +122,11 @@ test.describe("Board Events API", () => {
     await page.goto("/");
     await page.waitForSelector("h2");
 
-    // Set up WebSocket listener that filters for issue_created
-    const wsMessagePromise = page.evaluate(([pid, port]) => {
-      return new Promise<string>((resolve) => {
-        const ws = new WebSocket(`ws://127.0.0.1:${port}/ws/board/${pid}`);
-        ws.onmessage = (event) => {
-          const data = JSON.parse(event.data as string);
-          if (data.type === "board_changed" && data.reason === "issue_created") {
-            resolve(event.data as string);
-            ws.close();
-          }
-        };
-      });
-    }, [projectId, SERVER_PORT] as [string, number]);
-
-    // Small delay to ensure WS is connected
-    await page.waitForTimeout(500);
+    const { messagePromise: wsMessagePromise } = await listenForBoardEvent(
+      page,
+      projectId,
+      "issue_created",
+    );
 
     const suffix = Date.now().toString(36);
     const issueRes = await request.post(`${SERVER_URL}/api/issues`, {
@@ -87,21 +165,11 @@ test.describe("Board Events API", () => {
     await page.goto("/");
     await page.waitForSelector("h2");
 
-    // Set up WS listener that filters for issue_updated
-    const wsMessagePromise = page.evaluate(([pid, port]) => {
-      return new Promise<string>((resolve) => {
-        const ws = new WebSocket(`ws://127.0.0.1:${port}/ws/board/${pid}`);
-        ws.onmessage = (event) => {
-          const data = JSON.parse(event.data as string);
-          if (data.type === "board_changed" && data.reason === "issue_updated") {
-            resolve(event.data as string);
-            ws.close();
-          }
-        };
-      });
-    }, [projectId, SERVER_PORT] as [string, number]);
-
-    await page.waitForTimeout(500);
+    const { messagePromise: wsMessagePromise } = await listenForBoardEvent(
+      page,
+      projectId,
+      "issue_updated",
+    );
 
     // Update the issue
     await request.patch(`${SERVER_URL}/api/issues/${issueId}`, {
@@ -132,21 +200,11 @@ test.describe("Board Events API", () => {
     await page.goto("/");
     await page.waitForSelector("h2");
 
-    // Set up WS listener that filters for issue_deleted
-    const wsMessagePromise = page.evaluate(([pid, port]) => {
-      return new Promise<string>((resolve) => {
-        const ws = new WebSocket(`ws://127.0.0.1:${port}/ws/board/${pid}`);
-        ws.onmessage = (event) => {
-          const data = JSON.parse(event.data as string);
-          if (data.type === "board_changed" && data.reason === "issue_deleted") {
-            resolve(event.data as string);
-            ws.close();
-          }
-        };
-      });
-    }, [projectId, SERVER_PORT] as [string, number]);
-
-    await page.waitForTimeout(500);
+    const { messagePromise: wsMessagePromise } = await listenForBoardEvent(
+      page,
+      projectId,
+      "issue_deleted",
+    );
 
     // Delete the issue
     await request.delete(`${SERVER_URL}/api/issues/${issueId}`);
