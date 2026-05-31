@@ -7,6 +7,7 @@ import { createMockProc } from "./helpers/mocks.js";
 import { createSessionState } from "../services/session-manager/types.js";
 import { createSessionLifecycle, type AgentService } from "../services/session-manager/session-lifecycle.js";
 import type { AgentOutputCallback } from "../services/agent.service.js";
+import type { workspaceLaunchPreflight } from "../services/preflight-check.js";
 
 /**
  * Unit tests for the session lifecycle using an in-memory SQLite DB plus an
@@ -74,6 +75,10 @@ function createFakeAgentService(): { service: AgentService; getOnOutput: () => A
   return { service, getOnOutput: () => captured };
 }
 
+function okPreflight(): typeof workspaceLaunchPreflight {
+  return vi.fn(async () => ({ ok: true, errors: [], staleFiles: [], refreshed: false, dirtyFiles: [] })) as unknown as typeof workspaceLaunchPreflight;
+}
+
 /** Flush pending microtasks so fire-and-forget DB writes (`.catch()`) settle. */
 async function flush(): Promise<void> {
   await new Promise((r) => setTimeout(r, 20));
@@ -91,7 +96,7 @@ describe("session-lifecycle", () => {
     const { service: agentService } = createFakeAgentService();
     const broadcast = vi.fn();
 
-    const lifecycle = createSessionLifecycle(createSessionState(), undefined, broadcast, { db, agentService });
+    const lifecycle = createSessionLifecycle(createSessionState(), undefined, broadcast, { db, agentService, preflight: okPreflight() });
 
     const sessionId = await lifecycle.startSession({ workspaceId, prompt: "do it" });
 
@@ -112,7 +117,7 @@ describe("session-lifecycle", () => {
     const workspaceId = await seedWorkspace(db, skill);
     const { service: agentService } = createFakeAgentService();
 
-    const lifecycle = createSessionLifecycle(createSessionState(), undefined, vi.fn(), { db, agentService });
+    const lifecycle = createSessionLifecycle(createSessionState(), undefined, vi.fn(), { db, agentService, preflight: okPreflight() });
     const sessionId = await lifecycle.startSession({ workspaceId, prompt: "do it" });
 
     const rows = await db.select().from(sessions).where(eq(sessions.id, sessionId));
@@ -124,7 +129,7 @@ describe("session-lifecycle", () => {
     const workspaceId = await seedWorkspace(db);
     const { service: agentService } = createFakeAgentService();
 
-    const lifecycle = createSessionLifecycle(createSessionState(), undefined, vi.fn(), { db, agentService });
+    const lifecycle = createSessionLifecycle(createSessionState(), undefined, vi.fn(), { db, agentService, preflight: okPreflight() });
     const sessionId = await lifecycle.startSession({ workspaceId, prompt: "do it" });
 
     const rows = await db.select().from(sessions).where(eq(sessions.id, sessionId));
@@ -142,7 +147,7 @@ describe("session-lifecycle", () => {
       state,
       { onSessionExit },
       vi.fn(),
-      { db, agentService },
+      { db, agentService, preflight: okPreflight() },
     );
 
     const sessionId = await lifecycle.startSession({ workspaceId, prompt: "do it" });
@@ -170,7 +175,7 @@ describe("session-lifecycle", () => {
       createSessionState(),
       { onSessionExit },
       vi.fn(),
-      { db, agentService },
+      { db, agentService, preflight: okPreflight() },
     );
 
     const sessionId = await lifecycle.startSession({ workspaceId, prompt: "do it", provider: "codex" });
@@ -203,7 +208,7 @@ describe("session-lifecycle", () => {
     });
     const state = createSessionState();
 
-    const lifecycle = createSessionLifecycle(state, undefined, vi.fn(), { db, agentService });
+    const lifecycle = createSessionLifecycle(state, undefined, vi.fn(), { db, agentService, preflight: okPreflight() });
 
     await expect(lifecycle.startSession({ workspaceId, prompt: "do it" })).rejects.toThrow("spawn ENOENT");
 
@@ -213,5 +218,26 @@ describe("session-lifecycle", () => {
     expect(rows[0].status).toBe("stopped");
     // In-memory zombie state was cleaned up
     expect(state.sessionContexts.size).toBe(0);
+  });
+
+  it("blocks launch before spawning when workspace safety preflight fails", async () => {
+    const workspaceId = await seedWorkspace(db);
+    const { service: agentService } = createFakeAgentService();
+    const preflight = vi.fn(async () => ({
+      ok: false,
+      errors: ["Workspace safety policy is stale; checkpoint/commit first."],
+      staleFiles: [".codex/hooks.json"],
+      refreshed: false,
+      dirtyFiles: [" M src/changed.ts"],
+    })) as unknown as typeof workspaceLaunchPreflight;
+
+    const lifecycle = createSessionLifecycle(createSessionState(), undefined, vi.fn(), { db, agentService, preflight });
+
+    await expect(lifecycle.startSession({ workspaceId, prompt: "do it" })).rejects.toThrow("checkpoint/commit");
+    expect(preflight).toHaveBeenCalledOnce();
+    expect(agentService.launch).not.toHaveBeenCalled();
+
+    const rows = await db.select().from(sessions).where(eq(sessions.workspaceId, workspaceId));
+    expect(rows).toHaveLength(0);
   });
 });

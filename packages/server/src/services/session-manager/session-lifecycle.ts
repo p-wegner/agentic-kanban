@@ -1,6 +1,6 @@
 import { db as realDb } from "../../db/index.js";
 import type { Database } from "../../db/index.js";
-import { sessions, sessionMessages, workspaces, issues, preferences, agentSkills } from "@agentic-kanban/shared/schema";
+import { sessions, sessionMessages, workspaces, issues, projects, preferences, agentSkills } from "@agentic-kanban/shared/schema";
 import { eq } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import * as realAgentService from "../agent.service.js";
@@ -10,6 +10,7 @@ import { computeScorecard } from "../workspace-scorecard.service.js";
 import { computeWorkspaceCodeMetrics } from "../workspace-code-metrics.service.js";
 import type { AgentOutputMessage } from "@agentic-kanban/shared";
 import type { SessionManagerOptions, SessionState, StartSessionOptions } from "./types.js";
+import { workspaceLaunchPreflight } from "../preflight-check.js";
 
 /** Subset of agent.service that the lifecycle depends on. Injectable for tests. */
 export type AgentService = typeof realAgentService;
@@ -18,6 +19,7 @@ export type AgentService = typeof realAgentService;
 export interface SessionLifecycleDeps {
   db?: Database;
   agentService?: AgentService;
+  preflight?: typeof workspaceLaunchPreflight;
 }
 
 export const ZERO_OUTPUT_LAUNCH_FAILURE_WINDOW_MS = 10_000;
@@ -49,6 +51,7 @@ export function createSessionLifecycle(
 ) {
   const db = deps.db ?? realDb;
   const agentService = deps.agentService ?? realAgentService;
+  const launchPreflight = deps.preflight ?? workspaceLaunchPreflight;
   /** Create a session DB row and launch the agent process. */
   async function startSession(opts: StartSessionOptions): Promise<string> {
     const {
@@ -100,6 +103,30 @@ export function createSessionLifecycle(
       .where(eq(issues.id, workspace.issueId))
       .limit(1);
     const projectId = issueRows.length > 0 ? issueRows[0].projectId : "";
+
+    if (!workspace.isDirect && !workingDirOverride && projectId) {
+      const projectRows = await db
+        .select({ repoPath: projects.repoPath, defaultBranch: projects.defaultBranch })
+        .from(projects)
+        .where(eq(projects.id, projectId))
+        .limit(1);
+      const project = projectRows[0];
+      if (project?.repoPath) {
+        const preflight = await launchPreflight({
+          repoPath: project.repoPath,
+          worktreePath: effectiveWorkingDir,
+          baseBranch: workspace.baseBranch || project.defaultBranch,
+          branch: workspace.branch,
+          isDirect: workspace.isDirect ?? false,
+        });
+        if (!preflight.ok) {
+          throw new Error(preflight.errors.join("\n"));
+        }
+        if (preflight.refreshed) {
+          console.log(`[session] launch preflight refreshed workspace ${workspaceId} from ${workspace.baseBranch || project.defaultBranch}`);
+        }
+      }
+    }
 
     const executor = provider ?? "claude-code";
 
