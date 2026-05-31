@@ -233,7 +233,7 @@ When the user references `#N` (e.g., "review #70", "merge #65", "what's the stat
 - `pnpm cli -- skill list/get/create/export`
 - `pnpm cli -- status` — board overview with last agent message per issue
 
-**Note:** `--json` flag doesn't work through `pnpm cli --` due to argument forwarding. Use REST API for JSON output.
+**Note:** `--json` and other flags (`--help`, `-d`, …) now work through `pnpm cli --`. The wrapper's leading `--` (which commander treated as end-of-options, so flags became positional operands) is stripped in `cli/index.ts`. REST API JSON output remains available as an alternative.
 
 **Note:** `pnpm cli -- <any command>` fails in git worktrees with `ERR_MODULE_NOT_FOUND` because `packages/shared/dist` is not built in the worktree. Use the main checkout CLI (`cd C:\andrena\agentic-kanban && pnpm cli -- ...`) or MCP tools / REST API instead.
 The command-safety hook blocks direct `pnpm cli --` from worktrees; switch to the main checkout, MCP, or REST instead of retrying.
