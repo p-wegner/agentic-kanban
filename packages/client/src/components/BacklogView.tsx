@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { CreateIssueRequest, IssueWithStatus, ProfileSelection, StatusWithIssues } from "@agentic-kanban/shared";
 import type { CreateIssueFormState } from "./CreateIssueForm.js";
 import { CreateIssueForm } from "./CreateIssueForm.js";
@@ -48,12 +48,67 @@ const FILTERS = [
 ] as const;
 
 type FilterMode = (typeof FILTERS)[number]["id"];
+type BacklogPreset = {
+  id: string;
+  name: string;
+  filterMode: FilterMode;
+  sortMode: SortMode;
+  groupMode: GroupMode;
+  searchQuery: string;
+};
+
+const PRESET_SETTINGS_PREFIX = "backlog_filter_presets_";
+
+function isFilterMode(value: unknown): value is FilterMode {
+  return typeof value === "string" && FILTERS.some((filter) => filter.id === value);
+}
+
+function isSortMode(value: unknown): value is SortMode {
+  return ["rank", "newest", "oldest", "priority", "type", "due"].includes(String(value));
+}
+
+function isGroupMode(value: unknown): value is GroupMode {
+  return value === "none" || value === "priority" || value === "type";
+}
+
+function parsePresets(raw: string | undefined): BacklogPreset[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.flatMap((item): BacklogPreset[] => {
+      if (!item || typeof item !== "object") return [];
+      const preset = item as Record<string, unknown>;
+      if (
+        typeof preset.id !== "string"
+        || typeof preset.name !== "string"
+        || !isFilterMode(preset.filterMode)
+        || !isSortMode(preset.sortMode)
+        || !isGroupMode(preset.groupMode)
+        || typeof preset.searchQuery !== "string"
+      ) {
+        return [];
+      }
+      return [{
+        id: preset.id,
+        name: preset.name,
+        filterMode: preset.filterMode,
+        sortMode: preset.sortMode,
+        groupMode: preset.groupMode,
+        searchQuery: preset.searchQuery,
+      }];
+    });
+  } catch {
+    return [];
+  }
+}
 
 export interface BacklogViewProps {
   backlogColumn: StatusWithIssues | undefined;
   activeColumns: StatusWithIssues[];
   projectId: string;
   searchQuery: string;
+  onSearchChange: (query: string) => void;
   sessionActivity: Record<string, string>;
   liveStats: Record<string, LiveSessionStats>;
   sessionTodos: Record<string, TodoItem[]>;
@@ -74,6 +129,7 @@ export function BacklogView({
   activeColumns,
   projectId,
   searchQuery,
+  onSearchChange,
   sessionActivity,
   liveStats,
   sessionTodos,
@@ -95,9 +151,32 @@ export function BacklogView({
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkMoving, setBulkMoving] = useState(false);
   const [dragOver, setDragOver] = useState(false);
+  const [presetName, setPresetName] = useState("");
+  const [selectedPresetId, setSelectedPresetId] = useState("");
+  const [presets, setPresets] = useState<BacklogPreset[]>([]);
+  const [presetsSaving, setPresetsSaving] = useState(false);
 
   const backlogIssues = backlogColumn?.issues ?? [];
   const q = searchQuery.toLowerCase();
+  const presetSettingsKey = `${PRESET_SETTINGS_PREFIX}${projectId}`;
+
+  useEffect(() => {
+    let cancelled = false;
+    apiFetch<Record<string, string>>("/api/preferences/settings")
+      .then((settings) => {
+        if (!cancelled) {
+          const loaded = parsePresets(settings[presetSettingsKey]);
+          setPresets(loaded);
+          setSelectedPresetId((current) => loaded.some((preset) => preset.id === current) ? current : "");
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setPresets([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [presetSettingsKey]);
 
   const filteredIssues = useMemo(() => {
     return backlogIssues.filter((issue) => {
@@ -218,6 +297,63 @@ export function BacklogView({
     }
   }
 
+  async function persistPresets(nextPresets: BacklogPreset[], successMessage: string) {
+    setPresetsSaving(true);
+    try {
+      await apiFetch("/api/preferences/settings", {
+        method: "PUT",
+        body: JSON.stringify({ [presetSettingsKey]: JSON.stringify(nextPresets) }),
+      });
+      setPresets(nextPresets);
+      showToast(successMessage, "success");
+      return true;
+    } catch {
+      showToast("Failed to save backlog presets", "error");
+      return false;
+    } finally {
+      setPresetsSaving(false);
+    }
+  }
+
+  async function savePreset() {
+    const name = presetName.trim();
+    if (!name) return;
+    const preset: BacklogPreset = {
+      id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+      name,
+      filterMode,
+      sortMode,
+      groupMode,
+      searchQuery,
+    };
+    const nextPresets = [...presets.filter((existing) => existing.name.toLowerCase() !== name.toLowerCase()), preset]
+      .sort((a, b) => a.name.localeCompare(b.name));
+    const saved = await persistPresets(nextPresets, `Saved preset "${name}"`);
+    if (!saved) return;
+    setPresetName("");
+    setSelectedPresetId(preset.id);
+  }
+
+  function applyPreset() {
+    const preset = presets.find((item) => item.id === selectedPresetId);
+    if (!preset) return;
+    setFilterMode(preset.filterMode);
+    setSortMode(preset.sortMode);
+    setGroupMode(preset.groupMode);
+    onSearchChange(preset.searchQuery);
+    setSelectedIds(new Set());
+    showToast(`Applied preset "${preset.name}"`, "success");
+  }
+
+  async function deletePreset() {
+    const preset = presets.find((item) => item.id === selectedPresetId);
+    if (!preset) return;
+    const nextPresets = presets.filter((item) => item.id !== selectedPresetId);
+    const deleted = await persistPresets(nextPresets, `Deleted preset "${preset.name}"`);
+    if (!deleted) return;
+    setSelectedPresetId("");
+  }
+
   function handleDrop(e: React.DragEvent) {
     e.preventDefault();
     setDragOver(false);
@@ -321,6 +457,52 @@ export function BacklogView({
               <option value="type">Type</option>
             </select>
           </label>
+          <div className="flex flex-wrap items-center gap-1.5 rounded-md border border-gray-200 bg-white px-2 py-1 dark:border-gray-700 dark:bg-gray-900">
+            <span className="text-xs font-medium text-gray-500 dark:text-gray-400">Presets</span>
+            <select
+              aria-label="Backlog preset"
+              value={selectedPresetId}
+              onChange={(e) => setSelectedPresetId(e.target.value)}
+              className="min-w-32 rounded border border-gray-200 bg-white px-2 py-1 text-xs text-gray-700 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-300"
+            >
+              <option value="">Select preset</option>
+              {presets.map((preset) => (
+                <option key={preset.id} value={preset.id}>{preset.name}</option>
+              ))}
+            </select>
+            <button
+              type="button"
+              disabled={!selectedPresetId}
+              onClick={applyPreset}
+              className="rounded border border-gray-200 px-2 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+            >
+              Apply
+            </button>
+            <button
+              type="button"
+              disabled={!selectedPresetId || presetsSaving}
+              onClick={deletePreset}
+              className="rounded border border-gray-200 px-2 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+            >
+              Delete
+            </button>
+            <input
+              aria-label="Backlog preset name"
+              value={presetName}
+              onChange={(e) => setPresetName(e.target.value)}
+              placeholder="Preset name"
+              className="w-32 rounded border border-gray-200 bg-white px-2 py-1 text-xs text-gray-700 placeholder:text-gray-400 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-300"
+            />
+            <button
+              type="button"
+              aria-label="Save backlog preset"
+              disabled={!presetName.trim() || presetsSaving}
+              onClick={savePreset}
+              className="rounded border border-brand-200 bg-brand-50 px-2 py-1 text-xs font-medium text-brand-700 hover:bg-brand-100 disabled:opacity-50 dark:border-brand-800 dark:bg-brand-900/40 dark:text-brand-300"
+            >
+              Save
+            </button>
+          </div>
         </div>
 
         {selectedVisibleIds.length > 0 && (
