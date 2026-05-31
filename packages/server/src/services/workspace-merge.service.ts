@@ -24,6 +24,7 @@ import {
 } from "./merge-helpers.service.js";
 import { PREF_AUTO_START_FOLLOWUP } from "../constants/preference-keys.js";
 import { autoStartFollowups } from "./followup-workspace.service.js";
+import { autoStartUnblockedDependencyIssue } from "./dependency-auto-chain.service.js";
 import { loadAgentSettings, toExecutorProvider } from "./agent-settings.service.js";
 import { computeWorkspaceCodeMetrics } from "./workspace-code-metrics.service.js";
 import {
@@ -337,6 +338,20 @@ export function createWorkspaceMergeService(deps: {
       }
     } catch (err) {
       console.warn("[workspace-merge] auto_start_followup check failed:", err);
+    }
+
+    try {
+      await autoStartUnblockedDependencyIssue({
+        database,
+        projectId,
+        completedIssueId: issueId,
+        prefMap,
+        getSessionManager,
+        boardEvents,
+        gitService,
+      });
+    } catch (err) {
+      console.warn("[workspace-merge] dependency auto-chain check failed:", err);
     }
   }
 
