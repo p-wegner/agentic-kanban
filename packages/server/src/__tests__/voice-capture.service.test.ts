@@ -122,4 +122,111 @@ describe("createVoiceCaptureIssue", () => {
     expect(rows).toHaveLength(1);
     expect(rows[0].statusId).toBe(reviewId);
   });
+
+  it("rejects a move command without a target status", async () => {
+    const { db } = createTestDb();
+    const { projectId, backlogId } = await seedProject(db);
+    const issueId = randomUUID();
+    const now = new Date().toISOString();
+
+    await db.insert(schema.issues).values({
+      id: issueId,
+      issueNumber: 5,
+      title: "Existing task",
+      description: null,
+      priority: "medium",
+      issueType: "task",
+      sortOrder: 0,
+      statusId: backlogId,
+      projectId,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    await expect(createVoiceCaptureIssue({
+      projectId,
+      transcript: "move #5 to !!!",
+    }, db)).rejects.toThrow("Target status is required");
+
+    const rows = await db.select().from(schema.issues).where(eq(schema.issues.id, issueId));
+    expect(rows[0].statusId).toBe(backlogId);
+  });
+
+  it("rejects workflow-driven moves to unreachable statuses", async () => {
+    const { db } = createTestDb();
+    const { projectId, backlogId } = await seedProject(db);
+    const now = new Date().toISOString();
+    const templateId = randomUUID();
+    const startNodeId = randomUUID();
+    const doneNodeId = randomUUID();
+    const issueId = randomUUID();
+
+    await db.insert(schema.workflowTemplates).values({
+      id: templateId,
+      projectId,
+      name: "Test workflow",
+      description: null,
+      ticketType: "task",
+      isDefault: false,
+      isBuiltin: false,
+      builtinKey: null,
+      createdAt: now,
+      updatedAt: now,
+    });
+    await db.insert(schema.workflowNodes).values([
+      {
+        id: startNodeId,
+        templateId,
+        name: "Start",
+        nodeType: "start",
+        statusName: "Backlog",
+        sortOrder: 0,
+        createdAt: now,
+      },
+      {
+        id: doneNodeId,
+        templateId,
+        name: "Done",
+        nodeType: "end",
+        statusName: "Done",
+        sortOrder: 1,
+        createdAt: now,
+      },
+    ]);
+    await db.insert(schema.workflowEdges).values({
+      id: randomUUID(),
+      templateId,
+      fromNodeId: startNodeId,
+      toNodeId: doneNodeId,
+      label: null,
+      condition: "manual",
+      isLoop: false,
+      sortOrder: 0,
+      createdAt: now,
+    });
+    await db.insert(schema.issues).values({
+      id: issueId,
+      issueNumber: 5,
+      title: "Workflow task",
+      description: null,
+      priority: "medium",
+      issueType: "task",
+      sortOrder: 0,
+      statusId: backlogId,
+      workflowTemplateId: templateId,
+      currentNodeId: startNodeId,
+      projectId,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    await expect(createVoiceCaptureIssue({
+      projectId,
+      transcript: "move #5 to review",
+    }, db)).rejects.toThrow("not a valid next step");
+
+    const rows = await db.select().from(schema.issues).where(eq(schema.issues.id, issueId));
+    expect(rows[0].statusId).toBe(backlogId);
+    expect(rows[0].currentNodeId).toBe(startNodeId);
+  });
 });
