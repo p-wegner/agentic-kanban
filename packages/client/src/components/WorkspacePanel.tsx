@@ -13,6 +13,7 @@ import TicketMentionInput from "./TicketMentionInput.js";
 import { useWorkspaceSession } from "../hooks/useWorkspaceSession.js";
 import { usePanelLayout } from "../hooks/usePanelLayout.js";
 import { SessionReplay } from "./SessionReplay.js";
+import { SetupStatusPanel } from "./SetupStatusPanel.js";
 import { showToast } from "./Toast.js";
 import type {
   AgentOutputMessage,
@@ -1509,6 +1510,8 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                     }
                   </div>
                 )}
+
+                <SetupStatusPanel setup={ws.latestSetup ?? null} />
 
                 {handoffContent[ws.id] && (
                   <details className="text-xs">

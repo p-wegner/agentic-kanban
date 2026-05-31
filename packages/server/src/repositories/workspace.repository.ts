@@ -1,4 +1,5 @@
 import { workspaces, issues, projects, sessions, sessionMessages, diffComments, projectStatuses } from "@agentic-kanban/shared/schema";
+import type { WorkspaceSetupRun } from "@agentic-kanban/shared";
 import { eq, inArray } from "drizzle-orm";
 
 type Project = typeof projects.$inferSelect;
@@ -185,6 +186,7 @@ export interface WorkspaceDetails {
   agentCommand: string | null;
   provider: string | null;
   contextPrimer: string | null;
+  latestSetup: WorkspaceSetupRun | null;
   createdAt: string;
   updatedAt: string;
   issue: { title: string; priority: string | null };
@@ -210,6 +212,14 @@ export async function getWorkspaceDetails(
       agentCommand: workspaces.agentCommand,
       provider: workspaces.provider,
       contextPrimer: workspaces.contextPrimer,
+      latestSetupCommand: workspaces.latestSetupCommand,
+      latestSetupState: workspaces.latestSetupState,
+      latestSetupStartedAt: workspaces.latestSetupStartedAt,
+      latestSetupEndedAt: workspaces.latestSetupEndedAt,
+      latestSetupExitCode: workspaces.latestSetupExitCode,
+      latestSetupDurationMs: workspaces.latestSetupDurationMs,
+      latestSetupStdoutTail: workspaces.latestSetupStdoutTail,
+      latestSetupStderrTail: workspaces.latestSetupStderrTail,
       createdAt: workspaces.createdAt,
       updatedAt: workspaces.updatedAt,
       issueTitle: issues.title,
@@ -237,6 +247,16 @@ export async function getWorkspaceDetails(
     agentCommand: row.agentCommand,
     provider: row.provider,
     contextPrimer: row.contextPrimer ?? null,
+    latestSetup: row.latestSetupState ? {
+      command: row.latestSetupCommand,
+      state: row.latestSetupState as WorkspaceSetupRun["state"],
+      startedAt: row.latestSetupStartedAt,
+      endedAt: row.latestSetupEndedAt,
+      exitCode: row.latestSetupExitCode,
+      durationMs: row.latestSetupDurationMs,
+      stdoutTail: row.latestSetupStdoutTail,
+      stderrTail: row.latestSetupStderrTail,
+    } : null,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
     issue: { title: row.issueTitle, priority: row.issuePriority },

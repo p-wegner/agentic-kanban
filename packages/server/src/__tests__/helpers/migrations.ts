@@ -72,4 +72,5 @@ export const MIGRATION_FILES = [
   "0063_workflow_edge_loop_flag.sql",
   "0064_quality_metrics.sql",
   "0065_project_script_shortcuts.sql",
+  "0066_workspace_setup_status.sql",
 ];

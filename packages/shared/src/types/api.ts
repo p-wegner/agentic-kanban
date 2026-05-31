@@ -306,6 +306,19 @@ export interface WorkspaceCodeMetrics {
   } | null;
 }
 
+export type WorkspaceSetupState = "running" | "success" | "failed" | "skipped";
+
+export interface WorkspaceSetupRun {
+  command: string | null;
+  state: WorkspaceSetupState;
+  startedAt: string | null;
+  endedAt: string | null;
+  exitCode: number | null;
+  durationMs: number | null;
+  stdoutTail: string | null;
+  stderrTail: string | null;
+}
+
 export interface QualityMetricRecord {
   id: string;
   projectId: string;
@@ -406,6 +419,7 @@ export interface WorkspaceResponse {
   contextTokens?: number | null;
   lastTool?: string | null;
   latestCommit?: { sha: string; message: string } | null;
+  latestSetup?: WorkspaceSetupRun | null;
 }
 
 export interface IssueArtifact {

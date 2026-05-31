@@ -510,7 +510,52 @@ describe("Workspaces API", () => {
     const body = await res.json() as any;
     expect(body.isDirect).toBe(true);
     expect(body.workingDir).toBe(repoPath);
+    expect(body.latestSetup.state).toBe("skipped");
+    expect(body.latestSetup.command).toBe("echo setup-ran> setup-ran.txt");
     expect(existsSync(join(repoPath, "setup-ran.txt"))).toBe(false);
+  });
+
+  it("GET /api/issues/:id/workspaces includes the latest setup script status", async () => {
+    const repoPath = mkdtempSync(join(tmpdir(), "kanban-setup-status-"));
+    execFileSync("git", ["init", "-b", "main"], { cwd: repoPath });
+    execFileSync("git", ["commit", "--allow-empty", "-m", "initial"], { cwd: repoPath });
+    const setupProjectId = await createProjectDirectly(database, {
+      name: "Setup Status Project",
+      repoPath,
+      setupScript: "echo setup stdout && echo setup stderr 1>&2",
+      setupBlocking: true,
+      setupEnabled: true,
+    });
+    const setupStatusId = await createStatusDirectly(database, setupProjectId, "Todo", 0);
+    const issueRes = await app.request("/api/issues", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "Setup status test", statusId: setupStatusId, projectId: setupProjectId }),
+    });
+    const setupIssueId = (await issueRes.json()).id;
+
+    const createRes = await app.request("/api/workspaces", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ issueId: setupIssueId, branch: "feature/setup-status" }),
+    });
+
+    expect(createRes.status).toBe(201);
+    const createBody = await createRes.json() as any;
+    expect(createBody.latestSetup.state).toBe("success");
+    expect(createBody.latestSetup.exitCode).toBe(0);
+
+    const res = await app.request(`/api/issues/${setupIssueId}/workspaces`);
+    expect(res.status).toBe(200);
+    const body = await res.json() as any;
+    expect(body[0].latestSetup).toMatchObject({
+      command: "echo setup stdout && echo setup stderr 1>&2",
+      state: "success",
+      exitCode: 0,
+    });
+    expect(body[0].latestSetup.durationMs).toEqual(expect.any(Number));
+    expect(body[0].latestSetup.stdoutTail).toContain("setup stdout");
+    expect(body[0].latestSetup.stderrTail).toContain("setup stderr");
   });
 
   it("GET /api/workspaces/:id returns workspace with issue info", async () => {
