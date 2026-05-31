@@ -91,6 +91,18 @@ function parsePorcelainFiles(output: string): string[] {
     .filter(Boolean);
 }
 
+async function getCurrentBranch(
+  git: (args: string[], cwd: string) => Promise<string>,
+  cwd: string,
+): Promise<string | null> {
+  try {
+    const branch = (await git(["rev-parse", "--abbrev-ref", "HEAD"], cwd)).trim();
+    return branch && branch !== "HEAD" ? branch : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Deterministic guard before launching/resuming an agent in a worktree.
  *
@@ -109,6 +121,32 @@ export async function workspaceLaunchPreflight(
   const policyExists = options.exists ?? defaultExists;
   const git = options.execGit ?? execGit;
   const errors: string[] = [];
+  const expectedBranch = options.branch.trim();
+  let dirtyFiles = parsePorcelainFiles(await git(["status", "--porcelain"], options.worktreePath));
+
+  if (expectedBranch) {
+    const currentBranch = await getCurrentBranch(git, options.worktreePath);
+    if (currentBranch !== expectedBranch) {
+      if (dirtyFiles.length > 0) {
+        errors.push(
+          `Workspace is not attached to branch ${expectedBranch} and has uncommitted changes. ` +
+            "checkpoint/commit the workspace first, then reattach the worktree before relaunching the agent.",
+        );
+        return { ok: false, errors, staleFiles: [], refreshed: false, dirtyFiles };
+      }
+
+      try {
+        await git(["checkout", expectedBranch], options.worktreePath);
+      } catch (err) {
+        errors.push(
+          `Workspace is not attached to branch ${expectedBranch} and could not be reattached before launch. ` +
+            `${err instanceof Error ? err.message : String(err)}`,
+        );
+        return { ok: false, errors, staleFiles: [], refreshed: false, dirtyFiles };
+      }
+      dirtyFiles = parsePorcelainFiles(await git(["status", "--porcelain"], options.worktreePath));
+    }
+  }
 
   const staleBefore = await findStaleSafetyFiles({
     repoPath: options.repoPath,
@@ -116,7 +154,6 @@ export async function workspaceLaunchPreflight(
     readFile: readPolicyFile,
     exists: policyExists,
   });
-  const dirtyFiles = parsePorcelainFiles(await git(["status", "--porcelain"], options.worktreePath));
 
   if (dirtyFiles.length > 0 && staleBefore.length > 0) {
     errors.push(
@@ -138,6 +175,17 @@ export async function workspaceLaunchPreflight(
       errors.push(
         `Workspace update-base preflight failed before agent launch. ` +
           `Checkpoint/commit if needed, then resolve the rebase manually. ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return { ok: false, errors, staleFiles: staleBefore, refreshed, dirtyFiles };
+    }
+  }
+
+  if (expectedBranch) {
+    const currentBranch = await getCurrentBranch(git, options.worktreePath);
+    if (currentBranch !== expectedBranch) {
+      errors.push(
+        `Workspace is not attached to branch ${expectedBranch} after update-base. ` +
+          "Do not launch the agent from a detached or wrong-branch worktree.",
       );
       return { ok: false, errors, staleFiles: staleBefore, refreshed, dirtyFiles };
     }
