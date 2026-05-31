@@ -243,6 +243,18 @@ test.describe("Graph and Table board views", () => {
     await expect(page.getByText(`GraphTableA ${suffix}`)).not.toBeVisible();
   });
 
+  test("Graph status filter can show multiple selected statuses", async ({ page }) => {
+    await page.goto("/");
+    await page.waitForSelector("h2");
+    await page.locator("button", { hasText: "Graph" }).click();
+    await expect(page.locator(".bg-gray-50.select-none")).toBeVisible({ timeout: 5000 });
+
+    await page.getByLabel("Graph status filter").selectOption(["Todo", "Backlog"]);
+    await expect(page.getByText(`GraphTableA ${suffix}`).first()).toBeVisible({ timeout: 5000 });
+    await expect(page.getByText(`GraphTableBacklog ${suffix}`).first()).toBeVisible({ timeout: 5000 });
+    await expect(page.getByText(`GraphTableDone ${suffix}`)).not.toBeVisible();
+  });
+
   test("Graph status filter can show all statuses", async ({ page }) => {
     await page.goto("/");
     await page.waitForSelector("h2");
