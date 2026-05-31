@@ -389,6 +389,7 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
   const eventSourceRef = useRef<EventSource | null>(null);
   const assistantBufRef = useRef("");
   const assistantMsgIdRef = useRef<string | null>(null);
+  const assistantTextSeenRef = useRef(false);
   const inputValueRef = useRef("");
   const voiceButtonRef = useRef<ButlerVoiceButtonHandle>(null);
   const hasDictatedRef = useRef(false);
@@ -409,6 +410,8 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
 
   // Append/replace the streaming assistant bubble as text deltas arrive.
   function appendAssistantText(delta: string) {
+    if (!delta) return;
+    assistantTextSeenRef.current = true;
     assistantBufRef.current += delta;
     const text = assistantBufRef.current;
     // Decide the bubble id OUTSIDE the state updater. Mutating the ref inside the
@@ -444,6 +447,7 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
         setSending(true);
         assistantBufRef.current = "";
         assistantMsgIdRef.current = null;
+        assistantTextSeenRef.current = false;
         break;
       case "user":
         // A prompt sent from outside this UI (CLI/MCP `ask`). Render it so the
@@ -469,8 +473,16 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
         setChatMessages((prev) => [...prev, { id: `act-${Date.now()}-${Math.random()}`, role: "activity", text: formatToolLabel(e.name), ts: Date.now() }]);
         break;
       case "result":
+        if (e.text && !assistantTextSeenRef.current) {
+          if (e.isError) {
+            setChatMessages((prev) => [...prev, { id: `err-${Date.now()}`, role: "activity", text: `Error: ${e.text}`, ts: Date.now() }]);
+          } else {
+            appendAssistantText(e.text);
+          }
+        }
         assistantBufRef.current = "";
         assistantMsgIdRef.current = null;
+        assistantTextSeenRef.current = false;
         setSending(false);
         break;
       case "error":
@@ -514,6 +526,7 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
     setMcpConnected(undefined);
     assistantBufRef.current = "";
     assistantMsgIdRef.current = null;
+    assistantTextSeenRef.current = false;
     eventSourceRef.current?.close();
     eventSourceRef.current = null;
     try {
@@ -611,6 +624,7 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
     setButlers([]);
     assistantBufRef.current = "";
     assistantMsgIdRef.current = null;
+    assistantTextSeenRef.current = false;
     eventSourceRef.current?.close();
     eventSourceRef.current = null;
 
@@ -670,6 +684,7 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
     setContextTokens(0);
     assistantBufRef.current = "";
     assistantMsgIdRef.current = null;
+    assistantTextSeenRef.current = false;
     setButlerState({ active: true, sessionId: null });
     openStream();
     void fetchButlers();
@@ -708,6 +723,7 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
       setModel(undefined);
       assistantBufRef.current = "";
       assistantMsgIdRef.current = null;
+      assistantTextSeenRef.current = false;
       setButlerState({ active: true, sessionId: null });
       openStream();
       void loadCapabilities();
@@ -804,6 +820,7 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
     setSending(true);
     assistantBufRef.current = "";
     assistantMsgIdRef.current = null;
+    assistantTextSeenRef.current = false;
 
     try {
       await apiFetch<{ ok: boolean }>(
