@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { AgentOutputMessage } from "@agentic-kanban/shared";
 import { extractMeaningfulOutput } from "@agentic-kanban/shared";
 import { createAgentOutputParser, type AgentOutputFormat, type DisplayEvent } from "../lib/agent-output-parser.js";
@@ -31,9 +31,127 @@ interface RenderContext {
   subagentGroups: Map<string, SubagentGroup>;
   eventToSubagent: Map<number, string>;
   isMaximized: boolean;
+  searchQuery: string;
 }
 
 const SCROLL_THRESHOLD = 50;
+const FILE_PATH_PATTERN = /(?:[A-Za-z]:[\\/]|\.{1,2}[\\/]|[\w.-]+[\\/])[\w .@()[\]{}+=,;!#$%&'-]+(?:[\\/][\w .@()[\]{}+=,;!#$%&'-]+)*|\b[\w.-]+\.(?:ts|tsx|js|jsx|json|md|css|scss|html|sql|py|rs|go|java|cs|yml|yaml|toml)\b/i;
+
+const SEARCH_FILTERS = [
+  { id: "assistant", label: "Assistant" },
+  { id: "tool_call", label: "Tools" },
+  { id: "tool_result", label: "Results" },
+  { id: "error", label: "Errors" },
+  { id: "file", label: "Files" },
+] as const;
+
+type SearchFilter = typeof SEARCH_FILTERS[number]["id"];
+
+export interface TranscriptSearchEntry {
+  idx: number;
+  event: DisplayEvent;
+  text: string;
+  filters: SearchFilter[];
+}
+
+function normalizedSearchQuery(query: string): string {
+  return query.trim().toLowerCase();
+}
+
+function stringifySearchValue(value: unknown): string {
+  if (value === undefined || value === null) return "";
+  if (typeof value === "string") return value;
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+function eventSearchText(event: DisplayEvent): string {
+  switch (event.kind) {
+    case "assistant":
+    case "thinking":
+    case "raw":
+      return event.text;
+    case "tool_use":
+      return [event.name, event.input, stringifySearchValue(event.inputParsed)].filter(Boolean).join("\n");
+    case "tool_result":
+      return [event.toolName, event.output].filter(Boolean).join("\n");
+    case "result":
+      return [event.success ? "Completed" : "Failed", event.result, event.model].filter(Boolean).join("\n");
+    case "init":
+      return [event.model, event.sessionId, event.cwd, event.tools.join(" "), event.permissionMode].filter(Boolean).join("\n");
+    case "task_started":
+      return [event.description, event.taskType, event.taskId].filter(Boolean).join("\n");
+    case "notification":
+      return [event.key, event.text, event.priority].filter(Boolean).join("\n");
+    case "rate_limit":
+      return [event.status, event.rateLimitType, event.overageStatus, event.overageDisabledReason].filter(Boolean).join("\n");
+    case "image":
+      return event.mediaType;
+  }
+}
+
+function eventSearchFilters(event: DisplayEvent, text: string): SearchFilter[] {
+  const filters: SearchFilter[] = [];
+  if (event.kind === "assistant") filters.push("assistant");
+  if (event.kind === "tool_use") filters.push("tool_call");
+  if (event.kind === "tool_result") filters.push("tool_result");
+  if (
+    (event.kind === "tool_result" && event.isError)
+    || (event.kind === "result" && !event.success)
+    || (event.kind === "raw" && /\b(error|failed|exception|traceback)\b/i.test(event.text))
+  ) {
+    filters.push("error");
+  }
+  if (FILE_PATH_PATTERN.test(text)) filters.push("file");
+  return filters;
+}
+
+export function buildTranscriptSearchEntries(
+  events: DisplayEvent[],
+  query: string,
+  filters: ReadonlySet<SearchFilter> = new Set(),
+): TranscriptSearchEntry[] {
+  const needle = normalizedSearchQuery(query);
+  const hasFilters = filters.size > 0;
+
+  return events.flatMap((event, idx) => {
+    const text = eventSearchText(event);
+    const entryFilters = eventSearchFilters(event, text);
+    const matchesQuery = needle.length === 0 || text.toLowerCase().includes(needle);
+    const matchesFilters = !hasFilters || entryFilters.some((filter) => filters.has(filter));
+
+    return matchesQuery && matchesFilters ? [{ idx, event, text, filters: entryFilters }] : [];
+  });
+}
+
+function highlightText(text: string, query: string): React.ReactNode {
+  const needle = query.trim();
+  if (!needle) return text;
+
+  const lowerText = text.toLowerCase();
+  const lowerNeedle = needle.toLowerCase();
+  const parts: React.ReactNode[] = [];
+  let cursor = 0;
+  let matchIdx = lowerText.indexOf(lowerNeedle);
+
+  while (matchIdx !== -1) {
+    if (matchIdx > cursor) parts.push(text.slice(cursor, matchIdx));
+    const end = matchIdx + needle.length;
+    parts.push(
+      <mark key={`${matchIdx}-${end}`} className="rounded bg-yellow-300 px-0.5 text-gray-950">
+        {text.slice(matchIdx, end)}
+      </mark>,
+    );
+    cursor = end;
+    matchIdx = lowerText.indexOf(lowerNeedle, cursor);
+  }
+
+  if (cursor < text.length) parts.push(text.slice(cursor));
+  return parts;
+}
 
 function basename(path: string): string {
   const parts = path.replace(/\\/g, "/").replace(/\/+$/, "").split("/");
@@ -114,6 +232,9 @@ export function TerminalView({ messages, connectionState, parseOutput = "minimal
   const [isAtBottom, setIsAtBottom] = useState(true);
   const [showScrollButton, setShowScrollButton] = useState(false);
   const [markers, setMarkers] = useState<Array<{ idx: number; color: string; pct: number }>>([]);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [activeSearchIdx, setActiveSearchIdx] = useState(0);
+  const [searchFilters, setSearchFilters] = useState<Set<SearchFilter>>(new Set());
 
   const handleDownload = useCallback(() => {
     const lines = extractMeaningfulOutput(messages.map(m => ({ ...m, data: m.data ?? null })), 10000);
@@ -206,6 +327,49 @@ export function TerminalView({ messages, connectionState, parseOutput = "minimal
     preRef.current.scrollTop = preRef.current.scrollHeight;
     setIsAtBottom(true);
     setShowScrollButton(false);
+  };
+
+  const hasSearch = searchQuery.trim().length > 0 || searchFilters.size > 0;
+  const searchEntries = useMemo(
+    () => buildTranscriptSearchEntries(displayEvents, searchQuery, searchFilters),
+    [displayEvents, searchQuery, searchFilters],
+  );
+  const activeSearchEventIdx = hasSearch && searchEntries.length > 0 ? searchEntries[activeSearchIdx]?.idx : undefined;
+
+  useEffect(() => {
+    setActiveSearchIdx((idx) => {
+      if (searchEntries.length === 0) return 0;
+      return Math.min(idx, searchEntries.length - 1);
+    });
+  }, [searchEntries.length]);
+
+  useEffect(() => {
+    if (activeSearchEventIdx === undefined || !preRef.current) return;
+    const el = preRef.current.querySelector(`[data-event-idx="${activeSearchEventIdx}"]`) as HTMLElement | null;
+    if (!el) return;
+    preRef.current.scrollTop = Math.max(0, el.offsetTop - 24);
+    setIsAtBottom(false);
+    setShowScrollButton(true);
+  }, [activeSearchEventIdx]);
+
+  const toggleSearchFilter = (filter: SearchFilter) => {
+    setSearchFilters((prev) => {
+      const next = new Set(prev);
+      if (next.has(filter)) next.delete(filter);
+      else next.add(filter);
+      return next;
+    });
+  };
+
+  const clearSearch = () => {
+    setSearchQuery("");
+    setSearchFilters(new Set());
+    setActiveSearchIdx(0);
+  };
+
+  const goToSearchMatch = (delta: number) => {
+    if (searchEntries.length === 0) return;
+    setActiveSearchIdx((idx) => (idx + delta + searchEntries.length) % searchEntries.length);
   };
 
   useEffect(() => {
@@ -327,7 +491,11 @@ export function TerminalView({ messages, connectionState, parseOutput = "minimal
     subagentGroups,
     eventToSubagent,
     isMaximized,
+    searchQuery,
   };
+
+  const renderedEvents = hasSearch ? searchEntries.map((entry) => entry.event) : displayEvents;
+  const renderedIndexes = hasSearch ? searchEntries.map((entry) => entry.idx) : displayEvents.map((_, idx) => idx);
 
   const content = (
     <>
@@ -338,12 +506,17 @@ export function TerminalView({ messages, connectionState, parseOutput = "minimal
         </div>
       )}
       {isParsed
-        ? displayEvents.map((event, i) => renderParsedEvent(event, i, ctx))
-        : displayEvents.map((event, i) => (
-            <div key={i} className={event.kind === "raw" && messages[i]?.type === "stderr" ? "text-red-400" : ""}>
-              {event.kind === "raw" ? event.text : ""}
+        ? renderedEvents.map((event, i) => renderParsedEvent(event, renderedIndexes[i], ctx))
+        : renderedEvents.map((event, i) => (
+            <div key={renderedIndexes[i]} data-event-idx={renderedIndexes[i]} className={event.kind === "raw" && messages[renderedIndexes[i]]?.type === "stderr" ? "text-red-400" : ""}>
+              {event.kind === "raw" ? highlightText(event.text, searchQuery) : ""}
             </div>
           ))}
+      {hasSearch && searchEntries.length === 0 && (
+        <div className="text-gray-500 text-xs py-2">
+          No transcript matches found.
+        </div>
+      )}
       {displayEvents.length === 0 && connectionState === "connecting" && (
         <span className="text-gray-500 animate-pulse">Starting agent...</span>
       )}
@@ -351,6 +524,95 @@ export function TerminalView({ messages, connectionState, parseOutput = "minimal
         <span className="text-gray-500">Waiting for output...</span>
       )}
     </>
+  );
+
+  const searchControls = (
+    <div className="flex flex-wrap items-center gap-1.5 border-b border-gray-700 bg-gray-900 px-3 py-1.5">
+      <div className="relative min-w-[180px] flex-1">
+        <input
+          value={searchQuery}
+          onChange={(e) => {
+            setSearchQuery(e.target.value);
+            setActiveSearchIdx(0);
+          }}
+          placeholder="Search transcript"
+          aria-label="Search transcript"
+          className="w-full rounded border border-gray-700 bg-gray-950 px-2 py-1 pr-7 text-[11px] text-gray-100 placeholder:text-gray-500 focus:border-brand-500 focus:outline-none"
+        />
+        {searchQuery && (
+          <button
+            type="button"
+            onClick={() => {
+              setSearchQuery("");
+              setActiveSearchIdx(0);
+            }}
+            className="absolute right-1 top-1/2 -translate-y-1/2 rounded px-1 text-xs text-gray-500 hover:bg-gray-800 hover:text-gray-200"
+            title="Clear search text"
+            aria-label="Clear search text"
+          >
+            x
+          </button>
+        )}
+      </div>
+      <div className="flex items-center gap-1 text-[11px] text-gray-400">
+        <button
+          type="button"
+          onClick={() => goToSearchMatch(-1)}
+          disabled={searchEntries.length === 0}
+          className="rounded border border-gray-700 px-1.5 py-1 text-gray-300 hover:bg-gray-700 disabled:cursor-not-allowed disabled:opacity-40"
+          title="Previous match"
+          aria-label="Previous match"
+        >
+          ^
+        </button>
+        <button
+          type="button"
+          onClick={() => goToSearchMatch(1)}
+          disabled={searchEntries.length === 0}
+          className="rounded border border-gray-700 px-1.5 py-1 text-gray-300 hover:bg-gray-700 disabled:cursor-not-allowed disabled:opacity-40"
+          title="Next match"
+          aria-label="Next match"
+        >
+          v
+        </button>
+        <span className="min-w-[52px] text-center">
+          {hasSearch ? (searchEntries.length > 0 ? `${activeSearchIdx + 1}/${searchEntries.length}` : "0/0") : `${displayEvents.length}`}
+        </span>
+      </div>
+      <div className="flex flex-wrap items-center gap-1">
+        {SEARCH_FILTERS.map((filter) => {
+          const selected = searchFilters.has(filter.id);
+          return (
+            <button
+              key={filter.id}
+              type="button"
+              onClick={() => {
+                toggleSearchFilter(filter.id);
+                setActiveSearchIdx(0);
+              }}
+              className={`rounded border px-1.5 py-1 text-[11px] ${
+                selected
+                  ? "border-brand-500 bg-brand-900/50 text-brand-100"
+                  : "border-gray-700 text-gray-400 hover:bg-gray-700 hover:text-gray-200"
+              }`}
+              aria-pressed={selected}
+            >
+              {filter.label}
+            </button>
+          );
+        })}
+      </div>
+      {hasSearch && (
+        <button
+          type="button"
+          onClick={clearSearch}
+          className="rounded px-1.5 py-1 text-[11px] text-gray-400 hover:bg-gray-700 hover:text-gray-100"
+          aria-label="Clear transcript search"
+        >
+          Clear
+        </button>
+      )}
+    </div>
   );
 
   // Scrollbar markers — position computed here, not during render
@@ -447,6 +709,7 @@ export function TerminalView({ messages, connectionState, parseOutput = "minimal
             </svg>
           </button>
         </div>
+        {searchControls}
         <div className="relative flex-1 min-h-0">
           <pre
             ref={preRef}
@@ -490,6 +753,7 @@ export function TerminalView({ messages, connectionState, parseOutput = "minimal
             </svg>
           </button>
         </div>
+        {searchControls}
         <div className="relative flex-1 min-h-0">
           <pre
             ref={preRef}
@@ -508,8 +772,10 @@ export function TerminalView({ messages, connectionState, parseOutput = "minimal
 }
 
 function renderParsedEvent(event: DisplayEvent, key: number, ctx: RenderContext): React.ReactNode {
-  const { multiTurn, expandedSections, toggleExpand, parseOutput, activeSubagentToolUseIds, subagentGroups, eventToSubagent, isMaximized } = ctx;
-  const isExpanded = expandedSections.has(key);
+  const { multiTurn, expandedSections, toggleExpand, parseOutput, activeSubagentToolUseIds, subagentGroups, eventToSubagent, isMaximized, searchQuery } = ctx;
+  const searchNeedle = normalizedSearchQuery(searchQuery);
+  const isSearchMatch = searchNeedle.length > 0 && eventSearchText(event).toLowerCase().includes(searchNeedle);
+  const isExpanded = expandedSections.has(key) || isSearchMatch;
   const isMinimal = parseOutput === "minimal";
 
   // Determine if this event is inside a subagent section (between Agent tool_use and its result)
@@ -526,7 +792,7 @@ function renderParsedEvent(event: DisplayEvent, key: number, ctx: RenderContext)
     const indent = isInsideSubagent && !isSubagentStart ? "ml-6" : "";
     return (
       <div key={key} data-event-idx={key} className={`text-green-400 ${indent}`}>
-        {event.text}
+        {highlightText(event.text, searchQuery)}
       </div>
     );
   }
@@ -545,8 +811,8 @@ function renderParsedEvent(event: DisplayEvent, key: number, ctx: RenderContext)
           Session initialized
         </div>
         <div className="text-gray-400">
-          Model: <span className="text-white">{event.model}</span>
-          {" | "}CWD: <span className="text-white">{event.cwd}</span>
+          Model: <span className="text-white">{highlightText(event.model, searchQuery)}</span>
+          {" | "}CWD: <span className="text-white">{highlightText(event.cwd, searchQuery)}</span>
         </div>
         {event.mcpServers.length > 0 && (
           <div className="text-gray-400">
@@ -573,7 +839,7 @@ function renderParsedEvent(event: DisplayEvent, key: number, ctx: RenderContext)
       return (
         <div key={key} data-event-idx={key} className={`mb-1 ${inSubagent ? "ml-6" : ""}`}>
           <div className={`text-[11px] ${inSubagent ? "text-gray-400" : "text-green-300"}`}>
-            {truncated ? lines.slice(0, 3).join("\n") + "..." : event.text}
+            {highlightText(truncated ? lines.slice(0, 3).join("\n") + "..." : event.text, searchQuery)}
           </div>
           {truncated && (
             <button
@@ -591,7 +857,7 @@ function renderParsedEvent(event: DisplayEvent, key: number, ctx: RenderContext)
         {event.model && !inSubagent && (
           <span className="text-blue-400 text-[10px]">[{event.model}]</span>
         )}
-        <div className={inSubagent ? "text-gray-400 text-[11px]" : "text-green-300"}>{event.text}</div>
+        <div className={inSubagent ? "text-gray-400 text-[11px]" : "text-green-300"}>{highlightText(event.text, searchQuery)}</div>
       </div>
     );
   }
@@ -601,7 +867,7 @@ function renderParsedEvent(event: DisplayEvent, key: number, ctx: RenderContext)
     const inSubagent = isInsideSubagent && !isSubagentStart;
     return (
       <div key={key} data-event-idx={key} className={`mb-1 text-gray-500 italic text-[11px] ${inSubagent ? "ml-6" : ""}`}>
-        Thinking: {event.text.length > 200 ? event.text.slice(0, 200) + "..." : event.text}
+        Thinking: {highlightText(event.text.length > 200 ? event.text.slice(0, 200) + "..." : event.text, searchQuery)}
       </div>
     );
   }
@@ -619,7 +885,7 @@ function renderParsedEvent(event: DisplayEvent, key: number, ctx: RenderContext)
               ? <span className="text-brand-600 dark:text-brand-400 animate-pulse">⟳</span>
               : <span className="text-brand-600 dark:text-brand-400">⇢</span>}
             <span className="text-brand-700 dark:text-brand-300 font-medium">Subagent</span>
-            <span className="text-gray-300">{description.slice(0, 80) || "delegating to agent"}</span>
+            <span className="text-gray-300">{highlightText(description.slice(0, 80) || "delegating to agent", searchQuery)}</span>
             {subagentType && <span className="text-gray-500 ml-1">({subagentType})</span>}
             {isRunning && <span className="text-brand-600 dark:text-brand-400 text-[10px] animate-pulse">running</span>}
           </div>
@@ -636,7 +902,7 @@ function renderParsedEvent(event: DisplayEvent, key: number, ctx: RenderContext)
             {isRunning ? "Subagent running" : "Subagent"}
           </span>
           {subagentType && <span className="text-brand-600 dark:text-brand-400 text-[10px] bg-brand-100 dark:bg-brand-800/40 px-1 rounded">{subagentType}</span>}
-          <span className="text-gray-300 text-[11px] ml-1">{description}</span>
+          <span className="text-gray-300 text-[11px] ml-1">{highlightText(description, searchQuery)}</span>
         </div>
       </div>
     );
@@ -665,7 +931,7 @@ function renderParsedEvent(event: DisplayEvent, key: number, ctx: RenderContext)
       return (
         <div key={key} data-event-idx={key} className={`mb-0.5 text-[11px] ${inSubagent ? "ml-6" : "ml-1"}`}>
           <span className={color}>{icon} </span>
-          <span className="text-gray-300">{summary}</span>
+          <span className="text-gray-300">{highlightText(summary, searchQuery)}</span>
         </div>
       );
     }
@@ -677,7 +943,7 @@ function renderParsedEvent(event: DisplayEvent, key: number, ctx: RenderContext)
         return (
           <div key={key} data-event-idx={key} className={`mb-0.5 ${inSubagent ? "ml-6" : "ml-2"} pl-2`}>
             <span className="text-gray-500 text-[11px]">○ </span>
-            <span className="text-gray-300 text-[11px]">{subject}</span>
+            <span className="text-gray-300 text-[11px]">{highlightText(subject, searchQuery)}</span>
             {input.activeForm ? <span className="text-blue-400 text-[10px] ml-1">— {String(input.activeForm)}</span> : null}
           </div>
         );
@@ -694,7 +960,7 @@ function renderParsedEvent(event: DisplayEvent, key: number, ctx: RenderContext)
         return (
           <div key={key} data-event-idx={key} className={`mb-0.5 ${inSubagent ? "ml-6" : "ml-2"} pl-2`}>
             <span className={statusColor}>{statusIcon} </span>
-            <span className={`text-[11px] ${s === "completed" ? "text-gray-500 line-through" : "text-gray-300"}`}>{subject}</span>
+            <span className={`text-[11px] ${s === "completed" ? "text-gray-500 line-through" : "text-gray-300"}`}>{highlightText(subject, searchQuery)}</span>
           </div>
         );
       }
@@ -707,14 +973,14 @@ function renderParsedEvent(event: DisplayEvent, key: number, ctx: RenderContext)
         return (
           <div key={key} data-event-idx={key} className={`mb-1 text-[11px] ${inSubagent ? "ml-6" : "ml-1"} flex items-center gap-1.5`}>
             <span className="text-brand-600 dark:text-brand-400">⚡</span>
-            <span className="text-brand-700 dark:text-brand-300 font-medium">Skill: {skillName}</span>
+            <span className="text-brand-700 dark:text-brand-300 font-medium">Skill: {highlightText(skillName, searchQuery)}</span>
           </div>
         );
       }
       const summary = summarizeToolCall(event.name, event.inputParsed || {});
       return (
         <div key={key} data-event-idx={key} className={`mb-0.5 text-[11px] ${inSubagent ? "ml-6" : "ml-1"}`}>
-          <span className="text-yellow-500">{summary}</span>
+          <span className="text-yellow-500">{highlightText(summary, searchQuery)}</span>
           {!isExpanded && event.input && (
             <button
               className="text-gray-600 text-[10px] ml-1 hover:text-gray-400"
@@ -731,7 +997,7 @@ function renderParsedEvent(event: DisplayEvent, key: number, ctx: RenderContext)
               >
                 hide
               </button>
-              <pre className="text-gray-500 text-[10px] mt-0.5 ml-2 whitespace-pre-wrap">{event.input}</pre>
+              <pre className="text-gray-500 text-[10px] mt-0.5 ml-2 whitespace-pre-wrap">{highlightText(event.input, searchQuery)}</pre>
             </>
           )}
         </div>
@@ -739,14 +1005,14 @@ function renderParsedEvent(event: DisplayEvent, key: number, ctx: RenderContext)
     }
     return (
       <div key={key} data-event-idx={key} className={`mb-1 ${inSubagent ? "ml-6" : "ml-2"} pl-2 border-l-2 ${inSubagent ? "border-gray-700" : "border-yellow-600"}`}>
-        <span className={inSubagent ? "text-gray-500 text-[11px]" : "text-yellow-400"}>Tool: {event.name}</span>
+        <span className={inSubagent ? "text-gray-500 text-[11px]" : "text-yellow-400"}>Tool: {highlightText(event.name, searchQuery)}</span>
         {event.input && (
           <div
             className={`text-gray-500 text-[10px] mt-0.5 cursor-pointer select-none ${isExpanded ? "" : "max-h-5 overflow-hidden"}`}
             onClick={() => toggleExpand(key)}
             title={isExpanded ? "Click to collapse" : "Click to expand"}
           >
-            <pre className="whitespace-pre-wrap">{event.input}</pre>
+            <pre className="whitespace-pre-wrap">{highlightText(event.input, searchQuery)}</pre>
           </div>
         )}
       </div>
@@ -812,10 +1078,10 @@ function renderParsedEvent(event: DisplayEvent, key: number, ctx: RenderContext)
               className="text-gray-400 text-[11px] mt-0.5 ml-2 cursor-pointer select-none"
               onClick={() => toggleExpand(key)}
             >
-              {truncated ? summary.slice(0, 300) + "..." : summary}
+              {highlightText(truncated ? summary.slice(0, 300) + "..." : summary, searchQuery)}
               {truncated && <span className="text-gray-600 text-[10px] ml-1">click for full output</span>}
               {isExpanded && !truncated && (
-                <pre className={`text-gray-500 text-[10px] mt-0.5 whitespace-pre-wrap ${isMaximized ? "" : "max-h-60 overflow-auto"}`}>{event.output}</pre>
+                <pre className={`text-gray-500 text-[10px] mt-0.5 whitespace-pre-wrap ${isMaximized ? "" : "max-h-60 overflow-auto"}`}>{highlightText(event.output, searchQuery)}</pre>
               )}
             </div>
           )}
@@ -830,7 +1096,7 @@ function renderParsedEvent(event: DisplayEvent, key: number, ctx: RenderContext)
           <span className={event.isError ? "text-red-400" : "text-green-500"}>
             {event.isError ? "✗" : "✓"}
           </span>
-          <span className="text-gray-500 ml-1">{event.toolName}</span>
+          <span className="text-gray-500 ml-1">{highlightText(event.toolName, searchQuery)}</span>
           {!isExpanded && (
             <button
               className="text-gray-600 text-[10px] ml-1 hover:text-gray-400"
@@ -847,7 +1113,7 @@ function renderParsedEvent(event: DisplayEvent, key: number, ctx: RenderContext)
               >
                 hide
               </button>
-              <pre className={`text-gray-500 text-[10px] mt-0.5 ml-2 whitespace-pre-wrap ${isMaximized ? "" : "max-h-40 overflow-auto"}`}>{event.output}</pre>
+              <pre className={`text-gray-500 text-[10px] mt-0.5 ml-2 whitespace-pre-wrap ${isMaximized ? "" : "max-h-40 overflow-auto"}`}>{highlightText(event.output, searchQuery)}</pre>
             </>
           )}
         </div>
@@ -857,13 +1123,13 @@ function renderParsedEvent(event: DisplayEvent, key: number, ctx: RenderContext)
     const textColor = event.isError ? "text-red-400" : inSubagent ? "text-gray-500" : "text-brand-600 dark:text-brand-400";
     return (
       <div key={key} data-event-idx={key} className={`mb-1 ${inSubagent ? "ml-6" : "ml-2"} pl-2 border-l-2 ${borderColor}`}>
-        <span className={textColor}>{event.isError ? "Error" : "Result"}: {event.toolName}</span>
+        <span className={textColor}>{event.isError ? "Error" : "Result"}: {highlightText(event.toolName, searchQuery)}</span>
         <div
           className={`text-gray-500 text-[10px] mt-0.5 cursor-pointer select-none ${isExpanded ? "" : "max-h-5 overflow-hidden"}`}
           onClick={() => toggleExpand(key)}
           title={isExpanded ? "Click to collapse" : "Click to expand"}
         >
-          <pre className="whitespace-pre-wrap">{event.output}</pre>
+          <pre className="whitespace-pre-wrap">{highlightText(event.output, searchQuery)}</pre>
         </div>
         {event.images && event.images.length > 0 && (
           <div className="mt-1 flex flex-wrap gap-2">
@@ -902,7 +1168,7 @@ function renderParsedEvent(event: DisplayEvent, key: number, ctx: RenderContext)
           {event.model && <span className="text-gray-400 font-normal"> ({event.model})</span>}
         </div>
         {event.result && (
-          <div className="text-gray-300 mt-1">{event.result}</div>
+          <div className="text-gray-300 mt-1">{highlightText(event.result, searchQuery)}</div>
         )}
         <div className="text-gray-500 text-[10px] mt-1">
           {(event.durationMs / 1000).toFixed(1)}s
@@ -921,7 +1187,7 @@ function renderParsedEvent(event: DisplayEvent, key: number, ctx: RenderContext)
           {isRunning
             ? <span className="text-blue-400 animate-pulse">⟳</span>
             : <span className="text-green-500">✓</span>}
-          <span className={isRunning ? "text-blue-300" : "text-gray-400"}>{event.description}</span>
+          <span className={isRunning ? "text-blue-300" : "text-gray-400"}>{highlightText(event.description, searchQuery)}</span>
           {isRunning && <span className="text-blue-500 text-[10px]">running</span>}
         </div>
       );
@@ -932,7 +1198,7 @@ function renderParsedEvent(event: DisplayEvent, key: number, ctx: RenderContext)
           ? <span className="text-blue-400 animate-pulse text-[11px]">⟳</span>
           : <span className="text-green-500 text-[11px]">✓</span>}
         <span className={`text-[11px] ${isRunning ? "text-blue-300" : "text-gray-500"}`}>
-          {event.description}
+          {highlightText(event.description, searchQuery)}
         </span>
         {isRunning && <span className="text-blue-500 text-[10px] animate-pulse">running</span>}
         {event.taskType && !isRunning && <span className="text-gray-600 text-[10px] ml-1">{event.taskType}</span>}
@@ -947,7 +1213,7 @@ function renderParsedEvent(event: DisplayEvent, key: number, ctx: RenderContext)
     if (isMinimal) {
       return (
         <div key={key} data-event-idx={key} className={`mb-0.5 text-[11px] ${inSubagent ? "ml-6" : "ml-1"}`}>
-          <span className="text-yellow-500">Rate limit ({event.rateLimitType}): {event.status}</span>
+          <span className="text-yellow-500">Rate limit ({highlightText(event.rateLimitType, searchQuery)}): {highlightText(event.status, searchQuery)}</span>
           {overageRejected && <span className="text-orange-400"> — overage rejected</span>}
           {resetsAt && <span className="text-gray-500"> — resets {resetsAt}</span>}
         </div>
@@ -955,7 +1221,7 @@ function renderParsedEvent(event: DisplayEvent, key: number, ctx: RenderContext)
     }
     return (
       <div key={key} data-event-idx={key} className={`mb-1 ${inSubagent ? "ml-6" : "ml-2"} pl-2 border-l-2 border-yellow-600`}>
-        <span className="text-yellow-400">Rate limit: {event.status}</span>
+        <span className="text-yellow-400">Rate limit: {highlightText(event.status, searchQuery)}</span>
         <div className="text-gray-500 text-[10px]">
           {event.rateLimitType}{overageRejected ? " | overage rejected" : ""}{resetsAt ? ` | resets ${resetsAt}` : ""}
         </div>
@@ -970,16 +1236,16 @@ function renderParsedEvent(event: DisplayEvent, key: number, ctx: RenderContext)
       return (
         <div key={key} data-event-idx={key} className={`mb-0.5 text-[11px] ${inSubagent ? "ml-6" : "ml-1"}`}>
           {isUserMsg
-            ? <><span className="text-blue-400">User: </span><span className="text-gray-300">{event.text}</span></>
-            : <><span className="text-orange-400">Note: </span><span className="text-gray-400">{event.text}</span></>}
+            ? <><span className="text-blue-400">User: </span><span className="text-gray-300">{highlightText(event.text, searchQuery)}</span></>
+            : <><span className="text-orange-400">Note: </span><span className="text-gray-400">{highlightText(event.text, searchQuery)}</span></>}
         </div>
       );
     }
     return (
       <div key={key} data-event-idx={key} className={`mb-1 ${inSubagent ? "ml-6" : "ml-2"} pl-2 ${isUserMsg ? "border-l-2 border-blue-600" : "border-l-2 border-orange-600"}`}>
         {isUserMsg
-          ? <span className="text-blue-400">User: <span className="text-gray-300">{event.text}</span></span>
-          : <span className="text-orange-400">Notification: {event.text}</span>}
+          ? <span className="text-blue-400">User: <span className="text-gray-300">{highlightText(event.text, searchQuery)}</span></span>
+          : <span className="text-orange-400">Notification: {highlightText(event.text, searchQuery)}</span>}
         {!isUserMsg && <div className="text-gray-600 text-[10px]">{event.key} | {event.priority}</div>}
       </div>
     );
