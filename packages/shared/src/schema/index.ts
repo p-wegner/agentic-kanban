@@ -14,7 +14,7 @@ export type { DependencyType } from "./issue-dependencies.js";
 export { agentSkills } from "./agent-skills.js";
 export { issueArtifacts, issueArtifactsRelations } from "./issue-artifacts.js";
 export { issueComments, issueCommentsRelations } from "./issue-comments.js";
-export { scheduledRuns } from "./scheduled-runs.js";
+export { scheduledRuns, scheduledRunHistory } from "./scheduled-runs.js";
 export { failurePatterns } from "./failure-patterns.js";
 export {
   flakyTests,

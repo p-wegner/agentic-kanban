@@ -418,6 +418,23 @@ type ScheduledRun = {
   cronExpression: string | null;
   enabled: boolean; lastRunAt: string | null; lastRunStatus: string | null;
   lastRunWorkspaceId: string | null;
+  systemIssueId?: string | null;
+  nextFireAt?: string | null;
+  systemIssue?: { id: string; issueNumber: number; title: string } | null;
+  lastRunWorkspace?: { id: string; branch: string; status: string } | null;
+  latestHistory?: ScheduledRunHistory | null;
+  history?: ScheduledRunHistory[];
+};
+
+type ScheduledRunHistory = {
+  id: string;
+  status: string;
+  reason: string | null;
+  triggeredBy: string;
+  issueId: string | null;
+  workspaceId: string | null;
+  startedAt: string;
+  completedAt: string | null;
 };
 
 function validateCronExpression(expr: string): { valid: boolean; error?: string } {
@@ -465,6 +482,22 @@ function describeCronExpression(expr: string): string {
   }
   if (domF !== "*" && monF === "*" && dowF === "*" && simpleTime && /^\d+$/.test(domF)) return `Monthly on day ${domF} at ${timeStr}`;
   return expr;
+}
+
+function formatScheduledRunTime(value: string | null | undefined): string {
+  if (!value) return "None";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString("en-US");
+}
+
+function formatNextFire(value: string | null | undefined): string {
+  if (!value) return "pending";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  const diffMin = Math.round((date.getTime() - Date.now()) / 60000);
+  if (diffMin <= 0) return "overdue";
+  if (diffMin < 60) return `in ${diffMin}m`;
+  return `at ${date.toLocaleTimeString("en-US")}`;
 }
 
 export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) {
@@ -2012,6 +2045,24 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                                 <span className="flex-1 text-sm font-medium text-gray-800">{run.name}</span>
                                 <span className="text-xs text-gray-400">{run.cronExpression ? describeCronExpression(run.cronExpression) : `every ${run.intervalMinutes}m`}</span>
                                 <button
+                                  onClick={async () => {
+                                    const enabled = !run.enabled;
+                                    try {
+                                      await apiFetch(`/api/scheduled-runs/${run.id}`, {
+                                        method: "PUT",
+                                        body: JSON.stringify({ enabled }),
+                                      });
+                                      setScheduledRunsList((r) => r.map((x) => x.id === run.id ? { ...x, enabled, nextFireAt: enabled ? x.nextFireAt : null } : x));
+                                      showToast(enabled ? "Scheduled run resumed" : "Scheduled run paused", "success");
+                                    } catch {
+                                      showToast("Failed to update", "error");
+                                    }
+                                  }}
+                                  className="text-xs px-2 py-1 text-gray-600 hover:bg-gray-100 rounded border border-gray-200"
+                                >
+                                  {run.enabled ? "Pause" : "Resume"}
+                                </button>
+                                <button
                                   onClick={() => { setEditingRun(run.id); setEditRunName(run.name); setEditRunPrompt(run.prompt ?? ""); setEditRunInterval(run.intervalMinutes); setEditRunCron(run.cronExpression ?? ""); setEditRunMode(run.cronExpression ? "cron" : "interval"); }}
                                   className="text-xs text-gray-400 hover:text-brand-600"
                                 >
@@ -2052,6 +2103,26 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                               {run.prompt && (
                                 <p className="text-xs text-gray-500 pl-5 truncate">{run.prompt}</p>
                               )}
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1 pl-5 text-xs text-gray-500">
+                                <p>
+                                  Issue: {run.systemIssue ? (
+                                    <span className="font-medium text-gray-700">#{run.systemIssue.issueNumber} {run.systemIssue.title}</span>
+                                  ) : run.systemIssueId ? (
+                                    <span className="text-red-600">missing issue</span>
+                                  ) : (
+                                    <span>none</span>
+                                  )}
+                                </p>
+                                <p>
+                                  Workspace: {run.lastRunWorkspace ? (
+                                    <span className="font-medium text-gray-700">{run.lastRunWorkspace.branch} ({run.lastRunWorkspace.status})</span>
+                                  ) : run.lastRunWorkspaceId ? (
+                                    <span className="text-red-600">missing workspace</span>
+                                  ) : (
+                                    <span>none</span>
+                                  )}
+                                </p>
+                              </div>
                               {run.lastRunAt ? (() => {
                                 const status = run.lastRunStatus ?? "unknown";
                                 const isRunning = status === "running";
@@ -2079,26 +2150,29 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                               })() : (
                                 <p className="text-xs text-gray-400 pl-5">Never run</p>
                               )}
-                              {(() => {
-                                const nextMs = run.lastRunAt
-                                  ? new Date(run.lastRunAt).getTime() + run.intervalMinutes * 60 * 1000
-                                  : null;
-                                if (!run.enabled) return null;
-                                if (nextMs === null) return (
-                                  <p className="text-xs text-blue-500 pl-5">Next run: pending (first run)</p>
-                                );
-                                const diffMin = Math.round((nextMs - Date.now()) / 60000);
-                                const label = diffMin <= 0
-                                  ? "overdue"
-                                  : diffMin < 60
-                                    ? `in ${diffMin}m`
-                                    : `at ${new Date(nextMs).toLocaleTimeString('en-US')}`;
-                                return (
-                                  <p className="text-xs text-blue-500 pl-5" title={new Date(nextMs).toLocaleString('en-US')}>
-                                    Next run: {label}
-                                  </p>
-                                );
-                              })()}
+                              <p className={`text-xs pl-5 ${run.enabled ? "text-blue-500" : "text-gray-400"}`} title={formatScheduledRunTime(run.nextFireAt)}>
+                                Next run: {run.enabled ? formatNextFire(run.nextFireAt) : "paused"}
+                              </p>
+                              {run.latestHistory?.reason && (
+                                <p className="text-xs text-red-600 pl-5">
+                                  Last reason: {run.latestHistory.reason}
+                                </p>
+                              )}
+                              {run.history && run.history.length > 0 && (
+                                <details className="pl-5">
+                                  <summary className="text-xs text-gray-500 cursor-pointer">Recent history</summary>
+                                  <div className="mt-1 space-y-1">
+                                    {run.history.map((entry) => (
+                                      <div key={entry.id} className="text-xs text-gray-500 flex flex-wrap gap-x-2">
+                                        <span className="font-medium text-gray-700">{entry.status}</span>
+                                        <span>{formatScheduledRunTime(entry.startedAt)}</span>
+                                        <span>{entry.triggeredBy}</span>
+                                        {entry.reason && <span className="text-red-600">{entry.reason}</span>}
+                                      </div>
+                                    ))}
+                                  </div>
+                                </details>
+                              )}
                             </>
                           )}
                         </div>
