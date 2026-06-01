@@ -63,8 +63,21 @@ interface Project {
   remoteUrl: string | null;
 }
 
+interface Tag {
+  id: string;
+  name: string;
+  color: string | null;
+}
+
 const ARCHIVE_STATUS_NAMES = new Set(["Done", "Cancelled"]);
 const BACKLOG_STATUS_NAME = "Backlog";
+const PRIORITY_OPTIONS = ["critical", "high", "medium", "low"] as const;
+const PRIORITY_LABEL: Record<(typeof PRIORITY_OPTIONS)[number], string> = {
+  critical: "Critical",
+  high: "High",
+  medium: "Medium",
+  low: "Low",
+};
 
 
 export function BoardPage() {
@@ -168,6 +181,11 @@ export function BoardPage() {
   const [monitorRunning, setMonitorRunning] = useState(false);
   const [moveToDonePending, setMoveToDonePending] = useState<{ issue: IssueWithStatus; confirm: () => Promise<void> } | null>(null);
   const [pendingWorkspaceIssueIds, setPendingWorkspaceIssueIds] = useState<Set<string>>(new Set());
+  const [selectedBoardIssueIds, setSelectedBoardIssueIds] = useState<Set<string>>(new Set());
+  const [lastSelectedBoardIssueId, setLastSelectedBoardIssueId] = useState<string | null>(null);
+  const [boardBulkUpdating, setBoardBulkUpdating] = useState(false);
+  const [allTags, setAllTags] = useState<Tag[]>([]);
+  const [tagsLoaded, setTagsLoaded] = useState(false);
 
   const refetchBoard = useCallback(async (projectId?: string) => {
     const pid = projectId || activeProjectId;
@@ -720,6 +738,95 @@ export function BoardPage() {
     setSelectedIssue(issue);
   }
 
+  function handleBoardIssueClick(issue: IssueWithStatus, event: React.MouseEvent) {
+    if (event.ctrlKey || event.metaKey || event.shiftKey) {
+      event.preventDefault();
+      setSelectedIssue(null);
+      setSelectedBoardIssueIds((prev) => {
+        const next = new Set(prev);
+        if (event.shiftKey) {
+          const ids = visibleKanbanIssues.map((item) => item.id);
+          const anchorIndex = lastSelectedBoardIssueId ? ids.indexOf(lastSelectedBoardIssueId) : -1;
+          const currentIndex = ids.indexOf(issue.id);
+          if (anchorIndex >= 0 && currentIndex >= 0) {
+            const [start, end] = anchorIndex < currentIndex ? [anchorIndex, currentIndex] : [currentIndex, anchorIndex];
+            for (const id of ids.slice(start, end + 1)) next.add(id);
+          } else {
+            next.add(issue.id);
+          }
+        } else if (next.has(issue.id)) {
+          next.delete(issue.id);
+        } else {
+          next.add(issue.id);
+        }
+        return next;
+      });
+      setLastSelectedBoardIssueId(issue.id);
+      return;
+    }
+
+    if (selectedBoardIssueIds.size > 0) {
+      setSelectedBoardIssueIds(new Set());
+      setLastSelectedBoardIssueId(null);
+    }
+    handleIssueClick(issue);
+  }
+
+  async function handleBoardBulkUpdate(updates: UpdateIssueRequest, successLabel: string) {
+    if (hasArchivedBoardSelection) return;
+    const ids = selectedBoardIssues.map((issue) => issue.id);
+    if (ids.length === 0) return;
+    setBoardBulkUpdating(true);
+    try {
+      const results = await Promise.allSettled(ids.map((id) =>
+        apiFetch(`/api/issues/${id}`, {
+          method: "PATCH",
+          body: JSON.stringify(updates),
+        })
+      ));
+      const failed = results.filter((result) => result.status === "rejected").length;
+      const succeeded = ids.length - failed;
+      if (failed === 0) {
+        showToast(`${successLabel} for ${succeeded} issue${succeeded !== 1 ? "s" : ""}`, "success");
+      } else {
+        showToast(`${successLabel} for ${succeeded} issue${succeeded !== 1 ? "s" : ""}; ${failed} failed`, "error");
+      }
+      setSelectedBoardIssueIds(new Set());
+      setLastSelectedBoardIssueId(null);
+      await refetchBoard();
+    } finally {
+      setBoardBulkUpdating(false);
+    }
+  }
+
+  async function handleBoardBulkAddTag(tagId: string) {
+    if (hasArchivedBoardSelection) return;
+    const tag = allTags.find((candidate) => candidate.id === tagId);
+    const ids = selectedBoardIssues.map((issue) => issue.id);
+    if (!tag || ids.length === 0) return;
+    setBoardBulkUpdating(true);
+    try {
+      const results = await Promise.allSettled(ids.map((id) =>
+        apiFetch(`/api/issues/${id}/tags`, {
+          method: "POST",
+          body: JSON.stringify({ tagId }),
+        })
+      ));
+      const failed = results.filter((result) => result.status === "rejected").length;
+      const succeeded = ids.length - failed;
+      if (failed === 0) {
+        showToast(`Added tag "${tag.name}" to ${succeeded} issue${succeeded !== 1 ? "s" : ""}`, "success");
+      } else {
+        showToast(`Added tag to ${succeeded} issue${succeeded !== 1 ? "s" : ""}; ${failed} failed`, "error");
+      }
+      setSelectedBoardIssueIds(new Set());
+      setLastSelectedBoardIssueId(null);
+      await refetchBoard();
+    } finally {
+      setBoardBulkUpdating(false);
+    }
+  }
+
   function handleManageWorkspaces(issue: IssueWithStatus, workspaceId?: string) {
     setSelectedIssue(null);
     setWorkspaceIssue(issue);
@@ -803,6 +910,43 @@ export function BoardPage() {
     () => filteredColumns.filter((col) => ARCHIVE_STATUS_NAMES.has(col.name)),
     [filteredColumns],
   );
+  const archiveExpanded = !collapsedGroups.has("archive");
+  const visibleKanbanIssues = useMemo(
+    () => [
+      ...activeColumns.flatMap((col) => col.issues),
+      ...(archiveExpanded ? archiveColumns.flatMap((col) => col.issues) : []),
+    ],
+    [activeColumns, archiveColumns, archiveExpanded],
+  );
+  const selectedBoardIssues = useMemo(() => {
+    const byId = new Map(columns.flatMap((col) => col.issues).map((issue) => [issue.id, issue]));
+    return [...selectedBoardIssueIds].map((id) => byId.get(id)).filter((issue): issue is IssueWithStatus => !!issue);
+  }, [columns, selectedBoardIssueIds]);
+  const hasArchivedBoardSelection = selectedBoardIssues.some((issue) => ARCHIVE_STATUS_NAMES.has(issue.statusName));
+
+  useEffect(() => {
+    if (selectedBoardIssueIds.size === 0) return;
+    const visibleIds = new Set(columns.flatMap((col) => col.issues).map((issue) => issue.id));
+    setSelectedBoardIssueIds((prev) => {
+      const next = new Set([...prev].filter((id) => visibleIds.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [columns, selectedBoardIssueIds.size]);
+
+  async function loadTags() {
+    if (tagsLoaded) return;
+    try {
+      const tags = await apiFetch<Tag[]>("/api/tags");
+      setAllTags(tags);
+      setTagsLoaded(true);
+    } catch {
+      showToast("Failed to load tags", "error");
+    }
+  }
+
+  useEffect(() => {
+    if (selectedBoardIssueIds.size > 0) void loadTags();
+  }, [selectedBoardIssueIds.size]);
 
   const allMentionIssues = useMemo(
     () =>
@@ -1297,6 +1441,84 @@ export function BoardPage() {
             return i.statusName === "In Review" && ws && ws.status !== "closed";
           }).length}
         />
+        {viewMode === "kanban" && selectedBoardIssues.length > 0 && (
+          <div
+            className="flex shrink-0 flex-wrap items-center gap-2 rounded-lg border border-brand-200 bg-brand-50 px-3 py-2 text-xs shadow-sm dark:border-brand-800 dark:bg-brand-950/40"
+            data-testid="board-bulk-action-bar"
+          >
+            <span className="font-medium text-brand-700 dark:text-brand-200">
+              {selectedBoardIssues.length} selected
+            </span>
+            {hasArchivedBoardSelection && (
+              <span className="text-amber-700 dark:text-amber-300">
+                Bulk edits are unavailable while archived cards are selected.
+              </span>
+            )}
+            <select
+              defaultValue=""
+              disabled={boardBulkUpdating || hasArchivedBoardSelection}
+              onChange={(event) => {
+                const statusId = event.target.value;
+                const status = columns.find((col) => col.id === statusId);
+                event.currentTarget.value = "";
+                if (status) void handleBoardBulkUpdate({ statusId }, `Moved to "${status.name}"`);
+              }}
+              className="rounded border border-gray-300 bg-white px-2 py-1 text-gray-700 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200"
+              aria-label="Bulk move status"
+              title={hasArchivedBoardSelection ? "Clear archived selections before bulk editing" : "Move selected cards to status"}
+            >
+              <option value="">Move status...</option>
+              {columns.map((col) => (
+                <option key={col.id} value={col.id}>{col.name}</option>
+              ))}
+            </select>
+            <select
+              defaultValue=""
+              disabled={boardBulkUpdating || hasArchivedBoardSelection}
+              onChange={(event) => {
+                const priority = event.target.value as (typeof PRIORITY_OPTIONS)[number] | "";
+                event.currentTarget.value = "";
+                if (priority) void handleBoardBulkUpdate({ priority }, `Set priority to "${PRIORITY_LABEL[priority]}"`);
+              }}
+              className="rounded border border-gray-300 bg-white px-2 py-1 text-gray-700 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200"
+              aria-label="Bulk set priority"
+              title={hasArchivedBoardSelection ? "Clear archived selections before bulk editing" : "Set priority on selected cards"}
+            >
+              <option value="">Set priority...</option>
+              {PRIORITY_OPTIONS.map((priority) => (
+                <option key={priority} value={priority}>{PRIORITY_LABEL[priority]}</option>
+              ))}
+            </select>
+            <select
+              defaultValue=""
+              disabled={boardBulkUpdating || hasArchivedBoardSelection || allTags.length === 0}
+              onFocus={() => void loadTags()}
+              onChange={(event) => {
+                const tagId = event.target.value;
+                event.currentTarget.value = "";
+                if (tagId) void handleBoardBulkAddTag(tagId);
+              }}
+              className="rounded border border-gray-300 bg-white px-2 py-1 text-gray-700 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200"
+              aria-label="Bulk add tag"
+              title={hasArchivedBoardSelection ? "Clear archived selections before bulk editing" : "Add a tag to selected cards"}
+            >
+              <option value="">Add tag...</option>
+              {allTags.map((tag) => (
+                <option key={tag.id} value={tag.id}>{tag.name}</option>
+              ))}
+            </select>
+            <button
+              type="button"
+              onClick={() => {
+                setSelectedBoardIssueIds(new Set());
+                setLastSelectedBoardIssueId(null);
+              }}
+              className="rounded px-2 py-1 text-brand-600 underline-offset-2 hover:underline dark:text-brand-300"
+            >
+              Clear
+            </button>
+          </div>
+        )}
         {viewMode === "graph" && activeProjectId ? (
           <div className="flex-1 min-h-0">
             <BoardErrorBoundary columnName="Graph View">
@@ -1485,7 +1707,7 @@ export function BoardPage() {
             onToggleArchive={() => toggleGroup("archive")}
             onCreateClick={setCreatingInColumnId}
             onCreateCancel={() => setCreatingInColumnId(null)}
-            onIssueClick={handleIssueClick}
+            onIssueClick={handleBoardIssueClick}
             onWorkspaceClick={handleManageWorkspaces}
             onStartWorkspace={handleStartWorkspace}
             onDragStart={handleBoardDragStart}
@@ -1500,6 +1722,7 @@ export function BoardPage() {
             })}
             onCreateIssue={handleCreateIssue}
             onExpandCreate={(statusId, statusName, state) => setExpandedCreatePanel({ statusId, statusName, state })}
+            selectedIssueIds={selectedBoardIssueIds}
           />
         )}
       </div>

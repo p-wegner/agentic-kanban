@@ -24,7 +24,7 @@ export interface BoardKanbanViewProps {
   onToggleArchive: () => void;
   onCreateClick: (statusId: string) => void;
   onCreateCancel: () => void;
-  onIssueClick: (issue: IssueWithStatus) => void;
+  onIssueClick: (issue: IssueWithStatus, event: React.MouseEvent) => void;
   onWorkspaceClick: (issue: IssueWithStatus, workspaceId?: string) => void;
   onStartWorkspace: (issue: IssueWithStatus) => void;
   onDragStart: (e: React.DragEvent, issue: IssueWithStatus) => void;
@@ -34,6 +34,7 @@ export interface BoardKanbanViewProps {
   onColumnResizeReset: (colId: string) => void;
   onCreateIssue: (data: CreateIssueRequest & { startWorkspace?: boolean; planMode?: boolean; skipAutoReview?: boolean; profile?: ProfileSelection; model?: string; isDirect?: boolean; skillId?: string }) => Promise<void>;
   onExpandCreate: (statusId: string, statusName: string, state: Partial<CreateIssueFormState>) => void;
+  selectedIssueIds?: Set<string>;
 }
 
 export function BoardKanbanView({
@@ -64,6 +65,7 @@ export function BoardKanbanView({
   onColumnResizeReset,
   onCreateIssue,
   onExpandCreate,
+  selectedIssueIds,
 }: BoardKanbanViewProps) {
   function handleMobileCreateClick(statusId: string) {
     if (typeof window !== "undefined" && window.innerWidth < 640) {
@@ -142,6 +144,7 @@ export function BoardKanbanView({
               liveStats={liveStats}
               sessionTodos={sessionTodos}
               pendingWorkspaceIssueIds={pendingWorkspaceIssueIds}
+              selectedIssueIds={selectedIssueIds}
             >
               <CreateIssueForm
                 projectId={projectId}
@@ -167,6 +170,7 @@ export function BoardKanbanView({
           onDragStart={onDragStart}
           onDrop={onDrop}
           searchQuery={searchQuery}
+          selectedIssueIds={selectedIssueIds}
         />
       </BoardErrorBoundary>
     </>

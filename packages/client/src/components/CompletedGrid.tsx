@@ -6,10 +6,11 @@ interface CompletedGridProps {
   columns: StatusWithIssues[];
   collapsed: boolean;
   onToggle: () => void;
-  onIssueClick: (issue: IssueWithStatus) => void;
+  onIssueClick: (issue: IssueWithStatus, event: React.MouseEvent) => void;
   onDragStart: (e: React.DragEvent, issue: IssueWithStatus) => void;
   onDrop: (statusId: string, sortOrder?: number) => void;
   searchQuery?: string;
+  selectedIssueIds?: Set<string>;
 }
 
 export function CompletedGrid({
@@ -20,6 +21,7 @@ export function CompletedGrid({
   onDragStart,
   onDrop,
   searchQuery,
+  selectedIssueIds,
 }: CompletedGridProps) {
   const [dragOver, setDragOver] = useState(false);
   const dragCounterRef = useRef(0);
@@ -144,6 +146,7 @@ export function CompletedGrid({
               onClick={onIssueClick}
               onDragStart={onDragStart}
               searchQuery={searchQuery}
+              isSelected={selectedIssueIds?.has(issue.id)}
             />
           ))}
         </div>
