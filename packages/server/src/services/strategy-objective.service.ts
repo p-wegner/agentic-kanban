@@ -12,12 +12,41 @@ export interface StrategyBullseyeSegment {
   keywords?: string;
 }
 
+/**
+ * Rate-limit policy for a single provider profile.
+ *
+ * - "fill": use aggressively — keep busy at all times (e.g. time-windowed plans with cheap resets)
+ * - "throttle": use for main work but preserve headroom (e.g. 5h/week plans shared with other projects)
+ * - "fallback-only": only use when no better option exists, or on explicit user action (e.g. token-based gateways)
+ *
+ * `headroomPct` (0–100) is only meaningful for "throttle": the fraction of the window's capacity
+ * the orchestrator should leave unused. E.g. 20 means "don't start new work if projected usage
+ * would exceed 80% of the window".
+ */
+export type ProviderPolicyMode = "fill" | "throttle" | "fallback-only";
+
+export interface ProviderProfilePolicy {
+  /** Unique key: "{provider}:{profileName}" — e.g. "claude:work", "codex:default" */
+  id: string;
+  provider: "claude" | "codex" | "copilot";
+  profileName: string;
+  /** Human-readable label, e.g. "Claude (andrena gateway)" */
+  label: string;
+  mode: ProviderPolicyMode;
+  /** 0–100. Only applies when mode="throttle". Leave this % of the rate-limit window unused. */
+  headroomPct: number;
+  /** Informational note shown in the UI and emitted into objective.md */
+  notes: string;
+}
+
 export interface StrategyBullseyeConfig {
   version?: number;
   activeAgentsTarget?: number;
   backlogFloor?: number;
   maxNewStartsPerCycle?: number;
   segments?: StrategyBullseyeSegment[];
+  /** Provider profile policies — controls how the orchestrator routes work to each profile. */
+  providerPolicies?: ProviderProfilePolicy[];
 }
 
 export interface MonitorTunables {
@@ -73,6 +102,23 @@ function segmentWeight(segment: StrategyBullseyeSegment): number {
   return clampInt(segment.weight, 3, 1, 5);
 }
 
+const VALID_MODES: ProviderPolicyMode[] = ["fill", "throttle", "fallback-only"];
+
+function parseProviderPolicies(raw: unknown): ProviderProfilePolicy[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((p) => p && typeof p === "object" && typeof p.id === "string" && typeof p.provider === "string")
+    .map((p) => ({
+      id: p.id as string,
+      provider: (["claude", "codex", "copilot"].includes(p.provider) ? p.provider : "claude") as "claude" | "codex" | "copilot",
+      profileName: typeof p.profileName === "string" ? p.profileName : "",
+      label: typeof p.label === "string" ? p.label : p.id as string,
+      mode: (VALID_MODES.includes(p.mode) ? p.mode : "throttle") as ProviderPolicyMode,
+      headroomPct: clampInt(p.headroomPct, 20, 0, 100),
+      notes: typeof p.notes === "string" ? p.notes : "",
+    }));
+}
+
 export function parseStrategyBullseyeConfig(raw: string): StrategyBullseyeConfig {
   if (!raw.trim()) return { version: 1, segments: [] };
   const parsed = JSON.parse(raw) as StrategyBullseyeConfig;
@@ -94,6 +140,7 @@ export function parseStrategyBullseyeConfig(raw: string): StrategyBullseyeConfig
             keywords: segment.keywords,
           }))
       : [],
+    providerPolicies: parseProviderPolicies(parsed.providerPolicies),
   };
 }
 
@@ -117,6 +164,12 @@ export function deriveMonitorTunables(config: StrategyBullseyeConfig): MonitorTu
   };
 }
 
+const MODE_DESCRIPTIONS: Record<ProviderPolicyMode, string> = {
+  "fill": "FILL — use aggressively, keep busy at all times",
+  "throttle": "THROTTLE — use for main work but preserve headroom",
+  "fallback-only": "FALLBACK-ONLY — use only when no better option exists or on explicit user request",
+};
+
 export function renderGeneratedStrategyBlock(config: StrategyBullseyeConfig): string {
   const tunables = deriveMonitorTunables(config);
   const segments = [...(config.segments ?? [])].sort((a, b) => segmentWeight(b) - segmentWeight(a));
@@ -127,6 +180,25 @@ export function renderGeneratedStrategyBlock(config: StrategyBullseyeConfig): st
         const provider = segment.provider ? `, provider ${segment.provider}` : "";
         return `- ${segment.label}: weight ${segmentWeight(segment)}/5, ${kind}${provider}`;
       });
+
+  const policies = config.providerPolicies ?? [];
+  const policyLines = policies.length === 0
+    ? ["- No provider policies configured. Workspace launches use the globally-selected provider."]
+    : policies.map((p) => {
+        const headroom = p.mode === "throttle" ? `, headroom ${p.headroomPct}%` : "";
+        const notes = p.notes ? ` (${p.notes})` : "";
+        return `- **${p.label}** [${p.provider}:${p.profileName}]: ${MODE_DESCRIPTIONS[p.mode]}${headroom}${notes}`;
+      });
+
+  const providerStrategyNote = policies.length > 0 ? [
+    "",
+    "## PROVIDER POLICY (generated - do not hand-edit)",
+    "When selecting a provider for a new workspace, apply these rules in priority order:",
+    "1. **FILL** profiles should always have capacity — start work on them first.",
+    "2. **THROTTLE** profiles are preferred for main work. Respect their headroom percentage.",
+    "3. **FALLBACK-ONLY** profiles are last resort — only use if all others are exhausted or the user explicitly selects them.",
+    ...policyLines,
+  ] : [];
 
   return [
     "## TUNABLE TARGETS - generated from Strategy Bullseye",
@@ -139,6 +211,7 @@ export function renderGeneratedStrategyBlock(config: StrategyBullseyeConfig): st
     "",
     "## STRATEGY WEIGHTS (generated - do not hand-edit)",
     ...weightedLines,
+    ...providerStrategyNote,
     GENERATED_END,
   ].join("\n");
 }
@@ -183,4 +256,44 @@ export function isBoardStrategyKey(key: string): boolean {
 export function projectIdFromBoardStrategyKey(key: string): string | null {
   const match = normalizeText(key).match(/^board_strategy_([0-9a-f-]+)$/);
   return match?.[1] ?? null;
+}
+
+/**
+ * Select the best provider+profile for a new workspace based on the strategy config.
+ *
+ * Priority order:
+ * 1. "fill" profiles — always keep busy, use first
+ * 2. "throttle" profiles — preferred for main work
+ * 3. "fallback-only" profiles — last resort
+ *
+ * Returns `null` if no policies are configured (caller should use the globally-selected provider).
+ * Returns the policy with the highest priority that is not "fallback-only" by default;
+ * "fallback-only" profiles are only returned if `allowFallback` is true and there are no
+ * other options.
+ */
+export function selectProviderFromStrategy(
+  config: StrategyBullseyeConfig,
+  options: { allowFallback?: boolean } = {},
+): { provider: "claude" | "codex" | "copilot"; profileName: string; policy: ProviderProfilePolicy } | null {
+  const policies = config.providerPolicies ?? [];
+  if (policies.length === 0) return null;
+
+  const fill = policies.filter((p) => p.mode === "fill");
+  if (fill.length > 0) {
+    return { provider: fill[0].provider, profileName: fill[0].profileName, policy: fill[0] };
+  }
+
+  const throttle = policies.filter((p) => p.mode === "throttle");
+  if (throttle.length > 0) {
+    return { provider: throttle[0].provider, profileName: throttle[0].profileName, policy: throttle[0] };
+  }
+
+  if (options.allowFallback) {
+    const fallback = policies.filter((p) => p.mode === "fallback-only");
+    if (fallback.length > 0) {
+      return { provider: fallback[0].provider, profileName: fallback[0].profileName, policy: fallback[0] };
+    }
+  }
+
+  return null;
 }
