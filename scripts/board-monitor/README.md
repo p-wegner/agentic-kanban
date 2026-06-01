@@ -82,8 +82,14 @@ What the signals mean:
 - **`state.md` is the fastest read** — one line per cycle, says what was merged/started/nudged/stopped
   and how many consecutive cycles an item has been touched (so you can spot something it keeps
   re-acting on).
-- **`exit=0`** = clean bounded run. **`exit=124`** = hit the iteration timeout (usually babysitting a
-  long merge/rebase) — fine in ones and twos; a streak means something is stuck.
+- **`exit=0`** = clean bounded run. **`exit=124`** = hit the iteration timeout. Two distinct causes:
+  (a) genuinely babysitting a long merge/rebase, or (b) **a post-completion idle hang** — codex
+  finishes its work, writes its `state.md` line and commits, then *sits idle* until the timeout kills
+  it (confirmed 2026-06-01: hangs on iters 1/6/7 of ~11, each *after* the cycle's work was done). Case
+  (b) is harmless to output but burns the full `MONITOR_ITER_TIMEOUT` and stalls board advance for that
+  gap. Fine in ones and twos; if it's a recurring fraction of cycles, **lower `MONITOR_ITER_TIMEOUT`**
+  (e.g. 1800 → 1200) to cap the wasted wall-clock — the work is already committed before the hang, so a
+  shorter cap loses nothing. A streak of *every* cycle hitting it still means something is genuinely stuck.
 - **3 consecutive sub-8s exits** → `loop.sh`'s launch-failure guard stops the loop and logs why
   (bad flag / auth / broken launch). If the loop is gone and `loop.log` ends with that message,
   fix the launch before restarting.
