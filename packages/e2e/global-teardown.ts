@@ -33,13 +33,18 @@ async function cleanupE2EProject(
   apiContext: import("@playwright/test").APIRequestContext,
   e2eProjectId: string,
   previousActiveProjectId: string | null,
+  createdE2EProject = true,
 ) {
-  // Delete the entire E2E project — this cascades to issues, workspaces, sessions, and statuses.
-  const deleteRes = await apiContext.delete(`/api/projects/${e2eProjectId}`);
-  if (deleteRes.ok()) {
-    console.log(`[global-teardown] Deleted E2E test project (${e2eProjectId})`);
+  // Delete the entire E2E project only when this run created it.
+  if (createdE2EProject) {
+    const deleteRes = await apiContext.delete(`/api/projects/${e2eProjectId}`);
+    if (deleteRes.ok()) {
+      console.log(`[global-teardown] Deleted E2E test project (${e2eProjectId})`);
+    } else {
+      console.warn(`[global-teardown] Failed to delete E2E project ${e2eProjectId}: ${deleteRes.status()}`);
+    }
   } else {
-    console.warn(`[global-teardown] Failed to delete E2E project ${e2eProjectId}: ${deleteRes.status()}`);
+    console.log(`[global-teardown] Kept reused E2E project (${e2eProjectId})`);
   }
 
   // Restore the previously active project (if any and if it still exists).
@@ -124,9 +129,14 @@ async function globalTeardown() {
 
   try {
     if (existsSync(E2E_STATE_FILE)) {
-      const state: { e2eProjectId: string; previousActiveProjectId: string | null } =
+      const state: { e2eProjectId: string; previousActiveProjectId: string | null; createdE2EProject?: boolean } =
         JSON.parse(readFileSync(E2E_STATE_FILE, "utf8"));
-      await cleanupE2EProject(apiContext, state.e2eProjectId, state.previousActiveProjectId);
+      await cleanupE2EProject(
+        apiContext,
+        state.e2eProjectId,
+        state.previousActiveProjectId,
+        state.createdE2EProject ?? true,
+      );
       try { unlinkSync(E2E_STATE_FILE); } catch { /* ignore */ }
     } else {
       // State file missing — global-setup may have failed. Use legacy fallback cleanup.
