@@ -431,6 +431,8 @@ export function createProjectService(deps: { database: Database }) {
         statusName: projectStatuses.name,
         skipAutoReview: issues.skipAutoReview,
         estimate: issues.estimate,
+        externalKey: issues.externalKey,
+        externalUrl: issues.externalUrl,
       })
       .from(issues)
       .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
