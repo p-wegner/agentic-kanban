@@ -178,6 +178,60 @@ describe("workspace.service", () => {
       }
     });
 
+    it("does not store the Claude profile as the displayed profile for default Codex workspaces", async () => {
+      const { issueId } = await seedProjectAndIssue(db);
+      await db.insert(preferences).values([
+        { key: "provider", value: "codex" },
+        { key: "claude_profile", value: "anth" },
+        { key: "codex_profile", value: "" },
+      ]);
+      const sessionManager = createMockSessionManager();
+
+      const service = createWorkspaceService({
+        database: db,
+        getSessionManager: () => sessionManager,
+        gitService: createFakeGitService(),
+      });
+
+      const result = await service.createWorkspace({ issueId, branch: "feature/ak-1-codex" });
+
+      expect(result.error).toBeUndefined();
+      const wsRows = await db.select().from(workspaces).where(eq(workspaces.id, result.id));
+      expect(wsRows[0].provider).toBe("codex");
+      expect(wsRows[0].claudeProfile).toBeNull();
+      expect(sessionManager.startSession).toHaveBeenCalledWith(expect.objectContaining({
+        provider: "codex",
+        profile: undefined,
+      }));
+    });
+
+    it("stores the selected Codex profile for ticket card display", async () => {
+      const { issueId } = await seedProjectAndIssue(db);
+      await db.insert(preferences).values([
+        { key: "provider", value: "codex" },
+        { key: "claude_profile", value: "anth" },
+        { key: "codex_profile", value: "fast" },
+      ]);
+      const sessionManager = createMockSessionManager();
+
+      const service = createWorkspaceService({
+        database: db,
+        getSessionManager: () => sessionManager,
+        gitService: createFakeGitService(),
+      });
+
+      const result = await service.createWorkspace({ issueId, branch: "feature/ak-1-codex-fast" });
+
+      expect(result.error).toBeUndefined();
+      const wsRows = await db.select().from(workspaces).where(eq(workspaces.id, result.id));
+      expect(wsRows[0].provider).toBe("codex");
+      expect(wsRows[0].claudeProfile).toBe("fast");
+      expect(sessionManager.startSession).toHaveBeenCalledWith(expect.objectContaining({
+        provider: "codex",
+        profile: { provider: "codex", name: "fast" },
+      }));
+    });
+
     it("rolls back the DB row and the worktree when agent spawn fails, and throws", async () => {
       const { issueId } = await seedProjectAndIssue(db);
       const gitService = createFakeGitService();
