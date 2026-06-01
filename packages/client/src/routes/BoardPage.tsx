@@ -919,19 +919,19 @@ export function BoardPage() {
     [activeColumns, archiveColumns, archiveExpanded],
   );
   const selectedBoardIssues = useMemo(() => {
-    const byId = new Map(columns.flatMap((col) => col.issues).map((issue) => [issue.id, issue]));
+    const byId = new Map(visibleKanbanIssues.map((issue) => [issue.id, issue]));
     return [...selectedBoardIssueIds].map((id) => byId.get(id)).filter((issue): issue is IssueWithStatus => !!issue);
-  }, [columns, selectedBoardIssueIds]);
+  }, [visibleKanbanIssues, selectedBoardIssueIds]);
   const hasArchivedBoardSelection = selectedBoardIssues.some((issue) => ARCHIVE_STATUS_NAMES.has(issue.statusName));
 
   useEffect(() => {
     if (selectedBoardIssueIds.size === 0) return;
-    const visibleIds = new Set(columns.flatMap((col) => col.issues).map((issue) => issue.id));
+    const visibleIds = new Set(visibleKanbanIssues.map((issue) => issue.id));
     setSelectedBoardIssueIds((prev) => {
       const next = new Set([...prev].filter((id) => visibleIds.has(id)));
       return next.size === prev.size ? prev : next;
     });
-  }, [columns, selectedBoardIssueIds.size]);
+  }, [visibleKanbanIssues, selectedBoardIssueIds.size]);
 
   async function loadTags() {
     if (tagsLoaded) return;
