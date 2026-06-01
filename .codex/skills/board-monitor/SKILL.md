@@ -99,6 +99,9 @@ Get the board:
 $proj = (Invoke-RestMethod "http://127.0.0.1:3001/api/preferences/active-project" -TimeoutSec 10).projectId
 if (-not $proj) { throw "Active project is not set" }
 $board = Invoke-RestMethod "http://127.0.0.1:3001/api/projects/$proj/board" -TimeoutSec 10
+$columns = @($board)
+$columns | Where-Object { $_.name -in @("Backlog", "In Progress", "In Review") } |
+  ForEach-Object { "COLUMN $($_.name): $($_.issues.Count)" }
 ```
 
 For each issue in `In Progress` and `In Review` columns, check `workspaceSummary.main`. **The action depends on which column the issue is in** — `idle` means "continue work" in In Progress but "ready to land" in In Review:
