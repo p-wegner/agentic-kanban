@@ -29,7 +29,8 @@ export const SETTINGS_KEYS = [
 function isAllowedDynamicKey(key: string): boolean {
   return /^butler_event_feed_[0-9a-f-]+$/.test(key) ||
     /^tdd_mode_[0-9a-f-]+$/.test(key) ||
-    /^backlog_filter_presets_[0-9a-f-]+$/.test(key);
+    /^backlog_filter_presets_[0-9a-f-]+$/.test(key) ||
+    /^board_saved_views_[0-9a-f-]+$/.test(key);
 }
 
 export function createPreferenceService({ database }: { database: Database }) {
