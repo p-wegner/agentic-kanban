@@ -48,7 +48,7 @@ export function createScheduledRunsRoute(
   // POST /api/scheduled-runs/:id/run — manual or scheduled trigger
   router.post("/:id/run", async (c) => {
     const id = c.req.param("id");
-    const result = await service.run(id);
+    const result = await service.run(id, c.req.query("triggeredBy") ?? "manual");
     return c.json({ ok: true, ...result });
   });
 

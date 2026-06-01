@@ -179,7 +179,7 @@ test.describe("Settings Schedule tab", () => {
     ).not.toBeVisible();
   });
 
-  test("enable/disable toggle updates run state", async ({
+  test("pause/resume controls update run state", async ({
     page,
     request,
   }) => {
@@ -209,25 +209,31 @@ test.describe("Settings Schedule tab", () => {
     });
     const checkbox = row.locator('input[type="checkbox"]');
     await expect(checkbox).not.toBeChecked();
+    await expect(row.locator("button", { hasText: "Resume" })).toBeVisible();
 
-    // Click checkbox and wait for the PUT request to complete
+    // Click Resume and wait for the PUT request to complete
     const putPromise = page.waitForResponse(
       (res) =>
         res.url().includes("/api/scheduled-runs/") &&
         res.request().method() === "PUT",
       { timeout: 8000 }
     );
-    await checkbox.click();
+    await row.locator("button", { hasText: "Resume" }).click();
     await putPromise;
     // Poll for the checkbox to become checked (React re-renders async after state update)
     await expect(checkbox).toBeChecked({ timeout: 3000 });
+    await expect(row.locator("button", { hasText: "Pause" })).toBeVisible();
 
     // Immediately disable again so the scheduler doesn't start a workspace
-    await request
-      .put(`${SERVER_URL}/api/scheduled-runs/${created.id}`, {
-        data: { enabled: false },
-      })
-      .catch(() => {});
+    const pausePromise = page.waitForResponse(
+      (res) =>
+        res.url().includes("/api/scheduled-runs/") &&
+        res.request().method() === "PUT",
+      { timeout: 8000 }
+    );
+    await row.locator("button", { hasText: "Pause" }).click();
+    await pausePromise;
+    await expect(checkbox).not.toBeChecked({ timeout: 3000 });
   });
 });
 
