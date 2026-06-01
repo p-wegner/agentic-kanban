@@ -502,7 +502,18 @@ async function broadcastContextUsage(session: ButlerSession, q: Query): Promise<
   }
 }
 
+/**
+ * Check if an error message indicates a stale/missing Claude Code session that
+ * cannot be resumed. The SDK surfaces this as:
+ *   "No conversation found with session ID: <uuid>"
+ * When this happens during a `resume` attempt, we can recover by starting fresh.
+ */
+function isStaleResumeError(message: string): boolean {
+  return /no conversation found/i.test(message);
+}
+
 async function runLoop(session: ButlerSession, input: Pushable<SDKUserMessage>, options: Options): Promise<void> {
+  let retrying = false;
   try {
     const q = query({ prompt: input, options });
     session.query = q;
@@ -558,13 +569,23 @@ async function runLoop(session: ButlerSession, input: Pushable<SDKUserMessage>, 
       // Don't propagate or surface as a hard error — the dev loop must keep running and
       // the next ensureButlerSession() call will reopen a warm connection.
       console.warn(`[butler-sdk] transient network error (ignored): project=${session.projectId} ${message}`);
+    } else if ((options as Record<string, unknown>).resume && isStaleResumeError(message)) {
+      // The persisted session no longer exists (server restart, cache eviction, etc.).
+      // Drop the stale resume id and start a fresh conversation — no user-facing error.
+      console.warn(`[butler-sdk] resume session ${(options as Record<string, unknown>).resume} not found, starting fresh: project=${session.projectId}`);
+      delete (options as Record<string, unknown>).resume;
+      session.sessionId = undefined;
+      retrying = true;
+      void runLoop(session, input, options);
     } else {
       console.error(`[butler-sdk] session error: project=${session.projectId} ${message}`);
       broadcast(session, { type: "error", message });
     }
   } finally {
-    session.query = undefined;
-    sessions.delete(session.key);
+    if (!retrying) {
+      session.query = undefined;
+      sessions.delete(session.key);
+    }
   }
 }
 
