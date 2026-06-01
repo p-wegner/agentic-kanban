@@ -1,6 +1,7 @@
 import { useRef, useEffect, useState } from "react";
 import type { CreateIssueRequest } from "@agentic-kanban/shared";
 import { apiFetch } from "../lib/api.js";
+import { isHttpUrl } from "../lib/url.js";
 import { showToast } from "./Toast.js";
 import TicketMentionInput from "./TicketMentionInput.js";
 
@@ -53,6 +54,8 @@ export function CreateIssueForm({
   const [planMode, setPlanMode] = useState(initialState?.planMode ?? false);
   const [skipAutoReview, setSkipAutoReview] = useState(initialState?.skipAutoReview ?? false);
   const [isDirect, setIsDirect] = useState(false);
+  const [externalKey, setExternalKey] = useState("");
+  const [externalUrl, setExternalUrl] = useState("");
   const [skillId, setSkillId] = useState<string>(initialState?.skillId ?? "");
   const [skills, setSkills] = useState<Skill[]>([]);
   const [templates, setTemplates] = useState<WorkflowTemplate[]>([]);
@@ -133,6 +136,11 @@ export function CreateIssueForm({
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!title.trim() || submitting) return;
+    const trimmedUrl = externalUrl.trim();
+    if (trimmedUrl && !isHttpUrl(trimmedUrl)) {
+      showToast("External URL must start with http:// or https://", "error");
+      return;
+    }
     setSubmitting(true);
     try {
       await onSubmit({
@@ -142,6 +150,8 @@ export function CreateIssueForm({
         statusId,
         projectId,
         workflowTemplateId: workflowTemplateId || undefined,
+        externalKey: externalKey.trim() || undefined,
+        externalUrl: trimmedUrl || undefined,
         startWorkspace: startWorkspace || undefined,
         planMode: (startWorkspace && planMode) || undefined,
         skipAutoReview: (startWorkspace && skipAutoReview) || undefined,
@@ -216,6 +226,22 @@ export function CreateIssueForm({
         <option value="feature">Feature</option>
         <option value="chore">Chore</option>
       </select>
+      <div className="flex gap-2">
+        <input
+          type="text"
+          placeholder="External key (optional)"
+          value={externalKey}
+          onChange={(e) => setExternalKey(e.target.value)}
+          className="w-1/3 text-xs border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500 dark:bg-gray-900 dark:text-gray-100"
+        />
+        <input
+          type="url"
+          placeholder="External URL (optional)"
+          value={externalUrl}
+          onChange={(e) => setExternalUrl(e.target.value)}
+          className="flex-1 text-xs border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500 dark:bg-gray-900 dark:text-gray-100"
+        />
+      </div>
       {templates.length > 0 && (
         <div className="flex items-center gap-2">
           <label className="text-xs text-gray-600 dark:text-gray-400 shrink-0" title="The workflow graph this issue flows through. Defaults to the ticket type's workflow.">

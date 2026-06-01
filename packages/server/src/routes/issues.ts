@@ -151,19 +151,26 @@ export function createIssuesRoute(database: Database = db, options?: { boardEven
     if (!body.projectId) return c.json({ error: "projectId is required" }, 400);
     if (!body.title?.trim()) return c.json({ error: "title is required" }, 400);
 
-    const result = await issueService.createIssue({
-      projectId: body.projectId,
-      title: body.title,
-      description: body.description,
-      priority: body.priority,
-      issueType: body.issueType,
-      skipAutoReview: body.skipAutoReview,
-      estimate: body.estimate,
-      sortOrder: body.sortOrder,
-      statusId: body.statusId,
-      workflowTemplateId: body.workflowTemplateId,
-    });
-    return c.json(result, 201);
+    try {
+      const result = await issueService.createIssue({
+        projectId: body.projectId,
+        title: body.title,
+        description: body.description,
+        priority: body.priority,
+        issueType: body.issueType,
+        skipAutoReview: body.skipAutoReview,
+        estimate: body.estimate,
+        sortOrder: body.sortOrder,
+        statusId: body.statusId,
+        workflowTemplateId: body.workflowTemplateId,
+        externalKey: body.externalKey,
+        externalUrl: body.externalUrl,
+      });
+      return c.json(result, 201);
+    } catch (err: any) {
+      if (err.code === "BAD_REQUEST") return c.json({ error: err.message }, 400);
+      throw err;
+    }
   });
 
   // GET /api/issues/:id/touched-files — return cached prediction only (no AI call)
@@ -232,8 +239,14 @@ export function createIssuesRoute(database: Database = db, options?: { boardEven
   router.patch("/:id", async (c) => {
     const id = c.req.param("id");
     const body = await parseJsonBody(c);
-    const result = await issueService.updateIssue(id, body);
-    return c.json({ id: result.id });
+    try {
+      const result = await issueService.updateIssue(id, body);
+      return c.json({ id: result.id });
+    } catch (err: any) {
+      if (err.code === "BAD_REQUEST") return c.json({ error: err.message }, 400);
+      if (err.code === "NOT_FOUND") return c.json({ error: err.message }, 404);
+      throw err;
+    }
   });
 
   // DELETE /api/issues/:id

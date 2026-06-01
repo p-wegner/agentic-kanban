@@ -19,6 +19,10 @@ export const issues = sqliteTable("issues", {
   skipAutoReview: integer("skip_auto_review", { mode: "boolean" }).notNull().default(false),
   estimate: text("estimate"),
   dueDate: text("due_date"),
+  // Optional link to an issue in an external tracker (Jira, Linear, GitHub, ...).
+  // externalKey is the human-readable identifier (e.g. "PROJ-123"); externalUrl is the http/https deep link.
+  externalKey: text("external_key"),
+  externalUrl: text("external_url"),
   // Configurable workflow graph this issue flows through (null = legacy status-only flow).
   workflowTemplateId: text("workflow_template_id"),
   // The node the issue currently sits on; the board status is derived from it.

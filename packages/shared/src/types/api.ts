@@ -228,6 +228,10 @@ export interface CreateIssueRequest {
   estimate?: IssueEstimate;
   /** Optional configurable-workflow template; null/omitted = auto-route by ticket type. */
   workflowTemplateId?: string | null;
+  /** Optional external-tracker identifier (e.g. "PROJ-123"). */
+  externalKey?: string | null;
+  /** Optional external-tracker deep link; must be http/https. */
+  externalUrl?: string | null;
 }
 
 export interface UpdateIssueRequest {
@@ -240,6 +244,10 @@ export interface UpdateIssueRequest {
   estimate?: IssueEstimate | null;
   skipAutoReview?: boolean;
   dueDate?: string | null;
+  /** Optional external-tracker identifier (e.g. "PROJ-123"). */
+  externalKey?: string | null;
+  /** Optional external-tracker deep link; must be http/https. */
+  externalUrl?: string | null;
 }
 
 export interface MainWorkspaceInfo {
@@ -391,6 +399,8 @@ export interface IssueWithStatus {
   skipAutoReview?: boolean;
   estimate?: string | null;
   dueDate?: string | null;
+  externalKey?: string | null;
+  externalUrl?: string | null;
   tags?: { id: string; name: string; color: string | null }[];
 }
 
