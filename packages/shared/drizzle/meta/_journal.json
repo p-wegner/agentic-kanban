@@ -484,6 +484,13 @@
       "when": 1748764527066,
       "tag": "0068_scheduled_run_history",
       "breakpoints": true
+    },
+    {
+      "idx": 69,
+      "version": "6",
+      "when": 1748764527067,
+      "tag": "0069_symlink_bootstrap",
+      "breakpoints": true
     }
   ]
 }

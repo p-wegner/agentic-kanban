@@ -245,6 +245,25 @@ export function createProjectService(deps: { database: Database }) {
     if (body.teardownScript !== undefined) updates.teardownScript = body.teardownScript || null;
     if (body.autoRetryFlakes !== undefined) updates.autoRetryFlakes = !!body.autoRetryFlakes;
     if (body.maxRetries !== undefined) updates.maxRetries = Number(body.maxRetries);
+    if (body.symlinkEnabled !== undefined) updates.symlinkEnabled = !!body.symlinkEnabled;
+    if (body.symlinkDirs !== undefined) {
+      // Validate: must be a JSON array of strings with safe directory names
+      if (body.symlinkDirs === null || body.symlinkDirs === "") {
+        updates.symlinkDirs = null;
+      } else if (typeof body.symlinkDirs === "string") {
+        // Parse and re-serialize to normalize
+        try {
+          const parsed = JSON.parse(body.symlinkDirs);
+          if (Array.isArray(parsed)) {
+            updates.symlinkDirs = JSON.stringify(parsed.filter((d: unknown) => typeof d === "string"));
+          }
+        } catch {
+          throw new ProjectError("symlinkDirs must be a JSON array of strings", "BAD_REQUEST");
+        }
+      } else if (Array.isArray(body.symlinkDirs)) {
+        updates.symlinkDirs = JSON.stringify(body.symlinkDirs.filter((d: unknown) => typeof d === "string"));
+      }
+    }
     if (body.defaultBranch !== undefined) {
       const nextDefaultBranch = typeof body.defaultBranch === "string"
         ? body.defaultBranch.trim()

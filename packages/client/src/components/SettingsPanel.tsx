@@ -514,13 +514,15 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
   const [tab, setTab] = useState<Tab>("agent");
 
   // Project-specific settings
-  const [projectSettings, setProjectSettings] = useState<{ defaultBranch: string; setupScript: string; setupBlocking: boolean; setupEnabled: boolean; teardownScript: string; color: string | null }>({
+  const [projectSettings, setProjectSettings] = useState<{ defaultBranch: string; setupScript: string; setupBlocking: boolean; setupEnabled: boolean; teardownScript: string; color: string | null; symlinkEnabled: boolean; symlinkDirs: string }>({
     defaultBranch: "",
     setupScript: "",
     setupBlocking: true,
     setupEnabled: true,
     teardownScript: "",
     color: null,
+    symlinkEnabled: false,
+    symlinkDirs: "",
   });
   const [projectBranches, setProjectBranches] = useState<{ local: string[]; remote: string[] } | null>(null);
   const [generatingScript, setGeneratingScript] = useState(false);
@@ -637,6 +639,8 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                 setupEnabled: (project as any).setupEnabled !== false,
                 teardownScript: (project as any).teardownScript || "",
                 color: project.color || null,
+                symlinkEnabled: (project as any).symlinkEnabled === true,
+                symlinkDirs: (project as any).symlinkDirs || "",
               });
             }
             apiFetch<{ local: string[]; remote: string[] }>(`/api/projects/${activeProjectId}/branches`)
@@ -742,6 +746,8 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
               teardownScript: projectSettings.teardownScript || null,
               color: projectSettings.color || null,
               defaultBranch: projectSettings.defaultBranch.trim() || null,
+              symlinkEnabled: projectSettings.symlinkEnabled,
+              symlinkDirs: projectSettings.symlinkDirs.trim() || null,
             }),
           }),
         );
@@ -1713,6 +1719,39 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                             </>
                           )}
                         </button>
+                      </CollapsibleSection>
+                      <CollapsibleSection
+                        title="Dependency Symlinks"
+                        configured={projectSettings.symlinkEnabled}
+                        defaultOpen={projectSettings.symlinkEnabled}
+                      >
+                        <p className="text-xs text-gray-500">
+                          Junction-link dependency directories (e.g. node_modules) from the main checkout into new worktrees.
+                          Eliminates the need for pnpm install in each worktree, enabling fast visual checks.
+                        </p>
+                        <Toggle
+                          checked={projectSettings.symlinkEnabled}
+                          onChange={(v) => setProjectSettings(s => ({ ...s, symlinkEnabled: v }))}
+                          label="Enable dependency symlinks"
+                          hint="When enabled, listed directories are junction-linked from the main checkout into new worktrees on Windows."
+                        />
+                        {projectSettings.symlinkEnabled && (
+                          <div className="space-y-2">
+                            <label className="block text-xs font-medium text-gray-700">
+                              Directories to symlink
+                            </label>
+                            <input
+                              type="text"
+                              value={projectSettings.symlinkDirs}
+                              onChange={(e) => setProjectSettings(s => ({ ...s, symlinkDirs: e.target.value }))}
+                              placeholder='["node_modules", ".venv"]'
+                              className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500 font-mono"
+                            />
+                            <p className="text-xs text-gray-400">
+                              JSON array of directory names relative to the repo root. These must exist in the main checkout.
+                            </p>
+                          </div>
+                        )}
                       </CollapsibleSection>
                     </div>
                   )}
