@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { boardHealthEvents } from "@agentic-kanban/shared/schema";
-import { and, desc, eq, inArray, lt, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, lt } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 
