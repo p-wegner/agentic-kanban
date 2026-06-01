@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect } from "@playwright/test";
 import { SERVER_URL, SERVER_PORT } from "../helpers/port.js";
 
 const BOARD_EVENT_TIMEOUT_MS = 5_000;
@@ -6,87 +6,116 @@ const BOARD_EVENT_TIMEOUT_MS = 5_000;
 function withEventTimeout<T>(
   promise: Promise<T>,
   expectedEvent: string,
+  getDiagnostics?: () => Promise<string>,
 ): Promise<T> {
-  return Promise.race([
-    promise,
-    new Promise<never>((_, reject) => {
-      setTimeout(() => {
-        reject(
-          new Error(
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(async () => {
+      const diagnostics = getDiagnostics ? await getDiagnostics() : "";
+      reject(
+        new Error(
+          [
             `Timed out after ${BOARD_EVENT_TIMEOUT_MS}ms waiting for ${expectedEvent}`,
-          ),
-        );
-      }, BOARD_EVENT_TIMEOUT_MS);
-    }),
-  ]);
+            diagnostics,
+          ]
+            .filter(Boolean)
+            .join("\n"),
+        ),
+      );
+    }, BOARD_EVENT_TIMEOUT_MS);
+  });
+
+  return Promise.race([promise, timeoutPromise]).finally(() => {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
+  });
+}
+
+function describeBoardEventState(
+  ws: WebSocket,
+  reason: string,
+  getLastMessage: () => string | undefined,
+  getLastError: () => string | undefined,
+): Promise<string> {
+  return Promise.resolve(
+    [
+      `Expected reason: ${reason}`,
+      `WebSocket readyState: ${ws.readyState}`,
+      `Last message: ${getLastMessage() ?? "none"}`,
+      `Last error: ${getLastError() ?? "none"}`,
+    ].join("\n"),
+  );
 }
 
 async function listenForBoardEvent(
-  page: Page,
   projectId: string,
   reason: string,
-): Promise<{ messagePromise: Promise<string> }> {
+): Promise<{ messagePromise: Promise<string>; close: () => void }> {
+  let lastMessage: string | undefined;
+  let lastError: string | undefined;
+  let messageSettled = false;
+  const ws = new WebSocket(`ws://127.0.0.1:${SERVER_PORT}/ws/board/${projectId}`);
+  const diagnostics = () =>
+    describeBoardEventState(ws, reason, () => lastMessage, () => lastError);
+
+  const messagePromise = new Promise<string>((resolveMessage, rejectMessage) => {
+    ws.addEventListener("message", (event) => {
+      const message = String(event.data);
+      lastMessage = message;
+      let data: { type?: string; reason?: string };
+      try {
+        data = JSON.parse(message);
+      } catch {
+        lastError = `Received non-JSON WebSocket message before board_changed event with reason "${reason}"`;
+        messageSettled = true;
+        rejectMessage(new Error(lastError));
+        return;
+      }
+
+      if (data.type === "board_changed" && data.reason === reason) {
+        messageSettled = true;
+        resolveMessage(message);
+        ws.close();
+      }
+    });
+
+    ws.addEventListener("close", () => {
+      if (messageSettled) return;
+      lastError = `WebSocket closed before board_changed event with reason "${reason}"`;
+      messageSettled = true;
+      rejectMessage(new Error(lastError));
+    });
+  });
+
   await withEventTimeout(
-    page.evaluate(
-      ([pid, port, expectedReason]) => {
-        const state = window as unknown as {
-          __boardEventTestEventPromise: Promise<string>;
-        };
+    new Promise<void>((resolveOpen, rejectOpen) => {
+      ws.addEventListener("open", () => {
+        if (ws.readyState === WebSocket.OPEN) {
+          resolveOpen();
+          return;
+        }
 
-        return new Promise<void>((resolveOpen, rejectOpen) => {
-          let opened = false;
-          const ws = new WebSocket(`ws://127.0.0.1:${port}/ws/board/${pid}`);
-
-          state.__boardEventTestEventPromise = new Promise<string>(
-            (resolveMessage, rejectMessage) => {
-              const rejectConnection = (message: string) => {
-                const error = new Error(message);
-                if (!opened) {
-                  rejectOpen(error);
-                }
-                rejectMessage(error);
-              };
-
-              ws.onopen = () => {
-                if (ws.readyState === WebSocket.OPEN) {
-                  opened = true;
-                  resolveOpen();
-                }
-              };
-              ws.onerror = () => {
-                rejectConnection(
-                  `WebSocket error before board_changed event with reason "${expectedReason}"`,
-                );
-              };
-              ws.onmessage = (event) => {
-                const data = JSON.parse(event.data as string);
-                if (
-                  data.type === "board_changed" &&
-                  data.reason === expectedReason
-                ) {
-                  resolveMessage(event.data as string);
-                  ws.close();
-                }
-              };
-            },
-          );
-        });
-      },
-      [projectId, SERVER_PORT, reason] as [string, number, string],
-    ),
+        lastError = `WebSocket open event fired with readyState ${ws.readyState}`;
+        rejectOpen(new Error(lastError));
+      });
+      ws.addEventListener("error", () => {
+        lastError = `WebSocket error before board_changed event with reason "${reason}"`;
+        rejectOpen(new Error(lastError));
+      });
+    }),
     `WebSocket OPEN before board_changed event with reason "${reason}"`,
+    diagnostics,
   );
 
   return {
     messagePromise: withEventTimeout(
-      page.evaluate(() => {
-        const state = window as unknown as {
-          __boardEventTestEventPromise: Promise<string>;
-        };
-        return state.__boardEventTestEventPromise;
-      }),
+      messagePromise,
       `board_changed event with reason "${reason}"`,
+      diagnostics,
     ),
+    close: () => ws.close(),
   };
 }
 
@@ -115,32 +144,27 @@ test.describe("Board Events API", () => {
   });
 
   test("WS /ws/board/:projectId receives board_changed event on issue create", async ({
-    page,
     request,
   }) => {
-    // Navigate to establish browser context
-    await page.goto("/");
-    await page.waitForSelector("h2");
-
-    const { messagePromise: wsMessagePromise } = await listenForBoardEvent(
-      page,
-      projectId,
-      "issue_created",
-    );
+    const listener = await listenForBoardEvent(projectId, "issue_created");
 
     const suffix = Date.now().toString(36);
-    const issueRes = await request.post(`${SERVER_URL}/api/issues`, {
-      data: {
-        title: `Board events test issue ${suffix}`,
-        statusId,
-        projectId,
-      },
-    });
-    expect(issueRes.status()).toBe(201);
-    createdIssueIds.push((await issueRes.json()).id);
+    let messageStr = "";
+    try {
+      const issueRes = await request.post(`${SERVER_URL}/api/issues`, {
+        data: {
+          title: `Board events test issue ${suffix}`,
+          statusId,
+          projectId,
+        },
+      });
+      expect(issueRes.status()).toBe(201);
+      createdIssueIds.push((await issueRes.json()).id);
 
-    // Wait for the board_changed event
-    const messageStr = await wsMessagePromise;
+      messageStr = await listener.messagePromise;
+    } finally {
+      listener.close();
+    }
     const message = JSON.parse(messageStr);
 
     expect(message.type).toBe("board_changed");
@@ -149,7 +173,6 @@ test.describe("Board Events API", () => {
   });
 
   test("WS /ws/board/:projectId receives event on issue update", async ({
-    page,
     request,
   }) => {
     // Create an issue first
@@ -161,22 +184,20 @@ test.describe("Board Events API", () => {
       },
     });
     const { id: issueId } = await issueRes.json();
+    createdIssueIds.push(issueId);
 
-    await page.goto("/");
-    await page.waitForSelector("h2");
+    const listener = await listenForBoardEvent(projectId, "issue_updated");
 
-    const { messagePromise: wsMessagePromise } = await listenForBoardEvent(
-      page,
-      projectId,
-      "issue_updated",
-    );
+    let messageStr = "";
+    try {
+      await request.patch(`${SERVER_URL}/api/issues/${issueId}`, {
+        data: { title: "Board events updated title" },
+      });
 
-    // Update the issue
-    await request.patch(`${SERVER_URL}/api/issues/${issueId}`, {
-      data: { title: "Board events updated title" },
-    });
-
-    const messageStr = await wsMessagePromise;
+      messageStr = await listener.messagePromise;
+    } finally {
+      listener.close();
+    }
     const message = JSON.parse(messageStr);
 
     expect(message.type).toBe("board_changed");
@@ -184,7 +205,6 @@ test.describe("Board Events API", () => {
   });
 
   test("WS /ws/board/:projectId receives event on issue delete", async ({
-    page,
     request,
   }) => {
     // Create an issue
@@ -197,19 +217,16 @@ test.describe("Board Events API", () => {
     });
     const { id: issueId } = await issueRes.json();
 
-    await page.goto("/");
-    await page.waitForSelector("h2");
+    const listener = await listenForBoardEvent(projectId, "issue_deleted");
 
-    const { messagePromise: wsMessagePromise } = await listenForBoardEvent(
-      page,
-      projectId,
-      "issue_deleted",
-    );
+    let messageStr = "";
+    try {
+      await request.delete(`${SERVER_URL}/api/issues/${issueId}`);
 
-    // Delete the issue
-    await request.delete(`${SERVER_URL}/api/issues/${issueId}`);
-
-    const messageStr = await wsMessagePromise;
+      messageStr = await listener.messagePromise;
+    } finally {
+      listener.close();
+    }
     const message = JSON.parse(messageStr);
 
     expect(message.type).toBe("board_changed");
