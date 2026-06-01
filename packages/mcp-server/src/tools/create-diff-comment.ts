@@ -33,6 +33,7 @@ export function registerCreateDiffComment(server: McpServer) {
         lineNumNew: lineNumNew ?? null,
         side: side || "new",
         body,
+        resolvedAt: null as string | null,
         createdAt: now,
         updatedAt: now,
       };

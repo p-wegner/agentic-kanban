@@ -1099,6 +1099,91 @@ describe("Diff Comments API", () => {
     });
     expect(res.status).toBe(404);
   });
+
+  it("POST creates an unresolved comment by default", async () => {
+    const res = await app.request(`/api/workspaces/${workspaceId}/comments`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ filePath: "resolve.ts", body: "default state" }),
+    });
+    const body = await res.json() as any;
+    expect(body.resolvedAt).toBeNull();
+  });
+
+  it("PATCH resolve marks a comment resolved, then reopens it", async () => {
+    const createRes = await app.request(`/api/workspaces/${workspaceId}/comments`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ filePath: "resolve.ts", body: "Please fix" }),
+    });
+    const { id } = await createRes.json();
+
+    // Resolve
+    const resolveRes = await app.request(`/api/workspaces/${workspaceId}/comments/${id}/resolve`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ resolved: true }),
+    });
+    expect(resolveRes.status).toBe(200);
+    const resolved = await resolveRes.json() as any;
+    expect(resolved.id).toBe(id);
+    expect(resolved.resolvedAt).not.toBeNull();
+    expect(typeof resolved.resolvedAt).toBe("string");
+
+    // Verify persisted via GET
+    const listed = await (await app.request(`/api/workspaces/${workspaceId}/comments`)).json();
+    expect(listed.find((c: { id: string }) => c.id === id).resolvedAt).not.toBeNull();
+
+    // Reopen
+    const reopenRes = await app.request(`/api/workspaces/${workspaceId}/comments/${id}/resolve`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ resolved: false }),
+    });
+    expect(reopenRes.status).toBe(200);
+    const reopened = await reopenRes.json() as any;
+    expect(reopened.resolvedAt).toBeNull();
+  });
+
+  it("PATCH resolve requires a boolean resolved field", async () => {
+    const createRes = await app.request(`/api/workspaces/${workspaceId}/comments`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ filePath: "resolve.ts", body: "missing flag" }),
+    });
+    const { id } = await createRes.json();
+
+    const res = await app.request(`/api/workspaces/${workspaceId}/comments/${id}/resolve`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("PATCH resolve returns 404 for missing comment", async () => {
+    const res = await app.request(`/api/workspaces/${workspaceId}/comments/${randomUUID()}/resolve`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ resolved: true }),
+    });
+    expect(res.status).toBe(404);
+  });
+
+  it("GET lists carry the resolvedAt field for each comment", async () => {
+    const createRes = await app.request(`/api/workspaces/${workspaceId}/comments`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ filePath: "list-state.ts", body: "has resolvedAt" }),
+    });
+    const { id } = await createRes.json();
+
+    const listed = await (await app.request(`/api/workspaces/${workspaceId}/comments`)).json();
+    const found = listed.find((c: { id: string }) => c.id === id);
+    expect(found).toBeDefined();
+    expect(found).toHaveProperty("resolvedAt");
+    expect(found.resolvedAt).toBeNull();
+  });
 });
 
 describe("Preferences API", () => {

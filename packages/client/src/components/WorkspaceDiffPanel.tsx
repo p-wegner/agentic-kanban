@@ -45,6 +45,18 @@ export function WorkspaceDiffPanel({ diff, diffComments, workspaceId, onClose, o
     }
   }
 
+  async function handleResolveComment(commentId: string, resolved: boolean) {
+    try {
+      const result = await apiFetch<DiffComment>(`/api/workspaces/${workspaceId}/comments/${commentId}/resolve`, {
+        method: "PATCH",
+        body: JSON.stringify({ resolved }),
+      });
+      onCommentsChange(diffComments.map(c => c.id === commentId ? { ...c, resolvedAt: result.resolvedAt } : c));
+    } catch (err) {
+      onError(err instanceof Error ? err.message : "Failed to update comment");
+    }
+  }
+
   return (
     <div className="border border-gray-200 dark:border-gray-700 rounded overflow-hidden">
       <div className="flex items-center justify-between px-3 py-2 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
@@ -64,6 +76,7 @@ export function WorkspaceDiffPanel({ diff, diffComments, workspaceId, onClose, o
         onCreateComment={handleCreateComment}
         onEditComment={handleEditComment}
         onDeleteComment={handleDeleteComment}
+        onResolveComment={handleResolveComment}
       />
       </div>
     </div>

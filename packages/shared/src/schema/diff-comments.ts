@@ -10,6 +10,7 @@ export const diffComments = sqliteTable("diff_comments", {
   lineNumNew: integer("line_num_new"),
   side: text("side").notNull().default("new"),
   body: text("body").notNull(),
+  resolvedAt: text("resolved_at"),
   createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
   updatedAt: text("updated_at").notNull().$defaultFn(() => new Date().toISOString()),
 }, (table) => ({
