@@ -1,5 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { SERVER_URL } from "../helpers/port.js";
+import { getE2EProject } from "../helpers/e2e-project.js";
 
 test.describe("Board workspace summary", () => {
   let projectId: string;
@@ -8,16 +9,27 @@ test.describe("Board workspace summary", () => {
   const suffix = Date.now().toString(36);
 
   test.beforeAll(async ({ request }) => {
-    const projectsRes = await request.get(`${SERVER_URL}/api/projects`);
-    const projects = await projectsRes.json();
-    projectId = projects[0].id;
+    const project = await getE2EProject(request);
+    projectId = project.id;
 
     const statusesRes = await request.get(
       `${SERVER_URL}/api/projects/${projectId}/statuses`,
     );
-    const statuses = await statusesRes.json();
-    const todoStatus = statuses.find((s: { name: string }) => s.name === "Todo");
-    statusId = todoStatus ? todoStatus.id : statuses[0].id;
+    if (!statusesRes.ok()) {
+      throw new Error(`[board-workspace-summary] Could not fetch statuses for E2E project ${projectId}: ${statusesRes.status()}`);
+    }
+    const statuses: { id: string; name: string }[] = await statusesRes.json();
+    if (statuses.length === 0) {
+      throw new Error(`[board-workspace-summary] E2E project ${projectId} has no statuses — cannot seed test data`);
+    }
+    const todoStatus = statuses.find((s) => s.name === "Todo");
+    if (!todoStatus) {
+      throw new Error(
+        `[board-workspace-summary] E2E project ${projectId} is missing required "Todo" status. ` +
+        `Available: ${statuses.map((s) => s.name).join(", ")}`
+      );
+    }
+    statusId = todoStatus.id;
 
     const issueRes = await request.post(`${SERVER_URL}/api/issues`, {
       data: {
