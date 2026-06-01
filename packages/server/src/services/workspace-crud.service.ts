@@ -28,6 +28,8 @@ export interface StaleWorktreeEntry {
 }
 import type { ProviderName } from "./agent-provider.js";
 import * as realGitService from "./git.service.js";
+import { estimateBudget } from "./budget-estimator.service.js";
+import type { BudgetEstimate } from "./budget-estimator.service.js";
 import { kill as killAgent } from "./agent.service.js";
 import { teardownWorktree } from "./workspace-teardown.service.js";
 import { runSetupScript } from "./setup-script.js";
@@ -1313,6 +1315,7 @@ exit 1
     profile: string | null;
     model: string | null;
     warnings: string[];
+    budgetEstimate: BudgetEstimate;
   }> {
     const isDirect = input.isDirect === true;
     const warnings: string[] = [];
@@ -1393,6 +1396,18 @@ exit 1
       warnings.push("Project has no default branch configured. Some features (merge, diff) may not work.");
     }
 
+    // 10. Budget estimation (non-blocking — never throws)
+    const budgetEstimate = await estimateBudget(database, input.issueId, agentConfig.resolvedProvider).catch(
+      () => ({
+        risk: "low" as const,
+        estimatedTokens: null,
+        avgTokensFromHistory: null,
+        sessionCount: 0,
+        descriptionTokens: 0,
+        reason: "Estimation unavailable",
+      }),
+    );
+
     return {
       branch,
       baseBranch,
@@ -1406,6 +1421,7 @@ exit 1
       profile: agentConfig.resolvedProfile ?? agentConfig.resolvedProfileSelection?.name ?? null,
       model: agentConfig.model ?? null,
       warnings,
+      budgetEstimate,
     };
   }
 
