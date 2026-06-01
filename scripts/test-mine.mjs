@@ -27,7 +27,7 @@
 //     - cli-butler.test.ts spawn-based CLI integration; same root causes
 //     - git.service.test.ts real git on temp dirs; Windows file-locking / timing
 //   mcp-server:
-//     - mcp-tools.test.ts  spawn-based MCP integration; stale migration list / worktree DB resolution
+//     - mcp-tools.test.ts  spawn-based MCP integration; stale migration list FIXED (reads journal dynamically)
 //
 // Pass-through: any extra args are forwarded to vitest run in BOTH packages, so you can
 // still narrow the run, e.g.:

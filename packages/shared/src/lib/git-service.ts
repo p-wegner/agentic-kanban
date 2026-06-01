@@ -428,8 +428,6 @@ async function canResetInterruptedMergeCheckout(repoPath: string, targetSha: str
 const DRIZZLE_DIR = "packages/shared/drizzle";
 /** Path (relative to repo root) of the drizzle migration journal. */
 const JOURNAL_PATH = `${DRIZZLE_DIR}/meta/_journal.json`;
-/** Path (relative to repo root) of the server test helper that lists every migration. */
-const MIGRATION_HELPER_PATH = "packages/server/src/__tests__/helpers/migrations.ts";
 /** Matches a drizzle migration filename: NNNN_some_name.sql */
 const MIGRATION_RE = /^(\d{4})_(.+)\.sql$/;
 
@@ -503,7 +501,6 @@ async function listMigrationsAtRef(cwd: string, ref: string): Promise<string[]> 
  *   - renames each colliding `NNNN_*.sql` to the next free number;
  *   - rebuilds `_journal.json` as `[...baseEntries, ...renumberedFeatureEntries]`
  *     so the feature journal shares the base's exact prefix (no journal conflict);
- *   - updates the `MIGRATION_FILES` test helper to match the renamed files;
  *   - commits ONLY the migration paths on the feature branch and syncs the branch ref.
  *
  * No-op (`renumbered:false`) when the feature branch added no migrations. Idempotent:
@@ -639,15 +636,9 @@ export async function autoRenumberMigrations(
   // unrelated uncommitted work. Only include the test helper if it exists here.
   const commitPaths = [DRIZZLE_DIR];
 
-  // Keep the server test helper's MIGRATION_FILES list in sync (test-only; mismatch
-  // breaks unit tests, never runtime). Best-effort — the file may not exist in the worktree.
-  try {
-    const staged = await updateMigrationHelper(worktreePath, renames);
-    if (staged) {
-      await execGit(["add", "--", MIGRATION_HELPER_PATH], worktreePath);
-      commitPaths.push(MIGRATION_HELPER_PATH);
-    }
-  } catch { /* helper sync is best-effort */ }
+  // The server test helper now reads from the drizzle journal dynamically,
+  // so no manual sync of a hardcoded MIGRATION_FILES list is needed.
+  // The journal itself was rewritten above and is already staged.
 
   const renameSummary = renames.map((r) => `${r.from}→${r.to}`).join(", ");
   await execGit(
@@ -709,34 +700,6 @@ async function resolveLocalBaseRef(worktreePath: string, baseBranch: string): Pr
   } catch {
     return `origin/${baseBranch}`;
   }
-}
-
-/**
- * Rewrite the MIGRATION_FILES array in the server test helper to reflect renamed files.
- * Returns true when the helper exists and was updated (so the caller can stage/commit it).
- */
-async function updateMigrationHelper(
-  worktreePath: string,
-  renames: { from: string; to: string }[],
-): Promise<boolean> {
-  if (renames.length === 0) return false;
-  const helperPath = join(worktreePath, ...MIGRATION_HELPER_PATH.split("/"));
-  let text: string;
-  try {
-    text = await readFile(helperPath, "utf-8");
-  } catch {
-    return false; // helper not present in this worktree
-  }
-  for (const { from, to } of renames) {
-    if (text.includes(`"${from}"`)) {
-      text = text.split(`"${from}"`).join(`"${to}"`);
-    } else if (!text.includes(`"${to}"`)) {
-      // Old entry missing (helper was already stale) — append the new name before the closing bracket.
-      text = text.replace(/(\n\];?\s*)$/, `\n  "${to}",$1`);
-    }
-  }
-  await writeFile(helperPath, text);
-  return true;
 }
 
 /**
