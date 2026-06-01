@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { randomUUID } from "node:crypto";
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import * as schema from "@agentic-kanban/shared/schema";
@@ -258,6 +258,32 @@ describe("session artifact routes", () => {
         expect(body.error).toContain("outside");
       } finally {
         rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    it("rejects symlinked paths that resolve outside the workspace", async () => {
+      const { app, db } = createTestApp();
+      const tempDir = mkdtempSync(join(tmpdir(), "ak-artifacts-link-"));
+      const externalDir = mkdtempSync(join(tmpdir(), "ak-artifacts-outside-"));
+      try {
+        writeFileSync(join(externalDir, "secret.txt"), "outside content");
+        try {
+          symlinkSync(externalDir, join(tempDir, "linked"), "junction");
+        } catch (err: any) {
+          if (err?.code === "EPERM" || err?.code === "EACCES") return;
+          throw err;
+        }
+        const { workspaceId } = await seedWorkspace(db, tempDir);
+
+        const res = await app.request(
+          `/api/workspaces/${workspaceId}/artifacts-file?path=${encodeURIComponent("linked/secret.txt")}`,
+        );
+        expect(res.status).toBe(400);
+        const body = await res.json();
+        expect(body.error).toContain("outside");
+      } finally {
+        rmSync(tempDir, { recursive: true, force: true });
+        rmSync(externalDir, { recursive: true, force: true });
       }
     });
 
