@@ -399,6 +399,43 @@ describe("workspace.service", () => {
       expect(statusRow[0].name).toBe("Done");
     });
 
+    it("returns success, closes the workspace, and moves the issue to Done when worktree removal fails after merge", { timeout: 30000 }, async () => {
+      const { projectId, issueId } = await seedProjectAndIssue(db);
+      const wsId = await seedWorkspaceForMerge(projectId, issueId);
+      const gitService = createFakeGitService({
+        removeWorktree: vi.fn(async () => {
+          throw new Error("worktree still busy");
+        }),
+      });
+
+      const service = createWorkspaceService({
+        database: db,
+        gitService,
+        createBackup: vi.fn(async () => ({})),
+        processKiller: vi.fn(async () => 0),
+      });
+
+      const result = await service.mergeWorkspace(wsId);
+
+      expect(result.mergeOutput).toContain("Merge made");
+      expect(result.warnings).toEqual([
+        expect.objectContaining({
+          step: "remove-worktree",
+          message: "worktree still busy",
+          recoverable: true,
+        }),
+      ]);
+
+      const wsRows = await db.select().from(workspaces).where(eq(workspaces.id, wsId));
+      expect(wsRows[0].status).toBe("closed");
+      expect(wsRows[0].workingDir).toBeNull();
+      expect(wsRows[0].mergedAt).toBeTruthy();
+
+      const issueRow = await db.select().from(issues).where(eq(issues.id, issueId));
+      const statusRow = await db.select().from(projectStatuses).where(eq(projectStatuses.id, issueRow[0].statusId));
+      expect(statusRow[0].name).toBe("Done");
+    });
+
     it("throws a BAD_REQUEST WorkspaceError with the conflicting files when merge conflicts are detected", { timeout: 30000 }, async () => {
       const { projectId, issueId } = await seedProjectAndIssue(db);
       const wsId = await seedWorkspaceForMerge(projectId, issueId);

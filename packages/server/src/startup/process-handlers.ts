@@ -2,6 +2,7 @@ import type * as agentService from "../services/agent.service.js";
 import { rawClient } from "../db/index.js";
 import { createBackup } from "../db/backup.js";
 import { isTransientNetworkError } from "./transient-errors.js";
+import { activeMerges } from "../services/workspace-internals.js";
 
 /** Checkpoint the WAL and take a verified shutdown backup, bounded so it can't hang exit. */
 async function checkpointAndBackup(): Promise<void> {
@@ -20,6 +21,18 @@ async function checkpointAndBackup(): Promise<void> {
   })();
   // Never let backup work block shutdown indefinitely.
   await Promise.race([work, new Promise<void>((r) => setTimeout(r, 5000).unref())]);
+}
+
+export async function waitForActiveMergesToSettle(timeoutMs = 60_000): Promise<number> {
+  const merges = [...activeMerges.values()];
+  if (merges.length === 0) return 0;
+
+  console.warn(`[shutdown] Waiting for ${merges.length} active merge(s) to settle before closing server...`);
+  const waitForMerges = Promise.allSettled(merges.map((merge) => merge.promise)).then(() => merges.length);
+  return Promise.race([
+    waitForMerges,
+    new Promise<number>((resolve) => setTimeout(() => resolve(0), timeoutMs).unref()),
+  ]);
 }
 
 export function setupProcessHandlers(server: { close: (cb: () => void) => void }, agentServiceModule: typeof agentService) {
@@ -53,11 +66,12 @@ export function setupProcessHandlers(server: { close: (cb: () => void) => void }
     // Only kill them on explicit SIGINT (user Ctrl+C) to avoid orphaning on intentional shutdown.
     const activeCount = signal === "SIGINT" ? agentServiceModule.killAll() : 0;
     console.log(`[shutdown] Received ${signal} — closing server (${activeCount} agent process(es) terminated, survivors continue)...`);
-    // Hard cap so backup work can never block exit indefinitely.
+    // Hard cap so shutdown work can never block exit indefinitely.
     setTimeout(() => {
-      console.error("[shutdown] Forced exit after 10s timeout");
+      console.error("[shutdown] Forced exit after 70s timeout");
       process.exit(1);
-    }, 10_000).unref();
+    }, 70_000).unref();
+    await waitForActiveMergesToSettle();
     // Checkpoint + verified backup before closing (non-fatal, bounded to ~5s).
     await checkpointAndBackup();
     server.close(() => {
