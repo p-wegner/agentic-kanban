@@ -13,7 +13,7 @@ export interface AutoStartDeps {
 
 export async function runAutoStart(prefMap: Map<string, string>, { serverPort, boardEvents, logMonitorAction }: AutoStartDeps) {
   if (prefMap.get("nudge_auto_start") !== "true") return;
-  const baseUrl = `http://localhost:${serverPort}`;
+  const baseUrl = `http://127.0.0.1:${serverPort}`;
   const wipLimit = parseInt(prefMap.get("nudge_wip_limit") || "5", 10);
   const inProgressStatuses = await db.select({ id: projectStatuses.id, projectId: projectStatuses.projectId }).from(projectStatuses)
     .where(sql`${projectStatuses.name} = 'In Progress'`);
