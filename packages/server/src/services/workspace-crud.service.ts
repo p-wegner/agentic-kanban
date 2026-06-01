@@ -45,6 +45,7 @@ import {
 } from "@agentic-kanban/shared/lib/workflow-engine";
 import { resolveAgentSettings, toExecutorProvider } from "./agent-settings.service.js";
 import { parseStrategyBullseyeConfig, selectProviderFromStrategy } from "./strategy-objective.service.js";
+import { preflightAgentProfile } from "./agent-profile-health.service.js";
 import { emitButlerSystemEvent } from "./butler-event-feed.js";
 import {
   moveIssueToInProgress,
@@ -1396,7 +1397,20 @@ exit 1
       warnings.push("Project has no default branch configured. Some features (merge, diff) may not work.");
     }
 
-    // 10. Budget estimation (non-blocking — never throws)
+    // 10. Profile availability check
+    if (agentConfig.resolvedProfileSelection) {
+      const { provider, name } = agentConfig.resolvedProfileSelection;
+      const prefRows = await database.select().from(preferences);
+      const prefMap = new Map(prefRows.map(r => [r.key, r.value]));
+      const profileCheck = preflightAgentProfile(prefMap, provider, name);
+      if (!profileCheck.ok) {
+        for (const err of profileCheck.errors) {
+          warnings.push(`Profile unavailable: ${err}`);
+        }
+      }
+    }
+
+    // 12. Budget estimation (non-blocking — never throws)
     const budgetEstimate = await estimateBudget(database, input.issueId, agentConfig.resolvedProvider).catch(
       () => ({
         risk: "low" as const,
