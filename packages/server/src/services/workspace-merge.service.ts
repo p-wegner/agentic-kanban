@@ -52,6 +52,18 @@ export function createWorkspaceMergeService(deps: {
   const createBackup = deps.createBackup ?? realCreateBackup;
   const killProcesses = deps.processKiller ?? killProcessesInDir;
 
+  type MergeWarning = { step: string; message: string; recoverable: true };
+
+  function warningMessage(err: unknown): string {
+    return err instanceof Error ? err.message : String(err);
+  }
+
+  function addRecoverableWarning(warnings: MergeWarning[], step: string, err: unknown): void {
+    const message = warningMessage(err);
+    warnings.push({ step, message, recoverable: true });
+    console.warn(`[workspace-merge] ${step} failed after git merge landed (recoverable):`, message);
+  }
+
   async function getChangedFilesBetweenSafe(repoPath: string, fromRef: string, toRef: string): Promise<string[]> {
     if (typeof gitService.getChangedFilesBetween !== "function") return [];
     return gitService.getChangedFilesBetween(repoPath, fromRef, toRef);
@@ -251,6 +263,7 @@ export function createWorkspaceMergeService(deps: {
 
     // Plumbing-based merge: working tree and index are never modified.
     let result = await gitService.mergeBranch(repoPath, workspace.branch, targetBranch);
+    const warnings: MergeWarning[] = [];
 
     try {
       const changedFiles = preMergeHead
@@ -275,24 +288,26 @@ export function createWorkspaceMergeService(deps: {
         result += `\nOpenSpec: applied ${appliedCount} domain delta(s)${committed ? " and committed living specs" : ""}.`;
       }
     } catch (err) {
-      console.warn("[workspace-merge] OpenSpec delta application failed:", err instanceof Error ? err.message : String(err));
-      throw err;
+      addRecoverableWarning(warnings, "openspec-post-merge", err);
     }
 
     if (workspace.workingDir) {
-      await computeWorkspaceCodeMetrics(id, database).catch(() => null);
+      await computeWorkspaceCodeMetrics(id, database).catch((err) => {
+        addRecoverableWarning(warnings, "code-metrics", err);
+        return null;
+      });
     }
 
     // Kill any agent-spawned processes (e.g. leaked dev.mjs) before removing the worktree.
     if (workspace.workingDir) {
       await killWorktreeProcesses(workspace.workingDir, "merge:post");
-      try { await gitService.removeWorktree(repoPath, workspace.workingDir); } catch { /* best effort */ }
+      try { await gitService.removeWorktree(repoPath, workspace.workingDir); } catch (err) { addRecoverableWarning(warnings, "remove-worktree", err); }
     }
 
     try {
       await gitService.deleteBranch(repoPath, workspace.branch);
       console.log(`[workspace-service] deleted branch ${workspace.branch}`);
-    } catch { /* ignore */ }
+    } catch (err) { addRecoverableWarning(warnings, "delete-branch", err); }
 
     const now = new Date().toISOString();
     await updateWorkspaceStatus(id, "closed", { workingDir: null, closedAt: now, mergedAt: now }, database);
@@ -311,7 +326,7 @@ export function createWorkspaceMergeService(deps: {
       projectId,
     });
 
-    return { id, mergeOutput: result };
+    return { id, mergeOutput: result, ...(warnings.length > 0 ? { warnings } : {}) };
   }
 
   async function runPostMergeTasks(args: {
