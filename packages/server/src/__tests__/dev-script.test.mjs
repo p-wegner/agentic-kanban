@@ -3,6 +3,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildDevPortEnv } from "../../../../scripts/dev-env.mjs";
+import { resolveDevPorts } from "../../../../scripts/dev-port-plan.mjs";
 import {
   classifyProcessExit,
   createDependencyRecoveryState,
@@ -67,6 +68,22 @@ describe("dev launcher exit classification", () => {
 });
 
 describe("dev launcher port guard", () => {
+  it("keeps the main checkout on the board server and client ports", () => {
+    expect(resolveDevPorts({ isWorktree: false, branch: null })).toEqual({
+      serverPort: 3001,
+      clientPort: 5173,
+      offset: 0,
+    });
+  });
+
+  it("maps feature/ak-N worktrees onto deterministic isolated ports", () => {
+    expect(resolveDevPorts({ isWorktree: true, branch: "feature/ak-229-regression-tests-for-worktree-port-isolati" })).toEqual({
+      serverPort: 3230,
+      clientPort: 5402,
+      offset: 229,
+    });
+  });
+
   it("exports worktree server and client ports instead of default board ports", () => {
     const env = buildDevPortEnv(3222, 5394, {}, 12345);
 
@@ -80,6 +97,46 @@ describe("dev launcher port guard", () => {
     expect(env.KANBAN_BOARD_SERVER_PID).toBe("12345");
     expect(env.PORT).not.toBe("3001");
     expect(env.VITE_PORT).not.toBe("5173");
+  });
+
+  it("allows freeing a default board port when the owner is from the same main checkout", () => {
+    const auditEvents = [];
+    const decision = planPortOwnerKill({
+      pid: "3001",
+      port: 3001,
+      checkoutRoot: "C:\\andrena\\agentic-kanban",
+      getCommandLine: () => "node C:\\andrena\\agentic-kanban\\node_modules\\tsx\\dist\\cli.mjs src/index.ts",
+      audit: (event) => auditEvents.push(event),
+    });
+
+    expect(decision.allowed).toBe(true);
+    expect(decision.reason).toBe("inside-checkout");
+    expect(auditEvents).toContainEqual(expect.objectContaining({
+      action: "dev-port-kill-allowed",
+      port: 3001,
+      pid: "3001",
+      checkoutRoot: "C:\\andrena\\agentic-kanban",
+    }));
+  });
+
+  it("allows freeing a worktree port when the owner is from the same worktree checkout", () => {
+    const auditEvents = [];
+    const decision = planPortOwnerKill({
+      pid: "3230",
+      port: 3230,
+      checkoutRoot: "C:\\andrena\\.worktrees\\feature_ak-229-regression-tests-for-worktree-port-isolati",
+      getCommandLine: () => "node C:\\andrena\\.worktrees\\feature_ak-229-regression-tests-for-worktree-port-isolati\\packages\\server\\src\\index.ts",
+      audit: (event) => auditEvents.push(event),
+    });
+
+    expect(decision.allowed).toBe(true);
+    expect(decision.reason).toBe("inside-checkout");
+    expect(auditEvents).toContainEqual(expect.objectContaining({
+      action: "dev-port-kill-allowed",
+      port: 3230,
+      pid: "3230",
+      checkoutRoot: "C:\\andrena\\.worktrees\\feature_ak-229-regression-tests-for-worktree-port-isolati",
+    }));
   });
 
   it("matches checkout paths on path boundaries", () => {
