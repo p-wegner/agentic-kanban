@@ -510,6 +510,67 @@ describe("Board API", () => {
     });
   });
 
+  it("GET /api/projects/:id/board includes latest workspace session status and assistant message", async () => {
+    const sessionProjectId = await createProjectDirectly(database, { name: "Board Session Project" });
+    const statusId = await createStatusDirectly(database, sessionProjectId, "In Progress", 0);
+    const now = new Date().toISOString();
+    const issueId = randomUUID();
+    const workspaceId = randomUUID();
+    const sessionId = randomUUID();
+
+    await database.insert(schema.issues).values({
+      id: issueId,
+      projectId: sessionProjectId,
+      statusId,
+      issueNumber: 253,
+      title: "Surface session state",
+      priority: "medium",
+      issueType: "bug",
+      sortOrder: 0,
+      createdAt: now,
+      updatedAt: now,
+    });
+    await database.insert(schema.workspaces).values({
+      id: workspaceId,
+      issueId,
+      branch: "feature/session-state-summary",
+      status: "active",
+      createdAt: now,
+      updatedAt: now,
+    });
+    await database.insert(schema.sessions).values({
+      id: sessionId,
+      workspaceId,
+      executor: "codex",
+      status: "running",
+      startedAt: now,
+      triggerType: "initial",
+    });
+    await database.insert(schema.sessionMessages).values({
+      sessionId,
+      type: "stdout",
+      data: JSON.stringify({
+        type: "item.completed",
+        item: { type: "agent_message", text: "I found the missing board fields." },
+      }),
+      createdAt: now,
+    });
+
+    const res = await app.request(`/api/projects/${sessionProjectId}/board`);
+    expect(res.status).toBe(200);
+    const body = await res.json() as any;
+    const allIssues = body.flatMap((column: any) => column.issues);
+    const issue = allIssues.find((item: any) => item.id === issueId);
+
+    expect(issue.workspaceSummary.main).toMatchObject({
+      id: workspaceId,
+      status: "active",
+      sessionStatus: "running",
+      lastSessionTriggerType: "initial",
+      lastAssistantMessage: "I found the missing board fields.",
+    });
+  });
+
   it("GET /api/projects/:id/board returns 404 for missing project", async () => {
     const res = await app.request(`/api/projects/${randomUUID()}/board`);
     expect(res.status).toBe(404);

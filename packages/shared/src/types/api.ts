@@ -253,6 +253,7 @@ export interface MainWorkspaceInfo {
   diffStats?: { filesChanged: number; insertions: number; deletions: number } | null;
   conflicts?: { hasConflicts: boolean; conflictingFiles: string[] } | null;
   lastSessionAt?: string | null;
+  sessionStatus?: string | null;
   lastSessionTriggerType?: string | null;
   /** Set when the workspace's branch was actually merged into its base (distinguishes merged from abandoned-closed). */
   mergedAt?: string | null;
