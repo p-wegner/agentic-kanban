@@ -313,6 +313,14 @@ export async function getIssueWorkspaces(
       latestSetupDurationMs: workspaces.latestSetupDurationMs,
       latestSetupStdoutTail: workspaces.latestSetupStdoutTail,
       latestSetupStderrTail: workspaces.latestSetupStderrTail,
+      latestSymlinkState: workspaces.latestSymlinkState,
+      latestSymlinkStartedAt: workspaces.latestSymlinkStartedAt,
+      latestSymlinkEndedAt: workspaces.latestSymlinkEndedAt,
+      latestSymlinkDirs: workspaces.latestSymlinkDirs,
+      latestSymlinkLinked: workspaces.latestSymlinkLinked,
+      latestSymlinkSkipped: workspaces.latestSymlinkSkipped,
+      latestSymlinkFailed: workspaces.latestSymlinkFailed,
+      latestSymlinkError: workspaces.latestSymlinkError,
     })
     .from(workspaces)
     .leftJoin(agentSkills, eq(workspaces.skillId, agentSkills.id))
