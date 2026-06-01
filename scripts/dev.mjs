@@ -21,12 +21,10 @@ import {
   dependencyManifestsChanged,
   snapshotDependencyManifests,
 } from "./dev-supervisor.mjs";
+import { resolveDevPorts } from "./dev-port-plan.mjs";
 import { buildDevPortEnv } from "./dev-env.mjs";
 import { planPortOwnerKill } from "./dev-port-guard.mjs";
 import { writeProcessAudit } from "./process-audit.mjs";
-
-const DEFAULT_SERVER_PORT = 3001;
-const DEFAULT_CLIENT_PORT = 5173;
 
 function run(cmd) {
   try {
@@ -45,20 +43,6 @@ function detectWorktree() {
   const isWorktree = resolvedCommon !== expectedGit;
   const branch = isWorktree ? run("git branch --show-current") : null;
   return { isWorktree, branch };
-}
-
-function getIssueNumber(branchName) {
-  const match = branchName.match(/^feature\/(?:ak-)?(\d+)-/);
-  return match ? parseInt(match[1], 10) : null;
-}
-
-function branchHash(branchName) {
-  let hash = 0;
-  for (let i = 0; i < branchName.length; i++) {
-    hash = (hash * 31 + branchName.charCodeAt(i)) & 0xffff;
-  }
-  // Use range 101-1000 to avoid collisions with issue numbers 1-100
-  return (hash % 900) + 101;
 }
 
 function isPortFree(port) {
@@ -187,14 +171,9 @@ function installUpdatedDependencies(label) {
 
 function configurePorts() {
   const { isWorktree, branch } = detectWorktree();
-  let serverPort = DEFAULT_SERVER_PORT;
-  let clientPort = DEFAULT_CLIENT_PORT;
+  const { serverPort, clientPort } = resolveDevPorts({ isWorktree, branch });
 
   if (isWorktree && branch) {
-    const issueNum = getIssueNumber(branch);
-    const offset = issueNum !== null ? issueNum : branchHash(branch);
-    serverPort = DEFAULT_SERVER_PORT + offset;
-    clientPort = DEFAULT_CLIENT_PORT + offset;
     if (serverPort > 60000) {
       console.error(`[dev] ERROR: computed server port ${serverPort} exceeds 60000. Use a different branch name.`);
       process.exit(1);
