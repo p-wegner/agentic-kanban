@@ -88,12 +88,25 @@ export async function createDiffComment(
     lineNumNew: body.lineNumNew ?? null,
     side: body.side || "new",
     body: body.body,
+    resolvedAt: null as string | null,
     createdAt: now,
     updatedAt: now,
   };
 
   await database.insert(diffComments).values(comment);
   return comment;
+}
+
+export async function setDiffCommentResolved(
+  commentId: string,
+  resolved: boolean,
+  database: Database = db,
+) {
+  const now = new Date().toISOString();
+  await database
+    .update(diffComments)
+    .set({ resolvedAt: resolved ? now : null, updatedAt: now })
+    .where(eq(diffComments.id, commentId));
 }
 
 export async function updateDiffComment(

@@ -12,6 +12,7 @@ interface DiffViewerProps {
   onCreateComment?: (data: CreateDiffCommentRequest) => void;
   onEditComment?: (commentId: string, body: string) => void;
   onDeleteComment?: (commentId: string) => void;
+  onResolveComment?: (commentId: string, resolved: boolean) => void;
 }
 
 type ViewMode = "unified" | "split";
@@ -97,14 +98,17 @@ function CommentBlock({
   comment,
   onEdit,
   onDelete,
+  onResolve,
 }: {
   comment: DiffComment;
   onEdit?: (id: string, body: string) => void;
   onDelete?: (id: string) => void;
+  onResolve?: (id: string, resolved: boolean) => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [editBody, setEditBody] = useState(comment.body);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const resolved = comment.resolvedAt != null;
 
   useEffect(() => {
     if (editing && textareaRef.current) {
@@ -148,12 +152,35 @@ function CommentBlock({
   });
 
   return (
-    <div className="bg-yellow-50 border-l-2 border-yellow-400 px-3 py-1.5 group/comment">
+    <div
+      data-resolved={resolved ? "true" : "false"}
+      className={`px-3 py-1.5 group/comment border-l-2 ${
+        resolved
+          ? "bg-gray-50 dark:bg-gray-900/40 border-gray-300 dark:border-gray-700 opacity-60"
+          : "bg-yellow-50 border-yellow-400"
+      }`}
+    >
       <div className="flex items-center gap-2 mb-0.5">
+        {resolved && (
+          <span className="inline-flex items-center gap-0.5 text-[10px] font-medium text-green-700 dark:text-green-400">
+            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+            </svg>
+            Resolved
+          </span>
+        )}
         <span className="text-[10px] text-gray-400 dark:text-gray-500">{timestamp}</span>
       </div>
-      <div className="text-xs text-gray-700 dark:text-gray-300 whitespace-pre-wrap">{comment.body}</div>
+      <div className={`text-xs whitespace-pre-wrap ${resolved ? "text-gray-500 dark:text-gray-400 line-through decoration-gray-400/60" : "text-gray-700 dark:text-gray-300"}`}>{comment.body}</div>
       <div className="flex items-center gap-2 mt-0.5 opacity-0 group-hover/comment:opacity-100 transition-opacity">
+        {onResolve && (
+          <button
+            onClick={() => onResolve(comment.id, !resolved)}
+            className="text-[10px] font-medium text-green-600 dark:text-green-400 hover:text-green-800 dark:hover:text-green-300"
+          >
+            {resolved ? "Reopen" : "Resolve"}
+          </button>
+        )}
         <button
           onClick={() => setEditing(true)}
           className="text-[10px] text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300"
@@ -228,12 +255,14 @@ function UnifiedFileView({
   onCreateComment,
   onEditComment,
   onDeleteComment,
+  onResolveComment,
 }: {
   file: DiffFile;
   commentMap: Map<string, DiffComment[]>;
   onCreateComment?: (data: CreateDiffCommentRequest) => void;
   onEditComment?: (id: string, body: string) => void;
   onDeleteComment?: (id: string) => void;
+  onResolveComment?: (id: string, resolved: boolean) => void;
 }) {
   const [inputLineIdx, setInputLineIdx] = useState<number | null>(null);
 
@@ -274,14 +303,23 @@ function UnifiedFileView({
                   +
                 </span>
               )}
-              {lineComments.length > 0 && (
-                <span className="absolute right-1 top-1/2 -translate-y-1/2 w-5 h-5 flex items-center justify-center rounded-full bg-yellow-200 text-yellow-700 text-xs font-medium select-none">
-                  {lineComments.length}
-                </span>
-              )}
+              {lineComments.length > 0 && (() => {
+                const unresolved = lineComments.filter((c) => c.resolvedAt == null).length;
+                const allResolved = unresolved === 0;
+                return (
+                  <span
+                    className={`absolute right-1 top-1/2 -translate-y-1/2 w-5 h-5 flex items-center justify-center rounded-full text-xs font-medium select-none ${
+                      allResolved ? "bg-gray-200 dark:bg-gray-700 text-gray-500 dark:text-gray-400" : "bg-yellow-200 text-yellow-700"
+                    }`}
+                    title={allResolved ? "All comments resolved" : `${unresolved} unresolved comment${unresolved !== 1 ? "s" : ""}`}
+                  >
+                    {allResolved ? lineComments.length : unresolved}
+                  </span>
+                );
+              })()}
             </div>
             {lineComments.map((c) => (
-              <CommentBlock key={c.id} comment={c} onEdit={onEditComment} onDelete={onDeleteComment} />
+              <CommentBlock key={c.id} comment={c} onEdit={onEditComment} onDelete={onDeleteComment} onResolve={onResolveComment} />
             ))}
             {isInputOpen && (
               <CommentInput
@@ -311,12 +349,14 @@ function SplitFileView({
   onCreateComment,
   onEditComment,
   onDeleteComment,
+  onResolveComment,
 }: {
   file: DiffFile;
   commentMap: Map<string, DiffComment[]>;
   onCreateComment?: (data: CreateDiffCommentRequest) => void;
   onEditComment?: (id: string, body: string) => void;
   onDeleteComment?: (id: string) => void;
+  onResolveComment?: (id: string, resolved: boolean) => void;
 }) {
   const [inputLineIdx, setInputLineIdx] = useState<number | null>(null);
 
@@ -398,7 +438,7 @@ function SplitFileView({
                 {allComments.map((c) => (
                   <tr key={c.id}>
                     <td colSpan={4}>
-                      <CommentBlock comment={c} onEdit={onEditComment} onDelete={onDeleteComment} />
+                      <CommentBlock comment={c} onEdit={onEditComment} onDelete={onDeleteComment} onResolve={onResolveComment} />
                     </td>
                   </tr>
                 ))}
@@ -441,6 +481,7 @@ function FileDiffAccordion({
   onCreateComment,
   onEditComment,
   onDeleteComment,
+  onResolveComment,
 }: {
   file: DiffFile;
   fileIdx: number;
@@ -451,6 +492,7 @@ function FileDiffAccordion({
   onCreateComment?: (data: CreateDiffCommentRequest) => void;
   onEditComment?: (id: string, body: string) => void;
   onDeleteComment?: (id: string) => void;
+  onResolveComment?: (id: string, resolved: boolean) => void;
 }) {
   const { additions, deletions } = computeFileStats(file.lines);
 
@@ -477,19 +519,20 @@ function FileDiffAccordion({
       </button>
       {expanded && (
         viewMode === "unified" ? (
-          <UnifiedFileView file={file} commentMap={commentMap} onCreateComment={onCreateComment} onEditComment={onEditComment} onDeleteComment={onDeleteComment} />
+          <UnifiedFileView file={file} commentMap={commentMap} onCreateComment={onCreateComment} onEditComment={onEditComment} onDeleteComment={onDeleteComment} onResolveComment={onResolveComment} />
         ) : (
-          <SplitFileView file={file} commentMap={commentMap} onCreateComment={onCreateComment} onEditComment={onEditComment} onDeleteComment={onDeleteComment} />
+          <SplitFileView file={file} commentMap={commentMap} onCreateComment={onCreateComment} onEditComment={onEditComment} onDeleteComment={onDeleteComment} onResolveComment={onResolveComment} />
         )
       )}
     </div>
   );
 }
 
-export function DiffViewer({ diff, stats, comments = [], onCreateComment, onEditComment, onDeleteComment }: DiffViewerProps) {
+export function DiffViewer({ diff, stats, comments = [], onCreateComment, onEditComment, onDeleteComment, onResolveComment }: DiffViewerProps) {
   const [viewMode, setViewMode] = useState<ViewMode>("unified");
   const files = parseUnifiedDiff(diff);
   const commentMap = buildCommentMap(comments);
+  const unresolvedCount = comments.filter((c) => c.resolvedAt == null).length;
 
   const [expandedFiles, setExpandedFiles] = useState<Set<number>>(() => new Set(files.map((_, i) => i)));
 
@@ -515,7 +558,15 @@ export function DiffViewer({ diff, stats, comments = [], onCreateComment, onEdit
           <span className="text-green-600">+{stats.insertions}</span>
           <span className="text-red-600">-{stats.deletions}</span>
           {comments.length > 0 && (
-            <span className="text-yellow-600">{comments.length} comment{comments.length !== 1 ? "s" : ""}</span>
+            unresolvedCount > 0 ? (
+              <span className="text-yellow-600" data-testid="unresolved-count">
+                {unresolvedCount} unresolved comment{unresolvedCount !== 1 ? "s" : ""}
+              </span>
+            ) : (
+              <span className="text-green-600" data-testid="unresolved-count">
+                All {comments.length} comment{comments.length !== 1 ? "s" : ""} resolved
+              </span>
+            )
           )}
         </div>
         <div className="flex items-center gap-2">
@@ -569,6 +620,7 @@ export function DiffViewer({ diff, stats, comments = [], onCreateComment, onEdit
             onCreateComment={onCreateComment}
             onEditComment={onEditComment}
             onDeleteComment={onDeleteComment}
+            onResolveComment={onResolveComment}
           />
         ))}
       </div>
