@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { buildDevPortEnv } from "../../../../scripts/dev-env.mjs";
 import {
   classifyProcessExit,
   createDependencyRecoveryState,
@@ -66,6 +67,21 @@ describe("dev launcher exit classification", () => {
 });
 
 describe("dev launcher port guard", () => {
+  it("exports worktree server and client ports instead of default board ports", () => {
+    const env = buildDevPortEnv(3222, 5394, {}, 12345);
+
+    expect(env.PORT).toBe("3222");
+    expect(env.SERVER_PORT).toBe("3222");
+    expect(env.KANBAN_SERVER_PORT).toBe("3222");
+    expect(env.KANBAN_WORKTREE_SERVER_PORT).toBe("3222");
+    expect(env.VITE_PORT).toBe("5394");
+    expect(env.KANBAN_CLIENT_PORT).toBe("5394");
+    expect(env.KANBAN_WORKTREE_CLIENT_PORT).toBe("5394");
+    expect(env.KANBAN_BOARD_SERVER_PID).toBe("12345");
+    expect(env.PORT).not.toBe("3001");
+    expect(env.VITE_PORT).not.toBe("5173");
+  });
+
   it("matches checkout paths on path boundaries", () => {
     expect(commandLineBelongsToCheckout(
       "node C:\\andrena\\.worktrees\\feature_ak-175-harden-board-shutdowns\\packages\\server\\src\\index.ts",

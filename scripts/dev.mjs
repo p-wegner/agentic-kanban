@@ -21,6 +21,7 @@ import {
   dependencyManifestsChanged,
   snapshotDependencyManifests,
 } from "./dev-supervisor.mjs";
+import { buildDevPortEnv } from "./dev-env.mjs";
 import { planPortOwnerKill } from "./dev-port-guard.mjs";
 import { writeProcessAudit } from "./process-audit.mjs";
 
@@ -203,15 +204,7 @@ function configurePorts() {
     console.log(`[dev] Main checkout — server:${serverPort} client:${clientPort}`);
   }
 
-  process.env.PORT = String(serverPort);
-  process.env.VITE_PORT = String(clientPort);
-  process.env.SERVER_PORT = String(serverPort);
-  process.env.KANBAN_SERVER_PORT = String(serverPort);
-  process.env.KANBAN_CLIENT_PORT = String(clientPort);
-  process.env.KANBAN_BOARD_SERVER_PID = String(process.pid);
-  process.env.KANBAN_PROTECTED_PIDS = [process.env.KANBAN_PROTECTED_PIDS, String(process.pid)]
-    .filter(Boolean)
-    .join(",");
+  Object.assign(process.env, buildDevPortEnv(serverPort, clientPort));
 
   writeProcessAudit({
     action: "dev-launch-configured",
