@@ -27,9 +27,13 @@ export function createMergeQueueRoute(
    */
   router.post("/preview/:workspaceId", async (c) => {
     const workspaceId = c.req.param("workspaceId");
-    const plan = await queueService.computePlan([workspaceId]);
-    const preview = plan.conflictPreviews[0] ?? { workspaceId, hasConflicts: false, conflictingFiles: [], isStale: false };
-    return c.json({ ok: true, preview });
+    try {
+      const plan = await queueService.computePlan([workspaceId]);
+      const preview = plan.conflictPreviews[0] ?? { workspaceId, hasConflicts: false, conflictingFiles: [], isStale: false };
+      return c.json({ ok: true, preview });
+    } catch (err) {
+      return c.json({ ok: false, error: err instanceof Error ? err.message : String(err) }, 500);
+    }
   });
 
   /**
