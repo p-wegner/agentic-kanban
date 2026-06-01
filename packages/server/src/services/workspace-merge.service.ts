@@ -164,6 +164,13 @@ export function createWorkspaceMergeService(deps: {
         }
       }
 
+      try {
+        await gitService.deleteBranch(repoPath, workspace.branch);
+        console.log(`[workspace-service] deleted branch ${workspace.branch}`);
+      } catch (err) {
+        addRecoverableWarning(warnings, "delete-branch", err);
+      }
+
       const now = new Date().toISOString();
       await updateWorkspaceStatus(id, "closed", {
         workingDir: null,
