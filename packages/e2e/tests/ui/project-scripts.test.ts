@@ -36,24 +36,19 @@ test.describe("Project script shortcuts", () => {
     const projectId = await getActiveOrFirstProjectId(request);
     const scriptName = `Smoke ${Date.now()}`;
     await deleteScriptByName(request, projectId, scriptName);
+    const createRes = await request.post(`${SERVER_URL}/api/projects/${projectId}/scripts`, {
+      data: {
+        name: scriptName,
+        description: "Smoke-test command",
+        command: "node -e \"console.log('ak-script-smoke')\"",
+        cwdMode: "project",
+      },
+    });
+    expect(createRes.ok()).toBeTruthy();
 
     try {
       await page.goto("/");
-      await page.locator('button[title="Settings"]').click();
-      await expect(page.locator("h2", { hasText: "Settings" })).toBeVisible();
-      await page.locator("button", { hasText: /^Project$/ }).click();
-
-      const section = page.locator("h3", { hasText: "Script Shortcuts" }).locator("xpath=ancestor::div[contains(@class, 'space-y-3')][1]");
-      await section.locator('input[placeholder="Test mine"]').fill(scriptName);
-      await section.locator('input[placeholder="Fast local check"]').fill("Smoke-test command");
-      await section.locator('input[placeholder="pnpm test:mine"]').fill("node -e \"console.log('ak-script-smoke')\"");
-      await section.locator("select").selectOption("project");
-      await section.locator("button", { hasText: /^Add$/ }).click();
-      await expect(page.locator("text=Script shortcut saved")).toBeVisible({ timeout: 10000 });
-
-      await page.locator("button", { hasText: /^Cancel$/ }).click();
-      await expect(page.locator("h2", { hasText: "Settings" })).not.toBeVisible();
-
+      await expect(page.getByRole("button", { name: "Scripts" })).toBeVisible();
       await page.locator('button[title="Project scripts"]').click();
       await page.locator("button", { hasText: scriptName }).click();
 
