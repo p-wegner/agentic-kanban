@@ -501,7 +501,7 @@ export function AllWorkspacesPanel({ columns, activeProjectId, onClose, onIssueC
                           </span>
 
                           {/* Ready to merge */}
-                          {main.readyForMerge && (
+                          {main.readyForMerge && main.status !== "closed" && (
                             <span className="text-xs px-1.5 py-0.5 rounded bg-green-100 text-green-700">
                               Ready to merge
                             </span>
