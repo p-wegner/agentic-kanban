@@ -199,6 +199,7 @@ export function createWorkspaceMergeService(deps: {
         workingDir: null,
         closedAt: workspace.closedAt ?? now,
         mergedAt: workspace.mergedAt,
+        readyForMerge: false,
       }, database);
       await moveIssueToDone(id, workspace.issueId, now, database);
 
@@ -238,7 +239,7 @@ export function createWorkspaceMergeService(deps: {
     if (workspace.isDirect) {
       const now = new Date().toISOString();
       await computeWorkspaceCodeMetrics(id, database).catch(() => null);
-      await updateWorkspaceStatus(id, "closed", { closedAt: now }, database);
+      await updateWorkspaceStatus(id, "closed", { closedAt: now, readyForMerge: false }, database);
       await moveIssueToDone(id, workspace.issueId, now, database, true);
 
       const projectId = await resolveProjectId(id, database);
@@ -380,7 +381,7 @@ export function createWorkspaceMergeService(deps: {
     }
 
     const now = new Date().toISOString();
-    await updateWorkspaceStatus(id, "closed", { workingDir: null, closedAt: now, mergedAt: now }, database);
+    await updateWorkspaceStatus(id, "closed", { workingDir: null, closedAt: now, mergedAt: now, readyForMerge: false }, database);
     await moveIssueToDone(id, workspace.issueId, now, database);
     await recordMergeAttempt(
       workspace,
