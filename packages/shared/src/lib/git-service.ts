@@ -263,7 +263,18 @@ export async function deleteBranch(
   repoPath: string,
   branch: string,
 ): Promise<void> {
-  await execGit(["branch", "-d", branch], repoPath);
+  try {
+    await execGit(["branch", "-d", branch], repoPath);
+  } catch (err) {
+    if (!isBranchCheckedOutElsewhereError(err)) throw err;
+    await pruneWorktrees(repoPath);
+    await execGit(["branch", "-d", branch], repoPath);
+  }
+}
+
+function isBranchCheckedOutElsewhereError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err);
+  return message.includes("Cannot delete branch") && message.includes("checked out at");
 }
 
 /**
