@@ -571,6 +571,53 @@ describe("Board API", () => {
     });
   });
 
+  it("GET /api/projects/:id/board includes main workspace workingDir", async () => {
+    const workspaceProjectId = await createProjectDirectly(database, {
+      name: "Workspace Summary Board Project",
+      defaultBranch: null,
+    });
+    const inProgressStatusId = await createStatusDirectly(database, workspaceProjectId, "In Progress", 0);
+    const now = new Date().toISOString();
+    const issueId = randomUUID();
+    const workspaceId = randomUUID();
+    const workingDir = "C:/andrena/.worktrees/feature_ak-249-board-working-dir";
+
+    await database.insert(schema.issues).values({
+      id: issueId,
+      projectId: workspaceProjectId,
+      statusId: inProgressStatusId,
+      issueNumber: 249,
+      title: "Expose workspace workingDir",
+      priority: "medium",
+      issueType: "bug",
+      sortOrder: 0,
+      createdAt: now,
+      updatedAt: now,
+    });
+    await database.insert(schema.workspaces).values({
+      id: workspaceId,
+      issueId,
+      branch: "feature/ak-249-board-working-dir",
+      workingDir,
+      status: "reviewing",
+      isDirect: true,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const res = await app.request(`/api/projects/${workspaceProjectId}/board`);
+    expect(res.status).toBe(200);
+    const body = await res.json() as any;
+    const issue = body.flatMap((column: any) => column.issues).find((item: any) => item.id === issueId);
+
+    expect(issue.workspaceSummary.main).toMatchObject({
+      id: workspaceId,
+      branch: "feature/ak-249-board-working-dir",
+      status: "reviewing",
+      workingDir,
+    });
+  });
+
   it("GET /api/projects/:id/board returns 404 for missing project", async () => {
     const res = await app.request(`/api/projects/${randomUUID()}/board`);
     expect(res.status).toBe(404);
