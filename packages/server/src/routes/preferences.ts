@@ -6,6 +6,7 @@ import {
   preflightAgentProfile,
   type AgentProfilePreflightResult,
 } from "../services/agent-profile-health.service.js";
+import { getMcpHealthSummary, probeMcpHealth } from "../services/mcp-health.service.js";
 import { createRouter } from "../middleware/create-router.js";
 import { parseJsonBody } from "../middleware/parse-body.js";
 import { preferences } from "@agentic-kanban/shared/schema";
@@ -76,6 +77,14 @@ export function createPreferencesRoute(database: Database = db) {
     const prefMap = new Map(prefRows.map((row) => [row.key, row.value]));
     const result: AgentProfilePreflightResult = preflightAgentProfile(prefMap, provider, profileName);
     return c.json(result);
+  });
+
+  router.get("/mcp/health", (c) => {
+    return c.json(getMcpHealthSummary());
+  });
+
+  router.post("/mcp/probe", async (c) => {
+    return c.json(await probeMcpHealth());
   });
 
   return router;

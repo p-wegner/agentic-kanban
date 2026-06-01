@@ -141,6 +141,28 @@ type AgentProfileHealth = {
   } | null;
 };
 
+type McpHealth = {
+  server: {
+    name: string;
+    command: string;
+    args: string[];
+    cwd: string | null;
+    path: string | null;
+  };
+  lastProbe: {
+    ok: boolean;
+    status: "ok" | "warning" | "error" | "unknown";
+    checkedAt: string;
+    durationMs: number;
+    toolCount: number | null;
+    error: {
+      code: "missing_binary" | "bad_cwd" | "timeout" | "malformed_json_rpc" | "process_error";
+      message: string;
+      detail?: string;
+    } | null;
+  } | null;
+};
+
 function uniqueProfiles(profiles: string[], fallback?: string): string[] {
   const all = fallback ? [fallback, ...profiles] : profiles;
   return [...new Set(all.filter(Boolean))];
@@ -452,6 +474,8 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
   const [copilotProfiles, setCopilotProfiles] = useState<string[]>([COPILOT_DEFAULT_PROFILE]);
   const [profileHealth, setProfileHealth] = useState<AgentProfileHealth[]>([]);
   const [preflightingProfileId, setPreflightingProfileId] = useState<string | null>(null);
+  const [mcpHealth, setMcpHealth] = useState<McpHealth | null>(null);
+  const [mcpProbing, setMcpProbing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [tab, setTab] = useState<Tab>("agent");
@@ -527,12 +551,13 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
   useEffect(() => {
     async function load() {
       try {
-        const [data, profileData, codexProfileData, copilotProfileData, profileHealthData, skillsData, tagsData] = await Promise.all([
+        const [data, profileData, codexProfileData, copilotProfileData, profileHealthData, mcpHealthData, skillsData, tagsData] = await Promise.all([
           apiFetch<Record<string, string>>("/api/preferences/settings"),
           apiFetch<{ profiles: string[] }>("/api/preferences/claude-profiles"),
           apiFetch<{ profiles: string[] }>("/api/preferences/codex-profiles"),
           apiFetch<{ profiles: string[] }>("/api/preferences/copilot-profiles").catch(() => ({ profiles: [COPILOT_DEFAULT_PROFILE] })),
           apiFetch<{ profiles: AgentProfileHealth[] }>("/api/preferences/agent-profiles/health").catch(() => ({ profiles: [] })),
+          apiFetch<McpHealth>("/api/preferences/mcp/health").catch(() => null),
           apiFetch<{ id: string; name: string; description: string; prompt: string; model: string | null; projectId: string | null; isBuiltin: boolean }[]>("/api/agent-skills"),
           apiFetch<{ id: string; name: string; color: string | null; isBuiltin: boolean }[]>("/api/tags"),
         ]);
@@ -541,6 +566,7 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
         setCodexProfiles(uniqueProfiles(codexProfileData.profiles, CODEX_DEFAULT_PROFILE));
         setCopilotProfiles(uniqueProfiles(copilotProfileData.profiles, COPILOT_DEFAULT_PROFILE));
         setProfileHealth(profileHealthData.profiles);
+        setMcpHealth(mcpHealthData);
         setSkills(skillsData);
         setTagsList(tagsData);
 
@@ -643,6 +669,19 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
       showToast(err instanceof Error ? err.message : "Preflight failed", "error");
     } finally {
       setPreflightingProfileId(null);
+    }
+  }
+
+  async function handleMcpProbe() {
+    setMcpProbing(true);
+    try {
+      const result = await apiFetch<McpHealth>("/api/preferences/mcp/probe", { method: "POST" });
+      setMcpHealth(result);
+      showToast(result.lastProbe?.ok ? "MCP probe passed" : "MCP probe found issues", result.lastProbe?.ok ? "success" : "error");
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "MCP probe failed", "error");
+    } finally {
+      setMcpProbing(false);
     }
   }
 
@@ -1331,6 +1370,71 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
               {/* MCP Tools tab */}
               {tab === "mcp" && (
                 <div className="space-y-4">
+                  <div className="border border-gray-200 dark:border-gray-700 rounded-md overflow-hidden">
+                    <div className="px-3 py-2 border-b border-gray-200 dark:border-gray-700 flex items-start justify-between gap-3">
+                      <div>
+                        <div className="text-sm font-medium text-gray-800 dark:text-gray-200">MCP connection health</div>
+                        <div className="text-xs text-gray-500 dark:text-gray-400">Validates that the local MCP server starts and responds to tools/list.</div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleMcpProbe}
+                        disabled={mcpProbing}
+                        className="shrink-0 text-xs px-2.5 py-1.5 border border-gray-300 dark:border-gray-600 rounded text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50"
+                      >
+                        {mcpProbing ? "Probing..." : "Probe"}
+                      </button>
+                    </div>
+                    <div className="px-3 py-3 space-y-3">
+                      {mcpHealth ? (
+                        <>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+                            <div>
+                              <div className="text-gray-500 dark:text-gray-400">Server</div>
+                              <div className="font-mono text-gray-800 dark:text-gray-200 break-all">{mcpHealth.server.name}</div>
+                            </div>
+                            <div>
+                              <div className="text-gray-500 dark:text-gray-400">Command</div>
+                              <div className="font-mono text-gray-800 dark:text-gray-200 break-all">{mcpHealth.server.command}</div>
+                            </div>
+                            <div>
+                              <div className="text-gray-500 dark:text-gray-400">Path</div>
+                              <div className="font-mono text-gray-800 dark:text-gray-200 break-all">{mcpHealth.server.path || "not detected"}</div>
+                            </div>
+                            <div>
+                              <div className="text-gray-500 dark:text-gray-400">Working directory</div>
+                              <div className="font-mono text-gray-800 dark:text-gray-200 break-all">{mcpHealth.server.cwd || "current process"}</div>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className={`text-[10px] px-1.5 py-0.5 rounded border ${statusClasses(mcpHealth.lastProbe?.status ?? "unknown")}`}>
+                              {mcpHealth.lastProbe ? mcpHealth.lastProbe.status : "not probed"}
+                            </span>
+                            <span className="text-xs text-gray-500 dark:text-gray-400">
+                              Tool count: {mcpHealth.lastProbe?.toolCount ?? "unknown"}
+                            </span>
+                            {mcpHealth.lastProbe && (
+                              <span className="text-xs text-gray-500 dark:text-gray-400">
+                                Last probe {formatHealthTime(mcpHealth.lastProbe.checkedAt)} in {mcpHealth.lastProbe.durationMs}ms
+                              </span>
+                            )}
+                          </div>
+                          {mcpHealth.lastProbe?.error && (
+                            <div className="space-y-1">
+                              <div className="text-xs font-medium text-red-700 dark:text-red-300">
+                                {mcpHealth.lastProbe.error.code}: {mcpHealth.lastProbe.error.message}
+                              </div>
+                              {mcpHealth.lastProbe.error.detail && (
+                                <div className="text-xs text-red-600 dark:text-red-400 font-mono break-all">{mcpHealth.lastProbe.error.detail}</div>
+                              )}
+                            </div>
+                          )}
+                        </>
+                      ) : (
+                        <div className="text-sm text-gray-500 dark:text-gray-400">MCP health is unavailable.</div>
+                      )}
+                    </div>
+                  </div>
                   <p className="text-xs text-gray-500">
                     Enable or disable individual MCP tools. Disabled tools won't be registered with the MCP server and won't be available to connected AI agents. Requires MCP server restart to take effect.
                   </p>
