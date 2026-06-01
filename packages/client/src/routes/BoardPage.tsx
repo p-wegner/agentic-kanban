@@ -47,6 +47,7 @@ import { registerAction } from "../lib/actions.js";
 import { getAppRouteView, getViewRoutePath } from "../lib/appRoutes.js";
 import { QuickTasksPanel } from "../components/QuickTasksPanel.js";
 import { MergeQueuePanel } from "../components/MergeQueuePanel.js";
+import { RunQueueForecastPanel, buildRunQueueForecast } from "../components/RunQueueForecastPanel.js";
 import { CodemodPanel } from "../components/CodemodPanel.js";
 import { TranscriptSearchPanel } from "../components/TranscriptSearchPanel.js";
 import type { MonitorStatus } from "../components/MonitorPopover.js";
@@ -107,6 +108,7 @@ export function BoardPage() {
   const [showSettings, setShowSettings] = useState(false);
   const [showQuickTasks, setShowQuickTasks] = useState(false);
   const [showMergeQueue, setShowMergeQueue] = useState(false);
+  const [showRunQueueForecast, setShowRunQueueForecast] = useState(false);
   const [showCodemod, setShowCodemod] = useState(false);
   const [showWorktreeOverview, setShowWorktreeOverview] = useState(false);
   const [showAllWorkspaces, setShowAllWorkspaces] = useState(false);
@@ -1047,6 +1049,10 @@ export function BoardPage() {
         .map((i) => ({ id: i.id, issueNumber: i.issueNumber, title: i.title })),
     [columns],
   );
+  const runQueueForecast = useMemo(
+    () => buildRunQueueForecast(columns, nudgeWipLimit),
+    [columns, nudgeWipLimit],
+  );
 
   const handleMentionClick = useCallback(
     (issueId: string) => {
@@ -1127,6 +1133,10 @@ export function BoardPage() {
         }
         if (showQuickTasks) {
           setShowQuickTasks(false);
+          return;
+        }
+        if (showRunQueueForecast) {
+          setShowRunQueueForecast(false);
           return;
         }
         if (showCodemod) {
@@ -1224,7 +1234,7 @@ export function BoardPage() {
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [searchQuery, showCommandPalette, showAllWorkspaces, showTranscriptSearch, showWorktreeOverview, showShortcutHelp, showQuickTasks, showCodemod, filteredColumns, columns, handleViewModeChange, setShowQuickTasks, setShowSettings]);
+  }, [searchQuery, showCommandPalette, showAllWorkspaces, showTranscriptSearch, showWorktreeOverview, showShortcutHelp, showQuickTasks, showRunQueueForecast, showCodemod, filteredColumns, columns, handleViewModeChange, setShowQuickTasks, setShowSettings]);
 
   // Register command palette actions
   useEffect(() => {
@@ -1340,6 +1350,15 @@ export function BoardPage() {
       shortcut: "q",
       category: "board",
       handler: () => setShowQuickTasks(true),
+    }));
+
+    unregisters.push(registerAction({
+      id: "run-queue-forecast",
+      label: "Run Queue Forecast",
+      description: "View active-agent capacity and the next likely starts",
+      icon: "▥",
+      category: "board",
+      handler: () => setShowRunQueueForecast(true),
     }));
 
     unregisters.push(registerAction({
@@ -1558,6 +1577,8 @@ export function BoardPage() {
             const ws = i.workspaceSummary?.main;
             return i.statusName === "In Review" && ws && ws.status !== "closed";
           }).length}
+          onShowRunQueueForecast={() => setShowRunQueueForecast(true)}
+          runQueueOpenSlots={runQueueForecast.openSlots}
         />
         {viewMode === "kanban" && selectedBoardIssues.length > 0 && (
           <div
@@ -1966,6 +1987,17 @@ export function BoardPage() {
           }}
           onMerged={() => {
             refetchBoard();
+          }}
+        />
+      )}
+      {showRunQueueForecast && (
+        <RunQueueForecastPanel
+          columns={columns}
+          activeTarget={nudgeWipLimit}
+          onClose={() => setShowRunQueueForecast(false)}
+          onIssueClick={(issue) => {
+            setSelectedIssue(issue);
+            setShowRunQueueForecast(false);
           }}
         />
       )}
