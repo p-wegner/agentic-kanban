@@ -250,4 +250,72 @@ describe("board-status", () => {
     });
     expect(status.totals.inProgress).toBe(1);
   });
+
+  it("counts fixing workspaces with running sessions as active capacity", async () => {
+    const { db } = createTestDb();
+    const now = new Date().toISOString();
+    const projectId = randomUUID();
+    const statusId = randomUUID();
+    const issueId = randomUUID();
+    const workspaceId = randomUUID();
+    const sessionId = randomUUID();
+
+    getDiffShortstat.mockResolvedValue({ filesChanged: 1, insertions: 2, deletions: 0 });
+
+    await db.insert(projects).values({
+      id: projectId,
+      name: "Fixing Project",
+      repoPath: "/tmp/fixing-project",
+      repoName: "fixing-project",
+      defaultBranch: "main",
+      createdAt: now,
+      updatedAt: now,
+    });
+    await db.insert(projectStatuses).values({
+      id: statusId,
+      projectId,
+      name: "In Progress",
+      sortOrder: 0,
+      isDefault: true,
+      createdAt: now,
+    });
+    await db.insert(issues).values({
+      id: issueId,
+      issueNumber: 240,
+      title: "Fix merge conflict",
+      statusId,
+      projectId,
+      createdAt: now,
+      updatedAt: now,
+    });
+    await db.insert(workspaces).values({
+      id: workspaceId,
+      issueId,
+      branch: "feature/fixing",
+      workingDir: "/tmp/fixing-project/.worktrees/fixing",
+      baseBranch: "main",
+      status: "fixing",
+      createdAt: now,
+      updatedAt: now,
+    });
+    await db.insert(sessions).values({
+      id: sessionId,
+      workspaceId,
+      executor: "codex",
+      status: "running",
+      startedAt: now,
+    });
+
+    const status = await getBoardStatus({ projectId }, db);
+
+    expect(status.totals).toMatchObject({
+      activeWorkspaces: 1,
+      runningSessions: 1,
+    });
+    expect(status.issues[0]).toMatchObject({
+      issueNumber: 240,
+      workspace: { status: "fixing" },
+      session: { status: "running" },
+    });
+  });
 });

@@ -10,6 +10,7 @@ import { isAnalyticsNoise } from "./session-filter.js";
 // In-memory conflict cache: workspaceId → { result, timestamp }
 const conflictCache = new Map<string, { result: { hasConflicts: boolean; conflictingFiles: string[] }; ts: number }>();
 const CONFLICT_CACHE_TTL = 60_000; // 60 seconds
+const ACTIVE_CAPACITY_WORKSPACE_STATUSES = new Set(["active", "fixing", "reviewing"]);
 
 function isZeroDiff(stats: BoardStatusIssue["diffStats"]): boolean {
   return !!stats && stats.filesChanged === 0 && stats.insertions === 0 && stats.deletions === 0;
@@ -157,7 +158,7 @@ export async function getBoardStatus(
   for (const issue of projectIssues) {
     const wsForIssue = wsByIssue.get(issue.id) ?? [];
     const mainWs = wsForIssue.sort((a, b) => {
-      const p = (s: string) => s === "active" ? 0 : s === "reviewing" ? 1 : s === "awaiting-plan-approval" ? 2 : s === "idle" ? 3 : 4;
+      const p = (s: string) => s === "active" ? 0 : s === "fixing" ? 1 : s === "reviewing" ? 2 : s === "awaiting-plan-approval" ? 3 : s === "idle" ? 4 : 5;
       return p(a.status) - p(b.status) || (b.updatedAt ?? "").localeCompare(a.updatedAt ?? "");
     })[0] ?? null;
     const workflowStatusName = mainWs?.status !== "closed" && mainWs?.currentNodeId
@@ -321,7 +322,7 @@ export async function getBoardStatus(
     totals: {
       totalIssues: projectIssues.length,
       inProgress: result.filter(i => i.statusName === "In Progress" || i.statusName === "In Review").length,
-      activeWorkspaces: wsRows.filter(w => w.status === "active" || w.status === "reviewing").length,
+      activeWorkspaces: wsRows.filter(w => ACTIVE_CAPACITY_WORKSPACE_STATUSES.has(w.status)).length,
       runningSessions: sessionRows.filter(s => s.status === "running").length,
     },
     issues: result,
