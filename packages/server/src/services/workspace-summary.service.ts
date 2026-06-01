@@ -60,6 +60,7 @@ export type WorkspaceSummary = {
       currentNodeId: string;
       currentNodeName: string;
       currentNodeType: string;
+      currentNodeStatusName: string | null;
       state: "active" | "waiting" | "terminal";
       nextStages: string[];
     } | null;
@@ -316,6 +317,7 @@ export async function buildWorkspaceSummaryMap(
         id: workflowNodes.id,
         name: workflowNodes.name,
         nodeType: workflowNodes.nodeType,
+        statusName: workflowNodes.statusName,
       })
       .from(workflowNodes)
       .where(inArray(workflowNodes.id, currentNodeIds));
@@ -361,6 +363,7 @@ export async function buildWorkspaceSummaryMap(
         currentNodeId: currentNode.id,
         currentNodeName: currentNode.name,
         currentNodeType: currentNode.nodeType,
+        currentNodeStatusName: currentNode.statusName,
         state: isTerminal ? "terminal" : isRunning ? "active" : "waiting",
         nextStages,
       };

@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { issues, projects, projectStatuses, sessionMessages, sessions, workspaces } from "@agentic-kanban/shared/schema";
+import { issues, projects, projectStatuses, sessionMessages, sessions, workflowNodes, workflowTemplates, workspaces } from "@agentic-kanban/shared/schema";
 import { createTestDb } from "./helpers/test-db.js";
 
 const getDiffShortstat = vi.fn();
@@ -148,5 +148,106 @@ describe("board-status", () => {
 
     expect(status.issues[0]?.workspace?.readyForMerge).toBe(true);
     expect(status.issues[0]?.attention).toBeNull();
+  });
+
+  it("reports active workflow Review progress as In Review even if the issue status is stale", async () => {
+    const { db } = createTestDb();
+    const now = new Date().toISOString();
+    const projectId = randomUUID();
+    const inProgressStatusId = randomUUID();
+    const inReviewStatusId = randomUUID();
+    const issueId = randomUUID();
+    const workspaceId = randomUUID();
+    const templateId = randomUUID();
+    const implementNodeId = randomUUID();
+    const reviewNodeId = randomUUID();
+
+    await db.insert(projects).values({
+      id: projectId,
+      name: "Workflow Status Project",
+      repoPath: "/tmp/workflow-status-project",
+      repoName: "workflow-status-project",
+      defaultBranch: "main",
+      createdAt: now,
+      updatedAt: now,
+    });
+    await db.insert(projectStatuses).values([
+      {
+        id: inProgressStatusId,
+        projectId,
+        name: "In Progress",
+        sortOrder: 0,
+        isDefault: true,
+        createdAt: now,
+      },
+      {
+        id: inReviewStatusId,
+        projectId,
+        name: "In Review",
+        sortOrder: 1,
+        isDefault: false,
+        createdAt: now,
+      },
+    ]);
+    await db.insert(workflowTemplates).values({
+      id: templateId,
+      projectId,
+      name: "Implement Review",
+      isDefault: false,
+      isBuiltin: false,
+      createdAt: now,
+      updatedAt: now,
+    });
+    await db.insert(workflowNodes).values([
+      {
+        id: implementNodeId,
+        templateId,
+        name: "Implement",
+        nodeType: "normal",
+        statusName: "In Progress",
+        sortOrder: 0,
+        createdAt: now,
+      },
+      {
+        id: reviewNodeId,
+        templateId,
+        name: "Review",
+        nodeType: "normal",
+        statusName: "In Review",
+        sortOrder: 1,
+        createdAt: now,
+      },
+    ] as any);
+    await db.insert(issues).values({
+      id: issueId,
+      issueNumber: 244,
+      title: "Workflow status drift",
+      statusId: inProgressStatusId,
+      projectId,
+      workflowTemplateId: templateId,
+      currentNodeId: implementNodeId,
+      createdAt: now,
+      updatedAt: now,
+    });
+    await db.insert(workspaces).values({
+      id: workspaceId,
+      issueId,
+      branch: "feature/workflow-status-drift",
+      status: "idle",
+      currentNodeId: reviewNodeId,
+      readyForMerge: false,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const status = await getBoardStatus({ projectId }, db);
+
+    expect(status.issues).toHaveLength(1);
+    expect(status.issues[0]).toMatchObject({
+      issueNumber: 244,
+      statusName: "In Review",
+      workspace: { id: workspaceId, status: "idle" },
+    });
+    expect(status.totals.inProgress).toBe(1);
   });
 });

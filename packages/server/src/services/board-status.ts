@@ -109,6 +109,21 @@ export async function getBoardStatus(
 
   // 4. Get workspaces for these issues
   const wsRows = await database.select().from(workspaces).where(inArray(workspaces.issueId, issueIds));
+  const currentNodeIds = [
+    ...new Set(
+      wsRows
+        .filter((w) => w.status !== "closed" && w.currentNodeId)
+        .map((w) => w.currentNodeId as string),
+    ),
+  ];
+  const currentNodeStatuses = currentNodeIds.length > 0
+    ? await database
+        .select({ id: workflowNodes.id, statusName: workflowNodes.statusName })
+        .from(workflowNodes)
+        .where(inArray(workflowNodes.id, currentNodeIds))
+    : [];
+  const currentNodeStatusById = new Map(currentNodeStatuses.map((node) => [node.id, node.statusName]));
+  const statusByName = new Map(statuses.map((status) => [status.name.toLowerCase(), status]));
 
   // 5. Get sessions for these workspaces
   const wsIds = wsRows.map(w => w.id);
@@ -145,6 +160,12 @@ export async function getBoardStatus(
       const p = (s: string) => s === "active" ? 0 : s === "reviewing" ? 1 : s === "awaiting-plan-approval" ? 2 : s === "idle" ? 3 : 4;
       return p(a.status) - p(b.status) || (b.updatedAt ?? "").localeCompare(a.updatedAt ?? "");
     })[0] ?? null;
+    const workflowStatusName = mainWs?.status !== "closed" && mainWs?.currentNodeId
+      ? currentNodeStatusById.get(mainWs.currentNodeId)
+      : null;
+    const effectiveStatusName = workflowStatusName
+      ? statusByName.get(workflowStatusName.toLowerCase())?.name ?? issue.statusName
+      : issue.statusName;
 
     const mainSessions = mainWs ? (sessionsByWs.get(mainWs.id) ?? []) : [];
     // Prefer the latest non-noise session for analytics; fall back to latest overall
@@ -173,7 +194,7 @@ export async function getBoardStatus(
       title: issue.title,
       priority: issue.priority,
       issueType: issue.issueType,
-      statusName: issue.statusName,
+      statusName: effectiveStatusName,
       workspace: mainWs ? {
         id: mainWs.id, branch: mainWs.branch, status: mainWs.status,
         workingDir: mainWs.workingDir, baseBranch: mainWs.baseBranch, isDirect: mainWs.isDirect,
@@ -299,7 +320,7 @@ export async function getBoardStatus(
     generatedAt: new Date().toISOString(),
     totals: {
       totalIssues: projectIssues.length,
-      inProgress: projectIssues.filter(i => i.statusName === "In Progress" || i.statusName === "In Review").length,
+      inProgress: result.filter(i => i.statusName === "In Progress" || i.statusName === "In Review").length,
       activeWorkspaces: wsRows.filter(w => w.status === "active" || w.status === "reviewing").length,
       runningSessions: sessionRows.filter(s => s.status === "running").length,
     },
