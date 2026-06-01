@@ -1,5 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { SERVER_URL } from "../helpers/port.js";
+import { getE2EProjectId } from "../helpers/e2e-project.js";
 
 /**
  * Diff viewer E2E tests.
@@ -13,6 +14,37 @@ import { SERVER_URL } from "../helpers/port.js";
  * git changes.
  */
 
+/** Bounded polling helper — retries `fn` until it returns truthy or attempts exhaust. */
+async function pollUntil<T>(
+  fn: () => Promise<T>,
+  opts: { attempts?: number; delayMs?: number; label?: string } = {},
+): Promise<T | null> {
+  const { attempts = 10, delayMs = 1000, label = "poll" } = opts;
+  for (let i = 0; i < attempts; i++) {
+    const result = await fn();
+    if (result) return result;
+    await new Promise((r) => setTimeout(r, delayMs));
+  }
+  return null;
+}
+
+/** Fetch workspace diff and assert it has file changes. Throws with diagnostics on failure. */
+async function expectDiffWithChanges(
+  request: import("@playwright/test").APIRequestContext,
+  workspaceId: string,
+) {
+  const res = await request.get(
+    `${SERVER_URL}/api/workspaces/${workspaceId}/diff`,
+  );
+  expect(res.ok(), `GET /diff returned ${res.status()} for workspace ${workspaceId}`).toBeTruthy();
+  const data = await res.json();
+  expect(
+    data.stats?.filesChanged,
+    `Diff has no file changes for workspace ${workspaceId} — agent commit may have failed`,
+  ).toBeGreaterThan(0);
+  return data;
+}
+
 test.describe("Diff Viewer UI", () => {
   let projectId: string;
   let todoStatusId: string;
@@ -20,13 +52,12 @@ test.describe("Diff Viewer UI", () => {
   const createdIssueIds: string[] = [];
 
   test.beforeAll(async ({ request }) => {
-    const projectsRes = await request.get(`${SERVER_URL}/api/projects`);
-    const projects = await projectsRes.json();
-    projectId = projects[0].id;
+    projectId = await getE2EProjectId(request);
 
     const statusesRes = await request.get(
       `${SERVER_URL}/api/projects/${projectId}/statuses`,
     );
+    expect(statusesRes.ok(), `GET statuses returned ${statusesRes.status()}`).toBeTruthy();
     const statuses = await statusesRes.json();
     const todoStatus = statuses.find((s: { name: string }) => s.name === "Todo");
     todoStatusId = todoStatus ? todoStatus.id : statuses[0].id;
@@ -88,30 +119,34 @@ test.describe("Diff Viewer UI", () => {
       const issueRes = await request.post(`${SERVER_URL}/api/issues`, {
         data: { title: issueTitle, statusId: todoStatusId, projectId },
       });
+      expect(issueRes.ok(), `Create issue returned ${issueRes.status()}`).toBeTruthy();
       const issueId = (await issueRes.json()).id;
       createdIssueIds.push(issueId);
 
       const wsRes = await request.post(`${SERVER_URL}/api/workspaces`, {
         data: { issueId, branch: branchName },
       });
+      expect(wsRes.ok(), `Create workspace returned ${wsRes.status()}`).toBeTruthy();
       const workspace = await wsRes.json();
       workspaceId = workspace.id;
       createdWorkspaceIds.push(workspaceId);
 
-      // Wait for setup (retry loop)
-      let setupOk = false;
-      for (let attempt = 0; attempt < 3; attempt++) {
-        try {
-          const r = await request.post(
-            `${SERVER_URL}/api/workspaces/${workspaceId}/setup`,
-            { data: {} },
-          );
-          if (r.ok()) { setupOk = true; break; }
-        } catch { /* retry */ }
-        await new Promise((r) => setTimeout(r, 500));
-      }
-
-      if (!setupOk) return; // tests in this group will call test.skip()
+      // Wait for setup (bounded polling)
+      const setupOk = await pollUntil(
+        async () => {
+          try {
+            const r = await request.post(
+              `${SERVER_URL}/api/workspaces/${workspaceId}/setup`,
+              { data: {} },
+            );
+            return r.ok();
+          } catch {
+            return false;
+          }
+        },
+        { attempts: 6, delayMs: 500, label: "workspace setup" },
+      );
+      expect(setupOk, `Workspace setup failed after 6 attempts for ${workspaceId}`).toBeTruthy();
 
       // Commit a file change in the worktree so the diff is non-empty
       const addFileRes = await request.post(
@@ -127,26 +162,30 @@ test.describe("Diff Viewer UI", () => {
       // POST /turn returns 409 if agent already running — that's fine for setup
       // We just need to wait for the commit to land; poll the diff endpoint
       if (addFileRes.ok()) {
-        for (let i = 0; i < 20; i++) {
-          await new Promise((r) => setTimeout(r, 1500));
-          const diffRes = await request.get(
-            `${SERVER_URL}/api/workspaces/${workspaceId}/diff`,
-          );
-          if (diffRes.ok()) {
-            const d = await diffRes.json();
-            if (d.stats?.filesChanged > 0) break;
-          }
-        }
+        const diffReady = await pollUntil(
+          async () => {
+            try {
+              const diffRes = await request.get(
+                `${SERVER_URL}/api/workspaces/${workspaceId}/diff`,
+              );
+              if (!diffRes.ok()) return false;
+              const d = await diffRes.json();
+              return d.stats?.filesChanged > 0;
+            } catch {
+              return false;
+            }
+          },
+          { attempts: 20, delayMs: 1500, label: "diff availability" },
+        );
+        expect(
+          diffReady,
+          `Diff never became available after agent commit for workspace ${workspaceId}`,
+        ).toBeTruthy();
       }
     });
 
     test("View Diff button shows diff stats header", async ({ page, request }) => {
-      const diffCheck = await request.get(
-        `${SERVER_URL}/api/workspaces/${workspaceId}/diff`,
-      );
-      if (!diffCheck.ok()) { test.skip(); return; }
-      const d = await diffCheck.json();
-      if (!d.stats || d.stats.filesChanged === 0) { test.skip(); return; }
+      const d = await expectDiffWithChanges(request, workspaceId);
 
       await page.goto("/");
       await page.waitForSelector("h2");
@@ -170,12 +209,7 @@ test.describe("Diff Viewer UI", () => {
     });
 
     test("file tree shows changed file and is expandable", async ({ page, request }) => {
-      const diffCheck = await request.get(
-        `${SERVER_URL}/api/workspaces/${workspaceId}/diff`,
-      );
-      if (!diffCheck.ok()) { test.skip(); return; }
-      const d = await diffCheck.json();
-      if (!d.stats || d.stats.filesChanged === 0) { test.skip(); return; }
+      await expectDiffWithChanges(request, workspaceId);
 
       await page.goto("/");
       await page.waitForSelector("h2");
@@ -201,12 +235,7 @@ test.describe("Diff Viewer UI", () => {
     });
 
     test("diff content shows added lines", async ({ page, request }) => {
-      const diffCheck = await request.get(
-        `${SERVER_URL}/api/workspaces/${workspaceId}/diff`,
-      );
-      if (!diffCheck.ok()) { test.skip(); return; }
-      const d = await diffCheck.json();
-      if (!d.stats || d.stats.filesChanged === 0) { test.skip(); return; }
+      await expectDiffWithChanges(request, workspaceId);
 
       await page.goto("/");
       await page.waitForSelector("h2");
@@ -221,12 +250,7 @@ test.describe("Diff Viewer UI", () => {
     });
 
     test("Unified/Split view toggle switches rendering", async ({ page, request }) => {
-      const diffCheck = await request.get(
-        `${SERVER_URL}/api/workspaces/${workspaceId}/diff`,
-      );
-      if (!diffCheck.ok()) { test.skip(); return; }
-      const d = await diffCheck.json();
-      if (!d.stats || d.stats.filesChanged === 0) { test.skip(); return; }
+      await expectDiffWithChanges(request, workspaceId);
 
       await page.goto("/");
       await page.waitForSelector("h2");
@@ -246,155 +270,14 @@ test.describe("Diff Viewer UI", () => {
       await page.locator('button:has-text("Unified")').click();
       await expect(page.locator("table")).not.toBeVisible({ timeout: 2000 });
     });
-  });
-
-  // ---------------------------------------------------------------------------
-  // Comment CRUD — use a direct workspace so no git worktree is needed
-  // ---------------------------------------------------------------------------
-
-  test.describe("comment CRUD", () => {
-    let workspaceId: string;
-    let issueTitle: string;
-    let branchName: string;
-
-    test.beforeAll(async ({ request }) => {
-      const suffix = Date.now().toString(36);
-      issueTitle = `DiffCommentTest ${suffix}`;
-      branchName = `feature/diff-comment-${suffix}`;
-
-      const issueRes = await request.post(`${SERVER_URL}/api/issues`, {
-        data: { title: issueTitle, statusId: todoStatusId, projectId },
-      });
-      const issueId = (await issueRes.json()).id;
-      createdIssueIds.push(issueId);
-
-      // Create a worktree workspace (diff endpoint requires a real workspace)
-      const wsRes = await request.post(`${SERVER_URL}/api/workspaces`, {
-        data: { issueId, branch: branchName },
-      });
-      const workspace = await wsRes.json();
-      workspaceId = workspace.id;
-      createdWorkspaceIds.push(workspaceId);
-
-      // Wait for worktree setup
-      for (let attempt = 0; attempt < 3; attempt++) {
-        try {
-          const r = await request.post(
-            `${SERVER_URL}/api/workspaces/${workspaceId}/setup`,
-            { data: {} },
-          );
-          if (r.ok()) break;
-        } catch { /* retry */ }
-        await new Promise((r) => setTimeout(r, 500));
-      }
-    });
-
-    test("comment count badge appears in diff viewer header", async ({
-      page,
-      request,
-    }) => {
-      // Seed a comment directly via API
-      const commentRes = await request.post(
-        `${SERVER_URL}/api/workspaces/${workspaceId}/comments`,
-        {
-          data: {
-            filePath: "src/example.ts",
-            lineNumNew: 1,
-            side: "new",
-            body: "API-seeded comment for badge test",
-          },
-        },
-      );
-      expect(commentRes.status()).toBe(201);
-      const comment = await commentRes.json();
-
-      try {
-        await page.goto("/");
-        await page.waitForSelector("h2");
-
-        await openWorkspacePanel(page, issueTitle, branchName);
-
-        await expect(
-          page.locator('button:has-text("View Diff")'),
-        ).toBeVisible({ timeout: 5000 });
-        await page.locator('button:has-text("View Diff")').click();
-
-        // Wait for diff viewer to appear (may show "No changes to show" if branch is empty)
-        const diffViewer = page
-          .locator(".border.border-gray-300.rounded")
-          .or(page.locator("text=No changes to show"))
-          .first();
-        await expect(diffViewer).toBeVisible({ timeout: 5000 });
-
-        // The diff header shows comment count when comments exist
-        // It's loaded from the diff endpoint which includes comments
-        await expect(
-          page.locator("text=/1 comment/"),
-        ).toBeVisible({ timeout: 3000 });
-      } finally {
-        // Clean up comment
-        await request.delete(
-          `${SERVER_URL}/api/workspaces/${workspaceId}/comments/${comment.id}`,
-        );
-      }
-    });
-
-    test("comment shows timestamp", async ({ page, request }) => {
-      const commentRes = await request.post(
-        `${SERVER_URL}/api/workspaces/${workspaceId}/comments`,
-        {
-          data: {
-            filePath: "src/example.ts",
-            lineNumNew: 2,
-            side: "new",
-            body: "Timestamp display test comment",
-          },
-        },
-      );
-      expect(commentRes.status()).toBe(201);
-      const comment = await commentRes.json();
-
-      try {
-        await page.goto("/");
-        await page.waitForSelector("h2");
-
-        await openWorkspacePanel(page, issueTitle, branchName);
-        await page.locator('button:has-text("View Diff")').click();
-
-        const diffViewer = page
-          .locator(".border.border-gray-300.rounded")
-          .or(page.locator("text=No changes to show"))
-          .first();
-        await expect(diffViewer).toBeVisible({ timeout: 5000 });
-
-        // Comment block should be visible with the body text
-        await expect(page.locator("text=Timestamp display test comment")).toBeVisible({ timeout: 3000 });
-
-        // Timestamp should be shown in the comment block (formatted date/time)
-        const commentBlock = page.locator(".bg-yellow-50").filter({ hasText: "Timestamp display test comment" }).first();
-        // The timestamp span renders a short date-time string (non-empty)
-        const timestampEl = commentBlock.locator("span.text-gray-400").first();
-        await expect(timestampEl).toBeVisible({ timeout: 2000 });
-        const timestampText = await timestampEl.textContent();
-        expect(timestampText?.trim().length).toBeGreaterThan(0);
-      } finally {
-        await request.delete(
-          `${SERVER_URL}/api/workspaces/${workspaceId}/comments/${comment.id}`,
-        );
-      }
-    });
 
     test("comment create via UI: click diff line, type comment, submit", async ({
       page,
       request,
     }) => {
-      // This test requires actual diff content to have clickable lines.
-      const diffCheck = await request.get(
-        `${SERVER_URL}/api/workspaces/${workspaceId}/diff`,
-      );
-      if (!diffCheck.ok()) { test.skip(); return; }
-      const diffData = await diffCheck.json();
-      if (!diffData.diff || !diffData.stats?.filesChanged) { test.skip(); return; }
+      // This test lives in the "with real diff" block because it requires
+      // actual diff content to click on diff lines.
+      await expectDiffWithChanges(request, workspaceId);
 
       await page.goto("/");
       await page.waitForSelector("h2");
@@ -450,6 +333,150 @@ test.describe("Diff Viewer UI", () => {
         }
       }
     });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Comment CRUD — use a worktree workspace so comments work via API
+  // ---------------------------------------------------------------------------
+
+  test.describe("comment CRUD", () => {
+    let workspaceId: string;
+    let issueTitle: string;
+    let branchName: string;
+
+    test.beforeAll(async ({ request }) => {
+      const suffix = Date.now().toString(36);
+      issueTitle = `DiffCommentTest ${suffix}`;
+      branchName = `feature/diff-comment-${suffix}`;
+
+      const issueRes = await request.post(`${SERVER_URL}/api/issues`, {
+        data: { title: issueTitle, statusId: todoStatusId, projectId },
+      });
+      expect(issueRes.ok(), `Create issue returned ${issueRes.status()}`).toBeTruthy();
+      const issueId = (await issueRes.json()).id;
+      createdIssueIds.push(issueId);
+
+      // Create a worktree workspace (diff endpoint requires a real workspace)
+      const wsRes = await request.post(`${SERVER_URL}/api/workspaces`, {
+        data: { issueId, branch: branchName },
+      });
+      expect(wsRes.ok(), `Create workspace returned ${wsRes.status()}`).toBeTruthy();
+      const workspace = await wsRes.json();
+      workspaceId = workspace.id;
+      createdWorkspaceIds.push(workspaceId);
+
+      // Wait for worktree setup (bounded polling)
+      const setupOk = await pollUntil(
+        async () => {
+          try {
+            const r = await request.post(
+              `${SERVER_URL}/api/workspaces/${workspaceId}/setup`,
+              { data: {} },
+            );
+            return r.ok();
+          } catch {
+            return false;
+          }
+        },
+        { attempts: 6, delayMs: 500, label: "comment workspace setup" },
+      );
+      expect(setupOk, `Workspace setup failed after 6 attempts for comment workspace ${workspaceId}`).toBeTruthy();
+    });
+
+    test("comment count badge appears in diff viewer header", async ({
+      page,
+      request,
+    }) => {
+      // Seed a comment directly via API
+      const commentRes = await request.post(
+        `${SERVER_URL}/api/workspaces/${workspaceId}/comments`,
+        {
+          data: {
+            filePath: "src/example.ts",
+            lineNumNew: 1,
+            side: "new",
+            body: "API-seeded comment for badge test",
+          },
+        },
+      );
+      expect(commentRes.status(), `Seed comment returned ${commentRes.status()}`).toBe(201);
+      const comment = await commentRes.json();
+
+      try {
+        await page.goto("/");
+        await page.waitForSelector("h2");
+
+        await openWorkspacePanel(page, issueTitle, branchName);
+
+        await expect(
+          page.locator('button:has-text("View Diff")'),
+        ).toBeVisible({ timeout: 5000 });
+        await page.locator('button:has-text("View Diff")').click();
+
+        // Wait for diff viewer to appear (may show "No changes to show" if branch is empty)
+        const diffViewer = page
+          .locator(".border.border-gray-300.rounded")
+          .or(page.locator("text=No changes to show"))
+          .first();
+        await expect(diffViewer).toBeVisible({ timeout: 5000 });
+
+        // The diff header shows comment count when comments exist
+        // It's loaded from the diff endpoint which includes comments
+        await expect(
+          page.locator("text=/1 comment/"),
+        ).toBeVisible({ timeout: 3000 });
+      } finally {
+        // Clean up comment
+        await request.delete(
+          `${SERVER_URL}/api/workspaces/${workspaceId}/comments/${comment.id}`,
+        );
+      }
+    });
+
+    test("comment shows timestamp", async ({ page, request }) => {
+      const commentRes = await request.post(
+        `${SERVER_URL}/api/workspaces/${workspaceId}/comments`,
+        {
+          data: {
+            filePath: "src/example.ts",
+            lineNumNew: 2,
+            side: "new",
+            body: "Timestamp display test comment",
+          },
+        },
+      );
+      expect(commentRes.status(), `Seed comment returned ${commentRes.status()}`).toBe(201);
+      const comment = await commentRes.json();
+
+      try {
+        await page.goto("/");
+        await page.waitForSelector("h2");
+
+        await openWorkspacePanel(page, issueTitle, branchName);
+        await page.locator('button:has-text("View Diff")').click();
+
+        const diffViewer = page
+          .locator(".border.border-gray-300.rounded")
+          .or(page.locator("text=No changes to show"))
+          .first();
+        await expect(diffViewer).toBeVisible({ timeout: 5000 });
+
+        // Comment block should be visible with the body text
+        await expect(page.locator("text=Timestamp display test comment")).toBeVisible({ timeout: 3000 });
+
+        // Timestamp should be shown in the comment block (formatted date/time)
+        const commentBlock = page.locator(".bg-yellow-50").filter({ hasText: "Timestamp display test comment" }).first();
+        // The timestamp span renders a short date-time string (non-empty)
+        const timestampEl = commentBlock.locator("span.text-gray-400").first();
+        await expect(timestampEl).toBeVisible({ timeout: 2000 });
+        const timestampText = await timestampEl.textContent();
+        expect(timestampText?.trim().length).toBeGreaterThan(0);
+      } finally {
+        await request.delete(
+          `${SERVER_URL}/api/workspaces/${workspaceId}/comments/${comment.id}`,
+        );
+      }
+    });
 
     test("comment edit and delete via UI", async ({ page, request }) => {
       // Seed a comment via API
@@ -464,7 +491,7 @@ test.describe("Diff Viewer UI", () => {
           },
         },
       );
-      if (!seedRes.ok()) { test.skip(); return; }
+      expect(seedRes.ok(), `Seed comment returned ${seedRes.status()} for workspace ${workspaceId}`).toBeTruthy();
       const seededComment = await seedRes.json();
 
       // Reload the diff in the UI so it picks up the seeded comment.
