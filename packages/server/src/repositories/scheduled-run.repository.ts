@@ -1,5 +1,5 @@
-import { scheduledRuns } from "@agentic-kanban/shared/schema";
-import { eq } from "drizzle-orm";
+import { scheduledRunHistory, scheduledRuns } from "@agentic-kanban/shared/schema";
+import { desc, eq } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 
@@ -71,5 +71,63 @@ export async function deleteScheduledRun(
   id: string,
   database: Database = db,
 ) {
+  await database.delete(scheduledRunHistory).where(eq(scheduledRunHistory.scheduledRunId, id));
   await database.delete(scheduledRuns).where(eq(scheduledRuns.id, id));
+}
+
+export async function createScheduledRunHistory(
+  input: {
+    id: string;
+    scheduledRunId: string;
+    projectId: string;
+    status: string;
+    reason: string | null;
+    triggeredBy: string;
+    issueId: string | null;
+    workspaceId: string | null;
+    startedAt: string;
+    completedAt: string | null;
+  },
+  database: Database = db,
+) {
+  const now = new Date().toISOString();
+  await database.insert(scheduledRunHistory).values({
+    ...input,
+    createdAt: now,
+  });
+  return getScheduledRunHistoryById(input.id, database);
+}
+
+export async function updateScheduledRunHistory(
+  id: string,
+  updates: Record<string, unknown>,
+  database: Database = db,
+) {
+  await database.update(scheduledRunHistory).set(updates).where(eq(scheduledRunHistory.id, id));
+  return getScheduledRunHistoryById(id, database);
+}
+
+export async function getScheduledRunHistoryById(
+  id: string,
+  database: Database = db,
+) {
+  const rows = await database
+    .select()
+    .from(scheduledRunHistory)
+    .where(eq(scheduledRunHistory.id, id))
+    .limit(1);
+  return rows[0] ?? null;
+}
+
+export async function getScheduledRunHistoryByProject(
+  projectId: string,
+  limit = 50,
+  database: Database = db,
+) {
+  return database
+    .select()
+    .from(scheduledRunHistory)
+    .where(eq(scheduledRunHistory.projectId, projectId))
+    .orderBy(desc(scheduledRunHistory.startedAt))
+    .limit(limit);
 }
