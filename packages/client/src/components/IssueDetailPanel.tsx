@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import type { IssueArtifact, IssueWithStatus, UpdateIssueRequest, DependencyInfo } from "@agentic-kanban/shared";
 import { apiFetch } from "../lib/api.js";
+import { isHttpUrl } from "../lib/url.js";
 import { formatRelativeTime } from "../lib/formatRelativeTime.js";
 import { showToast } from "./Toast.js";
 import { MoveToDoneDialog } from "./MoveToDoneDialog.js";
@@ -301,6 +302,8 @@ export function IssueDetailPanel({
   const [issueType, setIssueType] = useState(issue.issueType ?? "task");
   const [estimate, setEstimate] = useState<string>(issue.estimate ?? "");
   const [dueDate, setDueDate] = useState<string>(issue.dueDate ?? "");
+  const [externalKey, setExternalKey] = useState<string>(issue.externalKey ?? "");
+  const [externalUrl, setExternalUrl] = useState<string>(issue.externalUrl ?? "");
   const [skipAutoReview, setSkipAutoReview] = useState(issue.skipAutoReview ?? false);
   const [saving, setSaving] = useState(false);
   const depTypeRef = useRef<HTMLSelectElement>(null);
@@ -343,6 +346,8 @@ export function IssueDetailPanel({
     issueType !== (issue.issueType ?? "task") ||
     estimate !== (issue.estimate ?? "") ||
     dueDate !== (issue.dueDate ?? "") ||
+    externalKey !== (issue.externalKey ?? "") ||
+    externalUrl !== (issue.externalUrl ?? "") ||
     skipAutoReview !== (issue.skipAutoReview ?? false)
   );
 
@@ -397,6 +402,9 @@ export function IssueDetailPanel({
       setDescription(issue.description ?? "");
       setIssueType(issue.issueType ?? "task");
       setEstimate(issue.estimate ?? "");
+      setDueDate(issue.dueDate ?? "");
+      setExternalKey(issue.externalKey ?? "");
+      setExternalUrl(issue.externalUrl ?? "");
       setSkipAutoReview(issue.skipAutoReview ?? false);
     }
   }, [issue, editing]);
@@ -438,6 +446,8 @@ export function IssueDetailPanel({
     setIssueType(issue.issueType ?? "task");
     setEstimate(issue.estimate ?? "");
     setDueDate(issue.dueDate ?? "");
+    setExternalKey(issue.externalKey ?? "");
+    setExternalUrl(issue.externalUrl ?? "");
     setSkipAutoReview(issue.skipAutoReview ?? false);
   }
 
@@ -636,6 +646,11 @@ export function IssueDetailPanel({
 
   async function handleSave() {
     if (saving) return;
+    const trimmedUrl = externalUrl.trim();
+    if (trimmedUrl && !isHttpUrl(trimmedUrl)) {
+      showToast("External URL must start with http:// or https://", "error");
+      return;
+    }
     setSaving(true);
     try {
       const imageMarkdown = pastedImages.map((url, i) => `![screenshot-${i + 1}](${url})`).join("\n");
@@ -647,6 +662,8 @@ export function IssueDetailPanel({
         estimate: (estimate || null) as UpdateIssueRequest["estimate"],
         skipAutoReview,
         dueDate: dueDate || null,
+        externalKey: externalKey.trim() || null,
+        externalUrl: trimmedUrl || null,
       });
       setPastedImages([]);
       setEditing(false);
@@ -1149,6 +1166,28 @@ export function IssueDetailPanel({
                   className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100"
                 />
               </div>
+              <div className="grid grid-cols-[minmax(0,1fr)_2fr] gap-3">
+                <div>
+                  <label className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">External Key</label>
+                  <input
+                    type="text"
+                    value={externalKey}
+                    onChange={(e) => setExternalKey(e.target.value)}
+                    placeholder="PROJ-123"
+                    className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">External URL</label>
+                  <input
+                    type="url"
+                    value={externalUrl}
+                    onChange={(e) => setExternalUrl(e.target.value)}
+                    placeholder="https://tracker.example.com/issue/123"
+                    className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100"
+                  />
+                </div>
+              </div>
               <div>
                 <label className="flex items-center gap-2 cursor-pointer select-none">
                   <input
@@ -1243,6 +1282,23 @@ export function IssueDetailPanel({
                     </svg>
                     Skip review
                   </span>
+                )}
+                {issue.externalUrl && isHttpUrl(issue.externalUrl) && (
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-xs text-gray-500 dark:text-gray-400">Tracker:</span>
+                    <a
+                      href={issue.externalUrl}
+                      target="_blank"
+                      rel="noreferrer noopener"
+                      title={issue.externalUrl}
+                      className="inline-flex items-center gap-1 text-xs font-medium px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-700 hover:bg-indigo-200 dark:bg-indigo-900/40 dark:text-indigo-300 dark:hover:bg-indigo-900/70"
+                    >
+                      <svg className="w-3 h-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4m-4-6l6-6m0 0v4m0-4h-4" />
+                      </svg>
+                      {issue.externalKey || "Open link"}
+                    </a>
+                  </div>
                 )}
               </div>
             </div>

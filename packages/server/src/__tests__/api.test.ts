@@ -395,6 +395,104 @@ describe("Issues API", () => {
     expect(issue).toHaveProperty("estimate");
     expect(issue.estimate).toBe("XS");
   });
+
+  it("POST /api/issues persists externalKey and externalUrl", async () => {
+    const res = await app.request("/api/issues", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        title: "Linked issue",
+        statusId,
+        projectId,
+        externalKey: "PROJ-123",
+        externalUrl: "https://tracker.example.com/browse/PROJ-123",
+      }),
+    });
+    expect(res.status).toBe(201);
+    const { id } = await res.json() as any;
+
+    const list = await (await app.request(`/api/issues?projectId=${projectId}`)).json() as any[];
+    const created = list.find((i: any) => i.id === id);
+    expect(created.externalKey).toBe("PROJ-123");
+    expect(created.externalUrl).toBe("https://tracker.example.com/browse/PROJ-123");
+  });
+
+  it("POST /api/issues defaults external fields to null", async () => {
+    const res = await app.request("/api/issues", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "No external link", statusId, projectId }),
+    });
+    const { id } = await res.json() as any;
+
+    const list = await (await app.request(`/api/issues?projectId=${projectId}`)).json() as any[];
+    const created = list.find((i: any) => i.id === id);
+    expect(created.externalKey).toBeNull();
+    expect(created.externalUrl).toBeNull();
+  });
+
+  it("POST /api/issues rejects a non-http externalUrl", async () => {
+    const res = await app.request("/api/issues", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        title: "Bad link",
+        statusId,
+        projectId,
+        externalUrl: "javascript:alert(1)",
+      }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("PATCH /api/issues/:id sets and clears external fields", async () => {
+    const createRes = await app.request("/api/issues", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "Patch external", statusId, projectId }),
+    });
+    const { id } = await createRes.json() as any;
+
+    const patchRes = await app.request(`/api/issues/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ externalKey: "LIN-7", externalUrl: "http://linear.app/issue/LIN-7" }),
+    });
+    expect(patchRes.status).toBe(200);
+
+    let list = await (await app.request(`/api/issues?projectId=${projectId}`)).json() as any[];
+    let updated = list.find((i: any) => i.id === id);
+    expect(updated.externalKey).toBe("LIN-7");
+    expect(updated.externalUrl).toBe("http://linear.app/issue/LIN-7");
+
+    const clearRes = await app.request(`/api/issues/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ externalKey: "", externalUrl: null }),
+    });
+    expect(clearRes.status).toBe(200);
+
+    list = await (await app.request(`/api/issues?projectId=${projectId}`)).json() as any[];
+    updated = list.find((i: any) => i.id === id);
+    expect(updated.externalKey).toBeNull();
+    expect(updated.externalUrl).toBeNull();
+  });
+
+  it("PATCH /api/issues/:id rejects a non-http externalUrl", async () => {
+    const createRes = await app.request("/api/issues", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "Patch bad link", statusId, projectId }),
+    });
+    const { id } = await createRes.json() as any;
+
+    const res = await app.request(`/api/issues/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ externalUrl: "ftp://example.com/file" }),
+    });
+    expect(res.status).toBe(400);
+  });
 });
 
 describe("Board API", () => {
@@ -433,6 +531,29 @@ describe("Board API", () => {
     expect(body[0].issues[0].statusName).toBe("Todo");
     expect(body[1].name).toBe("Done");
     expect(body[1].issues.length).toBe(1);
+  });
+
+  it("GET /api/projects/:id/board exposes external tracker fields on issues", async () => {
+    const linkProjectId = await createProjectDirectly(database, { name: "Board External Link Project" });
+    const linkStatusId = await createStatusDirectly(database, linkProjectId, "Todo", 0);
+    await app.request("/api/issues", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        title: "Linked task",
+        statusId: linkStatusId,
+        projectId: linkProjectId,
+        externalKey: "GH-9",
+        externalUrl: "https://github.com/acme/repo/issues/9",
+      }),
+    });
+
+    const res = await app.request(`/api/projects/${linkProjectId}/board`);
+    expect(res.status).toBe(200);
+    const body = await res.json() as any;
+    const issue = body[0].issues[0];
+    expect(issue.externalKey).toBe("GH-9");
+    expect(issue.externalUrl).toBe("https://github.com/acme/repo/issues/9");
   });
 
   it("GET /api/projects/:id/board derives the column from active workflow progress", async () => {

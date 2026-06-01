@@ -42,6 +42,40 @@ export class IssueError extends Error {
   }
 }
 
+/**
+ * Validate an optional external-tracker URL: must be absent/null/empty, or a
+ * well-formed http(s) URL. Returns the trimmed URL (or null). Throws IssueError
+ * (BAD_REQUEST) for any other scheme or malformed value so links can be opened
+ * safely in a new tab without smuggling javascript:/data: payloads.
+ */
+export function validateExternalUrl(value: unknown): string | null {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== "string") {
+    throw new IssueError("externalUrl must be a string", "BAD_REQUEST");
+  }
+  const trimmed = value.trim();
+  if (trimmed === "") return null;
+  let parsed: URL;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    throw new IssueError("externalUrl must be a valid URL", "BAD_REQUEST");
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new IssueError("externalUrl must use http or https", "BAD_REQUEST");
+  }
+  return trimmed;
+}
+
+function normalizeExternalKey(value: unknown): string | null {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== "string") {
+    throw new IssueError("externalKey must be a string", "BAD_REQUEST");
+  }
+  const trimmed = value.trim();
+  return trimmed === "" ? null : trimmed;
+}
+
 export interface CreateIssueInput {
   projectId: string;
   title: string;
@@ -53,6 +87,8 @@ export interface CreateIssueInput {
   sortOrder?: number;
   statusId?: string;
   workflowTemplateId?: string | null;
+  externalKey?: string | null;
+  externalUrl?: string | null;
 }
 
 export interface CreateIssueResult {
@@ -80,6 +116,9 @@ export function createIssueService(deps: {
       throw err;
     }
 
+    const externalKey = normalizeExternalKey(input.externalKey);
+    const externalUrl = validateExternalUrl(input.externalUrl);
+
     const workflowDefaults = input.workflowTemplateId
       ? await resolveInitialWorkflowState(input.projectId, input.workflowTemplateId, statusId)
       : { currentNodeId: null, statusId };
@@ -95,6 +134,8 @@ export function createIssueService(deps: {
       estimate: input.estimate ?? null,
       sortOrder: input.sortOrder ?? 0,
       workflowTemplateId: input.workflowTemplateId ?? null,
+      externalKey,
+      externalUrl,
       currentNodeId: workflowDefaults.currentNodeId,
       statusId: workflowDefaults.statusId,
       projectId: input.projectId,
@@ -213,6 +254,8 @@ export function createIssueService(deps: {
     if (body.estimate !== undefined) updates.estimate = body.estimate;
     if (body.skipAutoReview !== undefined) updates.skipAutoReview = body.skipAutoReview;
     if (body.dueDate !== undefined) updates.dueDate = body.dueDate;
+    if (body.externalKey !== undefined) updates.externalKey = normalizeExternalKey(body.externalKey);
+    if (body.externalUrl !== undefined) updates.externalUrl = validateExternalUrl(body.externalUrl);
     if (body.workflowTemplateId !== undefined) updates.workflowTemplateId = body.workflowTemplateId;
 
     await database.update(issues).set(updates).where(eq(issues.id, id));
@@ -261,6 +304,8 @@ export function createIssueService(deps: {
     if (body.estimate !== undefined) updates.estimate = body.estimate;
     if (body.skipAutoReview !== undefined) updates.skipAutoReview = body.skipAutoReview;
     if (body.dueDate !== undefined) updates.dueDate = body.dueDate;
+    if (body.externalKey !== undefined) updates.externalKey = normalizeExternalKey(body.externalKey);
+    if (body.externalUrl !== undefined) updates.externalUrl = validateExternalUrl(body.externalUrl);
     if (body.workflowTemplateId !== undefined) updates.workflowTemplateId = body.workflowTemplateId;
 
     const uniqueIds = [...new Set(ids)];

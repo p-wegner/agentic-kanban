@@ -505,6 +505,13 @@
       "when": 1748764527069,
       "tag": "0071_board_health_event_category",
       "breakpoints": true
+    },
+    {
+      "idx": 72,
+      "version": "6",
+      "when": 1748764527070,
+      "tag": "0072_external_tracker_link",
+      "breakpoints": true
     }
   ]
 }
