@@ -3,18 +3,27 @@ import { writeFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { SERVER_URL } from "./helpers/port.js";
+import { getE2EProject } from "./helpers/e2e-project.js";
 
 test.describe("Output parser verification", () => {
   let projectId: string;
   let statusId: string;
+  let previousActiveProjectId: string | null = null;
   const tmpFiles: string[] = [];
   const createdWorkspaceIds: string[] = [];
   const createdIssueIds: string[] = [];
 
   test.beforeAll(async ({ request }) => {
-    const projectsRes = await request.get(`${SERVER_URL}/api/projects`);
-    const projects = await projectsRes.json();
-    projectId = projects[0].id;
+    // Capture current active project so afterAll can restore it
+    const prevPrefRes = await request.get(`${SERVER_URL}/api/preferences/active-project`);
+    if (prevPrefRes.ok()) {
+      const pref = await prevPrefRes.json();
+      previousActiveProjectId = pref.projectId ?? null;
+    }
+
+    // Use the E2E project set by global-setup, never projects[0]
+    const project = await getE2EProject(request);
+    projectId = project.id;
 
     const statusesRes = await request.get(
       `${SERVER_URL}/api/projects/${projectId}/statuses`,
@@ -23,12 +32,12 @@ test.describe("Output parser verification", () => {
     const todoStatus = statuses.find((s: { name: string }) => s.name === "Todo");
     statusId = todoStatus ? todoStatus.id : statuses[0].id;
 
-    // Ensure output_parser is enabled and the correct project is active
+    // Ensure output_parser is enabled and the E2E project is active
     await request.put(`${SERVER_URL}/api/preferences/settings`, {
       data: { output_parser: "minimal" },
     });
     await request.put(`${SERVER_URL}/api/preferences/active-project`, {
-      data: { projectId: projects[0].id },
+      data: { projectId },
     });
   });
 
@@ -64,7 +73,9 @@ test.describe("Output parser verification", () => {
       await new Promise((r) => setTimeout(r, 500));
     }
 
-    if (!setupOk) { test.skip(); return; }
+    if (!setupOk) {
+      throw new Error(`[output-parser] Workspace setup failed after 3 attempts (workspaceId=${workspaceId})`);
+    }
 
     // Launch with a mock agent that produces stream-json output
     // Write to a temp file to avoid Windows cmd.exe quoting issues with node -e "..."
@@ -104,7 +115,11 @@ process.exit(0);
       },
     );
 
-    if (launchRes.status() !== 201) { test.skip(); return; }
+    if (launchRes.status() !== 201) {
+      throw new Error(
+        `[output-parser] Launch failed: HTTP ${launchRes.status()} — ${await launchRes.text()}`,
+      );
+    }
 
     const { sessionId } = await launchRes.json();
 
@@ -118,8 +133,11 @@ process.exit(0);
         if (sessionMessages.some((m: { type: string }) => m.type === "exit")) break;
       }
     }
-    // Skip if session produced no output (e.g. agent command failed)
-    if (sessionMessages.length === 0) { test.skip(); return; }
+    if (sessionMessages.length === 0) {
+      throw new Error(
+        `[output-parser] Session ${sessionId} produced no output after 10 polling attempts — mock agent may have failed to launch`,
+      );
+    }
 
     // Stop any lingering "running" sessions so the workspace panel shows the mock session's output
     await request.post(`${SERVER_URL}/api/workspaces/${workspaceId}/stop`, { data: {} });
@@ -142,7 +160,7 @@ process.exit(0);
     const backdrop = page.locator("div.fixed.inset-0.bg-black\\/30").first();
     if (await backdrop.isVisible()) {
       await backdrop.click({ force: true });
-      await page.waitForTimeout(300);
+      await expect(backdrop).toBeHidden({ timeout: 2000 });
     }
 
     // Expand the workspace
@@ -153,11 +171,10 @@ process.exit(0);
 
     // Explicitly select the mock session from the session history list using data-session-id.
     // This ensures we view the mock session's output rather than the auto-launched real claude session.
-    // Wait up to 5s for the session selector to render the mock session button.
     const sessionBtn = page.locator(`button[data-session-id="${sessionId}"]`);
     if (await sessionBtn.isVisible({ timeout: 5000 }).catch(() => false)) {
       await sessionBtn.click();
-      await page.waitForTimeout(500);
+      await expect(page.locator("text=Session initialized")).toBeVisible({ timeout: 5000 });
     }
 
     // Verify key parsed elements are visible
@@ -189,12 +206,10 @@ process.exit(0);
     for (const id of createdIssueIds) {
       await request.delete(`${SERVER_URL}/api/issues/${id}`);
     }
-    // Restore active project to projects[0] (global-setup default)
-    const projectsRes = await request.get(`${SERVER_URL}/api/projects`);
-    const projects = await projectsRes.json();
-    if (projects.length > 0) {
+    // Restore the active project to what it was before this suite ran
+    if (previousActiveProjectId) {
       await request.put(`${SERVER_URL}/api/preferences/active-project`, {
-        data: { projectId: projects[0].id },
+        data: { projectId: previousActiveProjectId },
       });
     }
   });
