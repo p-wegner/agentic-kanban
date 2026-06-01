@@ -53,6 +53,153 @@ function isGithubHandoffDraft(artifact: IssueArtifact): boolean {
   return artifact.type === "text" && artifact.caption === "github-handoff-draft";
 }
 
+export function issueArtifactKind(artifact: IssueArtifact): string {
+  if (isGithubHandoffDraft(artifact)) return "GitHub draft";
+  if (artifact.caption?.startsWith("phase-artifact:")) return `Phase ${phaseArtifactName(artifact.caption)}`;
+  if (artifact.caption) return artifact.caption;
+  return artifact.type.charAt(0).toUpperCase() + artifact.type.slice(1);
+}
+
+export function issueArtifactAuthor(artifact: IssueArtifact): string {
+  return artifact.workspaceId ? "agent" : "system";
+}
+
+export function issueArtifactPreview(artifact: IssueArtifact, maxLength = 140): string {
+  const source = artifact.type === "text"
+    ? normalizeMarkdown(artifact.content)
+    : artifact.caption || artifact.content;
+  const preview = source
+    .replace(/```[\s\S]*?```/g, " ")
+    .replace(/[#*_`>\-[\]()]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!preview) return artifact.type === "text" ? "Empty text artifact" : artifact.content;
+  return preview.length > maxLength ? `${preview.slice(0, maxLength - 1).trimEnd()}...` : preview;
+}
+
+export async function copyIssueArtifactContent(
+  artifact: IssueArtifact,
+  clipboard: Pick<Clipboard, "writeText"> | undefined = typeof navigator !== "undefined" ? navigator.clipboard : undefined,
+): Promise<boolean> {
+  if (!clipboard) return false;
+  await clipboard.writeText(artifact.content);
+  return true;
+}
+
+export function openIssueArtifact(
+  artifact: IssueArtifact,
+  opener: ((url: string, target?: string, features?: string) => unknown) | undefined = typeof window !== "undefined" ? window.open.bind(window) : undefined,
+): boolean {
+  if (!opener || artifact.type === "text") return false;
+  opener(artifact.content, "_blank", "noopener,noreferrer");
+  return true;
+}
+
+interface IssueArtifactsSectionProps {
+  artifacts: IssueArtifact[];
+  loading: boolean;
+  expandedArtifactId: string | null;
+  deletingArtifactId?: string | null;
+  onOpen: (artifact: IssueArtifact) => void;
+  onCopy: (artifact: IssueArtifact) => void;
+  onDelete: (artifact: IssueArtifact) => void;
+}
+
+export function IssueArtifactsSection({
+  artifacts,
+  loading,
+  expandedArtifactId,
+  deletingArtifactId = null,
+  onOpen,
+  onCopy,
+  onDelete,
+}: IssueArtifactsSectionProps) {
+  const orderedArtifacts = [...artifacts].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+
+  return (
+    <div className="pt-2 border-t border-gray-100 dark:border-gray-800">
+      <div className="flex items-center justify-between gap-2 mb-2">
+        <label className="text-xs font-medium text-gray-600 dark:text-gray-400">
+          Artifacts
+        </label>
+        {!loading && artifacts.length > 0 && (
+          <span className="text-[11px] text-gray-400 dark:text-gray-500">
+            {artifacts.length}
+          </span>
+        )}
+      </div>
+      {loading ? (
+        <p className="text-xs text-gray-400 dark:text-gray-500">Loading artifacts...</p>
+      ) : orderedArtifacts.length === 0 ? (
+        <p className="text-xs text-gray-400 dark:text-gray-500">No generated artifacts yet.</p>
+      ) : (
+        <ul className="space-y-1.5">
+          {orderedArtifacts.map((artifact) => {
+            const expanded = expandedArtifactId === artifact.id;
+            return (
+              <li
+                key={artifact.id}
+                className="border border-gray-200 dark:border-gray-700 rounded px-2.5 py-2 bg-gray-50 dark:bg-gray-800/50"
+              >
+                <div className="flex items-center gap-2 text-[11px]">
+                  <span className="font-medium px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300">
+                    {issueArtifactKind(artifact)}
+                  </span>
+                  <span className="text-gray-400 dark:text-gray-500 capitalize">{issueArtifactAuthor(artifact)}</span>
+                  <span className="text-gray-400 dark:text-gray-500 ml-auto">{formatRelativeTime(artifact.createdAt)}</span>
+                </div>
+                <p className="mt-1 text-xs text-gray-600 dark:text-gray-300 line-clamp-2">
+                  {issueArtifactPreview(artifact)}
+                </p>
+                <div className="mt-1.5 flex items-center gap-2 text-[11px]">
+                  <button
+                    type="button"
+                    onClick={() => onOpen(artifact)}
+                    className="text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
+                  >
+                    {expanded ? "Close" : "Open"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onCopy(artifact)}
+                    className="text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
+                  >
+                    Copy
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onDelete(artifact)}
+                    disabled={deletingArtifactId === artifact.id}
+                    className="text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300 disabled:opacity-50"
+                  >
+                    {deletingArtifactId === artifact.id ? "Deleting..." : "Delete"}
+                  </button>
+                </div>
+                {expanded && (
+                  <div className="markdown-body mt-2 max-h-80 overflow-y-auto text-sm">
+                    {artifact.type === "text" ? (
+                      <ReactMarkdown>{normalizeMarkdown(artifact.content)}</ReactMarkdown>
+                    ) : (
+                      <a
+                        href={artifact.content}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="break-all text-blue-600 hover:text-blue-700 dark:text-blue-400"
+                      >
+                        {artifact.content}
+                      </a>
+                    )}
+                  </div>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 interface IssueDetailPanelProps {
   issue: IssueWithStatus;
   statuses: StatusOption[];
@@ -174,6 +321,9 @@ export function IssueDetailPanel({
   const [availableSkills, setAvailableSkills] = useState<{ id: string; name: string; description: string }[]>([]);
   const [comments, setComments] = useState<IssueComment[]>([]);
   const [artifacts, setArtifacts] = useState<IssueArtifact[]>([]);
+  const [artifactsLoading, setArtifactsLoading] = useState(true);
+  const [expandedArtifactId, setExpandedArtifactId] = useState<string | null>(null);
+  const [deletingArtifactId, setDeletingArtifactId] = useState<string | null>(null);
 
   // Track unsaved changes for warning
   const hasChanges = editing && (
@@ -187,6 +337,9 @@ export function IssueDetailPanel({
 
   useEffect(() => {
     async function loadData() {
+      setArtifactsLoading(true);
+      setArtifacts([]);
+      setExpandedArtifactId(null);
       try {
         const [ws, tags, available, deps, issues, skills, commentsResp, artifactsResp] = await Promise.all([
           apiFetch<{ id: string }[]>(`/api/issues/${issue.id}/workspaces`),
@@ -206,11 +359,13 @@ export function IssueDetailPanel({
         setAvailableSkills(skills);
         setComments(commentsResp.comments);
         setArtifacts(artifactsResp);
+        setArtifactsLoading(false);
         // Check for active showdown
         apiFetch<{ id: string }>(`/api/issues/${issue.id}/showdown`)
           .then(sd => setActiveShowdownId(sd.id))
           .catch(() => {});
       } catch {
+        setArtifactsLoading(false);
         // Ignore — non-critical
       }
       // Load cached touched-files prediction (non-blocking, best-effort)
@@ -372,13 +527,39 @@ export function IssueDetailPanel({
     showToast("Appended to description — save to persist");
   }
 
-  async function handleCopyArtifact(content: string) {
+  async function handleCopyArtifact(artifact: IssueArtifact) {
     try {
-      if (!navigator.clipboard) throw new Error("Clipboard API unavailable");
-      await navigator.clipboard.writeText(content);
-      showToast("Draft copied", "success");
+      const copied = await copyIssueArtifactContent(artifact);
+      if (!copied) throw new Error("Clipboard API unavailable");
+      showToast("Artifact copied", "success");
     } catch {
-      window.prompt("Copy draft", content);
+      window.prompt("Copy artifact", artifact.content);
+    }
+  }
+
+  function handleOpenArtifact(artifact: IssueArtifact) {
+    if (artifact.type === "text") {
+      setExpandedArtifactId((current) => current === artifact.id ? null : artifact.id);
+      return;
+    }
+    if (!openIssueArtifact(artifact)) {
+      setExpandedArtifactId((current) => current === artifact.id ? null : artifact.id);
+    }
+  }
+
+  async function handleDeleteArtifact(artifact: IssueArtifact) {
+    if (deletingArtifactId) return;
+    if (!window.confirm(`Delete artifact "${issueArtifactKind(artifact)}"? This cannot be undone.`)) return;
+    setDeletingArtifactId(artifact.id);
+    try {
+      await apiFetch(`/api/issues/${issue.id}/artifacts/${artifact.id}`, { method: "DELETE" });
+      setArtifacts((prev) => prev.filter((item) => item.id !== artifact.id));
+      setExpandedArtifactId((current) => current === artifact.id ? null : current);
+      showToast("Artifact deleted", "success");
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Failed to delete artifact", "error");
+    } finally {
+      setDeletingArtifactId(null);
     }
   }
 
@@ -1577,68 +1758,16 @@ export function IssueDetailPanel({
             )}
           </div>
 
-          {!editing && artifacts.some(isGithubHandoffDraft) && (
-            <div className="pt-2 border-t border-gray-100 dark:border-gray-800">
-              <label className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-2">
-                GitHub drafts
-              </label>
-              <ul className="space-y-2">
-                {artifacts
-                  .filter(isGithubHandoffDraft)
-                  .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
-                  .map((artifact) => (
-                    <li
-                      key={artifact.id}
-                      className="border border-gray-200 dark:border-gray-700 rounded px-2.5 py-2 bg-gray-50 dark:bg-gray-800/50"
-                    >
-                      <div className="mb-1 flex items-center gap-2 text-[11px]">
-                        <span className="font-medium px-1.5 py-0.5 rounded bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300">
-                          handoff.md
-                        </span>
-                        <button
-                          onClick={() => handleCopyArtifact(artifact.content)}
-                          className="text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
-                        >
-                          Copy
-                        </button>
-                        <span className="text-gray-400 dark:text-gray-500 ml-auto">{formatRelativeTime(artifact.createdAt)}</span>
-                      </div>
-                      <div className="markdown-body max-h-80 overflow-y-auto text-sm">
-                        <ReactMarkdown>{normalizeMarkdown(artifact.content)}</ReactMarkdown>
-                      </div>
-                    </li>
-                  ))}
-              </ul>
-            </div>
-          )}
-
-          {!editing && artifacts.some((artifact) => artifact.type === "text" && artifact.caption?.startsWith("phase-artifact:")) && (
-            <div className="pt-2 border-t border-gray-100 dark:border-gray-800">
-              <label className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-2">
-                Phase artifacts
-              </label>
-              <ul className="space-y-2">
-                {artifacts
-                  .filter((artifact) => artifact.type === "text" && artifact.caption?.startsWith("phase-artifact:"))
-                  .sort((a, b) => a.caption!.localeCompare(b.caption!) || b.createdAt.localeCompare(a.createdAt))
-                  .map((artifact) => (
-                    <li
-                      key={artifact.id}
-                      className="border border-gray-200 dark:border-gray-700 rounded px-2.5 py-2 bg-gray-50 dark:bg-gray-800/50"
-                    >
-                      <div className="mb-1 flex items-center gap-2 text-[11px]">
-                        <span className="font-medium px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300">
-                          {phaseArtifactName(artifact.caption)}
-                        </span>
-                        <span className="text-gray-400 dark:text-gray-500 ml-auto">{formatRelativeTime(artifact.createdAt)}</span>
-                      </div>
-                      <div className="markdown-body max-h-80 overflow-y-auto text-sm">
-                        <ReactMarkdown>{normalizeMarkdown(artifact.content)}</ReactMarkdown>
-                      </div>
-                    </li>
-                  ))}
-              </ul>
-            </div>
+          {!editing && (
+            <IssueArtifactsSection
+              artifacts={artifacts}
+              loading={artifactsLoading}
+              expandedArtifactId={expandedArtifactId}
+              deletingArtifactId={deletingArtifactId}
+              onOpen={handleOpenArtifact}
+              onCopy={handleCopyArtifact}
+              onDelete={handleDeleteArtifact}
+            />
           )}
 
           {/* Comments / activity thread (preflight clarifications + agent questions) */}
