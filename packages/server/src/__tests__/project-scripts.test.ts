@@ -42,13 +42,17 @@ describe("Project script shortcuts API", () => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name: "Build",
+          description: "Compile server package",
           command: "pnpm build",
+          cwdMode: "custom",
           workingDir: "packages/server",
         }),
       });
       expect(createRes.status).toBe(201);
       const created = await createRes.json() as any;
       expect(created.name).toBe("Build");
+      expect(created.description).toBe("Compile server package");
+      expect(created.cwdMode).toBe("custom");
       expect(created.workingDir).toBe("packages/server");
       expect(created.lastRun).toBeNull();
 
@@ -61,11 +65,13 @@ describe("Project script shortcuts API", () => {
       const updateRes = await app.request(`/api/projects/${project.projectId}/scripts/${created.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: "Test Mine", command: "pnpm test:mine", workingDir: null }),
+        body: JSON.stringify({ name: "Test Mine", description: null, command: "pnpm test:mine", cwdMode: "project", workingDir: null }),
       });
       expect(updateRes.status).toBe(200);
       const updated = await updateRes.json() as any;
       expect(updated.name).toBe("Test Mine");
+      expect(updated.description).toBeNull();
+      expect(updated.cwdMode).toBe("project");
       expect(updated.workingDir).toBeNull();
 
       const deleteRes = await app.request(`/api/projects/${project.projectId}/scripts/${created.id}`, {
@@ -98,6 +104,13 @@ describe("Project script shortcuts API", () => {
       expect(escapingDir.status).toBe(400);
       const body = await escapingDir.json() as any;
       expect(body.error).toContain("inside the project root");
+
+      const missingCustomDir = await app.request(`/api/projects/${project.projectId}/scripts`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "Custom", command: "pnpm build", cwdMode: "custom" }),
+      });
+      expect(missingCustomDir.status).toBe(400);
     } finally {
       project.cleanup();
     }

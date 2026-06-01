@@ -159,6 +159,9 @@ export function ProjectScriptsMenu({ projectId }: ProjectScriptsMenuProps) {
                   <span className="text-[10px] text-gray-400 dark:text-gray-500 shrink-0">{scriptStatusLabel(script)}</span>
                 </div>
                 <div className="text-xs font-mono text-gray-500 dark:text-gray-400 truncate mt-0.5">{script.command}</div>
+                {script.description && (
+                  <div className="text-xs text-gray-400 dark:text-gray-500 truncate mt-0.5">{script.description}</div>
+                )}
               </button>
             ))}
           </div>
