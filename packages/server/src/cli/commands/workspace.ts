@@ -4,6 +4,7 @@ import { issues, projects, workspaces } from "@agentic-kanban/shared/schema";
 import { eq, and, desc, inArray } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { runMigrations, getActiveProjectId } from "../shared.js";
+import { buildWorkspaceApiUrl } from "./workspace-api-url.js";
 
 export function registerWorkspaceCommand(program: Command) {
   const wsCmd = program.command("workspace").description("Manage workspaces (git worktrees linked to issues).\n\nWorkspaces create isolated git worktrees where agents can work on issues. Each workspace is tied to a single issue.\n\nSubcommands: list, create");
@@ -159,7 +160,7 @@ Examples:
         }
 
         const port = options.port ?? process.env.KANBAN_SERVER_PORT ?? "3001";
-        const res = await fetch(`http://localhost:${port}/api/workspaces/${workspaceId}/launch`, {
+        const res = await fetch(buildWorkspaceApiUrl(port, workspaceId, "launch"), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ prompt }),
@@ -237,7 +238,7 @@ Examples:
         }
 
         const port = options.port ?? process.env.KANBAN_SERVER_PORT ?? "3001";
-        const res = await fetch(`http://localhost:${port}/api/workspaces/${ws.id}/launch`, {
+        const res = await fetch(buildWorkspaceApiUrl(port, ws.id, "launch"), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ prompt }),
@@ -299,7 +300,7 @@ Example:
         }
 
         const port = options.port ?? process.env.KANBAN_SERVER_PORT ?? "3001";
-        const res = await fetch(`http://localhost:${port}/api/workspaces/${workspaceId}/review`, {
+        const res = await fetch(buildWorkspaceApiUrl(port, workspaceId, "review"), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({}),
