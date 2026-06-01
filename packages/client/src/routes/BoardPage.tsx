@@ -31,6 +31,7 @@ import { IssueDetailPanel } from "../components/IssueDetailPanel.js";
 import { WorkspacePanel } from "../components/WorkspacePanel.js";
 import { WorktreeOverview } from "../components/WorktreeOverview.js";
 import { AllWorkspacesPanel } from "../components/AllWorkspacesPanel.js";
+import { FileContentionPanel } from "../components/FileContentionPanel.js";
 import { SettingsPanel } from "../components/SettingsPanel.js";
 import { SkeletonBoard } from "../components/SkeletonBoard.js";
 import { ToastContainer, showToast } from "../components/Toast.js";
@@ -117,6 +118,7 @@ export function BoardPage() {
   const [showCodemod, setShowCodemod] = useState(false);
   const [showWorktreeOverview, setShowWorktreeOverview] = useState(false);
   const [showAllWorkspaces, setShowAllWorkspaces] = useState(false);
+  const [showFileContention, setShowFileContention] = useState(false);
   const [showTranscriptSearch, setShowTranscriptSearch] = useState(false);
   const [showCommandPalette, setShowCommandPalette] = useState(false);
   const [showShortcutHelp, setShowShortcutHelp] = useState(false);
@@ -1204,6 +1206,10 @@ export function BoardPage() {
           setShowAllWorkspaces(false);
           return;
         }
+        if (showFileContention) {
+          setShowFileContention(false);
+          return;
+        }
         if (showWorktreeOverview) {
           setShowWorktreeOverview(false);
           return;
@@ -1272,6 +1278,13 @@ export function BoardPage() {
         setShowAllWorkspaces(prev => !prev);
         return;
       }
+      // "h" to toggle File Contention Heatmap panel
+      if (e.key === "h" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        if (isTextEntryTarget(e.target)) return;
+        e.preventDefault();
+        setShowFileContention(prev => !prev);
+        return;
+      }
       // "t" to open Transcript Search
       if (e.key === "t" && !e.ctrlKey && !e.metaKey && !e.altKey) {
         if (isTextEntryTarget(e.target)) return;
@@ -1315,7 +1328,7 @@ export function BoardPage() {
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [searchQuery, showCommandPalette, showAllWorkspaces, showTranscriptSearch, showWorktreeOverview, showShortcutHelp, showQuickTasks, showRunQueueForecast, showCodemod, filteredColumns, columns, handleViewModeChange, setShowQuickTasks, setShowSettings]);
+  }, [searchQuery, showCommandPalette, showAllWorkspaces, showFileContention, showTranscriptSearch, showWorktreeOverview, showShortcutHelp, showQuickTasks, showRunQueueForecast, showCodemod, filteredColumns, columns, handleViewModeChange, setShowQuickTasks, setShowSettings]);
 
   // Register command palette actions
   useEffect(() => {
@@ -1383,6 +1396,15 @@ export function BoardPage() {
       icon: "⊞",
       category: "navigation",
       handler: () => setShowAllWorkspaces(true),
+    }));
+
+    unregisters.push(registerAction({
+      id: "view-file-contention",
+      label: "File Contention Heatmap",
+      description: "Show which active workspaces touch the same files (merge-risk clusters)",
+      icon: "⚡",
+      category: "navigation",
+      handler: () => setShowFileContention(true),
     }));
 
     unregisters.push(registerAction({
@@ -2044,6 +2066,12 @@ export function BoardPage() {
             setShowAllWorkspaces(false);
           }}
           onRefresh={() => refetchBoard()}
+        />
+      )}
+      {showFileContention && (
+        <FileContentionPanel
+          activeProjectId={activeProjectId ?? null}
+          onClose={() => setShowFileContention(false)}
         />
       )}
       {showTranscriptSearch && activeProjectId && (
