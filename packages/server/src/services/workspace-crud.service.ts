@@ -32,6 +32,7 @@ import { kill as killAgent } from "./agent.service.js";
 import { teardownWorktree } from "./workspace-teardown.service.js";
 import { runSetupScript } from "./setup-script.js";
 import type { SetupScriptResult } from "./setup-script.js";
+import type { WorkspaceSymlinkRun } from "@agentic-kanban/shared";
 import { writeAgentSkillFile, readLocalSkillPrompt, copySkillToWorktree } from "@agentic-kanban/shared/lib/agent-skill-files";
 import { writeTicketContextFile } from "@agentic-kanban/shared/lib/ticket-context";
 import { bootstrapSymlinks, parseSymlinkDirs } from "@agentic-kanban/shared/lib/worktree-symlink-bootstrap";
@@ -80,6 +81,11 @@ export function createWorkspaceCrudService(deps: {
     stdoutTail: string | null;
     stderrTail: string | null;
   };
+  type LatestSymlinkRun = WorkspaceSymlinkRun;
+
+  function stringifyJson(value: unknown): string {
+    return JSON.stringify(value);
+  }
 
   function tailOutput(output: string): string | null {
     const trimmed = output.trim();
@@ -127,6 +133,57 @@ export function createWorkspaceCrudService(deps: {
       durationMs: 0,
       stdoutTail: null,
       stderrTail: null,
+    };
+  }
+
+  function disabledSymlinkRun(): LatestSymlinkRun {
+    const now = new Date().toISOString();
+    return {
+      state: "disabled",
+      dirs: [],
+      linked: [],
+      skipped: [],
+      failed: [],
+      startedAt: now,
+      endedAt: now,
+      error: null,
+    };
+  }
+
+  function buildSymlinkRun(
+    dirs: string[],
+    startedAt: string,
+    result: { linked: string[]; skipped: string[]; failed: Array<{ dir: string; error: string }> },
+  ): LatestSymlinkRun {
+    const endedAt = new Date().toISOString();
+    const state = result.failed.length > 0
+      ? "failed"
+      : result.linked.length > 0
+        ? "linked"
+        : "skipped";
+    return {
+      state,
+      dirs,
+      linked: result.linked,
+      skipped: result.skipped,
+      failed: result.failed,
+      startedAt,
+      endedAt,
+      error: null,
+    };
+  }
+
+  function buildSymlinkErrorRun(dirs: string[], startedAt: string, err: unknown): LatestSymlinkRun {
+    const endedAt = new Date().toISOString();
+    return {
+      state: "failed",
+      dirs,
+      linked: [],
+      skipped: [],
+      failed: [],
+      startedAt,
+      endedAt,
+      error: err instanceof Error ? err.message : String(err),
     };
   }
 
@@ -215,13 +272,13 @@ export function createWorkspaceCrudService(deps: {
     baseCommitSha: string | null;
     latestSetup: LatestSetupRun;
     setupCompletion?: Promise<LatestSetupRun>;
-    symlinkResult?: { linked: string[]; skipped: string[]; failed: Array<{ dir: string; error: string }> };
+    symlinkRun: LatestSymlinkRun;
   }> {
     let branch: string;
     let worktreePath: string;
     let baseBranch: string | null;
     let baseCommitSha: string | null;
-    let symlinkResult: { linked: string[]; skipped: string[]; failed: Array<{ dir: string; error: string }> } | undefined;
+    let symlinkRun = disabledSymlinkRun();
 
     if (isDirect) {
       branch = await gitService.getCurrentBranch(repoPath);
@@ -244,8 +301,10 @@ export function createWorkspaceCrudService(deps: {
     // Symlink dependency directories from the main checkout into the worktree.
     // Best-effort: never blocks workspace creation on failure.
     if (!isDirect && symlinkConfig.enabled && symlinkConfig.dirs.length > 0) {
+      const symlinkStartedAt = new Date().toISOString();
       try {
-        symlinkResult = await bootstrapSymlinks(repoPath, worktreePath, symlinkConfig.dirs);
+        const symlinkResult = await bootstrapSymlinks(repoPath, worktreePath, symlinkConfig.dirs);
+        symlinkRun = buildSymlinkRun(symlinkConfig.dirs, symlinkStartedAt, symlinkResult);
         if (symlinkResult.linked.length > 0) {
           console.log(`[workspaces] symlink bootstrap: linked [${symlinkResult.linked.join(", ")}] for workspaceId=${workspaceId}`);
         }
@@ -253,6 +312,7 @@ export function createWorkspaceCrudService(deps: {
           console.warn(`[workspaces] symlink bootstrap: failed [${symlinkResult.failed.map(f => `${f.dir}: ${f.error}`).join(", ")}] for workspaceId=${workspaceId}`);
         }
       } catch (err) {
+        symlinkRun = buildSymlinkErrorRun(symlinkConfig.dirs, symlinkStartedAt, err);
         console.warn(`[workspaces] symlink bootstrap error (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
       }
     }
@@ -300,7 +360,7 @@ export function createWorkspaceCrudService(deps: {
       }
     }
 
-    return { branch, worktreePath, baseBranch, baseCommitSha, latestSetup, setupCompletion, symlinkResult };
+    return { branch, worktreePath, baseBranch, baseCommitSha, latestSetup, setupCompletion, symlinkRun };
   }
 
   function buildAgentPrompt(
@@ -449,6 +509,7 @@ export function createWorkspaceCrudService(deps: {
     model: string | undefined;
     contextPrimer: string | null;
     latestSetup: LatestSetupRun;
+    latestSymlink: LatestSymlinkRun;
     now: string;
   }): Promise<void> {
     await database.insert(workspaces).values({
@@ -478,6 +539,14 @@ export function createWorkspaceCrudService(deps: {
       latestSetupDurationMs: params.latestSetup.durationMs,
       latestSetupStdoutTail: params.latestSetup.stdoutTail,
       latestSetupStderrTail: params.latestSetup.stderrTail,
+      latestSymlinkState: params.latestSymlink.state,
+      latestSymlinkStartedAt: params.latestSymlink.startedAt,
+      latestSymlinkEndedAt: params.latestSymlink.endedAt,
+      latestSymlinkDirs: stringifyJson(params.latestSymlink.dirs),
+      latestSymlinkLinked: stringifyJson(params.latestSymlink.linked),
+      latestSymlinkSkipped: stringifyJson(params.latestSymlink.skipped),
+      latestSymlinkFailed: stringifyJson(params.latestSymlink.failed),
+      latestSymlinkError: params.latestSymlink.error,
       contextPrimer: params.contextPrimer,
       createdAt: params.now,
       updatedAt: params.now,
@@ -646,6 +715,7 @@ exit 1
     let baseBranch: string | null = null;
     let baseCommitSha: string | null = null;
     let latestSetup: LatestSetupRun = skippedSetupRun(null);
+    let latestSymlink: LatestSymlinkRun = disabledSymlinkRun();
     let setupCompletion: Promise<LatestSetupRun> | undefined;
     let claudeProfile: string | undefined;
     let agentCommand: string | undefined;
@@ -667,7 +737,7 @@ exit 1
       const isHighPriority = issue.priority === "high" || issue.priority === "critical";
       planMode = input.planMode !== undefined ? input.planMode === true : isHighPriority;
 
-      ({ branch, worktreePath, baseBranch, baseCommitSha, latestSetup, setupCompletion } = await setupWorktree(
+      ({ branch, worktreePath, baseBranch, baseCommitSha, latestSetup, setupCompletion, symlinkRun: latestSymlink } = await setupWorktree(
         isDirect, project.repoPath, project.defaultBranch, input, setupConfig, symlinkConfig, id,
       ));
 
@@ -734,7 +804,7 @@ exit 1
         id, issueId: input.issueId, branch, worktreePath, baseBranch, isDirect,
         baseCommitSha, requiresReview, thoroughReview, planMode, tddMode, includeVisualProof,
         skillId: effectiveSkillId, claudeProfile, agentCommand, resolvedProvider, model: agentConfig.model,
-        contextPrimer, latestSetup, now,
+        contextPrimer, latestSetup, latestSymlink, now,
       });
       workspaceInserted = true;
 
@@ -784,6 +854,7 @@ exit 1
         status: "active",
         provider: resolvedProvider,
         latestSetup,
+        latestSymlink,
         sessionId,
         createdAt: now,
         updatedAt: now,

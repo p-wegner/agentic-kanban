@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { apiFetch } from "../lib/api.js";
 import type { AgentOutputMessage, SessionSummaryResponse } from "@agentic-kanban/shared";
 
-export type WorkspaceViewMode = "output" | "summary" | "preview" | "artifacts";
+export type WorkspaceViewMode = "output" | "summary" | "preview" | "artifacts" | "diagnostics";
 
 interface SessionInfo {
   id: string;

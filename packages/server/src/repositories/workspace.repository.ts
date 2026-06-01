@@ -1,5 +1,5 @@
 import { workspaces, issues, projects, sessions, sessionMessages, diffComments, projectStatuses } from "@agentic-kanban/shared/schema";
-import type { WorkspaceSetupRun } from "@agentic-kanban/shared";
+import type { WorkspaceSetupRun, WorkspaceSymlinkRun } from "@agentic-kanban/shared";
 import { eq, inArray } from "drizzle-orm";
 
 type Project = typeof projects.$inferSelect;
@@ -7,6 +7,39 @@ import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 
 type Workspace = typeof workspaces.$inferSelect;
+
+function parseJsonArray<T>(raw: string | null | undefined, fallback: T[]): T[] {
+  if (!raw) return fallback;
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed as T[] : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function mapSymlinkRun(row: {
+  latestSymlinkState: string | null;
+  latestSymlinkStartedAt: string | null;
+  latestSymlinkEndedAt: string | null;
+  latestSymlinkDirs: string | null;
+  latestSymlinkLinked: string | null;
+  latestSymlinkSkipped: string | null;
+  latestSymlinkFailed: string | null;
+  latestSymlinkError: string | null;
+}): WorkspaceSymlinkRun | null {
+  if (!row.latestSymlinkState) return null;
+  return {
+    state: row.latestSymlinkState as WorkspaceSymlinkRun["state"],
+    dirs: parseJsonArray<string>(row.latestSymlinkDirs, []),
+    linked: parseJsonArray<string>(row.latestSymlinkLinked, []),
+    skipped: parseJsonArray<string>(row.latestSymlinkSkipped, []),
+    failed: parseJsonArray<{ dir: string; error: string }>(row.latestSymlinkFailed, []),
+    startedAt: row.latestSymlinkStartedAt,
+    endedAt: row.latestSymlinkEndedAt,
+    error: row.latestSymlinkError,
+  };
+}
 
 export async function getWorkspaceById(
   workspaceId: string,
@@ -187,6 +220,7 @@ export interface WorkspaceDetails {
   provider: string | null;
   contextPrimer: string | null;
   latestSetup: WorkspaceSetupRun | null;
+  latestSymlink: WorkspaceSymlinkRun | null;
   createdAt: string;
   updatedAt: string;
   issue: { title: string; priority: string | null };
@@ -220,6 +254,14 @@ export async function getWorkspaceDetails(
       latestSetupDurationMs: workspaces.latestSetupDurationMs,
       latestSetupStdoutTail: workspaces.latestSetupStdoutTail,
       latestSetupStderrTail: workspaces.latestSetupStderrTail,
+      latestSymlinkState: workspaces.latestSymlinkState,
+      latestSymlinkStartedAt: workspaces.latestSymlinkStartedAt,
+      latestSymlinkEndedAt: workspaces.latestSymlinkEndedAt,
+      latestSymlinkDirs: workspaces.latestSymlinkDirs,
+      latestSymlinkLinked: workspaces.latestSymlinkLinked,
+      latestSymlinkSkipped: workspaces.latestSymlinkSkipped,
+      latestSymlinkFailed: workspaces.latestSymlinkFailed,
+      latestSymlinkError: workspaces.latestSymlinkError,
       createdAt: workspaces.createdAt,
       updatedAt: workspaces.updatedAt,
       issueTitle: issues.title,
@@ -257,6 +299,7 @@ export async function getWorkspaceDetails(
       stdoutTail: row.latestSetupStdoutTail,
       stderrTail: row.latestSetupStderrTail,
     } : null,
+    latestSymlink: mapSymlinkRun(row),
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
     issue: { title: row.issueTitle, priority: row.issuePriority },

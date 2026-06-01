@@ -1,5 +1,5 @@
 import { workspaces } from "@agentic-kanban/shared/schema";
-import type { WorkspaceSetupRun } from "@agentic-kanban/shared";
+import type { WorkspaceSetupRun, WorkspaceSymlinkRun } from "@agentic-kanban/shared";
 import type { ProviderName } from "./agent-provider.js";
 import type { AgentSettings } from "./agent-settings.service.js";
 import * as realGitService from "./git.service.js";
@@ -89,6 +89,7 @@ export interface CreateWorkspaceResult {
   status: string;
   provider: ProviderName;
   latestSetup?: WorkspaceSetupRun;
+  latestSymlink?: WorkspaceSymlinkRun;
   sessionId?: string;
   createdAt: string;
   updatedAt: string;
