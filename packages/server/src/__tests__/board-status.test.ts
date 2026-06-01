@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { issues, projects, projectStatuses, sessionMessages, sessions, workflowNodes, workflowTemplates, workspaces } from "@agentic-kanban/shared/schema";
+import { issues, preferences, projects, projectStatuses, sessionMessages, sessions, workflowNodes, workflowTemplates, workspaces } from "@agentic-kanban/shared/schema";
 import { createTestDb } from "./helpers/test-db.js";
 
 const getDiffShortstat = vi.fn();
@@ -148,6 +148,73 @@ describe("board-status", () => {
 
     expect(status.issues[0]?.workspace?.readyForMerge).toBe(true);
     expect(status.issues[0]?.attention).toBeNull();
+  });
+
+  it("classifies idle committed In Review work as pending merge when auto_merge_in_review is enabled", async () => {
+    const { db } = createTestDb();
+    const now = new Date().toISOString();
+    const projectId = randomUUID();
+    const statusId = randomUUID();
+    const issueId = randomUUID();
+    const workspaceId = randomUUID();
+
+    getDiffShortstat.mockResolvedValue({ filesChanged: 2, insertions: 12, deletions: 3 });
+
+    await db.insert(projects).values({
+      id: projectId,
+      name: "Auto Merge Project",
+      repoPath: "/tmp/auto-merge-project",
+      repoName: "auto-merge-project",
+      defaultBranch: "main",
+      createdAt: now,
+      updatedAt: now,
+    });
+    await db.insert(preferences).values([
+      { key: "auto_merge", value: "true", updatedAt: now },
+      { key: "auto_merge_in_review", value: "true", updatedAt: now },
+    ]);
+    await db.insert(projectStatuses).values({
+      id: statusId,
+      projectId,
+      name: "In Review",
+      sortOrder: 0,
+      isDefault: true,
+      createdAt: now,
+    });
+    await db.insert(issues).values({
+      id: issueId,
+      issueNumber: 245,
+      title: "Committed review work",
+      statusId,
+      projectId,
+      createdAt: now,
+      updatedAt: now,
+    });
+    await db.insert(workspaces).values({
+      id: workspaceId,
+      issueId,
+      branch: "feature/committed-review-work",
+      workingDir: "/tmp/auto-merge-project/.worktrees/committed-review-work",
+      baseBranch: "main",
+      status: "idle",
+      readyForMerge: false,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const status = await getBoardStatus({ projectId }, db);
+
+    expect(status.issues[0]).toMatchObject({
+      issueNumber: 245,
+      statusName: "In Review",
+      workspace: { status: "idle", readyForMerge: false },
+      diffStats: { filesChanged: 2, insertions: 12, deletions: 3 },
+      mergeState: {
+        bucket: "pending_merge",
+        reason: "auto-merge-in-review",
+      },
+      attention: null,
+    });
   });
 
   it("reports active workflow Review progress as In Review even if the issue status is stale", async () => {

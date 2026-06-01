@@ -7,6 +7,8 @@ import { prodDeps, type ToolDeps } from "./deps.js";
 import { requireEntity } from "../db-utils.js";
 
 function classifyAttention(issue: BoardStatusIssue): BoardStatusIssue["attention"] {
+  if (issue.mergeState?.bucket === "pending_merge") return null;
+
   const stats = issue.diffStats;
   if (
     issue.statusName === "In Review"
@@ -22,6 +24,30 @@ function classifyAttention(issue: BoardStatusIssue): BoardStatusIssue["attention
       bucket: "needs_attention",
       reason: "idle-awaiting",
       label: "In Review workspace has no file changes and is not ready for merge",
+    };
+  }
+  return null;
+}
+
+function classifyMergeState(
+  issue: BoardStatusIssue,
+  options: { autoMergeEnabled: boolean; autoMergeInReview: boolean },
+): BoardStatusIssue["mergeState"] {
+  const stats = issue.diffStats;
+  if (
+    options.autoMergeEnabled
+    && options.autoMergeInReview
+    && issue.statusName === "In Review"
+    && issue.workspace
+    && issue.workspace.status === "idle"
+    && !issue.workspace.readyForMerge
+    && stats
+    && (stats.filesChanged > 0 || stats.insertions > 0 || stats.deletions > 0)
+  ) {
+    return {
+      bucket: "pending_merge",
+      reason: "auto-merge-in-review",
+      label: "Auto-merge pending for idle In Review workspace",
     };
   }
   return null;
@@ -63,6 +89,16 @@ export function registerGetBoardStatus(server: McpServer, deps: ToolDeps = prodD
         const rp = requireEntity(projectRows, pid, "Project");
         if (!rp.ok) return rp.error;
         const project = rp.value;
+
+        const preferenceRows = await db
+          .select({ key: schema.preferences.key, value: schema.preferences.value })
+          .from(schema.preferences)
+          .where(inArray(schema.preferences.key, ["auto_merge", "auto_merge_in_review"]));
+        const preferenceMap = new Map(preferenceRows.map((pref) => [pref.key, pref.value]));
+        const classificationOptions = {
+          autoMergeEnabled: preferenceMap.get("auto_merge") === "true",
+          autoMergeInReview: preferenceMap.get("auto_merge_in_review") === "true",
+        };
 
         // 2. Get statuses to identify terminal ones
         const statuses = await db
@@ -196,6 +232,7 @@ export function registerGetBoardStatus(server: McpServer, deps: ToolDeps = prodD
             lastOutput: [],
             lastAgentMessage: null,
             attention: null,
+            mergeState: null,
           };
 
           // For non-closed workspaces with a workingDir: compute diff stats + last output
@@ -236,6 +273,7 @@ export function registerGetBoardStatus(server: McpServer, deps: ToolDeps = prodD
         await Promise.all(asyncWork);
 
         for (const issue of result) {
+          issue.mergeState = classifyMergeState(issue, classificationOptions);
           issue.attention = classifyAttention(issue);
         }
 
