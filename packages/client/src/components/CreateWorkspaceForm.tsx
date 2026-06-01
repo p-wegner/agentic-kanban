@@ -34,6 +34,7 @@ interface CreateWorkspaceFormProps {
   onCreated: (result: { id: string; sessionId?: string }) => void;
   onCancel: () => void;
   onSubmitting?: () => void;
+  onSettled?: () => void;
 }
 
 type AgentProvider = ProfileSelection["provider"];
@@ -60,7 +61,7 @@ function profileOptionLabel(provider: AgentProvider, name: string): string {
   return `${providerLabel}: ${displayName}`;
 }
 
-export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCreated, onCancel, onSubmitting }: CreateWorkspaceFormProps) {
+export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCreated, onCancel, onSubmitting, onSettled }: CreateWorkspaceFormProps) {
   const suggestion = suggestBranchName(issue);
 
   const [branchName, setBranchName] = useState(suggestion);
@@ -163,6 +164,8 @@ export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCr
     } catch (err) {
       setLocalError(err instanceof Error ? err.message : "Failed to create workspace");
       setLocalLoading(false);
+    } finally {
+      onSettled?.();
     }
   }
 
