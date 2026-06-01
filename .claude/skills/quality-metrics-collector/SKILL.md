@@ -1,10 +1,5 @@
 ---
 name: quality-metrics-collector
-description: Collect repository code-health metrics and POST them to the board Quality Metrics API
----
-
----
-name: quality-metrics-collector
 description: Gather repository quality metrics such as productive code lines, test ratio, and available test or lint counts, then post them to the agentic-kanban quality metrics endpoint. Use when asked to collect, refresh, record, or publish quality metrics for the current project.
 ---
 
