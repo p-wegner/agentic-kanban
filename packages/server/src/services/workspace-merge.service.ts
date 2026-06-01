@@ -29,6 +29,7 @@ import { autoStartUnblockedDependencyIssue } from "./dependency-auto-chain.servi
 import { loadAgentSettings, toExecutorProvider } from "./agent-settings.service.js";
 import { computeWorkspaceCodeMetrics } from "./workspace-code-metrics.service.js";
 import { generateAndPersistGithubHandoffDraft } from "./github-handoff-draft.service.js";
+import { insertIssueComment } from "../repositories/issue-comments.repository.js";
 import {
   WorkspaceError,
   applyWorkspaceAgentSelection,
@@ -62,6 +63,28 @@ export function createWorkspaceMergeService(deps: {
     const message = warningMessage(err);
     warnings.push({ step, message, recoverable: true });
     console.warn(`[workspace-merge] ${step} failed after git merge landed (recoverable):`, message);
+  }
+
+  async function recordMergeAttempt(
+    workspace: typeof workspaces.$inferSelect,
+    eventType: "conflict" | "fix-and-merge-launched" | "merged" | "warning" | "already-merged" | "direct-closed",
+    body: string,
+    payload: Record<string, unknown> = {},
+    createdAt = new Date().toISOString(),
+  ): Promise<void> {
+    try {
+      await insertIssueComment({
+        issueId: workspace.issueId,
+        workspaceId: workspace.id,
+        kind: "merge-attempt",
+        author: "system",
+        body,
+        payload: { eventType, workspaceId: workspace.id, branch: workspace.branch, ...payload },
+        createdAt,
+      }, database);
+    } catch (err) {
+      console.warn("[workspace-merge] failed to record merge timeline event:", err instanceof Error ? err.message : String(err));
+    }
   }
 
   async function getChangedFilesBetweenSafe(repoPath: string, fromRef: string, toRef: string): Promise<string[]> {
@@ -181,6 +204,13 @@ export function createWorkspaceMergeService(deps: {
 
       const projectId = await resolveProjectId(id, database);
       if (projectId) boardEvents?.broadcast(projectId, "workspace_merged");
+      await recordMergeAttempt(
+        workspace,
+        "already-merged",
+        `Merge already recorded for workspace ${id} at ${workspace.mergedAt}. Reconciled cleanup and issue status.`,
+        { mergedAt: workspace.mergedAt, warnings },
+        now,
+      );
 
       return {
         id,
@@ -213,6 +243,13 @@ export function createWorkspaceMergeService(deps: {
 
       const projectId = await resolveProjectId(id, database);
       if (projectId) boardEvents?.broadcast(projectId, "workspace_merged");
+      await recordMergeAttempt(
+        workspace,
+        "direct-closed",
+        `Direct workspace ${id} was closed without a branch merge.`,
+        { closedAt: now },
+        now,
+      );
 
       return { id, mergeOutput: "Direct workspace closed (no merge needed)" };
     }
@@ -245,6 +282,12 @@ export function createWorkspaceMergeService(deps: {
 
       const conflicts = await gitService.detectConflicts(workspace.workingDir, baseBranch);
       if (conflicts.hasConflicts) {
+        await recordMergeAttempt(
+          workspace,
+          "conflict",
+          `Merge attempt blocked by conflicts in ${conflicts.conflictingFiles.length} file${conflicts.conflictingFiles.length === 1 ? "" : "s"}: ${conflicts.conflictingFiles.join(", ")}`,
+          { targetBranch: baseBranch, conflictingFiles: conflicts.conflictingFiles },
+        );
         throw new WorkspaceError(
           "Merge conflicts detected",
           "BAD_REQUEST",
@@ -313,6 +356,12 @@ export function createWorkspaceMergeService(deps: {
     try {
       result = await gitService.mergeBranch(repoPath, workspace.branch, targetBranch);
     } catch (err) {
+      await recordMergeAttempt(
+        workspace,
+        "conflict",
+        `Merge failed while merging ${workspace.branch} into ${targetBranch}: ${err instanceof Error ? err.message : String(err)}`,
+        { step: "git-merge", targetBranch },
+      );
       throw new WorkspaceError(
         `Merge failed (git-merge step): ${err instanceof Error ? err.message : String(err)}`,
         "CONFLICT",
@@ -320,6 +369,8 @@ export function createWorkspaceMergeService(deps: {
       );
     }
     const warnings: MergeWarning[] = [];
+    let mergeCommitSha = "";
+    try { mergeCommitSha = await gitService.revParse(repoPath, "HEAD"); } catch { /* tolerate */ }
 
     if (workspace.workingDir) {
       await computeWorkspaceCodeMetrics(id, database).catch((err) => {
@@ -331,6 +382,13 @@ export function createWorkspaceMergeService(deps: {
     const now = new Date().toISOString();
     await updateWorkspaceStatus(id, "closed", { workingDir: null, closedAt: now, mergedAt: now }, database);
     await moveIssueToDone(id, workspace.issueId, now, database);
+    await recordMergeAttempt(
+      workspace,
+      "merged",
+      `Merged ${workspace.branch} into ${targetBranch}${mergeCommitSha ? ` at ${mergeCommitSha}` : ""}.`,
+      { targetBranch, commitSha: mergeCommitSha || null, mergedAt: now, mergeOutput: result },
+      now,
+    );
 
     const projectId = await resolveProjectId(id, database);
     if (projectId) boardEvents?.broadcast(projectId, "workspace_merged");
@@ -371,6 +429,15 @@ export function createWorkspaceMergeService(deps: {
       await gitService.deleteBranch(repoPath, workspace.branch);
       console.log(`[workspace-service] deleted branch ${workspace.branch}`);
     } catch (err) { addRecoverableWarning(warnings, "delete-branch", err); }
+
+    if (warnings.length > 0) {
+      await recordMergeAttempt(
+        workspace,
+        "warning",
+        `Merge completed, but ${warnings.length} post-merge cleanup step${warnings.length === 1 ? "" : "s"} reported a recoverable warning. The branch was already merged before this response returned.`,
+        { warnings },
+      );
+    }
 
     // Post-merge tasks that don't affect the merge result — run in background so /merge returns promptly.
     void runPostMergeTasks({
@@ -607,6 +674,12 @@ export function createWorkspaceMergeService(deps: {
     });
 
     await updateWorkspaceStatus(id, "fixing", {}, database);
+    await recordMergeAttempt(
+      workspace,
+      "fix-and-merge-launched",
+      `Launched a fix-and-merge session for workspace ${id}.`,
+      { sessionId, mergeError: errorMessage, targetBranch: baseBranch },
+    );
 
     const projectId = await resolveProjectId(id, database);
     if (projectId) boardEvents?.broadcast(projectId, "session_launched");

@@ -336,8 +336,8 @@ export function createIssuesRoute(database: Database = db, options?: { boardEven
       payload?: unknown;
       workspaceId?: string;
     }>(c);
-    const validKinds: IssueCommentKind[] = ["preflight-clarification", "agent-question", "note"];
-    const validAuthors: IssueCommentAuthor[] = ["user", "butler", "agent", "preflight"];
+    const validKinds: IssueCommentKind[] = ["preflight-clarification", "agent-question", "merge-attempt", "note"];
+    const validAuthors: IssueCommentAuthor[] = ["user", "butler", "agent", "preflight", "system"];
     if (!body.body?.trim()) return c.json({ error: "body is required" }, 400);
     const kind = body.kind && validKinds.includes(body.kind) ? body.kind : "note";
     const author = body.author && validAuthors.includes(body.author) ? body.author : "user";
