@@ -52,9 +52,9 @@ playwright-cli open http://127.0.0.1:5173
 deadline=$((SECONDS + 20))
 found=""
 while [ "$SECONDS" -lt "$deadline" ]; do
-  main_text=$(playwright-cli eval "document.querySelector('main')?.innerText || ''" 2>&1)
-  if printf '%s' "$main_text" | grep -Eq "Todo|In Progress|No issues|No projects registered"; then
-    printf '%s\n' "$main_text" | head -c 500
+  rendered_text=$(playwright-cli eval "document.querySelector('main')?.innerText || document.querySelector('#root')?.innerText || document.body?.innerText || ''" 2>&1)
+  if printf '%s' "$rendered_text" | grep -Eq "Todo|In Progress|No issues|No projects registered"; then
+    printf '%s\n' "$rendered_text" | head -c 500
     echo
     found="yes"
     break
@@ -66,10 +66,10 @@ if [ -z "$found" ]; then
   echo "Timed out waiting for hydrated board content."
   echo "--- console ---"
   playwright-cli console || true
-  echo "--- main text ---"
-  playwright-cli eval "document.querySelector('main')?.innerText?.substring(0,1000) || '<missing main>'" || true
-  echo "--- main html ---"
-  playwright-cli eval "document.querySelector('main')?.innerHTML?.substring(0,1500) || '<missing main>'" || true
+  echo "--- rendered text ---"
+  playwright-cli eval "(document.querySelector('main')?.innerText || document.querySelector('#root')?.innerText || document.body?.innerText || '<empty rendered text>').substring(0,1000)" || true
+  echo "--- app root html ---"
+  playwright-cli eval "(document.querySelector('main')?.innerHTML || document.querySelector('#root')?.innerHTML || document.body?.innerHTML || '<empty rendered html>').substring(0,1500)" || true
   playwright-cli close
   exit 1
 fi
@@ -79,7 +79,7 @@ playwright-cli close
 
 **Interpret result:**
 - Contains `Todo`, `In Progress`, `No issues`, or `No projects registered` before the timeout → **OK**
-- Times out with empty/missing/irrelevant `<main>` content → app may have crashed or failed to hydrate. The smoke command has already printed console output and the current `<main>` text/html snippets. Diagnose:
+- Times out with empty/missing/irrelevant rendered app content → app may have crashed or failed to hydrate. The smoke command has already printed console output and the current rendered text/html snippets. Diagnose:
   1. Check Vite module errors: `GET http://127.0.0.1:5173/src/routes/BoardPage.tsx` — HTTP 500 = compile error in client source
   2. Check server watcher log: `tail -20 /tmp/kanban-monitor-srv.log` for `SyntaxError`, `Cannot find`, `error TS`
   3. Re-run Section 1 scan (conflict markers may have slipped through)
