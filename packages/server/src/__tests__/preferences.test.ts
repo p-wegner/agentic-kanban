@@ -246,6 +246,23 @@ describe("Preferences API - settings", () => {
     expect(body[key]).toBe(value);
   });
 
+  it("PUT /api/preferences/settings stores project-scoped launch templates", async () => {
+    const { app: freshApp } = createTestApp();
+    const projectId = randomUUID();
+    const key = `launch_templates_${projectId}`;
+    const value = JSON.stringify([{ id: "lt-1", name: "Standard", options: { planMode: true } }]);
+
+    await freshApp.request("/api/preferences/settings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ [key]: value }),
+    });
+
+    const res = await freshApp.request("/api/preferences/settings");
+    const body = await res.json() as any;
+    expect(body[key]).toBe(value);
+  });
+
   it("PUT /api/preferences/settings handles agent/profile allowed keys", async () => {
     const { app: freshApp } = createTestApp();
 
