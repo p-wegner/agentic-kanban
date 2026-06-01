@@ -82,6 +82,7 @@ interface WorkspacePanelProps {
   onClose: () => void;
   onWorkspaceChange?: () => void;
   onWorkspaceCreating?: (issueId: string) => void;
+  onWorkspaceCreateSettled?: (issueId: string) => void;
   initialWorkspaceId?: string;
   initialSessionId?: string;
   autoSelectId?: string;
@@ -283,7 +284,7 @@ function RetryDecisionBadge({ decision }: { decision: RetryDecision }) {
   );
 }
 
-export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onWorkspaceCreating, initialWorkspaceId, initialSessionId, autoSelectId, initialShowCreate }: WorkspacePanelProps) {
+export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onWorkspaceCreating, onWorkspaceCreateSettled, initialWorkspaceId, initialSessionId, autoSelectId, initialShowCreate }: WorkspacePanelProps) {
   const [workspaces, setWorkspaces] = useState<WorkspaceResponse[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(initialShowCreate ?? false);
@@ -588,6 +589,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
     setError(null);
     setCompletedMessages([]);
     setQuickDropdownOpen(false);
+    onWorkspaceCreating?.(issue.id);
     try {
       const body: Record<string, unknown> = {
         issueId: issue.id,
@@ -614,6 +616,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create workspace");
     } finally {
+      onWorkspaceCreateSettled?.(issue.id);
       setActionLoading(false);
     }
   }
@@ -623,6 +626,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
     setError(null);
     setCompletedMessages([]);
     setQuickDropdownOpen(false);
+    onWorkspaceCreating?.(issue.id);
     try {
       const body: Record<string, unknown> = {
         issueId: issue.id,
@@ -650,6 +654,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create workspace");
     } finally {
+      onWorkspaceCreateSettled?.(issue.id);
       setActionLoading(false);
     }
   }
@@ -1433,6 +1438,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
               prefs={prefs}
               actionLoading={actionLoading}
               onSubmitting={() => onWorkspaceCreating?.(issue.id)}
+              onSettled={() => onWorkspaceCreateSettled?.(issue.id)}
               onCreated={(result) => {
                 setShowCreate(false);
                 setCompletedMessages([]);

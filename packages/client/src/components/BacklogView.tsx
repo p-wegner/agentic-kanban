@@ -112,6 +112,7 @@ export interface BacklogViewProps {
   sessionActivity: Record<string, string>;
   liveStats: Record<string, LiveSessionStats>;
   sessionTodos: Record<string, TodoItem[]>;
+  pendingIssueIds: Set<string>;
   pendingWorkspaceIssueIds: Set<string>;
   canStartWorkspace: boolean;
   onIssueClick: (issue: IssueWithStatus) => void;
@@ -133,6 +134,7 @@ export function BacklogView({
   sessionActivity,
   liveStats,
   sessionTodos,
+  pendingIssueIds,
   pendingWorkspaceIssueIds,
   canStartWorkspace,
   onIssueClick,
@@ -656,6 +658,7 @@ export function BacklogView({
                           liveActivity={sessionActivity[issue.id]}
                           liveStats={liveStats[issue.id]}
                           todos={sessionTodos[issue.id]}
+                          isPendingIssue={pendingIssueIds.has(issue.id)}
                           isPendingWorkspace={pendingWorkspaceIssueIds.has(issue.id)}
                         />
                         <div className="mt-1 flex flex-wrap gap-1">

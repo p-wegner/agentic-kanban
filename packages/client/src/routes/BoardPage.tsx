@@ -187,6 +187,7 @@ export function BoardPage() {
   const [monitorStatus, setMonitorStatus] = useState<MonitorStatus | null>(null);
   const [monitorRunning, setMonitorRunning] = useState(false);
   const [moveToDonePending, setMoveToDonePending] = useState<{ issue: IssueWithStatus; confirm: () => Promise<void> } | null>(null);
+  const [pendingIssueIds, setPendingIssueIds] = useState<Set<string>>(new Set());
   const [pendingWorkspaceIssueIds, setPendingWorkspaceIssueIds] = useState<Set<string>>(new Set());
   const [selectedBoardIssueIds, setSelectedBoardIssueIds] = useState<Set<string>>(new Set());
   const [lastSelectedBoardIssueId, setLastSelectedBoardIssueId] = useState<string | null>(null);
@@ -512,6 +513,41 @@ export function BoardPage() {
     setMutating(true);
     setError(null);
     const { startWorkspace, planMode, profile, model, isDirect, skillId, ...issueData } = data;
+    const tempIssueId = `pending-${Date.now()}`;
+    const targetColumn = columnsRef.current.find((col) => col.id === issueData.statusId);
+    const now = new Date().toISOString();
+    if (targetColumn) {
+      const optimisticIssue: IssueWithStatus = {
+        id: tempIssueId,
+        issueNumber: null,
+        title: issueData.title,
+        description: issueData.description ?? null,
+        priority: issueData.priority ?? "medium",
+        issueType: issueData.issueType ?? "task",
+        sortOrder: (targetColumn.issues[0]?.sortOrder ?? 0) - 100,
+        statusId: issueData.statusId,
+        projectId: issueData.projectId,
+        createdAt: now,
+        updatedAt: now,
+        statusChangedAt: null,
+        statusName: targetColumn.name,
+        skipAutoReview: issueData.skipAutoReview,
+        estimate: issueData.estimate ?? null,
+        dueDate: null,
+        tags: [],
+      };
+      const withOptimisticIssue = columnsRef.current.map((col) =>
+        col.id === issueData.statusId
+          ? { ...col, issues: [optimisticIssue, ...col.issues] }
+          : col,
+      );
+      setColumns(withOptimisticIssue);
+      columnsRef.current = withOptimisticIssue;
+      setPendingIssueIds((prev) => new Set([...prev, tempIssueId]));
+      if (startWorkspace) {
+        setPendingWorkspaceIssueIds((prev) => new Set([...prev, tempIssueId]));
+      }
+    }
     try {
       const created = await apiFetch<{ id: string; issueNumber: number; title: string }>(
         "/api/issues",
@@ -519,6 +555,17 @@ export function BoardPage() {
       );
       setCreatingInColumnId(null);
       setExpandedCreatePanel(null);
+      setPendingIssueIds((prev) => {
+        const next = new Set(prev);
+        next.delete(tempIssueId);
+        return next;
+      });
+      setPendingWorkspaceIssueIds((prev) => {
+        const next = new Set(prev);
+        next.delete(tempIssueId);
+        if (startWorkspace) next.add(created.id);
+        return next;
+      });
       const board = await refetchBoard();
       pendingBoardRefreshRef.current = false;
 
@@ -541,7 +588,14 @@ export function BoardPage() {
               skillId: skillId || undefined,
             }),
           });
-          for (const col of board ?? columns) {
+          let launchedBoard = board;
+          try {
+            launchedBoard = await refetchBoard();
+            pendingBoardRefreshRef.current = false;
+          } catch {
+            // The workspace was created; a later realtime/poll refresh can reconcile the card.
+          }
+          for (const col of launchedBoard ?? board ?? columns) {
             const found = col.issues.find((i) => i.id === created.id);
             if (found) {
               setWorkspaceIssue(found);
@@ -553,12 +607,32 @@ export function BoardPage() {
           }
           showToast("Issue and workspace created", "success");
         } catch {
+          setPendingWorkspaceIssueIds((prev) => {
+            const next = new Set(prev);
+            next.delete(created.id);
+            return next;
+          });
           showToast("Issue created, but workspace creation failed", "error");
         }
       } else {
         showToast("Issue created", "success");
       }
     } catch (err) {
+      setColumns((prev) => {
+        const next = prev.map((col) => ({ ...col, issues: col.issues.filter((issue) => issue.id !== tempIssueId) }));
+        columnsRef.current = next;
+        return next;
+      });
+      setPendingIssueIds((prev) => {
+        const next = new Set(prev);
+        next.delete(tempIssueId);
+        return next;
+      });
+      setPendingWorkspaceIssueIds((prev) => {
+        const next = new Set(prev);
+        next.delete(tempIssueId);
+        return next;
+      });
       showToast("Failed to create issue", "error");
     } finally {
       setMutating(false);
@@ -742,10 +816,12 @@ export function BoardPage() {
   }
 
   function handleIssueClick(issue: IssueWithStatus) {
+    if (pendingIssueIds.has(issue.id)) return;
     setSelectedIssue(issue);
   }
 
   function handleBoardIssueClick(issue: IssueWithStatus, event: React.MouseEvent) {
+    if (pendingIssueIds.has(issue.id)) return;
     if (event.ctrlKey || event.metaKey || event.shiftKey) {
       event.preventDefault();
       setSelectedIssue(null);
@@ -1771,6 +1847,7 @@ export function BoardPage() {
               sessionActivity={sessionActivity}
               liveStats={liveStats}
               sessionTodos={sessionTodos}
+              pendingIssueIds={pendingIssueIds}
               pendingWorkspaceIssueIds={pendingWorkspaceIssueIds}
               canStartWorkspace={canStartWorkspace}
               onIssueClick={handleIssueClick}
@@ -1797,6 +1874,7 @@ export function BoardPage() {
             sessionActivity={sessionActivity}
             liveStats={liveStats}
             sessionTodos={sessionTodos}
+            pendingIssueIds={pendingIssueIds}
             pendingWorkspaceIssueIds={pendingWorkspaceIssueIds}
             collapsedArchive={collapsedGroups.has("archive")}
             canStartWorkspace={canStartWorkspace}
@@ -1851,6 +1929,11 @@ export function BoardPage() {
           onClose={() => { setWorkspaceIssue(null); setWorkspaceInitial(null); setWorkspaceOpenCreate(false); }}
           onWorkspaceChange={() => refetchBoard()}
           onWorkspaceCreating={(issueId) => setPendingWorkspaceIssueIds((prev) => new Set([...prev, issueId]))}
+          onWorkspaceCreateSettled={(issueId) => setPendingWorkspaceIssueIds((prev) => {
+            const next = new Set(prev);
+            next.delete(issueId);
+            return next;
+          })}
           initialWorkspaceId={workspaceInitial?.workspaceId}
           initialSessionId={workspaceInitial?.sessionId}
           initialShowCreate={workspaceOpenCreate}
