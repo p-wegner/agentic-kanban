@@ -6,6 +6,35 @@ import * as gitService from "../git-service.js";
 import { notifyBoard } from "../notify.js";
 import { requireEntity } from "../db-utils.js";
 import { applyOpenSpecDeltas, OPENSPEC_CHANGES_DIR, OPENSPEC_SPECS_DIR, validateOpenSpecChange } from "@agentic-kanban/shared/lib/openspec";
+import { randomUUID } from "node:crypto";
+
+async function recordMergeAttempt(args: {
+  issueId: string;
+  workspaceId: string;
+  branch: string;
+  eventType: "merged" | "direct-closed" | "conflict";
+  body: string;
+  payload?: Record<string, unknown>;
+}) {
+  const now = new Date().toISOString();
+  await db.insert(schema.issueComments).values({
+    id: randomUUID(),
+    issueId: args.issueId,
+    workspaceId: args.workspaceId,
+    kind: "merge-attempt",
+    author: "system",
+    body: args.body,
+    payload: JSON.stringify({
+      eventType: args.eventType,
+      workspaceId: args.workspaceId,
+      branch: args.branch,
+      ...args.payload,
+    }),
+    createdAt: now,
+  }).catch((err) => {
+    console.warn("[merge-workspace] failed to record merge timeline event:", err instanceof Error ? err.message : String(err));
+  });
+}
 
 export function registerMergeWorkspace(server: McpServer) {
   server.tool(
@@ -53,6 +82,14 @@ export function registerMergeWorkspace(server: McpServer) {
             .where(eq(schema.workspaces.id, workspaceId));
 
           await autoTransitionDone(projectId, workspace.issueId, now);
+          await recordMergeAttempt({
+            issueId: workspace.issueId,
+            workspaceId,
+            branch: workspace.branch,
+            eventType: "direct-closed",
+            body: `Direct workspace ${workspaceId} was closed without a branch merge.`,
+            payload: { closedAt: now },
+          });
           notifyBoard(projectId, "mcp_merge_workspace");
 
           return {
@@ -104,7 +141,10 @@ export function registerMergeWorkspace(server: McpServer) {
 
         let preMergeHead = "";
         try { preMergeHead = await gitService.revParse(repoPath, "HEAD"); } catch { /* tolerate */ }
-        let mergeOutput = await gitService.mergeBranch(repoPath, workspace.branch, projectRows[0].defaultBranch || "main");
+        const targetBranch = projectRows[0].defaultBranch || "main";
+        let mergeOutput = await gitService.mergeBranch(repoPath, workspace.branch, targetBranch);
+        let mergeCommitSha = "";
+        try { mergeCommitSha = await gitService.revParse(repoPath, "HEAD"); } catch { /* tolerate */ }
 
         const changedFiles = preMergeHead
           ? await gitService.getChangedFilesBetween(repoPath, preMergeHead, "HEAD")
@@ -143,12 +183,28 @@ export function registerMergeWorkspace(server: McpServer) {
           .where(eq(schema.workspaces.id, workspaceId));
 
         await autoTransitionDone(projectId, workspace.issueId, now);
+        await recordMergeAttempt({
+          issueId: workspace.issueId,
+          workspaceId,
+          branch: workspace.branch,
+          eventType: "merged",
+          body: `Merged ${workspace.branch} into ${targetBranch}${mergeCommitSha ? ` at ${mergeCommitSha}` : ""}.`,
+          payload: { targetBranch, commitSha: mergeCommitSha || null, mergedAt: now, mergeOutput },
+        });
         notifyBoard(projectId, "mcp_merge_workspace");
 
         return {
           content: [{ type: "text" as const, text: JSON.stringify({ id: workspaceId, mergeOutput }, null, 2) }],
         };
       } catch (err) {
+        await recordMergeAttempt({
+          issueId: workspace.issueId,
+          workspaceId,
+          branch: workspace.branch,
+          eventType: "conflict",
+          body: `Merge failed for ${workspace.branch}: ${err instanceof Error ? err.message : String(err)}`,
+          payload: { error: err instanceof Error ? err.message : String(err) },
+        });
         return {
           content: [{ type: "text" as const, text: `Merge failed: ${err instanceof Error ? err.message : String(err)}` }],
         };
