@@ -152,6 +152,7 @@ describe("workspace-summary.service", () => {
       currentNodeId: implementNodeId,
       currentNodeName: "Implement",
       currentNodeType: "normal",
+      currentNodeStatusName: "In Progress",
       state: "waiting",
       nextStages: ["Review"],
     });

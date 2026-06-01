@@ -435,6 +435,81 @@ describe("Board API", () => {
     expect(body[1].issues.length).toBe(1);
   });
 
+  it("GET /api/projects/:id/board derives the column from active workflow progress", async () => {
+    const workflowProjectId = await createProjectDirectly(database, { name: "Workflow Board Project" });
+    const inProgressStatusId = await createStatusDirectly(database, workflowProjectId, "In Progress", 0);
+    const inReviewStatusId = await createStatusDirectly(database, workflowProjectId, "In Review", 1);
+    const now = new Date().toISOString();
+    const templateId = randomUUID();
+    const implementNodeId = randomUUID();
+    const reviewNodeId = randomUUID();
+    await database.insert(schema.workflowTemplates).values({
+      id: templateId,
+      projectId: workflowProjectId,
+      name: "Implement Review",
+      isDefault: false,
+      isBuiltin: false,
+      createdAt: now,
+      updatedAt: now,
+    });
+    await database.insert(schema.workflowNodes).values([
+      {
+        id: implementNodeId,
+        templateId,
+        name: "Implement",
+        nodeType: "normal",
+        statusName: "In Progress",
+        sortOrder: 0,
+        createdAt: now,
+      },
+      {
+        id: reviewNodeId,
+        templateId,
+        name: "Review",
+        nodeType: "normal",
+        statusName: "In Review",
+        sortOrder: 1,
+        createdAt: now,
+      },
+    ] as any);
+
+    const issueId = randomUUID();
+    await database.insert(schema.issues).values({
+      id: issueId,
+      projectId: workflowProjectId,
+      statusId: inProgressStatusId,
+      issueNumber: 244,
+      title: "Workflow status drift",
+      priority: "medium",
+      issueType: "bug",
+      sortOrder: 0,
+      workflowTemplateId: templateId,
+      currentNodeId: implementNodeId,
+      createdAt: now,
+      updatedAt: now,
+    });
+    await database.insert(schema.workspaces).values({
+      id: randomUUID(),
+      issueId,
+      branch: "feature/workflow-status-drift",
+      status: "idle",
+      currentNodeId: reviewNodeId,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const res = await app.request(`/api/projects/${workflowProjectId}/board`);
+    expect(res.status).toBe(200);
+    const body = await res.json() as any;
+
+    expect(body.find((column: any) => column.name === "In Progress")?.issues).toHaveLength(0);
+    expect(body.find((column: any) => column.name === "In Review")?.issues[0]).toMatchObject({
+      id: issueId,
+      statusId: inReviewStatusId,
+      statusName: "In Review",
+    });
+  });
+
   it("GET /api/projects/:id/board returns 404 for missing project", async () => {
     const res = await app.request(`/api/projects/${randomUUID()}/board`);
     expect(res.status).toBe(404);
