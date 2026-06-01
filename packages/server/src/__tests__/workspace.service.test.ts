@@ -399,6 +399,44 @@ describe("workspace.service", () => {
       expect(statusRow[0].name).toBe("Done");
     });
 
+    it("records the merge before post-merge cleanup can interrupt the response", { timeout: 30000 }, async () => {
+      const { projectId, issueId } = await seedProjectAndIssue(db);
+      const wsId = await seedWorkspaceForMerge(projectId, issueId);
+      const gitService = createFakeGitService({
+        removeWorktree: vi.fn(async () => {
+          const wsRows = await db.select().from(workspaces).where(eq(workspaces.id, wsId));
+          expect(wsRows[0].status).toBe("closed");
+          expect(wsRows[0].workingDir).toBeNull();
+          expect(wsRows[0].mergedAt).toBeTruthy();
+          expect(wsRows[0].codeMetricsJson).toBeTruthy();
+
+          const issueRow = await db.select().from(issues).where(eq(issues.id, issueId));
+          const statusRow = await db.select().from(projectStatuses).where(eq(projectStatuses.id, issueRow[0].statusId));
+          expect(statusRow[0].name).toBe("Done");
+
+          throw new Error("connection dropped during cleanup");
+        }),
+      });
+
+      const service = createWorkspaceService({
+        database: db,
+        gitService,
+        createBackup: vi.fn(async () => ({})),
+        processKiller: vi.fn(async () => 0),
+      });
+
+      const result = await service.mergeWorkspace(wsId);
+
+      expect(result.mergeOutput).toContain("Merge made");
+      expect(result.warnings).toEqual([
+        expect.objectContaining({
+          step: "remove-worktree",
+          message: "connection dropped during cleanup",
+          recoverable: true,
+        }),
+      ]);
+    });
+
     it("returns success, closes the workspace, and moves the issue to Done when worktree removal fails after merge", { timeout: 30000 }, async () => {
       const { projectId, issueId } = await seedProjectAndIssue(db);
       const wsId = await seedWorkspaceForMerge(projectId, issueId);

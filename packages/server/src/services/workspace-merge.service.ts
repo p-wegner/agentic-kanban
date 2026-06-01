@@ -265,6 +265,20 @@ export function createWorkspaceMergeService(deps: {
     let result = await gitService.mergeBranch(repoPath, workspace.branch, targetBranch);
     const warnings: MergeWarning[] = [];
 
+    if (workspace.workingDir) {
+      await computeWorkspaceCodeMetrics(id, database).catch((err) => {
+        addRecoverableWarning(warnings, "code-metrics", err);
+        return null;
+      });
+    }
+
+    const now = new Date().toISOString();
+    await updateWorkspaceStatus(id, "closed", { workingDir: null, closedAt: now, mergedAt: now }, database);
+    await moveIssueToDone(id, workspace.issueId, now, database);
+
+    const projectId = await resolveProjectId(id, database);
+    if (projectId) boardEvents?.broadcast(projectId, "workspace_merged");
+
     try {
       const changedFiles = preMergeHead
         ? await getChangedFilesBetweenSafe(repoPath, preMergeHead, "HEAD")
@@ -291,13 +305,6 @@ export function createWorkspaceMergeService(deps: {
       addRecoverableWarning(warnings, "openspec-post-merge", err);
     }
 
-    if (workspace.workingDir) {
-      await computeWorkspaceCodeMetrics(id, database).catch((err) => {
-        addRecoverableWarning(warnings, "code-metrics", err);
-        return null;
-      });
-    }
-
     // Kill any agent-spawned processes (e.g. leaked dev.mjs) before removing the worktree.
     if (workspace.workingDir) {
       await killWorktreeProcesses(workspace.workingDir, "merge:post");
@@ -308,13 +315,6 @@ export function createWorkspaceMergeService(deps: {
       await gitService.deleteBranch(repoPath, workspace.branch);
       console.log(`[workspace-service] deleted branch ${workspace.branch}`);
     } catch (err) { addRecoverableWarning(warnings, "delete-branch", err); }
-
-    const now = new Date().toISOString();
-    await updateWorkspaceStatus(id, "closed", { workingDir: null, closedAt: now, mergedAt: now }, database);
-    await moveIssueToDone(id, workspace.issueId, now, database);
-
-    const projectId = await resolveProjectId(id, database);
-    if (projectId) boardEvents?.broadcast(projectId, "workspace_merged");
 
     // Post-merge tasks that don't affect the merge result — run in background so /merge returns promptly.
     void runPostMergeTasks({
