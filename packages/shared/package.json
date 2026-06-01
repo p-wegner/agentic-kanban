@@ -16,6 +16,7 @@
     "./lib/setup-script": { "types": "./dist/lib/setup-script.d.ts", "import": "./dist/lib/setup-script.js", "default": "./src/lib/setup-script.ts" },
     "./lib/ticket-context": { "types": "./dist/lib/ticket-context.d.ts", "import": "./dist/lib/ticket-context.js", "default": "./src/lib/ticket-context.ts" },
     "./lib/cron-utils": { "types": "./dist/lib/cron-utils.d.ts", "import": "./dist/lib/cron-utils.js", "default": "./src/lib/cron-utils.ts" },
+    "./lib/worktree-symlink-bootstrap": { "types": "./dist/lib/worktree-symlink-bootstrap.d.ts", "import": "./dist/lib/worktree-symlink-bootstrap.js", "default": "./src/lib/worktree-symlink-bootstrap.ts" },
     "./lib/workflow-engine": { "types": "./dist/lib/workflow-engine.d.ts", "import": "./dist/lib/workflow-engine.js", "default": "./src/lib/workflow-engine.ts" }
   },
   "scripts": {
