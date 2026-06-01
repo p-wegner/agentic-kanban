@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
-import { join, dirname, sep } from "node:path";
+import { join, dirname, sep, resolve, parse } from "node:path";
 
 function execGit(args: string[], cwd: string): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -141,12 +141,38 @@ export async function removeWorktree(
   repoPath: string,
   worktreePath: string,
 ): Promise<void> {
-  await execGit(["worktree", "remove", "--force", worktreePath], repoPath);
+  try {
+    await execGit(["worktree", "remove", "--force", worktreePath], repoPath);
+  } catch (err) {
+    if (await removeLeftoverWorktreeDirectory(repoPath, worktreePath)) {
+      await execGit(["worktree", "prune"], repoPath).catch(() => undefined);
+      return;
+    }
+    throw err;
+  }
+
+  if (await removeLeftoverWorktreeDirectory(repoPath, worktreePath)) {
+    await execGit(["worktree", "prune"], repoPath).catch(() => undefined);
+  }
 }
 
 /** Prune stale worktree references (worktrees whose directories no longer exist). */
 export async function pruneWorktrees(repoPath: string): Promise<void> {
   await execGit(["worktree", "prune"], repoPath);
+}
+
+async function removeLeftoverWorktreeDirectory(repoPath: string, worktreePath: string): Promise<boolean> {
+  if (!existsSync(worktreePath)) return false;
+
+  const repoResolved = resolve(repoPath);
+  const targetResolved = resolve(worktreePath);
+  const root = parse(targetResolved).root;
+  if (targetResolved === repoResolved || targetResolved === root) {
+    throw new Error(`Refusing to recursively remove unsafe worktree path: ${worktreePath}`);
+  }
+
+  await rm(worktreePath, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+  return !existsSync(worktreePath);
 }
 
 /** Generate unified diff entries for untracked files (not yet git-add'd). */
