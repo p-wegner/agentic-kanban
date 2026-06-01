@@ -21,7 +21,6 @@ DIR="$REPO/scripts/board-monitor"
 LOG="$DIR/loop.log"
 STOP="$DIR/STOP"
 STATE="$DIR/state.md"
-OBJ="$(cat "$DIR/objective.md")"
 SLEEP="${MONITOR_SLEEP:-300}"
 MAX="${MONITOR_MAX_ITERS:-500}"
 ITER_TIMEOUT="${MONITOR_ITER_TIMEOUT:-1800}"
@@ -50,6 +49,9 @@ for (( i=1; i<=MAX; i++ )); do
   if [ -f "$STOP" ]; then log "STOP file present — exiting before iteration $i"; rm -f "$STOP"; break; fi
 
   log "--- iteration $i START ---"
+  # Re-read the objective every iteration so it can be steered LIVE (edit
+  # objective.md and the next cycle picks it up — no loop restart needed).
+  OBJ="$(cat "$DIR/objective.md")"
   start=$(date +%s)
   timeout "$ITER_TIMEOUT" codex exec \
     --dangerously-bypass-approvals-and-sandbox \
