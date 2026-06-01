@@ -25,7 +25,7 @@ export function setupScheduledTasks(serverPort: number): void {
         if (now >= nextRun) {
           console.log(`[scheduler] triggering scheduled run "${run.name}" (${run.id})`);
           try {
-            const res = await fetch(`http://localhost:${serverPort}/api/scheduled-runs/${run.id}/run?triggeredBy=scheduler`, { method: "POST" });
+            const res = await fetch(`http://127.0.0.1:${serverPort}/api/scheduled-runs/${run.id}/run?triggeredBy=scheduler`, { method: "POST" });
             if (!res.ok) {
               const body = await res.text();
               const reason = `Launch error: ${res.status} ${body}`;
