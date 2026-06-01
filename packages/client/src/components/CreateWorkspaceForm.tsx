@@ -1,10 +1,20 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { apiFetch } from "../lib/api.js";
 import { suggestBranchName, sanitizeBranchName } from "../lib/branch.js";
 import type { IssueWithStatus, ProfileSelection, WorkspaceResponse } from "@agentic-kanban/shared";
 import { CLAUDE_MODEL_OPTIONS } from "@agentic-kanban/shared";
 import { PreflightModal } from "./PreflightModal.js";
 import type { PreflightResult, PreflightClarification } from "./PreflightModal.js";
+import {
+  launchTemplatesKey,
+  sanitizeLaunchTemplates,
+  upsertLaunchTemplate,
+  deleteLaunchTemplate,
+  applyTemplateToForm,
+  type LaunchTemplate,
+  type LaunchTemplateOptions,
+} from "../lib/launchTemplates.js";
+import { showToast } from "./Toast.js";
 
 interface Project {
   id: string;
@@ -80,6 +90,13 @@ export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCr
   // When set, a pending launch payload is waiting for preflight confirmation
   const [pendingLaunch, setPendingLaunch] = useState<Record<string, unknown> | null>(null);
 
+  // Launch templates state
+  const [templates, setTemplates] = useState<LaunchTemplate[]>([]);
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string>("");
+  const [templateName, setTemplateName] = useState("");
+  const [templateSaving, setTemplateSaving] = useState(false);
+  const templateSettingsKey = useMemo(() => project ? launchTemplatesKey(project.id) : "", [project]);
+
   useEffect(() => {
     if (project) {
       apiFetch<{ local: string[]; remote: string[] }>(`/api/projects/${project.id}/branches`)
@@ -111,6 +128,12 @@ export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCr
       const projectTddKey = project ? `tdd_mode_${project.id}` : null;
       const tddPref = projectTddKey ? (settings[projectTddKey] ?? settings.tdd_mode) : settings.tdd_mode;
       setTddMode(tddPref === "true");
+      // Load launch templates
+      if (project) {
+        const key = launchTemplatesKey(project.id);
+        const loaded = sanitizeLaunchTemplates(settings[key]);
+        setTemplates(loaded);
+      }
     });
     const url = project ? `/api/agent-skills?projectId=${project.id}` : "/api/agent-skills";
     apiFetch<{ id: string; name: string; description: string }[]>(url)
@@ -208,6 +231,75 @@ export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCr
     onCancel();
   }
 
+  async function persistTemplates(nextTemplates: LaunchTemplate[], message: string) {
+    if (!templateSettingsKey) return false;
+    setTemplateSaving(true);
+    try {
+      await apiFetch("/api/preferences/settings", {
+        method: "PUT",
+        body: JSON.stringify({ [templateSettingsKey]: JSON.stringify(nextTemplates) }),
+      });
+      setTemplates(nextTemplates);
+      showToast(message, "success");
+      return true;
+    } catch {
+      showToast("Failed to save launch template", "error");
+      return false;
+    } finally {
+      setTemplateSaving(false);
+    }
+  }
+
+  function handleApplyTemplate(templateId: string) {
+    setSelectedTemplateId(templateId);
+    if (!templateId) return;
+    const t = templates.find((tpl) => tpl.id === templateId);
+    if (!t) return;
+    const formState = applyTemplateToForm(t);
+    if (formState.isDirect !== undefined) setIsDirect(formState.isDirect);
+    if (formState.baseBranch !== undefined) setBaseBranch(formState.baseBranch);
+    if (formState.requiresReview !== undefined) setRequiresReview(formState.requiresReview);
+    if (formState.planMode !== undefined) setPlanMode(formState.planMode);
+    if (formState.tddMode !== undefined) setTddMode(formState.tddMode);
+    if (formState.skipSetup !== undefined) setSkipSetup(formState.skipSetup);
+    if (formState.skipContextPacker !== undefined) setSkipContextPacker(formState.skipContextPacker);
+    if (formState.selectedSkillId !== undefined) setSelectedSkillId(formState.selectedSkillId);
+    if (formState.selectedProfile !== undefined) setSelectedProfile(formState.selectedProfile);
+    if (formState.selectedModel !== undefined) setSelectedModel(formState.selectedModel);
+  }
+
+  async function handleSaveTemplate() {
+    const name = templateName.trim();
+    if (!name) return;
+    const options: LaunchTemplateOptions = {
+      baseBranch: baseBranch || undefined,
+      selectedProfile: selectedProfile || undefined,
+      selectedModel: selectedModel || undefined,
+      selectedSkillId: selectedSkillId || undefined,
+      planMode,
+      tddMode,
+      requiresReview,
+      skipSetup,
+      skipContextPacker,
+      isDirect,
+    };
+    const next = upsertLaunchTemplate(templates, name, options);
+    const saved = await persistTemplates(next, `Saved template "${name}"`);
+    if (!saved) return;
+    setTemplateName("");
+    const savedTpl = next.find((tpl) => tpl.name.toLowerCase() === name.toLowerCase());
+    setSelectedTemplateId(savedTpl?.id ?? "");
+  }
+
+  async function handleDeleteTemplate() {
+    if (!selectedTemplateId) return;
+    const t = templates.find((tpl) => tpl.id === selectedTemplateId);
+    if (!t) return;
+    const next = deleteLaunchTemplate(templates, selectedTemplateId);
+    const deleted = await persistTemplates(next, `Deleted template "${t.name}"`);
+    if (deleted) setSelectedTemplateId("");
+  }
+
   const isLoading = actionLoading || localLoading || preflightLoading;
   const isClaudeSelected = selectedProfile === ""
     ? (prefs.provider !== "codex" && prefs.provider !== "copilot")
@@ -223,6 +315,59 @@ export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCr
           {localError}
         </div>
       )}
+      {/* Launch template section */}
+      <div className="border-b border-gray-200 dark:border-gray-700 pb-2 space-y-1.5">
+        <label className="text-xs font-medium text-gray-600 dark:text-gray-400 block">
+          Launch Template
+        </label>
+        <div className="flex items-center gap-1.5">
+          <select
+            value={selectedTemplateId}
+            onChange={(e) => handleApplyTemplate(e.target.value)}
+            className="flex-1 text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500 dark:bg-gray-900 dark:text-gray-100"
+            aria-label="Launch template"
+          >
+            <option value="">No template</option>
+            {templates.map((t) => (
+              <option key={t.id} value={t.id}>{t.name}</option>
+            ))}
+          </select>
+          {selectedTemplateId && (
+            <button
+              type="button"
+              onClick={() => void handleDeleteTemplate()}
+              disabled={templateSaving}
+              className="rounded p-1 text-gray-400 hover:text-red-500 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-50"
+              aria-label="Delete template"
+              title="Delete selected template"
+            >
+              <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
+              </svg>
+            </button>
+          )}
+        </div>
+        <div className="flex items-center gap-1.5">
+          <input
+            type="text"
+            value={templateName}
+            onChange={(e) => setTemplateName(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void handleSaveTemplate(); } }}
+            placeholder="Template name"
+            className="flex-1 text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-brand-500 dark:bg-gray-900 dark:text-gray-100 placeholder:text-gray-400"
+            aria-label="Template name"
+          />
+          <button
+            type="button"
+            onClick={() => void handleSaveTemplate()}
+            disabled={templateSaving || !templateName.trim()}
+            className="text-xs font-medium text-gray-600 dark:text-gray-400 px-2 py-1.5 rounded border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed"
+            title="Save current options as a named template"
+          >
+            Save
+          </button>
+        </div>
+      </div>
       <label className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400">
         <input
           type="checkbox"
