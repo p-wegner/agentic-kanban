@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { stripAnsi, extractMeaningfulOutput } from "@agentic-kanban/shared/lib/session-output.js";
+import { stripAnsi, extractMeaningfulOutput } from "@agentic-kanban/shared/lib/session-output";
 
 describe("session-output", () => {
   describe("stripAnsi", () => {
