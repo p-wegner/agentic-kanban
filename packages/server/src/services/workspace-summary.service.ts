@@ -46,6 +46,7 @@ export type WorkspaceSummary = {
     diffStats?: { filesChanged: number; insertions: number; deletions: number } | null;
     conflicts?: { hasConflicts: boolean; conflictingFiles: string[] } | null;
     lastSessionAt?: string | null;
+    sessionStatus?: string | null;
     lastSessionTriggerType?: string | null;
     mergedAt?: string | null;
     contextTokens?: number | null;
@@ -66,6 +67,58 @@ export type WorkspaceSummary = {
     } | null;
   };
 };
+
+function extractAssistantMessage(data: string): string | null {
+  for (const line of data.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    try {
+      const obj = JSON.parse(trimmed) as Record<string, unknown>;
+      if (obj.type === "assistant") {
+        const content = (obj.message as { content?: unknown[] })?.content ?? [];
+        for (const block of [...content].reverse() as { type: string; text?: string }[]) {
+          if (block.type === "text" && block.text?.trim()) return block.text.trim();
+        }
+      }
+      if (obj.type === "assistant.message") {
+        const messageData = obj.data as Record<string, unknown> | undefined;
+        const raw = messageData?.content;
+        const contentStr = typeof raw === "string" ? raw
+          : Array.isArray(raw)
+            ? (raw as { type?: string; text?: string }[])
+                .filter(b => b.type === "text" && typeof b.text === "string")
+                .map(b => b.text as string)
+                .join("\n")
+            : "";
+        if (contentStr.trim()) return contentStr.trim();
+      }
+      if (
+        obj.type === "item.completed"
+        && (obj.item as { type?: string; text?: string } | undefined)?.type === "agent_message"
+      ) {
+        const text = (obj.item as { text?: string }).text;
+        if (text?.trim()) return text.trim();
+      }
+    } catch { /* ignore non-JSON output */ }
+  }
+  return null;
+}
+
+function extractToolName(data: string): string | null {
+  for (const line of data.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    try {
+      const obj = JSON.parse(trimmed) as Record<string, unknown>;
+      if (obj.type !== "assistant") continue;
+      const content = (obj.message as { content?: unknown[] })?.content ?? [];
+      for (const block of content as { type: string; name?: string }[]) {
+        if (block.type === "tool_use" && block.name) return block.name;
+      }
+    } catch { /* ignore non-JSON output */ }
+  }
+  return null;
+}
 
 export async function buildWorkspaceSummaryMap(
   issueIds: string[],
@@ -418,37 +471,14 @@ export async function buildWorkspaceSummaryMap(
         const hasMsg = lastAssistantMsgBySession.has(msg.sessionId);
         if (hasTool && hasMsg) continue;
         if (!msg.data) continue;
-        try {
-          const obj = JSON.parse(msg.data) as Record<string, unknown>;
-          if (obj.type === "assistant") {
-            const content = (obj.message as { content?: unknown[] })?.content ?? [];
-            for (const block of content as { type: string; name?: string; text?: string; input?: unknown }[]) {
-              if (!hasTool && block.type === "tool_use" && block.name) {
-                lastToolBySession.set(msg.sessionId, block.name);
-              }
-              if (!hasMsg && block.type === "text" && block.text?.trim()) {
-                lastAssistantMsgBySession.set(msg.sessionId, block.text.trim());
-              }
-            }
-          }
-          // Copilot stream: assistant.message
-          if (obj.type === "assistant.message" && !hasMsg) {
-            const data = obj.data as Record<string, unknown> | undefined;
-            if (data) {
-              const raw = data.content;
-              const contentStr = typeof raw === "string" ? raw
-                : Array.isArray(raw)
-                  ? (raw as { type?: string; text?: string }[])
-                      .filter(b => b.type === "text" && typeof b.text === "string")
-                      .map(b => b.text as string)
-                      .join("\n")
-                  : "";
-              if (contentStr.trim()) {
-                lastAssistantMsgBySession.set(msg.sessionId, contentStr.trim());
-              }
-            }
-          }
-        } catch { /* ignore */ }
+        if (!hasTool) {
+          const toolName = extractToolName(msg.data);
+          if (toolName) lastToolBySession.set(msg.sessionId, toolName);
+        }
+        if (!hasMsg) {
+          const assistantMessage = extractAssistantMessage(msg.data);
+          if (assistantMessage) lastAssistantMsgBySession.set(msg.sessionId, assistantMessage);
+        }
       }
     }
 
@@ -457,6 +487,7 @@ export async function buildWorkspaceSummaryMap(
       const sess = latestByWs.get(summary.main.id);
       if (!sess) continue;
       summary.main.lastSessionAt = sess.status === "running" ? sess.startedAt : sess.endedAt;
+      summary.main.sessionStatus = sess.status;
       summary.main.lastSessionTriggerType = sess.triggerType;
       if (sess.stats) {
         try {
