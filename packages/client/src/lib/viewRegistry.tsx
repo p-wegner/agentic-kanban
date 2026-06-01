@@ -323,7 +323,7 @@ export const VIEW_REGISTRY: ViewDescriptor[] = [
     icon: ICON["workflow-analytics"],
     paletteIcon: "WA",
     paletteDescription: "Show workflow stage trends, funnel drop-off, and burn-down",
-    shortcut: "w",
+    shortcut: "h",
     activeClass: "bg-emerald-600 text-white",
     group: "secondary",
   },
