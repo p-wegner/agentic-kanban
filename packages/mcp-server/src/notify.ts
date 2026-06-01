@@ -1,4 +1,4 @@
-const SERVER_PORT = Number(process.env.SERVER_PORT) || 3001;
+import { boardApiUrl } from "./server-url.js";
 
 /**
  * Fire-and-forget notification to the main server to broadcast a board_changed event.
@@ -6,7 +6,7 @@ const SERVER_PORT = Number(process.env.SERVER_PORT) || 3001;
  * instead of waiting for the next polling cycle.
  */
 export function notifyBoard(projectId: string, reason: string) {
-  fetch(`http://localhost:${SERVER_PORT}/api/internal/board-notify`, {
+  fetch(boardApiUrl("/api/internal/board-notify"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ projectId, reason }),
@@ -21,7 +21,7 @@ export function notifyBoard(projectId: string, reason: string) {
  * manager + git, only available in the main server process).
  */
 export function notifyWorkflowAdvanced(workspaceId: string) {
-  fetch(`http://localhost:${SERVER_PORT}/api/internal/workflow-advanced`, {
+  fetch(boardApiUrl("/api/internal/workflow-advanced"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ workspaceId }),
