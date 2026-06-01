@@ -5,9 +5,15 @@ merged, stale sessions unstuck, backlog flowing and refilled. Architecture decis
 A/B/C comparison that led here: [`docs/decisions/006-board-monitor-orchestrator-architecture.md`](../../docs/decisions/006-board-monitor-orchestrator-architecture.md).
 
 **TL;DR of the approach:** a fresh, short-lived `codex exec` session every ~5 minutes (not one
-long-running agent, not the in-process monitor). Each run makes **one** bounded control-plane
-action and exits. Durable memory lives outside the model — in the board, git, and a small rolling
+long-running agent, not the in-process monitor). Each run makes the bounded set of high-value
+control-plane actions its priorities call for (e.g. merge finished work, fill agent slots up to the
+target) and exits. Durable memory lives outside the model — in the board, git, and a small rolling
 `state.md` — so every session is disposable and crash-resilient.
+
+**`objective.md` is the single source of truth for monitor policy.** Both this codex loop and the
+in-process **Monitor Butler** (`packages/server/src/services/monitor-butler.ts`, off by default)
+read this same file — its `STRATEGY_FILE` points here. There is no separate `.claude/monitor-strategy.md`.
+Steer everything (priorities + the TUNABLE TARGETS block) by editing `objective.md`.
 
 ## Files
 

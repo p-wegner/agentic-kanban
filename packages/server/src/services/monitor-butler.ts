@@ -15,9 +15,14 @@
  * context small, avoids drift across hours of accumulated history, and means a
  * crashed/hung cycle never poisons the next one.
  *
- * Strategy resolution: reads `.claude/monitor-strategy.md` from the project repo if
- * present (natural-language, user-editable); otherwise falls back to a built-in
- * default (merge clean work, restart stale agents, pull ready tickets).
+ * Strategy resolution: reads the project's SINGLE monitor-policy source of truth —
+ * `scripts/board-monitor/objective.md`, shared with the codex board-monitor loop —
+ * if present; otherwise falls back to a built-in default (merge clean work, restart
+ * stale agents, pull ready tickets). The objective is authored for the codex loop,
+ * but its priorities and TUNABLE TARGETS block are mechanism-agnostic; this butler
+ * interprets the shared intent and ignores loop-harness specifics (e.g. the
+ * `state.md` memory line). Keeping ONE policy file means the two monitor mechanisms
+ * can never drift into conflicting strategies.
  *
  * Gating: the `monitor_butler_enabled` preference must be "true"; cadence comes from
  * `monitor_butler_interval_min` (default 15). A 30s sync loop picks up preference
@@ -36,12 +41,14 @@ import { buildSpawnEnv, getMcpServersConfig } from "./agent-provider/helpers.js"
 import { getBoardStatus } from "./board-status.js";
 import { isTransientNetworkError } from "../startup/transient-errors.js";
 
-const STRATEGY_FILE = ".claude/monitor-strategy.md";
+// Single source of truth for monitor policy, shared with the codex board-monitor
+// loop (scripts/board-monitor/loop.sh). Edit that one file to steer both.
+const STRATEGY_FILE = "scripts/board-monitor/objective.md";
 const DEFAULT_INTERVAL_MIN = 15;
 /** Hard ceiling on a single cycle so a stuck session can never run past the next tick. */
 const CYCLE_TIMEOUT_MS = 10 * 60 * 1000;
 
-/** Built-in strategy used when the project has no `.claude/monitor-strategy.md`. */
+/** Built-in strategy used when the project has no monitor objective file. */
 export const DEFAULT_MONITOR_STRATEGY = [
   "You are the autonomous Monitor Butler for this kanban board. No human is watching this turn — act, don't ask.",
   "Default strategy (apply unless the board state clearly argues against a specific action):",
