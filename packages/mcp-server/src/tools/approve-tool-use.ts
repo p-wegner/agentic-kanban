@@ -1,7 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { boardApiUrl } from "../server-url.js";
 
-const SERVER_PORT = Number(process.env.SERVER_PORT) || 3001;
 const POLL_INTERVAL_MS = 500;
 const TIMEOUT_MS = 120_000;
 
@@ -20,7 +20,7 @@ export function registerApproveToolUse(server: McpServer) {
       // Create a pending approval on the kanban server
       let approvalId: string;
       try {
-        const res = await fetch(`http://localhost:${SERVER_PORT}/api/approvals`, {
+        const res = await fetch(boardApiUrl("/api/approvals"), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ sessionId, toolName: tool_name, toolInput: tool_input }),
@@ -38,12 +38,12 @@ export function registerApproveToolUse(server: McpServer) {
       while (Date.now() < deadline) {
         await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL_MS));
         try {
-          const res = await fetch(`http://localhost:${SERVER_PORT}/api/approvals/${approvalId}`);
+          const res = await fetch(boardApiUrl(`/api/approvals/${approvalId}`));
           if (res.ok) {
             const data = await res.json() as { decision: string | null };
             if (data.decision) {
               // Clean up and return
-              fetch(`http://localhost:${SERVER_PORT}/api/approvals/${approvalId}`, { method: "DELETE" }).catch(() => {});
+              fetch(boardApiUrl(`/api/approvals/${approvalId}`), { method: "DELETE" }).catch(() => {});
               return { content: [{ type: "text" as const, text: data.decision }] };
             }
           }
@@ -53,7 +53,7 @@ export function registerApproveToolUse(server: McpServer) {
       }
 
       // Timed out — deny and clean up
-      fetch(`http://localhost:${SERVER_PORT}/api/approvals/${approvalId}`, { method: "DELETE" }).catch(() => {});
+      fetch(boardApiUrl(`/api/approvals/${approvalId}`), { method: "DELETE" }).catch(() => {});
       return { content: [{ type: "text" as const, text: "deny" }] };
     },
   );
