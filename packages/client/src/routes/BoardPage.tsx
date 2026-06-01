@@ -46,6 +46,7 @@ import { registerAction } from "../lib/actions.js";
 import { QuickTasksPanel } from "../components/QuickTasksPanel.js";
 import { MergeQueuePanel } from "../components/MergeQueuePanel.js";
 import { CodemodPanel } from "../components/CodemodPanel.js";
+import { TranscriptSearchPanel } from "../components/TranscriptSearchPanel.js";
 import type { MonitorStatus } from "../components/MonitorPopover.js";
 import type { BoardViewState, SavedViewReference } from "../lib/boardSavedViews.js";
 import type {
@@ -107,6 +108,7 @@ export function BoardPage() {
   const [showCodemod, setShowCodemod] = useState(false);
   const [showWorktreeOverview, setShowWorktreeOverview] = useState(false);
   const [showAllWorkspaces, setShowAllWorkspaces] = useState(false);
+  const [showTranscriptSearch, setShowTranscriptSearch] = useState(false);
   const [showCommandPalette, setShowCommandPalette] = useState(false);
   const [showShortcutHelp, setShowShortcutHelp] = useState(false);
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(
@@ -1151,6 +1153,13 @@ export function BoardPage() {
         setShowAllWorkspaces(prev => !prev);
         return;
       }
+      // "t" to open Transcript Search
+      if (e.key === "t" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        if (isTextEntryTarget(e.target)) return;
+        e.preventDefault();
+        setShowTranscriptSearch(true);
+        return;
+      }
       // "q" to open Quick Tasks panel
       if (e.key === "q" && !e.ctrlKey && !e.metaKey && !e.altKey) {
         if (isTextEntryTarget(e.target)) return;
@@ -1187,7 +1196,7 @@ export function BoardPage() {
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [searchQuery, showCommandPalette, showAllWorkspaces, showWorktreeOverview, showShortcutHelp, showQuickTasks, showCodemod, filteredColumns, columns, handleViewModeChange, setShowQuickTasks, setShowSettings]);
+  }, [searchQuery, showCommandPalette, showAllWorkspaces, showTranscriptSearch, showWorktreeOverview, showShortcutHelp, showQuickTasks, showCodemod, filteredColumns, columns, handleViewModeChange, setShowQuickTasks, setShowSettings]);
 
   // Register command palette actions
   useEffect(() => {
@@ -1255,6 +1264,15 @@ export function BoardPage() {
       icon: "⊞",
       category: "navigation",
       handler: () => setShowAllWorkspaces(true),
+    }));
+
+    unregisters.push(registerAction({
+      id: "search-transcripts",
+      label: "Search Transcripts",
+      description: "Search agent session transcripts across all workspaces",
+      icon: "⏎",
+      category: "navigation",
+      handler: () => setShowTranscriptSearch(true),
     }));
 
     unregisters.push(registerAction({
@@ -1884,6 +1902,24 @@ export function BoardPage() {
             setShowAllWorkspaces(false);
           }}
           onRefresh={() => refetchBoard()}
+        />
+      )}
+      {showTranscriptSearch && activeProjectId && (
+        <TranscriptSearchPanel
+          projectId={activeProjectId}
+          onClose={() => setShowTranscriptSearch(false)}
+          onNavigateToWorkspace={(issueId, workspaceId, sessionId) => {
+            setShowTranscriptSearch(false);
+            const issue = columnsRef.current.flatMap((c) => c.issues).find((i) => i.id === issueId);
+            if (issue) {
+              setSelectedIssue(null);
+              setWorkspaceIssue(issue);
+              setWorkspaceOpenCreate(false);
+              setWorkspaceInitial({ workspaceId, sessionId });
+            } else {
+              showToast("Issue not found on current board — try refreshing", "error");
+            }
+          }}
         />
       )}
       {showMergeQueue && activeProjectId && (
