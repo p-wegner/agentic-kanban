@@ -19,14 +19,14 @@ export function createPreferencesRoute(database: Database = db) {
   // GET /api/preferences/active-project
   router.get("/active-project", async (c) => {
     const projectId = await preferenceService.getActiveProjectId();
-    return c.json({ projectId });
+    return c.json({ projectId, value: projectId });
   });
 
   // PUT /api/preferences/active-project
   router.put("/active-project", async (c) => {
     const body = await parseJsonBody<{ projectId?: string }>(c);
     await preferenceService.setActiveProjectId(body.projectId ?? "");
-    return c.json({ projectId: body.projectId });
+    return c.json({ projectId: body.projectId, value: body.projectId });
   });
 
   // GET /api/preferences/settings — get all agent settings

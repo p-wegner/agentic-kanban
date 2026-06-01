@@ -45,6 +45,20 @@ describe("Preferences API - active-project", () => {
     expect(body.projectId).toBe(id);
   });
 
+  it("GET /api/preferences/active-project supports monitor-style value consumers", async () => {
+    const id = randomUUID();
+    await app.request("/api/preferences/active-project", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ projectId: id }),
+    });
+
+    const res = await app.request("/api/preferences/active-project");
+    expect(res.status).toBe(200);
+    const body = await res.json() as any;
+    expect(body.value).toBe(id);
+  });
+
   it("PUT upserts the active-project preference", async () => {
     const id1 = randomUUID();
     const id2 = randomUUID();
