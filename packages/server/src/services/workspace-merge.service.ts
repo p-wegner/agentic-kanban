@@ -309,7 +309,16 @@ export function createWorkspaceMergeService(deps: {
     try { preMergeHead = await gitService.revParse(repoPath, "HEAD"); } catch { /* tolerate */ }
 
     // Plumbing-based merge: working tree and index are never modified.
-    let result = await gitService.mergeBranch(repoPath, workspace.branch, targetBranch);
+    let result: string;
+    try {
+      result = await gitService.mergeBranch(repoPath, workspace.branch, targetBranch);
+    } catch (err) {
+      throw new WorkspaceError(
+        `Merge failed (git-merge step): ${err instanceof Error ? err.message : String(err)}`,
+        "CONFLICT",
+        { step: "git-merge", branch: workspace.branch, targetBranch },
+      );
+    }
     const warnings: MergeWarning[] = [];
 
     if (workspace.workingDir) {

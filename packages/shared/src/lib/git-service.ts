@@ -366,11 +366,19 @@ export async function mergeBranch(
       "git",
       ["merge-tree", "--write-tree", "--no-messages", targetBranch, featureBranch],
       { cwd: repoPath, maxBuffer: 10 * 1024 * 1024 },
-      (_err, stdout) => {
-        const lines = stdout.toString().trim().split("\n").filter(Boolean);
+      (err, stdout, stderr) => {
+        const output = stdout.toString().trim();
+        // git merge-tree exits 1 for conflicts (expected, output still valid).
+        // A real failure (exit 128+) produces no usable output — propagate the
+        // git error instead of a misleading "no output" message.
+        if (err && !output) {
+          reject(new Error(`git merge-tree --write-tree failed: ${stderr?.toString().trim() || err.message}`));
+          return;
+        }
+        const lines = output.split("\n").filter(Boolean);
         const treeSha = lines[0]?.trim() ?? "";
         if (!treeSha) {
-          reject(new Error("git merge-tree produced no output"));
+          reject(new Error(`git merge-tree produced no output${stderr?.toString().trim() ? `: ${stderr.toString().trim()}` : ""}`));
           return;
         }
         // Stage 1/2/3 entries indicate conflicting files: "<mode> <sha> <stage>\t<file>"
@@ -963,15 +971,23 @@ export async function detectConflicts(
   worktreePath: string,
   baseBranch: string,
 ): Promise<{ hasConflicts: boolean; conflictingFiles: string[] }> {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     // merge-tree exits 0 for clean merge, 1 for conflicts.
     // Stdout: tree SHA on line 1, then conflict entries (mode sha stage\tfile) for conflicting files.
     execFile(
       "git",
       ["merge-tree", "--write-tree", "--no-messages", "HEAD", baseBranch],
       { cwd: worktreePath, maxBuffer: 10 * 1024 * 1024 },
-      (_err, stdout) => {
-        const lines = stdout.toString().trim().split("\n").slice(1).filter(Boolean);
+      (err, stdout, stderr) => {
+        const output = stdout.toString().trim();
+        // A real failure (exit 128+) produces no usable output — reject so callers
+        // don't silently treat it as "no conflicts". Exit 1 (conflicts) is fine:
+        // output still has the tree SHA + conflict entries.
+        if (err && !output) {
+          reject(new Error(`git merge-tree --write-tree (detectConflicts) failed: ${stderr?.toString().trim() || err.message}`));
+          return;
+        }
+        const lines = output.split("\n").slice(1).filter(Boolean);
         // Lines with stage 1/2/3 indicate conflicting files: "<mode> <sha> <stage>\t<file>"
         const seen = new Set<string>();
         for (const line of lines) {
