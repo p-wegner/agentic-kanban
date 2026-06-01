@@ -12,7 +12,7 @@
 # Stop gracefully: `touch scripts/board-monitor/STOP` (exits after the current
 # iteration) or kill the logged PID.
 #
-# Env knobs: MONITOR_SLEEP (default 300s between runs), MONITOR_MAX_ITERS
+# Env knobs: MONITOR_SLEEP (default 1800s between runs), MONITOR_MAX_ITERS
 # (default 500), MONITOR_ITER_TIMEOUT (default 1800s per iteration).
 
 set -u
@@ -21,7 +21,7 @@ DIR="$REPO/scripts/board-monitor"
 LOG="$DIR/loop.log"
 STOP="$DIR/STOP"
 STATE="$DIR/state.md"
-SLEEP="${MONITOR_SLEEP:-300}"
+SLEEP="${MONITOR_SLEEP:-1800}"
 MAX="${MONITOR_MAX_ITERS:-500}"
 ITER_TIMEOUT="${MONITOR_ITER_TIMEOUT:-1800}"
 # Rolling cross-iteration memory: each fresh session reads state.md for what

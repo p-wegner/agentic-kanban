@@ -12,7 +12,7 @@ This is a FRESH session every run — you have NO memory of previous runs. The k
 - **ACTIVE_AGENTS_TARGET = 4** — keep this many workspaces actively In Progress at all times.
 - **BACKLOG_FLOOR = 10** — never let the backlog drop below this; refill before it does.
 - **MAX_NEW_STARTS_PER_CYCLE = 2** — cap on how many NEW workspaces to launch in a single cycle (safe ramp; raise for a faster fill).
-- **REFILL_FOCUS = bugfix-only** — when refilling, create ONLY real, reproducible bug-fix tickets; do NOT create new feature or enhancement tickets. (Set to `balanced` to resume the feature-weighted mix.)
+- **REFILL_FOCUS = balanced** — when refilling, create a balanced mix of bug-fix and feature/enhancement tickets. (Set to `bugfix-only` to create ONLY real, reproducible bug-fix tickets.)
 
 FIRST, READ YOUR RECENT MEMORY: `scripts/board-monitor/state.md` is a short rolling log of what the last several cycles did. Read it before choosing an action and use it to ESCALATE rather than repeat — if a prior cycle (or two) already nudged an item with no change, take the stronger action this time (stop the stale session and inspect the branch, rebuild, or flag for a human) instead of nudging it again. If the file is missing or empty, just proceed.
 
