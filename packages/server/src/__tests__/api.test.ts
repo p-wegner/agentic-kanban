@@ -1255,6 +1255,8 @@ describe("Transcript Search API", () => {
     expect(body.results[0].snippet).toContain("token");
     expect(body.results[0].issueTitle).toBe("Fix auth bug");
     expect(body.results[0].branch).toBe("feature/auth-fix");
+    expect(body.results[0].projectId).toBe(projectId);
+    expect(body.results[0].projectName).toBe("Transcript Search Project");
     expect(body.results[0].executor).toBe("claude-code");
   });
 
@@ -1266,9 +1268,59 @@ describe("Transcript Search API", () => {
     expect(body.totalMatches).toBe(0);
   });
 
-  it("requires projectId", async () => {
-    const res = await app.request("/api/sessions/search?q=test");
-    expect(res.status).toBe(400);
+  it("searches globally when projectId is omitted", async () => {
+    const otherProjectId = await createProjectDirectly(database, { name: "Other Transcript Project" });
+    const otherStatusId = await createStatusDirectly(database, otherProjectId, "Done", 0);
+    const now = new Date().toISOString();
+    const issueId = randomUUID();
+    const workspaceId = randomUUID();
+    const sessionId = randomUUID();
+
+    await database.insert(schema.issues).values({
+      id: issueId,
+      projectId: otherProjectId,
+      statusId: otherStatusId,
+      issueNumber: 287,
+      title: "Implemented elsewhere",
+      priority: "medium",
+      issueType: "task",
+      sortOrder: 0,
+      createdAt: now,
+      updatedAt: now,
+    });
+    await database.insert(schema.workspaces).values({
+      id: workspaceId,
+      issueId,
+      branch: "feature/ak-287",
+      status: "closed",
+      createdAt: now,
+      updatedAt: now,
+    });
+    await database.insert(schema.sessions).values({
+      id: sessionId,
+      workspaceId,
+      executor: "codex",
+      status: "completed",
+      startedAt: now,
+    });
+    await database.insert(schema.sessionMessages).values({
+      sessionId,
+      type: "stdout",
+      data: "GlobalNeedle implementation notes and problems",
+      createdAt: now,
+    });
+
+    const res = await app.request("/api/sessions/search?q=GlobalNeedle");
+    expect(res.status).toBe(200);
+    const body = await res.json() as any;
+    expect(body.results).toHaveLength(1);
+    expect(body.results[0]).toMatchObject({
+      sessionId,
+      projectId: otherProjectId,
+      projectName: "Other Transcript Project",
+      issueNumber: 287,
+      issueTitle: "Implemented elsewhere",
+    });
   });
 
   it("returns empty for query shorter than 2 chars", async () => {

@@ -244,6 +244,8 @@ export function launch(
       KANBAN_BOARD_CLIENT_PORT: boardClientPort,
       KANBAN_BOARD_SERVER_PID: String(process.pid),
       KANBAN_PROTECTED_PIDS: [process.env.KANBAN_PROTECTED_PIDS, String(process.pid)].filter(Boolean).join(","),
+      KANBAN_SESSION_ID: sessionId,
+      AGENTIC_KANBAN_SESSION_ID: sessionId,
       KANBAN_SERVER_PORT: worktreeServerPort,
       KANBAN_CLIENT_PORT: worktreeClientPort,
       KANBAN_WORKTREE_SERVER_PORT: worktreeServerPort,

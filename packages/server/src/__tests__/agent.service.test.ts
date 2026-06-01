@@ -250,6 +250,8 @@ describe("agent.service", () => {
 
       const opts = (spawnMock as any).mock.calls[0][2];
       expect(opts.env.KANBAN_SERVER_PORT).toBe("3005");
+      expect(opts.env.KANBAN_SESSION_ID).toBe("sess-11");
+      expect(opts.env.AGENTIC_KANBAN_SESSION_ID).toBe("sess-11");
       delete process.env.KANBAN_SERVER_PORT;
     });
 
