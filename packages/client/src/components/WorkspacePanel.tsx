@@ -8,6 +8,7 @@ import { useWebSocket } from "../lib/useWebSocket.js";
 import { TerminalView } from "./TerminalView.js";
 import { CreateWorkspaceForm } from "./CreateWorkspaceForm.js";
 import { WorkspaceDiffPanel } from "./WorkspaceDiffPanel.js";
+import { WorkspacePreviewPanel } from "./WorkspacePreviewPanel.js";
 import { FailurePatternHint } from "./FailurePatternHint.js";
 import TicketMentionInput from "./TicketMentionInput.js";
 import { useWorkspaceSession } from "../hooks/useWorkspaceSession.js";
@@ -1853,7 +1854,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                       );
                     })()}
 
-                    {(selectedHistoryId ? historyMessages : (activeSession || completedMessages.length > 0)) && (
+                    {((selectedHistoryId ? historyMessages : (activeSession || completedMessages.length > 0)) || ws.workingDir) && (
                       <div className="flex border-b border-gray-200 dark:border-gray-700">
                         <button
                           onClick={() => { setViewMode("output"); }}
@@ -1865,20 +1866,34 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                         >
                           Output
                         </button>
-                        <button
-                          onClick={() => {
-                            setViewMode("summary");
-                            const sid = selectedHistoryId || activeSession || lastSessionPerWorkspace[ws.id];
-                            if (sid) handleFetchSummary(sid, isRunning);
-                          }}
-                          className={`flex-1 text-xs py-1.5 text-center font-medium ${
-                            viewMode === "summary"
-                              ? "text-blue-700 border-b-2 border-blue-600"
-                              : "text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"
-                          }`}
-                        >
-                          Summary
-                        </button>
+                        {(selectedHistoryId ? historyMessages : (activeSession || completedMessages.length > 0)) && (
+                          <button
+                            onClick={() => {
+                              setViewMode("summary");
+                              const sid = selectedHistoryId || activeSession || lastSessionPerWorkspace[ws.id];
+                              if (sid) handleFetchSummary(sid, isRunning);
+                            }}
+                            className={`flex-1 text-xs py-1.5 text-center font-medium ${
+                              viewMode === "summary"
+                                ? "text-blue-700 border-b-2 border-blue-600"
+                                : "text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"
+                            }`}
+                          >
+                            Summary
+                          </button>
+                        )}
+                        {ws.workingDir && (
+                          <button
+                            onClick={() => { setViewMode("preview"); }}
+                            className={`flex-1 text-xs py-1.5 text-center font-medium ${
+                              viewMode === "preview"
+                                ? "text-blue-700 border-b-2 border-blue-600"
+                                : "text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"
+                            }`}
+                          >
+                            Preview
+                          </button>
+                        )}
                       </div>
                     )}
 
@@ -2031,7 +2046,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                       );
                     })()}
 
-                    {(viewMode === "output" || isRunning) && (selectedHistoryId ? historyMessages : (activeSession || completedMessages.length > 0)) ? (
+                    {(viewMode === "output" || (isRunning && viewMode !== "preview")) && (selectedHistoryId ? historyMessages : (activeSession || completedMessages.length > 0)) ? (
                       <TerminalView
                         messages={selectedHistoryId ? historyMessages : (activeSession ? messages : completedMessages)}
                         connectionState={selectedHistoryId ? "closed" : (activeSession ? wsState : "closed")}
@@ -2086,6 +2101,10 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                         />
                     ) : null}
 
+                    {viewMode === "preview" && ws.workingDir && (
+                      <WorkspacePreviewPanel preview={preview} branch={ws.branch} />
+                    )}
+
                     {!isRunning && viewMode === "output" && (
                       <SessionStatsSummary
                         stats={selectedHistoryId
@@ -2095,7 +2114,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                       />
                     )}
 
-                    {!selectedHistoryId && !activeSession && ws.workingDir && ws.status !== "closed" && (
+                    {!selectedHistoryId && !activeSession && viewMode === "output" && ws.workingDir && ws.status !== "closed" && (
                       <div className="flex gap-2">
                         <TicketMentionInput
                           inputRef={textareaRef}
