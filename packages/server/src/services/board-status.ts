@@ -1,7 +1,8 @@
 import { db } from "../db/index.js";
 import { projects, projectStatuses, issues, workspaces, sessions, sessionMessages, preferences, workflowNodes } from "@agentic-kanban/shared/schema";
 import { eq, inArray, desc } from "drizzle-orm";
-import { getDiffShortstat, detectConflicts } from "./git.service.js";
+import { detectConflicts } from "./git.service.js";
+import { getWorkspaceDiffStats } from "./workspace-diff-stats.js";
 import { extractMeaningfulOutput, isTerminalStatusIdView } from "@agentic-kanban/shared";
 import type { BoardStatusResponse, BoardStatusIssue } from "@agentic-kanban/shared";
 import { isAnalyticsNoise } from "./session-filter.js";
@@ -194,11 +195,9 @@ export async function getBoardStatus(
     // For non-closed workspaces with a workingDir: compute diff stats + last output
     if (mainWs && mainWs.workingDir && mainWs.status !== "closed") {
       const baseBranch = mainWs.baseBranch || project.defaultBranch;
-      const diffRef = mainWs.isDirect ? "HEAD" : baseBranch;
-      if (!diffRef) continue;
 
       asyncWork.push(
-        getDiffShortstat(mainWs.workingDir, diffRef)
+        getWorkspaceDiffStats(mainWs, project.defaultBranch)
           .then(stats => { entry.diffStats = stats; })
           .catch((err) => { console.error(`[board-status] diff failed for ${mainWs.branch}:`, err instanceof Error ? err.message : String(err)); }),
       );
