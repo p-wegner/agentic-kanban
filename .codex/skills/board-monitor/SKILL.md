@@ -46,35 +46,8 @@ try { Invoke-RestMethod "http://127.0.0.1:3001/health" -TimeoutSec 5 | Out-Null;
 
 **Why HTTP 200 is not enough:** A blank page from a React crash (e.g. `ReferenceError`, missing useState) still returns 200. The real check reads rendered DOM content.
 
-```bash
-playwright-cli open http://127.0.0.1:5173
-# Poll for hydrated board content instead of treating a slow first render as blank.
-deadline=$((SECONDS + 20))
-found=""
-while [ "$SECONDS" -lt "$deadline" ]; do
-  rendered_text=$(playwright-cli eval "document.querySelector('main')?.innerText || document.querySelector('#root')?.innerText || document.body?.innerText || ''" 2>&1)
-  if printf '%s' "$rendered_text" | grep -Eq "Todo|In Progress|No issues|No projects registered"; then
-    printf '%s\n' "$rendered_text" | head -c 500
-    echo
-    found="yes"
-    break
-  fi
-  sleep 1
-done
-
-if [ -z "$found" ]; then
-  echo "Timed out waiting for hydrated board content."
-  echo "--- console ---"
-  playwright-cli console || true
-  echo "--- rendered text ---"
-  playwright-cli eval "(document.querySelector('main')?.innerText || document.querySelector('#root')?.innerText || document.body?.innerText || '<empty rendered text>').substring(0,1000)" || true
-  echo "--- app root html ---"
-  playwright-cli eval "(document.querySelector('main')?.innerHTML || document.querySelector('#root')?.innerHTML || document.body?.innerHTML || '<empty rendered html>').substring(0,1500)" || true
-  playwright-cli close
-  exit 1
-fi
-
-playwright-cli close
+```powershell
+.\scripts\board-monitor\frontend-smoke.ps1 -Url "http://127.0.0.1:5173"
 ```
 
 **Interpret result:**

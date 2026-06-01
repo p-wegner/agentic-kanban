@@ -20,6 +20,7 @@ Steer everything (priorities + the TUNABLE TARGETS block) by editing `objective.
 | File | Role | Committed? |
 |---|---|---|
 | `loop.sh` | The driver: fires `timeout 1800 codex exec "<objective>"` every `MONITOR_SLEEP`s (**re-reading `objective.md` each iteration**), trims `state.md`, has a launch-failure guard | yes |
+| `frontend-smoke.ps1` | PowerShell Playwright smoke check used by the monitor skill; polls for hydrated board text and prints bounded snippets safely for multiline output | yes |
 | `objective.md` | The prompt each fresh run receives (read it to know what the orchestrator is told to do) | yes |
 | `state.md` | **Rolling cross-iteration memory** — one line per cycle, newest last, trimmed to the last `MONITOR_STATE_KEEP` (40) lines. Runtime state, not source | **no** (gitignored) |
 | `loop.log` | Full append-only transcript of every iteration's stdout/stderr | no (gitignored) |
@@ -36,6 +37,16 @@ nohup bash scripts/board-monitor/loop.sh > /dev/null 2>&1 & disown
 touch scripts/board-monitor/STOP
 # ...or, if it's only sleeping between iterations, kill the driver:
 kill "$(cat scripts/board-monitor/loop.pid)"
+```
+
+## Frontend Smoke Check
+
+```powershell
+# Run the real render check against the main board UI.
+.\scripts\board-monitor\frontend-smoke.ps1 -Url "http://127.0.0.1:5173"
+
+# Exercise the snippet formatter without launching a browser.
+.\scripts\board-monitor\frontend-smoke.ps1 -SelfTest
 ```
 
 > **`objective.md` is re-read at the start of every iteration** — edit it (including its TUNABLE
