@@ -5,6 +5,9 @@ import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { getPreference, setPreference, getAllPreferences, setPreferences } from "../repositories/preferences.repository.js";
 import { allHarnessSettingKeys } from "./harness-settings.js";
+import { isBoardStrategyKey, projectIdFromBoardStrategyKey, writeStrategyObjective } from "./strategy-objective.service.js";
+import { projects } from "@agentic-kanban/shared/schema";
+import { eq } from "drizzle-orm";
 
 export const SETTINGS_KEYS = [
   "agent_command", "agent_args", "output_parser", "skip_permissions", "claude_profile",
@@ -30,7 +33,8 @@ function isAllowedDynamicKey(key: string): boolean {
   return /^butler_event_feed_[0-9a-f-]+$/.test(key) ||
     /^tdd_mode_[0-9a-f-]+$/.test(key) ||
     /^backlog_filter_presets_[0-9a-f-]+$/.test(key) ||
-    /^board_saved_views_[0-9a-f-]+$/.test(key);
+    /^board_saved_views_[0-9a-f-]+$/.test(key) ||
+    isBoardStrategyKey(key);
 }
 
 export function createPreferenceService({ database }: { database: Database }) {
@@ -58,6 +62,22 @@ export function createPreferenceService({ database }: { database: Database }) {
       .filter(([key]) => SETTINGS_KEYS.includes(key) || isAllowedDynamicKey(key))
       .map(([key, value]) => ({ key, value: value ?? "" }));
     await setPreferences(entries, database);
+    await updateStrategyObjectives(entries);
+  }
+
+  async function updateStrategyObjectives(entries: Array<{ key: string; value: string }>) {
+    const strategyEntries = entries.filter((entry) => isBoardStrategyKey(entry.key));
+    for (const entry of strategyEntries) {
+      const projectId = projectIdFromBoardStrategyKey(entry.key);
+      if (!projectId) continue;
+      const projectRows = await database
+        .select({ repoPath: projects.repoPath })
+        .from(projects)
+        .where(eq(projects.id, projectId))
+        .limit(1);
+      const repoPath = projectRows[0]?.repoPath;
+      if (repoPath) writeStrategyObjective(repoPath, entry.value);
+    }
   }
 
   function listClaudeProfiles(): string[] {
