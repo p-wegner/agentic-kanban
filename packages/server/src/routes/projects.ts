@@ -5,6 +5,7 @@ import { parseJsonBody } from "../middleware/parse-body.js";
 import { createRouter } from "../middleware/create-router.js";
 import { wrapAiOperation } from "../middleware/ai-operation.js";
 import { checkIssueOverlap } from "../services/issue-ai.service.js";
+import { getFileContention } from "../services/file-contention.service.js";
 import { listBoardHealthEvents, type BoardHealthEventType } from "../repositories/board-health-events.repository.js";
 import { buildDependencyWavePlan, startNextDependencyWave } from "../services/dependency-wave.service.js";
 import type { BoardEvents } from "../services/board-events.js";
@@ -204,6 +205,19 @@ export function createProjectsRoute(database: Database = db, options?: { boardEv
       return c.json({ error: "issueIds array is required" }, 400);
     }
     return c.json(await checkIssueOverlap(body.issueIds, database));
+  });
+
+  // GET /api/projects/:id/file-contention — live file contention heatmap for active/reviewing workspaces
+  router.get("/:id/file-contention", async (c) => {
+    const projectId = c.req.param("id");
+    try {
+      const result = await getFileContention(projectId, database);
+      return c.json(result);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.includes("not found")) return c.json({ error: msg }, 404);
+      return c.json({ error: msg }, 500);
+    }
   });
 
   // GET /api/projects/:id/graph
