@@ -183,6 +183,15 @@ export function createWorkspaceActionsRoute(
     return c.json(await workspaceService.updateComment(id, commentId, body.body));
   });
 
+  // PATCH /api/workspaces/:id/comments/:commentId/resolve — toggle resolved state
+  router.patch("/:id/comments/:commentId/resolve", async (c) => {
+    const id = c.req.param("id");
+    const commentId = c.req.param("commentId");
+    const body = await parseJsonBody(c);
+    if (typeof body.resolved !== "boolean") return c.json({ error: "resolved (boolean) is required" }, 400);
+    return c.json(await workspaceService.resolveComment(id, commentId, body.resolved));
+  });
+
   // DELETE /api/workspaces/:id/comments/:commentId
   router.delete("/:id/comments/:commentId", async (c) => {
     const id = c.req.param("id");

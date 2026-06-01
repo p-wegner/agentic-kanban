@@ -1,0 +1,1 @@
+ALTER TABLE `diff_comments` ADD `resolved_at` text;
