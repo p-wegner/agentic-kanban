@@ -17,6 +17,10 @@ export const projects = sqliteTable("projects", {
   autoRetryFlakes: integer("auto_retry_flakes", { mode: "boolean" }).default(true),
   /** Maximum number of automatic retries for flake-classified test failures. Default: 2. */
   maxRetries: integer("max_retries").default(2),
+  /** Whether to symlink dependency directories from the main checkout into new worktrees. Default: false. */
+  symlinkEnabled: integer("symlink_enabled", { mode: "boolean" }).notNull().default(false),
+  /** JSON array of directory names to symlink (e.g. '["node_modules",".venv"]'). */
+  symlinkDirs: text("symlink_dirs"),
   createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
   updatedAt: text("updated_at").notNull().$defaultFn(() => new Date().toISOString()),
 });
