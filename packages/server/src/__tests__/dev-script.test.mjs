@@ -73,8 +73,10 @@ describe("dev launcher port guard", () => {
     expect(env.PORT).toBe("3222");
     expect(env.SERVER_PORT).toBe("3222");
     expect(env.KANBAN_SERVER_PORT).toBe("3222");
+    expect(env.KANBAN_WORKTREE_SERVER_PORT).toBe("3222");
     expect(env.VITE_PORT).toBe("5394");
     expect(env.KANBAN_CLIENT_PORT).toBe("5394");
+    expect(env.KANBAN_WORKTREE_CLIENT_PORT).toBe("5394");
     expect(env.KANBAN_BOARD_SERVER_PID).toBe("12345");
     expect(env.PORT).not.toBe("3001");
     expect(env.VITE_PORT).not.toBe("5173");
