@@ -331,3 +331,155 @@ test.describe("Graph and Table board views", () => {
     await expect(page.locator("[data-node]")).not.toBeVisible();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Critical Path mode
+// ---------------------------------------------------------------------------
+
+test.describe("Critical Path mode", () => {
+  let projectId: string;
+  let todoStatusId: string;
+  let suffix: string;
+  const createdIssueIds: string[] = [];
+  const createdDeps: Array<{ issueId: string; depId: string }> = [];
+
+  test.beforeAll(async ({ request }) => {
+    const prefRes = await request.get(`${SERVER_URL}/api/preferences/active-project`);
+    const pref = await prefRes.json();
+    projectId = pref.projectId;
+
+    const statusesRes = await request.get(`${SERVER_URL}/api/projects/${projectId}/statuses`);
+    const statuses = await statusesRes.json();
+    const todoStatus = statuses.find((s: { name: string }) => s.name === "Todo");
+    todoStatusId = todoStatus ? todoStatus.id : statuses[0].id;
+
+    suffix = Date.now().toString(36);
+
+    // Create a chain: rootA → childB → childC
+    const rA = await request.post(`${SERVER_URL}/api/issues`, {
+      data: { title: `CPRoot ${suffix}`, statusId: todoStatusId, projectId },
+    });
+    const issueAId = (await rA.json()).id;
+    createdIssueIds.push(issueAId);
+
+    const rB = await request.post(`${SERVER_URL}/api/issues`, {
+      data: { title: `CPChild ${suffix}`, statusId: todoStatusId, projectId },
+    });
+    const issueBId = (await rB.json()).id;
+    createdIssueIds.push(issueBId);
+
+    const rC = await request.post(`${SERVER_URL}/api/issues`, {
+      data: { title: `CPEnd ${suffix}`, statusId: todoStatusId, projectId },
+    });
+    const issueCId = (await rC.json()).id;
+    createdIssueIds.push(issueCId);
+
+    // B depends on A (A blocks B)
+    const depRes1 = await request.post(`${SERVER_URL}/api/issues/${issueBId}/dependencies`, {
+      data: { dependsOnId: issueAId, type: "depends_on" },
+    });
+    if (depRes1.ok()) createdDeps.push({ issueId: issueBId, depId: (await depRes1.json()).id });
+
+    // C depends on B (B blocks C)
+    const depRes2 = await request.post(`${SERVER_URL}/api/issues/${issueCId}/dependencies`, {
+      data: { dependsOnId: issueBId, type: "depends_on" },
+    });
+    if (depRes2.ok()) createdDeps.push({ issueId: issueCId, depId: (await depRes2.json()).id });
+  });
+
+  test.afterAll(async ({ request }) => {
+    // Remove dependencies first (issue ID required in path)
+    for (const { issueId, depId } of createdDeps) {
+      try { await request.delete(`${SERVER_URL}/api/issues/${issueId}/dependencies/${depId}`); } catch {}
+    }
+    // Then remove issues
+    for (const id of createdIssueIds) {
+      await request.delete(`${SERVER_URL}/api/issues/${id}`);
+    }
+  });
+
+  test("Critical Path toggle is visible when dependencies exist", async ({ page }) => {
+    await page.goto("/");
+    await page.waitForSelector("h2");
+
+    await page.locator("button", { hasText: "Graph" }).click();
+    await expect(page.locator(".bg-gray-50.select-none")).toBeVisible({ timeout: 5000 });
+
+    // The "Critical Path" button should be visible
+    await expect(page.locator("button", { hasText: "Critical Path" })).toBeVisible({ timeout: 5000 });
+  });
+
+  test("Clicking Critical Path switches to critical-path mode", async ({ page }) => {
+    await page.goto("/");
+    await page.waitForSelector("h2");
+
+    await page.locator("button", { hasText: "Graph" }).click();
+    await expect(page.locator(".bg-gray-50.select-none")).toBeVisible({ timeout: 5000 });
+
+    await page.locator("button", { hasText: "Critical Path" }).click();
+
+    // The Critical Path button should now be active (brand-600)
+    await expect(page.locator("button", { hasText: "Critical Path" })).toHaveClass(
+      /bg-brand-600/,
+    );
+
+    // Root blocker node should have the data attribute
+    const rootNodes = page.locator("[data-critical-path-root]");
+    await expect(rootNodes.first()).toBeVisible({ timeout: 5000 });
+  });
+
+  test("Root blocker nodes show downstream count badge", async ({ page }) => {
+    await page.goto("/");
+    await page.waitForSelector("h2");
+
+    await page.locator("button", { hasText: "Graph" }).click();
+    await expect(page.locator(".bg-gray-50.select-none")).toBeVisible({ timeout: 5000 });
+
+    await page.locator("button", { hasText: "Critical Path" }).click();
+
+    // Look for the badge circle (fills with ROOT_BLOCKER_COLOR #b4453a)
+    const badges = page.locator("[data-critical-path-root] circle");
+    await expect(badges.first()).toBeVisible({ timeout: 5000 });
+  });
+
+  test("Clicking a root blocker opens chain side panel", async ({ page }) => {
+    await page.goto("/");
+    await page.waitForSelector("h2");
+
+    await page.locator("button", { hasText: "Graph" }).click();
+    await expect(page.locator(".bg-gray-50.select-none")).toBeVisible({ timeout: 5000 });
+
+    await page.locator("button", { hasText: "Critical Path" }).click();
+
+    // Click the root blocker node
+    const rootNodes = page.locator("[data-critical-path-root]");
+    await expect(rootNodes.first()).toBeVisible({ timeout: 5000 });
+    await rootNodes.first().click();
+
+    // Side panel should appear with "Critical Path" heading
+    await expect(page.locator("text=Critical Path").first()).toBeVisible({ timeout: 5000 });
+
+    // Chain steps should show our issue titles
+    await expect(page.locator(`text=CPRoot ${suffix}`).first()).toBeVisible({ timeout: 5000 });
+    await expect(page.locator(`text=CPChild ${suffix}`).first()).toBeVisible({ timeout: 5000 });
+    await expect(page.locator(`text=CPEnd ${suffix}`).first()).toBeVisible({ timeout: 5000 });
+  });
+
+  test("Toggling back to Graph restores normal rendering", async ({ page }) => {
+    await page.goto("/");
+    await page.waitForSelector("h2");
+
+    await page.locator("button", { hasText: "Graph" }).click();
+    await expect(page.locator(".bg-gray-50.select-none")).toBeVisible({ timeout: 5000 });
+
+    // Switch to critical path
+    await page.locator("button", { hasText: "Critical Path" }).click();
+    await expect(page.locator("[data-critical-path-root]").first()).toBeVisible({ timeout: 5000 });
+
+    // Switch back to normal graph
+    await page.locator("button", { hasText: "Graph" }).click();
+
+    // Root blocker attribute should no longer be present (re-rendered without critical path mode)
+    await expect(page.locator("[data-critical-path-root]")).not.toBeVisible({ timeout: 5000 });
+  });
+});
