@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { formatRelativeTime } from "../lib/formatRelativeTime.js";
 import { apiFetch } from "../lib/api.js";
 import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
@@ -23,6 +23,22 @@ interface CrossProjectGroup {
   issues: CrossProjectIssue[];
 }
 
+interface StaleWorktreeEntry {
+  id: string;
+  branch: string;
+  workingDir: string;
+  workspaceStatus: string;
+  closedAt: string | null;
+  mergedAt: string | null;
+  updatedAt: string | null;
+  issueId: string;
+  issueNumber: number;
+  issueTitle: string;
+  issueStatusName: string;
+  projectId: string;
+  repoPath: string;
+}
+
 interface AllWorkspacesPanelProps {
   columns: StatusWithIssues[];
   activeProjectId: string | null;
@@ -32,7 +48,7 @@ interface AllWorkspacesPanelProps {
   onRefresh?: () => void;
 }
 
-type WsStatusFilter = "all" | "active" | "running" | "idle" | "reviewing" | "fixing" | "closed";
+type WsStatusFilter = "all" | "active" | "running" | "idle" | "reviewing" | "fixing" | "closed" | "stale";
 
 const FILTER_CHIPS: { label: string; value: WsStatusFilter }[] = [
   { label: "All", value: "all" },
@@ -42,6 +58,7 @@ const FILTER_CHIPS: { label: string; value: WsStatusFilter }[] = [
   { label: "Reviewing", value: "reviewing" },
   { label: "Fixing", value: "fixing" },
   { label: "Closed", value: "closed" },
+  { label: "Stale", value: "stale" },
 ];
 
 const WS_STATUS_COLORS: Record<string, string> = {
@@ -49,7 +66,7 @@ const WS_STATUS_COLORS: Record<string, string> = {
   reviewing: "bg-accent-50 text-accent-700 dark:bg-accent-900/40 dark:text-accent-300",
   fixing: "bg-orange-100 text-orange-700",
   idle: "bg-yellow-100 text-yellow-700",
-  closed: "bg-gray-100 text-gray-500 dark:text-gray-400",
+  closed: "bg-gray-100 text-gray-500 dark:bg-gray-400",
 };
 
 const ISSUE_STATUS_COLORS: Record<string, string> = {
@@ -70,6 +87,12 @@ export function AllWorkspacesPanel({ columns, activeProjectId, onClose, onIssueC
   const [crossProjectData, setCrossProjectData] = useState<CrossProjectGroup[] | null>(null);
   const [crossProjectLoading, setCrossProjectLoading] = useState(false);
 
+  // Stale worktrees state
+  const [staleWorktrees, setStaleWorktrees] = useState<StaleWorktreeEntry[]>([]);
+  const [staleLoading, setStaleLoading] = useState(false);
+  const [removingIds, setRemovingIds] = useState<Set<string>>(new Set());
+  const [staleErrors, setStaleErrors] = useState<Record<string, string>>({});
+
   // Fetch list of projects for the dropdown
   useEffect(() => {
     apiFetch<Project[]>("/api/projects")
@@ -89,6 +112,21 @@ export function AllWorkspacesPanel({ columns, activeProjectId, onClose, onIssueC
       .catch(() => setCrossProjectData([]))
       .finally(() => setCrossProjectLoading(false));
   }, [projectFilter]);
+
+  // Fetch stale worktrees when the stale tab is selected
+  const fetchStaleWorktrees = useCallback(() => {
+    if (statusFilter !== "stale") return;
+    setStaleLoading(true);
+    const query = projectFilter !== "all" ? `?projectId=${projectFilter}` : "";
+    apiFetch<StaleWorktreeEntry[]>(`/api/workspaces/stale-worktrees${query}`)
+      .then((data) => { setStaleWorktrees(data); setStaleErrors({}); })
+      .catch(() => setStaleWorktrees([]))
+      .finally(() => setStaleLoading(false));
+  }, [statusFilter, projectFilter]);
+
+  useEffect(() => {
+    fetchStaleWorktrees();
+  }, [fetchStaleWorktrees]);
 
   // Build the issues list depending on project filter
   const issuesWithWorkspaces: (CrossProjectIssue & { projectName?: string })[] =
@@ -126,11 +164,60 @@ export function AllWorkspacesPanel({ columns, activeProjectId, onClose, onIssueC
     setClosingIdle(false);
   }
 
+  async function handleRemoveStale(id: string) {
+    const entry = staleWorktrees.find((w) => w.id === id);
+    const label = entry ? `#${entry.issueNumber} ${entry.branch}` : "this worktree";
+    if (!window.confirm(`Remove stale worktree for ${label}?\n\nThis deletes the directory:\n${entry?.workingDir ?? ""}`)) return;
+
+    setRemovingIds((prev) => new Set(prev).add(id));
+    setStaleErrors((prev) => { const next = { ...prev }; delete next[id]; return next; });
+    try {
+      const result = await apiFetch<{ success: boolean; error?: string }>(`/api/workspaces/${id}/stale-worktree`, { method: "DELETE" });
+      if (result.success) {
+        setStaleWorktrees((prev) => prev.filter((w) => w.id !== id));
+      } else {
+        setStaleErrors((prev) => ({ ...prev, [id]: result.error ?? "Unknown error" }));
+      }
+    } catch (err) {
+      setStaleErrors((prev) => ({ ...prev, [id]: err instanceof Error ? err.message : String(err) }));
+    }
+    setRemovingIds((prev) => { const next = new Set(prev); next.delete(id); return next; });
+  }
+
+  async function handleRemoveAllStale() {
+    if (staleWorktrees.length === 0) return;
+    const confirmed = window.confirm(
+      `Remove ${staleWorktrees.length} stale worktree${staleWorktrees.length !== 1 ? "s" : ""}?\n\nThis deletes all listed directories.`
+    );
+    if (!confirmed) return;
+
+    const ids = staleWorktrees.map((w) => w.id);
+    for (const id of ids) {
+      await handleRemoveStaleSilent(id);
+    }
+  }
+
+  async function handleRemoveStaleSilent(id: string) {
+    setRemovingIds((prev) => new Set(prev).add(id));
+    setStaleErrors((prev) => { const next = { ...prev }; delete next[id]; return next; });
+    try {
+      const result = await apiFetch<{ success: boolean; error?: string }>(`/api/workspaces/${id}/stale-worktree`, { method: "DELETE" });
+      if (result.success) {
+        setStaleWorktrees((prev) => prev.filter((w) => w.id !== id));
+      } else {
+        setStaleErrors((prev) => ({ ...prev, [id]: result.error ?? "Unknown error" }));
+      }
+    } catch (err) {
+      setStaleErrors((prev) => ({ ...prev, [id]: err instanceof Error ? err.message : String(err) }));
+    }
+    setRemovingIds((prev) => { const next = new Set(prev); next.delete(id); return next; });
+  }
+
   const filtered = issuesWithWorkspaces.filter((issue) => {
     const ws = issue.workspaceSummary!;
     const mainStatus = ws.main?.status ?? "";
 
-    if (statusFilter !== "all") {
+    if (statusFilter !== "all" && statusFilter !== "stale") {
       if (statusFilter === "active") {
         if (!["active", "reviewing", "fixing"].includes(mainStatus)) return false;
       } else if (mainStatus !== statusFilter) {
@@ -149,7 +236,17 @@ export function AllWorkspacesPanel({ columns, activeProjectId, onClose, onIssueC
     return true;
   });
 
+  // Filter stale worktrees by search query
+  const filteredStale = staleWorktrees.filter((entry) => {
+    if (!searchQuery.trim()) return true;
+    const q = searchQuery.trim().toLowerCase();
+    return entry.branch.toLowerCase().includes(q)
+      || entry.issueTitle.toLowerCase().includes(q)
+      || String(entry.issueNumber).includes(q);
+  });
+
   const showingCrossProject = projectFilter === "all";
+  const showingStale = statusFilter === "stale";
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end">
@@ -165,21 +262,36 @@ export function AllWorkspacesPanel({ columns, activeProjectId, onClose, onIssueC
               <rect x="14" y="14" width="7" height="7" rx="1" />
             </svg>
             <h2 className="text-lg font-semibold text-ink dark:text-stone-100 heading-serif">All Workspaces</h2>
-            <span className="text-sm text-gray-500 dark:text-gray-400">
-              {crossProjectLoading
-                ? "…"
-                : filtered.length === issuesWithWorkspaces.length
-                  ? `(${issuesWithWorkspaces.length})`
-                  : `${filtered.length} of ${issuesWithWorkspaces.length}`}
-            </span>
-            {activeCount > 0 && (
+            {showingStale ? (
+              <span className="text-sm text-gray-500 dark:text-gray-400">
+                {staleLoading ? "…" : `(${staleWorktrees.length} stale)`}
+              </span>
+            ) : (
+              <span className="text-sm text-gray-500 dark:text-gray-400">
+                {crossProjectLoading
+                  ? "…"
+                  : filtered.length === issuesWithWorkspaces.length
+                    ? `(${issuesWithWorkspaces.length})`
+                    : `${filtered.length} of ${issuesWithWorkspaces.length}`}
+              </span>
+            )}
+            {activeCount > 0 && !showingStale && (
               <span className="text-xs bg-green-100 text-green-700 px-1.5 py-0.5 rounded-full font-medium">
                 {activeCount} active
               </span>
             )}
           </div>
           <div className="flex items-center gap-2">
-            {idleWorkspaceIds.length > 0 && (
+            {showingStale && staleWorktrees.length > 0 && (
+              <button
+                onClick={handleRemoveAllStale}
+                disabled={removingIds.size > 0}
+                className="text-xs px-2.5 py-1 rounded bg-red-100 text-red-700 hover:bg-red-200 disabled:opacity-50 font-medium"
+              >
+                Remove all
+              </button>
+            )}
+            {!showingStale && idleWorkspaceIds.length > 0 && (
               <button
                 onClick={handleCloseIdle}
                 disabled={closingIdle}
@@ -216,7 +328,7 @@ export function AllWorkspacesPanel({ columns, activeProjectId, onClose, onIssueC
           {/* Text search */}
           <input
             type="text"
-            placeholder={showingCrossProject ? "Search by title, branch, or project…" : "Search by title or branch…"}
+            placeholder={showingStale ? "Search by title, branch, or issue #…" : showingCrossProject ? "Search by title, branch, or project…" : "Search by title or branch…"}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="w-full text-sm px-3 py-1.5 border border-gray-200 dark:border-gray-700 rounded-md focus:outline-none focus:ring-1 focus:ring-brand-400 dark:bg-gray-900 dark:text-gray-200"
@@ -229,8 +341,12 @@ export function AllWorkspacesPanel({ columns, activeProjectId, onClose, onIssueC
                 onClick={() => setStatusFilter(chip.value)}
                 className={`text-xs px-2.5 py-1 rounded-full font-medium transition-colors ${
                   statusFilter === chip.value
-                    ? "bg-brand-600 text-white"
-                    : "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700"
+                    ? chip.value === "stale"
+                      ? "bg-red-600 text-white"
+                      : "bg-brand-600 text-white"
+                    : chip.value === "stale"
+                      ? "bg-red-50 text-red-600 dark:bg-red-900/30 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/50"
+                      : "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700"
                 }`}
               >
                 {chip.label}
@@ -241,144 +357,223 @@ export function AllWorkspacesPanel({ columns, activeProjectId, onClose, onIssueC
 
         {/* Content */}
         <div className="flex-1 overflow-y-auto">
-          {crossProjectLoading ? (
-            <div className="px-4 py-12 text-center text-sm text-gray-400 dark:text-gray-500">Loading…</div>
-          ) : filtered.length === 0 ? (
-            <div className="px-4 py-12 text-center text-sm text-gray-500 dark:text-gray-400">
-              {issuesWithWorkspaces.length === 0
-                ? "No workspaces yet. Create a workspace from an issue to get started."
-                : "No workspaces match the current filter."}
-            </div>
-          ) : (
-            <div className="divide-y divide-gray-100 dark:divide-gray-800">
-              {filtered.map((issue) => {
-                const ws = issue.workspaceSummary!;
-                const main = ws.main;
-                const projectName = "projectName" in issue ? issue.projectName : undefined;
-
-                return (
+          {showingStale ? (
+            // Stale worktrees view
+            staleLoading ? (
+              <div className="px-4 py-12 text-center text-sm text-gray-400 dark:text-gray-500">Loading stale worktrees…</div>
+            ) : filteredStale.length === 0 ? (
+              <div className="px-4 py-12 text-center text-sm text-gray-500 dark:text-gray-400">
+                {staleWorktrees.length === 0
+                  ? "No stale worktrees found. All closed workspaces have been cleaned up."
+                  : "No stale worktrees match the current filter."}
+              </div>
+            ) : (
+              <div className="divide-y divide-gray-100 dark:divide-gray-800">
+                {filteredStale.map((entry) => (
                   <div
-                    key={issue.id}
-                    className="px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer"
-                    onClick={async () => {
-                      if (showingCrossProject && issue.projectId !== activeProjectId && onProjectSwitch) {
-                        await onProjectSwitch(issue.projectId);
-                      }
-                      onIssueClick(issue as IssueWithStatus);
-                    }}
+                    key={entry.id}
+                    className="px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-800"
                   >
-                    {/* Issue title + status */}
+                    {/* Issue title + issue number */}
                     <div className="flex items-start gap-2 mb-1.5">
                       <span className="text-xs text-gray-400 dark:text-gray-500 font-mono mt-0.5 shrink-0">
-                        #{issue.issueNumber}
+                        #{entry.issueNumber}
                       </span>
                       <span className="text-sm font-medium text-gray-900 dark:text-gray-100 flex-1 min-w-0 line-clamp-1">
-                        {issue.title}
+                        {entry.issueTitle}
                       </span>
-                      <span
-                        className={`text-xs px-1.5 py-0.5 rounded shrink-0 ${ISSUE_STATUS_COLORS[issue.statusName] ?? "bg-gray-100 text-gray-600"}`}
-                      >
-                        {issue.statusName}
+                      <span className="text-xs px-1.5 py-0.5 rounded shrink-0 bg-red-100 text-red-600 dark:bg-red-900/40 dark:text-red-400">
+                        stale
                       </span>
                     </div>
 
-                    {/* Project name (cross-project mode only) */}
-                    {showingCrossProject && projectName && (
-                      <div className="ml-6 mb-1">
-                        <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-brand-50 text-brand-700 dark:bg-brand-900/40 dark:text-brand-300">
-                          {projectName}
+                    {/* Worktree details */}
+                    <div className="flex items-center gap-2 flex-wrap ml-6 mb-2">
+                      {/* Branch */}
+                      <span className="text-xs text-gray-500 dark:text-gray-400 font-mono truncate max-w-[180px]">
+                        {entry.branch}
+                      </span>
+
+                      {/* Status badge */}
+                      <span className={`text-xs px-1.5 py-0.5 rounded ${entry.mergedAt ? "bg-emerald-100 text-emerald-700" : WS_STATUS_COLORS["closed"] ?? "bg-gray-100 text-gray-600"}`}>
+                        {entry.mergedAt ? "merged" : "closed"}
+                      </span>
+
+                      {/* Closed time */}
+                      {entry.closedAt && (
+                        <span className="text-xs text-gray-400 dark:text-gray-500">
+                          closed {formatRelativeTime(entry.closedAt)}
                         </span>
+                      )}
+                    </div>
+
+                    {/* Path info (truncated) */}
+                    <div className="ml-6 mb-2 text-[11px] text-gray-400 dark:text-gray-500 font-mono truncate" title={entry.workingDir}>
+                      {entry.workingDir}
+                    </div>
+
+                    {/* Error message */}
+                    {staleErrors[entry.id] && (
+                      <div className="ml-6 mb-2 text-xs text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 px-2 py-1 rounded">
+                        {staleErrors[entry.id]}
                       </div>
                     )}
 
-                    {/* Workspace details */}
-                    {main && (
-                      <div className="flex items-center gap-2 flex-wrap ml-6">
-                        {/* Branch */}
-                        <span className="text-xs text-gray-500 dark:text-gray-400 font-mono truncate max-w-[180px]">
-                          {main.branch}
-                        </span>
-
-                        {/* Workspace status */}
-                        <span
-                          className={`text-xs px-1.5 py-0.5 rounded ${main.conflicts?.hasConflicts && main.status !== "fixing" ? "bg-red-100 text-red-700" : main.status === "closed" && main.lastSessionTriggerType === "fix-conflicts" ? "bg-orange-100 text-orange-700" : main.status === "closed" && main.mergedAt ? "bg-emerald-100 text-emerald-700" : WS_STATUS_COLORS[main.status] ?? "bg-gray-100 text-gray-600"}`}
-                        >
-                          {main.status === "reviewing" ? "AI Reviewing" : main.status === "fixing" ? "AI Fixing Conflicts" : main.conflicts?.hasConflicts ? "Merge Conflicts" : main.status === "closed" && main.lastSessionTriggerType === "fix-conflicts" ? "merged conflicts" : main.status === "closed" && main.mergedAt ? "merged" : main.status}
-                        </span>
-
-                        {/* Ready to merge */}
-                        {main.readyForMerge && (
-                          <span className="text-xs px-1.5 py-0.5 rounded bg-green-100 text-green-700">
-                            Ready to merge
-                          </span>
-                        )}
-
-                        {/* Diff stats */}
-                        {main.diffStats && main.diffStats.filesChanged > 0 && (
-                          <span className="text-xs text-gray-500 dark:text-gray-400">
-                            {main.diffStats.filesChanged} file{main.diffStats.filesChanged !== 1 ? "s" : ""},&nbsp;
-                            <span className="text-green-600">+{main.diffStats.insertions}</span>
-                            {" / "}
-                            <span className="text-red-500">-{main.diffStats.deletions}</span>
-                          </span>
-                        )}
-
-                        {/* Conflicts */}
-                        {main.conflicts?.hasConflicts && (
-                          <span className="text-xs bg-red-100 text-red-600 px-1.5 py-0.5 rounded">
-                            {main.conflicts.conflictingFiles.length} conflict{main.conflicts.conflictingFiles.length !== 1 ? "s" : ""}
-                          </span>
-                        )}
-
-                        {/* Last session trigger */}
-                        {main.lastSessionTriggerType && (() => {
-                          const map: Record<string, { label: string; className: string }> = {
-                            review: { label: "AI Review", className: "bg-accent-50 text-accent-700 dark:bg-accent-900/40 dark:text-accent-300" },
-                            merge: { label: "AI Merge", className: "bg-emerald-100 text-emerald-700" },
-                            "fix-conflicts": { label: "Fix Conflicts", className: "bg-orange-100 text-orange-700" },
-                            learning: { label: "Learning", className: "bg-teal-100 text-teal-700" },
-                            "auto-start": { label: "Auto-start", className: "bg-gray-100 text-gray-600" },
-                          };
-                          const humanize = (n: string) => n.replace(/[-_]/g, " ").replace(/\b\w/g, c => c.toUpperCase());
-                          const badge = map[main.lastSessionTriggerType] ?? (main.lastSessionTriggerType.startsWith("skill:") ? { label: `✨ ${humanize(main.lastSessionTriggerType.slice(6))}`, className: "bg-brand-50 text-brand-700 dark:bg-brand-900/40 dark:text-brand-300" } : null);
-                          return badge ? <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${badge.className}`}>{badge.label}</span> : null;
-                        })()}
-
-                        {/* Last session */}
-                        {main.lastSessionAt && (
-                          <span className="text-xs text-gray-400 dark:text-gray-500">
-                            {formatRelativeTime(main.lastSessionAt)}
-                          </span>
-                        )}
-
-                        {/* Context usage */}
-                        {(main.status === "active" || main.status === "fixing") && main.contextTokens ? (
-                          <span className="text-xs text-gray-400 dark:text-gray-500" title={`${main.contextTokens.toLocaleString('en-US')} context tokens`}>
-                            {main.contextTokens >= 1000
-                              ? `${Math.round(main.contextTokens / 1000)}k ctx`
-                              : `${main.contextTokens} ctx`}
-                          </span>
-                        ) : null}
-
-                        {/* Last tool */}
-                        {(main.status === "active" || main.status === "fixing") && main.lastTool ? (
-                          <span className="text-xs text-gray-400 dark:text-gray-500 truncate max-w-[160px]" title={`Last tool: ${main.lastTool}`}>
-                            <span className="font-medium text-gray-500 dark:text-gray-400">tool:</span> {main.lastTool}
-                          </span>
-                        ) : null}
-                      </div>
-                    )}
-
-                    {/* Multiple workspaces indicator */}
-                    {ws.total > 1 && (
-                      <div className="ml-6 mt-1 text-xs text-gray-400 dark:text-gray-500">
-                        +{ws.total - 1} more workspace{ws.total - 1 !== 1 ? "s" : ""}
-                      </div>
-                    )}
+                    {/* Remove button */}
+                    <div className="ml-6">
+                      <button
+                        onClick={() => handleRemoveStale(entry.id)}
+                        disabled={removingIds.has(entry.id)}
+                        className="text-xs px-2.5 py-1 rounded bg-red-50 text-red-600 hover:bg-red-100 dark:bg-red-900/30 dark:text-red-400 dark:hover:bg-red-900/50 disabled:opacity-50 font-medium"
+                      >
+                        {removingIds.has(entry.id) ? "Removing…" : "Remove worktree"}
+                      </button>
+                    </div>
                   </div>
-                );
-              })}
-            </div>
+                ))}
+              </div>
+            )
+          ) : (
+            // Normal workspace view
+            crossProjectLoading ? (
+              <div className="px-4 py-12 text-center text-sm text-gray-400 dark:text-gray-500">Loading…</div>
+            ) : filtered.length === 0 ? (
+              <div className="px-4 py-12 text-center text-sm text-gray-500 dark:text-gray-400">
+                {issuesWithWorkspaces.length === 0
+                  ? "No workspaces yet. Create a workspace from an issue to get started."
+                  : "No workspaces match the current filter."}
+              </div>
+            ) : (
+              <div className="divide-y divide-gray-100 dark:divide-gray-800">
+                {filtered.map((issue) => {
+                  const ws = issue.workspaceSummary!;
+                  const main = ws.main;
+                  const projectName = "projectName" in issue ? issue.projectName : undefined;
+
+                  return (
+                    <div
+                      key={issue.id}
+                      className="px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer"
+                      onClick={async () => {
+                        if (showingCrossProject && issue.projectId !== activeProjectId && onProjectSwitch) {
+                          await onProjectSwitch(issue.projectId);
+                        }
+                        onIssueClick(issue as IssueWithStatus);
+                      }}
+                    >
+                      {/* Issue title + status */}
+                      <div className="flex items-start gap-2 mb-1.5">
+                        <span className="text-xs text-gray-400 dark:text-gray-500 font-mono mt-0.5 shrink-0">
+                          #{issue.issueNumber}
+                        </span>
+                        <span className="text-sm font-medium text-gray-900 dark:text-gray-100 flex-1 min-w-0 line-clamp-1">
+                          {issue.title}
+                        </span>
+                        <span
+                          className={`text-xs px-1.5 py-0.5 rounded shrink-0 ${ISSUE_STATUS_COLORS[issue.statusName] ?? "bg-gray-100 text-gray-600"}`}
+                        >
+                          {issue.statusName}
+                        </span>
+                      </div>
+
+                      {/* Project name (cross-project mode only) */}
+                      {showingCrossProject && projectName && (
+                        <div className="ml-6 mb-1">
+                          <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-brand-50 text-brand-700 dark:bg-brand-900/40 dark:text-brand-300">
+                            {projectName}
+                          </span>
+                        </div>
+                      )}
+
+                      {/* Workspace details */}
+                      {main && (
+                        <div className="flex items-center gap-2 flex-wrap ml-6">
+                          {/* Branch */}
+                          <span className="text-xs text-gray-500 dark:text-gray-400 font-mono truncate max-w-[180px]">
+                            {main.branch}
+                          </span>
+
+                          {/* Workspace status */}
+                          <span
+                            className={`text-xs px-1.5 py-0.5 rounded ${main.conflicts?.hasConflicts && main.status !== "fixing" ? "bg-red-100 text-red-700" : main.status === "closed" && main.lastSessionTriggerType === "fix-conflicts" ? "bg-orange-100 text-orange-700" : main.status === "closed" && main.mergedAt ? "bg-emerald-100 text-emerald-700" : WS_STATUS_COLORS[main.status] ?? "bg-gray-100 text-gray-600"}`}
+                          >
+                            {main.status === "reviewing" ? "AI Reviewing" : main.status === "fixing" ? "AI Fixing Conflicts" : main.conflicts?.hasConflicts ? "Merge Conflicts" : main.status === "closed" && main.lastSessionTriggerType === "fix-conflicts" ? "merged conflicts" : main.status === "closed" && main.mergedAt ? "merged" : main.status}
+                          </span>
+
+                          {/* Ready to merge */}
+                          {main.readyForMerge && (
+                            <span className="text-xs px-1.5 py-0.5 rounded bg-green-100 text-green-700">
+                              Ready to merge
+                            </span>
+                          )}
+
+                          {/* Diff stats */}
+                          {main.diffStats && main.diffStats.filesChanged > 0 && (
+                            <span className="text-xs text-gray-500 dark:text-gray-400">
+                              {main.diffStats.filesChanged} file{main.diffStats.filesChanged !== 1 ? "s" : ""},&nbsp;
+                              <span className="text-green-600">+{main.diffStats.insertions}</span>
+                              {" / "}
+                              <span className="text-red-500">-{main.diffStats.deletions}</span>
+                            </span>
+                          )}
+
+                          {/* Conflicts */}
+                          {main.conflicts?.hasConflicts && (
+                            <span className="text-xs bg-red-100 text-red-600 px-1.5 py-0.5 rounded">
+                              {main.conflicts.conflictingFiles.length} conflict{main.conflicts.conflictingFiles.length !== 1 ? "s" : ""}
+                            </span>
+                          )}
+
+                          {/* Last session trigger */}
+                          {main.lastSessionTriggerType && (() => {
+                            const map: Record<string, { label: string; className: string }> = {
+                              review: { label: "AI Review", className: "bg-accent-50 text-accent-700 dark:bg-accent-900/40 dark:text-accent-300" },
+                              merge: { label: "AI Merge", className: "bg-emerald-100 text-emerald-700" },
+                              "fix-conflicts": { label: "Fix Conflicts", className: "bg-orange-100 text-orange-700" },
+                              learning: { label: "Learning", className: "bg-teal-100 text-teal-700" },
+                              "auto-start": { label: "Auto-start", className: "bg-gray-100 text-gray-600" },
+                            };
+                            const humanize = (n: string) => n.replace(/[-_]/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+                            const badge = map[main.lastSessionTriggerType] ?? (main.lastSessionTriggerType.startsWith("skill:") ? { label: `✨ ${humanize(main.lastSessionTriggerType.slice(6))}`, className: "bg-brand-50 text-brand-700 dark:bg-brand-900/40 dark:text-brand-300" } : null);
+                            return badge ? <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${badge.className}`}>{badge.label}</span> : null;
+                          })()}
+
+                          {/* Last session */}
+                          {main.lastSessionAt && (
+                            <span className="text-xs text-gray-400 dark:text-gray-500">
+                              {formatRelativeTime(main.lastSessionAt)}
+                            </span>
+                          )}
+
+                          {/* Context usage */}
+                          {(main.status === "active" || main.status === "fixing") && main.contextTokens ? (
+                            <span className="text-xs text-gray-400 dark:text-gray-500" title={`${main.contextTokens.toLocaleString('en-US')} context tokens`}>
+                              {main.contextTokens >= 1000
+                                ? `${Math.round(main.contextTokens / 1000)}k ctx`
+                                : `${main.contextTokens} ctx`}
+                            </span>
+                          ) : null}
+
+                          {/* Last tool */}
+                          {(main.status === "active" || main.status === "fixing") && main.lastTool ? (
+                            <span className="text-xs text-gray-400 dark:text-gray-500 truncate max-w-[160px]" title={`Last tool: ${main.lastTool}`}>
+                              <span className="font-medium text-gray-500 dark:text-gray-400">tool:</span> {main.lastTool}
+                            </span>
+                          ) : null}
+                        </div>
+                      )}
+
+                      {/* Multiple workspaces indicator */}
+                      {ws.total > 1 && (
+                        <div className="ml-6 mt-1 text-xs text-gray-400 dark:text-gray-500">
+                          +{ws.total - 1} more workspace{ws.total - 1 !== 1 ? "s" : ""}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )
           )}
         </div>
       </div>

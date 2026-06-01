@@ -17,6 +17,8 @@ export {
   type GitService,
 } from "./workspace-internals.js";
 
+export type { StaleWorktreeEntry } from "./workspace-crud.service.js";
+
 export function createWorkspaceService(deps: {
   database: Database;
   getSessionManager?: () => SessionManager;
@@ -78,6 +80,8 @@ export function createWorkspaceService(deps: {
       database: deps.database,
       gitService: deps.gitService,
     }),
+    listStaleWorktrees: crud.listStaleWorktrees,
+    removeStaleWorktree: crud.removeStaleWorktree,
     getLatestGithubHandoffDraft: (workspaceId: string) => getLatestGithubHandoffDraft({
       workspaceId,
       database: deps.database,

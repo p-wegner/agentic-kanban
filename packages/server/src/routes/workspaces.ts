@@ -19,6 +19,14 @@ export function createWorkspacesRoute(
     boardEvents: options?.boardEvents,
   });
 
+  // GET /api/workspaces/stale-worktrees — list closed workspaces with directories still on disk
+  // Must be registered BEFORE /:id to avoid being matched as an ID param
+  router.get("/stale-worktrees", async (c) => {
+    const projectId = c.req.query("projectId") || undefined;
+    const staleWorktrees = await workspaceService.listStaleWorktrees(projectId);
+    return c.json(staleWorktrees);
+  });
+
   // POST /api/workspaces — create workspace with worktree + auto-launch agent
   router.post("/", async (c) => {
     const body = await parseJsonBody(c);
