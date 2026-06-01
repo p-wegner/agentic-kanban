@@ -3,6 +3,7 @@ import type { BoardEvents } from "../services/board-events.js";
 import type { Database } from "../db/index.js";
 import { createWorkspaceService } from "../services/workspace.service.js";
 import { createBisectService, type BisectScope } from "../services/bisect.service.js";
+import { createSessionArtifactsService } from "../services/session-artifacts.service.js";
 import { createRouter } from "../middleware/create-router.js";
 import { parseJsonBody, parseOptionalJsonBody } from "../middleware/parse-body.js";
 
@@ -23,6 +24,7 @@ export function createWorkspaceActionsRoute(
     getSessionManager,
     boardEvents: options?.boardEvents,
   });
+  const artifactsService = createSessionArtifactsService({ database });
 
   // POST /api/workspaces/:id/setup
   router.post("/:id/setup", async (c) => {
@@ -231,6 +233,55 @@ export function createWorkspaceActionsRoute(
       return c.json({ error: result.error }, 400);
     }
     return c.json({ success: true });
+  });
+
+  // GET /api/workspaces/:id/artifacts — list recognized artifacts in workspace directory
+  router.get("/:id/artifacts", async (c) => {
+    const id = c.req.param("id");
+    try {
+      const artifacts = await artifactsService.listArtifacts(id);
+      return c.json(artifacts);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Failed to list artifacts";
+      if (message.includes("not found") || message.includes("no working directory")) {
+        return c.json({ error: message }, 404);
+      }
+      return c.json({ error: message }, 500);
+    }
+  });
+
+  // GET /api/workspaces/:id/artifacts-file — read a single artifact by ?path= query param
+  router.get("/:id/artifacts-file", async (c) => {
+    const id = c.req.param("id");
+    const artifactPath = c.req.query("path");
+    if (!artifactPath) {
+      return c.json({ error: "path query parameter is required" }, 400);
+    }
+    try {
+      const ext = artifactPath.split(".").pop()?.toLowerCase() ?? "";
+      const imageExts = ["png", "jpg", "jpeg", "webp", "gif", "bmp", "svg"];
+      if (imageExts.includes(ext)) {
+        const result = await artifactsService.readImageArtifact(id, artifactPath);
+        return new Response(result.buffer, {
+          headers: {
+            "Content-Type": result.mimeType,
+            "Cache-Control": "no-cache",
+          },
+        });
+      } else {
+        const result = await artifactsService.readTextArtifact(id, artifactPath);
+        return c.json(result);
+      }
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Failed to read artifact";
+      if (message.includes("outside") || message.includes("Cannot read")) {
+        return c.json({ error: message }, 400);
+      }
+      if (message.includes("not found") || message.includes("ENOENT")) {
+        return c.json({ error: "Artifact file not found" }, 404);
+      }
+      return c.json({ error: message }, 500);
+    }
   });
 
   return router;
