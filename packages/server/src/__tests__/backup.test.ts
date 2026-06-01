@@ -134,6 +134,43 @@ describe("db backup", () => {
     await expect(verifyBackup(emptyBackup)).rejects.toThrow(/0 projects/);
   }, 30000);
 
+  it("verifyBackup rejects a 0-issue backup when live has issues", async () => {
+    await seedDb(process.env.DB_URL!, 0, 3);
+    const { verifyBackup } = await loadBackupModule();
+
+    const emptyBackup = join(tmpDir, "empty-issues-backup.db");
+    await seedDb(pathToFileURL(emptyBackup).href, 0, 0);
+
+    await expect(verifyBackup(emptyBackup)).rejects.toThrow(/0 issues/);
+  }, 30000);
+
+  it("does not promote a backup that fails verification and preserves the previous good backup", async () => {
+    await seedDb(process.env.DB_URL!, 1, 1);
+    const { createBackup } = await loadBackupModule();
+
+    const first = await createBackup("known-good");
+    expect(first).not.toBeNull();
+    const before = readdirSync(backupDir)
+      .filter((f) => /^kanban-.+\.db$/.test(f))
+      .sort();
+
+    await expect(
+      createBackup("fails-validation", {
+        verify: async () => {
+          throw new Error("forced verification failure");
+        },
+      }),
+    ).rejects.toThrow(/forced verification failure/);
+
+    const after = readdirSync(backupDir)
+      .filter((f) => /^kanban-.+\.db$/.test(f))
+      .sort();
+    const temps = readdirSync(backupDir).filter((f) => f.endsWith(".tmp"));
+    expect(after).toEqual(before);
+    expect(temps).toEqual([]);
+    expect(existsSync(first!.path)).toBe(true);
+  }, 30000);
+
   it("pruneBackups keeps exactly KEEP_LAST and never deletes the last one", async () => {
     const { pruneBackups, KEEP_LAST } = await loadBackupModule();
     expect(KEEP_LAST).toBe(5);
