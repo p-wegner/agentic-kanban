@@ -8,6 +8,8 @@ import { extractPlan, writePlanFile, buildImplementPrompt } from "../plan-mode.s
 import { getHarnessBoolSetting } from "../harness-settings.js";
 import { computeScorecard } from "../workspace-scorecard.service.js";
 import { computeWorkspaceCodeMetrics } from "../workspace-code-metrics.service.js";
+import { recordAgentProfileLaunchFailure } from "../agent-profile-health.service.js";
+import type { ProviderName } from "../agent-provider.js";
 import type { AgentOutputMessage } from "@agentic-kanban/shared";
 import type { SessionManagerOptions, SessionState, StartSessionOptions } from "./types.js";
 import { workspaceLaunchPreflight } from "../preflight-check.js";
@@ -41,6 +43,12 @@ function buildZeroOutputLaunchFailureStats(executor: string, durationMs: number,
     providerExitCode: exitCode,
     agentSummary: reason,
   };
+}
+
+function lifecycleProviderName(provider: string | undefined, profile?: { provider?: string; name?: string }): ProviderName {
+  if (profile?.provider === "codex" || profile?.provider === "copilot" || profile?.provider === "claude") return profile.provider;
+  if (provider === "codex" || provider === "copilot") return provider;
+  return "claude";
 }
 
 export function createSessionLifecycle(
@@ -260,6 +268,15 @@ export function createSessionLifecycle(
             const stats = buildZeroOutputLaunchFailureStats(executor, durationMs, exitCode);
             const effectiveExitCode = 1;
             void (async () => {
+              await recordAgentProfileLaunchFailure(db, {
+                provider: lifecycleProviderName(provider, profile),
+                profileName: profile?.name,
+                summary: stats.failureReason,
+                exitCode: effectiveExitCode,
+                sessionId,
+                workspaceId,
+                at: endNow,
+              });
               await db.update(sessions)
                 .set({ status: "stopped", endedAt: endNow, exitCode: String(effectiveExitCode), stats: JSON.stringify(stats) })
                 .where(eq(sessions.id, sessionId));
@@ -383,6 +400,14 @@ export function createSessionLifecycle(
           .catch((err) => console.error("Failed to store session pid:", err));
       }
     } catch (err) {
+      await recordAgentProfileLaunchFailure(db, {
+        provider: lifecycleProviderName(provider, profile),
+        profileName: profile?.name,
+        summary: err instanceof Error ? err.message : String(err),
+        exitCode: 1,
+        sessionId,
+        workspaceId,
+      }).catch(() => {});
       // Clean up zombie session state if launch failed
       state.sessionContexts.delete(sessionId);
       state.turnStates.delete(sessionId);

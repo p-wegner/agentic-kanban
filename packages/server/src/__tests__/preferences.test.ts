@@ -239,12 +239,52 @@ describe("Preferences API - settings", () => {
     expect(body.copilot_profile).toBe("gpt-5.2");
   });
 
-  it("GET /api/preferences/copilot-profiles returns an empty profile list", async () => {
+  it("GET /api/preferences/copilot-profiles returns the default profile", async () => {
     const { app: freshApp } = createTestApp();
     const res = await freshApp.request("/api/preferences/copilot-profiles");
     expect(res.status).toBe(200);
     const body = await res.json() as any;
-    expect(body.profiles).toEqual([]);
+    expect(body.profiles).toEqual(["default"]);
+  });
+
+  it("GET /api/preferences/agent-profiles/health maps configured profiles to preflight rows", async () => {
+    const { app: freshApp } = createTestApp();
+    await freshApp.request("/api/preferences/settings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        provider: "codex",
+        codex_profile: "default",
+        agent_args: "--model test-model --api-key should-not-render",
+      }),
+    });
+
+    const res = await freshApp.request("/api/preferences/agent-profiles/health");
+    expect(res.status).toBe(200);
+    const body = await res.json() as any;
+    const codex = body.profiles.find((profile: any) => profile.id === "codex:default");
+    expect(codex).toMatchObject({
+      provider: "codex",
+      profileName: "default",
+      selected: true,
+    });
+    expect(codex.preflight.flags).toContain("--model test-model");
+    expect(codex.preflight.flags).toContain("--api-key [redacted]");
+    expect(JSON.stringify(codex)).not.toContain("should-not-render");
+  });
+
+  it("POST /api/preferences/agent-profiles/preflight reports missing profile config shape", async () => {
+    const { app: freshApp } = createTestApp();
+    const res = await freshApp.request("/api/preferences/agent-profiles/preflight", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ provider: "codex", profileName: "missing-profile-for-test" }),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json() as any;
+    expect(body.ok).toBe(false);
+    expect(body.errors[0]).toContain("Profile config not found");
+    expect(body.errors[0]).toContain("missing-profile-for-test");
   });
 });
 
