@@ -9,6 +9,7 @@ import { BUILTIN_SKILLS } from "../builtin-skills.js";
 export const BUILTIN_TAGS = [
   { name: "needs-visual-verification", color: "#F59E0B" },
   { name: "epic", color: "#8B5CF6" },
+  { name: "no-auto-start", color: "#6B7280" },
 ] as const;
 
 export async function ensureBuiltinTags(database: Database = db): Promise<void> {
