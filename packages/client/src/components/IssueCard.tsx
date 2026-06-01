@@ -198,7 +198,7 @@ interface TagBadge {
 
 interface IssueCardProps {
   issue: IssueWithStatus;
-  onClick: (issue: IssueWithStatus) => void;
+  onClick: (issue: IssueWithStatus, event: React.MouseEvent) => void;
   onWorkspaceClick?: (issue: IssueWithStatus, workspaceId?: string) => void;
   onStartWorkspace?: (issue: IssueWithStatus) => void;
   onDragStart: (e: React.DragEvent, issue: IssueWithStatus) => void;
@@ -210,6 +210,7 @@ interface IssueCardProps {
   liveStats?: LiveSessionStats;
   todos?: TodoItem[];
   isPendingWorkspace?: boolean;
+  isSelected?: boolean;
 }
 
 function HighlightedText({ text, query }: { text: string; query: string }) {
@@ -232,7 +233,7 @@ function HighlightedText({ text, query }: { text: string; query: string }) {
   );
 }
 
-export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, onDragStart, onMoveToNext, nextStatusName, tags, searchQuery, liveActivity, liveStats, todos, isPendingWorkspace }: IssueCardProps) {
+export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, onDragStart, onMoveToNext, nextStatusName, tags, searchQuery, liveActivity, liveStats, todos, isPendingWorkspace, isSelected }: IssueCardProps) {
   const typeBadgeColor = issue.issueType ? (issueTypeColors[issue.issueType] ?? null) : null;
   const priorityBadgeColor = issue.priority && issue.priority !== "medium" ? (priorityColors[issue.priority] ?? null) : null;
   const ws = issue.workspaceSummary;
@@ -360,11 +361,21 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
       onDragOver={handleDragOver}
       onDragLeave={() => setDepDragOver(false)}
       onDrop={handleDrop}
-      onClick={() => onClick(issue)}
+      onClick={(e) => onClick(issue, e)}
       onContextMenu={handleContextMenu}
       onKeyDown={handleCardKeyDown}
-      className={`group bg-surface-raised dark:bg-surface-raised-dark rounded-lg shadow-sm p-2.5 border cursor-pointer hover:shadow-md hover:-translate-y-px transition-all duration-150 relative isolate ${depDragOver ? "border-brand-400 bg-brand-50 shadow-brand-200" : isPendingWorkspace ? "border-brand-300 shadow-brand-100 shadow-md" : "border-black/[0.07] dark:border-white/10 hover:border-brand-200 dark:hover:border-gray-600"}`}
+      aria-selected={isSelected ? "true" : undefined}
+      className={`group bg-surface-raised dark:bg-surface-raised-dark rounded-lg shadow-sm p-2.5 border cursor-pointer hover:shadow-md hover:-translate-y-px transition-all duration-150 relative isolate ${
+        isSelected
+          ? "border-brand-500 ring-2 ring-brand-400/70 shadow-brand-100 dark:shadow-brand-950"
+          : depDragOver ? "border-brand-400 bg-brand-50 shadow-brand-200" : isPendingWorkspace ? "border-brand-300 shadow-brand-100 shadow-md" : "border-black/[0.07] dark:border-white/10 hover:border-brand-200 dark:hover:border-gray-600"
+      }`}
     >
+      {isSelected && (
+        <span className="absolute right-2 top-2 z-10 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-brand-600 px-1.5 text-[10px] font-semibold text-white shadow-sm">
+          ✓
+        </span>
+      )}
       {contextMenu && createPortal(
         <div
           ref={menuRef}

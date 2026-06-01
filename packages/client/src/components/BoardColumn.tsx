@@ -38,7 +38,7 @@ interface BoardColumnProps {
   creatingInColumn: string | null;
   onCreateClick: (statusId: string) => void;
   onCreateCancel: () => void;
-  onIssueClick: (issue: IssueWithStatus) => void;
+  onIssueClick: (issue: IssueWithStatus, event: React.MouseEvent) => void;
   onWorkspaceClick?: (issue: IssueWithStatus, workspaceId?: string) => void;
   onStartWorkspace?: (issue: IssueWithStatus) => void;
   onDragStart: (e: React.DragEvent, issue: IssueWithStatus) => void;
@@ -49,6 +49,7 @@ interface BoardColumnProps {
   liveStats?: Record<string, LiveSessionStats>;
   sessionTodos?: Record<string, TodoItem[]>;
   pendingWorkspaceIssueIds?: Set<string>;
+  selectedIssueIds?: Set<string>;
   children?: React.ReactNode;
   style?: React.CSSProperties;
   width?: number;
@@ -76,6 +77,7 @@ export function BoardColumn({
   liveStats,
   sessionTodos,
   pendingWorkspaceIssueIds,
+  selectedIssueIds,
   children,
   style,
   width,
@@ -249,6 +251,7 @@ export function BoardColumn({
                 liveStats={liveStats?.[issue.id]}
                 todos={sessionTodos?.[issue.id]}
                 isPendingWorkspace={pendingWorkspaceIssueIds?.has(issue.id)}
+                isSelected={selectedIssueIds?.has(issue.id)}
               />
             </div>
           ))}

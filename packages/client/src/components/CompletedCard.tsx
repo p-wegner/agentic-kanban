@@ -3,9 +3,10 @@ import { formatRelativeTime } from "../lib/formatRelativeTime.js";
 
 interface CompletedCardProps {
   issue: IssueWithStatus;
-  onClick: (issue: IssueWithStatus) => void;
+  onClick: (issue: IssueWithStatus, event: React.MouseEvent) => void;
   onDragStart: (e: React.DragEvent, issue: IssueWithStatus) => void;
   searchQuery?: string;
+  isSelected?: boolean;
 }
 
 function HighlightedText({ text, query }: { text: string; query: string }) {
@@ -26,7 +27,7 @@ function HighlightedText({ text, query }: { text: string; query: string }) {
   );
 }
 
-export function CompletedCard({ issue, onClick, onDragStart, searchQuery }: CompletedCardProps) {
+export function CompletedCard({ issue, onClick, onDragStart, searchQuery, isSelected }: CompletedCardProps) {
   const isCancelled = issue.statusName === "Cancelled";
   const ws = issue.workspaceSummary;
   const mainWs = ws?.main;
@@ -35,15 +36,24 @@ export function CompletedCard({ issue, onClick, onDragStart, searchQuery }: Comp
     <div
       draggable
       onDragStart={(e) => onDragStart(e, issue)}
-      onClick={() => onClick(issue)}
+      onClick={(e) => onClick(issue, e)}
+      aria-selected={isSelected ? "true" : undefined}
       className={
         `group rounded-md shadow-sm p-2.5 border cursor-pointer ` +
         `hover:shadow-md transition-shadow ` +
+        (isSelected
+          ? "ring-2 ring-brand-400 border-brand-500 "
+          : "") +
         (isCancelled
           ? "bg-red-50/50 border-red-200/60 hover:border-red-300"
           : "bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600")
       }
     >
+      {isSelected && (
+        <span className="float-right ml-2 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-brand-600 px-1 text-[9px] font-semibold text-white">
+          ✓
+        </span>
+      )}
       <div className="flex min-w-0 items-start justify-between gap-1.5">
         <p className={`text-xs leading-snug min-w-0 break-words ${isCancelled ? "line-through text-gray-400 dark:text-gray-500" : "text-gray-800 dark:text-gray-200"}`}>
           {issue.issueNumber != null && (
