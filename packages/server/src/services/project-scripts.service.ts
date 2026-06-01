@@ -16,6 +16,7 @@ export class ProjectScriptsError extends Error {
 }
 
 type LastRunStatus = "running" | "success" | "failed" | "error";
+type CwdMode = "project" | "custom";
 
 interface ScriptLastRun {
   status: LastRunStatus;
@@ -40,6 +41,29 @@ function normalizeWorkingDir(value: unknown): string | null {
     throw new ProjectScriptsError("workingDir must be relative to the project root", "BAD_REQUEST");
   }
   return trimmed.replace(/\\/g, "/");
+}
+
+function normalizeNullableText(value: unknown, field: string): string | null {
+  if (value == null) return null;
+  if (typeof value !== "string") throw new ProjectScriptsError(`${field} must be a string`, "BAD_REQUEST");
+  const trimmed = value.trim();
+  return trimmed || null;
+}
+
+function normalizeCwdMode(value: unknown, workingDir: string | null): CwdMode {
+  if (value == null) return workingDir ? "custom" : "project";
+  if (value === "project" || value === "custom") return value;
+  throw new ProjectScriptsError("cwdMode must be project or custom", "BAD_REQUEST");
+}
+
+function normalizeCwdInput(body: Record<string, unknown>) {
+  const workingDir = normalizeWorkingDir(body.workingDir);
+  const cwdMode = normalizeCwdMode(body.cwdMode, workingDir);
+  if (cwdMode === "project") return { cwdMode, workingDir: null };
+  if (!workingDir) {
+    throw new ProjectScriptsError("workingDir is required when cwdMode is custom", "BAD_REQUEST");
+  }
+  return { cwdMode, workingDir };
 }
 
 function resolveWorkingDir(repoPath: string, workingDir: string | null): string {
@@ -87,7 +111,8 @@ export function createProjectScriptsService(deps: { database: Database }) {
     const command = typeof body.command === "string" ? body.command.trim() : "";
     if (!name) throw new ProjectScriptsError("name is required", "BAD_REQUEST");
     if (!command) throw new ProjectScriptsError("command is required", "BAD_REQUEST");
-    const workingDir = normalizeWorkingDir(body.workingDir);
+    const description = normalizeNullableText(body.description, "description");
+    const { cwdMode, workingDir } = normalizeCwdInput(body);
     resolveWorkingDir(project.repoPath, workingDir);
     const existing = await database
       .select({ id: projectScriptShortcuts.id })
@@ -101,7 +126,9 @@ export function createProjectScriptsService(deps: { database: Database }) {
       id,
       projectId,
       name,
+      description,
       command,
+      cwdMode,
       workingDir,
       sortOrder: Number(body.sortOrder ?? 0),
       createdAt: now,
@@ -131,9 +158,17 @@ export function createProjectScriptsService(deps: { database: Database }) {
       if (!command) throw new ProjectScriptsError("command is required", "BAD_REQUEST");
       updates.command = command;
     }
-    if (body.workingDir !== undefined) {
-      const workingDir = normalizeWorkingDir(body.workingDir);
+    if (body.description !== undefined) {
+      updates.description = normalizeNullableText(body.description, "description");
+    }
+    if (body.cwdMode !== undefined || body.workingDir !== undefined) {
+      const nextBody = {
+        cwdMode: body.cwdMode ?? rows[0].cwdMode,
+        workingDir: body.workingDir !== undefined ? body.workingDir : rows[0].workingDir,
+      };
+      const { cwdMode, workingDir } = normalizeCwdInput(nextBody);
       resolveWorkingDir(project.repoPath, workingDir);
+      updates.cwdMode = cwdMode;
       updates.workingDir = workingDir;
     }
     if (body.sortOrder !== undefined) updates.sortOrder = Number(body.sortOrder);

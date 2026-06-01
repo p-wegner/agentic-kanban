@@ -108,12 +108,15 @@ export interface ProjectStatsResponse {
 }
 
 export type ProjectScriptLastRunStatus = "running" | "success" | "failed" | "error";
+export type ProjectScriptCwdMode = "project" | "custom";
 
 export interface ProjectScriptShortcutResponse {
   id: string;
   projectId: string;
   name: string;
+  description: string | null;
   command: string;
+  cwdMode: ProjectScriptCwdMode;
   workingDir: string | null;
   sortOrder: number;
   createdAt: string;
@@ -129,12 +132,16 @@ export interface ProjectScriptShortcutResponse {
 export interface CreateProjectScriptShortcutRequest {
   name: string;
   command: string;
+  description?: string | null;
+  cwdMode?: ProjectScriptCwdMode;
   workingDir?: string | null;
 }
 
 export interface UpdateProjectScriptShortcutRequest {
   name?: string;
   command?: string;
+  description?: string | null;
+  cwdMode?: ProjectScriptCwdMode;
   workingDir?: string | null;
   sortOrder?: number;
 }
