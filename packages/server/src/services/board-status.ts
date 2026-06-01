@@ -22,15 +22,29 @@ export function classifyBoardStatusIssueAttention(issue: BoardStatusIssue): Boar
   if (
     issue.statusName === "In Review"
     && issue.workspace
-    && issue.workspace.status !== "closed"
     && !issue.workspace.readyForMerge
-    && isZeroDiff(issue.diffStats)
   ) {
-    return {
-      bucket: "needs_attention",
-      reason: "idle-awaiting",
-      label: "In Review workspace has no file changes and is not ready for merge",
-    };
+    if (issue.workspace.status === "closed") {
+      return {
+        bucket: "needs_attention",
+        reason: "closed-in-review",
+        label: "In Review issue points at a closed or already-merged workspace",
+      };
+    }
+    if (!issue.diffStats) {
+      return {
+        bucket: "needs_attention",
+        reason: "stale-in-review",
+        label: "In Review workspace has no available diff stats and may be stale",
+      };
+    }
+    if (isZeroDiff(issue.diffStats)) {
+      return {
+        bucket: "needs_attention",
+        reason: "idle-awaiting",
+        label: "In Review workspace has no file changes and is not ready for merge",
+      };
+    }
   }
   return null;
 }
@@ -271,19 +285,20 @@ export async function getBoardStatus(
 
       // Conflict detection for non-direct idle workspaces (cached, non-blocking)
       if (!mainWs.isDirect && mainWs.status === "idle") {
-        if (!baseBranch) continue;
-        const cached = conflictCache.get(mainWs.id);
-        if (cached && Date.now() - cached.ts < CONFLICT_CACHE_TTL) {
-          entry.conflicts = cached.result;
-        } else {
-          asyncWork.push(
-            detectConflicts(mainWs.workingDir, baseBranch)
-              .then(result => {
-                conflictCache.set(mainWs.id, { result, ts: Date.now() });
-                entry.conflicts = result;
-              })
-              .catch(() => { /* non-critical */ }),
-          );
+        if (baseBranch) {
+          const cached = conflictCache.get(mainWs.id);
+          if (cached && Date.now() - cached.ts < CONFLICT_CACHE_TTL) {
+            entry.conflicts = cached.result;
+          } else {
+            asyncWork.push(
+              detectConflicts(mainWs.workingDir, baseBranch)
+                .then(result => {
+                  conflictCache.set(mainWs.id, { result, ts: Date.now() });
+                  entry.conflicts = result;
+                })
+                .catch(() => { /* non-critical */ }),
+            );
+          }
         }
       }
 
