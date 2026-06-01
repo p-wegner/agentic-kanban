@@ -1,4 +1,4 @@
-import { sqliteTable, text, index } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, integer, index } from "drizzle-orm/sqlite-core";
 import { relations } from "drizzle-orm";
 import { projects } from "./projects.js";
 
@@ -11,6 +11,9 @@ import { projects } from "./projects.js";
  * the Monitor Butler interprets natural-language strategies and we cannot enumerate
  * every action shape up front. `eventType` is a coarse category for filtering;
  * `summary` is the human-readable line; `details` holds optional JSON context.
+ *
+ * `category` is a business-level grouping for the notification center UI:
+ * merge | launch | server | refill | smoke_check
  */
 export const boardHealthEvents = sqliteTable("board_health_events", {
   id: text("id").primaryKey(),
@@ -19,6 +22,10 @@ export const boardHealthEvents = sqliteTable("board_health_events", {
   cycleId: text("cycle_id").notNull(),
   /** Coarse category: cycle_start | cycle_end | observation | action | error. */
   eventType: text("event_type").notNull(),
+  /** Business-level grouping for UI filters: merge | launch | server | refill | smoke_check */
+  category: text("category"),
+  /** Issue number this event relates to, if applicable. */
+  issueNumber: integer("issue_number"),
   /** Human-readable one-line description of the event. */
   summary: text("summary").notNull(),
   /** Optional JSON blob with structured context (stats, ids, tool names). */
@@ -27,6 +34,7 @@ export const boardHealthEvents = sqliteTable("board_health_events", {
 }, (table) => ({
   projectIdIdx: index("idx_board_health_events_project_id").on(table.projectId),
   cycleIdIdx: index("idx_board_health_events_cycle_id").on(table.cycleId),
+  categoryIdx: index("idx_board_health_events_category").on(table.category),
 }));
 
 export const boardHealthEventsRelations = relations(boardHealthEvents, ({ one }) => ({

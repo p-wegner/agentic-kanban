@@ -54,6 +54,8 @@ export type BoardHealthEvent = {
   timestamp: string;
   level: "info" | "error";
   type: "cycle_start" | "cycle_end" | "observation" | "action" | "error";
+  category: "merge" | "launch" | "server" | "refill" | "smoke_check" | null;
+  issueNumber: number | null;
   summary: string;
   details: string | null;
 };
@@ -85,6 +87,7 @@ interface MonitorPopoverProps {
   orchestrator?: OrchestratorStatus | null;
   orchestratorNotify?: boolean;
   onOrchestratorNotifyChange?: (v: boolean) => void;
+  onViewAllHealthEvents?: () => void;
 }
 
 export function MonitorPopover({
@@ -105,6 +108,7 @@ export function MonitorPopover({
   orchestrator,
   orchestratorNotify = false,
   onOrchestratorNotifyChange,
+  onViewAllHealthEvents,
 }: MonitorPopoverProps) {
   const [now, setNow] = useState(Date.now());
   const [running, setRunning] = useState(false);
@@ -407,6 +411,7 @@ export function MonitorPopover({
             loading={healthEventsLoading}
             error={healthEventsError}
             formatAge={formatAge}
+            onViewAll={onViewAllHealthEvents}
           />
 
           {/* Settings */}
@@ -552,15 +557,27 @@ export function RecentBoardHealthEventsSection({
   loading,
   error,
   formatAge,
+  onViewAll,
 }: {
   events: BoardHealthEvent[];
   loading: boolean;
   error: string | null;
   formatAge: (isoStr: string) => string;
+  onViewAll?: () => void;
 }) {
   return (
     <div className="px-3 py-2.5 border-b border-gray-100 dark:border-gray-800">
-      <div className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500 mb-1.5">Recent events</div>
+      <div className="flex items-center justify-between mb-1.5">
+        <div className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">Recent events</div>
+        {onViewAll && (
+          <button
+            onClick={onViewAll}
+            className="text-[10px] text-brand-600 dark:text-brand-400 hover:underline"
+          >
+            View all
+          </button>
+        )}
+      </div>
       {loading ? (
         <div className="text-gray-400 dark:text-gray-500 text-[11px]">Loading events...</div>
       ) : error ? (
