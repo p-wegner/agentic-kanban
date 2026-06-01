@@ -9,6 +9,7 @@ import { TerminalView } from "./TerminalView.js";
 import { CreateWorkspaceForm } from "./CreateWorkspaceForm.js";
 import { WorkspaceDiffPanel } from "./WorkspaceDiffPanel.js";
 import { WorkspacePreviewPanel } from "./WorkspacePreviewPanel.js";
+import { WorkspaceArtifactsBrowser } from "./WorkspaceArtifactsBrowser.js";
 import { FailurePatternHint } from "./FailurePatternHint.js";
 import TicketMentionInput from "./TicketMentionInput.js";
 import { useWorkspaceSession } from "../hooks/useWorkspaceSession.js";
@@ -1942,6 +1943,18 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                             Preview
                           </button>
                         )}
+                        {ws.workingDir && (
+                          <button
+                            onClick={() => { setViewMode("artifacts"); }}
+                            className={`flex-1 text-xs py-1.5 text-center font-medium ${
+                              viewMode === "artifacts"
+                                ? "text-blue-700 border-b-2 border-blue-600"
+                                : "text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"
+                            }`}
+                          >
+                            Artifacts
+                          </button>
+                        )}
                       </div>
                     )}
 
@@ -2151,6 +2164,10 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
 
                     {viewMode === "preview" && ws.workingDir && (
                       <WorkspacePreviewPanel preview={preview} branch={ws.branch} />
+                    )}
+
+                    {viewMode === "artifacts" && ws.workingDir && (
+                      <WorkspaceArtifactsBrowser workspaceId={ws.id} />
                     )}
 
                     {!isRunning && viewMode === "output" && (
