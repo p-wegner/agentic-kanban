@@ -27,6 +27,37 @@ export function createWorkspacesRoute(
     return c.json(staleWorktrees);
   });
 
+  // POST /api/workspaces/preview — dry-run preview (read-only, no side effects)
+  // Must be registered BEFORE /:id to avoid being matched as an ID param
+  router.post("/preview", async (c) => {
+    const body = await parseJsonBody(c);
+    if (!body.issueId) {
+      return c.json({ error: "issueId is required" }, 400);
+    }
+
+    const result = await workspaceService.computeLaunchPreview({
+      issueId: body.issueId,
+      branch: body.branch,
+      isDirect: body.isDirect === true,
+      baseBranch: body.baseBranch,
+      requiresReview: body.requiresReview === true,
+      thoroughReview: body.thoroughReview === true,
+      planMode: body.planMode,
+      tddMode: body.tddMode === true,
+      includeVisualProof: body.includeVisualProof === true,
+      skipSetup: body.skipSetup === true,
+      customPrompt: body.customPrompt,
+      clarifications: body.clarifications,
+      skillId: body.skillId,
+      skillName: body.skillName,
+      profile: body.profile,
+      claudeProfile: body.claudeProfile,
+      model: body.model,
+      skipContextPacker: body.skipContextPacker === true,
+    } satisfies CreateWorkspaceInput);
+    return c.json(result);
+  });
+
   // POST /api/workspaces — create workspace with worktree + auto-launch agent
   router.post("/", async (c) => {
     const body = await parseJsonBody(c);

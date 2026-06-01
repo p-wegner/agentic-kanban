@@ -82,6 +82,7 @@ export function createWorkspaceService(deps: {
     }),
     listStaleWorktrees: crud.listStaleWorktrees,
     removeStaleWorktree: crud.removeStaleWorktree,
+    computeLaunchPreview: crud.computeLaunchPreview,
     getLatestGithubHandoffDraft: (workspaceId: string) => getLatestGithubHandoffDraft({
       workspaceId,
       database: deps.database,
