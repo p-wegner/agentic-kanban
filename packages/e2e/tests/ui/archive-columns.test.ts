@@ -1,5 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { SERVER_URL } from "../helpers/port.js";
+import { getE2EProjectId } from "../helpers/e2e-project.js";
 
 test.describe("Archive Column Group UI", () => {
   let projectId: string;
@@ -10,9 +11,7 @@ test.describe("Archive Column Group UI", () => {
   const createdIssueIds: string[] = [];
 
   test.beforeAll(async ({ request }) => {
-    const projectsRes = await request.get(`${SERVER_URL}/api/projects`);
-    const projects = await projectsRes.json();
-    projectId = projects[0].id;
+    projectId = await getE2EProjectId(request);
 
     const statusesRes = await request.get(
       `${SERVER_URL}/api/projects/${projectId}/statuses`,
@@ -21,9 +20,14 @@ test.describe("Archive Column Group UI", () => {
     const doneStatus = statuses.find((s: { name: string }) => s.name === "Done");
     const cancelledStatus = statuses.find((s: { name: string }) => s.name === "Cancelled");
     const todoStatus = statuses.find((s: { name: string }) => s.name === "Todo");
-    doneStatusId = doneStatus ? doneStatus.id : statuses[3].id;
-    cancelledStatusId = cancelledStatus ? cancelledStatus.id : statuses[4].id;
-    todoStatusId = todoStatus ? todoStatus.id : statuses[0].id;
+
+    if (!doneStatus) throw new Error("[archive-columns] 'Done' status not found in project — is the board seeded correctly?");
+    if (!cancelledStatus) throw new Error("[archive-columns] 'Cancelled' status not found in project — is the board seeded correctly?");
+    if (!todoStatus) throw new Error("[archive-columns] 'Todo' status not found in project — is the board seeded correctly?");
+
+    doneStatusId = doneStatus.id;
+    cancelledStatusId = cancelledStatus.id;
+    todoStatusId = todoStatus.id;
 
     suffix = Date.now().toString(36);
     const doneRes = await request.post(`${SERVER_URL}/api/issues`, {
