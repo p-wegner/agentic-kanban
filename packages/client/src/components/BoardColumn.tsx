@@ -48,6 +48,7 @@ interface BoardColumnProps {
   sessionActivity?: Record<string, string>;
   liveStats?: Record<string, LiveSessionStats>;
   sessionTodos?: Record<string, TodoItem[]>;
+  pendingIssueIds?: Set<string>;
   pendingWorkspaceIssueIds?: Set<string>;
   selectedIssueIds?: Set<string>;
   children?: React.ReactNode;
@@ -76,6 +77,7 @@ export function BoardColumn({
   sessionActivity,
   liveStats,
   sessionTodos,
+  pendingIssueIds,
   pendingWorkspaceIssueIds,
   selectedIssueIds,
   children,
@@ -250,6 +252,7 @@ export function BoardColumn({
                 liveActivity={sessionActivity?.[issue.id]}
                 liveStats={liveStats?.[issue.id]}
                 todos={sessionTodos?.[issue.id]}
+                isPendingIssue={pendingIssueIds?.has(issue.id)}
                 isPendingWorkspace={pendingWorkspaceIssueIds?.has(issue.id)}
                 isSelected={selectedIssueIds?.has(issue.id)}
               />

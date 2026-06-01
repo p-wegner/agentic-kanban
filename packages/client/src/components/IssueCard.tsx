@@ -209,6 +209,7 @@ interface IssueCardProps {
   liveActivity?: string;
   liveStats?: LiveSessionStats;
   todos?: TodoItem[];
+  isPendingIssue?: boolean;
   isPendingWorkspace?: boolean;
   isSelected?: boolean;
 }
@@ -233,7 +234,7 @@ function HighlightedText({ text, query }: { text: string; query: string }) {
   );
 }
 
-export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, onDragStart, onMoveToNext, nextStatusName, tags, searchQuery, liveActivity, liveStats, todos, isPendingWorkspace, isSelected }: IssueCardProps) {
+export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, onDragStart, onMoveToNext, nextStatusName, tags, searchQuery, liveActivity, liveStats, todos, isPendingIssue, isPendingWorkspace, isSelected }: IssueCardProps) {
   const typeBadgeColor = issue.issueType ? (issueTypeColors[issue.issueType] ?? null) : null;
   const priorityBadgeColor = issue.priority && issue.priority !== "medium" ? (priorityColors[issue.priority] ?? null) : null;
   const ws = issue.workspaceSummary;
@@ -245,7 +246,7 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
   const menuRef = useRef<HTMLDivElement>(null);
 
   // Determine which action buttons to show in the action row
-  const showActionRow = issue.statusName !== "Done" && issue.statusName !== "Cancelled";
+  const showActionRow = !isPendingIssue && issue.statusName !== "Done" && issue.statusName !== "Cancelled";
   const showResume = showActionRow && hasActiveWorkspace && !!onWorkspaceClick;
   const showStartWorkspace = showActionRow && !hasActiveWorkspace && !!onStartWorkspace;
   const showMoveToNext = showActionRow && !!onMoveToNext && !!nextStatusName;
@@ -354,9 +355,16 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
   return (
     <div
       ref={cardRef}
-      draggable
+      draggable={!isPendingIssue}
       tabIndex={0}
-      onDragStart={(e) => { setIsDragging(true); onDragStart(e, issue); }}
+      onDragStart={(e) => {
+        if (isPendingIssue) {
+          e.preventDefault();
+          return;
+        }
+        setIsDragging(true);
+        onDragStart(e, issue);
+      }}
       onDragEnd={() => setIsDragging(false)}
       onDragOver={handleDragOver}
       onDragLeave={() => setDepDragOver(false)}
@@ -367,7 +375,9 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
       aria-selected={isSelected ? "true" : undefined}
       aria-label={`Open issue ${issue.title}`}
       className={`group bg-surface-raised dark:bg-surface-raised-dark rounded-lg shadow-sm p-2.5 border cursor-pointer hover:shadow-md hover:-translate-y-px transition-all duration-150 relative isolate ${
-        isSelected
+        isPendingIssue
+          ? "border-brand-300 bg-brand-50/70 shadow-brand-100 shadow-md dark:border-brand-700 dark:bg-brand-950/40"
+          : isSelected
           ? "border-brand-500 ring-2 ring-brand-400/70 shadow-brand-100 dark:shadow-brand-950"
           : depDragOver ? "border-brand-400 bg-brand-50 shadow-brand-200" : isPendingWorkspace ? "border-brand-300 shadow-brand-100 shadow-md" : "border-black/[0.07] dark:border-white/10 hover:border-brand-200 dark:hover:border-gray-600"
       }`}
@@ -462,6 +472,12 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
         </p>
       )}
       <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+        {isPendingIssue && (
+          <span className="inline-flex items-center gap-1 text-xs font-medium px-1.5 py-0.5 rounded bg-brand-100 text-brand-700 dark:bg-brand-900/50 dark:text-brand-300">
+            <span className="inline-block h-1.5 w-1.5 rounded-full bg-brand-500 animate-pulse" />
+            Creating issue
+          </span>
+        )}
         {issue.isBlocked && (
           <span className="inline-flex items-center gap-1 text-xs font-medium px-1.5 py-0.5 rounded bg-amber-100 text-amber-700">
             <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 16 16"><path d="M8 1a2 2 0 0 1 2 2v4H6V3a2 2 0 0 1 2-2zm3 6V3a3 3 0 0 0-6 0v4a2 2 0 0 0 2 2v2.5a.5.5 0 0 0 1 0V9a2 2 0 0 0 2-2z"/></svg>

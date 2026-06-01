@@ -18,6 +18,7 @@ export interface BoardKanbanViewProps {
   sessionActivity: Record<string, string>;
   liveStats: Record<string, LiveSessionStats>;
   sessionTodos: Record<string, TodoItem[]>;
+  pendingIssueIds: Set<string>;
   pendingWorkspaceIssueIds: Set<string>;
   collapsedArchive: boolean;
   canStartWorkspace: boolean;
@@ -49,6 +50,7 @@ export function BoardKanbanView({
   sessionActivity,
   liveStats,
   sessionTodos,
+  pendingIssueIds,
   pendingWorkspaceIssueIds,
   collapsedArchive,
   canStartWorkspace,
@@ -143,6 +145,7 @@ export function BoardKanbanView({
               sessionActivity={sessionActivity}
               liveStats={liveStats}
               sessionTodos={sessionTodos}
+              pendingIssueIds={pendingIssueIds}
               pendingWorkspaceIssueIds={pendingWorkspaceIssueIds}
               selectedIssueIds={selectedIssueIds}
             >
