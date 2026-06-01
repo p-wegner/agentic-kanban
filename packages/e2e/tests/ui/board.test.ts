@@ -202,8 +202,13 @@ test.describe("Board interactions", () => {
     await expect(page.locator(".whitespace-pre-wrap", { hasText: "Click me" })).toBeVisible();
   });
 
-  test("edit issue from detail panel", async ({ page, request }) => {
-    const editSuffix = Date.now().toString(36);
+  test("edit issue from detail panel", async ({ page, request }, testInfo) => {
+    const editSuffix = [
+      Date.now().toString(36),
+      testInfo.workerIndex,
+      testInfo.repeatEachIndex,
+      Math.random().toString(36).slice(2, 8),
+    ].join("-");
     const originalTitle = `EditTest ${editSuffix}`;
     const editedTitle = `EditedTitle ${editSuffix}`;
 
@@ -222,27 +227,38 @@ test.describe("Board interactions", () => {
     await page.goto("/");
     await page.waitForSelector("h2");
 
-    await page.locator("p", { hasText: originalTitle }).first().click();
+    await page.getByLabel(`Open issue ${originalTitle}`).click();
+
+    const panel = page.locator("[data-panel]").filter({
+      has: page.getByRole("heading", { name: "Issue Details" }),
+    });
+    await expect(panel).toBeVisible();
     await expect(
-      page.locator("h2", { hasText: "Issue Details" }),
+      panel.getByRole("heading", { name: originalTitle }),
     ).toBeVisible();
 
-    await page.locator('button:has-text("Edit")').click();
-    await expect(page.locator("text=Edit Issue")).toBeVisible();
-
-    const panel = page.locator(".fixed.right-0");
-    const titleInput = panel.locator('input[type="text"]').first();
-    await titleInput.clear();
+    await panel.getByRole("button", { name: "Edit issue" }).click();
+    const titleInput = panel.getByLabel("Issue title");
+    await expect(titleInput).toBeEditable();
     await titleInput.fill(editedTitle);
 
-    await page.locator('button:has-text("Save")').click();
+    await Promise.all([
+      page.waitForResponse((response) =>
+        response.url().includes(`/api/issues/${id}`)
+        && response.request().method() === "PATCH"
+        && response.ok(),
+      ),
+      panel.getByRole("button", { name: "Save issue", exact: true }).click(),
+    ]);
+
+    await expect(titleInput).not.toBeVisible({ timeout: 15000 });
+    await expect(panel.getByRole("button", { name: "Edit issue" })).toBeVisible();
+    await expect(
+      panel.getByRole("heading", { name: editedTitle }),
+    ).toBeVisible();
 
     await expect(
-      page.locator("h2", { hasText: "Issue Details" }),
-    ).not.toBeVisible();
-
-    await expect(
-      page.locator("p", { hasText: editedTitle }),
+      page.getByLabel(`Open issue ${editedTitle}`),
     ).toBeVisible({ timeout: 10000 });
   });
 

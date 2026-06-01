@@ -365,6 +365,7 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
       onContextMenu={handleContextMenu}
       onKeyDown={handleCardKeyDown}
       aria-selected={isSelected ? "true" : undefined}
+      aria-label={`Open issue ${issue.title}`}
       className={`group bg-surface-raised dark:bg-surface-raised-dark rounded-lg shadow-sm p-2.5 border cursor-pointer hover:shadow-md hover:-translate-y-px transition-all duration-150 relative isolate ${
         isSelected
           ? "border-brand-500 ring-2 ring-brand-400/70 shadow-brand-100 dark:shadow-brand-950"
