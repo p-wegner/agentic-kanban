@@ -50,7 +50,7 @@ function uniqueProfiles(profiles: string[], fallback?: string): string[] {
 function defaultProfileLabel(prefs: Record<string, string>): string {
   if (prefs.provider === "codex") return `codex:${prefs.codex_profile || CODEX_DEFAULT_PROFILE}`;
   if (prefs.provider === "copilot") return `copilot:${prefs.copilot_profile || COPILOT_DEFAULT_PROFILE}`;
-  return `claude:${prefs.claude_profile || "none"}`;
+  return `claude:${prefs.claude_profile || "default"}`;
 }
 
 function profileOptionLabel(provider: AgentProvider, name: string): string {
@@ -512,11 +512,24 @@ export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCr
       )}
       {(claudeProfiles.length > 0 || codexProfiles.length > 0 || copilotProfiles.length > 0) && (
         <div>
-          <label className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-1 block">Profile</label>
+          <div className="flex items-center justify-between mb-1">
+            <label className="text-xs font-medium text-gray-600 dark:text-gray-400">Agent Profile</label>
+            {selectedProfile && (
+              <button
+                type="button"
+                onClick={() => setSelectedProfile("")}
+                className="text-[10px] text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300"
+                title="Reset to default profile"
+              >
+                Reset to default
+              </button>
+            )}
+          </div>
           <select
             value={selectedProfile}
             onChange={(e) => setSelectedProfile(e.target.value)}
             className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500 dark:bg-gray-900 dark:text-gray-100"
+            aria-label="Agent profile"
           >
             <option value="">Default ({defaultProfileLabel(prefs)})</option>
             {claudeProfiles.length > 0 && (
@@ -537,6 +550,9 @@ export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCr
               ))}
             </optgroup>
           </select>
+          <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-0.5">
+            Will use: <span className="font-medium text-gray-600 dark:text-gray-300">{selectedProfile ? selectedProfile : defaultProfileLabel(prefs)}</span>
+          </p>
         </div>
       )}
       {isClaudeSelected && (
