@@ -25,4 +25,12 @@ describe("board-monitor frontend smoke check", () => {
       expect(skill.contents, skill.path).toContain("--- app root html ---");
     }
   });
+
+  it("reads active project using the active-project response shape", () => {
+    for (const skill of boardMonitorSkills) {
+      expect(skill.contents, skill.path).toContain("/api/preferences/active-project");
+      expect(skill.contents, skill.path).toContain(").projectId");
+      expect(skill.contents, skill.path).not.toContain("preferences/active-project\" -TimeoutSec 10).value");
+    }
+  });
 });
