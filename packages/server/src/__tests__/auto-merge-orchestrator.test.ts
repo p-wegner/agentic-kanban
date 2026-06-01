@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { randomUUID } from "node:crypto";
 import { issues, projectStatuses, projects, workspaces, preferences } from "@agentic-kanban/shared/schema";
+import { eq } from "drizzle-orm";
 import { createTestDb } from "./helpers/test-db.js";
 import { createAutoMergeOrchestrator } from "../startup/auto-merge-orchestrator.js";
 
@@ -74,6 +75,25 @@ async function seedWorkspace(
 }
 
 describe("auto-merge orchestrator", () => {
+  it("runs only when the merge strategy is the merge queue", async () => {
+    const { db } = createTestDb();
+    const now = new Date().toISOString();
+    await db.insert(preferences).values([
+      { key: "auto_merge", value: "true", updatedAt: now },
+      { key: "auto_monitor", value: "true", updatedAt: now },
+      { key: "merge_strategy", value: "merge_queue", updatedAt: now },
+    ]);
+
+    const queueOrchestrator = createAutoMergeOrchestrator({ database: db });
+    await queueOrchestrator.runOnce();
+    expect(queueOrchestrator.state.lastRunAt).not.toBeNull();
+
+    await db.update(preferences).set({ value: "monitor", updatedAt: now }).where(eq(preferences.key, "merge_strategy"));
+    const monitorOrchestrator = createAutoMergeOrchestrator({ database: db });
+    await monitorOrchestrator.runOnce();
+    expect(monitorOrchestrator.state.lastRunAt).toBeNull();
+  });
+
   it("finds idle reviewed workspaces and excludes direct, closed, and in-progress workspaces", async () => {
     const { db } = createTestDb();
     const { projectId, statusIds } = await seedProject(db);

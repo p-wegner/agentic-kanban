@@ -11,6 +11,7 @@ import { processWorkspaceCandidates } from "./monitor-cycle.js";
 import { buildMonitorNudgePrompt } from "./review-helpers.js";
 import { snapshotAndCleanStaleDevProcesses, type BoardMonitorResourceSnapshot } from "../services/stale-dev-processes.js";
 import { scanDirtyMainCheckouts, type DirtyMainCheckoutWarning } from "../services/dirty-main-checkout.js";
+import { resolveMergeStrategy } from "./merge-strategy.js";
 
 export interface MonitorState {
   timer: ReturnType<typeof setTimeout> | null;
@@ -94,6 +95,7 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort }: 
       const prefRows = await db.select().from(preferences);
       const prefMap = new Map(prefRows.map((r) => [r.key, r.value]));
       if (!force && prefMap.get("auto_monitor") !== "true") return;
+      const mergeStrategy = resolveMergeStrategy(prefMap);
       warningCount = (await refreshDirtyMainCheckoutWarnings()).length;
       const resourceSnapshot = await snapshotAndCleanStaleDevProcesses(db);
       monitorState.lastResourceSnapshot = resourceSnapshot;
@@ -123,7 +125,7 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort }: 
         sessionManager,
         boardEvents,
         serverPort,
-        autoMergeEnabled: prefMap.get("auto_merge") === "true",
+        autoMergeEnabled: prefMap.get("auto_merge") === "true" && mergeStrategy === "monitor",
         autoMergeInReview: prefMap.get("auto_merge_in_review") === "true",
         monitorRecentActions: monitorState.recentActions,
         logMonitorAction,
