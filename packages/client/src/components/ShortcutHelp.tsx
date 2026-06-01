@@ -28,6 +28,7 @@ const GLOBAL_SHORTCUTS: Shortcut[] = [
   { keys: ["Shift", "V"], description: "Start voice inbox (record idea → Backlog issue)" },
   ...VIEW_SHORTCUTS,
   { keys: ["a"], description: "Toggle All Workspaces panel" },
+  { keys: ["t"], description: "Search agent transcripts" },
   { keys: ["x"], description: "Open Codemod Factory" },
   { keys: ["g", "s"], description: "Open settings", sequential: true },
 ];
