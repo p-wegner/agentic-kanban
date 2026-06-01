@@ -477,6 +477,13 @@
       "when": 1748764527065,
       "tag": "0067_project_script_shortcut_details",
       "breakpoints": true
+    },
+    {
+      "idx": 68,
+      "version": "6",
+      "when": 1748764527066,
+      "tag": "0068_scheduled_run_history",
+      "breakpoints": true
     }
   ]
 }

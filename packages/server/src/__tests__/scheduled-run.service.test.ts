@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { randomUUID } from "node:crypto";
-import { projects, projectStatuses, issues, agentSkills } from "@agentic-kanban/shared/schema";
+import { projects, projectStatuses, issues, agentSkills, scheduledRunHistory } from "@agentic-kanban/shared/schema";
 import { createTestDb, type TestDb } from "./helpers/test-db.js";
 import { createScheduledRunService } from "../services/scheduled-run.service.js";
 import { createScheduledRun } from "../repositories/scheduled-run.repository.js";
@@ -160,6 +160,46 @@ describe("createScheduledRunService", () => {
 
       await expect(service.run(runId)).rejects.toThrow("No prompt or skill configured");
       expect(createWorkspace).not.toHaveBeenCalled();
+    });
+
+    it("records failed launch history rows with a visible reason", async () => {
+      const { projectId, statusId } = await seedProject(db);
+      const systemIssueId = await seedIssue(db, projectId, statusId);
+
+      const createWorkspace = vi.fn();
+      const service = createScheduledRunService({ database: db, createWorkspace });
+
+      const runId = randomUUID();
+      await createScheduledRun({
+        id: runId,
+        name: "Empty Run",
+        description: null,
+        projectId,
+        prompt: null,
+        skillId: null,
+        intervalMinutes: 60,
+        cronExpression: null,
+        enabled: true,
+        systemIssueId,
+      }, db);
+
+      await expect(service.run(runId, "scheduler")).rejects.toThrow("No prompt or skill configured");
+
+      const rows = await db.select().from(scheduledRunHistory);
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({
+        scheduledRunId: runId,
+        projectId,
+        status: "error",
+        reason: "No prompt or skill configured for this scheduled run",
+        triggeredBy: "scheduler",
+        issueId: systemIssueId,
+        workspaceId: null,
+      });
+
+      const [listed] = await service.list(projectId);
+      expect(listed.latestHistory?.reason).toBe("No prompt or skill configured for this scheduled run");
+      expect(listed.history).toHaveLength(1);
     });
   });
 });

@@ -1,6 +1,6 @@
 import { isSpecPlanningStageName, syncCurrentNodeToStatus } from "@agentic-kanban/shared/lib/workflow-engine";
-import { issues, preferences, projectStatuses, projects, scheduledRuns, sessions, workflowNodes, workspaces } from "@agentic-kanban/shared/schema";
-import { eq } from "drizzle-orm";
+import { issues, preferences, projectStatuses, projects, scheduledRunHistory, scheduledRuns, sessions, workflowNodes, workspaces } from "@agentic-kanban/shared/schema";
+import { desc, eq } from "drizzle-orm";
 import { execFile } from "node:child_process";
 import { db } from "../db/index.js";
 import { MOCK_AGENT_COMMAND, isMockProfile, toExecutorProvider } from "../services/agent-settings.service.js";
@@ -116,7 +116,23 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge }:
       }
       try {
         const runRows = await db.select({ id: scheduledRuns.id }).from(scheduledRuns).where(eq(scheduledRuns.lastRunWorkspaceId, workspaceId)).limit(1);
-        if (runRows.length > 0) await db.update(scheduledRuns).set({ lastRunStatus: exitCode === 0 ? "success" : "error", updatedAt: now }).where(eq(scheduledRuns.id, runRows[0].id));
+        if (runRows.length > 0) {
+          const status = exitCode === 0 ? "success" : "error";
+          await db.update(scheduledRuns).set({ lastRunStatus: status, updatedAt: now }).where(eq(scheduledRuns.id, runRows[0].id));
+          const historyRows = await db
+            .select({ id: scheduledRunHistory.id })
+            .from(scheduledRunHistory)
+            .where(eq(scheduledRunHistory.workspaceId, workspaceId))
+            .orderBy(desc(scheduledRunHistory.startedAt))
+            .limit(1);
+          if (historyRows.length > 0) {
+            await db.update(scheduledRunHistory).set({
+              status,
+              reason: exitCode === 0 ? null : `Agent session exited with code ${exitCode}`,
+              completedAt: now,
+            }).where(eq(scheduledRunHistory.id, historyRows[0].id));
+          }
+        }
       } catch (err) { console.warn("[workflow] failed to update scheduled run status:", err); }
 
       const statuses = await db.select().from(projectStatuses).where(eq(projectStatuses.projectId, projectId));
