@@ -31,7 +31,7 @@ test.describe("Board card bulk selection", () => {
 
   test("selects cards with Ctrl-click and applies a bulk priority change", async ({ page, request }) => {
     const suffix = Date.now().toString(36);
-    const titles = [`BulkSelectA ${suffix}`, `BulkSelectB ${suffix}`];
+    const titles = [`BulkSelectA ${suffix}`, `BulkSelectB ${suffix}`, `BulkSelectHidden ${suffix}`];
 
     for (const title of titles) {
       const createRes = await request.post(`${SERVER_URL}/api/issues`, {
@@ -50,6 +50,7 @@ test.describe("Board card bulk selection", () => {
     );
     await expect(cards[0]).toBeVisible({ timeout: 10000 });
     await expect(cards[1]).toBeVisible({ timeout: 10000 });
+    await expect(cards[2]).toBeVisible({ timeout: 10000 });
 
     await cards[0].click({ modifiers: ["Control"] });
     await cards[1].click({ modifiers: ["Control"] });
@@ -68,6 +69,23 @@ test.describe("Board card bulk selection", () => {
         const issues = await res.json();
         return createdIssueIds.map((id) => issues.find((issue: { id: string; priority: string }) => issue.id === id)?.priority);
       })
-      .toEqual(["high", "high"]);
+      .toEqual(["high", "high", "low"]);
+
+    await cards[0].click({ modifiers: ["Control"] });
+    await cards[2].click({ modifiers: ["Control"] });
+    await page.locator("#search-input").fill(titles[0]);
+    await expect(cards[2]).toBeHidden({ timeout: 10000 });
+
+    await expect(bulkBar).toContainText("1 selected");
+    await bulkBar.getByLabel("Bulk set priority").selectOption("critical");
+
+    await expect(bulkBar).toBeHidden({ timeout: 10000 });
+    await expect
+      .poll(async () => {
+        const res = await request.get(`${SERVER_URL}/api/issues?projectId=${projectId}`);
+        const issues = await res.json();
+        return createdIssueIds.map((id) => issues.find((issue: { id: string; priority: string }) => issue.id === id)?.priority);
+      })
+      .toEqual(["critical", "high", "low"]);
   });
 });
