@@ -1228,6 +1228,116 @@ exit 1
     return { success: true };
   }
 
+  /** Read-only dry-run: compute what would happen on launch without side effects. */
+  async function computeLaunchPreview(input: CreateWorkspaceInput): Promise<{
+    branch: string | null;
+    baseBranch: string | null;
+    isDirect: boolean;
+    planMode: boolean;
+    tddMode: boolean;
+    requiresReview: boolean;
+    setupScript: { enabled: boolean; command: string | null; blocking: boolean; willRun: boolean } | null;
+    skill: { id: string; name: string } | null;
+    provider: string;
+    profile: string | null;
+    model: string | null;
+    warnings: string[];
+  }> {
+    const isDirect = input.isDirect === true;
+    const warnings: string[] = [];
+
+    // 1. Resolve issue + project (same lookup as createWorkspace)
+    const { issue, project, setupConfig } = await resolveIssueAndProject(input.issueId);
+
+    // 2. Resolve plan mode default (high/critical → plan mode on)
+    const isHighPriority = issue.priority === "high" || issue.priority === "critical";
+    const planMode = input.planMode !== undefined ? input.planMode === true : isHighPriority;
+    const tddMode = input.tddMode === true;
+    const requiresReview = input.requiresReview === true;
+
+    // 3. Branch / base-branch resolution (no worktree creation)
+    let branch: string | null;
+    let baseBranch: string | null;
+    if (isDirect) {
+      try {
+        branch = await gitService.getCurrentBranch(project.repoPath);
+      } catch {
+        branch = "(unknown)";
+      }
+      baseBranch = null;
+    } else {
+      branch = input.branch ?? "";
+      baseBranch = input.baseBranch || project.defaultBranch || null;
+      if (!baseBranch) {
+        warnings.push("No base branch configured — workspace creation will fail. Set a project default branch or choose a base branch.");
+      }
+    }
+
+    // 4. Agent config resolution (provider, profile, model) — reuses same logic
+    const agentConfig = await buildAgentConfig(input, issue.projectId);
+
+    // 5. Skill resolution (name only, no file writes)
+    const skillId = input.skillId || null;
+    let skill: { id: string; name: string } | null = null;
+    if (skillId) {
+      const skillRows = await database.select({ id: agentSkills.id, name: agentSkills.name }).from(agentSkills).where(eq(agentSkills.id, skillId)).limit(1);
+      if (skillRows.length > 0) skill = skillRows[0];
+    }
+
+    // 6. Setup script info (computed, not run)
+    const setupScript = setupConfig.setupScript
+      ? {
+          enabled: setupConfig.setupEnabled,
+          command: setupConfig.setupScript,
+          blocking: setupConfig.setupBlocking,
+          willRun: setupConfig.setupEnabled && !input.skipSetup,
+        }
+      : null;
+
+    // 7. Conflict detection: existing active/idle workspaces on this issue
+    const existingWs = await database
+      .select({ id: workspaces.id, status: workspaces.status, branch: workspaces.branch, isDirect: workspaces.isDirect })
+      .from(workspaces)
+      .where(eq(workspaces.issueId, input.issueId));
+    const activeExisting = existingWs.filter(ws => ws.status === "active" || ws.status === "idle" || ws.status === "fixing");
+    if (activeExisting.length > 0) {
+      const labels = activeExisting.map(ws =>
+        `${ws.branch || "direct"} (${ws.status})`
+      );
+      warnings.push(
+        `Issue already has ${activeExisting.length} active workspace(s): ${labels.join(", ")}. Multiple concurrent workspaces on the same issue may cause merge conflicts.`,
+      );
+    }
+
+    // 8. Branch name collision check (for non-direct workspaces)
+    if (!isDirect && branch) {
+      const branchExists = existingWs.some(ws => ws.branch === branch);
+      if (branchExists) {
+        warnings.push(`Branch "${branch}" already has a workspace. This will create a new worktree on the same branch.`);
+      }
+    }
+
+    // 9. Missing base branch warning
+    if (isDirect && !project.defaultBranch) {
+      warnings.push("Project has no default branch configured. Some features (merge, diff) may not work.");
+    }
+
+    return {
+      branch,
+      baseBranch,
+      isDirect,
+      planMode,
+      tddMode,
+      requiresReview,
+      setupScript,
+      skill,
+      provider: agentConfig.resolvedProvider,
+      profile: agentConfig.resolvedProfile ?? agentConfig.resolvedProfileSelection?.name ?? null,
+      model: agentConfig.model ?? null,
+      warnings,
+    };
+  }
+
   return {
     createWorkspace,
     deleteWorkspace,
@@ -1238,5 +1348,6 @@ exit 1
     getWorkspace,
     listStaleWorktrees,
     removeStaleWorktree,
+    computeLaunchPreview,
   };
 }
