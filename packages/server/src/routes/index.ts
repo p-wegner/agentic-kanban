@@ -49,7 +49,7 @@ export function createRoutes(database: Database, getSessionManager: () => Sessio
   });
   const onWorkflowAdvanced = (workspaceId: string) => forkService.onWorkspaceEnteredNode(workspaceId);
 
-  routes.route("/projects", createProjectsRoute(database));
+  routes.route("/projects", createProjectsRoute(database, { ...options, getSessionManager }));
   routes.route("/projects", createProjectScriptsRoute(database));
   routes.route("/projects", createButlerRoute(database, getSessionManager, options));
   routes.route("/butler-definitions", createButlerDefinitionsRoute(database));

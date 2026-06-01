@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import type { CreateIssueRequest, IssueWithStatus, ProfileSelection, StatusWithIssues } from "@agentic-kanban/shared";
+import type { CreateIssueRequest, DependencyWaveIssue, DependencyWavePlan, DependencyWaveStartResult, IssueWithStatus, ProfileSelection, StatusWithIssues } from "@agentic-kanban/shared";
 import type { CreateIssueFormState } from "./CreateIssueForm.js";
 import { CreateIssueForm } from "./CreateIssueForm.js";
 import { IssueCard } from "./IssueCard.js";
@@ -156,6 +156,9 @@ export function BacklogView({
   const [presets, setPresets] = useState<BacklogPreset[]>([]);
   const [presetsSaving, setPresetsSaving] = useState(false);
   const [promotingIssueIds, setPromotingIssueIds] = useState<Set<string>>(new Set());
+  const [wavePlan, setWavePlan] = useState<DependencyWavePlan | null>(null);
+  const [waveLoading, setWaveLoading] = useState(false);
+  const [startingWave, setStartingWave] = useState(false);
 
   const backlogIssues = backlogColumn?.issues ?? [];
   const q = searchQuery.toLowerCase();
@@ -178,6 +181,23 @@ export function BacklogView({
       cancelled = true;
     };
   }, [presetSettingsKey]);
+
+  async function loadWavePlan() {
+    setWaveLoading(true);
+    try {
+      const plan = await apiFetch<DependencyWavePlan>(`/api/projects/${projectId}/dependency-waves`);
+      setWavePlan(plan);
+    } catch {
+      setWavePlan(null);
+    } finally {
+      setWaveLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    void loadWavePlan();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId, backlogColumn?.issues.length, activeColumns.length]);
 
   const filteredIssues = useMemo(() => {
     return backlogIssues.filter((issue) => {
@@ -356,6 +376,31 @@ export function BacklogView({
     const deleted = await persistPresets(nextPresets, `Deleted preset "${preset.name}"`);
     if (!deleted) return;
     setSelectedPresetId("");
+  }
+
+  async function startNextWave() {
+    setStartingWave(true);
+    try {
+      const result = await apiFetch<DependencyWaveStartResult>(`/api/projects/${projectId}/dependency-waves/start-next`, { method: "POST" });
+      const failures = result.failed.length;
+      if (result.started.length > 0) {
+        showToast(
+          failures > 0
+            ? `Started ${result.started.length}; ${failures} failed`
+            : `Started ${result.started.length} issue${result.started.length === 1 ? "" : "s"}`,
+          failures > 0 ? "error" : "success",
+        );
+      } else if (result.skipped.availableSlots <= 0) {
+        showToast("WIP limit reached", "error");
+      } else {
+        showToast("No ready issues to start");
+      }
+      await loadWavePlan();
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Failed to start wave", "error");
+    } finally {
+      setStartingWave(false);
+    }
   }
 
   function handleDrop(e: React.DragEvent) {
@@ -552,6 +597,14 @@ export function BacklogView({
             />
           </div>
         )}
+
+        <DependencyWavePanel
+          plan={wavePlan}
+          loading={waveLoading}
+          starting={startingWave}
+          onRefresh={loadWavePlan}
+          onStartNextWave={startNextWave}
+        />
       </div>
 
       <div className="flex-1 overflow-y-auto p-3">
@@ -632,6 +685,111 @@ export function BacklogView({
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+function DependencyWavePanel({
+  plan,
+  loading,
+  starting,
+  onRefresh,
+  onStartNextWave,
+}: {
+  plan: DependencyWavePlan | null;
+  loading: boolean;
+  starting: boolean;
+  onRefresh: () => void;
+  onStartNextWave: () => void;
+}) {
+  const startableCount = plan?.readyNow.filter((issue) => issue.startEligible).length ?? 0;
+  const startLimit = plan ? Math.min(startableCount, plan.wip.available) : 0;
+
+  return (
+    <div className="mt-3 rounded-md border border-gray-200 bg-white px-3 py-2 dark:border-gray-700 dark:bg-gray-900">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <div className="text-xs font-semibold uppercase text-gray-500 dark:text-gray-400">Dependency Waves</div>
+          <div className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+            {plan ? `${plan.wip.current}/${plan.wip.limit} WIP, ${plan.wip.available} slot${plan.wip.available === 1 ? "" : "s"} open` : loading ? "Loading wave plan" : "Wave plan unavailable"}
+          </div>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={onRefresh}
+            disabled={loading || starting}
+            className="rounded border border-gray-200 px-2 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+          >
+            Refresh
+          </button>
+          <button
+            type="button"
+            onClick={onStartNextWave}
+            disabled={!plan || startLimit === 0 || loading || starting}
+            className="rounded border border-brand-200 bg-brand-50 px-2 py-1 text-xs font-medium text-brand-700 hover:bg-brand-100 disabled:opacity-50 dark:border-brand-800 dark:bg-brand-900/40 dark:text-brand-300"
+          >
+            {starting ? "Starting..." : `Start Next Wave${startLimit > 0 ? ` (${startLimit})` : ""}`}
+          </button>
+        </div>
+      </div>
+
+      {plan && (
+        <div className="mt-2 grid grid-cols-1 gap-2 lg:grid-cols-3">
+          <WaveColumn title="Ready Now" issues={plan.readyNow} emptyText="No ready open issues" tone="ready" />
+          <WaveColumn title="Blocked" issues={plan.blocked} emptyText="No blocked issues" tone="blocked" />
+          <WaveColumn title="Cyclic/Invalid" issues={plan.cyclicInvalid} emptyText="No invalid dependency chains" tone="invalid" />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function WaveColumn({
+  title,
+  issues,
+  emptyText,
+  tone,
+}: {
+  title: string;
+  issues: DependencyWaveIssue[];
+  emptyText: string;
+  tone: "ready" | "blocked" | "invalid";
+}) {
+  const toneClass = tone === "ready"
+    ? "border-green-200 bg-green-50 text-green-700 dark:border-green-900 dark:bg-green-950/30 dark:text-green-300"
+    : tone === "blocked"
+      ? "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-300"
+      : "border-red-200 bg-red-50 text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-300";
+
+  return (
+    <div className="min-w-0">
+      <div className={`mb-1 inline-flex rounded border px-1.5 py-0.5 text-[10px] font-semibold uppercase ${toneClass}`}>
+        {title} {issues.length}
+      </div>
+      {issues.length === 0 ? (
+        <div className="text-xs text-gray-400 dark:text-gray-500">{emptyText}</div>
+      ) : (
+        <div className="space-y-1">
+          {issues.slice(0, 5).map((issue) => (
+            <div key={issue.id} className="min-w-0 rounded border border-gray-100 px-2 py-1 text-xs dark:border-gray-800">
+              <div className="flex min-w-0 items-center gap-1.5">
+                <span className="shrink-0 font-mono text-gray-400">{issue.issueNumber != null ? `#${issue.issueNumber}` : "-"}</span>
+                <span className="truncate font-medium text-gray-700 dark:text-gray-200">{issue.title}</span>
+                {issue.startEligible && <span className="shrink-0 rounded bg-green-100 px-1 text-[10px] text-green-700 dark:bg-green-950 dark:text-green-300">startable</span>}
+              </div>
+              {(issue.blockers.length > 0 || issue.reasons.length > 0) && (
+                <div className="mt-0.5 truncate text-[11px] text-gray-500 dark:text-gray-400">
+                  {issue.blockers.length > 0
+                    ? `Blocked by ${issue.blockers.map((blocker) => blocker.issueNumber != null ? `#${blocker.issueNumber}` : blocker.title).join(", ")}`
+                    : issue.reasons.join("; ")}
+                </div>
+              )}
+            </div>
+          ))}
+          {issues.length > 5 && <div className="text-[11px] text-gray-400">+{issues.length - 5} more</div>}
+        </div>
+      )}
     </div>
   );
 }

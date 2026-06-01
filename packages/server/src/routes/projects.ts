@@ -6,6 +6,9 @@ import { createRouter } from "../middleware/create-router.js";
 import { wrapAiOperation } from "../middleware/ai-operation.js";
 import { checkIssueOverlap } from "../services/issue-ai.service.js";
 import { listBoardHealthEvents } from "../repositories/board-health-events.repository.js";
+import { buildDependencyWavePlan, startNextDependencyWave } from "../services/dependency-wave.service.js";
+import type { BoardEvents } from "../services/board-events.js";
+import type { SessionManager } from "../services/session.manager.js";
 
 function parseBoardHealthEventsLimit(raw: string | undefined): number {
   const parsed = Number.parseInt(raw ?? "", 10);
@@ -38,7 +41,7 @@ function compactBoardHealthEventDetails(raw: string | null): string | null {
   }
 }
 
-export function createProjectsRoute(database: Database = db) {
+export function createProjectsRoute(database: Database = db, options?: { boardEvents?: BoardEvents; getSessionManager?: () => SessionManager }) {
   const router = createRouter();
 
   const projectService = createProjectService({ database });
@@ -198,6 +201,20 @@ export function createProjectsRoute(database: Database = db) {
   router.get("/:id/graph", async (c) => {
     const projectId = c.req.param("id");
     const result = await projectService.getGraph(projectId);
+    return c.json(result);
+  });
+
+  // GET /api/projects/:id/dependency-waves
+  router.get("/:id/dependency-waves", async (c) => {
+    const projectId = c.req.param("id");
+    const result = await buildDependencyWavePlan(database, projectId);
+    return c.json(result);
+  });
+
+  // POST /api/projects/:id/dependency-waves/start-next
+  router.post("/:id/dependency-waves/start-next", async (c) => {
+    const projectId = c.req.param("id");
+    const result = await startNextDependencyWave(database, projectId, options);
     return c.json(result);
   });
 
