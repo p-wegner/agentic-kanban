@@ -498,6 +498,13 @@
       "when": 1748764527068,
       "tag": "0070_workspace_symlink_diagnostics",
       "breakpoints": true
+    },
+    {
+      "idx": 71,
+      "version": "6",
+      "when": 1748764527069,
+      "tag": "0071_board_health_event_category",
+      "breakpoints": true
     }
   ]
 }

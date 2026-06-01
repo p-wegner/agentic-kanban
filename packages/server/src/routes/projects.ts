@@ -6,7 +6,7 @@ import { createRouter } from "../middleware/create-router.js";
 import { wrapAiOperation } from "../middleware/ai-operation.js";
 import { checkIssueOverlap } from "../services/issue-ai.service.js";
 import { getFileContention } from "../services/file-contention.service.js";
-import { listBoardHealthEvents, type BoardHealthEventType } from "../repositories/board-health-events.repository.js";
+import { listBoardHealthEvents, type BoardHealthEventType, type BoardHealthEventCategory } from "../repositories/board-health-events.repository.js";
 import { buildDependencyWavePlan, startNextDependencyWave } from "../services/dependency-wave.service.js";
 import type { BoardEvents } from "../services/board-events.js";
 import type { SessionManager } from "../services/session.manager.js";
@@ -18,11 +18,18 @@ function parseBoardHealthEventsLimit(raw: string | undefined): number {
 }
 
 const VALID_EVENT_TYPES: Set<string> = new Set(["cycle_start", "cycle_end", "observation", "action", "error"]);
+const VALID_CATEGORIES: Set<string> = new Set(["merge", "launch", "server", "refill", "smoke_check"]);
 
 function parseBoardHealthEventTypes(raw: string | undefined): BoardHealthEventType[] | undefined {
   if (!raw) return undefined;
   const types = raw.split(",").map((t) => t.trim()).filter((t) => VALID_EVENT_TYPES.has(t));
   return types.length > 0 ? (types as BoardHealthEventType[]) : undefined;
+}
+
+function parseBoardHealthCategories(raw: string | undefined): BoardHealthEventCategory[] | undefined {
+  if (!raw) return undefined;
+  const cats = raw.split(",").map((t) => t.trim()).filter((t) => VALID_CATEGORIES.has(t));
+  return cats.length > 0 ? (cats as BoardHealthEventCategory[]) : undefined;
 }
 
 function compactBoardHealthEventDetails(raw: string | null): string | null {
@@ -148,12 +155,15 @@ export function createProjectsRoute(database: Database = db, options?: { boardEv
     const projectId = c.req.param("id");
     const limit = parseBoardHealthEventsLimit(c.req.query("limit"));
     const eventTypes = parseBoardHealthEventTypes(c.req.query("eventType"));
-    const events = await listBoardHealthEvents({ projectId, eventTypes, limit }, database);
+    const categories = parseBoardHealthCategories(c.req.query("category"));
+    const events = await listBoardHealthEvents({ projectId, eventTypes, categories, limit }, database);
     return c.json(events.map((event) => ({
       id: event.id,
       timestamp: event.createdAt,
       level: event.eventType === "error" ? "error" : "info",
       type: event.eventType,
+      category: event.category ?? null,
+      issueNumber: event.issueNumber ?? null,
       summary: event.summary,
       details: compactBoardHealthEventDetails(event.details),
     })));

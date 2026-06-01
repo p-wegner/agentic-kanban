@@ -28,6 +28,7 @@ export type ViewMode =
   | "swimlane"
   | "flaky-tests"
   | "monitor-history"
+  | "health-events"
   | "digest"
   | "strategy"
   | "focus";
@@ -173,6 +174,11 @@ const ICON = {
   "monitor-history": (
     <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
+    </svg>
+  ),
+  "health-events": (
+    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
     </svg>
   ),
 } as const;
@@ -377,6 +383,17 @@ export const VIEW_REGISTRY: ViewDescriptor[] = [
     icon: ICON["monitor-history"],
     paletteIcon: "⏱",
     paletteDescription: "Show recent monitor cycle events with action drill-downs",
+    activeClass: "bg-indigo-500 text-white",
+    group: "secondary",
+  },
+  {
+    id: "health-events",
+    toolbarLabel: "Health",
+    label: "Board Health Events",
+    tooltip: "Board Health Notification Center — merge, launch, server, refill, smoke-check events",
+    icon: ICON["health-events"],
+    paletteIcon: "🔔",
+    paletteDescription: "Notification center for monitor health events with category filters",
     activeClass: "bg-indigo-500 text-white",
     group: "secondary",
   },
