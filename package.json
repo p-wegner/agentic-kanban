@@ -43,7 +43,7 @@
     "test:mcp": "pnpm --filter @agentic-kanban/mcp-server test",
     "test:e2e": "pnpm --filter e2e test",
     "test:e2e:headed": "pnpm --filter e2e test:headed",
-    "cli": "pnpm --filter agentic-kanban exec tsx src/cli/index.ts",
+    "cli": "pnpm --filter agentic-kanban exec node --disable-warning=DEP0205 --import tsx src/cli/index.ts",
     "board": "pnpm cli -- status",
     "issue": "pnpm cli -- issue",
     "workspace": "pnpm cli -- workspace",
