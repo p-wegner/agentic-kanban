@@ -16,6 +16,7 @@ import { runSetupScript } from "./setup-script.js";
 import type { SetupScriptResult } from "./setup-script.js";
 import { writeAgentSkillFile, readLocalSkillPrompt, copySkillToWorktree } from "@agentic-kanban/shared/lib/agent-skill-files";
 import { writeTicketContextFile } from "@agentic-kanban/shared/lib/ticket-context";
+import { bootstrapSymlinks, parseSymlinkDirs } from "@agentic-kanban/shared/lib/worktree-symlink-bootstrap";
 import {
   resolveWorkflowStart,
   initWorkspaceWorkflow,
@@ -133,6 +134,7 @@ export function createWorkspaceCrudService(deps: {
     issue: { projectId: string; issueNumber: number | null; title: string; description: string | null; priority: string | null };
     project: { repoPath: string; defaultBranch: string | null };
     setupConfig: { setupScript: string | null; setupBlocking: boolean; setupEnabled: boolean };
+    symlinkConfig: { enabled: boolean; dirs: string[] };
   }> {
     const issueRows = await database
       .select({ projectId: issues.projectId, issueNumber: issues.issueNumber, title: issues.title, description: issues.description, priority: issues.priority })
@@ -147,7 +149,15 @@ export function createWorkspaceCrudService(deps: {
     const issue = issueRows[0];
 
     const projectRows = await database
-      .select({ repoPath: projects.repoPath, defaultBranch: projects.defaultBranch, setupScript: projects.setupScript, setupBlocking: projects.setupBlocking, setupEnabled: projects.setupEnabled })
+      .select({
+        repoPath: projects.repoPath,
+        defaultBranch: projects.defaultBranch,
+        setupScript: projects.setupScript,
+        setupBlocking: projects.setupBlocking,
+        setupEnabled: projects.setupEnabled,
+        symlinkEnabled: projects.symlinkEnabled,
+        symlinkDirs: projects.symlinkDirs,
+      })
       .from(projects)
       .where(eq(projects.id, issue.projectId))
       .limit(1);
@@ -165,6 +175,10 @@ export function createWorkspaceCrudService(deps: {
         setupBlocking: projectRow.setupBlocking ?? true,
         setupEnabled: projectRow.setupEnabled ?? true,
       },
+      symlinkConfig: {
+        enabled: projectRow.symlinkEnabled ?? false,
+        dirs: parseSymlinkDirs(projectRow.symlinkDirs),
+      },
     };
   }
 
@@ -174,6 +188,7 @@ export function createWorkspaceCrudService(deps: {
     defaultBranch: string | null,
     input: Pick<CreateWorkspaceInput, "branch" | "baseBranch" | "skipSetup">,
     setupConfig: { setupScript: string | null; setupBlocking: boolean; setupEnabled: boolean },
+    symlinkConfig: { enabled: boolean; dirs: string[] },
     workspaceId: string,
   ): Promise<{
     branch: string;
@@ -182,11 +197,13 @@ export function createWorkspaceCrudService(deps: {
     baseCommitSha: string | null;
     latestSetup: LatestSetupRun;
     setupCompletion?: Promise<LatestSetupRun>;
+    symlinkResult?: { linked: string[]; skipped: string[]; failed: Array<{ dir: string; error: string }> };
   }> {
     let branch: string;
     let worktreePath: string;
     let baseBranch: string | null;
     let baseCommitSha: string | null;
+    let symlinkResult: { linked: string[]; skipped: string[]; failed: Array<{ dir: string; error: string }> } | undefined;
 
     if (isDirect) {
       branch = await gitService.getCurrentBranch(repoPath);
@@ -204,6 +221,22 @@ export function createWorkspaceCrudService(deps: {
       branch = input.branch ?? "";
       baseCommitSha = await gitService.revParse(repoPath, baseBranch);
       worktreePath = await gitService.createWorktree(repoPath, branch, baseBranch);
+    }
+
+    // Symlink dependency directories from the main checkout into the worktree.
+    // Best-effort: never blocks workspace creation on failure.
+    if (!isDirect && symlinkConfig.enabled && symlinkConfig.dirs.length > 0) {
+      try {
+        symlinkResult = await bootstrapSymlinks(repoPath, worktreePath, symlinkConfig.dirs);
+        if (symlinkResult.linked.length > 0) {
+          console.log(`[workspaces] symlink bootstrap: linked [${symlinkResult.linked.join(", ")}] for workspaceId=${workspaceId}`);
+        }
+        if (symlinkResult.failed.length > 0) {
+          console.warn(`[workspaces] symlink bootstrap: failed [${symlinkResult.failed.map(f => `${f.dir}: ${f.error}`).join(", ")}] for workspaceId=${workspaceId}`);
+        }
+      } catch (err) {
+        console.warn(`[workspaces] symlink bootstrap error (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
+      }
     }
 
     const { setupScript, setupBlocking, setupEnabled } = setupConfig;
@@ -249,7 +282,7 @@ export function createWorkspaceCrudService(deps: {
       }
     }
 
-    return { branch, worktreePath, baseBranch, baseCommitSha, latestSetup, setupCompletion };
+    return { branch, worktreePath, baseBranch, baseCommitSha, latestSetup, setupCompletion, symlinkResult };
   }
 
   function buildAgentPrompt(
@@ -608,7 +641,7 @@ exit 1
     let workspaceInserted = false;
 
     try {
-      const { issue, project, setupConfig } = await resolveIssueAndProject(input.issueId);
+      const { issue, project, setupConfig, symlinkConfig } = await resolveIssueAndProject(input.issueId);
       repoPath = project.repoPath;
 
       // Default plan mode on for high/critical priority when not explicitly set.
@@ -617,7 +650,7 @@ exit 1
       planMode = input.planMode !== undefined ? input.planMode === true : isHighPriority;
 
       ({ branch, worktreePath, baseBranch, baseCommitSha, latestSetup, setupCompletion } = await setupWorktree(
-        isDirect, project.repoPath, project.defaultBranch, input, setupConfig, id,
+        isDirect, project.repoPath, project.defaultBranch, input, setupConfig, symlinkConfig, id,
       ));
 
       // Run context packer (best-effort: never blocks workspace creation).
