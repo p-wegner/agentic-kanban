@@ -33,4 +33,12 @@ describe("board-monitor frontend smoke check", () => {
       expect(skill.contents, skill.path).not.toContain("preferences/active-project\" -TimeoutSec 10).value");
     }
   });
+
+  it("normalizes the board endpoint's top-level column array before counting monitor columns", () => {
+    for (const skill of boardMonitorSkills) {
+      expect(skill.contents, skill.path).toContain("$columns = @($board)");
+      expect(skill.contents, skill.path).toContain("$columns | Where-Object { $_.name -in @(\"Backlog\", \"In Progress\", \"In Review\") }");
+      expect(skill.contents, skill.path).not.toContain("$board.columns");
+    }
+  });
 });
