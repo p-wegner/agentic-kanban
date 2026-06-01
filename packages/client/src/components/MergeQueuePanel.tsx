@@ -3,6 +3,14 @@ import { apiFetch } from "../lib/api.js";
 import { formatRelativeTime } from "../lib/formatRelativeTime.js";
 import type { IssueWithStatus, MainWorkspaceInfo, StatusWithIssues } from "@agentic-kanban/shared";
 
+interface ConflictPreview {
+  workspaceId: string;
+  hasConflicts: boolean;
+  conflictingFiles: string[];
+  isStale: boolean;
+  error?: string;
+}
+
 export interface MergeQueueItem {
   issue: IssueWithStatus;
   workspace: MainWorkspaceInfo;
@@ -95,6 +103,9 @@ export function MergeQueuePanel({ columns, projectId: _projectId, onClose, onIss
   const items = useMemo(() => buildMergeQueueItems(columns), [columns]);
   const [mergingId, setMergingId] = useState<string | null>(null);
   const [errorByWorkspace, setErrorByWorkspace] = useState<Record<string, string>>({});
+  const [previewByWorkspace, setPreviewByWorkspace] = useState<Record<string, ConflictPreview>>({});
+  const [checkingId, setCheckingId] = useState<string | null>(null);
+  const [checkingAll, setCheckingAll] = useState(false);
 
   async function handleMerge(workspaceId: string) {
     const confirmed = window.confirm("Trigger merge for this workspace?");
@@ -120,6 +131,55 @@ export function MergeQueuePanel({ columns, projectId: _projectId, onClose, onIss
     }
   }
 
+  async function handleCheckConflicts(workspaceId: string) {
+    setCheckingId(workspaceId);
+    try {
+      const result = await apiFetch<{ ok: boolean; preview: ConflictPreview }>(
+        `/api/merge-queue/preview/${workspaceId}`,
+        { method: "POST" },
+      );
+      setPreviewByWorkspace((prev) => ({ ...prev, [workspaceId]: result.preview }));
+    } catch (err) {
+      setPreviewByWorkspace((prev) => ({
+        ...prev,
+        [workspaceId]: {
+          workspaceId,
+          hasConflicts: false,
+          conflictingFiles: [],
+          isStale: false,
+          error: err instanceof Error ? err.message : "Check failed",
+        },
+      }));
+    } finally {
+      setCheckingId(null);
+    }
+  }
+
+  async function handleCheckAll() {
+    const workspaceIds = items.map((item) => item.workspace.id);
+    if (workspaceIds.length === 0) return;
+    setCheckingAll(true);
+    try {
+      const result = await apiFetch<{ ok: boolean; dryRun: boolean; plan: { conflictPreviews: ConflictPreview[] } }>(
+        "/api/merge-queue",
+        {
+          method: "POST",
+          body: JSON.stringify({ workspaceIds, dryRun: true }),
+          headers: { "Content-Type": "application/json" },
+        },
+      );
+      const map: Record<string, ConflictPreview> = {};
+      for (const preview of result.plan.conflictPreviews) {
+        map[preview.workspaceId] = preview;
+      }
+      setPreviewByWorkspace((prev) => ({ ...prev, ...map }));
+    } catch {
+      // best effort — individual errors will surface on per-workspace retry
+    } finally {
+      setCheckingAll(false);
+    }
+  }
+
   return (
     <div className="fixed inset-0 z-50 flex justify-end">
       <div className="absolute inset-0 bg-black/30" onClick={onClose} />
@@ -133,13 +193,26 @@ export function MergeQueuePanel({ columns, projectId: _projectId, onClose, onIss
             <h2 className="text-lg font-semibold text-ink dark:text-stone-100 heading-serif">Merge Queue</h2>
             <span className="text-sm text-gray-500 dark:text-gray-400">({items.length})</span>
           </div>
-          <button
-            onClick={onClose}
-            className="text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 text-lg leading-none"
-            aria-label="Close merge queue"
-          >
-            &times;
-          </button>
+          <div className="flex items-center gap-2">
+            {items.length > 0 && (
+              <button
+                type="button"
+                onClick={() => void handleCheckAll()}
+                disabled={checkingAll || checkingId !== null}
+                className="text-xs px-2.5 py-1 rounded border border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-950/40 disabled:opacity-50 disabled:cursor-not-allowed"
+                title="Check all workspaces for merge conflicts (read-only)"
+              >
+                {checkingAll ? "Checking..." : "Check All"}
+              </button>
+            )}
+            <button
+              onClick={onClose}
+              className="text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 text-lg leading-none"
+              aria-label="Close merge queue"
+            >
+              &times;
+            </button>
+          </div>
         </div>
 
         <div className="px-4 py-2 border-b border-gray-100 dark:border-gray-800 grid grid-cols-[1fr_auto_auto_auto] gap-3 text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
@@ -160,7 +233,9 @@ export function MergeQueuePanel({ columns, projectId: _projectId, onClose, onIss
                 const { issue, workspace } = item;
                 const mergeError = errorByWorkspace[workspace.id];
                 const isMerging = mergingId === workspace.id;
+                const isChecking = checkingId === workspace.id;
                 const conflicts = workspace.conflicts?.hasConflicts ? workspace.conflicts.conflictingFiles : [];
+                const preview = previewByWorkspace[workspace.id];
 
                 return (
                   <div key={workspace.id} className="px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-800">
@@ -202,9 +277,26 @@ export function MergeQueuePanel({ columns, projectId: _projectId, onClose, onIss
                       </span>
                     </div>
 
-                    {conflicts.length > 0 && (
+                    {conflicts.length > 0 && !preview && (
                       <div className="mt-2 ml-10 text-xs text-red-600 dark:text-red-400 font-mono truncate">
                         {conflicts.length} conflict{conflicts.length === 1 ? "" : "s"}: {conflicts.join(", ")}
+                      </div>
+                    )}
+
+                    {preview && (
+                      <div className="mt-2 ml-10 space-y-0.5">
+                        {preview.error ? (
+                          <div className="text-xs text-red-600 dark:text-red-400">Check error: {preview.error}</div>
+                        ) : preview.hasConflicts ? (
+                          <div className="text-xs text-red-600 dark:text-red-400 font-mono">
+                            {preview.conflictingFiles.length} conflict{preview.conflictingFiles.length === 1 ? "" : "s"}: {preview.conflictingFiles.join(", ")}
+                          </div>
+                        ) : (
+                          <div className="text-xs text-green-600 dark:text-green-400">No conflicts detected</div>
+                        )}
+                        {preview.isStale && (
+                          <div className="text-xs text-amber-600 dark:text-amber-400">Base branch has new commits — consider rebasing</div>
+                        )}
                       </div>
                     )}
 
@@ -224,6 +316,15 @@ export function MergeQueuePanel({ columns, projectId: _projectId, onClose, onIss
                         className="text-xs px-2.5 py-1 rounded border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"
                       >
                         Open Detail
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void handleCheckConflicts(workspace.id)}
+                        disabled={isChecking || checkingAll || checkingId !== null}
+                        className="text-xs px-2.5 py-1 rounded border border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-950/40 disabled:opacity-50 disabled:cursor-not-allowed"
+                        title="Dry-run conflict check (read-only)"
+                      >
+                        {isChecking ? "Checking..." : "Check"}
                       </button>
                       <button
                         type="button"
