@@ -1,12 +1,13 @@
 import type { Command } from "commander";
 import { db } from "../../db/index.js";
-import { issues, projectStatuses, workspaces, sessions, sessionMessages, issueDependencies, DEPENDENCY_TYPES } from "@agentic-kanban/shared/schema";
+import { issues, projectStatuses, workspaces, sessions, sessionMessages, issueDependencies, DEPENDENCY_TYPES, projects } from "@agentic-kanban/shared/schema";
 import { eq, inArray, sql, and, desc } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { parseSessionSummary, formatDurationStr } from "@agentic-kanban/shared";
 import { runMigrations, getActiveProjectId } from "../shared.js";
 import { syncCurrentNodeToStatus } from "@agentic-kanban/shared/lib/workflow-engine";
 import { isAnalyticsNoise } from "../../services/session-filter.js";
+import { getWorkspaceDiffStats, type WorkspaceDiffStats } from "../../services/workspace-diff-stats.js";
 
 export function registerIssueCommand(program: Command) {
   const issueCmd = program.command("issue").description("Manage issues on the board.\n\nSubcommands: list, create, move, summary, dependency");
@@ -292,6 +293,12 @@ Examples:
         }
 
         const issue = issueRows[0];
+        const projectRows = await db
+          .select({ defaultBranch: projects.defaultBranch })
+          .from(projects)
+          .where(eq(projects.id, projectId))
+          .limit(1);
+        const projectDefaultBranch = projectRows[0]?.defaultBranch ?? null;
 
         const wsRows = await db
           .select()
@@ -317,6 +324,11 @@ Examples:
 
         let lastAgentMsg: string | null = null;
         let fileChanges: { read: number; edited: number; written: number } | null = null;
+        let diffStats: WorkspaceDiffStats | null = null;
+
+        if (matchingWs) {
+          diffStats = await getWorkspaceDiffStats(matchingWs, projectDefaultBranch);
+        }
 
         if (latestSession) {
           const msgRows = await db
@@ -390,6 +402,7 @@ Examples:
             } : null,
             lastAgentMessage: lastAgentMsg,
             fileChanges,
+            diffStats,
           }, null, 2));
           process.exit(0);
         }
@@ -414,7 +427,9 @@ Examples:
           console.log(`  Session:  ${latestSession.id.slice(0, 8)} (${latestSession.status}, ${ago} ago, lasted ${duration})`);
         }
 
-        if (fileChanges && (fileChanges.read || fileChanges.edited || fileChanges.written)) {
+        if (diffStats && (diffStats.filesChanged > 0 || diffStats.insertions > 0 || diffStats.deletions > 0)) {
+          console.log(`  Diff: ${diffStats.filesChanged} file${diffStats.filesChanged === 1 ? "" : "s"}, +${diffStats.insertions}/-${diffStats.deletions}`);
+        } else if (fileChanges && (fileChanges.read || fileChanges.edited || fileChanges.written)) {
           const parts: string[] = [];
           if (fileChanges.read) parts.push(`${fileChanges.read} read`);
           if (fileChanges.edited) parts.push(`${fileChanges.edited} edited`);
