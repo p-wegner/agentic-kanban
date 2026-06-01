@@ -1,18 +1,18 @@
 ---
 name: backlog-refill
-description: When the board backlog is running low, generate an aggressive batch of new well-scoped tickets — weighted toward substantial features, with some quality/hardening work mixed in — so the board always has enough queued to keep the monitor's agent target busy. Use when the monitor sees the backlog dipping below its BACKLOG_FLOOR.
+description: When the board backlog is running low, generate an aggressive batch of new well-scoped tickets — with the feature/bugfix mix set by the monitor's REFILL_FOCUS (in objective.md) — so the board always has enough queued to keep the monitor's agent target busy. Use when the monitor sees the backlog dipping below its BACKLOG_FLOOR.
 ---
 
 # backlog-refill
 
 Keep the board well-fed so the monitor can always keep its `ACTIVE_AGENTS_TARGET` workspaces running. The board should never drain below the monitor's `BACKLOG_FLOOR`. Refill **aggressively and early** — act before the backlog hits the floor, not when it reaches zero.
 
-**Batch size is set by the monitor, not here.** Create enough tickets to bring the backlog back **above `BACKLOG_FLOOR`** (defined in `scripts/board-monitor/objective.md` — the single source for these numbers). When in doubt, overshoot the floor by a few so the next refill isn't needed immediately. Weight the batch toward **substantial features** with some quality/hardening work mixed in:
+**Batch size AND focus are set by the monitor, not here.** Create enough tickets to bring the backlog back **above `BACKLOG_FLOOR`** (defined in `scripts/board-monitor/objective.md` — the single source for these numbers). When in doubt, overshoot the floor by a few so the next refill isn't needed immediately.
 
-- **Feature (the majority)** — new user value. Favor **bigger, more ambitious features** — meaty capabilities that meaningfully expand the product, not trivial tweaks. An ambitious feature that's too large for one workspace should be split into a small set of linked tickets (an epic + its first 2–3 implementable children) rather than dropped.
-- **Quality (at least one per batch)** — harden/clean what already exists.
+**Honor the monitor's `REFILL_FOCUS` (in `objective.md`):**
 
-**Every refill: a majority of feature tickets AND at least one quality ticket. Rotate which sub-area you draw from each time, so coverage spreads over runs instead of repeating the same theme.**
+- **`REFILL_FOCUS = bugfix-only`** — create **ONLY** tickets for real, reproducible bugs. Draw exclusively from the **Bug hunting** source below; do **not** create feature, enhancement, or speculative quality tickets. Every ticket must name a concrete, verifiable defect with repro steps. If you genuinely cannot find enough real bugs to reach the floor, create fewer and say so in the output — never pad with features.
+- **`REFILL_FOCUS = balanced`** — use the feature-weighted mix: a majority of **substantial feature** tickets plus at least one **quality** ticket. Favor bigger, more ambitious features (split an over-large one into an epic + its first 2–3 implementable children rather than dropping it). Rotate which sub-area you draw from each time so coverage spreads over runs.
 
 ## Feature sources (rotate across refills — lean ambitious)
 - **Feature gaps** — `$ui-explorer`: compare the running UI against `docs/prd/01-features-catalog.md` and surface a missing capability.
