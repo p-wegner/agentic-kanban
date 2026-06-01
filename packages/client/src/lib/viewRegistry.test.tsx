@@ -19,6 +19,12 @@ describe("VIEW_REGISTRY", () => {
     expect(new Set(shortcuts).size).toBe(shortcuts.length);
   });
 
+  it("does not collide with global board action shortcuts", () => {
+    const globalActionShortcuts = new Set(["/", "?", "a", "c", "q", "w", "x"]);
+    const collidingViews = VIEW_REGISTRY.filter((v) => v.shortcut && globalActionShortcuts.has(v.shortcut));
+    expect(collidingViews).toEqual([]);
+  });
+
   it("enumerates all 17 board views", () => {
     expect(VIEW_REGISTRY).toHaveLength(17);
   });
@@ -31,7 +37,7 @@ describe("VIEW_REGISTRY", () => {
     expect(VIEW_IDS.slice().sort()).toEqual(expected.slice().sort());
   });
 
-  it("preserves the existing view shortcuts (b/g/t/f/l/m/i/p/u/w, etc.)", () => {
+  it("preserves the existing view shortcuts (b/g/t/f/l/m/i/p/u/h, etc.)", () => {
     const byId = Object.fromEntries(VIEW_REGISTRY.map((v) => [v.id, v.shortcut]));
     expect(byId.kanban).toBe("b");
     expect(byId.backlog).toBe("r");
@@ -49,7 +55,7 @@ describe("VIEW_REGISTRY", () => {
     expect(byId.strategy).toBe("z");
     expect(byId.focus).toBe("o");
     expect(byId.workflows).toBe("u");
-    expect(byId["workflow-analytics"]).toBe("w");
+    expect(byId["workflow-analytics"]).toBe("h");
   });
 
   it("every view has the fields the three consumers need", () => {
