@@ -1,13 +1,13 @@
 ---
 name: backlog-refill
-description: When the board backlog is running low, generate an aggressive batch of new well-scoped tickets — weighted toward substantial features, with some quality/hardening work mixed in — so the board always has enough queued to keep 3 agents busy. Use when the monitor sees the backlog dipping below ~5 items.
+description: When the board backlog is running low, generate an aggressive batch of new well-scoped tickets — weighted toward substantial features, with some quality/hardening work mixed in — so the board always has enough queued to keep the monitor's agent target busy. Use when the monitor sees the backlog dipping below its BACKLOG_FLOOR.
 ---
 
 # backlog-refill
 
-Keep the board well-fed so **3 agents can always be running**. The board should never drain to the point where the monitor can't keep 3 concurrent workspaces in progress. Refill **aggressively and early** — act when the backlog falls **below ~5 items**, not when it hits zero.
+Keep the board well-fed so the monitor can always keep its `ACTIVE_AGENTS_TARGET` workspaces running. The board should never drain below the monitor's `BACKLOG_FLOOR`. Refill **aggressively and early** — act before the backlog hits the floor, not when it reaches zero.
 
-Each refill creates a batch of **at least 5 new tickets**, weighted toward **substantial features** with some quality/hardening work mixed in:
+**Batch size is set by the monitor, not here.** Create enough tickets to bring the backlog back **above `BACKLOG_FLOOR`** (defined in `scripts/board-monitor/objective.md` — the single source for these numbers). When in doubt, overshoot the floor by a few so the next refill isn't needed immediately. Weight the batch toward **substantial features** with some quality/hardening work mixed in:
 
 - **Feature (the majority)** — new user value. Favor **bigger, more ambitious features** — meaty capabilities that meaningfully expand the product, not trivial tweaks. An ambitious feature that's too large for one workspace should be split into a small set of linked tickets (an epic + its first 2–3 implementable children) rather than dropped.
 - **Quality (at least one per batch)** — harden/clean what already exists.
@@ -34,7 +34,7 @@ Each refill creates a batch of **at least 5 new tickets**, weighted toward **sub
 2. **No duplicates.** `list_issues` first; skip anything already open (or recently Done) that overlaps.
 3. **Create via the board.** Use `mcp__agentic-kanban__create_issue` (title, description, priority, type). Set priority honestly (quality debt is usually medium; a real bug can be high; flagship features can be high).
 4. **Tag them.** Add a `backlog-refill` tag (create it once via `create_tag` if missing) so auto-generated tickets are traceable and you can audit the mix later.
-5. **Refill to a buffer.** At least 5 tickets per refill — enough that, after the monitor pulls up to 3 into progress, a healthy queue still remains. This keeps 3 agents fed without re-refilling every cycle.
+5. **Refill above the floor.** Create enough tickets to bring the backlog back above the monitor's `BACKLOG_FLOOR` (plus a small buffer), so the agent target stays fed without re-refilling every cycle. The number lives in `objective.md`, not here.
 6. **Stay in scope.** You are *generating work*, not doing it. Create the tickets and stop; the monitor's normal loop will pull and start them through board workspaces.
 
 ## Output

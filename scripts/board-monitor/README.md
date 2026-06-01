@@ -13,7 +13,7 @@ action and exits. Durable memory lives outside the model — in the board, git, 
 
 | File | Role | Committed? |
 |---|---|---|
-| `loop.sh` | The driver: fires `timeout 1800 codex exec "<objective>"` every `MONITOR_SLEEP`s, trims `state.md`, has a launch-failure guard | yes |
+| `loop.sh` | The driver: fires `timeout 1800 codex exec "<objective>"` every `MONITOR_SLEEP`s (**re-reading `objective.md` each iteration**), trims `state.md`, has a launch-failure guard | yes |
 | `objective.md` | The prompt each fresh run receives (read it to know what the orchestrator is told to do) | yes |
 | `state.md` | **Rolling cross-iteration memory** — one line per cycle, newest last, trimmed to the last `MONITOR_STATE_KEEP` (40) lines. Runtime state, not source | **no** (gitignored) |
 | `loop.log` | Full append-only transcript of every iteration's stdout/stderr | no (gitignored) |
@@ -32,8 +32,10 @@ touch scripts/board-monitor/STOP
 kill "$(cat scripts/board-monitor/loop.pid)"
 ```
 
-> `loop.sh` reads `objective.md` and its own knobs **once at start** — after editing either, you
-> must **restart** the loop for changes to take effect.
+> **`objective.md` is re-read at the start of every iteration** — edit it (including its TUNABLE
+> TARGETS block: agent target, backlog floor, per-cycle start cap) and the **next cycle picks it up
+> with no restart**. This is the single place to steer the loop's pace. Only `loop.sh`'s own env
+> knobs (`MONITOR_SLEEP` etc.) are read once at start and still require a restart.
 
 **Env knobs:** `MONITOR_SLEEP` (gap between runs, default 300s) · `MONITOR_MAX_ITERS` (default 500)
 · `MONITOR_ITER_TIMEOUT` (per-iteration cap, default 1800s) · `MONITOR_STATE_KEEP` (memory lines
