@@ -10,11 +10,13 @@ interface ProjectScriptsSettingsSectionProps {
 type Draft = {
   id?: string;
   name: string;
+  description: string;
   command: string;
+  cwdMode: "project" | "custom";
   workingDir: string;
 };
 
-const EMPTY_DRAFT: Draft = { name: "", command: "", workingDir: "" };
+const EMPTY_DRAFT: Draft = { name: "", description: "", command: "", cwdMode: "project", workingDir: "" };
 
 export function ProjectScriptsSettingsSection({ projectId }: ProjectScriptsSettingsSectionProps) {
   const [scripts, setScripts] = useState<ProjectScriptShortcutResponse[]>([]);
@@ -44,8 +46,10 @@ export function ProjectScriptsSettingsSection({ projectId }: ProjectScriptsSetti
     try {
       const payload = {
         name: draft.name.trim(),
+        description: draft.description.trim() || null,
         command: draft.command.trim(),
-        workingDir: draft.workingDir.trim() || null,
+        cwdMode: draft.cwdMode,
+        workingDir: draft.cwdMode === "custom" ? draft.workingDir.trim() : null,
       };
       if (draft.id) {
         await apiFetch(`/api/projects/${projectId}/scripts/${draft.id}`, {
@@ -102,14 +106,19 @@ export function ProjectScriptsSettingsSection({ projectId }: ProjectScriptsSetti
                 )}
               </div>
               <div className="text-xs font-mono text-gray-500 dark:text-gray-400 truncate">{script.command}</div>
-              {script.workingDir && <div className="text-xs text-gray-400 dark:text-gray-500 truncate">cwd: {script.workingDir}</div>}
+              {script.description && <div className="text-xs text-gray-500 dark:text-gray-400 truncate">{script.description}</div>}
+              <div className="text-xs text-gray-400 dark:text-gray-500 truncate">
+                cwd: {script.cwdMode === "custom" ? script.workingDir : "project root"}
+              </div>
             </div>
             <button
               type="button"
               onClick={() => setDraft({
                 id: script.id,
                 name: script.name,
+                description: script.description ?? "",
                 command: script.command,
+                cwdMode: script.cwdMode,
                 workingDir: script.workingDir ?? "",
               })}
               className="text-xs px-2 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800"
@@ -128,13 +137,22 @@ export function ProjectScriptsSettingsSection({ projectId }: ProjectScriptsSetti
         ))}
       </div>
 
-      <div className="grid gap-2 md:grid-cols-[1fr_1.5fr_1fr_auto] items-end">
+      <div className="grid gap-2 md:grid-cols-[1fr_1.4fr_1fr_1fr_auto] items-end">
         <label className="block">
           <span className="block text-xs text-gray-500 mb-1">Name</span>
           <input
             value={draft.name}
             onChange={(event) => setDraft((value) => ({ ...value, name: event.target.value }))}
             placeholder="Test mine"
+            className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500 dark:bg-gray-900 dark:text-gray-100"
+          />
+        </label>
+        <label className="block">
+          <span className="block text-xs text-gray-500 mb-1">Description</span>
+          <input
+            value={draft.description}
+            onChange={(event) => setDraft((value) => ({ ...value, description: event.target.value }))}
+            placeholder="Fast local check"
             className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500 dark:bg-gray-900 dark:text-gray-100"
           />
         </label>
@@ -148,12 +166,24 @@ export function ProjectScriptsSettingsSection({ projectId }: ProjectScriptsSetti
           />
         </label>
         <label className="block">
+          <span className="block text-xs text-gray-500 mb-1">CWD mode</span>
+          <select
+            value={draft.cwdMode}
+            onChange={(event) => setDraft((value) => ({ ...value, cwdMode: event.target.value as Draft["cwdMode"] }))}
+            className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500 dark:bg-gray-900 dark:text-gray-100"
+          >
+            <option value="project">Project root</option>
+            <option value="custom">Custom path</option>
+          </select>
+        </label>
+        <label className="block">
           <span className="block text-xs text-gray-500 mb-1">Working directory</span>
           <input
             value={draft.workingDir}
             onChange={(event) => setDraft((value) => ({ ...value, workingDir: event.target.value }))}
+            disabled={draft.cwdMode === "project"}
             placeholder="packages/server"
-            className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500 font-mono dark:bg-gray-900 dark:text-gray-100"
+            className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500 font-mono dark:bg-gray-900 dark:text-gray-100 disabled:opacity-50"
           />
         </label>
         <div className="flex gap-2">
@@ -169,7 +199,7 @@ export function ProjectScriptsSettingsSection({ projectId }: ProjectScriptsSetti
           <button
             type="button"
             onClick={saveDraft}
-            disabled={saving || !draft.name.trim() || !draft.command.trim()}
+            disabled={saving || !draft.name.trim() || !draft.command.trim() || (draft.cwdMode === "custom" && !draft.workingDir.trim())}
             className="text-sm px-3 py-1.5 rounded bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50"
           >
             {draft.id ? "Update" : "Add"}

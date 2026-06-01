@@ -73,4 +73,5 @@ export const MIGRATION_FILES = [
   "0064_quality_metrics.sql",
   "0065_project_script_shortcuts.sql",
   "0066_workspace_setup_status.sql",
+  "0067_project_script_shortcut_details.sql",
 ];
