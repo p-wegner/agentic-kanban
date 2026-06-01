@@ -192,6 +192,62 @@ describe("workflows route analytics", () => {
 });
 
 describe("workflows route task approval", () => {
+  it("syncs the issue status when transitioning from Implement to Review", async () => {
+    const { app, db } = createTestApp();
+    const { projectId, statusId: inProgressStatusId } = await seedProject(db, "implement-review-sync");
+    const now = "2026-05-30T09:00:00.000Z";
+    const inReviewStatusId = randomUUID();
+    await db.insert(schema.projectStatuses).values({
+      id: inReviewStatusId,
+      projectId,
+      name: "In Review",
+      sortOrder: 1,
+      isDefault: false,
+      createdAt: now,
+    });
+
+    const templateId = randomUUID();
+    const implementNodeId = randomUUID();
+    const reviewNodeId = randomUUID();
+    await db.insert(schema.workflowTemplates).values({
+      id: templateId,
+      projectId: null,
+      name: "Implement Review",
+      isDefault: true,
+      isBuiltin: false,
+      createdAt: now,
+      updatedAt: now,
+    });
+    await db.insert(schema.workflowNodes).values([
+      { id: implementNodeId, templateId, name: "Implement", nodeType: "normal", statusName: "In Progress", sortOrder: 0, createdAt: now },
+      { id: reviewNodeId, templateId, name: "Review", nodeType: "normal", statusName: "In Review", sortOrder: 1, createdAt: now },
+    ] as any);
+    await db.insert(schema.workflowEdges).values({
+      id: randomUUID(),
+      templateId,
+      fromNodeId: implementNodeId,
+      toNodeId: reviewNodeId,
+      condition: "manual",
+      sortOrder: 0,
+      createdAt: now,
+    });
+
+    const issueId = await seedIssue(db, projectId, inProgressStatusId, 244, "Implement to Review");
+    await db.update(schema.issues).set({ workflowTemplateId: templateId, currentNodeId: implementNodeId }).where(eq(schema.issues.id, issueId));
+    const workspaceId = await seedWorkspace(db, issueId, "feature/implement-review", implementNodeId);
+
+    const res = await app.request(`/api/workflows/workspaces/${workspaceId}/transition`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ toNodeName: "Review", summary: "ready for review" }),
+    });
+
+    expect(res.status).toBe(200);
+    const issue = (await db.select().from(schema.issues).where(eq(schema.issues.id, issueId)))[0];
+    expect(issue.statusId).toBe(inReviewStatusId);
+    expect(issue.currentNodeId).toBe(reviewNodeId);
+  });
+
   it("writes the approved phase artifact into the workspace before advancing", async () => {
     const { app, db } = createTestApp();
     const worktreePath = mkdtempSync(join(tmpdir(), "ak-phase-artifact-"));

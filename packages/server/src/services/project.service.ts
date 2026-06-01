@@ -427,11 +427,19 @@ export function createProjectService(deps: { database: Database }) {
       buildTagMap(issueIds, database),
     ]);
 
+    const statusByName = new Map(statuses.map((status) => [status.name.toLowerCase(), status]));
     const issuesWithBlocked = projectIssues.map((issue) => {
       const wsSummary = workspaceSummaryMap.get(issue.id);
       const blocked = blockedMap.get(issue.id);
+      const workflowStatusName = wsSummary?.main?.status !== "closed"
+        ? wsSummary?.main?.workflow?.currentNodeStatusName
+        : null;
+      const workflowStatus = workflowStatusName
+        ? statusByName.get(workflowStatusName.toLowerCase())
+        : null;
       return {
         ...issue,
+        ...(workflowStatus ? { statusId: workflowStatus.id, statusName: workflowStatus.name } : {}),
         ...(wsSummary ? { workspaceSummary: wsSummary } : {}),
         ...(blocked ? { isBlocked: blocked.isBlocked, dependencyCount: blocked.dependencyCount } : {}),
       };
