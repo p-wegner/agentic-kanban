@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { apiFetch } from "../lib/api.js";
 import type { AgentOutputMessage, SessionSummaryResponse } from "@agentic-kanban/shared";
 
+export type WorkspaceViewMode = "output" | "summary" | "preview";
+
 interface SessionInfo {
   id: string;
   workspaceId: string;
@@ -33,8 +35,8 @@ interface UseWorkspaceSessionResult {
   setSelectedHistoryId: React.Dispatch<React.SetStateAction<string | null>>;
   historyMessages: AgentOutputMessage[];
   setHistoryMessages: React.Dispatch<React.SetStateAction<AgentOutputMessage[]>>;
-  viewMode: "output" | "summary";
-  setViewMode: React.Dispatch<React.SetStateAction<"output" | "summary">>;
+  viewMode: WorkspaceViewMode;
+  setViewMode: React.Dispatch<React.SetStateAction<WorkspaceViewMode>>;
   summaryData: SessionSummaryResponse | null;
   summaryLoading: boolean;
   summarySessionId: string | null;
@@ -57,7 +59,7 @@ export function useWorkspaceSession({
   const [workspaceSessions, setWorkspaceSessions] = useState<Record<string, SessionInfo[]>>({});
   const [selectedHistoryId, setSelectedHistoryId] = useState<string | null>(null);
   const [historyMessages, setHistoryMessages] = useState<AgentOutputMessage[]>([]);
-  const [viewMode, setViewMode] = useState<"output" | "summary">("output");
+  const [viewMode, setViewMode] = useState<WorkspaceViewMode>("output");
   const [summaryData, setSummaryData] = useState<SessionSummaryResponse | null>(null);
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [summarySessionId, setSummarySessionId] = useState<string | null>(null);
