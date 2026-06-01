@@ -70,21 +70,24 @@ test.describe("Mock agent profiles", () => {
     extraWorkspaceIds.push(workspaceId);
 
     // Setup worktree with retries
-    let setupOk = false;
+    let lastSetupStatus = 0;
+    let lastSetupBody = "";
     for (let attempt = 0; attempt < 3; attempt++) {
       const setupRes = await request.post(
         `${SERVER_URL}/api/workspaces/${workspaceId}/setup`,
         { data: {} },
       );
-      if (setupRes.status() === 200) {
-        setupOk = true;
-        break;
+      lastSetupStatus = setupRes.status();
+      if (lastSetupStatus === 200) {
+        return { issueId, workspaceId };
       }
+      lastSetupBody = await setupRes.text();
       await new Promise((resolve) => setTimeout(resolve, 500));
     }
-    if (!setupOk) test.skip();
-
-    return { issueId, workspaceId };
+    // Cleanup will run via extraIssueIds/extraWorkspaceIds in afterAll
+    throw new Error(
+      `Workspace setup failed after 3 attempts for workspace ${workspaceId}: last status=${lastSetupStatus}, body=${lastSetupBody}`,
+    );
   }
 
   async function waitForSession(request: any, workspaceId: string, sessionId: string, timeoutMs = 8000) {
@@ -323,8 +326,21 @@ test.describe("Mock agent profiles", () => {
     expect(launchRes.status()).toBe(201);
     const { sessionId } = await launchRes.json();
 
-    // Wait for first turn output to arrive
-    await new Promise((r) => setTimeout(r, 3000));
+    // Poll for first turn output to arrive (agent must have started producing output)
+    const firstOutputDeadline = Date.now() + 8000;
+    let hasOutput = false;
+    while (Date.now() < firstOutputDeadline) {
+      const outputRes = await request.get(
+        `${SERVER_URL}/api/sessions/${sessionId}/output`,
+      );
+      if (outputRes.status() === 200) {
+        const msgs = await outputRes.json();
+        const hasStdout = msgs.some((m: any) => m.type === "stdout" && m.data);
+        if (hasStdout) { hasOutput = true; break; }
+      }
+      await new Promise((r) => setTimeout(r, 300));
+    }
+    expect(hasOutput).toBe(true);
 
     // Stop the session (closes stdin, which triggers agent exit)
     await request.post(`${SERVER_URL}/api/workspaces/${workspaceId}/stop`, {
