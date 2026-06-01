@@ -408,6 +408,7 @@ describe("workspace.service", () => {
           expect(wsRows[0].status).toBe("closed");
           expect(wsRows[0].workingDir).toBeNull();
           expect(wsRows[0].mergedAt).toBeTruthy();
+          expect(wsRows[0].codeMetricsJson).toBeTruthy();
 
           const issueRow = await db.select().from(issues).where(eq(issues.id, issueId));
           const statusRow = await db.select().from(projectStatuses).where(eq(projectStatuses.id, issueRow[0].statusId));
