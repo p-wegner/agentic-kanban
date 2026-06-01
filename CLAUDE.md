@@ -102,7 +102,7 @@ When a test in the table below fails and you haven't touched the relevant code, 
 | `packages/e2e/tests/api/board-events.test.ts` | WebSocket event tests | Race condition: no wait for `readyState === 1`; 500 ms fixed delay before create; no timeout wrapper on WS promise | Re-run; wrap WS promise in `Promise.race()` with 5 s timeout |
 | `packages/e2e/tests/ui/board-realtime.test.ts` | "board updates when issue created via API" | `projects[0]` access without validating array is non-empty | Re-run; use `getE2EProjectId()` helper instead |
 | `packages/e2e/tests/ui/all-workspaces-panel.test.ts` | Multiple | Multiple `waitForTimeout(300)` calls + active-project state dependency across runs | Re-run; replace sleeps with condition-based waits |
-| `packages/e2e/tests/api/workspace-lifecycle.test.ts` | Multiple | `projects[0]` without validation; state from prior run can leak | Re-run; use `getE2EProjectId()` helper |
+
 | `packages/server/src/__tests__/git.service.test.ts` | All | Real filesystem + git operations; Windows file-locking on temp dirs; no per-test timeout | **Only run when touching `packages/shared/src/lib/git-service.ts`**; add `test.setTimeout(30000)`. Excluded by `pnpm test:mine`. |
 | `packages/server/src/__tests__/cli.test.ts` | All | Spawn-based CLI integration test; in a worktree `packages/shared/dist` isn't built and the inline migration list is stale → `ERR_MODULE_NOT_FOUND` / "Failed query" | Pre-existing-broken in worktrees — don't debug if you didn't touch the CLI. Excluded by `pnpm test:mine`. |
 | `packages/server/src/__tests__/cli-butler.test.ts` | All | Spawn-based CLI integration test; same worktree root causes as `cli.test.ts` | Pre-existing-broken in worktrees. Excluded by `pnpm test:mine`. |
