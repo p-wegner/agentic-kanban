@@ -1,13 +1,31 @@
 import { randomUUID } from "node:crypto";
 import { mkdirSync, writeFileSync, chmodSync } from "node:fs";
 import { join } from "node:path";
-import { eq, inArray } from "drizzle-orm";
+import { eq, inArray, and } from "drizzle-orm";
+import { existsSync } from "node:fs";
+import { resolve as pathResolve, dirname, parse as pathParse, relative, sep } from "node:path";
 import {
-  issues, projects, preferences, workspaces, sessions, sessionMessages, diffComments, agentSkills,
+  issues, projects, preferences, workspaces, sessions, sessionMessages, diffComments, agentSkills, projectStatuses,
 } from "@agentic-kanban/shared/schema";
 import type { Database } from "../db/index.js";
 import type { SessionManager } from "./session.manager.js";
 import type { BoardEvents } from "./board-events.js";
+
+export interface StaleWorktreeEntry {
+  id: string;
+  branch: string;
+  workingDir: string;
+  workspaceStatus: string;
+  closedAt: string | null;
+  mergedAt: string | null;
+  updatedAt: string | null;
+  issueId: string;
+  issueNumber: number;
+  issueTitle: string;
+  issueStatusName: string;
+  projectId: string;
+  repoPath: string;
+}
 import type { ProviderName } from "./agent-provider.js";
 import * as realGitService from "./git.service.js";
 import { kill as killAgent } from "./agent.service.js";
@@ -1083,6 +1101,133 @@ exit 1
     return getWorkspaceDetails(id, database);
   }
 
+  /**
+   * List closed/merged workspaces whose worktree directories still exist on disk.
+   * Returns data needed by the stale-worktree cleanup UI: issue info, branch, status,
+   * and whether the directory is still present.
+   */
+  async function listStaleWorktrees(projectId?: string): Promise<StaleWorktreeEntry[]> {
+    const conditions = [eq(workspaces.status, "closed")];
+    if (projectId) {
+      conditions.push(eq(issues.projectId, projectId));
+    }
+    const whereClause = conditions.length === 1 ? conditions[0] : and(...conditions);
+
+    const rows = await database
+      .select({
+        id: workspaces.id,
+        branch: workspaces.branch,
+        workingDir: workspaces.workingDir,
+        status: workspaces.status,
+        closedAt: workspaces.closedAt,
+        mergedAt: workspaces.mergedAt,
+        updatedAt: workspaces.updatedAt,
+        issueId: workspaces.issueId,
+        issueNumber: issues.issueNumber,
+        issueTitle: issues.title,
+        issueStatusName: projectStatuses.name,
+        projectId: issues.projectId,
+        repoPath: projects.repoPath,
+      })
+      .from(workspaces)
+      .innerJoin(issues, eq(workspaces.issueId, issues.id))
+      .leftJoin(projects, eq(issues.projectId, projects.id))
+      .leftJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
+      .where(whereClause);
+
+    const results: StaleWorktreeEntry[] = [];
+
+    for (const row of rows) {
+      // Skip entries without a workingDir or repoPath
+      if (!row.workingDir || !row.repoPath) continue;
+
+      // Check if the directory actually still exists on disk
+      if (!existsSync(row.workingDir)) continue;
+
+      results.push({
+        id: row.id,
+        branch: row.branch,
+        workingDir: row.workingDir,
+        workspaceStatus: row.status,
+        closedAt: row.closedAt,
+        mergedAt: row.mergedAt,
+        updatedAt: row.updatedAt,
+        issueId: row.issueId,
+        issueNumber: row.issueNumber ?? 0,
+        issueTitle: row.issueTitle ?? "",
+        issueStatusName: row.issueStatusName ?? "",
+        projectId: row.projectId,
+        repoPath: row.repoPath,
+      });
+    }
+
+    return results;
+  }
+
+  /**
+   * Safely remove a stale worktree directory. Validates that the workspace is closed
+   * and that the workingDir is within the project's managed .worktrees/ directory,
+   * rejecting arbitrary or unsafe paths.
+   */
+  async function removeStaleWorktree(workspaceId: string): Promise<{ success: boolean; error?: string }> {
+    const workspace = await getWorkspaceById(workspaceId, database);
+    if (!workspace) {
+      return { success: false, error: "Workspace not found" };
+    }
+    if (workspace.status !== "closed") {
+      return { success: false, error: "Workspace is not closed" };
+    }
+    if (!workspace.workingDir) {
+      return { success: false, error: "Workspace has no working directory" };
+    }
+
+    const resolved = await resolveProjectRepo(workspaceId, database).catch(() => ({ repoPath: null as string | null, defaultBranch: null as string | null }));
+    if (!resolved.repoPath) {
+      return { success: false, error: "Could not resolve project repo path" };
+    }
+    const repoPath = resolved.repoPath;
+
+    // Validate the workingDir is inside the managed .worktrees/ directory
+    const worktreesRoot = pathResolve(dirname(repoPath), ".worktrees");
+    const targetResolved = pathResolve(workspace.workingDir);
+    const relativeToWorktreesRoot = relative(worktreesRoot, targetResolved);
+    const root = pathParse(targetResolved).root;
+    const isInsideWorktreesRoot = relativeToWorktreesRoot !== ""
+      && relativeToWorktreesRoot !== ".."
+      && !relativeToWorktreesRoot.startsWith(`..${sep}`)
+      && pathParse(relativeToWorktreesRoot).root === "";
+
+    if (targetResolved === pathResolve(repoPath) || targetResolved === root || !isInsideWorktreesRoot) {
+      return { success: false, error: "Refusing to remove path outside managed worktrees directory" };
+    }
+
+    if (!existsSync(workspace.workingDir)) {
+      // Directory already gone — just null out workingDir in DB
+      const now = new Date().toISOString();
+      await database
+        .update(workspaces)
+        .set({ workingDir: null, updatedAt: now })
+        .where(eq(workspaces.id, workspaceId));
+      return { success: true };
+    }
+
+    try {
+      await gitService.removeWorktree(repoPath, workspace.workingDir);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return { success: false, error: `Failed to remove worktree: ${message}` };
+    }
+
+    // Null out workingDir so it no longer shows as stale
+    const now = new Date().toISOString();
+    await database
+      .update(workspaces)
+      .set({ workingDir: null, updatedAt: now })
+      .where(eq(workspaces.id, workspaceId));
+
+    return { success: true };
+  }
+
   return {
     createWorkspace,
     deleteWorkspace,
@@ -1091,5 +1236,7 @@ exit 1
     setupWorkspace,
     updateWorkspace,
     getWorkspace,
+    listStaleWorktrees,
+    removeStaleWorktree,
   };
 }
