@@ -4,8 +4,7 @@ import { db, schema } from "../db.js";
 import { eq } from "drizzle-orm";
 import { notifyBoard } from "../notify.js";
 import { requireEntity } from "../db-utils.js";
-
-const SERVER_PORT = Number(process.env.SERVER_PORT) || 3001;
+import { boardApiUrl } from "../server-url.js";
 
 export function registerRelaunchWorkspace(server: McpServer) {
   server.tool(
@@ -23,7 +22,7 @@ export function registerRelaunchWorkspace(server: McpServer) {
       if (!r.ok) return r.error;
 
       try {
-        const res = await fetch(`http://localhost:${SERVER_PORT}/api/workspaces/${workspaceId}/launch`, {
+        const res = await fetch(boardApiUrl(`/api/workspaces/${workspaceId}/launch`), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ prompt }),

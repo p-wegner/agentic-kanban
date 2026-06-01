@@ -1,7 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-
-const SERVER_PORT = Number(process.env.SERVER_PORT) || 3001;
+import { boardApiUrl } from "../server-url.js";
 
 export function registerAnalyzeTouchedFiles(server: McpServer) {
   server.tool(
@@ -12,7 +11,7 @@ export function registerAnalyzeTouchedFiles(server: McpServer) {
       refresh: z.boolean().optional().default(false).describe("Force re-analysis even if a cached result exists"),
     },
     async ({ issueId, refresh }) => {
-      const res = await fetch(`http://localhost:${SERVER_PORT}/api/issues/${issueId}/analyze-touched-files`, {
+      const res = await fetch(boardApiUrl(`/api/issues/${issueId}/analyze-touched-files`), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ refresh: refresh ?? false }),
