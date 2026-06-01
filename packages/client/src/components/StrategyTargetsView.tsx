@@ -6,6 +6,7 @@ import { showToast } from "./Toast.js";
 
 type SegmentKind = "work-type" | "provider" | "area" | "custom";
 type Provider = "" | "claude" | "codex" | "copilot";
+type ProviderPolicyMode = "fill" | "throttle" | "fallback-only";
 
 interface StrategySegment {
   id: string;
@@ -18,12 +19,23 @@ interface StrategySegment {
   provider: Provider;
 }
 
+interface ProviderProfilePolicy {
+  id: string;
+  provider: "claude" | "codex" | "copilot";
+  profileName: string;
+  label: string;
+  mode: ProviderPolicyMode;
+  headroomPct: number;
+  notes: string;
+}
+
 interface StrategyConfig {
   version: number;
   activeAgentsTarget: number;
   backlogFloor: number;
   maxNewStartsPerCycle: number;
   segments: StrategySegment[];
+  providerPolicies: ProviderProfilePolicy[];
 }
 
 interface StrategyTargetsViewProps {
@@ -46,6 +58,19 @@ const DEFAULT_CONFIG: StrategyConfig = {
     { id: "area-backend", label: "Backend", description: "Server, database, and orchestration areas.", kind: "area", weight: 2, color: "#547446", keywords: "server backend database api", provider: "codex" },
     { id: "area-frontend", label: "Frontend", description: "Client-side views and interaction flows.", kind: "area", weight: 2, color: "#c79a3e", keywords: "frontend client view ui", provider: "claude" },
   ],
+  providerPolicies: [],
+};
+
+const POLICY_MODE_LABELS: Record<ProviderPolicyMode, string> = {
+  "fill": "Fill",
+  "throttle": "Throttle",
+  "fallback-only": "Fallback only",
+};
+
+const POLICY_MODE_DESCRIPTIONS: Record<ProviderPolicyMode, string> = {
+  "fill": "Keep busy at all times. Ideal for time-windowed plans that reset frequently (e.g. hourly/daily).",
+  "throttle": "Use for main work but preserve headroom. Set a headroom % to avoid exhausting the window.",
+  "fallback-only": "Use only when no better option is available, or on explicit user request. Ideal for token-based / cost-per-request gateways.",
 };
 
 const KIND_LABELS: Record<SegmentKind, string> = {
@@ -81,17 +106,37 @@ function normalizeSegment(segment: Partial<StrategySegment>, index: number): Str
   };
 }
 
+function normalizeProviderPolicy(p: Partial<ProviderProfilePolicy>, index: number): ProviderProfilePolicy {
+  const provider = (["claude", "codex", "copilot"].includes(p.provider ?? "") ? p.provider : "claude") as "claude" | "codex" | "copilot";
+  const profileName = typeof p.profileName === "string" ? p.profileName : "";
+  const id = p.id || `policy-${provider}-${profileName || index}`;
+  const validModes: ProviderPolicyMode[] = ["fill", "throttle", "fallback-only"];
+  return {
+    id,
+    provider,
+    profileName,
+    label: typeof p.label === "string" && p.label.trim() ? p.label : `${provider}${profileName ? `:${profileName}` : ""}`,
+    mode: (validModes.includes(p.mode as ProviderPolicyMode) ? p.mode : "throttle") as ProviderPolicyMode,
+    headroomPct: clampPolicy(Number(p.headroomPct ?? 20), 20, 0, 100),
+    notes: typeof p.notes === "string" ? p.notes : "",
+  };
+}
+
 function normalizeConfig(raw: unknown): StrategyConfig {
   const parsed = raw && typeof raw === "object" ? raw as Partial<StrategyConfig> : {};
   const segments = Array.isArray(parsed.segments)
     ? parsed.segments.map((segment, index) => normalizeSegment(segment, index)).filter((segment) => segment.label.trim())
     : DEFAULT_CONFIG.segments;
+  const providerPolicies = Array.isArray(parsed.providerPolicies)
+    ? parsed.providerPolicies.map((p, i) => normalizeProviderPolicy(p, i))
+    : [];
   return {
     version: 1,
     activeAgentsTarget: clampPolicy(Number(parsed.activeAgentsTarget), DEFAULT_CONFIG.activeAgentsTarget, 1, 12),
     backlogFloor: clampPolicy(Number(parsed.backlogFloor), DEFAULT_CONFIG.backlogFloor, 0, 100),
     maxNewStartsPerCycle: clampPolicy(Number(parsed.maxNewStartsPerCycle), DEFAULT_CONFIG.maxNewStartsPerCycle, 1, 12),
     segments: segments.length > 0 ? segments : DEFAULT_CONFIG.segments,
+    providerPolicies,
   };
 }
 
@@ -125,6 +170,16 @@ function deriveRefillFocus(segments: StrategySegment[]) {
 
 function makeAgentBrief(config: StrategyConfig, issues: IssueWithStatus[]) {
   const top = [...config.segments].sort((a, b) => b.weight - a.weight).slice(0, 4);
+  const policyLines = config.providerPolicies.length > 0
+    ? [
+        "",
+        "Provider policies:",
+        ...config.providerPolicies.map((p) => {
+          const headroom = p.mode === "throttle" ? ` (headroom ${p.headroomPct}%)` : "";
+          return `- ${p.label} [${p.provider}:${p.profileName}]: ${POLICY_MODE_LABELS[p.mode]}${headroom}${p.notes ? ` — ${p.notes}` : ""}`;
+        }),
+      ]
+    : [];
   return [
     "Strategy Bullseye monitor policy:",
     `ACTIVE_AGENTS_TARGET=${config.activeAgentsTarget}, BACKLOG_FLOOR=${config.backlogFloor}, MAX_NEW_STARTS_PER_CYCLE=${config.maxNewStartsPerCycle}, REFILL_FOCUS=${deriveRefillFocus(config.segments)}.`,
@@ -133,6 +188,7 @@ function makeAgentBrief(config: StrategyConfig, issues: IssueWithStatus[]) {
       const provider = segment.provider ? `, provider ${segment.provider}` : "";
       return `${index + 1}. ${segment.label} (${KIND_LABELS[segment.kind]}, weight ${segment.weight}/5${provider}): ${segment.description} Current matching tickets: ${matches}.`;
     }),
+    ...policyLines,
   ].join("\n");
 }
 
@@ -405,6 +461,33 @@ export function StrategyTargetsView({ columns, projectId, onIssueClick, searchQu
     });
   }
 
+  function addProviderPolicy() {
+    const id = `policy-${Date.now()}`;
+    setConfigDirty((prev) => ({
+      ...prev,
+      providerPolicies: [
+        ...prev.providerPolicies,
+        { id, provider: "claude", profileName: "", label: "Claude: Default", mode: "throttle", headroomPct: 20, notes: "" },
+      ],
+    }));
+  }
+
+  function updateProviderPolicy(id: string, patch: Partial<ProviderProfilePolicy>) {
+    setConfigDirty((prev) => ({
+      ...prev,
+      providerPolicies: prev.providerPolicies.map((p) =>
+        p.id === id ? { ...p, ...patch } : p,
+      ),
+    }));
+  }
+
+  function removeProviderPolicy(id: string) {
+    setConfigDirty((prev) => ({
+      ...prev,
+      providerPolicies: prev.providerPolicies.filter((p) => p.id !== id),
+    }));
+  }
+
   return (
     <div className="flex-1 min-h-0 overflow-auto px-4 pb-6">
       <div className="mx-auto grid max-w-7xl grid-cols-1 gap-4 pt-3 xl:grid-cols-[minmax(360px,1fr)_minmax(520px,1.35fr)_minmax(320px,0.9fr)]">
@@ -552,6 +635,107 @@ export function StrategyTargetsView({ columns, projectId, onIssueClick, searchQu
               </div>
             </div>
           )}
+
+          <div className="rounded-lg border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-900">
+            <div className="mb-2 flex items-center justify-between gap-3">
+              <div>
+                <h2 className="text-sm font-semibold text-gray-800 dark:text-gray-100">Provider policies</h2>
+                <p className="text-xs text-gray-500 dark:text-gray-400">Define rate-limit strategy per provider profile. Steers which harness the orchestrator uses for new workspaces.</p>
+              </div>
+              <button type="button" onClick={addProviderPolicy} className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-gray-200 bg-white text-gray-600 shadow-sm transition-colors hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-800" title="Add provider policy">
+                <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.3}><path strokeLinecap="round" strokeLinejoin="round" d="M12 5v14M5 12h14" /></svg>
+              </button>
+            </div>
+            {config.providerPolicies.length === 0 ? (
+              <p className="text-xs text-gray-400 dark:text-gray-500 italic">No policies — the globally-selected provider is always used.</p>
+            ) : (
+              <div className="space-y-3">
+                {config.providerPolicies.map((policy) => (
+                  <div key={policy.id} className="rounded-md border border-gray-100 bg-gray-50 p-3 dark:border-gray-800 dark:bg-gray-950">
+                    <div className="mb-2 flex items-start justify-between gap-2">
+                      <div className="min-w-0 flex-1 space-y-2">
+                        <div className="grid grid-cols-2 gap-2">
+                          <label className="block">
+                            <span className="mb-1 block text-[11px] font-medium text-gray-500 dark:text-gray-400">Provider</span>
+                            <select
+                              value={policy.provider}
+                              onChange={(event) => updateProviderPolicy(policy.id, { provider: event.target.value as "claude" | "codex" | "copilot" })}
+                              className="w-full rounded-md border border-gray-200 bg-white px-2 py-1 text-xs text-gray-800 outline-none focus:border-brand-400 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+                            >
+                              <option value="claude">Claude</option>
+                              <option value="codex">Codex</option>
+                              <option value="copilot">Copilot</option>
+                            </select>
+                          </label>
+                          <label className="block">
+                            <span className="mb-1 block text-[11px] font-medium text-gray-500 dark:text-gray-400">Profile name</span>
+                            <input
+                              value={policy.profileName}
+                              onChange={(event) => updateProviderPolicy(policy.id, { profileName: event.target.value })}
+                              placeholder="default"
+                              className="w-full rounded-md border border-gray-200 bg-white px-2 py-1 text-xs text-gray-800 outline-none focus:border-brand-400 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+                            />
+                          </label>
+                        </div>
+                        <label className="block">
+                          <span className="mb-1 block text-[11px] font-medium text-gray-500 dark:text-gray-400">Display label</span>
+                          <input
+                            value={policy.label}
+                            onChange={(event) => updateProviderPolicy(policy.id, { label: event.target.value })}
+                            placeholder="e.g. Claude (andrena gateway)"
+                            className="w-full rounded-md border border-gray-200 bg-white px-2 py-1 text-xs text-gray-800 outline-none focus:border-brand-400 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+                          />
+                        </label>
+                        <label className="block">
+                          <span className="mb-1 block text-[11px] font-medium text-gray-500 dark:text-gray-400">Mode</span>
+                          <select
+                            value={policy.mode}
+                            onChange={(event) => updateProviderPolicy(policy.id, { mode: event.target.value as ProviderPolicyMode })}
+                            className="w-full rounded-md border border-gray-200 bg-white px-2 py-1 text-xs text-gray-800 outline-none focus:border-brand-400 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+                          >
+                            <option value="fill">Fill — keep busy at all times</option>
+                            <option value="throttle">Throttle — main work, preserve headroom</option>
+                            <option value="fallback-only">Fallback only — last resort / explicit</option>
+                          </select>
+                          <span className="mt-1 block text-[10px] text-gray-400 dark:text-gray-500">{POLICY_MODE_DESCRIPTIONS[policy.mode]}</span>
+                        </label>
+                        {policy.mode === "throttle" && (
+                          <label className="block">
+                            <span className="mb-1 block text-[11px] font-medium text-gray-500 dark:text-gray-400">Headroom {policy.headroomPct}%</span>
+                            <input
+                              type="range" min="0" max="80" step="5"
+                              value={policy.headroomPct}
+                              onChange={(event) => updateProviderPolicy(policy.id, { headroomPct: Number(event.target.value) })}
+                              className="w-full accent-brand-600"
+                            />
+                            <span className="text-[10px] text-gray-400 dark:text-gray-500">Leave {policy.headroomPct}% of the rate-limit window unused (e.g. for other projects).</span>
+                          </label>
+                        )}
+                        <label className="block">
+                          <span className="mb-1 block text-[11px] font-medium text-gray-500 dark:text-gray-400">Notes (optional)</span>
+                          <input
+                            value={policy.notes}
+                            onChange={(event) => updateProviderPolicy(policy.id, { notes: event.target.value })}
+                            placeholder="e.g. 5h/week plan, resets Monday"
+                            className="w-full rounded-md border border-gray-200 bg-white px-2 py-1 text-xs text-gray-800 outline-none focus:border-brand-400 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+                          />
+                        </label>
+                      </div>
+                      <button type="button" onClick={() => removeProviderPolicy(policy.id)} className="mt-1 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-gray-400 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950" title="Remove policy">
+                        <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+                      </button>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className={`inline-block rounded-full px-2 py-0.5 text-[10px] font-semibold ${policy.mode === "fill" ? "bg-green-50 text-green-700 dark:bg-green-950 dark:text-green-300" : policy.mode === "throttle" ? "bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-300" : "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400"}`}>
+                        {POLICY_MODE_LABELS[policy.mode]}
+                      </span>
+                      <span className="text-[11px] text-gray-500 dark:text-gray-400">{policy.provider}{policy.profileName ? `:${policy.profileName}` : ""}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
 
           <div className="rounded-lg border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-900">
             <div className="mb-2 flex items-center justify-between gap-3">
