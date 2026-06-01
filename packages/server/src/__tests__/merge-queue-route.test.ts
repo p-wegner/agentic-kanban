@@ -104,4 +104,16 @@ describe("merge-queue route", () => {
 
     expect(res.status).toBe(400);
   });
+
+  it("POST /api/merge-queue/preview/:id returns 500 when computePlan throws", async () => {
+    mockComputePlan.mockRejectedValue(new Error("db connection failed"));
+
+    const app = makeApp();
+    const res = await app.request("/api/merge-queue/preview/ws-err", { method: "POST" });
+
+    expect(res.status).toBe(500);
+    const body = await res.json();
+    expect(body.ok).toBe(false);
+    expect(body.error).toContain("db connection failed");
+  });
 });
