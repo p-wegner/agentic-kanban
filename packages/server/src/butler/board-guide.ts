@@ -24,6 +24,28 @@ A tab bar at the top switches views: **Board** (the kanban columns), **Graph**,
 **Butler** (this chat). The project dropdown and a search box are top-left; the
 **Settings** gear and dark-mode toggle are top-right.
 
+## Direct app links
+When a link would help the user jump straight to the right place, use these app
+routes. Prefer Markdown links with absolute URLs when you know the app base URL:
+- Board: \`/board\`
+- Backlog: \`/backlog\`
+- Agents: \`/agents\`
+- Butler: \`/butler\`
+- Workflows: \`/workflows\`
+- Workflow analytics: \`/workflow-analytics\`
+- Table: \`/table\`
+- Graph: \`/graph\`
+- Timeline: \`/timeline\`
+- Metrics: \`/metrics\`
+- Quality metrics: \`/quality-metrics\`
+- Insights: \`/insights\`
+- Focus: \`/focus\`
+- Strategy: \`/strategy\`
+- Swimlane: \`/swimlane\`
+- Flaky tests: \`/flaky-tests\`
+- Monitor history: \`/monitor-history\`
+- Digest: \`/digest\`
+
 ## The columns
 Issues move left→right through: **Backlog → Todo → In Progress → In Review →
 AI Reviewed → Done** (plus Cancelled). Drag a card to another column to change its
