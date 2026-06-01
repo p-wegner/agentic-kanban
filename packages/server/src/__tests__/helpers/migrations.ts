@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -5,74 +6,22 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 export const MIGRATIONS_DIR = resolve(__dirname, "../../../../shared/drizzle");
 
-export const MIGRATION_FILES = [
-  "0000_flawless_trauma.sql",
-  "0001_magical_johnny_storm.sql",
-  "0002_bent_may_parker.sql",
-  "0003_tough_lightspeed.sql",
-  "0004_boring_wind_dancer.sql",
-  "0005_silky_frog_thor.sql",
-  "0006_wide_ogun.sql",
-  "0007_diff_comments.sql",
-  "0008_direct_workspace.sql",
-  "0009_requires_review.sql",
-  "0010_session_messages_cascade.sql",
-  "0011_timestamps.sql",
-  "0012_session_stats.sql",
-  "0013_plan_mode.sql",
-  "0014_issue_dependencies.sql",
-  "0015_ai_reviewed_status.sql",
-  "0016_skip_auto_review.sql",
-  "0017_agent_config.sql",
-  "0018_agent_skills.sql",
-  "0019_workspace_skill.sql",
-  "0023_dependency_types.sql",
-  "0020_setup_script.sql",
-  "0021_project_skills.sql",
-  "0022_teardown_script.sql",
-  "0024_setup_enabled.sql",
-  "0025_provider_session_id.sql",
-  "0026_ready_for_merge.sql",
-  "0027_estimate_field.sql",
-  "0028_perf_indexes_conflict_cache.sql",
-  "0029_issue_artifacts.sql",
-  "0030_thorough_review.sql",
-  "0031_scheduled_runs.sql",
-  "0032_diff_stat_cache.sql",
-  "0033_backlog_status.sql",
-  "0034_session_pid.sql",
-  "0035_session_trigger.sql",
-  "0036_scheduled_runs_cron.sql",
-  "0037_workspace_provider.sql",
-  "0038_pending_plan_path.sql",
-  "0039_nullable_default_branch.sql",
-  "0040_direct_workspace_base_commit.sql",
-  "0041_builtin_tags.sql",
-  "0042_issue_type.sql",
-  "0043_missing_indexes.sql",
-  "0044_diff_comments_workspace_idx.sql",
-  "0045_workspace_model.sql",
-  "0046_issue_due_date.sql",
-  "0047_workflow_graphs.sql",
-  "0048_workflow_fork.sql",
-  "0049_workspace_scorecard.sql",
-  "0050_tdd_mode.sql",
-  "0051_test_runs.sql",
-  "0052_failure_patterns.sql",
-  "0053_flaky_test_classifier.sql",
-  "0054_touched_files.sql",
-  "0055_context_primer.sql",
-  "0056_showdowns.sql",
-  "0057_codemod_type.sql",
-  "0058_board_health_events.sql",
-  "0059_issue_comments.sql",
-  "0060_session_skill.sql",
-  "0061_workspace_merged_at.sql",
-  "0062_workspace_code_metrics.sql",
-  "0063_workflow_edge_loop_flag.sql",
-  "0064_quality_metrics.sql",
-  "0065_project_script_shortcuts.sql",
-  "0066_workspace_setup_status.sql",
-  "0067_project_script_shortcut_details.sql",
-  "0068_scheduled_run_history.sql",
-];
+interface JournalEntry { tag: string }
+
+/**
+ * Migration tags in journal apply-order — NOT lexical (e.g. 0023 runs before 0020).
+ * Read from the drizzle journal so this never goes stale as migrations are added
+ * (the old hardcoded list froze at 0068 and broke the MCP integration suite).
+ */
+export function migrationFilesInOrder(): string[] {
+  const journal = JSON.parse(
+    readFileSync(resolve(MIGRATIONS_DIR, "meta/_journal.json"), "utf-8"),
+  ) as { entries: JournalEntry[] };
+  return journal.entries.map((e) => `${e.tag}.sql`);
+}
+
+/**
+ * All migration SQL files in journal apply-order.
+ * Computed once at import time from the drizzle journal — the canonical source.
+ */
+export const MIGRATION_FILES: string[] = migrationFilesInOrder();
