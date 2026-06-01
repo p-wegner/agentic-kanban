@@ -22,6 +22,7 @@ import {
   buildTransitionBlock,
 } from "@agentic-kanban/shared/lib/workflow-engine";
 import { resolveAgentSettings, toExecutorProvider } from "./agent-settings.service.js";
+import { parseStrategyBullseyeConfig, selectProviderFromStrategy } from "./strategy-objective.service.js";
 import { emitButlerSystemEvent } from "./butler-event-feed.js";
 import {
   moveIssueToInProgress,
@@ -304,7 +305,10 @@ export function createWorkspaceCrudService(deps: {
     return null;
   }
 
-  async function buildAgentConfig(input: Pick<CreateWorkspaceInput, "profile" | "claudeProfile" | "model">): Promise<{
+  async function buildAgentConfig(
+    input: Pick<CreateWorkspaceInput, "profile" | "claudeProfile" | "model">,
+    projectId?: string,
+  ): Promise<{
     agentCommand: string | undefined;
     agentArgs: string | undefined;
     claudeProfile: string | undefined;
@@ -333,6 +337,30 @@ export function createWorkspaceCrudService(deps: {
     } else if (legacyProfileOverride) {
       prefMap.set("claude_profile", legacyProfileOverride);
       prefMap.set("provider", "claude");
+    } else if (projectId) {
+      // No explicit profile — consult the project's strategy config for provider policy.
+      const strategyRaw = prefMap.get(`board_strategy_${projectId}`);
+      if (strategyRaw) {
+        try {
+          const strategyConfig = parseStrategyBullseyeConfig(strategyRaw);
+          const selected = selectProviderFromStrategy(strategyConfig);
+          if (selected) {
+            if (selected.provider === "codex") {
+              if (selected.profileName) prefMap.set("codex_profile", selected.profileName);
+              prefMap.set("provider", "codex");
+            } else if (selected.provider === "copilot") {
+              if (selected.profileName) prefMap.set("copilot_profile", selected.profileName);
+              prefMap.set("provider", "copilot");
+            } else {
+              if (selected.profileName) prefMap.set("claude_profile", selected.profileName);
+              prefMap.set("provider", "claude");
+            }
+            console.log(`[workspaces] strategy provider selection: ${selected.provider}:${selected.profileName} (mode=${selected.policy.mode})`);
+          }
+        } catch {
+          /* non-fatal: fall through to global default */
+        }
+      }
     }
 
     const { agentCommand, agentArgs, claudeProfile: resolvedProfile, profile: resolvedProfileSelection, provider, permissionPromptTool } = resolveAgentSettings(prefMap);
@@ -646,7 +674,7 @@ exit 1
         ? await resolveSkillFile(effectiveSkillId, effectiveDiskSkill, worktreePath, project.repoPath)
         : null;
 
-      const agentConfig = await buildAgentConfig(input);
+      const agentConfig = await buildAgentConfig(input, issue.projectId);
       claudeProfile = agentConfig.claudeProfile;
       agentCommand = agentConfig.agentCommand;
       resolvedProvider = agentConfig.resolvedProvider;
