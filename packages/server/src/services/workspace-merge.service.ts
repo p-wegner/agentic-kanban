@@ -28,6 +28,7 @@ import { autoStartFollowups } from "./followup-workspace.service.js";
 import { autoStartUnblockedDependencyIssue } from "./dependency-auto-chain.service.js";
 import { loadAgentSettings, toExecutorProvider } from "./agent-settings.service.js";
 import { computeWorkspaceCodeMetrics } from "./workspace-code-metrics.service.js";
+import { generateAndPersistGithubHandoffDraft } from "./github-handoff-draft.service.js";
 import {
   WorkspaceError,
   applyWorkspaceAgentSelection,
@@ -325,10 +326,24 @@ export function createWorkspaceMergeService(deps: {
     try {
       if (preMergeHead) {
         const changedFiles = await gitService.getChangedFilesBetween(repoPath, preMergeHead, "HEAD");
+        const commits = typeof gitService.getCommitSummariesBetween === "function"
+          ? await gitService.getCommitSummariesBetween(repoPath, preMergeHead, "HEAD")
+          : [];
+        await generateAndPersistGithubHandoffDraft({
+          workspaceId,
+          issueId,
+          database,
+          repoPath,
+          fromRef: preMergeHead,
+          toRef: "HEAD",
+          changedFiles,
+          commits,
+          gitService,
+        });
         await rebuildSharedIfChanged(repoPath, changedFiles);
       }
     } catch (err) {
-      console.warn("[workspace-merge] post-merge shared rebuild failed:", err);
+      console.warn("[workspace-merge] post-merge draft/rebuild failed:", err);
     }
 
     try {

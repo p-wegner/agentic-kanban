@@ -6,6 +6,7 @@ import { createWorkspaceDiffService } from "./workspace-diff.service.js";
 import { createWorkspaceMergeService } from "./workspace-merge.service.js";
 import { createWorkspaceSessionService } from "./workspace-session.service.js";
 import { createWorkspaceCommentService } from "./workspace-comments.service.js";
+import { generateAndPersistGithubHandoffDraft, getLatestGithubHandoffDraft } from "./github-handoff-draft.service.js";
 import type { GitService } from "./workspace-internals.js";
 
 export {
@@ -72,5 +73,14 @@ export function createWorkspaceService(deps: {
     createComment: comments.createComment,
     updateComment: comments.updateComment,
     deleteComment: comments.deleteComment,
+    generateGithubHandoffDraft: (workspaceId: string) => generateAndPersistGithubHandoffDraft({
+      workspaceId,
+      database: deps.database,
+      gitService: deps.gitService,
+    }),
+    getLatestGithubHandoffDraft: (workspaceId: string) => getLatestGithubHandoffDraft({
+      workspaceId,
+      database: deps.database,
+    }),
   };
 }
