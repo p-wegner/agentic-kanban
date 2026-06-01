@@ -9,6 +9,13 @@ describe("resolveRuntimeServerPort", () => {
     })).toBe(3222);
   });
 
+  it("prefers KANBAN_SERVER_PORT over inherited PORT fallbacks", () => {
+    expect(resolveRuntimeServerPort({
+      KANBAN_SERVER_PORT: "3222",
+      PORT: "3001",
+    })).toBe(3222);
+  });
+
   it("prefers the explicit worktree server port over default board-port fallbacks", () => {
     expect(resolveRuntimeServerPort({
       KANBAN_WORKTREE_SERVER_PORT: "3222",
@@ -16,6 +23,13 @@ describe("resolveRuntimeServerPort", () => {
       KANBAN_SERVER_PORT: "3001",
       SERVER_PORT: "3001",
       PORT: "3001",
+    })).toBe(3222);
+  });
+
+  it("skips invalid port values instead of masking lower-precedence fallbacks", () => {
+    expect(resolveRuntimeServerPort({
+      KANBAN_WORKTREE_SERVER_PORT: "not-a-port",
+      KANBAN_SERVER_PORT: "3222",
     })).toBe(3222);
   });
 
