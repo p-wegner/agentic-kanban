@@ -470,6 +470,13 @@
       "when": 1748764527064,
       "tag": "0066_workspace_setup_status",
       "breakpoints": true
+    },
+    {
+      "idx": 67,
+      "version": "6",
+      "when": 1748764527065,
+      "tag": "0067_project_script_shortcut_details",
+      "breakpoints": true
     }
   ]
 }

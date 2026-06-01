@@ -82,30 +82,35 @@ export function ProjectScriptsMenu({ projectId }: ProjectScriptsMenuProps) {
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
+      function processFrame(frame: string) {
+        const line = frame.split("\n").find((entry) => entry.startsWith("data: "));
+        if (!line) return;
+        const event = JSON.parse(line.slice(6));
+        if (event.type === "start") {
+          setRunState((state) => state && { ...state, startedAt: event.startedAt });
+        } else if (event.type === "stdout" || event.type === "stderr") {
+          setRunState((state) => state && { ...state, output: state.output + event.data });
+        } else if (event.type === "exit") {
+          setRunState((state) => state && {
+            ...state,
+            status: event.status,
+            exitCode: event.exitCode,
+            endedAt: event.endedAt,
+          });
+        }
+      }
       while (true) {
         const { done, value } = await reader.read();
-        if (done) break;
+        if (done) {
+          buffer += decoder.decode();
+          break;
+        }
         buffer += decoder.decode(value, { stream: true });
         const frames = buffer.split("\n\n");
         buffer = frames.pop() ?? "";
-        for (const frame of frames) {
-          const line = frame.split("\n").find((entry) => entry.startsWith("data: "));
-          if (!line) continue;
-          const event = JSON.parse(line.slice(6));
-          if (event.type === "start") {
-            setRunState((state) => state && { ...state, startedAt: event.startedAt });
-          } else if (event.type === "stdout" || event.type === "stderr") {
-            setRunState((state) => state && { ...state, output: state.output + event.data });
-          } else if (event.type === "exit") {
-            setRunState((state) => state && {
-              ...state,
-              status: event.status,
-              exitCode: event.exitCode,
-              endedAt: event.endedAt,
-            });
-          }
-        }
+        for (const frame of frames) processFrame(frame);
       }
+      for (const frame of buffer.split("\n\n").filter(Boolean)) processFrame(frame);
       await refreshScripts();
     } catch (err) {
       const message = err instanceof Error ? err.message : "Script run failed";
@@ -159,6 +164,9 @@ export function ProjectScriptsMenu({ projectId }: ProjectScriptsMenuProps) {
                   <span className="text-[10px] text-gray-400 dark:text-gray-500 shrink-0">{scriptStatusLabel(script)}</span>
                 </div>
                 <div className="text-xs font-mono text-gray-500 dark:text-gray-400 truncate mt-0.5">{script.command}</div>
+                {script.description && (
+                  <div className="text-xs text-gray-400 dark:text-gray-500 truncate mt-0.5">{script.description}</div>
+                )}
               </button>
             ))}
           </div>

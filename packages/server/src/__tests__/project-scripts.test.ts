@@ -1,18 +1,31 @@
 import { describe, expect, it } from "vitest";
 import { randomUUID } from "node:crypto";
-import { mkdirSync, rmSync } from "node:fs";
-import { join } from "node:path";
+import { mkdirSync, readFileSync, rmSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
+import { createClient } from "@libsql/client";
 import * as schema from "@agentic-kanban/shared/schema";
 import { createRoutes } from "../routes/index.js";
 import { createTestApp as _createTestApp } from "./helpers/test-app.js";
 import { createMockSessionManager } from "./helpers/mocks.js";
 import type { TestDb } from "./helpers/test-db.js";
+import { MIGRATION_FILES, MIGRATIONS_DIR } from "./helpers/migrations.js";
 
 function createTestApp() {
   return _createTestApp((app, db) => {
     app.route("/api", createRoutes(db, () => createMockSessionManager()));
   });
+}
+
+async function applyMigrationFile(client: ReturnType<typeof createClient>, file: string): Promise<void> {
+  const sql = readFileSync(resolve(MIGRATIONS_DIR, file), "utf-8");
+  const statements = sql
+    .split("--> statement-breakpoint")
+    .map((statement) => statement.trim())
+    .filter(Boolean);
+  for (const statement of statements) {
+    await client.execute(statement);
+  }
 }
 
 async function createProject(database: TestDb) {
@@ -33,6 +46,28 @@ async function createProject(database: TestDb) {
 }
 
 describe("Project script shortcuts API", () => {
+  it("migrates existing shortcut working directories to custom cwd mode", async () => {
+    const client = createClient({ url: ":memory:" });
+    for (const file of MIGRATION_FILES.filter((name) => name !== "0067_project_script_shortcut_details.sql")) {
+      await applyMigrationFile(client, file);
+    }
+
+    const now = new Date().toISOString();
+    await client.execute({
+      sql: "INSERT INTO projects (id, name, repo_path, repo_name, default_branch, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      args: ["project-1", "Project", "/repo", "repo", "main", now, now],
+    });
+    await client.execute({
+      sql: "INSERT INTO project_script_shortcuts (id, project_id, name, command, working_dir, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+      args: ["script-1", "project-1", "Build", "pnpm build", "packages/server", 0, now, now],
+    });
+
+    await applyMigrationFile(client, "0067_project_script_shortcut_details.sql");
+
+    const row = await client.execute("SELECT cwd_mode FROM project_script_shortcuts WHERE id = 'script-1'");
+    expect(row.rows[0]?.cwd_mode).toBe("custom");
+  });
+
   it("creates, lists, updates, and deletes shortcuts", async () => {
     const { app, db } = createTestApp();
     const project = await createProject(db);
@@ -42,13 +77,17 @@ describe("Project script shortcuts API", () => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name: "Build",
+          description: "Compile server package",
           command: "pnpm build",
+          cwdMode: "custom",
           workingDir: "packages/server",
         }),
       });
       expect(createRes.status).toBe(201);
       const created = await createRes.json() as any;
       expect(created.name).toBe("Build");
+      expect(created.description).toBe("Compile server package");
+      expect(created.cwdMode).toBe("custom");
       expect(created.workingDir).toBe("packages/server");
       expect(created.lastRun).toBeNull();
 
@@ -61,11 +100,13 @@ describe("Project script shortcuts API", () => {
       const updateRes = await app.request(`/api/projects/${project.projectId}/scripts/${created.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: "Test Mine", command: "pnpm test:mine", workingDir: null }),
+        body: JSON.stringify({ name: "Test Mine", description: null, command: "pnpm test:mine", cwdMode: "project", workingDir: null }),
       });
       expect(updateRes.status).toBe(200);
       const updated = await updateRes.json() as any;
       expect(updated.name).toBe("Test Mine");
+      expect(updated.description).toBeNull();
+      expect(updated.cwdMode).toBe("project");
       expect(updated.workingDir).toBeNull();
 
       const deleteRes = await app.request(`/api/projects/${project.projectId}/scripts/${created.id}`, {
@@ -98,6 +139,13 @@ describe("Project script shortcuts API", () => {
       expect(escapingDir.status).toBe(400);
       const body = await escapingDir.json() as any;
       expect(body.error).toContain("inside the project root");
+
+      const missingCustomDir = await app.request(`/api/projects/${project.projectId}/scripts`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "Custom", command: "pnpm build", cwdMode: "custom" }),
+      });
+      expect(missingCustomDir.status).toBe(400);
     } finally {
       project.cleanup();
     }
