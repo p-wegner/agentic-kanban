@@ -54,7 +54,7 @@ kill "$(cat scripts/board-monitor/loop.pid)"
 > with no restart**. This is the single place to steer the loop's pace. Only `loop.sh`'s own env
 > knobs (`MONITOR_SLEEP` etc.) are read once at start and still require a restart.
 
-**Env knobs:** `MONITOR_SLEEP` (gap between runs, default 300s) · `MONITOR_MAX_ITERS` (default 500)
+**Env knobs:** `MONITOR_SLEEP` (gap between runs, default 1800s) · `MONITOR_MAX_ITERS` (default 500)
 · `MONITOR_ITER_TIMEOUT` (per-iteration cap, default 1800s) · `MONITOR_STATE_KEEP` (memory lines
 kept, default 40).
 
