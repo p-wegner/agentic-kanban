@@ -118,6 +118,7 @@ When a test in the table below fails and you haven't touched the relevant code, 
 ### Unit testing
 - **Run vitest from the WORKTREE, not the main checkout** — new/changed test files exist only on your branch in the worktree. Running `pnpm exec vitest run src/__tests__/foo.test.ts` from `C:\andrena\agentic-kanban` (the main checkout) yields a misleading **`No test files found, exiting with code 1`** — the file simply isn't there. This is a directory mismatch, NOT a broken or missing test. (Contrast: `pnpm cli --` must run from the *main* checkout — opposite rule. Don't conflate them.) `cd <worktree>\packages\server` first.
 - **`--related` is BROKEN in vitest 4** — `CACError: Unknown option '--related'`. Do not use it.
+- **Board endpoint regressions usually belong in `packages/server/src/__tests__/api.test.ts`** - it runs in-process from the worktree and avoids Playwright/dev-server/node_modules setup churn. Use Playwright API E2E only when browser/client wiring or a real running server is the behavior under test.
 - **For a specific source file**: use the `vitest related` subcommand (from inside the package dir):
   ```
   cd packages/server
