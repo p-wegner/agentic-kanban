@@ -1,54 +1,67 @@
-import { test, expect, type APIRequestContext } from "@playwright/test";
+import { test, expect, type APIRequestContext, type Page } from "@playwright/test";
+import { getE2EProjectId } from "../helpers/e2e-project.js";
 import { SERVER_URL } from "../helpers/port.js";
 
-// Ensure the board has an active project so the All Workspaces panel can render.
-// The active project may change between test runs (other test files modify it).
 async function ensureProjectActive(request: APIRequestContext): Promise<string> {
-  const res = await request.get(`${SERVER_URL}/api/projects`);
-  expect(res.ok(), `GET /api/projects failed with ${res.status()}`).toBe(true);
-  const projects: { id: string; name: string }[] = await res.json();
-  const proj =
-    projects.find((p) => p.name === "agentic-kanban") ??
-    projects[0];
-  if (!proj) {
-    throw new Error("No project is registered; cannot render All Workspaces panel");
-  }
+  const projectId = await getE2EProjectId(request);
   const prefRes = await request.put(`${SERVER_URL}/api/preferences/active-project`, {
-    data: { projectId: proj.id },
+    data: { projectId },
   });
   expect(prefRes.ok(), `PUT active-project failed with ${prefRes.status()}`).toBe(true);
-  return proj.id;
+  return projectId;
 }
 
-// Wait for the board columns to appear (i.e. a project is loaded and rendered).
-async function waitForBoard(page: import("@playwright/test").Page) {
-  // The board renders column headers as h2 elements when a project is active.
-  // Fall back to checking the header button as a minimum signal the app is loaded.
-  await page.waitForLoadState("networkidle");
-  // Give React time to render the project data
-  const colsVisible = await page
-    .locator("h2")
-    .first()
-    .isVisible({ timeout: 5000 })
-    .catch(() => false);
-  if (!colsVisible) {
-    // Board may show "No projects registered" — wait for the header button at minimum
-    await expect(page.locator('button[title="All Workspaces"]')).toBeVisible({
-      timeout: 5000,
-    });
-  }
+async function waitForBoard(page: Page) {
+  await expect(page.locator('button[title="All Workspaces"]')).toBeVisible({
+    timeout: 5000,
+  });
 }
 
-async function openPanel(page: import("@playwright/test").Page) {
-  await waitForBoard(page);
-  await page.evaluate(() =>
-    window.dispatchEvent(
-      new KeyboardEvent("keydown", { key: "a", bubbles: true }),
-    ),
-  );
+function panelRoot(page: Page) {
+  return page.locator(".fixed.inset-0.z-50").filter({
+    has: page.locator("h2", { hasText: "All Workspaces" }),
+  });
+}
+
+function panelTitle(page: Page) {
+  return panelRoot(page).locator("h2", { hasText: "All Workspaces" });
+}
+
+function panelRows(page: Page) {
+  return panelRoot(page).locator(".overflow-y-auto > .divide-y > div");
+}
+
+async function waitForPanelOpen(page: Page) {
+  await expect(panelRoot(page)).toBeVisible({ timeout: 5000 });
+  await expect(panelTitle(page)).toBeVisible({ timeout: 5000 });
+}
+
+async function waitForPanelClosed(page: Page) {
+  await expect(panelRoot(page)).toBeHidden({ timeout: 3000 });
+}
+
+async function waitForPanelListSettled(page: Page) {
+  const content = panelRoot(page).locator(".overflow-y-auto");
   await expect(
-    page.locator("h2", { hasText: "All Workspaces" }),
+    panelRows(page)
+      .first()
+      .or(content.getByText("No workspaces match the current filter."))
+      .or(content.getByText("No workspaces yet."))
+      .first(),
   ).toBeVisible({ timeout: 5000 });
+}
+
+async function waitForWorkspaceRow(page: Page, title: string) {
+  const row = panelRows(page).filter({ hasText: title }).first();
+  await expect(row).toBeVisible({ timeout: 5000 });
+  return row;
+}
+
+async function openPanel(page: Page) {
+  await waitForBoard(page);
+  await page.keyboard.press("a");
+  await waitForPanelOpen(page);
+  await waitForPanelListSettled(page);
 }
 
 test.describe("All Workspaces Panel — open/close", () => {
@@ -60,44 +73,33 @@ test.describe("All Workspaces Panel — open/close", () => {
 
   test("opens via keyboard shortcut 'a'", async ({ page }) => {
     await openPanel(page);
-    await expect(
-      page.locator("h2", { hasText: "All Workspaces" }),
-    ).toBeVisible();
+    await expect(panelTitle(page)).toBeVisible();
   });
 
   test("opens via header icon button", async ({ page }) => {
     await page.locator('button[title="All Workspaces"]').click();
-    await expect(
-      page.locator("h2", { hasText: "All Workspaces" }),
-    ).toBeVisible({ timeout: 5000 });
+    await waitForPanelOpen(page);
+    await waitForPanelListSettled(page);
   });
 
   test("closes via × button", async ({ page }) => {
     await openPanel(page);
-    await page.locator("button", { hasText: "×" }).click();
-    await expect(
-      page.locator("h2", { hasText: "All Workspaces" }),
-    ).not.toBeVisible({ timeout: 3000 });
+    await panelRoot(page).locator("button", { hasText: "×" }).click();
+    await waitForPanelClosed(page);
   });
 
   test("closes via backdrop click", async ({ page }) => {
     await openPanel(page);
-    await page.mouse.click(10, 10);
-    await expect(
-      page.locator("h2", { hasText: "All Workspaces" }),
-    ).not.toBeVisible({ timeout: 3000 });
+    await panelRoot(page)
+      .locator(":scope > .absolute.inset-0")
+      .click({ position: { x: 10, y: 10 } });
+    await waitForPanelClosed(page);
   });
 
   test("pressing 'a' again toggles panel off", async ({ page }) => {
     await openPanel(page);
-    await page.evaluate(() =>
-      window.dispatchEvent(
-        new KeyboardEvent("keydown", { key: "a", bubbles: true }),
-      ),
-    );
-    await expect(
-      page.locator("h2", { hasText: "All Workspaces" }),
-    ).not.toBeVisible({ timeout: 3000 });
+    await page.keyboard.press("a");
+    await waitForPanelClosed(page);
   });
 });
 
@@ -187,7 +189,7 @@ test.describe("All Workspaces Panel — filters and search", () => {
     await expect
       .poll(
         async () => {
-          const items = await page.locator(".divide-y > div").count();
+          const items = await panelRows(page).count();
           const hasEmpty = await page
             .locator("text=No workspaces match the current filter.")
             .isVisible()
@@ -305,6 +307,7 @@ test.describe("All Workspaces Panel — workspace list content", () => {
     await ensureProjectActive(request);
     await page.goto("/");
     await openPanel(page);
+    await waitForWorkspaceRow(page, firstIssueTitle);
   });
 
   test("shows issue number badges", async ({ page }) => {
@@ -338,15 +341,13 @@ test.describe("All Workspaces Panel — workspace list content", () => {
   });
 
   test("shows issue title in list", async ({ page }) => {
-    await expect(
-      page.locator(`text=${firstIssueTitle}`).first(),
-    ).toBeVisible({ timeout: 5000 });
+    await waitForWorkspaceRow(page, firstIssueTitle);
   });
 
   test("shows branch name in list", async ({ page }) => {
-    await expect(
-      page.locator(`text=${firstBranch}`).first(),
-    ).toBeVisible({ timeout: 5000 });
+    await expect(await waitForWorkspaceRow(page, firstIssueTitle)).toContainText(
+      firstBranch,
+    );
   });
 
   test("text search filters by issue title", async ({ page }) => {
@@ -355,9 +356,7 @@ test.describe("All Workspaces Panel — workspace list content", () => {
       'input[placeholder*="Search by title or branch"]',
     );
     await searchInput.fill(queryWord);
-    await expect(
-      page.locator(`text=${firstIssueTitle}`).first(),
-    ).toBeVisible({ timeout: 3000 });
+    await waitForWorkspaceRow(page, firstIssueTitle);
   });
 
   test("text search filters by branch name", async ({ page }) => {
@@ -366,20 +365,16 @@ test.describe("All Workspaces Panel — workspace list content", () => {
       'input[placeholder*="Search by title or branch"]',
     );
     await searchInput.fill(queryPart);
-    await expect(
-      page.locator(`text=${firstIssueTitle}`).first(),
-    ).toBeVisible({ timeout: 3000 });
+    await waitForWorkspaceRow(page, firstIssueTitle);
   });
 
   test("clicking an issue row opens issue detail and closes panel", async ({
     page,
   }) => {
-    await page.locator(`text=${firstIssueTitle}`).first().click();
+    await (await waitForWorkspaceRow(page, firstIssueTitle)).click();
     await expect(
       page.locator("h2", { hasText: "Issue Details" }),
     ).toBeVisible({ timeout: 5000 });
-    await expect(
-      page.locator("h2", { hasText: "All Workspaces" }),
-    ).not.toBeVisible({ timeout: 3000 });
+    await waitForPanelClosed(page);
   });
 });
