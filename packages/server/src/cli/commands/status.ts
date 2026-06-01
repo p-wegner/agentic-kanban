@@ -20,7 +20,7 @@ Examples:
   $ agentic-kanban status -w -i 10              # auto-refresh every 10s
 
 Status indicators:
-  * = active workspace   o = idle workspace   o = reviewing   . = no workspace
+  * = active/fixing workspace   o = idle workspace   o = reviewing   . = no workspace
 `)
     .action(async (options: { project?: string; all?: boolean; json?: boolean; watch?: boolean; interval?: string }) => {
       try {
@@ -69,7 +69,7 @@ Status indicators:
           for (const issue of status.issues) {
             const num = issue.issueNumber != null ? `#${issue.issueNumber}` : "???";
             const wsStatus = issue.workspace?.status ?? "no workspace";
-            const marker = wsStatus === "active" ? "*" : wsStatus === "idle" ? "o" : wsStatus === "reviewing" ? "o" : ".";
+            const marker = wsStatus === "active" || wsStatus === "fixing" ? "*" : wsStatus === "idle" ? "o" : wsStatus === "reviewing" ? "o" : ".";
             console.log(`  ${marker} ${num.padEnd(4)} ${issue.title}`);
             console.log(`         [${issue.statusName}]  workspace: ${wsStatus}`);
 
