@@ -15,6 +15,7 @@ import {
   type LaunchTemplateOptions,
 } from "../lib/launchTemplates.js";
 import { showToast } from "./Toast.js";
+import { LaunchPreviewPanel } from "./LaunchPreviewPanel.js";
 
 interface Project {
   id: string;
@@ -549,6 +550,20 @@ export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCr
           </select>
         </div>
       )}
+      <LaunchPreviewPanel
+        issueId={issue.id}
+        branch={branchName.trim()}
+        baseBranch={baseBranch.trim()}
+        isDirect={isDirect}
+        requiresReview={requiresReview}
+        planMode={planMode}
+        tddMode={tddMode}
+        skipSetup={skipSetup}
+        skillId={selectedSkillId}
+        selectedProfile={selectedProfile}
+        selectedModel={selectedModel}
+        disabled={isLoading || (!isDirect && !branchName.trim()) || cannotCreateWorktree}
+      />
       <div className="flex gap-2">
         <button
           onClick={handleSubmit}
