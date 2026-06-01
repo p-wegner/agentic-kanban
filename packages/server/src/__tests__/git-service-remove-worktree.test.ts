@@ -13,20 +13,22 @@ vi.mock("node:child_process", () => ({
 import { removeWorktree } from "../services/git.service.js";
 
 describe("git service removeWorktree cleanup fallback", () => {
+  let tempRoot: string;
   let repoPath: string;
   let worktreePath: string;
 
   beforeEach(async () => {
     execFileMock.mockReset();
-    repoPath = await mkdtemp(join(tmpdir(), "kanban-remove-worktree-repo-"));
-    worktreePath = await mkdtemp(join(tmpdir(), "kanban-remove-worktree-leftover-"));
+    tempRoot = await mkdtemp(join(tmpdir(), "kanban-remove-worktree-"));
+    repoPath = join(tempRoot, "repo");
+    worktreePath = join(tempRoot, ".worktrees", "leftover");
+    await mkdir(repoPath, { recursive: true });
     await mkdir(join(worktreePath, "node_modules", ".cache"), { recursive: true });
     await writeFile(join(worktreePath, "node_modules", ".cache", "generated.txt"), "leftover\n");
   });
 
   afterEach(async () => {
-    await rm(repoPath, { recursive: true, force: true });
-    await rm(worktreePath, { recursive: true, force: true });
+    await rm(tempRoot, { recursive: true, force: true });
   });
 
   it("removes a non-empty directory left behind when git worktree remove fails", async () => {
@@ -48,5 +50,22 @@ describe("git service removeWorktree cleanup fallback", () => {
     expect(execFileMock).toHaveBeenCalledTimes(2);
     expect(execFileMock.mock.calls[0][1]).toEqual(["worktree", "remove", "--force", worktreePath]);
     expect(execFileMock.mock.calls[1][1]).toEqual(["worktree", "prune"]);
+  });
+
+  it("does not recursively remove paths outside the managed worktrees directory", async () => {
+    const unsafePath = join(tempRoot, "not-a-managed-worktree");
+    await mkdir(join(unsafePath, "important"), { recursive: true });
+    await writeFile(join(unsafePath, "important", "data.txt"), "keep\n");
+
+    execFileMock.mockImplementation((_cmd, _args, _opts, callback) => {
+      callback(new Error("git worktree remove failed"), "", "fatal: not a working tree");
+    });
+
+    await expect(removeWorktree(repoPath, unsafePath)).rejects.toThrow(
+      "Refusing to recursively remove unsafe worktree path",
+    );
+
+    expect(existsSync(join(unsafePath, "important", "data.txt"))).toBe(true);
+    expect(execFileMock).toHaveBeenCalledTimes(1);
   });
 });

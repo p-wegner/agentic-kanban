@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
-import { join, dirname, sep, resolve, parse } from "node:path";
+import { join, dirname, sep, resolve, parse, relative } from "node:path";
 
 function execGit(args: string[], cwd: string): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -166,8 +166,15 @@ async function removeLeftoverWorktreeDirectory(repoPath: string, worktreePath: s
 
   const repoResolved = resolve(repoPath);
   const targetResolved = resolve(worktreePath);
+  const worktreesRoot = resolve(dirname(repoPath), ".worktrees");
+  const relativeToWorktreesRoot = relative(worktreesRoot, targetResolved);
   const root = parse(targetResolved).root;
-  if (targetResolved === repoResolved || targetResolved === root) {
+  const isInsideWorktreesRoot = relativeToWorktreesRoot !== ""
+    && relativeToWorktreesRoot !== ".."
+    && !relativeToWorktreesRoot.startsWith(`..${sep}`)
+    && parse(relativeToWorktreesRoot).root === "";
+
+  if (targetResolved === repoResolved || targetResolved === root || !isInsideWorktreesRoot) {
     throw new Error(`Refusing to recursively remove unsafe worktree path: ${worktreePath}`);
   }
 
