@@ -62,6 +62,14 @@ export const workspaces = sqliteTable("workspaces", {
   latestSetupDurationMs: integer("latest_setup_duration_ms"),
   latestSetupStdoutTail: text("latest_setup_stdout_tail"),
   latestSetupStderrTail: text("latest_setup_stderr_tail"),
+  latestSymlinkState: text("latest_symlink_state"),
+  latestSymlinkStartedAt: text("latest_symlink_started_at"),
+  latestSymlinkEndedAt: text("latest_symlink_ended_at"),
+  latestSymlinkDirs: text("latest_symlink_dirs"),
+  latestSymlinkLinked: text("latest_symlink_linked"),
+  latestSymlinkSkipped: text("latest_symlink_skipped"),
+  latestSymlinkFailed: text("latest_symlink_failed"),
+  latestSymlinkError: text("latest_symlink_error"),
   /** Context primer assembled by the context-packer at workspace creation. Injected into CLAUDE.local.md. */
   contextPrimer: text("context_primer"),
 }, (table) => ({

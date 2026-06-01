@@ -66,6 +66,11 @@ interface Project {
   repoName: string;
   defaultBranch: string | null;
   remoteUrl: string | null;
+  setupScript?: string | null;
+  setupEnabled?: boolean;
+  setupBlocking?: boolean;
+  symlinkEnabled?: boolean;
+  symlinkDirs?: string | null;
 }
 
 interface Tag {
