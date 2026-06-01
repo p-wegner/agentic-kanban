@@ -265,6 +265,13 @@ export function createWorkspaceMergeService(deps: {
     let result = await gitService.mergeBranch(repoPath, workspace.branch, targetBranch);
     const warnings: MergeWarning[] = [];
 
+    if (workspace.workingDir) {
+      await computeWorkspaceCodeMetrics(id, database).catch((err) => {
+        addRecoverableWarning(warnings, "code-metrics", err);
+        return null;
+      });
+    }
+
     const now = new Date().toISOString();
     await updateWorkspaceStatus(id, "closed", { workingDir: null, closedAt: now, mergedAt: now }, database);
     await moveIssueToDone(id, workspace.issueId, now, database);
@@ -296,13 +303,6 @@ export function createWorkspaceMergeService(deps: {
       }
     } catch (err) {
       addRecoverableWarning(warnings, "openspec-post-merge", err);
-    }
-
-    if (workspace.workingDir) {
-      await computeWorkspaceCodeMetrics(id, database).catch((err) => {
-        addRecoverableWarning(warnings, "code-metrics", err);
-        return null;
-      });
     }
 
     // Kill any agent-spawned processes (e.g. leaked dev.mjs) before removing the worktree.
