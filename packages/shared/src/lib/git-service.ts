@@ -1088,6 +1088,30 @@ export async function getChangedFilesBetween(
   }
 }
 
+/** List commit summaries between two refs, newest first. */
+export async function getCommitSummariesBetween(
+  repoPath: string,
+  fromRef: string,
+  toRef: string,
+): Promise<Array<{ sha: string; message: string }>> {
+  try {
+    const output = await execGit(["log", "--format=%h%x09%s", `${fromRef}..${toRef}`], repoPath);
+    return output
+      .trim()
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((line) => {
+        const tabIdx = line.indexOf("\t");
+        return tabIdx === -1
+          ? { sha: line, message: "" }
+          : { sha: line.slice(0, tabIdx), message: line.slice(tabIdx + 1) };
+      });
+  } catch {
+    return [];
+  }
+}
+
 /** Stage and commit specific paths in repoPath. Returns true when a commit was created. */
 export async function commitPaths(
   repoPath: string,

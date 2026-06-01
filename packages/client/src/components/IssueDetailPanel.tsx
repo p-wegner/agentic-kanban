@@ -49,6 +49,10 @@ function phaseArtifactName(caption: string | null): string {
   return "spec.md";
 }
 
+function isGithubHandoffDraft(artifact: IssueArtifact): boolean {
+  return artifact.type === "text" && artifact.caption === "github-handoff-draft";
+}
+
 interface IssueDetailPanelProps {
   issue: IssueWithStatus;
   statuses: StatusOption[];
@@ -366,6 +370,16 @@ export function IssueDetailPanel({
     setDescription(newDescription);
     setEditing(true);
     showToast("Appended to description — save to persist");
+  }
+
+  async function handleCopyArtifact(content: string) {
+    try {
+      if (!navigator.clipboard) throw new Error("Clipboard API unavailable");
+      await navigator.clipboard.writeText(content);
+      showToast("Draft copied", "success");
+    } catch {
+      window.prompt("Copy draft", content);
+    }
   }
 
   const VISUAL_VERIFY_TAG = "needs-visual-verification";
@@ -1562,6 +1576,41 @@ export function IssueDetailPanel({
               </div>
             )}
           </div>
+
+          {!editing && artifacts.some(isGithubHandoffDraft) && (
+            <div className="pt-2 border-t border-gray-100 dark:border-gray-800">
+              <label className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-2">
+                GitHub drafts
+              </label>
+              <ul className="space-y-2">
+                {artifacts
+                  .filter(isGithubHandoffDraft)
+                  .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+                  .map((artifact) => (
+                    <li
+                      key={artifact.id}
+                      className="border border-gray-200 dark:border-gray-700 rounded px-2.5 py-2 bg-gray-50 dark:bg-gray-800/50"
+                    >
+                      <div className="mb-1 flex items-center gap-2 text-[11px]">
+                        <span className="font-medium px-1.5 py-0.5 rounded bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300">
+                          handoff.md
+                        </span>
+                        <button
+                          onClick={() => handleCopyArtifact(artifact.content)}
+                          className="text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
+                        >
+                          Copy
+                        </button>
+                        <span className="text-gray-400 dark:text-gray-500 ml-auto">{formatRelativeTime(artifact.createdAt)}</span>
+                      </div>
+                      <div className="markdown-body max-h-80 overflow-y-auto text-sm">
+                        <ReactMarkdown>{normalizeMarkdown(artifact.content)}</ReactMarkdown>
+                      </div>
+                    </li>
+                  ))}
+              </ul>
+            </div>
+          )}
 
           {!editing && artifacts.some((artifact) => artifact.type === "text" && artifact.caption?.startsWith("phase-artifact:")) && (
             <div className="pt-2 border-t border-gray-100 dark:border-gray-800">

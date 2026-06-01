@@ -317,6 +317,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
 
   const [latestCommits, setLatestCommits] = useState<Record<string, { sha: string; message: string } | null>>({});
   const [handoffContent, setHandoffContent] = useState<Record<string, string | null>>({});
+  const [githubDrafts, setGithubDrafts] = useState<Record<string, string | null>>({});
   const [retryDecisions, setRetryDecisions] = useState<RetryDecision[]>([]);
   const [planContent, setPlanContent] = useState<Record<string, string | null>>({});
   const [planEditMode, setPlanEditMode] = useState<Record<string, boolean>>({});
@@ -470,6 +471,20 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
         }),
       );
       setHandoffContent(handoffs);
+      const drafts: Record<string, string | null> = {};
+      await Promise.all(
+        data.filter(ws => ws.status === "closed").map(async (ws) => {
+          try {
+            const result = await apiFetch<{ content: string | null }>(
+              `/api/workspaces/${ws.id}/github-handoff-draft`,
+            );
+            drafts[ws.id] = result.content;
+          } catch {
+            drafts[ws.id] = null;
+          }
+        }),
+      );
+      setGithubDrafts(drafts);
       // Fetch plan content for workspaces awaiting plan approval
       const plans: Record<string, string | null> = {};
       await Promise.all(
@@ -816,6 +831,39 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
       showToast("Preview URL copied", "success");
     } catch {
       window.prompt("Copy preview URL", url);
+    }
+  }
+
+  async function handleGenerateGithubDraft(wsId: string) {
+    setActionLoading(true);
+    setError(null);
+    try {
+      const result = await apiFetch<{ content: string }>(`/api/workspaces/${wsId}/github-handoff-draft`, {
+        method: "POST",
+      });
+      setGithubDrafts((prev) => ({ ...prev, [wsId]: result.content }));
+      try {
+        if (!navigator.clipboard) throw new Error("Clipboard API unavailable");
+        await navigator.clipboard.writeText(result.content);
+        showToast("GitHub draft generated and copied", "success");
+      } catch {
+        showToast("GitHub draft generated", "success");
+      }
+      onWorkspaceChange?.();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to generate GitHub draft");
+    } finally {
+      setActionLoading(false);
+    }
+  }
+
+  async function handleCopyGithubDraft(content: string) {
+    try {
+      if (!navigator.clipboard) throw new Error("Clipboard API unavailable");
+      await navigator.clipboard.writeText(content);
+      showToast("GitHub draft copied", "success");
+    } catch {
+      window.prompt("Copy GitHub draft", content);
     }
   }
 
@@ -2463,14 +2511,46 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                     )}
 
                     {!selectedHistoryId && ws.status === "closed" && (
-                      <div className="pt-2 border-t border-gray-200 dark:border-gray-700">
-                        <button
-                          onClick={() => handleDeleteWorkspace(ws.id)}
-                          disabled={actionLoading}
-                          className="text-sm bg-red-600 text-white px-3 py-1.5 rounded hover:bg-red-700 disabled:opacity-50 w-full"
-                        >
-                          Delete
-                        </button>
+                      <div className="pt-2 border-t border-gray-200 dark:border-gray-700 space-y-2">
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => handleGenerateGithubDraft(ws.id)}
+                            disabled={actionLoading}
+                            className="text-sm bg-gray-700 text-white px-3 py-1.5 rounded hover:bg-gray-800 disabled:opacity-50 flex-1"
+                            title="Generate a local GitHub PR or release-note draft and save it as an issue artifact"
+                          >
+                            Generate GitHub Draft
+                          </button>
+                          <button
+                            onClick={() => handleDeleteWorkspace(ws.id)}
+                            disabled={actionLoading}
+                            className="text-sm bg-red-600 text-white px-3 py-1.5 rounded hover:bg-red-700 disabled:opacity-50"
+                          >
+                            Delete
+                          </button>
+                        </div>
+                        {githubDrafts[ws.id] && (
+                          <details className="text-xs">
+                            <summary className="text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide cursor-pointer hover:text-gray-600 dark:hover:text-gray-300 flex items-center gap-2">
+                              <span>GitHub Draft</span>
+                              <button
+                                onClick={(event) => {
+                                  event.preventDefault();
+                                  event.stopPropagation();
+                                  void handleCopyGithubDraft(githubDrafts[ws.id]!);
+                                }}
+                                className="ml-auto text-[10px] text-blue-600 hover:text-blue-700"
+                              >
+                                Copy
+                              </button>
+                            </summary>
+                            <div className="mt-1 bg-gray-50 dark:bg-gray-900/50 border border-gray-200 dark:border-gray-700 rounded p-2 max-h-56 overflow-y-auto">
+                              <div className="prose prose-xs max-w-none text-[11px] leading-relaxed text-gray-700 dark:text-gray-300">
+                                <ReactMarkdown>{githubDrafts[ws.id]!}</ReactMarkdown>
+                              </div>
+                            </div>
+                          </details>
+                        )}
                       </div>
                     )}
                   </div>

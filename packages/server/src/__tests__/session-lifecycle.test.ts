@@ -80,8 +80,12 @@ function okPreflight(): typeof workspaceLaunchPreflight {
 }
 
 /** Flush pending microtasks so fire-and-forget DB writes (`.catch()`) settle. */
-async function flush(): Promise<void> {
-  await new Promise((r) => setTimeout(r, 20));
+async function flush(predicate?: () => boolean): Promise<void> {
+  const deadline = Date.now() + 1000;
+  while (Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 20));
+    if (!predicate || predicate()) return;
+  }
 }
 
 describe("session-lifecycle", () => {
@@ -158,7 +162,7 @@ describe("session-lifecycle", () => {
     expect(onOutput).toBeDefined();
     onOutput!({ type: "exit", exitCode: 0 } as never);
 
-    await flush();
+    await flush(() => onSessionExit.mock.calls.length > 0);
 
     const rows = await db.select().from(sessions).where(eq(sessions.id, sessionId));
     expect(rows[0].status).toBe("completed");
