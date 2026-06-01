@@ -48,7 +48,7 @@ Status indicators:
             return;
           }
 
-          const needsAttention = status.issues.filter((issue) => issue.attention?.reason === "idle-awaiting");
+          const needsAttention = status.issues.filter((issue) => issue.attention?.bucket === "needs_attention");
           const pendingMerge = status.issues.filter((issue) => issue.mergeState?.reason === "auto-merge-in-review");
           if (pendingMerge.length > 0) {
             console.log("  Pending merge");
@@ -66,8 +66,11 @@ Status indicators:
             for (const issue of needsAttention) {
               const num = issue.issueNumber != null ? `#${issue.issueNumber}` : "???";
               const wsStatus = issue.workspace?.status ?? "no workspace";
-              console.log(`    idle-awaiting ${num.padEnd(4)} ${issue.title}`);
+              console.log(`    ${issue.attention?.reason ?? "needs-attention"} ${num.padEnd(4)} ${issue.title}`);
               console.log(`         [${issue.statusName}]  workspace: ${wsStatus}`);
+              if (issue.attention?.label) {
+                console.log(`         reason: ${issue.attention.label}`);
+              }
               if (issue.lastAgentMessage) {
                 const msg = issue.lastAgentMessage.length > 200 ? issue.lastAgentMessage.slice(0, 197) + "..." : issue.lastAgentMessage;
                 console.log(`         last: ${msg.split("\n")[0]}`);

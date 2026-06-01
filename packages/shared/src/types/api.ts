@@ -664,7 +664,7 @@ export interface BoardStatusIssue {
   lastAgentMessage: string | null;
   attention?: {
     bucket: "needs_attention";
-    reason: "idle-awaiting";
+    reason: "idle-awaiting" | "stale-in-review" | "closed-in-review";
     label: string;
   } | null;
   mergeState?: {
