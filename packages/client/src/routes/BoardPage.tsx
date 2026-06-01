@@ -22,6 +22,7 @@ import { BacklogView } from "../components/BacklogView.js";
 import { BoardKanbanView } from "../components/BoardKanbanView.js";
 import { BoardStats } from "../components/BoardStats.js";
 import { BoardToolbar } from "../components/BoardToolbar.js";
+import { SavedBoardViews } from "../components/SavedBoardViews.js";
 import { VIEW_REGISTRY, VIEW_IDS, SHORTCUT_TO_VIEW, type ViewMode } from "../lib/viewRegistry.js";
 import { CreateIssuePanel } from "../components/CreateIssuePanel.js";
 import type { CreateIssueFormState } from "../components/CreateIssueForm.js";
@@ -46,6 +47,7 @@ import { QuickTasksPanel } from "../components/QuickTasksPanel.js";
 import { MergeQueuePanel } from "../components/MergeQueuePanel.js";
 import { CodemodPanel } from "../components/CodemodPanel.js";
 import type { MonitorStatus } from "../components/MonitorPopover.js";
+import type { BoardViewState, SavedViewReference } from "../lib/boardSavedViews.js";
 import type {
   CreateIssueRequest,
   IssueWithStatus,
@@ -95,6 +97,8 @@ export function BoardPage() {
   const [workspaceInitial, setWorkspaceInitial] = useState<{ workspaceId: string; sessionId: string } | null>(null);
   const [workspaceOpenCreate, setWorkspaceOpenCreate] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [statusFilterId, setStatusFilterId] = useState<string | null>(null);
+  const [tagFilterId, setTagFilterId] = useState<string | null>(null);
   const [createdDateFilter, setCreatedDateFilter] = useState<string | null>(null);
   const [showBlocked, setShowBlocked] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
@@ -859,12 +863,67 @@ export function BoardPage() {
     setWorkspaceOpenCreate(true);
   }
 
-  // Filter columns by search query
+  const statusFilter = useMemo(
+    () => columns.find((col) => col.id === statusFilterId) ?? null,
+    [columns, statusFilterId],
+  );
+  const tagFilter = useMemo(
+    () => allTags.find((tag) => tag.id === tagFilterId) ?? null,
+    [allTags, tagFilterId],
+  );
+  const boardViewState: BoardViewState = useMemo(() => ({
+    searchQuery,
+    showBlocked,
+    statusId: statusFilter?.id ?? null,
+    statusName: statusFilter?.name ?? null,
+    tagId: tagFilter?.id ?? null,
+    tagName: tagFilter?.name ?? null,
+    sortMode: "rank",
+    viewMode,
+  }), [searchQuery, showBlocked, statusFilter, tagFilter, viewMode]);
+  const boardStatusOptions = useMemo(
+    () => columns.map((col) => ({ id: col.id, name: col.name })),
+    [columns],
+  );
+  const boardTagOptions = useMemo(
+    () => allTags.map((tag) => ({ id: tag.id, name: tag.name })),
+    [allTags],
+  );
+
+  useEffect(() => {
+    if (statusFilterId && columns.length > 0 && !columns.some((col) => col.id === statusFilterId)) {
+      setStatusFilterId(null);
+    }
+  }, [columns, statusFilterId]);
+
+  useEffect(() => {
+    if (tagFilterId && tagsLoaded && !allTags.some((tag) => tag.id === tagFilterId)) {
+      setTagFilterId(null);
+    }
+  }, [allTags, tagFilterId, tagsLoaded]);
+
+  const applyBoardViewState = useCallback((state: BoardViewState) => {
+    setSearchQuery(state.searchQuery);
+    setShowBlocked(state.showBlocked);
+    setStatusFilterId(state.statusId);
+    setTagFilterId(state.tagId);
+    if (VIEW_IDS.includes(state.viewMode)) {
+      handleViewModeChange(state.viewMode);
+    }
+  }, [handleViewModeChange]);
+
+  // Filter columns by search query and saved-view filters.
   const filteredColumns = useMemo(
     () =>
       columns.map((col) => ({
         ...col,
         issues: col.issues.filter((issue) => {
+          if (statusFilterId && issue.statusId !== statusFilterId) {
+            return false;
+          }
+          if (tagFilterId && !issue.tags?.some((tag) => tag.id === tagFilterId)) {
+            return false;
+          }
           if (showBlocked && !(issue as IssueWithStatus & { isBlocked?: boolean }).isBlocked) {
             return false;
           }
@@ -872,13 +931,14 @@ export function BoardPage() {
             const q = searchQuery.toLowerCase();
             return (
               issue.title.toLowerCase().includes(q) ||
-              (issue.description?.toLowerCase().includes(q) ?? false)
+              (issue.description?.toLowerCase().includes(q) ?? false) ||
+              (issue.tags?.some((tag) => tag.name.toLowerCase().includes(q)) ?? false)
             );
           }
           return true;
         }),
       })),
-    [columns, searchQuery, showBlocked],
+    [columns, searchQuery, showBlocked, statusFilterId, tagFilterId],
   );
 
   // "AI Reviewed" = tickets needing human attention (manual merge).
@@ -933,14 +993,16 @@ export function BoardPage() {
     });
   }, [visibleKanbanIssues, selectedBoardIssueIds.size]);
 
-  async function loadTags() {
-    if (tagsLoaded) return;
+  async function loadTags(): Promise<SavedViewReference[]> {
+    if (tagsLoaded) return allTags;
     try {
       const tags = await apiFetch<Tag[]>("/api/tags");
       setAllTags(tags);
       setTagsLoaded(true);
+      return tags;
     } catch {
       showToast("Failed to load tags", "error");
+      return allTags;
     }
   }
 
@@ -1412,6 +1474,16 @@ export function BoardPage() {
             projectId={activeProjectId}
             showBlocked={showBlocked}
             onToggleBlocked={() => setShowBlocked((v) => !v)}
+          />
+        )}
+        {viewMode !== "butler" && (
+          <SavedBoardViews
+            projectId={activeProjectId}
+            currentState={boardViewState}
+            statuses={boardStatusOptions}
+            tags={boardTagOptions}
+            onApply={applyBoardViewState}
+            onLoadTags={loadTags}
           />
         )}
         <BoardToolbar
