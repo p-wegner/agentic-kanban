@@ -5,7 +5,7 @@ import { parseJsonBody } from "../middleware/parse-body.js";
 import { createRouter } from "../middleware/create-router.js";
 import { wrapAiOperation } from "../middleware/ai-operation.js";
 import { checkIssueOverlap } from "../services/issue-ai.service.js";
-import { listBoardHealthEvents } from "../repositories/board-health-events.repository.js";
+import { listBoardHealthEvents, type BoardHealthEventType } from "../repositories/board-health-events.repository.js";
 import { buildDependencyWavePlan, startNextDependencyWave } from "../services/dependency-wave.service.js";
 import type { BoardEvents } from "../services/board-events.js";
 import type { SessionManager } from "../services/session.manager.js";
@@ -14,6 +14,14 @@ function parseBoardHealthEventsLimit(raw: string | undefined): number {
   const parsed = Number.parseInt(raw ?? "", 10);
   if (!Number.isFinite(parsed)) return 20;
   return Math.min(50, Math.max(1, parsed));
+}
+
+const VALID_EVENT_TYPES: Set<string> = new Set(["cycle_start", "cycle_end", "observation", "action", "error"]);
+
+function parseBoardHealthEventTypes(raw: string | undefined): BoardHealthEventType[] | undefined {
+  if (!raw) return undefined;
+  const types = raw.split(",").map((t) => t.trim()).filter((t) => VALID_EVENT_TYPES.has(t));
+  return types.length > 0 ? (types as BoardHealthEventType[]) : undefined;
 }
 
 function compactBoardHealthEventDetails(raw: string | null): string | null {
@@ -138,7 +146,8 @@ export function createProjectsRoute(database: Database = db, options?: { boardEv
   router.get("/:id/board-health-events", async (c) => {
     const projectId = c.req.param("id");
     const limit = parseBoardHealthEventsLimit(c.req.query("limit"));
-    const events = await listBoardHealthEvents({ projectId, limit }, database);
+    const eventTypes = parseBoardHealthEventTypes(c.req.query("eventType"));
+    const events = await listBoardHealthEvents({ projectId, eventTypes, limit }, database);
     return c.json(events.map((event) => ({
       id: event.id,
       timestamp: event.createdAt,

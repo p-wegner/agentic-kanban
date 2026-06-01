@@ -16,6 +16,7 @@ import { FocusView } from "../components/FocusView.js";
 import { StrategyTargetsView } from "../components/StrategyTargetsView.js";
 import { SwimlaneView } from "../components/SwimlaneView.js";
 import { FlakyTestsPanel } from "../components/FlakyTestsPanel.js";
+import { MonitorCycleHistoryPanel } from "../components/MonitorCycleHistoryPanel.js";
 import { useAgentQuestionsCount } from "../components/AgentQuestionsPanel.js";
 import { BoardErrorBoundary } from "../components/BoardErrorBoundary.js";
 import { BacklogView } from "../components/BacklogView.js";
@@ -1752,6 +1753,11 @@ export function BoardPage() {
         {viewMode === "flaky-tests" && activeProjectId && (
           <BoardErrorBoundary columnName="Flaky Tests">
             <FlakyTestsPanel projectId={activeProjectId} />
+          </BoardErrorBoundary>
+        )}
+        {viewMode === "monitor-history" && activeProjectId && (
+          <BoardErrorBoundary columnName="Monitor History">
+            <MonitorCycleHistoryPanel projectId={activeProjectId} />
           </BoardErrorBoundary>
         )}
         {viewMode === "backlog" && (

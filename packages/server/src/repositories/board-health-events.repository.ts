@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { boardHealthEvents } from "@agentic-kanban/shared/schema";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 
@@ -33,14 +33,19 @@ export async function logBoardHealthEvent(
   return id;
 }
 
-/** Most-recent-first events for a project (optionally a single cycle), capped by limit. */
+/** Most-recent-first events for a project, optionally filtered by cycle or event types, capped by limit. */
 export async function listBoardHealthEvents(
-  opts: { projectId: string; cycleId?: string; limit?: number },
+  opts: { projectId: string; cycleId?: string; eventTypes?: BoardHealthEventType[]; limit?: number },
   database: Database = db,
 ) {
-  const where = opts.cycleId
-    ? and(eq(boardHealthEvents.projectId, opts.projectId), eq(boardHealthEvents.cycleId, opts.cycleId))
-    : eq(boardHealthEvents.projectId, opts.projectId);
+  const conditions = [eq(boardHealthEvents.projectId, opts.projectId)];
+  if (opts.cycleId) {
+    conditions.push(eq(boardHealthEvents.cycleId, opts.cycleId));
+  }
+  if (opts.eventTypes && opts.eventTypes.length > 0) {
+    conditions.push(inArray(boardHealthEvents.eventType, opts.eventTypes));
+  }
+  const where = conditions.length === 1 ? conditions[0] : and(...conditions);
   return database
     .select()
     .from(boardHealthEvents)

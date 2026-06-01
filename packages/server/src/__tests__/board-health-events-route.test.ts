@@ -84,4 +84,111 @@ describe("Board health events API", () => {
     });
     expect(body[1].details).toBe("strategySource: default, totals: 1 fields");
   });
+
+  it("filters events by single eventType", async () => {
+    const { app, db } = createTestApp();
+    const projectId = await createProject(db);
+
+    await db.insert(schema.boardHealthEvents).values([
+      {
+        id: "ev-start",
+        projectId,
+        cycleId: "c1",
+        eventType: "cycle_start",
+        summary: "Cycle started",
+        createdAt: new Date(Date.now() - 3000).toISOString(),
+      },
+      {
+        id: "ev-action",
+        projectId,
+        cycleId: "c1",
+        eventType: "action",
+        summary: "Merged #42",
+        createdAt: new Date(Date.now() - 2000).toISOString(),
+      },
+      {
+        id: "ev-error",
+        projectId,
+        cycleId: "c1",
+        eventType: "error",
+        summary: "Launch failed",
+        createdAt: new Date(Date.now() - 1000).toISOString(),
+      },
+    ]);
+
+    const res = await app.request(`/api/projects/${projectId}/board-health-events?eventType=action`);
+    expect(res.status).toBe(200);
+    const body = await res.json() as Array<{ id: string; type: string }>;
+    expect(body).toHaveLength(1);
+    expect(body[0].id).toBe("ev-action");
+    expect(body[0].type).toBe("action");
+  });
+
+  it("filters events by multiple comma-separated eventTypes", async () => {
+    const { app, db } = createTestApp();
+    const projectId = await createProject(db);
+
+    await db.insert(schema.boardHealthEvents).values([
+      {
+        id: "ev-start",
+        projectId,
+        cycleId: "c1",
+        eventType: "cycle_start",
+        summary: "Cycle started",
+        createdAt: new Date(Date.now() - 3000).toISOString(),
+      },
+      {
+        id: "ev-action",
+        projectId,
+        cycleId: "c1",
+        eventType: "action",
+        summary: "Merged #42",
+        createdAt: new Date(Date.now() - 2000).toISOString(),
+      },
+      {
+        id: "ev-error",
+        projectId,
+        cycleId: "c1",
+        eventType: "error",
+        summary: "Launch failed",
+        createdAt: new Date(Date.now() - 1000).toISOString(),
+      },
+    ]);
+
+    const res = await app.request(`/api/projects/${projectId}/board-health-events?eventType=action,error`);
+    expect(res.status).toBe(200);
+    const body = await res.json() as Array<{ id: string; type: string }>;
+    expect(body).toHaveLength(2);
+    expect(body.map((e) => e.id).sort()).toEqual(["ev-action", "ev-error"]);
+  });
+
+  it("ignores invalid eventType values and returns unfiltered results", async () => {
+    const { app, db } = createTestApp();
+    const projectId = await createProject(db);
+
+    await db.insert(schema.boardHealthEvents).values([
+      {
+        id: "ev-start",
+        projectId,
+        cycleId: "c1",
+        eventType: "cycle_start",
+        summary: "Cycle started",
+        createdAt: new Date(Date.now() - 1000).toISOString(),
+      },
+      {
+        id: "ev-action",
+        projectId,
+        cycleId: "c1",
+        eventType: "action",
+        summary: "Merged #42",
+        createdAt: new Date().toISOString(),
+      },
+    ]);
+
+    const res = await app.request(`/api/projects/${projectId}/board-health-events?eventType=invalid_type`);
+    expect(res.status).toBe(200);
+    const body = await res.json() as Array<{ id: string }>;
+    // Invalid types are ignored → returns all events
+    expect(body).toHaveLength(2);
+  });
 });
