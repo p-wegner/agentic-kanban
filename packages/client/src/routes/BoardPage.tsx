@@ -939,12 +939,12 @@ export function BoardPage() {
     }
   }
 
-  function handleManageWorkspaces(issue: IssueWithStatus, workspaceId?: string) {
+  function handleManageWorkspaces(issue: IssueWithStatus, workspaceId?: string, sessionId = "") {
     setSelectedIssue(null);
     setWorkspaceIssue(issue);
     setWorkspaceOpenCreate(false);
     if (workspaceId) {
-      setWorkspaceInitial({ workspaceId, sessionId: "" });
+      setWorkspaceInitial({ workspaceId, sessionId });
     }
   }
 

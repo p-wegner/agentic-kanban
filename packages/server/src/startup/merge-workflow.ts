@@ -13,6 +13,7 @@ import { killProcessesInDir } from "../services/process-cleanup.js";
 import { runScript } from "../services/script-runner.js";
 import { createSessionManager } from "../services/session.manager.js";
 import { getEffectiveProfile, parseProviderPref } from "./review-helpers.js";
+import { insertIssueComment } from "../repositories/issue-comments.repository.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -58,6 +59,26 @@ export async function tagIfNeedsVisualVerification(repoPath: string, branch: str
 }
 
 export function createAutoMerge({ sessionManager, boardEvents, learningSessionIds }: MergeDeps) {
+  async function recordMergeAttempt(
+    workspace: MergeWorkspace,
+    eventType: "merged" | "conflict",
+    body: string,
+    payload: Record<string, unknown> = {},
+    createdAt = new Date().toISOString(),
+  ) {
+    await insertIssueComment({
+      issueId: workspace.issueId,
+      workspaceId: workspace.id,
+      kind: "merge-attempt",
+      author: "system",
+      body,
+      payload: { eventType, workspaceId: workspace.id, branch: workspace.branch, ...payload },
+      createdAt,
+    }, db).catch((err) => {
+      console.warn("[workflow] failed to record merge timeline event:", err instanceof Error ? err.message : String(err));
+    });
+  }
+
   return async function autoMerge(workspace: MergeWorkspace, projectId: string, issueId: string, doneStatusId: string | null, now: string) {
     try {
       const prefRowsLearning = await db.select().from(preferences);
@@ -131,7 +152,16 @@ export function createAutoMerge({ sessionManager, boardEvents, learningSessionId
               }
 
               const targetBranch = workspace.baseBranch || defaultBranch || "main";
-              await gitService.mergeBranch(repoPath, workspace.branch, targetBranch);
+              const mergeOutput = await gitService.mergeBranch(repoPath, workspace.branch, targetBranch);
+              let mergeCommitSha = "";
+              try { mergeCommitSha = await gitService.revParse(repoPath, "HEAD"); } catch { /* tolerate */ }
+              await recordMergeAttempt(
+                workspace,
+                "merged",
+                `Merged ${workspace.branch} into ${targetBranch}${mergeCommitSha ? ` at ${mergeCommitSha}` : ""}.`,
+                { targetBranch, commitSha: mergeCommitSha || null, mergedAt: now, mergeOutput },
+                now,
+              );
               if (workspace.workingDir) {
                 try { await gitService.removeWorktree(repoPath, workspace.workingDir); } catch {}
               }
@@ -198,6 +228,12 @@ Server: http://localhost:${serverPort}`;
       console.error("[workflow] auto-merge failed:", err);
       boardEvents.broadcast(projectId, "workflow_error");
       const msg = err instanceof Error ? err.message : String(err);
+      await recordMergeAttempt(
+        workspace,
+        "conflict",
+        `Auto-merge failed for ${workspace.branch}: ${msg}`,
+        { error: msg },
+      );
       emitButlerSystemEvent({ projectId, kind: "merge_failed", workspaceId: workspace.id, text: `Auto-merge failed for workspace ${workspace.id} (branch ${workspace.branch}): ${msg.slice(0, 200)}` });
     }
   };

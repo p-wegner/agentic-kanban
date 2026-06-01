@@ -39,8 +39,19 @@ interface IssueComment {
 const COMMENT_KIND_LABELS: Record<string, string> = {
   "preflight-clarification": "Preflight clarification",
   "agent-question": "Agent question",
+  "merge-attempt": "Merge attempt",
   note: "Note",
 };
+
+function mergeAttemptPayload(payload: unknown): { eventType?: string; sessionId?: string; commitSha?: string } {
+  if (!payload || typeof payload !== "object") return {};
+  const data = payload as Record<string, unknown>;
+  return {
+    eventType: typeof data.eventType === "string" ? data.eventType : undefined,
+    sessionId: typeof data.sessionId === "string" ? data.sessionId : undefined,
+    commitSha: typeof data.commitSha === "string" ? data.commitSha : undefined,
+  };
+}
 
 function phaseArtifactName(caption: string | null): string {
   const key = caption?.replace(/^phase-artifact:/, "").toLowerCase();
@@ -206,7 +217,7 @@ interface IssueDetailPanelProps {
   onUpdate: (id: string, data: UpdateIssueRequest) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
   onClose: () => void;
-  onManageWorkspaces: (issue: IssueWithStatus, workspaceId?: string) => void;
+  onManageWorkspaces: (issue: IssueWithStatus, workspaceId?: string, sessionId?: string) => void;
   onStartWorkspace?: (issue: IssueWithStatus) => void;
   onIssueUpdate: (issue: IssueWithStatus) => void;
   onNavigateToIssue?: (issueId: string) => void;
@@ -1791,6 +1802,8 @@ export function IssueDetailPanel({
                           ? "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300"
                           : cmt.kind === "agent-question"
                           ? "bg-brand-50 text-brand-700 dark:bg-brand-900/40 dark:text-brand-300"
+                          : cmt.kind === "merge-attempt"
+                          ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300"
                           : "bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300"
                       }`}>
                         {COMMENT_KIND_LABELS[cmt.kind] ?? cmt.kind}
@@ -1801,6 +1814,27 @@ export function IssueDetailPanel({
                     <div className="markdown-body text-sm">
                       <ReactMarkdown>{normalizeMarkdown(cmt.body)}</ReactMarkdown>
                     </div>
+                    {cmt.kind === "merge-attempt" && (() => {
+                      const payload = mergeAttemptPayload(cmt.payload);
+                      return (
+                        <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px]">
+                          {cmt.workspaceId && (
+                            <button
+                              type="button"
+                              onClick={() => onManageWorkspaces(issue, cmt.workspaceId!, payload.sessionId ?? "")}
+                              className="text-emerald-700 hover:text-emerald-800 dark:text-emerald-300 dark:hover:text-emerald-200 font-medium"
+                            >
+                              {payload.sessionId ? "Open session" : "Open workspace"}
+                            </button>
+                          )}
+                          {payload.commitSha && (
+                            <span className="font-mono text-gray-400 dark:text-gray-500">
+                              {payload.commitSha.slice(0, 12)}
+                            </span>
+                          )}
+                        </div>
+                      );
+                    })()}
                   </li>
                 ))}
               </ul>
