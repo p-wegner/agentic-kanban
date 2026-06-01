@@ -241,6 +241,7 @@ export interface UpdateIssueRequest {
 export interface MainWorkspaceInfo {
   id: string;
   branch: string;
+  workingDir: string | null;
   status: "active" | "reviewing" | "fixing" | "idle" | "awaiting-plan-approval" | "error" | "closed";
   readyForMerge?: boolean;
   planMode?: boolean;

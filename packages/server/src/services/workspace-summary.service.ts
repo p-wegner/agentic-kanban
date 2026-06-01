@@ -36,6 +36,7 @@ export type WorkspaceSummary = {
   main?: {
     id: string;
     branch: string;
+    workingDir: string | null;
     status: "active" | "reviewing" | "fixing" | "idle" | "awaiting-plan-approval" | "error" | "closed";
     claudeProfile: string | null;
     profile?: { provider: ProviderName; name: string } | null;
@@ -240,6 +241,7 @@ export async function buildWorkspaceSummaryMap(
     summary.main = {
       id: mainWs.id,
       branch: mainWs.branch,
+      workingDir: mainWs.workingDir,
       status: mainWs.status as "active" | "reviewing" | "fixing" | "idle" | "awaiting-plan-approval" | "error" | "closed",
       claudeProfile: mainWs.claudeProfile,
       profile: mainWs.claudeProfile ? { provider: (mainWs.provider as ProviderName) ?? "claude", name: mainWs.claudeProfile } : null,

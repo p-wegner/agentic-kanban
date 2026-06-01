@@ -6,6 +6,7 @@ function workspace(overrides: Partial<MainWorkspaceInfo>): MainWorkspaceInfo {
   return {
     id: `ws-${overrides.branch ?? "branch"}`,
     branch: overrides.branch ?? "feature/test",
+    workingDir: null,
     status: "idle",
     readyForMerge: false,
     claudeProfile: null,
