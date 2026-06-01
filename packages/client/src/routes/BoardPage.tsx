@@ -44,6 +44,7 @@ import { ApprovalDialog } from "../components/ApprovalDialog.js";
 import { MoveToDoneDialog } from "../components/MoveToDoneDialog.js";
 import { sendDesktopNotification } from "../lib/desktop.js";
 import { registerAction } from "../lib/actions.js";
+import { getAppRouteView, getViewRoutePath } from "../lib/appRoutes.js";
 import { QuickTasksPanel } from "../components/QuickTasksPanel.js";
 import { MergeQueuePanel } from "../components/MergeQueuePanel.js";
 import { CodemodPanel } from "../components/CodemodPanel.js";
@@ -133,6 +134,8 @@ export function BoardPage() {
   const pendingGTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [expandedCreatePanel, setExpandedCreatePanel] = useState<{ statusId: string; statusName: string; state: Partial<CreateIssueFormState> } | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>(() => {
+    const routeView = getAppRouteView(window.location.pathname);
+    if (routeView) return routeView;
     const stored = localStorage.getItem("kanban-board-view");
     return VIEW_IDS.includes(stored as ViewMode) ? (stored as ViewMode) : "kanban";
   });
@@ -143,9 +146,33 @@ export function BoardPage() {
   });
   const resizingRef = useRef<{ colId: string; startX: number; startWidth: number } | null>(null);
 
+  const navigateToViewRoute = useCallback((mode: ViewMode, replace = false) => {
+    const nextPath = getViewRoutePath(mode);
+    if (window.location.pathname === nextPath) return;
+    const nextUrl = `${nextPath}${window.location.search}${window.location.hash}`;
+    if (replace) {
+      window.history.replaceState(null, "", nextUrl);
+    } else {
+      window.history.pushState(null, "", nextUrl);
+    }
+  }, []);
+
   const handleViewModeChange = useCallback((mode: ViewMode) => {
     setViewMode(mode);
     localStorage.setItem("kanban-board-view", mode);
+    navigateToViewRoute(mode);
+  }, [navigateToViewRoute]);
+
+  useEffect(() => {
+    function handlePopState() {
+      const routeView = getAppRouteView(window.location.pathname);
+      if (!routeView) return;
+      setViewMode(routeView);
+      localStorage.setItem("kanban-board-view", routeView);
+    }
+
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
   }, []);
 
   const handleCreatedDateDrilldown = useCallback((dateKey: string) => {
