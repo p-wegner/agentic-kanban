@@ -38,6 +38,8 @@ export function createWorkspaceSessionService(deps: {
   getSessionManager?: () => SessionManager;
   boardEvents?: BoardEvents;
   gitService?: GitService;
+  /** Optional override for workspace setup (worktree rebuild). Tests inject a fake. */
+  setupWorkspace?: (id: string) => Promise<{ id: string; workingDir: string }>;
 }) {
   const { database, getSessionManager, boardEvents } = deps;
   const gitService = deps.gitService ?? realGitService;
@@ -46,6 +48,32 @@ export function createWorkspaceSessionService(deps: {
     const ws0 = await getWorkspaceById(id, database);
     if (!ws0) throw new WorkspaceError("Workspace not found", "NOT_FOUND");
     if (!getSessionManager) throw new WorkspaceError("Session manager not available", "BAD_REQUEST");
+
+    // If workingDir is missing on a non-direct workspace, attempt to rebuild the worktree.
+    if (!ws0.isDirect && !ws0.workingDir) {
+      console.log(`[workspace-session] workingDir is null, attempting auto-setup: workspaceId=${id}`);
+      const doSetup = deps.setupWorkspace ??
+        ((await import("./workspace-crud.service.js")).createWorkspaceCrudService({ database, gitService }).setupWorkspace);
+      try {
+        const { workingDir: rebuilt } = await doSetup(id);
+        if (!rebuilt) {
+          throw new WorkspaceError(
+            `Workspace has no working directory and setup did not produce one. ` +
+              `Call POST /api/workspaces/${id}/setup first, then retry launch.`,
+            "BAD_REQUEST",
+          );
+        }
+        ws0.workingDir = rebuilt;
+        console.log(`[workspace-session] auto-setup succeeded: workspaceId=${id} workingDir=${rebuilt}`);
+      } catch (err) {
+        if (err instanceof WorkspaceError) throw err;
+        throw new WorkspaceError(
+          `Workspace has no working directory and auto-setup failed: ${err instanceof Error ? err.message : String(err)}. ` +
+            `Call POST /api/workspaces/${id}/setup first, then retry launch.`,
+          "BAD_REQUEST",
+        );
+      }
+    }
 
     let prompt = body.prompt as string | undefined;
     if (!prompt) {
