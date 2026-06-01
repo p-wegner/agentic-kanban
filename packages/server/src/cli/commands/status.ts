@@ -49,6 +49,18 @@ Status indicators:
           }
 
           const needsAttention = status.issues.filter((issue) => issue.attention?.reason === "idle-awaiting");
+          const pendingMerge = status.issues.filter((issue) => issue.mergeState?.reason === "auto-merge-in-review");
+          if (pendingMerge.length > 0) {
+            console.log("  Pending merge");
+            for (const issue of pendingMerge) {
+              const num = issue.issueNumber != null ? `#${issue.issueNumber}` : "???";
+              const diff = issue.diffStats ? `+${issue.diffStats.insertions}/-${issue.diffStats.deletions}` : "diff pending";
+              console.log(`    auto-merge ${num.padEnd(4)} ${issue.title}`);
+              console.log(`         [${issue.statusName}]  workspace: ${issue.workspace?.status ?? "no workspace"}  ${diff}`);
+            }
+            console.log("");
+          }
+
           if (needsAttention.length > 0) {
             console.log("  Needs attention");
             for (const issue of needsAttention) {
@@ -78,6 +90,9 @@ Status indicators:
               if (issue.workspace.isDirect) wsInfo.push("direct");
               if (issue.diffStats && (issue.diffStats.filesChanged > 0 || issue.diffStats.insertions > 0 || issue.diffStats.deletions > 0)) {
                 wsInfo.push(`+${issue.diffStats.insertions}/-${issue.diffStats.deletions}`);
+              }
+              if (issue.mergeState?.bucket === "pending_merge") {
+                wsInfo.push("auto-merge pending");
               }
               console.log(`         ${wsInfo.join(" · ")}`);
             }
