@@ -23,6 +23,7 @@ interface Settings {
   permission_prompt_tool?: string;
   auto_review?: string;
   auto_merge?: string;
+  merge_strategy?: string;
   auto_merge_in_review?: string;
   review_auto_fix?: string;
   resume_with_new_model?: string;
@@ -70,6 +71,7 @@ const DEFAULT_SETTINGS: Settings = {
   permission_prompt_tool: "false",
   auto_review: "true",
   auto_merge: "true",
+  merge_strategy: "",
   auto_merge_in_review: "false",
   review_auto_fix: "true",
   resume_with_new_model: "false",
@@ -1024,6 +1026,21 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                           hint="Merge the branch and close the workspace automatically once the review agent passes. When disabled, the issue moves to AI Reviewed and waits for manual merge."
                           disabled={!autoReviewOn}
                         />
+                        <Field
+                          label="Merge strategy"
+                          hint="Choose who owns reviewed branches. Direct leaves merges to manual per-workspace actions. Monitor lets the board monitor merge immediately. Merge queue batches reviewed workspaces into the queue release train."
+                        >
+                          <select
+                            value={settings.merge_strategy || (settings.auto_monitor === "true" ? "monitor" : "merge_queue")}
+                            onChange={(e) => set("merge_strategy")(e.target.value)}
+                            disabled={!autoReviewOn || settings.auto_merge === "false"}
+                            className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:opacity-50"
+                          >
+                            <option value="direct">Direct/manual - one workspace at a time</option>
+                            <option value="monitor">Monitor - merge as soon as ready</option>
+                            <option value="merge_queue">Merge queue - batch and land in order</option>
+                          </select>
+                        </Field>
                         <Toggle
                           checked={settings.auto_merge_in_review === "true"}
                           onChange={setBool("auto_merge_in_review")}

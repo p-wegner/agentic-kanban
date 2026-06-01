@@ -5,6 +5,7 @@ import type { Database } from "../db/index.js";
 import type { BoardEvents } from "../services/board-events.js";
 import { createMergeQueueService } from "../services/merge-queue.service.js";
 import type { SessionManager } from "../services/session.manager.js";
+import { resolveMergeStrategy } from "./merge-strategy.js";
 
 const DEFAULT_INTERVAL_MS = 30_000;
 const MERGEABLE_STATUS_NAMES = ["In Review", "AI Reviewed"] as const;
@@ -43,12 +44,9 @@ export function createAutoMergeOrchestrator(deps: {
     const prefRows = await database
       .select({ key: preferences.key, value: preferences.value })
       .from(preferences)
-      .where(inArray(preferences.key, ["auto_merge", "auto_monitor"]));
+      .where(inArray(preferences.key, ["auto_merge", "auto_monitor", "merge_strategy"]));
     const prefMap = new Map(prefRows.map((row) => [row.key, row.value]));
-    // When the broader board monitor is enabled, keep it as the single owner of
-    // merge actions to avoid dueling schedulers. Otherwise this lightweight
-    // orchestrator preserves automatic merging even when board monitoring is off.
-    return prefMap.get("auto_merge") !== "false" && prefMap.get("auto_monitor") !== "true";
+    return prefMap.get("auto_merge") !== "false" && resolveMergeStrategy(prefMap) === "merge_queue";
   }
 
   async function findCompletedWorkspaceIds(): Promise<string[]> {
