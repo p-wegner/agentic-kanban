@@ -10,7 +10,7 @@ vi.mock("node:child_process", () => ({
   execFile: execFileMock,
 }));
 
-import { removeWorktree } from "../services/git.service.js";
+import { deleteBranch, removeWorktree } from "../services/git.service.js";
 
 describe("git service removeWorktree cleanup fallback", () => {
   let tempRoot: string;
@@ -67,5 +67,46 @@ describe("git service removeWorktree cleanup fallback", () => {
 
     expect(existsSync(join(unsafePath, "important", "data.txt"))).toBe(true);
     expect(execFileMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("cleans up an already-merged worktree missing .git before retrying branch deletion", async () => {
+    execFileMock.mockImplementation((_cmd, args, _opts, callback) => {
+      if (args[0] === "worktree" && args[1] === "remove") {
+        callback(
+          new Error("git worktree remove failed"),
+          "",
+          `fatal: validation failed, cannot remove working tree: '${worktreePath}/.git' does not exist`,
+        );
+        return;
+      }
+      if (args[0] === "branch" && args[1] === "-d") {
+        if (execFileMock.mock.calls.filter((call) => call[1]?.[0] === "branch").length === 1) {
+          callback(
+            new Error("git branch failed"),
+            "",
+            `error: Cannot delete branch 'feature/ak-1-test' checked out at '${worktreePath}'`,
+          );
+          return;
+        }
+        callback(null, "", "");
+        return;
+      }
+      if (args[0] === "worktree" && args[1] === "prune") {
+        callback(null, "", "");
+        return;
+      }
+      callback(new Error(`unexpected git args: ${args.join(" ")}`), "", "");
+    });
+
+    await expect(removeWorktree(repoPath, worktreePath)).resolves.toBeUndefined();
+    await expect(deleteBranch(repoPath, "feature/ak-1-test")).resolves.toBeUndefined();
+
+    expect(existsSync(worktreePath)).toBe(false);
+    expect(execFileMock).toHaveBeenCalledTimes(5);
+    expect(execFileMock.mock.calls[0][1]).toEqual(["worktree", "remove", "--force", worktreePath]);
+    expect(execFileMock.mock.calls[1][1]).toEqual(["worktree", "prune"]);
+    expect(execFileMock.mock.calls[2][1]).toEqual(["branch", "-d", "feature/ak-1-test"]);
+    expect(execFileMock.mock.calls[3][1]).toEqual(["worktree", "prune"]);
+    expect(execFileMock.mock.calls[4][1]).toEqual(["branch", "-d", "feature/ak-1-test"]);
   });
 });
