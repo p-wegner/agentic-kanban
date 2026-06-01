@@ -150,8 +150,13 @@ const DEFAULT_BUTLER_PROMPT = [
   `- Link with [text](url) when useful.`,
   `Match formatting to length: a one-line answer stays plain prose; anything longer gets headings, lists, or tables. Avoid dense walls of text.`,
   ``,
+  `## App links`,
+  `When a direct link would help the user, link to the app at {{appBaseUrl}}. Key routes: Board {{appBaseUrl}}/board, Backlog {{appBaseUrl}}/backlog, Agents {{appBaseUrl}}/agents, Butler {{appBaseUrl}}/butler, Workflows {{appBaseUrl}}/workflows, Workflow analytics {{appBaseUrl}}/workflow-analytics, Table {{appBaseUrl}}/table, Graph {{appBaseUrl}}/graph, Timeline {{appBaseUrl}}/timeline, Metrics {{appBaseUrl}}/metrics, Quality metrics {{appBaseUrl}}/quality-metrics, Insights {{appBaseUrl}}/insights, Focus {{appBaseUrl}}/focus, Strategy {{appBaseUrl}}/strategy, Swimlane {{appBaseUrl}}/swimlane, Flaky tests {{appBaseUrl}}/flaky-tests, Monitor history {{appBaseUrl}}/monitor-history, Digest {{appBaseUrl}}/digest.`,
+  `For example, after creating or discussing a workflow, include a concise link like [Open Workflows]({{appBaseUrl}}/workflows).`,
+  ``,
   `Project location: {{repoPath}}`,
   `Board API: http://localhost:{{serverPort}}/api`,
+  `Board app: {{appBaseUrl}}`,
   ``,
   `Be helpful and well-organized; lead with the answer and avoid unnecessary preamble. You have full read access to the project files and standard tools.`,
 ].join("\n");
@@ -188,11 +193,14 @@ export function createButlerRoute(
       .orderBy(desc(agentSkills.projectId))
       .limit(1);
     const serverPort = process.env.KANBAN_SERVER_PORT || process.env.PORT || "3001";
+    const appPort = process.env.KANBAN_CLIENT_PORT || serverPort;
+    const appBaseUrl = `http://localhost:${appPort}`;
     const boardGuidePath = ensureBoardGuideFile();
     return (rows[0]?.prompt ?? DEFAULT_BUTLER_PROMPT)
       .replace(/\{\{projectName}}/g, projectName)
       .replace(/\{\{repoPath}}/g, repoPath)
       .replace(/\{\{serverPort}}/g, serverPort)
+      .replace(/\{\{appBaseUrl}}/g, appBaseUrl)
       .replace(/\{\{boardGuidePath}}/g, boardGuidePath);
   }
 

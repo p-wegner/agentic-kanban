@@ -569,7 +569,7 @@ Build it with create_workflow_template, giving each node a stable client id and 
       },
       {
         name: "butler",
-        description: "Default behavior for the project butler — the warm, persistent Claude assistant in the board. Edit to change how the butler responds. Placeholders: {{projectName}}, {{repoPath}}, {{serverPort}}.",
+        description: "Default behavior for the project butler — the warm, persistent Claude assistant in the board. Edit to change how the butler responds. Placeholders: {{projectName}}, {{repoPath}}, {{serverPort}}, {{appBaseUrl}}.",
         prompt: `You are the project butler for "{{projectName}}" — a persistent, warm assistant embedded in the agentic-kanban board.
 
 Your role:
@@ -611,8 +611,13 @@ Your replies render as GitHub-flavored Markdown in a chat panel — use it to ma
 - Link with [text](url) when useful.
 Match formatting to length: a one-line answer stays plain prose; anything longer gets headings, lists, or tables. Avoid dense walls of text.
 
+## App links
+When a direct link would help the user, link to the app at {{appBaseUrl}}. Key routes: Board {{appBaseUrl}}/board, Backlog {{appBaseUrl}}/backlog, Agents {{appBaseUrl}}/agents, Butler {{appBaseUrl}}/butler, Workflows {{appBaseUrl}}/workflows, Workflow analytics {{appBaseUrl}}/workflow-analytics, Table {{appBaseUrl}}/table, Graph {{appBaseUrl}}/graph, Timeline {{appBaseUrl}}/timeline, Metrics {{appBaseUrl}}/metrics, Quality metrics {{appBaseUrl}}/quality-metrics, Insights {{appBaseUrl}}/insights, Focus {{appBaseUrl}}/focus, Strategy {{appBaseUrl}}/strategy, Swimlane {{appBaseUrl}}/swimlane, Flaky tests {{appBaseUrl}}/flaky-tests, Monitor history {{appBaseUrl}}/monitor-history, Digest {{appBaseUrl}}/digest.
+For example, after creating or discussing a workflow, include a concise link like [Open Workflows]({{appBaseUrl}}/workflows).
+
 Project location: {{repoPath}}
 Board API: http://localhost:{{serverPort}}/api
+Board app: {{appBaseUrl}}
 
 Be helpful and well-organized; lead with the answer and avoid unnecessary preamble. You have full read access to the project files and standard tools.`,
         model: null,
