@@ -843,6 +843,7 @@ export function IssueDetailPanel({
                 <button
                   onClick={handleSave}
                   disabled={saving || !title.trim()}
+                  aria-label="Save issue"
                   className="text-xs font-medium bg-brand-600 text-white px-2.5 py-1 rounded hover:bg-brand-700 disabled:opacity-50 transition-colors"
                 >
                   {saving ? "Saving..." : "Save"}
@@ -859,6 +860,7 @@ export function IssueDetailPanel({
                 <button
                   onClick={() => setEditing(true)}
                   title="Edit issue"
+                  aria-label="Edit issue"
                   className="text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 p-0.5 rounded transition-colors"
                 >
                   <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -978,6 +980,7 @@ export function IssueDetailPanel({
                 </label>
                 <input
                   type="text"
+                  aria-label="Issue title"
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
                   className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500"
@@ -1822,6 +1825,7 @@ export function IssueDetailPanel({
             <button
               onClick={handleSave}
               disabled={saving || !title.trim()}
+              aria-label="Save issue changes"
               className="text-sm bg-brand-600 text-white px-4 py-1.5 rounded hover:bg-brand-700 disabled:opacity-50"
             >
               {saving ? "Saving..." : "Save"}
