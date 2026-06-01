@@ -223,5 +223,15 @@ export function createWorkspaceActionsRoute(
     return c.json(scorecard);
   });
 
+  // DELETE /api/workspaces/:id/stale-worktree — safely remove a stale worktree directory
+  router.delete("/:id/stale-worktree", async (c) => {
+    const id = c.req.param("id");
+    const result = await workspaceService.removeStaleWorktree(id);
+    if (!result.success) {
+      return c.json({ error: result.error }, 400);
+    }
+    return c.json({ success: true });
+  });
+
   return router;
 }
