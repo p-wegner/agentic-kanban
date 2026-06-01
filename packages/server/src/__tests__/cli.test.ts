@@ -6,7 +6,7 @@ import * as schema from "@agentic-kanban/shared/schema";
 import { eq, sql } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { createHash } from "node:crypto";
-import { readFileSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, readFileSync, mkdtempSync, rmSync } from "node:fs";
 import { resolve, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
@@ -17,6 +17,7 @@ import { applyMigrationsToClient } from "./helpers/test-db.js";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const CLI_PATH = resolve(__dirname, "../cli/index.ts");
 const PKG_DIR = resolve(__dirname, "../..");
+const REPO_ROOT = resolve(PKG_DIR, "../..");
 
 const TSX_LOADER = pathToFileURL(
   resolve(PKG_DIR, "node_modules/tsx/dist/loader.mjs")
@@ -64,6 +65,34 @@ function runCli(args: string[], dbPath: string) {
   return {
     stdout: (result.stdout || "").trim(),
     stderr: (result.stderr || "").trim(),
+    status: result.status ?? 1,
+  };
+}
+
+function runPnpmCli(args: string[], dbPath: string) {
+  const pnpm = "pnpm";
+  if (!existsSync(resolve(REPO_ROOT, "packages/shared/dist/index.js"))) {
+    const build = spawnSync(pnpm, ["--filter", "shared", "build"], {
+      cwd: REPO_ROOT,
+      encoding: "utf-8",
+    });
+    if (build.status !== 0) {
+      return {
+        stdout: build.stdout || "",
+        stderr: build.stderr || "",
+        status: build.status ?? 1,
+      };
+    }
+  }
+  const result = spawnSync(pnpm, ["cli", "--", ...args], {
+    env: { ...process.env, DB_URL: `file:${dbPath}` },
+    cwd: REPO_ROOT,
+    encoding: "utf-8",
+  });
+  return {
+    stdout: (result.stdout || "").trim(),
+    stderr: (result.stderr || "").trim(),
+    error: result.error?.message,
     status: result.status ?? 1,
   };
 }
@@ -155,6 +184,22 @@ describe("CLI dispatch gate", () => {
 });
 
 // ── register ──────────────────────────────────────────────────────────────────
+
+describe("CLI warning output", () => {
+  let ctx: ReturnType<typeof createTestDb>;
+
+  beforeEach(() => { ctx = createTestDb(); });
+  afterEach(() => { ctx.cleanup(); });
+
+  it("does not emit the DEP0205 module.register warning through the pnpm status wrapper", async () => {
+    await seedProject(ctx.dbPath);
+    const result = runPnpmCli(["status"], ctx.dbPath);
+
+    expect(result).toMatchObject({ status: 0 });
+    expect(result.stdout).toContain("Board Status: Test Project");
+    expect(result.stderr).not.toContain("DEP0205");
+  });
+});
 
 describe("CLI register", () => {
   let ctx: ReturnType<typeof createTestDb>;
