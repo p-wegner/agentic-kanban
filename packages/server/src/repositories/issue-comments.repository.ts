@@ -4,8 +4,8 @@ import { eq } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 
-export type IssueCommentKind = "preflight-clarification" | "agent-question" | "note";
-export type IssueCommentAuthor = "user" | "butler" | "agent" | "preflight";
+export type IssueCommentKind = "preflight-clarification" | "agent-question" | "merge-attempt" | "note";
+export type IssueCommentAuthor = "user" | "butler" | "agent" | "preflight" | "system";
 
 export interface AddIssueCommentInput {
   issueId: string;

@@ -332,6 +332,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
   const [planEditText, setPlanEditText] = useState<Record<string, string>>({});
   const [rejectMode, setRejectMode] = useState<Record<string, boolean>>({});
   const [rejectFeedback, setRejectFeedback] = useState<Record<string, string>>({});
+  const initialSessionAppliedRef = useRef(false);
 
   const [monitorRunning, setMonitorRunning] = useState(false);
   const [requiresReview, setRequiresReview] = useState(false);
@@ -378,6 +379,18 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
   });
 
   const { state: wsState, messages, disconnect, isWaitingForInput } = useWebSocket(activeSession);
+
+  useEffect(() => {
+    if (!initialSessionId || initialSessionAppliedRef.current || !selectedWorkspace) return;
+    const sessions = workspaceSessions[selectedWorkspace];
+    if (!sessions) return;
+    const session = sessions.find((s) => s.id === initialSessionId);
+    if (!session || session.status === "running") return;
+    initialSessionAppliedRef.current = true;
+    setActiveSession(null);
+    setLastSessionPerWorkspace((prev) => ({ ...prev, [selectedWorkspace]: initialSessionId }));
+    void handleViewHistory(initialSessionId);
+  }, [initialSessionId, selectedWorkspace, workspaceSessions, setActiveSession, setLastSessionPerWorkspace, handleViewHistory]);
 
   const isRunning = activeSession !== null && !messages.some(m => m.type === "exit");
   const isSessionAlive = activeSession !== null && isRunning;

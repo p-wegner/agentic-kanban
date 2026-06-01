@@ -4,7 +4,7 @@ import { mkdtemp, rm, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { eq } from "drizzle-orm";
-import { projects, projectStatuses, issues, workspaces, preferences } from "@agentic-kanban/shared/schema";
+import { projects, projectStatuses, issues, workspaces, preferences, issueComments } from "@agentic-kanban/shared/schema";
 import { createTestDb, type TestDb } from "./helpers/test-db.js";
 import { createMockSessionManager } from "./helpers/mocks.js";
 import { createWorkspaceService, WorkspaceError, type GitService } from "../services/workspace.service.js";
@@ -329,6 +329,21 @@ describe("workspace.service", () => {
       const issueRow = await db.select().from(issues).where(eq(issues.id, issueId));
       const statusRow = await db.select().from(projectStatuses).where(eq(projectStatuses.id, issueRow[0].statusId));
       expect(statusRow[0].name).toBe("Done");
+
+      const events = await db.select().from(issueComments).where(eq(issueComments.issueId, issueId));
+      expect(events).toEqual([
+        expect.objectContaining({
+          kind: "merge-attempt",
+          author: "system",
+          workspaceId: wsId,
+          body: expect.stringContaining("Merged feature/ak-1-test into main"),
+        }),
+      ]);
+      expect(JSON.parse(events[0].payload ?? "{}")).toEqual(expect.objectContaining({
+        eventType: "merged",
+        workspaceId: wsId,
+        commitSha: "base-sha-123",
+      }));
     });
 
     it("closes the workspace when a retry finds the branch is already merged", { timeout: 30000 }, async () => {
@@ -493,6 +508,11 @@ describe("workspace.service", () => {
           recoverable: true,
         }),
       ]);
+
+      const events = await db.select().from(issueComments).where(eq(issueComments.issueId, issueId));
+      expect(events.map((event) => JSON.parse(event.payload ?? "{}").eventType)).toEqual(["merged", "warning"]);
+      expect(events[1].body).toContain("recoverable warning");
+      expect(events[1].body).toContain("already merged before this response returned");
     });
 
     it("returns success, closes the workspace, and moves the issue to Done when worktree removal fails after merge", { timeout: 30000 }, async () => {
@@ -546,6 +566,19 @@ describe("workspace.service", () => {
         data: { conflictingFiles: ["src/foo.ts"] },
       });
       expect(gitService.mergeBranch).not.toHaveBeenCalled();
+
+      const events = await db.select().from(issueComments).where(eq(issueComments.issueId, issueId));
+      expect(events).toEqual([
+        expect.objectContaining({
+          kind: "merge-attempt",
+          workspaceId: wsId,
+          body: expect.stringContaining("Merge attempt blocked by conflicts"),
+        }),
+      ]);
+      expect(JSON.parse(events[0].payload ?? "{}")).toEqual(expect.objectContaining({
+        eventType: "conflict",
+        conflictingFiles: ["src/foo.ts"],
+      }));
 
       // Workspace stays active (not closed) on conflict
       const wsRows = await db.select().from(workspaces).where(eq(workspaces.id, wsId));
@@ -719,6 +752,19 @@ describe("workspace.service", () => {
       const startArgs = (sessionManager.startSession as ReturnType<typeof vi.fn>).mock.calls[0][0];
       expect(startArgs.prompt).toContain("rebased the workspace branch onto 'main' successfully");
       expect(startArgs.skipLaunchPreflight).toBe(true);
+
+      const events = await db.select().from(issueComments).where(eq(issueComments.issueId, issueId));
+      expect(events).toEqual([
+        expect.objectContaining({
+          kind: "merge-attempt",
+          workspaceId: wsId,
+          body: expect.stringContaining("Launched a fix-and-merge session"),
+        }),
+      ]);
+      expect(JSON.parse(events[0].payload ?? "{}")).toEqual(expect.objectContaining({
+        eventType: "fix-and-merge-launched",
+        sessionId: "mock-session-id",
+      }));
     });
 
     it("launches fix-and-merge with rebase conflict context instead of aborting the rebuild", async () => {
