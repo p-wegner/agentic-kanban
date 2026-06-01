@@ -38,6 +38,8 @@ interface BoardToolbarProps {
   onVoiceIssueCreated?: () => void;
   onShowMergeQueue?: () => void;
   mergeQueueCount?: number;
+  onShowRunQueueForecast?: () => void;
+  runQueueOpenSlots?: number;
 }
 
 export function BoardToolbar({
@@ -63,6 +65,8 @@ export function BoardToolbar({
   onVoiceIssueCreated,
   onShowMergeQueue,
   mergeQueueCount = 0,
+  onShowRunQueueForecast,
+  runQueueOpenSlots = 0,
 }: BoardToolbarProps) {
   const [showMonitorPopover, setShowMonitorPopover] = useState(false);
   const [showMoreViews, setShowMoreViews] = useState(false);
@@ -120,6 +124,23 @@ export function BoardToolbar({
           {mergeQueueCount > 0 && (
             <span className="ml-0.5 inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-brand-500 text-white text-[10px] font-semibold leading-none">
               {mergeQueueCount > 99 ? "99+" : mergeQueueCount}
+            </span>
+          )}
+        </button>
+      )}
+      {onShowRunQueueForecast && (
+        <button
+          onClick={onShowRunQueueForecast}
+          title="Run Queue Forecast - view active-agent capacity and next likely starts"
+          className="relative shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium border transition-colors bg-surface-raised dark:bg-surface-raised-dark border-black/[0.07] dark:border-white/10 text-ink-soft dark:text-gray-400 hover:bg-surface-sunken dark:hover:bg-gray-800"
+        >
+          <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M4 18V6m4 12V9m4 9v-5m4 5V4m4 14v-7" />
+          </svg>
+          Capacity
+          {runQueueOpenSlots > 0 && (
+            <span className="ml-0.5 inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-sky-500 text-white text-[10px] font-semibold leading-none">
+              {runQueueOpenSlots > 99 ? "99+" : runQueueOpenSlots}
             </span>
           )}
         </button>
