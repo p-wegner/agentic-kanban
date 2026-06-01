@@ -56,13 +56,25 @@ test.describe("Session History UI", () => {
         );
         if (!sessionsRes.ok()) return "sessions-unavailable";
 
-        const sessions = await sessionsRes.json();
-        return sessions.some((s: { status: string }) => s.status === "running")
-          ? "running"
-          : "idle";
+        const sessions = await sessionsRes.json() as Array<{
+          id: string;
+          status: string;
+          exitCode?: string | null;
+          exit_code?: string | null;
+        }>;
+        const observed = sessions
+          .map((s) => `${s.id}:${s.status}:${s.exitCode ?? s.exit_code ?? "no-exit-code"}`)
+          .join(",");
+        return sessions.some((s) => s.status === "running")
+          ? `running sessions still present (${observed})`
+          : "no running sessions";
       },
-      { timeout: 10000, intervals: [250, 500, 1000] },
-    ).toBe("idle");
+      {
+        message: `Timed out waiting for workspace ${workspaceId} to have no running sessions`,
+        timeout: 10000,
+        intervals: [250, 500, 1000],
+      },
+    ).toBe("no running sessions");
   }
 
   async function waitForSessionCompletion(
@@ -78,8 +90,13 @@ test.describe("Session History UI", () => {
         );
         if (!sessionsRes.ok()) return "sessions-unavailable";
 
-        const sessions = await sessionsRes.json();
-        const session = sessions.find((s: { id: string }) => s.id === sessionId);
+        const sessions = await sessionsRes.json() as Array<{
+          id: string;
+          status: string;
+          exitCode?: string | null;
+          exit_code?: string | null;
+        }>;
+        const session = sessions.find((s) => s.id === sessionId);
         if (!session) return "session-missing";
 
         const outputRes = await request.get(
@@ -96,14 +113,20 @@ test.describe("Session History UI", () => {
         const exitCode = session.exitCode ?? session.exit_code;
 
         return [
-          session.status,
-          String(exitCode ?? ""),
-          hasExpectedOutput ? "output" : "no-output",
-          hasExit ? "exit" : "no-exit",
+          `status=${session.status}`,
+          `exitCode=${String(exitCode ?? "missing")}`,
+          `expectedTranscriptRow=${hasExpectedOutput ? "present" : "missing"}`,
+          `exitTranscriptRow=${hasExit ? "present" : "missing"}`,
         ].join(":");
       },
-      { timeout: 15000, intervals: [250, 500, 1000] },
-    ).toBe("completed:0:output:exit");
+      {
+        message: `Timed out waiting for session ${sessionId} in workspace ${workspaceId} to complete with expected transcript rows`,
+        timeout: 15000,
+        intervals: [250, 500, 1000],
+      },
+    ).toBe(
+      "status=completed:exitCode=0:expectedTranscriptRow=present:exitTranscriptRow=present",
+    );
   }
 
   test.beforeAll(async ({ request }) => {
@@ -230,7 +253,8 @@ test.describe("Session History UI", () => {
 
     await openWorkspaceForIssue(page, issueTitle, branchName);
 
-    await expect(page.locator(`button[data-session-id="${sessionId}"]`)).toBeVisible({ timeout: 5000 });
+    const wsPanel = await ensureWorkspaceSelected(page, issueTitle, branchName);
+    await expect(wsPanel.locator(`button[data-session-id="${sessionId}"]`)).toBeVisible({ timeout: 5000 });
   });
 
   test("click past session shows output in TerminalView", async ({ page, request }) => {
