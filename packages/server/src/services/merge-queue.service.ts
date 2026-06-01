@@ -6,6 +6,14 @@ import { createWorkspaceMergeService } from "./workspace-merge.service.js";
 import type { BoardEvents } from "./board-events.js";
 import type { SessionManager } from "./session.manager.js";
 
+export interface WorkspaceConflictPreview {
+  workspaceId: string;
+  hasConflicts: boolean;
+  conflictingFiles: string[];
+  isStale: boolean;
+  error?: string;
+}
+
 const MIGRATION_RE = /^packages\/shared\/drizzle\/(\d{4})_.+\.sql$/;
 
 export interface WorkspaceQueueInfo {
@@ -44,6 +52,7 @@ export interface MergeQueuePlan {
   overlaps: OverlapEntry[];
   totalOverlapScore: number;
   migrationCollisions: MigrationCollisionEntry[];
+  conflictPreviews: WorkspaceConflictPreview[];
 }
 
 export type MergeQueueEvent =
@@ -224,13 +233,42 @@ export function createMergeQueueService(deps: {
     return sorted;
   }
 
+  async function detectConflictPreview(info: WorkspaceQueueInfo): Promise<WorkspaceConflictPreview> {
+    if (!info.workingDir || info.isDirect) {
+      return { workspaceId: info.id, hasConflicts: false, conflictingFiles: [], isStale: false };
+    }
+    try {
+      // isAncestor(path, ancestorRef, descendantRef): if baseBranch is NOT an ancestor of HEAD,
+      // the workspace is stale (baseBranch has moved past the workspace's merge base).
+      const [conflictResult, baseIsAncestorOfHead] = await Promise.all([
+        gitService.detectConflicts(info.workingDir, info.baseBranch),
+        gitService.isAncestor(info.workingDir, info.baseBranch, "HEAD").catch(() => true),
+      ]);
+      return {
+        workspaceId: info.id,
+        hasConflicts: conflictResult.hasConflicts,
+        conflictingFiles: conflictResult.conflictingFiles,
+        isStale: !baseIsAncestorOfHead,
+      };
+    } catch (err) {
+      return {
+        workspaceId: info.id,
+        hasConflicts: false,
+        conflictingFiles: [],
+        isStale: false,
+        error: err instanceof Error ? err.message : String(err),
+      };
+    }
+  }
+
   async function computePlan(workspaceIds: string[]): Promise<MergeQueuePlan> {
     const infos = await getWorkspaceQueueInfos(workspaceIds);
     const overlaps = computeOverlaps(infos);
     const sortedInfos = sortByLeastOverlap(infos, overlaps);
     const totalOverlapScore = overlaps.reduce((s, e) => s + e.overlapCount, 0);
     const migrationCollisions = computeMigrationCollisions(infos);
-    return { order: sortedInfos, overlaps, totalOverlapScore, migrationCollisions };
+    const conflictPreviews = await Promise.all(infos.map(detectConflictPreview));
+    return { order: sortedInfos, overlaps, totalOverlapScore, migrationCollisions, conflictPreviews };
   }
 
   async function verifyWorkspaceMerged(ws: WorkspaceQueueInfo, featureSha: string | null): Promise<void> {
