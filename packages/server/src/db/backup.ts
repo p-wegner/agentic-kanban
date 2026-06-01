@@ -15,10 +15,11 @@ import {
   statSync,
   unlinkSync,
   existsSync,
+  renameSync,
   copyFileSync,
 } from "node:fs";
-import { DatabaseSync } from "node:sqlite";
 import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { DATA_DIR, getDbUrl } from "./data-dir.js";
 
 /** Number of most-recent verified backups to retain. */
@@ -43,12 +44,29 @@ interface CreateBackupOptions {
   verify?: (path: string) => Promise<true>;
 }
 
+interface BackupRowCounts {
+  projects: number;
+  issues: number;
+}
+
 async function unlinkIfExists(path: string): Promise<void> {
   for (let attempt = 0; attempt < 40; attempt++) {
     try {
       if (existsSync(path)) unlinkSync(path);
       return;
     } catch {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+  }
+}
+
+async function renameWithRetry(from: string, to: string): Promise<void> {
+  for (let attempt = 0; attempt < 40; attempt++) {
+    try {
+      renameSync(from, to);
+      return;
+    } catch (err) {
+      if (attempt === 39) throw err;
       await new Promise((resolve) => setTimeout(resolve, 50));
     }
   }
@@ -87,17 +105,17 @@ export async function liveProjectCount(): Promise<number> {
   return (await liveRowCounts()).projects;
 }
 
-/**
- * Verify a backup file is restorable. Throws on any failure:
- *  - PRAGMA integrity_check must report "ok"
- *  - if the backup has 0 projects/issues while the LIVE db has any, refuse it
- *    (the exact "empty-when-live-is-not" trap that caused a silent data loss).
- */
-export async function verifyBackup(path: string): Promise<true> {
-  if (!existsSync(path) || statSync(path).size === 0) {
-    throw new Error(`backup missing or empty: ${path}`);
+async function nodeSqliteBackupRowCounts(
+  path: string,
+): Promise<BackupRowCounts | null> {
+  let sqlite: typeof import("node:sqlite");
+  try {
+    sqlite = await import("node:sqlite");
+  } catch {
+    return null;
   }
-  const c = new DatabaseSync(path, { readOnly: true });
+
+  const c = new sqlite.DatabaseSync(path, { readOnly: true });
   try {
     const integrity = c
       .prepare("PRAGMA integrity_check")
@@ -109,26 +127,61 @@ export async function verifyBackup(path: string): Promise<true> {
     const projects = c
       .prepare("SELECT count(*) c FROM projects")
       .get() as { c?: number } | undefined;
-    const backupProjects = Number(projects?.c ?? 0);
     const issues = c
       .prepare("SELECT count(*) c FROM issues")
       .get() as { c?: number } | undefined;
-    const backupIssues = Number(issues?.c ?? 0);
-    const live = await liveRowCounts();
-    if (backupIssues === 0 && live.issues > 0) {
-      throw new Error(
-        "backup has 0 issues but live DB has >0 - refusing as corrupt/empty",
-      );
-    }
-    if (backupProjects === 0 && (await liveProjectCount()) > 0) {
-      throw new Error(
-        "backup has 0 projects but live DB has >0 — refusing as corrupt/empty",
-      );
-    }
-    return true;
+    return {
+      projects: Number(projects?.c ?? 0),
+      issues: Number(issues?.c ?? 0),
+    };
   } finally {
     c.close();
   }
+}
+
+async function libsqlBackupRowCounts(path: string): Promise<BackupRowCounts> {
+  const c = createClient({ url: pathToFileURL(path).href });
+  try {
+    const integrity = await c.execute("PRAGMA integrity_check");
+    const verdict = String(integrity.rows[0]?.integrity_check ?? "");
+    if (verdict !== "ok") {
+      throw new Error(`integrity_check failed: ${JSON.stringify(integrity.rows[0])}`);
+    }
+    const projects = await c.execute("SELECT count(*) c FROM projects");
+    const issues = await c.execute("SELECT count(*) c FROM issues");
+    return {
+      projects: Number(projects.rows[0]?.c ?? 0),
+      issues: Number(issues.rows[0]?.c ?? 0),
+    };
+  } finally {
+    c.close();
+  }
+}
+
+/**
+ * Verify a backup file is restorable. Throws on any failure:
+ *  - PRAGMA integrity_check must report "ok"
+ *  - if the backup has 0 projects/issues while the LIVE db has any, refuse it
+ *    (the exact "empty-when-live-is-not" trap that caused a silent data loss).
+ */
+export async function verifyBackup(path: string): Promise<true> {
+  if (!existsSync(path) || statSync(path).size === 0) {
+    throw new Error(`backup missing or empty: ${path}`);
+  }
+  const counts =
+    (await nodeSqliteBackupRowCounts(path)) ?? (await libsqlBackupRowCounts(path));
+  const live = await liveRowCounts();
+  if (counts.issues === 0 && live.issues > 0) {
+    throw new Error(
+      "backup has 0 issues but live DB has >0 - refusing as corrupt/empty",
+    );
+  }
+  if (counts.projects === 0 && live.projects > 0) {
+    throw new Error(
+      "backup has 0 projects but live DB has >0 — refusing as corrupt/empty",
+    );
+  }
+  return true;
 }
 
 /**
@@ -173,6 +226,7 @@ export async function createBackup(
   const safeReason = reason.replace(/[^a-zA-Z0-9_-]/g, "-");
   const dest = join(BACKUP_DIR, `kanban-${stamp}-${safeReason}.db`);
   const tmpDest = `${dest}.tmp`;
+  const promoteDest = `${dest}.promote`;
 
   const client = createClient({ url: getDbUrl() });
   try {
@@ -186,10 +240,12 @@ export async function createBackup(
 
   try {
     await (options.verify ?? verifyBackup)(tmpDest); // throws on failure
-    copyFileSync(tmpDest, dest);
+    copyFileSync(tmpDest, promoteDest);
+    await renameWithRetry(promoteDest, dest);
     await unlinkIfExists(tmpDest);
   } catch (err) {
     await unlinkIfExists(tmpDest);
+    await unlinkIfExists(promoteDest);
     throw err;
   }
   pruneBackups(KEEP_LAST);
