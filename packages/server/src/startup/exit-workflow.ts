@@ -10,6 +10,7 @@ import * as gitService from "../services/git.service.js";
 import { createSessionManager } from "../services/session.manager.js";
 import { buildReviewArgs, buildReviewPrompt, getEffectiveProfile, parseProviderPref } from "./review-helpers.js";
 import type { MergeWorkspace } from "./merge-workflow.js";
+import { isAutomaticMergeEnabled } from "./merge-strategy.js";
 
 type WorkspaceRow = typeof workspaces.$inferSelect;
 
@@ -138,7 +139,7 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge }:
       const statuses = await db.select().from(projectStatuses).where(eq(projectStatuses.projectId, projectId));
       const findStatus = (name: string) => statuses.find((s) => s.name === name);
       const prefMap = new Map((await db.select().from(preferences)).map((r) => [r.key, r.value]));
-      const autoMergeEnabled = prefMap.get("auto_merge") !== "false";
+      const autoMergeEnabled = isAutomaticMergeEnabled(prefMap);
       const projectRows = await db.select({ defaultBranch: projects.defaultBranch }).from(projects).where(eq(projects.id, projectId)).limit(1);
       const defaultBranch = projectRows.length > 0 ? projectRows[0].defaultBranch : null;
 

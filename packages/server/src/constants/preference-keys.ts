@@ -15,3 +15,4 @@ export const PREF_AUTO_START_FOLLOWUP = "auto_start_followup";
 export const PREF_PROJECTS_BASE_PATH = "projects_base_path";
 export const PREF_BUTLER_AUTO_ANSWER = "butler_auto_answer";
 export const PREF_BUTLER_AUTO_ANSWER_MIN_CONFIDENCE = "butler_auto_answer_min_confidence";
+export const PREF_MERGE_STRATEGY = "merge_strategy";
