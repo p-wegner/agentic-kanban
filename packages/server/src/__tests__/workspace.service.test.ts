@@ -362,6 +362,53 @@ describe("workspace.service", () => {
       expect(statusRow[0].name).toBe("Done");
     });
 
+    it("reconciles a workspace that already has mergedAt even when the branch ref is missing", { timeout: 30000 }, async () => {
+      const { issueId } = await seedProjectAndIssue(db);
+      const now = new Date().toISOString();
+      const wsId = randomUUID();
+      const mergedAt = "2026-05-31T18:02:06.010Z";
+      await db.insert(workspaces).values({
+        id: wsId,
+        issueId,
+        branch: "feature/ak-1-test",
+        workingDir: null,
+        baseBranch: "main",
+        isDirect: false,
+        status: "closed",
+        provider: "claude",
+        mergedAt,
+        createdAt: now,
+        updatedAt: now,
+      });
+      const gitService = createFakeGitService({
+        mergeBranch: vi.fn(async () => {
+          throw new Error("git rev-parse feature/ak-1-test failed: unknown revision");
+        }),
+      });
+
+      const service = createWorkspaceService({
+        database: db,
+        gitService,
+        createBackup: vi.fn(async () => ({})),
+        processKiller: vi.fn(async () => 0),
+      });
+
+      const result = await service.mergeWorkspace(wsId);
+
+      expect(result.mergeOutput).toContain("already marked as merged");
+      expect(gitService.mergeBranch).not.toHaveBeenCalled();
+
+      const wsRows = await db.select().from(workspaces).where(eq(workspaces.id, wsId));
+      expect(wsRows[0].status).toBe("closed");
+      expect(wsRows[0].workingDir).toBeNull();
+      expect(wsRows[0].mergedAt).toBe(mergedAt);
+      expect(wsRows[0].closedAt).toBeTruthy();
+
+      const issueRow = await db.select().from(issues).where(eq(issues.id, issueId));
+      const statusRow = await db.select().from(projectStatuses).where(eq(projectStatuses.id, issueRow[0].statusId));
+      expect(statusRow[0].name).toBe("Done");
+    });
+
     it("closes the workspace and moves the issue to Done when post-merge changed-file detection fails", { timeout: 30000 }, async () => {
       const { projectId, issueId } = await seedProjectAndIssue(db);
       const wsId = await seedWorkspaceForMerge(projectId, issueId);

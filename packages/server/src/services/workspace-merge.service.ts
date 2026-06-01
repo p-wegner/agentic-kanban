@@ -142,6 +142,46 @@ export function createWorkspaceMergeService(deps: {
     repoPath: string,
     defaultBranch: string | null,
   ) {
+    if (workspace.mergedAt) {
+      const warnings: MergeWarning[] = [];
+      if (workspace.workingDir && !workspace.isDirect) {
+        await teardownWorktree(
+          {
+            workingDir: workspace.workingDir,
+            branch: workspace.branch,
+            isDirect: workspace.isDirect,
+            teardownScript: project?.teardownScript,
+            setupEnabled: project?.setupEnabled,
+            label: "merge:already-merged",
+          },
+          { killDir: killProcesses },
+        );
+        await killWorktreeProcesses(workspace.workingDir, "merge:already-merged");
+        try {
+          await gitService.removeWorktree(repoPath, workspace.workingDir);
+        } catch (err) {
+          addRecoverableWarning(warnings, "remove-worktree", err);
+        }
+      }
+
+      const now = new Date().toISOString();
+      await updateWorkspaceStatus(id, "closed", {
+        workingDir: null,
+        closedAt: workspace.closedAt ?? now,
+        mergedAt: workspace.mergedAt,
+      }, database);
+      await moveIssueToDone(id, workspace.issueId, now, database);
+
+      const projectId = await resolveProjectId(id, database);
+      if (projectId) boardEvents?.broadcast(projectId, "workspace_merged");
+
+      return {
+        id,
+        mergeOutput: `Workspace was already marked as merged at ${workspace.mergedAt}; reconciled without requiring branch ref.`,
+        ...(warnings.length > 0 ? { warnings } : {}),
+      };
+    }
+
     if (workspace.workingDir && !workspace.isDirect) {
       // Full teardown before merge: kill dir procs + free the worktree's dev ports +
       // run the project's generic teardownScript (with worktree context env).
