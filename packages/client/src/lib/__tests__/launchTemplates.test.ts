@@ -104,7 +104,7 @@ describe("launchTemplates", () => {
       expect(opts.selectedSkillId).toBe("skill-x");
       expect(opts.planMode).toBe(true);
       expect(opts.tddMode).toBe(true);
-      expect(opts.requiresReview).toBeUndefined();
+      expect(opts.requiresReview).toBe(false);
       expect(opts.skipSetup).toBe(true);
       expect(opts.skipContextPacker).toBe(true);
       expect(opts.isDirect).toBe(true);
