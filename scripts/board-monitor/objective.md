@@ -9,7 +9,7 @@ This is a FRESH session every run — you have NO memory of previous runs. The k
 
 ## TUNABLE TARGETS — edit these live to steer the loop
 > The loop re-reads this file at the START of every iteration, so changes here take effect on the next cycle with **NO restart**. This block is the SINGLE place to adjust the board's pace — these numbers are not hardcoded anywhere else (the $backlog-refill skill defers to them).
-- **ACTIVE_AGENTS_TARGET = 4** — keep this many workspaces actively In Progress at all times.
+- **ACTIVE_AGENTS_TARGET = 5** — keep this many workspaces actively In Progress at all times.
 - **BACKLOG_FLOOR = 10** — never let the backlog drop below this; refill before it does.
 - **MAX_NEW_STARTS_PER_CYCLE = 2** — cap on how many NEW workspaces to launch in a single cycle (safe ramp; raise for a faster fill).
 - **REFILL_FOCUS = balanced** — when refilling, create a balanced mix of bug-fix and feature/enhancement tickets. (Set to `bugfix-only` to create ONLY real, reproducible bug-fix tickets.)

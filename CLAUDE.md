@@ -119,6 +119,10 @@ When a test in the table below fails and you haven't touched the relevant code, 
 - **Run vitest from the WORKTREE, not the main checkout** — new/changed test files exist only on your branch in the worktree. Running `pnpm exec vitest run src/__tests__/foo.test.ts` from `C:\andrena\agentic-kanban` (the main checkout) yields a misleading **`No test files found, exiting with code 1`** — the file simply isn't there. This is a directory mismatch, NOT a broken or missing test. (Contrast: `pnpm cli --` must run from the *main* checkout — opposite rule. Don't conflate them.) `cd <worktree>\packages\server` first.
 - **`--related` is BROKEN in vitest 4** — `CACError: Unknown option '--related'`. Do not use it.
 - **Board endpoint regressions usually belong in `packages/server/src/__tests__/api.test.ts`** - it runs in-process from the worktree and avoids Playwright/dev-server/node_modules setup churn. Use Playwright API E2E only when browser/client wiring or a real running server is the behavior under test.
+- **For targeted runs, pass the test file pattern directly**:
+  ```
+  pnpm test:mine -- src/__tests__/tags.test.ts
+  ```
 - **For a specific source file**: use the `vitest related` subcommand (from inside the package dir):
   ```
   cd packages/server
@@ -258,7 +262,7 @@ The **Butler** is a warm, per-project Claude assistant (Agent SDK, in-process) �
 ## Monorepo Commands
 - `pnpm dev` — start server + client (auto-detects worktree ports; default: server 3001, client 5173)
 - `pnpm dev:desktop` — start server + client + Tauri native window
-- `pnpm test:mine` — **fast iteration loop**: runs only reliably-green unit suites (server + mcp-server), skipping the known-flaky ones (see "Known Flaky Test Suites"). Use this while iterating; run the full suite once before mark-ready. `--changed HEAD` passes through: `pnpm test:mine -- --changed HEAD`.
+- `pnpm test:mine` — **fast iteration loop**: runs only reliably-green unit suites (server + mcp-server), skipping the known-flaky ones (see "Known Flaky Test Suites"). Use this while iterating; run the full suite once before mark-ready. `--changed HEAD` passes through: `pnpm test:mine -- --changed HEAD`; to filter, pass a test file pattern directly, e.g. `pnpm test:mine -- tags.test.ts`.
 - `pnpm --filter agentic-kanban test` — Vitest unit tests (full suite — server package only)
 - **targeted by source file** (vitest 4): `cd packages/server && pnpm exec vitest related src/services/foo.service.ts`
 - `pnpm test:e2e` — Playwright E2E tests
