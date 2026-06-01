@@ -10,6 +10,7 @@ import { CreateWorkspaceForm } from "./CreateWorkspaceForm.js";
 import { WorkspaceDiffPanel } from "./WorkspaceDiffPanel.js";
 import { WorkspacePreviewPanel } from "./WorkspacePreviewPanel.js";
 import { WorkspaceArtifactsBrowser } from "./WorkspaceArtifactsBrowser.js";
+import { WorkspaceDiagnosticsPanel } from "./WorkspaceDiagnosticsPanel.js";
 import { FailurePatternHint } from "./FailurePatternHint.js";
 import TicketMentionInput from "./TicketMentionInput.js";
 import { useWorkspaceSession } from "../hooks/useWorkspaceSession.js";
@@ -36,6 +37,10 @@ interface Project {
   defaultBranch: string | null;
   remoteUrl: string | null;
   setupScript?: string | null;
+  setupEnabled?: boolean;
+  setupBlocking?: boolean;
+  symlinkEnabled?: boolean;
+  symlinkDirs?: string | null;
 }
 
 interface SessionInfo {
@@ -1961,6 +1966,16 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                             Artifacts
                           </button>
                         )}
+                        <button
+                          onClick={() => { setViewMode("diagnostics"); }}
+                          className={`flex-1 text-xs py-1.5 text-center font-medium ${
+                            viewMode === "diagnostics"
+                              ? "text-blue-700 border-b-2 border-blue-600"
+                              : "text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"
+                          }`}
+                        >
+                          Diagnostics
+                        </button>
                       </div>
                     )}
 
@@ -2113,7 +2128,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                       );
                     })()}
 
-                    {(viewMode === "output" || (isRunning && viewMode !== "preview" && viewMode !== "artifacts")) && (selectedHistoryId ? historyMessages : (activeSession || completedMessages.length > 0)) ? (
+                    {(viewMode === "output" || (isRunning && viewMode !== "preview" && viewMode !== "artifacts" && viewMode !== "diagnostics")) && (selectedHistoryId ? historyMessages : (activeSession || completedMessages.length > 0)) ? (
                       <TerminalView
                         messages={selectedHistoryId ? historyMessages : (activeSession ? messages : completedMessages)}
                         connectionState={selectedHistoryId ? "closed" : (activeSession ? wsState : "closed")}
@@ -2174,6 +2189,10 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
 
                     {viewMode === "artifacts" && ws.workingDir && (
                       <WorkspaceArtifactsBrowser workspaceId={ws.id} />
+                    )}
+
+                    {viewMode === "diagnostics" && (
+                      <WorkspaceDiagnosticsPanel workspace={ws} project={project} />
                     )}
 
                     {!isRunning && viewMode === "output" && (

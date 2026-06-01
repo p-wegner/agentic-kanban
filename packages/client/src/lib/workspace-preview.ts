@@ -1,4 +1,5 @@
 const DEFAULT_CLIENT_PORT = 5173;
+const DEFAULT_SERVER_PORT = 3001;
 
 export type WorkspacePreviewResult =
   | { ok: true; port: number; url: string }
@@ -18,22 +19,42 @@ function branchHash(branchName: string): number {
 }
 
 export function getWorkspacePreviewUrl(workspace: { branch?: string | null; isDirect?: boolean }): WorkspacePreviewResult {
+  const ports = getWorkspaceDevPorts(workspace);
+  if (!ports.ok) return { ok: false, reason: ports.reason };
+  return { ok: true, port: ports.clientPort, url: `http://127.0.0.1:${ports.clientPort}` };
+}
+
+export type WorkspaceDevPortsResult =
+  | { ok: true; serverPort: number; clientPort: number; previewUrl: string }
+  | { ok: false; reason: string };
+
+export function getWorkspaceDevPorts(workspace: { branch?: string | null; isDirect?: boolean }): WorkspaceDevPortsResult {
   if (workspace.isDirect) {
-    const url = `http://127.0.0.1:${DEFAULT_CLIENT_PORT}`;
-    return { ok: true, port: DEFAULT_CLIENT_PORT, url };
+    return {
+      ok: true,
+      serverPort: DEFAULT_SERVER_PORT,
+      clientPort: DEFAULT_CLIENT_PORT,
+      previewUrl: `http://127.0.0.1:${DEFAULT_CLIENT_PORT}`,
+    };
   }
 
   const branch = workspace.branch?.trim();
   if (!branch) {
-    return { ok: false, reason: "Preview port unavailable: workspace branch is missing." };
+    return { ok: false, reason: "Dev ports unavailable: workspace branch is missing." };
   }
 
   const issueNumber = getIssueNumber(branch);
   const offset = issueNumber ?? branchHash(branch);
-  const port = DEFAULT_CLIENT_PORT + offset;
-  if (port > 60000) {
-    return { ok: false, reason: `Preview port ${port} is outside the supported dev range.` };
+  const clientPort = DEFAULT_CLIENT_PORT + offset;
+  const serverPort = DEFAULT_SERVER_PORT + offset;
+  if (clientPort > 60000 || serverPort > 60000) {
+    return { ok: false, reason: `Dev ports ${serverPort}/${clientPort} are outside the supported range.` };
   }
 
-  return { ok: true, port, url: `http://127.0.0.1:${port}` };
+  return {
+    ok: true,
+    serverPort,
+    clientPort,
+    previewUrl: `http://127.0.0.1:${clientPort}`,
+  };
 }

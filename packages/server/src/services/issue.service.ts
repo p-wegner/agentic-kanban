@@ -23,6 +23,16 @@ import { deleteWorkspaceCascade } from "../repositories/workspace.repository.js"
 import { enrichWorkspacesWithSessionData, wouldCreateCycle } from "./board-aggregation.service.js";
 import { materializePhaseArtifactToWorktree } from "./phase-artifacts.service.js";
 
+function parseJsonArray<T>(raw: string | null | undefined, fallback: T[]): T[] {
+  if (!raw) return fallback;
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed as T[] : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
 export class IssueError extends Error {
   constructor(
     message: string,
@@ -556,6 +566,14 @@ export function createIssueService(deps: {
         latestSetupDurationMs,
         latestSetupStdoutTail,
         latestSetupStderrTail,
+        latestSymlinkState,
+        latestSymlinkStartedAt,
+        latestSymlinkEndedAt,
+        latestSymlinkDirs,
+        latestSymlinkLinked,
+        latestSymlinkSkipped,
+        latestSymlinkFailed,
+        latestSymlinkError,
         ...workspace
       } = w;
       return {
@@ -569,6 +587,16 @@ export function createIssueService(deps: {
           durationMs: latestSetupDurationMs,
           stdoutTail: latestSetupStdoutTail,
           stderrTail: latestSetupStderrTail,
+        } : null,
+        latestSymlink: latestSymlinkState ? {
+          state: latestSymlinkState,
+          dirs: parseJsonArray<string>(latestSymlinkDirs, []),
+          linked: parseJsonArray<string>(latestSymlinkLinked, []),
+          skipped: parseJsonArray<string>(latestSymlinkSkipped, []),
+          failed: parseJsonArray<{ dir: string; error: string }>(latestSymlinkFailed, []),
+          startedAt: latestSymlinkStartedAt,
+          endedAt: latestSymlinkEndedAt,
+          error: latestSymlinkError,
         } : null,
         contextTokens: contextTokensMap.get(w.id) ?? null,
         lastTool: lastToolMap.get(w.id) ?? null,

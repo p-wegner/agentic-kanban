@@ -50,6 +50,8 @@ export interface UpdateProjectRequest {
   teardownScript?: string | null;
   autoRetryFlakes?: boolean;
   maxRetries?: number;
+  symlinkEnabled?: boolean;
+  symlinkDirs?: string | string[] | null;
 }
 
 export interface ProjectResponse {
@@ -67,6 +69,8 @@ export interface ProjectResponse {
   teardownScript: string | null;
   autoRetryFlakes: boolean | null;
   maxRetries: number | null;
+  symlinkEnabled: boolean;
+  symlinkDirs: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -328,6 +332,19 @@ export interface WorkspaceSetupRun {
   stderrTail: string | null;
 }
 
+export type WorkspaceSymlinkState = "disabled" | "linked" | "skipped" | "failed";
+
+export interface WorkspaceSymlinkRun {
+  state: WorkspaceSymlinkState;
+  dirs: string[];
+  linked: string[];
+  skipped: string[];
+  failed: Array<{ dir: string; error: string }>;
+  startedAt: string | null;
+  endedAt: string | null;
+  error: string | null;
+}
+
 export interface QualityMetricRecord {
   id: string;
   projectId: string;
@@ -429,6 +446,7 @@ export interface WorkspaceResponse {
   lastTool?: string | null;
   latestCommit?: { sha: string; message: string } | null;
   latestSetup?: WorkspaceSetupRun | null;
+  latestSymlink?: WorkspaceSymlinkRun | null;
 }
 
 export interface IssueArtifact {
