@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
 import { apiFetch } from "../lib/api.js";
 import { STATUS_COLORS, TYPE_COLORS, BRAND, ACCENT } from "../lib/chartColors";
+import { computeCriticalPath, type CriticalPathResult, type ChainStep } from "../lib/criticalPath.js";
 
 interface Dependency {
   id: string;
@@ -36,6 +37,13 @@ const DEPENDENCY_COLORS: Record<string, string> = {
   child_of: "#c79a3e",
   duplicates: "#b07a8c",
 };
+
+/** Root blocker color — warm brick (same family as TYPE_COLORS.bug). */
+const ROOT_BLOCKER_COLOR = "#b4453a";
+/** Critical-chain edge color. */
+const CHAIN_EDGE_COLOR = "#c25f36";
+/** Cycle indicator color — amber. */
+const CYCLE_COLOR = "#f59e0b";
 
 const NODE_W = 220;
 const NODE_H = 64;
@@ -180,6 +188,8 @@ function orderedStatusNames(statusNames: string[]) {
   return [...knownOrder, ...extraStatuses];
 }
 
+type GraphMode = "dependency" | "critical-path";
+
 interface GraphViewProps {
   columns: StatusWithIssues[];
   projectId: string;
@@ -191,11 +201,27 @@ interface GraphFilterControlsProps {
   statusFilters: string[];
   statusNames: string[];
   onStatusFiltersChange: (statuses: string[]) => void;
+  graphMode: GraphMode;
+  onGraphModeChange: (mode: GraphMode) => void;
+  hasBlockingEdges: boolean;
 }
 
-function GraphFilterControls({ statusFilters, statusNames, onStatusFiltersChange }: GraphFilterControlsProps) {
+function GraphFilterControls({ statusFilters, statusNames, onStatusFiltersChange, graphMode, onGraphModeChange, hasBlockingEdges }: GraphFilterControlsProps) {
   return (
     <div className="absolute top-3 left-3 z-10 flex items-center gap-2 rounded-md border border-gray-200 bg-white/95 px-2.5 py-1.5 shadow-sm dark:border-gray-700 dark:bg-gray-900/95">
+      {hasBlockingEdges && (
+        <div className="flex items-center gap-0.5 mr-1">
+          <button
+            onClick={() => onGraphModeChange("dependency")}
+            className={`text-xs px-2 py-0.5 rounded ${graphMode === "dependency" ? "bg-brand-600 text-white" : "text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700"}`}
+          >Graph</button>
+          <button
+            onClick={() => onGraphModeChange("critical-path")}
+            className={`text-xs px-2 py-0.5 rounded ${graphMode === "critical-path" ? "bg-brand-600 text-white" : "text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700"}`}
+            title="Show critical blocking chains"
+          >Critical Path</button>
+        </div>
+      )}
       <span className="text-xs font-medium text-gray-500 dark:text-gray-400">Status</span>
       <select
         multiple
@@ -223,10 +249,158 @@ function GraphFilterControls({ statusFilters, statusNames, onStatusFiltersChange
   );
 }
 
+// ---------------------------------------------------------------------------
+// Critical Path Side Panel
+// ---------------------------------------------------------------------------
+
+interface CriticalPathSidePanelProps {
+  chainRoot: string;
+  criticalPathResult: CriticalPathResult;
+  nodeIssueMap: Map<string, IssueWithStatus>;
+  onClose: () => void;
+  onIssueClick: (issue: IssueWithStatus) => void;
+}
+
+function CriticalPathSidePanel({ chainRoot, criticalPathResult, nodeIssueMap, onClose, onIssueClick }: CriticalPathSidePanelProps) {
+  const chain = criticalPathResult.chainsByRoot.get(chainRoot);
+  const rootBlocker = criticalPathResult.rootBlockers.find((r) => r.id === chainRoot);
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleKey(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+  }, [onClose]);
+
+  if (!chain || chain.length === 0) return null;
+
+  const rootIssue = nodeIssueMap.get(chainRoot);
+
+  return (
+    <div className="absolute top-0 right-0 bottom-0 z-20 animate-slide-in-right" style={{ width: 320 }}>
+      <div ref={panelRef} className="h-full bg-white dark:bg-gray-900 border-l border-gray-200 dark:border-gray-700 shadow-lg flex flex-col">
+        {/* Header */}
+        <div className="flex items-center gap-2 px-3 py-2 border-b border-gray-200 dark:border-gray-700">
+          <div className="flex-1 min-w-0">
+            <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 truncate">
+              Critical Path
+            </h3>
+            <p className="text-xs text-gray-500 dark:text-gray-400">
+              {rootBlocker ? `${rootBlocker.downstreamCount} issue${rootBlocker.downstreamCount !== 1 ? "s" : ""} blocked downstream` : "Chain details"}
+            </p>
+          </div>
+          <button
+            onClick={onClose}
+            className="rounded px-1.5 py-0.5 text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800 text-sm"
+          >
+            ✕
+          </button>
+        </div>
+
+        {/* Chain steps */}
+        <div className="flex-1 overflow-y-auto px-3 py-2">
+          {chain.map((step: ChainStep, idx: number) => {
+            const isRoot = idx === 0;
+            return (
+              <div key={step.id}>
+                <button
+                  onClick={() => {
+                    const issue = nodeIssueMap.get(step.id);
+                    if (issue) onIssueClick(issue);
+                  }}
+                  className={`w-full text-left rounded-md px-2.5 py-2 mb-0.5 transition-colors ${
+                    isRoot
+                      ? "bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800"
+                      : "hover:bg-gray-50 dark:hover:bg-gray-800 border border-transparent"
+                  }`}
+                >
+                  <div className="flex items-center gap-1.5">
+                    {step.issueNumber != null && (
+                      <span className="text-[10px] font-mono text-gray-400">#{step.issueNumber}</span>
+                    )}
+                    <span className="text-xs font-medium text-gray-800 dark:text-gray-200 truncate">
+                      {step.title}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1.5 mt-0.5">
+                    <span
+                      className="w-1.5 h-1.5 rounded-full inline-block"
+                      style={{ background: STATUS_COLORS[step.statusName] ?? "#6b7280" }}
+                    />
+                    <span className="text-[10px] text-gray-500 dark:text-gray-400">{step.statusName}</span>
+                    {isRoot && (
+                      <span className="text-[10px] px-1 py-0.5 rounded bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300 ml-auto">
+                        root blocker
+                      </span>
+                    )}
+                    {step.isBlocked && !isRoot && (
+                      <span className="text-[10px] px-1 py-0.5 rounded bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300 ml-auto">
+                        blocked
+                      </span>
+                    )}
+                  </div>
+                </button>
+                {/* Connector arrow */}
+                {idx < chain.length - 1 && (
+                  <div className="flex items-center justify-center py-0.5">
+                    <svg width="12" height="12" viewBox="0 0 12 12" className="text-gray-300 dark:text-gray-600">
+                      <path d="M6 2 L6 8 M3 6 L6 9 L9 6" stroke="currentColor" strokeWidth="1.5" fill="none" />
+                    </svg>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Best unblock callout */}
+        {criticalPathResult.bestUnblock && (
+          <div className="border-t border-gray-200 dark:border-gray-700 px-3 py-2.5 bg-amber-50 dark:bg-amber-900/20">
+            <div className="text-[10px] font-semibold text-amber-700 dark:text-amber-300 uppercase tracking-wide mb-1">
+              Next best unblock
+            </div>
+            <button
+              onClick={() => {
+                const issue = nodeIssueMap.get(criticalPathResult.bestUnblock!.id);
+                if (issue) onIssueClick(issue);
+              }}
+              className="w-full text-left"
+            >
+              <span className="text-xs text-gray-800 dark:text-gray-200">
+                Resolve{" "}
+                {(() => {
+                  const bi = nodeIssueMap.get(criticalPathResult.bestUnblock.id);
+                  return bi ? (
+                    <>
+                      {bi.issueNumber != null && <span className="font-mono text-gray-500">#{bi.issueNumber}</span>}
+                      {" "}{bi.title.length > 32 ? bi.title.slice(0, 32) + "…" : bi.title}
+                    </>
+                  ) : "this issue";
+                })()}
+              </span>
+              <span className="block text-[10px] text-amber-600 dark:text-amber-400 mt-0.5">
+                to unblock {criticalPathResult.bestUnblock.downstreamCount} issue{criticalPathResult.bestUnblock.downstreamCount !== 1 ? "s" : ""}
+              </span>
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Main GraphView component
+// ---------------------------------------------------------------------------
+
 export function GraphView({ columns, projectId, onIssueClick, searchQuery }: GraphViewProps) {
   const [graphData, setGraphData] = useState<GraphData | null>(null);
   const [loading, setLoading] = useState(true);
   const [statusFilters, setStatusFilters] = useState<string[]>(["active"]);
+  const [graphMode, setGraphMode] = useState<GraphMode>("dependency");
+  const [selectedChainRoot, setSelectedChainRoot] = useState<string | null>(null);
   const [nodes, setNodes] = useState<Node[]>([]);
   const [colHeaders, setColHeaders] = useState<{ status: string; count: number; x: number }[]>([]);
   const [dragNode, setDragNode] = useState<string | null>(null);
@@ -246,6 +420,18 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery }: Gra
     ...columns.map((c) => c.name),
     ...(graphData?.nodes.map((n) => n.statusName) ?? []),
   ]);
+
+  // Whether there are any blocking edges (depends_on or blocked_by)
+  const hasBlockingEdges = useMemo(() => {
+    if (!graphData) return false;
+    return graphData.edges.some((e) => e.type === "depends_on" || e.type === "blocked_by");
+  }, [graphData]);
+
+  // Compute critical path analysis when in critical-path mode
+  const criticalPathResult = useMemo<CriticalPathResult | null>(() => {
+    if (graphMode !== "critical-path" || !graphData) return null;
+    return computeCriticalPath(graphData.nodes, graphData.edges);
+  }, [graphMode, graphData]);
 
   useEffect(() => {
     async function load() {
@@ -326,6 +512,36 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery }: Gra
   }, [nodes]);
 
   const nodeMap = new Map(nodes.map((n) => [n.id, n]));
+
+  // Precompute critical-path lookup sets for rendering
+  const rootBlockerIds = useMemo(() => {
+    if (!criticalPathResult) return new Set<string>();
+    return new Set(criticalPathResult.rootBlockers.map((r) => r.id));
+  }, [criticalPathResult]);
+
+  const downstreamCountMap = useMemo(() => {
+    if (!criticalPathResult) return new Map<string, number>();
+    return new Map(criticalPathResult.rootBlockers.map((r) => [r.id, r.downstreamCount]));
+  }, [criticalPathResult]);
+
+  // Map from chain step id to its root (for chain highlighting when a root is selected)
+  const selectedChainIds = useMemo(() => {
+    if (!selectedChainRoot || !criticalPathResult) return new Set<string>();
+    const chain = criticalPathResult.chainsByRoot.get(selectedChainRoot);
+    return chain ? new Set(chain.map((s) => s.id)) : new Set<string>();
+  }, [selectedChainRoot, criticalPathResult]);
+
+  // Map from edge key to whether it's in the selected chain
+  const selectedChainEdgeKeys = useMemo(() => {
+    if (!selectedChainRoot || !criticalPathResult) return new Set<string>();
+    const chain = criticalPathResult.chainsByRoot.get(selectedChainRoot);
+    if (!chain || chain.length < 2) return new Set<string>();
+    const keys = new Set<string>();
+    for (let i = 0; i < chain.length - 1; i++) {
+      keys.add(`${chain[i].id}->${chain[i + 1].id}`);
+    }
+    return keys;
+  }, [selectedChainRoot, criticalPathResult]);
 
   function getEdges() {
     if (!graphData) return [];
@@ -413,6 +629,9 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery }: Gra
           statusFilters={statusFilters}
           statusNames={statusNames}
           onStatusFiltersChange={setStatusFilters}
+          graphMode={graphMode}
+          onGraphModeChange={setGraphMode}
+          hasBlockingEdges={hasBlockingEdges}
         />
         <div className="flex h-full flex-col items-center justify-center gap-3 text-gray-500 dark:text-gray-400 text-sm">
           <span>No issues to display</span>
@@ -422,6 +641,7 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery }: Gra
   }
 
   const edges = getEdges();
+  const isCriticalPathMode = graphMode === "critical-path" && criticalPathResult !== null;
 
   return (
     <div ref={containerRef} className="relative h-full w-full overflow-hidden bg-gray-50 dark:bg-gray-950 select-none">
@@ -429,6 +649,12 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery }: Gra
         statusFilters={statusFilters}
         statusNames={statusNames}
         onStatusFiltersChange={setStatusFilters}
+        graphMode={graphMode}
+        onGraphModeChange={(mode) => {
+          setGraphMode(mode);
+          if (mode === "dependency") setSelectedChainRoot(null);
+        }}
+        hasBlockingEdges={hasBlockingEdges}
       />
       {/* Controls */}
       <div className="absolute top-3 right-3 z-10 flex flex-col gap-1">
@@ -453,14 +679,63 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery }: Gra
       </div>
       {/* Legend */}
       <div className="absolute bottom-3 left-3 z-10 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-md p-2 shadow-sm text-xs text-gray-600 dark:text-gray-400 space-y-1">
-        <div className="font-medium text-gray-700 dark:text-gray-300 mb-1">Status</div>
-        {Object.entries(STATUS_COLORS).map(([name, color]) => (
-          <div key={name} className="flex items-center gap-1.5">
-            <span className="w-2.5 h-2.5 rounded-full inline-block shrink-0" style={{ background: color }} />
-            {name}
-          </div>
-        ))}
+        {isCriticalPathMode ? (
+          <>
+            <div className="font-medium text-gray-700 dark:text-gray-300 mb-1">Critical Path</div>
+            <div className="flex items-center gap-1.5">
+              <span className="w-2.5 h-2.5 rounded-full inline-block shrink-0" style={{ background: ROOT_BLOCKER_COLOR }} />
+              Root blocker
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="w-2.5 h-2.5 rounded inline-block shrink-0 border-2 border-dashed" style={{ borderColor: CYCLE_COLOR }} />
+              Cycle
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="w-2.5 h-2.5 rounded-full inline-block shrink-0" style={{ background: CHAIN_EDGE_COLOR }} />
+              Blocking edge
+            </div>
+            {criticalPathResult!.rootBlockers.length === 0 && (
+              <div className="text-gray-400 italic mt-1">No blocking chains found</div>
+            )}
+          </>
+        ) : (
+          <>
+            <div className="font-medium text-gray-700 dark:text-gray-300 mb-1">Status</div>
+            {Object.entries(STATUS_COLORS).map(([name, color]) => (
+              <div key={name} className="flex items-center gap-1.5">
+                <span className="w-2.5 h-2.5 rounded-full inline-block shrink-0" style={{ background: color }} />
+                {name}
+              </div>
+            ))}
+          </>
+        )}
       </div>
+
+      {/* Best unblock callout (critical-path mode only) */}
+      {isCriticalPathMode && criticalPathResult!.bestUnblock && (() => {
+        const best = criticalPathResult!.bestUnblock;
+        const bestIssue = nodeMap.get(best.id)?.issue;
+        return (
+          <div
+            className="absolute bottom-3 right-3 z-10 bg-white dark:bg-gray-900 border border-amber-300 dark:border-amber-700 rounded-md p-2.5 shadow-sm text-xs cursor-pointer hover:border-amber-400 transition-colors max-w-56"
+            onClick={() => {
+              setSelectedChainRoot(best.id);
+              if (bestIssue) onIssueClick(bestIssue);
+            }}
+          >
+            <div className="text-[10px] font-semibold text-amber-700 dark:text-amber-300 uppercase tracking-wide mb-0.5">
+              Next best unblock
+            </div>
+            <div className="text-gray-800 dark:text-gray-200">
+              {bestIssue?.issueNumber != null && <span className="font-mono text-gray-500">#{bestIssue.issueNumber}</span>}
+              {" "}{bestIssue ? (bestIssue.title.length > 30 ? bestIssue.title.slice(0, 30) + "…" : bestIssue.title) : "this issue"}
+            </div>
+            <div className="text-amber-600 dark:text-amber-400 mt-0.5">
+              → {best.downstreamCount} issue{best.downstreamCount !== 1 ? "s" : ""} downstream
+            </div>
+          </div>
+        );
+      })()}
 
       <svg
         ref={svgRef}
@@ -480,6 +755,10 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery }: Gra
               <path d="M0,0 L0,6 L8,3 z" fill={color} />
             </marker>
           ))}
+          {/* Critical-path chain edge arrow */}
+          <marker id="arrow-critical-chain" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto">
+            <path d="M0,0 L0,6 L8,3 z" fill={CHAIN_EDGE_COLOR} />
+          </marker>
         </defs>
         <g transform={`translate(${pan.x},${pan.y}) scale(${zoom})`}>
           {/* Column headers (status swimlane mode) */}
@@ -518,6 +797,32 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery }: Gra
             const x2 = dst.x;
             const y2 = dst.y + NODE_H / 2;
             const mx = (x1 + x2) / 2;
+            const isBlockingEdge = edge.type === "depends_on" || edge.type === "blocked_by";
+
+            // Critical-path mode: highlight chain edges, dim non-chain
+            if (isCriticalPathMode) {
+              const isInSelectedChain = selectedChainRoot
+                ? selectedChainEdgeKeys.has(`${edge.dependsOnId}->${edge.issueId}`)
+                : isBlockingEdge && criticalPathResult!.chainNodeIds.has(edge.dependsOnId) && criticalPathResult!.chainNodeIds.has(edge.issueId);
+              const edgeOpacity = isInSelectedChain ? 0.9 : (isBlockingEdge ? 0.25 : 0.1);
+              const edgeStroke = isInSelectedChain ? CHAIN_EDGE_COLOR : (isBlockingEdge ? "#d17d54" : "#d1d5db");
+              const edgeWidth = isInSelectedChain ? 3 : 1.5;
+              const markerRef = isInSelectedChain ? "url(#arrow-critical-chain)" : `url(#arrow-${edge.type})`;
+
+              return (
+                <g key={edge.id}>
+                  <path
+                    d={`M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}`}
+                    fill="none"
+                    stroke={edgeStroke}
+                    strokeWidth={edgeWidth}
+                    opacity={edgeOpacity}
+                    markerEnd={markerRef}
+                  />
+                </g>
+              );
+            }
+
             const color = DEPENDENCY_COLORS[edge.type] ?? "#9ca3af";
             return (
               <g key={edge.id}>
@@ -552,16 +857,68 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery }: Gra
               : true;
             const title = node.issue.title;
             const displayTitle = title.length > 28 ? title.slice(0, 28) + "…" : title;
+
+            // Critical-path mode visual overrides
+            let nodeOpacity = isHighlighted ? 1 : 0.3;
+            let nodeStroke = isSelected ? BRAND : color;
+            let nodeStrokeWidth = isSelected ? 2 : 1.5;
+            let nodeStrokeDasharray: string | undefined;
+            let isRootBlocker = false;
+            let downstreamBadge: number | null = null;
+
+            if (isCriticalPathMode) {
+              const isChainNode = criticalPathResult!.chainNodeIds.has(node.id);
+              const isCycleNode = criticalPathResult!.cycleNodeIds.has(node.id);
+              isRootBlocker = rootBlockerIds.has(node.id);
+              const isInSelectedChain = selectedChainRoot
+                ? selectedChainIds.has(node.id)
+                : isChainNode;
+
+              if (isCycleNode) {
+                nodeStroke = CYCLE_COLOR;
+                nodeStrokeWidth = 2;
+                nodeStrokeDasharray = "4 2";
+                nodeOpacity = 0.6;
+              } else if (isRootBlocker) {
+                nodeStroke = ROOT_BLOCKER_COLOR;
+                nodeStrokeWidth = 3;
+                downstreamBadge = downstreamCountMap.get(node.id) ?? null;
+                nodeOpacity = 1;
+              } else if (isInSelectedChain) {
+                nodeStroke = isSelected ? BRAND : color;
+                nodeOpacity = 1;
+              } else if (isChainNode) {
+                nodeOpacity = 0.5;
+              } else {
+                nodeOpacity = 0.2;
+              }
+
+              // If a chain root is selected, highlight its chain strongly
+              if (selectedChainRoot) {
+                if (isInSelectedChain || isRootBlocker) {
+                  nodeOpacity = 1;
+                } else {
+                  nodeOpacity = 0.15;
+                }
+              }
+            }
+
             return (
               <g
                 key={node.id}
                 data-node
+                data-critical-path-root={isRootBlocker || undefined}
+                data-critical-path-chain={isCriticalPathMode && criticalPathResult!.chainNodeIds.has(node.id) || undefined}
                 transform={`translate(${node.x},${node.y})`}
-                style={{ cursor: "pointer", opacity: isHighlighted ? 1 : 0.3 }}
+                style={{ cursor: "pointer", opacity: nodeOpacity }}
                 onMouseDown={(e) => handleMouseDownNode(e, node.id)}
                 onClick={(e) => {
                   e.stopPropagation();
-                  if (!didDragRef.current) onIssueClick(node.issue);
+                  if (didDragRef.current) return;
+                  if (isCriticalPathMode && isRootBlocker) {
+                    setSelectedChainRoot(selectedChainRoot === node.id ? null : node.id);
+                  }
+                  onIssueClick(node.issue);
                 }}
               >
                 <rect
@@ -570,8 +927,9 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery }: Gra
                   rx={6}
                   ry={6}
                   fill="white"
-                  stroke={isSelected ? BRAND : color}
-                  strokeWidth={isSelected ? 2 : 1.5}
+                  stroke={nodeStroke}
+                  strokeWidth={nodeStrokeWidth}
+                  strokeDasharray={nodeStrokeDasharray}
                   filter="drop-shadow(0 1px 3px rgba(0,0,0,0.12))"
                 />
                 {/* Status indicator bar */}
@@ -602,14 +960,52 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery }: Gra
                   {node.issue.statusName}
                 </text>
                 {/* Blocked indicator */}
-                {node.issue.isBlocked && (
+                {node.issue.isBlocked && !isCriticalPathMode && (
                   <text x={NODE_W - 22} y={NODE_H - 6} fontSize={9} fill="#f59e0b">⚠</text>
+                )}
+                {/* Cycle label */}
+                {isCriticalPathMode && criticalPathResult!.cycleNodeIds.has(node.id) && (
+                  <text x={NODE_W - 40} y={NODE_H - 6} fontSize={8} fill={CYCLE_COLOR}>cycle</text>
+                )}
+                {/* Downstream count badge (root blockers in critical-path mode) */}
+                {downstreamBadge != null && downstreamBadge > 0 && (
+                  <>
+                    <circle
+                      cx={NODE_W - 8}
+                      cy={-4}
+                      r={9}
+                      fill={ROOT_BLOCKER_COLOR}
+                      stroke="white"
+                      strokeWidth={1.5}
+                    />
+                    <text
+                      x={NODE_W - 8}
+                      y={-0.5}
+                      fontSize={8}
+                      fill="white"
+                      fontWeight={700}
+                      textAnchor="middle"
+                    >
+                      {downstreamBadge > 99 ? "99+" : downstreamBadge}
+                    </text>
+                  </>
                 )}
               </g>
             );
           })}
         </g>
       </svg>
+
+      {/* Critical-path side panel */}
+      {isCriticalPathMode && selectedChainRoot && criticalPathResult && (
+        <CriticalPathSidePanel
+          chainRoot={selectedChainRoot}
+          criticalPathResult={criticalPathResult}
+          nodeIssueMap={new Map(nodes.map((n) => [n.id, n.issue]))}
+          onClose={() => setSelectedChainRoot(null)}
+          onIssueClick={onIssueClick}
+        />
+      )}
     </div>
   );
 }
