@@ -1,8 +1,15 @@
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { createPreferenceService } from "../services/preference.service.js";
+import {
+  listAgentProfileHealth,
+  preflightAgentProfile,
+  type AgentProfilePreflightResult,
+} from "../services/agent-profile-health.service.js";
 import { createRouter } from "../middleware/create-router.js";
 import { parseJsonBody } from "../middleware/parse-body.js";
+import { preferences } from "@agentic-kanban/shared/schema";
+import type { ProviderName } from "../services/agent-provider.js";
 
 export function createPreferencesRoute(database: Database = db) {
   const router = createRouter();
@@ -45,8 +52,36 @@ export function createPreferencesRoute(database: Database = db) {
 
   // GET /api/preferences/copilot-profiles
   router.get("/copilot-profiles", (_c) => {
-    return _c.json({ profiles: [] });
+    return _c.json({ profiles: preferenceService.listCopilotProfiles() });
+  });
+
+  router.get("/agent-profiles/health", async (c) => {
+    return c.json({
+      profiles: await listAgentProfileHealth(database, {
+        claudeProfiles: preferenceService.listClaudeProfiles(),
+        codexProfiles: preferenceService.listCodexProfiles(),
+        copilotProfiles: preferenceService.listCopilotProfiles(),
+      }),
+    });
+  });
+
+  router.post("/agent-profiles/preflight", async (c) => {
+    const body = await parseJsonBody<{ provider?: string; profileName?: string }>(c);
+    const provider = parseProvider(body.provider);
+    if (!provider) {
+      return c.json({ ok: false, status: "error", errors: ["Unsupported provider"], warnings: [], flags: [], command: "", provider: body.provider ?? "", profileName: body.profileName ?? "" }, 400);
+    }
+    const profileName = body.profileName?.trim() || "default";
+    const prefRows = await database.select().from(preferences);
+    const prefMap = new Map(prefRows.map((row) => [row.key, row.value]));
+    const result: AgentProfilePreflightResult = preflightAgentProfile(prefMap, provider, profileName);
+    return c.json(result);
   });
 
   return router;
+}
+
+function parseProvider(provider: string | undefined): ProviderName | null {
+  if (provider === "claude" || provider === "codex" || provider === "copilot") return provider;
+  return null;
 }

@@ -86,7 +86,11 @@ export function createPreferenceService({ database }: { database: Database }) {
     return [...new Set(profiles)].sort();
   }
 
-  return { getActiveProjectId, setActiveProjectId, getSettings, updateSettings, listClaudeProfiles, listCodexProfiles };
+  function listCopilotProfiles(): string[] {
+    return ["default"];
+  }
+
+  return { getActiveProjectId, setActiveProjectId, getSettings, updateSettings, listClaudeProfiles, listCodexProfiles, listCopilotProfiles };
 }
 
 export const preferenceService = createPreferenceService({ database: db });

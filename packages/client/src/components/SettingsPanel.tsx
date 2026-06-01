@@ -115,6 +115,30 @@ type AgentProvider = "claude" | "codex" | "copilot";
 const COPILOT_DEFAULT_PROFILE = "default";
 const CODEX_DEFAULT_PROFILE = "default";
 
+type AgentProfileHealth = {
+  id: string;
+  provider: AgentProvider;
+  profileName: string;
+  command: string;
+  selected: boolean;
+  status: "ok" | "warning" | "error" | "unknown";
+  preflight: {
+    ok: boolean;
+    status: "ok" | "warning" | "error" | "unknown";
+    errors: string[];
+    warnings: string[];
+    command: string;
+    provider: AgentProvider;
+    profileName: string;
+    flags: string[];
+  };
+  latestFailure: {
+    at: string;
+    summary: string;
+    exitCode?: number | null;
+  } | null;
+};
+
 function uniqueProfiles(profiles: string[], fallback?: string): string[] {
   const all = fallback ? [fallback, ...profiles] : profiles;
   return [...new Set(all.filter(Boolean))];
@@ -140,6 +164,24 @@ function defaultHarnessLabel(settings: Settings): string {
   if (provider === "codex") return "Codex";
   if (provider === "copilot") return "Copilot";
   return "Claude";
+}
+
+function providerDisplayName(provider: AgentProvider): string {
+  if (provider === "codex") return "Codex";
+  if (provider === "copilot") return "Copilot";
+  return "Claude";
+}
+
+function statusClasses(status: AgentProfileHealth["status"]): string {
+  if (status === "error") return "bg-red-50 text-red-700 border-red-200";
+  if (status === "warning") return "bg-amber-50 text-amber-700 border-amber-200";
+  if (status === "ok") return "bg-green-50 text-green-700 border-green-200";
+  return "bg-gray-50 text-gray-600 border-gray-200";
+}
+
+function formatHealthTime(value: string): string {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString("en-US");
 }
 
 function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
@@ -406,6 +448,8 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
   const [profiles, setProfiles] = useState<string[]>([]);
   const [codexProfiles, setCodexProfiles] = useState<string[]>([CODEX_DEFAULT_PROFILE]);
   const [copilotProfiles, setCopilotProfiles] = useState<string[]>([COPILOT_DEFAULT_PROFILE]);
+  const [profileHealth, setProfileHealth] = useState<AgentProfileHealth[]>([]);
+  const [preflightingProfileId, setPreflightingProfileId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [tab, setTab] = useState<Tab>("agent");
@@ -481,11 +525,12 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
   useEffect(() => {
     async function load() {
       try {
-        const [data, profileData, codexProfileData, copilotProfileData, skillsData, tagsData] = await Promise.all([
+        const [data, profileData, codexProfileData, copilotProfileData, profileHealthData, skillsData, tagsData] = await Promise.all([
           apiFetch<Record<string, string>>("/api/preferences/settings"),
           apiFetch<{ profiles: string[] }>("/api/preferences/claude-profiles"),
           apiFetch<{ profiles: string[] }>("/api/preferences/codex-profiles"),
           apiFetch<{ profiles: string[] }>("/api/preferences/copilot-profiles").catch(() => ({ profiles: [COPILOT_DEFAULT_PROFILE] })),
+          apiFetch<{ profiles: AgentProfileHealth[] }>("/api/preferences/agent-profiles/health").catch(() => ({ profiles: [] })),
           apiFetch<{ id: string; name: string; description: string; prompt: string; model: string | null; projectId: string | null; isBuiltin: boolean }[]>("/api/agent-skills"),
           apiFetch<{ id: string; name: string; color: string | null; isBuiltin: boolean }[]>("/api/tags"),
         ]);
@@ -493,6 +538,7 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
         setProfiles(profileData.profiles);
         setCodexProfiles(uniqueProfiles(codexProfileData.profiles, CODEX_DEFAULT_PROFILE));
         setCopilotProfiles(uniqueProfiles(copilotProfileData.profiles, COPILOT_DEFAULT_PROFILE));
+        setProfileHealth(profileHealthData.profiles);
         setSkills(skillsData);
         setTagsList(tagsData);
 
@@ -577,6 +623,24 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
       showToast("Failed to trigger monitor", "error");
     } finally {
       setMonitorRunning(false);
+    }
+  }
+
+  async function handleProfilePreflight(profile: AgentProfileHealth) {
+    setPreflightingProfileId(profile.id);
+    try {
+      const result = await apiFetch<AgentProfileHealth["preflight"]>("/api/preferences/agent-profiles/preflight", {
+        method: "POST",
+        body: JSON.stringify({ provider: profile.provider, profileName: profile.profileName }),
+      });
+      setProfileHealth((rows) => rows.map((row) => row.id === profile.id
+        ? { ...row, preflight: result, status: row.latestFailure ? "error" : result.status, command: result.command }
+        : row));
+      showToast(result.ok ? "Preflight passed" : "Preflight found issues", result.ok ? "success" : "error");
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Preflight failed", "error");
+    } finally {
+      setPreflightingProfileId(null);
     }
   }
 
@@ -730,6 +794,68 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                       className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-1 focus:ring-brand-500"
                     />
                   </Field>
+
+                  <div className="border border-gray-200 dark:border-gray-700 rounded-md overflow-hidden">
+                    <div className="px-3 py-2 border-b border-gray-200 dark:border-gray-700">
+                      <div className="text-sm font-medium text-gray-800 dark:text-gray-200">Provider capability</div>
+                      <div className="text-xs text-gray-500 dark:text-gray-400">Configured profiles, launch flags, and last launch failure.</div>
+                    </div>
+                    {profileHealth.length === 0 ? (
+                      <div className="px-3 py-4 text-sm text-gray-500 dark:text-gray-400">No provider profiles found.</div>
+                    ) : (
+                      <div className="divide-y divide-gray-100 dark:divide-gray-800">
+                        {profileHealth.map((profile) => (
+                          <div key={profile.id} className="px-3 py-3 space-y-2">
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="min-w-0">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <span className="text-sm font-medium text-gray-800 dark:text-gray-200">{providerDisplayName(profile.provider)}</span>
+                                  <span className="text-xs font-mono text-gray-500 dark:text-gray-400">{profile.profileName}</span>
+                                  {profile.selected && <span className="text-[10px] px-1.5 py-0.5 rounded bg-brand-50 text-brand-700 dark:bg-brand-900/40 dark:text-brand-300">selected</span>}
+                                  <span className={`text-[10px] px-1.5 py-0.5 rounded border ${statusClasses(profile.status)}`}>{profile.status}</span>
+                                </div>
+                                <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                                  Command: <span className="font-mono">{profile.command || profile.provider}</span>
+                                </div>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => handleProfilePreflight(profile)}
+                                disabled={preflightingProfileId === profile.id}
+                                className="shrink-0 text-xs px-2.5 py-1.5 border border-gray-300 dark:border-gray-600 rounded text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50"
+                              >
+                                {preflightingProfileId === profile.id ? "Checking..." : "Preflight"}
+                              </button>
+                            </div>
+                            <div className="flex flex-wrap gap-1">
+                              {profile.preflight.flags.length === 0 ? (
+                                <span className="text-xs text-gray-400">No launch flags</span>
+                              ) : profile.preflight.flags.map((flag) => (
+                                <span key={flag} className="text-[11px] font-mono px-1.5 py-0.5 rounded bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300">{flag}</span>
+                              ))}
+                            </div>
+                            {(profile.preflight.errors.length > 0 || profile.preflight.warnings.length > 0) && (
+                              <div className="space-y-1">
+                                {profile.preflight.errors.map((error) => (
+                                  <div key={error} className="text-xs text-red-600 dark:text-red-400">{error}</div>
+                                ))}
+                                {profile.preflight.warnings.map((warning) => (
+                                  <div key={warning} className="text-xs text-amber-600 dark:text-amber-400">{warning}</div>
+                                ))}
+                              </div>
+                            )}
+                            {profile.latestFailure ? (
+                              <div className="text-xs text-red-700 dark:text-red-300">
+                                Last failure {formatHealthTime(profile.latestFailure.at)}: {profile.latestFailure.summary}
+                              </div>
+                            ) : (
+                              <div className="text-xs text-gray-400">No launch failures recorded.</div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </>
               )}
 
