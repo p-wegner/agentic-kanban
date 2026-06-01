@@ -1,6 +1,7 @@
 import { startServer } from "./server-start.js";
+import { resolveRuntimeServerPort } from "./runtime-port.js";
 
-const port = Number(process.env.PORT) || 3001;
+const port = resolveRuntimeServerPort();
 
 const { app, sessionManager, boardEvents } = await startServer(port);
 
