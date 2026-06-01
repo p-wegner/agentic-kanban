@@ -1294,7 +1294,7 @@ export function BoardPage() {
           onShowMergeQueue={() => setShowMergeQueue(true)}
           mergeQueueCount={columns.flatMap(c => c.issues).filter(i => {
             const ws = i.workspaceSummary?.main;
-            return ws && (ws.status === "idle" || ws.status === "reviewing" || ws.readyForMerge);
+            return i.statusName === "In Review" && ws && ws.status !== "closed";
           }).length}
         />
         {viewMode === "graph" && activeProjectId ? (
@@ -1596,6 +1596,10 @@ export function BoardPage() {
           columns={columns}
           projectId={activeProjectId}
           onClose={() => setShowMergeQueue(false)}
+          onIssueClick={(issue) => {
+            setSelectedIssue(issue);
+            setShowMergeQueue(false);
+          }}
           onMerged={() => {
             refetchBoard();
           }}
