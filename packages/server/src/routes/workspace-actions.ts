@@ -108,6 +108,18 @@ export function createWorkspaceActionsRoute(
     return c.json(await workspaceService.mergeWorkspace(id));
   });
 
+  // GET /api/workspaces/:id/github-handoff-draft
+  router.get("/:id/github-handoff-draft", async (c) => {
+    const id = c.req.param("id");
+    return c.json(await workspaceService.getLatestGithubHandoffDraft(id) ?? { artifactId: null, content: null, createdAt: null });
+  });
+
+  // POST /api/workspaces/:id/github-handoff-draft
+  router.post("/:id/github-handoff-draft", async (c) => {
+    const id = c.req.param("id");
+    return c.json(await workspaceService.generateGithubHandoffDraft(id), 201);
+  });
+
   // GET /api/workspaces/:id/conflicts
   router.get("/:id/conflicts", async (c) => {
     const id = c.req.param("id");
