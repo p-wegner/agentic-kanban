@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { isTransientNetworkError } from "../startup/transient-errors.js";
+import { waitForActiveMergesToSettle } from "../startup/process-handlers.js";
+import { activeMerges } from "../services/workspace-internals.js";
 
 describe("isTransientNetworkError", () => {
   it("classifies ECONNRESET as transient", () => {
@@ -33,6 +35,38 @@ describe("isTransientNetworkError", () => {
   it("handles null/undefined safely", () => {
     expect(isTransientNetworkError(null)).toBe(false);
     expect(isTransientNetworkError(undefined)).toBe(false);
+  });
+});
+
+describe("shutdown waits for in-flight merges", () => {
+  afterEach(() => {
+    activeMerges.clear();
+  });
+
+  it("does not settle shutdown before an active merge promise resolves", async () => {
+    let resolveMerge!: () => void;
+    const mergePromise = new Promise<string>((resolve) => {
+      resolveMerge = () => resolve("merged");
+    });
+    activeMerges.set("/tmp/test-repo", {
+      promise: mergePromise,
+      workspaceId: "workspace-1",
+      repoPath: "/tmp/test-repo",
+      startedAt: new Date().toISOString(),
+      startedAtMs: Date.now(),
+    });
+
+    const waitPromise = waitForActiveMergesToSettle(5_000);
+    let settled = false;
+    waitPromise.then(() => {
+      settled = true;
+    });
+
+    await Promise.resolve();
+    expect(settled).toBe(false);
+
+    resolveMerge();
+    await expect(waitPromise).resolves.toBe(1);
   });
 });
 
