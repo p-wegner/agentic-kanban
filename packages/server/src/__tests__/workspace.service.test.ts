@@ -381,6 +381,9 @@ describe("workspace.service", () => {
         updatedAt: now,
       });
       const gitService = createFakeGitService({
+        deleteBranch: vi.fn(async () => {
+          throw new Error("git branch -D feature/ak-1-test failed: branch not found");
+        }),
         mergeBranch: vi.fn(async () => {
           throw new Error("git rev-parse feature/ak-1-test failed: unknown revision");
         }),
@@ -396,7 +399,15 @@ describe("workspace.service", () => {
       const result = await service.mergeWorkspace(wsId);
 
       expect(result.mergeOutput).toContain("already marked as merged");
+      expect(result.warnings).toEqual([
+        expect.objectContaining({
+          step: "delete-branch",
+          message: "git branch -D feature/ak-1-test failed: branch not found",
+          recoverable: true,
+        }),
+      ]);
       expect(gitService.mergeBranch).not.toHaveBeenCalled();
+      expect(gitService.deleteBranch).toHaveBeenCalledWith("/tmp/test-repo", "feature/ak-1-test");
 
       const wsRows = await db.select().from(workspaces).where(eq(workspaces.id, wsId));
       expect(wsRows[0].status).toBe("closed");
