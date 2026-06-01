@@ -505,6 +505,21 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
             {issue.estimate}
           </span>
         )}
+        {issue.externalUrl && (
+          <a
+            href={issue.externalUrl}
+            target="_blank"
+            rel="noreferrer noopener"
+            onClick={(e) => e.stopPropagation()}
+            title={`Open in external tracker${issue.externalKey ? `: ${issue.externalKey}` : ""}`}
+            className="inline-flex items-center gap-0.5 max-w-full truncate text-xs font-medium px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-700 hover:bg-indigo-200 dark:bg-indigo-900/40 dark:text-indigo-300 dark:hover:bg-indigo-900/70"
+          >
+            <svg className="w-3 h-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4m-4-6l6-6m0 0v4m0-4h-4" />
+            </svg>
+            {issue.externalKey || "link"}
+          </a>
+        )}
         {issue.dueDate && (() => {
           const overdue = new Date(issue.dueDate) < new Date(new Date().toDateString()) &&
             issue.statusName !== "Done" && issue.statusName !== "Cancelled";

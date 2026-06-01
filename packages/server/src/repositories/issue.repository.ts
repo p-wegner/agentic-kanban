@@ -203,6 +203,8 @@ export async function getIssuesByProject(
       skipAutoReview: issues.skipAutoReview,
       estimate: issues.estimate,
       dueDate: issues.dueDate,
+      externalKey: issues.externalKey,
+      externalUrl: issues.externalUrl,
       statusName: projectStatuses.name,
     })
     .from(issues)
