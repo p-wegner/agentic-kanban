@@ -117,7 +117,7 @@ export async function runBacklogEmptyStrategy(
     }
   }
 
-  const baseUrl = `http://localhost:${serverPort}`;
+  const baseUrl = `http://127.0.0.1:${serverPort}`;
   const wipLimit = parseInt(prefMap.get("nudge_wip_limit") || "5", 10);
   const skillName = prefMap.get("backlog_empty_skill") || DEFAULT_BACKLOG_SKILL;
 

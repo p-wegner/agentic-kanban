@@ -60,3 +60,25 @@ describe("runAutoStart dependency resolution", () => {
     expect(vi.mocked(fetch)).not.toHaveBeenCalled();
   });
 });
+
+describe("runAutoStart URL construction", () => {
+  it("uses 127.0.0.1 for monitor self-fetches", async () => {
+    vi.mocked(db.select)
+      .mockReturnValueOnce(makeSelectChain([{ id: "ip-1", projectId: "proj-1" }]) as ReturnType<typeof db.select>)
+      .mockReturnValueOnce(makeSelectChain([{ count: 0 }]) as ReturnType<typeof db.select>)
+      .mockReturnValueOnce(makeSelectChain([{ id: "issue-1", title: "Ready", description: "", issueNumber: 7 }]) as ReturnType<typeof db.select>)
+      .mockReturnValueOnce(makeSelectChain([]) as ReturnType<typeof db.select>)
+      .mockReturnValueOnce(makeSelectChain([{ count: 1 }]) as ReturnType<typeof db.select>);
+    vi.mocked(fetch).mockResolvedValue({ ok: true } as Response);
+
+    await runAutoStart(new Map([
+      ["nudge_auto_start", "true"],
+      ["nudge_wip_limit", "1"],
+    ]), makeDeps());
+
+    expect(vi.mocked(fetch)).toHaveBeenCalledWith(
+      "http://127.0.0.1:3001/api/workspaces",
+      expect.any(Object),
+    );
+  });
+});
