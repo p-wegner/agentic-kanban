@@ -2,7 +2,7 @@ import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { createSessionReadService } from "../services/session-read.service.js";
 import { createRouter } from "../middleware/create-router.js";
-import { sessions, sessionMessages, workspaces, issues, projectStatuses } from "@agentic-kanban/shared/schema";
+import { sessions, sessionMessages, workspaces, issues, projectStatuses, projects } from "@agentic-kanban/shared/schema";
 import { eq, and, or, sql, desc, inArray } from "drizzle-orm";
 
 export interface TranscriptSearchResult {
@@ -14,6 +14,8 @@ export interface TranscriptSearchResult {
   workspaceId: string;
   branch: string;
   workspaceStatus: string;
+  projectId: string;
+  projectName: string;
   issueId: string;
   issueNumber: number | null;
   issueTitle: string;
@@ -53,9 +55,6 @@ export function createSessionsRoute(database: Database = db) {
     }
 
     const projectId = c.req.query("projectId");
-    if (!projectId) {
-      return c.json({ error: "projectId is required" }, 400);
-    }
 
     const limit = Math.min(
       parseInt(c.req.query("limit") ?? String(DEFAULT_LIMIT), 10) || DEFAULT_LIMIT,
@@ -67,12 +66,14 @@ export function createSessionsRoute(database: Database = db) {
 
     // Build conditions
     const conditions = [
-      eq(issues.projectId, projectId),
       sql`${sessionMessages.data} IS NOT NULL`,
       sql`${sessionMessages.data} LIKE ${"%" + q + "%"}`,
       sql`${sessionMessages.type} != 'exit'`,
     ];
 
+    if (projectId) {
+      conditions.push(eq(issues.projectId, projectId));
+    }
     if (statusFilter) {
       conditions.push(eq(projectStatuses.name, statusFilter));
     }
@@ -93,6 +94,8 @@ export function createSessionsRoute(database: Database = db) {
         workspaceId: workspaces.id,
         branch: workspaces.branch,
         workspaceStatus: workspaces.status,
+        projectId: projects.id,
+        projectName: projects.name,
         issueId: issues.id,
         issueNumber: issues.issueNumber,
         issueTitle: issues.title,
@@ -102,6 +105,7 @@ export function createSessionsRoute(database: Database = db) {
       .innerJoin(sessions, eq(sessionMessages.sessionId, sessions.id))
       .innerJoin(workspaces, eq(sessions.workspaceId, workspaces.id))
       .innerJoin(issues, eq(workspaces.issueId, issues.id))
+      .innerJoin(projects, eq(issues.projectId, projects.id))
       .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
       .where(and(...conditions))
       .orderBy(desc(sessionMessages.id))
@@ -119,6 +123,8 @@ export function createSessionsRoute(database: Database = db) {
         workspaceId: row.workspaceId,
         branch: row.branch,
         workspaceStatus: row.workspaceStatus,
+        projectId: row.projectId,
+        projectName: row.projectName,
         issueId: row.issueId,
         issueNumber: row.issueNumber,
         issueTitle: row.issueTitle,

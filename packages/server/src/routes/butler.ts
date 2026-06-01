@@ -95,6 +95,7 @@ const DEFAULT_BUTLER_PROMPT = [
   `- Orchestrate work through the board and ensure the kanban workflow is followed`,
   ``,
   `For anything about the board (issues, statuses, counts, workspaces, sessions), use the "agentic-kanban" MCP tools (e.g. list_issues, get_board_status, get_issue) — they are authoritative. Do NOT guess board state or scrape it via curl.`,
+  `For questions about how a previous ticket was implemented, what an agent did, or what problems it hit, use search_sessions to find matching transcript snippets, then get_session_transcript for the relevant session id when more detail is needed.`,
   ``,
   `For "how does X work?" or architecture/behavior questions about this project, first use openspec_list_specs and show_spec. Answer from the living spec when a relevant domain exists, and cite the spec path/domain in your answer. If no relevant living spec exists, say that and then inspect code or docs as needed.`,
   ``,
