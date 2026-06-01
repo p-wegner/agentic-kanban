@@ -17,6 +17,7 @@ import { StrategyTargetsView } from "../components/StrategyTargetsView.js";
 import { SwimlaneView } from "../components/SwimlaneView.js";
 import { FlakyTestsPanel } from "../components/FlakyTestsPanel.js";
 import { MonitorCycleHistoryPanel } from "../components/MonitorCycleHistoryPanel.js";
+import { BoardHealthNotificationCenter } from "../components/BoardHealthNotificationCenter.js";
 import { useAgentQuestionsCount } from "../components/AgentQuestionsPanel.js";
 import { BoardErrorBoundary } from "../components/BoardErrorBoundary.js";
 import { BacklogView } from "../components/BacklogView.js";
@@ -1682,6 +1683,7 @@ export function BoardPage() {
           }).length}
           onShowRunQueueForecast={() => setShowRunQueueForecast(true)}
           runQueueOpenSlots={runQueueForecast.openSlots}
+          onViewAllHealthEvents={() => handleViewModeChange("health-events")}
         />
         {viewMode === "kanban" && selectedBoardIssues.length > 0 && (
           <div
@@ -1909,6 +1911,20 @@ export function BoardPage() {
         {viewMode === "monitor-history" && activeProjectId && (
           <BoardErrorBoundary columnName="Monitor History">
             <MonitorCycleHistoryPanel projectId={activeProjectId} />
+          </BoardErrorBoundary>
+        )}
+        {viewMode === "health-events" && activeProjectId && (
+          <BoardErrorBoundary columnName="Board Health Events">
+            <BoardHealthNotificationCenter
+              projectId={activeProjectId}
+              onOpenIssue={(issueNumber) => {
+                const issue = columns.flatMap(c => c.issues).find(i => i.issueNumber === issueNumber);
+                if (issue) {
+                  handleViewModeChange("kanban");
+                  handleIssueClick(issue);
+                }
+              }}
+            />
           </BoardErrorBoundary>
         )}
         {viewMode === "backlog" && (

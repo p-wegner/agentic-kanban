@@ -28,7 +28,7 @@ async function createProject(database: TestDb, name = "Health Events Project") {
 }
 
 describe("Board health events API", () => {
-  it("returns recent project events with compact details", async () => {
+  it("returns recent project events with compact details and new fields", async () => {
     const { app, db } = createTestApp();
     const projectId = await createProject(db);
     const otherProjectId = await createProject(db, "Other Project");
@@ -48,6 +48,8 @@ describe("Board health events API", () => {
         projectId,
         cycleId: "cycle-1",
         eventType: "error",
+        category: "launch",
+        issueNumber: 42,
         summary: "Monitor cycle failed",
         details: JSON.stringify({ message: "network unavailable", retries: 2 }),
         createdAt: "2026-05-31T10:05:00.000Z",
@@ -70,6 +72,8 @@ describe("Board health events API", () => {
       timestamp: string;
       level: string;
       type: string;
+      category: string | null;
+      issueNumber: number | null;
       summary: string;
       details: string | null;
     }>;
@@ -79,10 +83,14 @@ describe("Board health events API", () => {
       timestamp: "2026-05-31T10:05:00.000Z",
       level: "error",
       type: "error",
+      category: "launch",
+      issueNumber: 42,
       summary: "Monitor cycle failed",
       details: "message: network unavailable, retries: 2",
     });
     expect(body[1].details).toBe("strategySource: default, totals: 1 fields");
+    expect(body[1].category).toBeNull();
+    expect(body[1].issueNumber).toBeNull();
   });
 
   it("filters events by single eventType", async () => {
@@ -190,5 +198,68 @@ describe("Board health events API", () => {
     const body = await res.json() as Array<{ id: string }>;
     // Invalid types are ignored → returns all events
     expect(body).toHaveLength(2);
+  });
+
+  it("filters events by category", async () => {
+    const { app, db } = createTestApp();
+    const projectId = await createProject(db);
+
+    await db.insert(schema.boardHealthEvents).values([
+      {
+        id: "ev-merge",
+        projectId,
+        cycleId: "c1",
+        eventType: "action",
+        category: "merge",
+        summary: "Merged workspace",
+        createdAt: new Date(Date.now() - 3000).toISOString(),
+      },
+      {
+        id: "ev-launch",
+        projectId,
+        cycleId: "c1",
+        eventType: "error",
+        category: "launch",
+        summary: "Launch failed",
+        createdAt: new Date(Date.now() - 2000).toISOString(),
+      },
+      {
+        id: "ev-no-category",
+        projectId,
+        cycleId: "c1",
+        eventType: "observation",
+        summary: "Board looks healthy",
+        createdAt: new Date(Date.now() - 1000).toISOString(),
+      },
+    ]);
+
+    const res = await app.request(`/api/projects/${projectId}/board-health-events?category=merge`);
+    expect(res.status).toBe(200);
+    const body = await res.json() as Array<{ id: string; category: string | null }>;
+    expect(body).toHaveLength(1);
+    expect(body[0].id).toBe("ev-merge");
+    expect(body[0].category).toBe("merge");
+  });
+
+  it("ignores invalid category values and returns unfiltered results", async () => {
+    const { app, db } = createTestApp();
+    const projectId = await createProject(db);
+
+    await db.insert(schema.boardHealthEvents).values([
+      {
+        id: "ev-1",
+        projectId,
+        cycleId: "c1",
+        eventType: "action",
+        category: "merge",
+        summary: "Event 1",
+        createdAt: new Date(Date.now() - 1000).toISOString(),
+      },
+    ]);
+
+    const res = await app.request(`/api/projects/${projectId}/board-health-events?category=invalid_category`);
+    expect(res.status).toBe(200);
+    const body = await res.json() as Array<{ id: string }>;
+    expect(body).toHaveLength(1);
   });
 });

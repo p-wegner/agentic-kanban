@@ -40,6 +40,7 @@ interface BoardToolbarProps {
   mergeQueueCount?: number;
   onShowRunQueueForecast?: () => void;
   runQueueOpenSlots?: number;
+  onViewAllHealthEvents?: () => void;
 }
 
 export function BoardToolbar({
@@ -67,6 +68,7 @@ export function BoardToolbar({
   mergeQueueCount = 0,
   onShowRunQueueForecast,
   runQueueOpenSlots = 0,
+  onViewAllHealthEvents,
 }: BoardToolbarProps) {
   const [showMonitorPopover, setShowMonitorPopover] = useState(false);
   const [showMoreViews, setShowMoreViews] = useState(false);
@@ -198,6 +200,10 @@ export function BoardToolbar({
             orchestrator={orchestrator}
             orchestratorNotify={orchestratorNotify}
             onOrchestratorNotifyChange={setOrchestratorNotify}
+            onViewAllHealthEvents={onViewAllHealthEvents ? () => {
+              setShowMonitorPopover(false);
+              onViewAllHealthEvents();
+            } : undefined}
           />
         )}
       </div>
