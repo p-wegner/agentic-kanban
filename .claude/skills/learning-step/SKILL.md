@@ -175,6 +175,8 @@ Flag complex architectural changes for user review.
 ### Committing
 After applying changes, commit with: `docs: learning step -- <short description of key finding>`
 
+**Verify the commit actually happened** — after committing, run `git log --oneline -2` to confirm the commit SHA appears. Do NOT report a commit in "Changes Applied" unless you can see the commit hash in the log. Previous learning-step sessions have falsely reported changes as applied without committing.
+
 ## Quality Gates
 
 Before outputting each improvement, verify:
@@ -182,5 +184,6 @@ Before outputting each improvement, verify:
 2. **Project-specific?** Generic advice is noise.
 3. **Actionable?** The reader must know exactly what to do.
 4. **Non-duplicative?** Check existing memory files and CLAUDE.md before adding.
+5. **Not already in this branch?** Check `git log --oneline master..HEAD` for prior learning-step commits that may have addressed the same finding.
 
 Skip improvements that fail any gate. A clean report is better than a noisy one.
