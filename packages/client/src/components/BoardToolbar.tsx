@@ -109,7 +109,7 @@ export function BoardToolbar({
       {onShowMergeQueue && (
         <button
           onClick={onShowMergeQueue}
-          title="Smart Merge Queue — auto-order and merge ready workspaces"
+          title="Merge Queue - review In Review workspaces ordered by conflict risk"
           className="relative shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium border transition-colors bg-surface-raised dark:bg-surface-raised-dark border-black/[0.07] dark:border-white/10 text-ink-soft dark:text-gray-400 hover:bg-surface-sunken dark:hover:bg-gray-800"
         >
           <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
