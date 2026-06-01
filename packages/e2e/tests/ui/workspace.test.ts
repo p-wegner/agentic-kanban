@@ -1,5 +1,32 @@
-import { test, expect } from "@playwright/test";
+import {
+  test,
+  expect,
+  type APIRequestContext,
+  type APIResponse,
+  type Locator,
+  type Page,
+} from "@playwright/test";
 import { SERVER_URL } from "../helpers/port.js";
+
+async function describeResponse(response: APIResponse) {
+  let body = "";
+  try {
+    body = await response.text();
+  } catch {
+    body = "<body unavailable>";
+  }
+
+  const trimmedBody = body.length > 500 ? `${body.slice(0, 500)}...` : body;
+  return `${response.status()} ${response.statusText()} ${trimmedBody}`;
+}
+
+async function expectJson<T>(response: APIResponse, label: string): Promise<T> {
+  if (!response.ok()) {
+    throw new Error(`${label} failed: ${await describeResponse(response)}`);
+  }
+
+  return (await response.json()) as T;
+}
 
 test.describe("Workspace Panel UI", () => {
   test.beforeEach(async ({ page }) => {
@@ -63,13 +90,32 @@ test.describe("Workspace Diff and Merge UI", () => {
 
   test.beforeAll(async ({ request }) => {
     const projectsRes = await request.get(`${SERVER_URL}/api/projects`);
-    const projects = await projectsRes.json();
-    projectId = projects[0].id;
+    const projects = await expectJson<Array<{ id: string }>>(
+      projectsRes,
+      "GET /api/projects",
+    );
+    expect(projects.length, "E2E server has no registered projects").toBeGreaterThan(
+      0,
+    );
+
+    const activeProjectRes = await request.get(
+      `${SERVER_URL}/api/preferences/active-project`,
+    );
+    if (activeProjectRes.ok()) {
+      const activeProject = await activeProjectRes.json();
+      projectId = activeProject.projectId ?? projects[0].id;
+    } else {
+      projectId = projects[0].id;
+    }
 
     const statusesRes = await request.get(
       `${SERVER_URL}/api/projects/${projectId}/statuses`,
     );
-    const statuses = await statusesRes.json();
+    const statuses = await expectJson<Array<{ id: string; name: string }>>(
+      statusesRes,
+      "GET project statuses",
+    );
+    expect(statuses.length, "Project has no statuses").toBeGreaterThan(0);
     const todoStatus = statuses.find((s: { name: string }) => s.name === "Todo");
     todoStatusId = todoStatus ? todoStatus.id : statuses[0].id;
   });
@@ -83,26 +129,134 @@ test.describe("Workspace Diff and Merge UI", () => {
     }
   });
 
-  async function openWorkspaceForIssue(page: import("@playwright/test").Page, issueTitle: string) {
-    await page.locator("p", { hasText: issueTitle }).first().click();
+  async function setupWorkspaceWithDiagnostics(
+    request: APIRequestContext,
+    workspaceId: string,
+  ) {
+    const attempts: string[] = [];
+    let attempt = 0;
+
+    try {
+      await expect
+        .poll(
+          async () => {
+            attempt += 1;
+            try {
+              const setupRes = await request.post(
+                `${SERVER_URL}/api/workspaces/${workspaceId}/setup`,
+                { data: {} },
+              );
+
+              if (setupRes.ok()) {
+                return "ready";
+              }
+
+              const body = await setupRes.text();
+              attempts.push(
+                `attempt ${attempt}: HTTP ${setupRes.status()} ${body.slice(0, 500)}`,
+              );
+            } catch (error) {
+              attempts.push(
+                `attempt ${attempt}: ${error instanceof Error ? error.message : String(error)}`,
+              );
+            }
+
+            return "not-ready";
+          },
+          {
+            timeout: 10000,
+            intervals: [250, 500, 1000],
+            message: `workspace ${workspaceId} setup did not become ready`,
+          },
+        )
+        .toBe("ready");
+    } catch (error) {
+      const attemptLog = attempts.length > 0 ? attempts.join("\n") : "no setup attempts recorded";
+      throw new Error(
+        `Workspace setup failed for ${workspaceId}.\n${attemptLog}`,
+        { cause: error },
+      );
+    }
+  }
+
+  async function openWorkspaceForIssue(
+    page: Page,
+    issueTitle: string,
+    branchName: string,
+  ) {
+    const issueCardTitle = page.locator("p", { hasText: issueTitle }).first();
+    await expect(
+      issueCardTitle,
+      `Issue "${issueTitle}" should be visible in the active project board`,
+    ).toBeVisible({ timeout: 10000 });
+    await issueCardTitle.click();
     await expect(page.locator("h2", { hasText: "Issue Details" })).toBeVisible();
 
     // Click the workspace button in the Workspaces section of the detail panel
     const wsLabel = page.locator("label", { hasText: "Workspaces" });
     const wsSection = wsLabel.locator("..");
-    await wsSection.locator("button").first().click();
+    const workspaceButton = wsSection
+      .locator("button", { hasText: branchName })
+      .or(wsSection.locator("button", { hasText: "View Workspaces" }))
+      .first();
+    await expect(
+      workspaceButton,
+      `Issue "${issueTitle}" should expose workspace "${branchName}"`,
+    ).toBeVisible({ timeout: 10000 });
+    await workspaceButton.click();
 
     // Workspace panel should be visible
-    await expect(
-      page.locator("h2", { hasText: "Workspaces —" }),
-    ).toBeVisible({ timeout: 5000 });
+    await expect(page.locator("h2", { hasText: issueTitle })).toBeVisible({
+      timeout: 5000,
+    });
 
-    // Close the detail panel backdrop that blocks clicks on the workspace panel content
-    const backdrop = page.locator("div.fixed.inset-0.bg-black\\/30").first();
-    if (await backdrop.isVisible()) {
-      await backdrop.click({ force: true });
-      await page.waitForTimeout(300);
+    // Close the issue detail panel that otherwise sits above the workspace panel.
+    const issueDetailsHeading = page.locator("h2", { hasText: "Issue Details" });
+    if (await issueDetailsHeading.isVisible()) {
+      const issueDetailPanel = page
+        .locator("[data-panel]", { has: issueDetailsHeading })
+        .first();
+      await issueDetailPanel.locator("button", { hasText: "×" }).first().click();
+      await expect(issueDetailsHeading).toBeHidden({ timeout: 5000 });
     }
+
+    const panel = workspacePanel(page, issueTitle);
+    await expect(panel.locator(`text=${branchName}`).first()).toBeVisible({
+      timeout: 15000,
+    });
+
+    const card = workspaceCard(page, issueTitle, branchName);
+    const actionButton = card
+      .locator("button", { hasText: "View Diff" })
+      .or(card.locator("button", { hasText: "Merge" }))
+      .first();
+    if (!(await actionButton.isVisible())) {
+      await card.click();
+      await expect(actionButton).toBeVisible({ timeout: 10000 });
+    }
+  }
+
+  function workspacePanel(page: Page, issueTitle: string): Locator {
+    return page
+      .locator("[data-panel]", { has: page.locator("h2", { hasText: issueTitle }) })
+      .first();
+  }
+
+  function workspaceCard(page: Page, issueTitle: string, branchName: string): Locator {
+    return workspacePanel(page, issueTitle)
+      .locator(".cursor-pointer", { hasText: branchName })
+      .first();
+  }
+
+  function workspaceActionButton(
+    page: Page,
+    issueTitle: string,
+    branchName: string,
+    name: string,
+  ) {
+    return workspaceCard(page, issueTitle, branchName)
+      .locator("button", { hasText: name })
+      .first();
   }
 
   test("View Diff button shows diff output in panel", async ({ page, request }) => {
@@ -110,47 +264,42 @@ test.describe("Workspace Diff and Merge UI", () => {
     const issueRes = await request.post(`${SERVER_URL}/api/issues`, {
       data: { title: `DiffTestIssue ${suffix}`, statusId: todoStatusId, projectId },
     });
-    const issueId = (await issueRes.json()).id;
+    const issueId = (await expectJson<{ id: string }>(
+      issueRes,
+      "POST /api/issues",
+    )).id;
     createdIssueIds.push(issueId);
 
     const branchName = `feature/diff-test-${suffix}`;
     const wsRes = await request.post(`${SERVER_URL}/api/workspaces`, {
       data: { issueId, branch: branchName },
     });
-    const workspace = await wsRes.json();
+    const workspace = await expectJson<{ id: string }>(
+      wsRes,
+      "POST /api/workspaces",
+    );
     const workspaceId = workspace.id;
     createdWorkspaceIds.push(workspaceId);
 
-    // Setup workspace (retry loop per CLAUDE.md guidance)
-    let setupOk = false;
-    for (let attempt = 0; attempt < 3; attempt++) {
-      try {
-        const setupRes = await request.post(
-          `${SERVER_URL}/api/workspaces/${workspaceId}/setup`,
-          { data: {} },
-        );
-        if (setupRes.ok()) { setupOk = true; break; }
-      } catch { /* retry */ }
-      await new Promise((r) => setTimeout(r, 500));
-    }
-
-    if (!setupOk) { test.skip(); return; }
+    await setupWorkspaceWithDiagnostics(request, workspaceId);
 
     await page.goto("/");
     await page.waitForSelector("h2");
 
-    await openWorkspaceForIssue(page, `DiffTestIssue ${suffix}`);
-
-    // Expand the workspace by clicking on its branch name (force to bypass backdrop overlay)
-    await page.locator(`text=${branchName}`).first().click({ force: true });
+    const issueTitle = `DiffTestIssue ${suffix}`;
+    await openWorkspaceForIssue(page, issueTitle, branchName);
 
     // Should see "View Diff" button
-    await expect(
-      page.locator('button:has-text("View Diff")'),
-    ).toBeVisible({ timeout: 5000 });
+    const viewDiffButton = workspaceActionButton(
+      page,
+      issueTitle,
+      branchName,
+      "View Diff",
+    );
+    await expect(viewDiffButton).toBeVisible({ timeout: 5000 });
 
     // Click View Diff
-    await page.locator('button:has-text("View Diff")').click();
+    await viewDiffButton.click();
 
     // Diff section should appear (showing "Diff" heading or "No changes to show" message)
     const diffHeading = page.locator("h3", { hasText: "Diff" }).or(
@@ -164,47 +313,42 @@ test.describe("Workspace Diff and Merge UI", () => {
     const issueRes = await request.post(`${SERVER_URL}/api/issues`, {
       data: { title: `MergeTestIssue ${suffix}`, statusId: todoStatusId, projectId },
     });
-    const issueId = (await issueRes.json()).id;
+    const issueId = (await expectJson<{ id: string }>(
+      issueRes,
+      "POST /api/issues",
+    )).id;
     createdIssueIds.push(issueId);
 
     const branchName = `feature/merge-test-${suffix}`;
     const wsRes = await request.post(`${SERVER_URL}/api/workspaces`, {
       data: { issueId, branch: branchName },
     });
-    const workspace = await wsRes.json();
+    const workspace = await expectJson<{ id: string }>(
+      wsRes,
+      "POST /api/workspaces",
+    );
     const workspaceId = workspace.id;
     createdWorkspaceIds.push(workspaceId);
 
-    // Setup workspace (retry loop)
-    let setupOk = false;
-    for (let attempt = 0; attempt < 3; attempt++) {
-      try {
-        const setupRes = await request.post(
-          `${SERVER_URL}/api/workspaces/${workspaceId}/setup`,
-          { data: {} },
-        );
-        if (setupRes.ok()) { setupOk = true; break; }
-      } catch { /* retry */ }
-      await new Promise((r) => setTimeout(r, 500));
-    }
-
-    if (!setupOk) { test.skip(); return; }
+    await setupWorkspaceWithDiagnostics(request, workspaceId);
 
     await page.goto("/");
     await page.waitForSelector("h2");
 
-    await openWorkspaceForIssue(page, `MergeTestIssue ${suffix}`);
-
-    // Expand the workspace
-    await page.locator(`text=${branchName}`).first().click();
+    const issueTitle = `MergeTestIssue ${suffix}`;
+    await openWorkspaceForIssue(page, issueTitle, branchName);
 
     // Should see "Merge" button
-    await expect(
-      page.locator('button:has-text("Merge")'),
-    ).toBeVisible({ timeout: 5000 });
+    const mergeButton = workspaceActionButton(
+      page,
+      issueTitle,
+      branchName,
+      "Merge",
+    );
+    await expect(mergeButton).toBeVisible({ timeout: 5000 });
 
     // Click Merge
-    await page.locator('button:has-text("Merge")').click();
+    await mergeButton.click();
 
     // Wait for merge to complete — the workspace status should change to "closed" or "merged"
     await expect(
