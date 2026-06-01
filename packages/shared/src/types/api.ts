@@ -546,6 +546,7 @@ export interface DiffComment {
   lineNumNew: number | null;
   side: "old" | "new";
   body: string;
+  resolvedAt: string | null;
   createdAt: string;
   updatedAt: string;
 }

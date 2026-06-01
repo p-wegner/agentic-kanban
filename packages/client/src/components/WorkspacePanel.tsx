@@ -2507,6 +2507,19 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                           {ws.isDirect ? "View Changes" : "View Diff"}
                         </button>
                         )}
+                        {ws.workingDir && selectedWorkspace === ws.id && diff && (() => {
+                          const unresolved = diffComments.filter((c) => c.resolvedAt == null).length;
+                          if (unresolved === 0) return null;
+                          return (
+                            <span
+                              data-testid="unresolved-comments-badge"
+                              className="self-center text-xs font-medium px-2 py-1 rounded bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-300"
+                              title="Unresolved diff comments — resolve them before merging"
+                            >
+                              {unresolved} unresolved
+                            </span>
+                          );
+                        })()}
                         {ws.workingDir && (
                         <button
                           onClick={() => handleMerge(ws.id)}

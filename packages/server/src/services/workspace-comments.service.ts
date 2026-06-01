@@ -3,6 +3,7 @@ import {
   getDiffComments,
   createDiffComment as createDiffCommentRepo,
   updateDiffComment as updateDiffCommentRepo,
+  setDiffCommentResolved,
   findDiffComment,
   deleteDiffComment,
 } from "../repositories/session.repository.js";
@@ -38,5 +39,12 @@ export function createWorkspaceCommentService(deps: { database: Database }) {
     await deleteDiffComment(commentId, database);
   }
 
-  return { listComments, createComment, updateComment, deleteComment };
+  async function resolveComment(workspaceId: string, commentId: string, resolved: boolean) {
+    const existing = await findDiffComment(commentId, workspaceId, database);
+    if (!existing) throw new WorkspaceError("Comment not found", "NOT_FOUND");
+    await setDiffCommentResolved(commentId, resolved, database);
+    return findDiffComment(commentId, workspaceId, database);
+  }
+
+  return { listComments, createComment, updateComment, deleteComment, resolveComment };
 }

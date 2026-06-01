@@ -75,6 +75,7 @@ export function createWorkspaceService(deps: {
     createComment: comments.createComment,
     updateComment: comments.updateComment,
     deleteComment: comments.deleteComment,
+    resolveComment: comments.resolveComment,
     generateGithubHandoffDraft: (workspaceId: string) => generateAndPersistGithubHandoffDraft({
       workspaceId,
       database: deps.database,
