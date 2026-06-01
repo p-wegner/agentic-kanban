@@ -666,6 +666,11 @@ export interface BoardStatusIssue {
     reason: "idle-awaiting";
     label: string;
   } | null;
+  mergeState?: {
+    bucket: "pending_merge";
+    reason: "auto-merge-in-review";
+    label: string;
+  } | null;
 }
 
 export interface BoardStatusResponse {

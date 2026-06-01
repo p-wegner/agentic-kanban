@@ -17,6 +17,8 @@ function isZeroDiff(stats: BoardStatusIssue["diffStats"]): boolean {
 }
 
 export function classifyBoardStatusIssueAttention(issue: BoardStatusIssue): BoardStatusIssue["attention"] {
+  if (issue.mergeState?.bucket === "pending_merge") return null;
+
   if (
     issue.statusName === "In Review"
     && issue.workspace
@@ -30,6 +32,38 @@ export function classifyBoardStatusIssueAttention(issue: BoardStatusIssue): Boar
       label: "In Review workspace has no file changes and is not ready for merge",
     };
   }
+  return null;
+}
+
+interface BoardStatusClassificationOptions {
+  autoMergeEnabled: boolean;
+  autoMergeInReview: boolean;
+}
+
+function hasDiff(stats: BoardStatusIssue["diffStats"]): boolean {
+  return !!stats && (stats.filesChanged > 0 || stats.insertions > 0 || stats.deletions > 0);
+}
+
+export function classifyBoardStatusIssueMergeState(
+  issue: BoardStatusIssue,
+  options: BoardStatusClassificationOptions,
+): BoardStatusIssue["mergeState"] {
+  if (
+    options.autoMergeEnabled
+    && options.autoMergeInReview
+    && issue.statusName === "In Review"
+    && issue.workspace
+    && issue.workspace.status === "idle"
+    && !issue.workspace.readyForMerge
+    && hasDiff(issue.diffStats)
+  ) {
+    return {
+      bucket: "pending_merge",
+      reason: "auto-merge-in-review",
+      label: "Auto-merge pending for idle In Review workspace",
+    };
+  }
+
   return null;
 }
 
@@ -64,6 +98,16 @@ export async function getBoardStatus(
     .limit(1);
   if (projectRows.length === 0) throw new Error(`Project ${projectId} not found`);
   const project = projectRows[0];
+
+  const preferenceRows = await database
+    .select({ key: preferences.key, value: preferences.value })
+    .from(preferences)
+    .where(inArray(preferences.key, ["auto_merge", "auto_merge_in_review"]));
+  const preferenceMap = new Map(preferenceRows.map((pref) => [pref.key, pref.value]));
+  const classificationOptions: BoardStatusClassificationOptions = {
+    autoMergeEnabled: preferenceMap.get("auto_merge") === "true",
+    autoMergeInReview: preferenceMap.get("auto_merge_in_review") === "true",
+  };
 
   // 2. Get statuses to identify terminal ones (legacy fallback for non-workflow issues)
   const statuses = await database
@@ -212,6 +256,7 @@ export async function getBoardStatus(
       lastOutput: [],
       lastAgentMessage: null,
       attention: null,
+      mergeState: null,
     };
 
     // For non-closed workspaces with a workingDir: compute diff stats + last output
@@ -313,6 +358,7 @@ export async function getBoardStatus(
   await Promise.all(asyncWork);
 
   for (const issue of result) {
+    issue.mergeState = classifyBoardStatusIssueMergeState(issue, classificationOptions);
     issue.attention = classifyBoardStatusIssueAttention(issue);
   }
 
