@@ -28,6 +28,7 @@ interface Settings {
   resume_with_new_model?: string;
   disabled_mcp_tools?: string;
   auto_start_followup?: string;
+  dependency_auto_chain?: string;
   auto_rebase_on_continue?: string;
   require_manual_approval?: string;
   skip_preflight?: string;
@@ -74,6 +75,7 @@ const DEFAULT_SETTINGS: Settings = {
   resume_with_new_model: "false",
   disabled_mcp_tools: "",
   auto_start_followup: "false",
+  dependency_auto_chain: "false",
   auto_rebase_on_continue: "false",
   require_manual_approval: "false",
   skip_preflight: "false",
@@ -1030,6 +1032,12 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                         onChange={setBool("auto_start_followup")}
                         label="Auto-start follow-up tasks after merge"
                         hint="When a workspace is merged and the issue has outgoing 'depends_on' or 'child_of' dependencies, automatically create workspaces for unblocked follow-up issues."
+                      />
+                      <Toggle
+                        checked={settings.dependency_auto_chain === "true"}
+                        onChange={setBool("dependency_auto_chain")}
+                        label="Auto-chain unblocked dependencies"
+                        hint="After an upstream issue merges, start newly unblocked dependent or child issues when WIP capacity is available. Add the no-auto-start tag to opt out individual issues."
                       />
                       <Toggle
                         checked={settings.auto_rebase_on_continue === "true"}

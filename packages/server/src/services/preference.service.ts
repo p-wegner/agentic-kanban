@@ -11,6 +11,7 @@ export const SETTINGS_KEYS = [
   "codex_profile", "copilot_profile", "provider", "default_model", "mock_agent_profile", "mock_agent_delay_ms",
   "permission_prompt_tool", "auto_review", "auto_merge", "auto_merge_in_review", "resume_with_new_model",
   "review_auto_fix", "disabled_mcp_tools", "auto_start_followup", "require_manual_approval",
+  "dependency_auto_chain",
   "dynamic_column_scaling", "persistent_agent", "learning_step_after_agent",
   "learning_step_after_review", "learning_step_before_merge", "auto_monitor",
   "auto_monitor_interval", "nudge_auto_start", "projects_base_path", "plan_auto_continue",
