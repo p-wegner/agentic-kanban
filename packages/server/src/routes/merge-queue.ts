@@ -20,11 +20,24 @@ export function createMergeQueueRoute(
   });
 
   /**
+   * POST /api/merge-queue/preview/:workspaceId
+   *
+   * Dry-run conflict preview for a single workspace. Read-only — does not mutate the worktree.
+   * Returns: WorkspaceConflictPreview
+   */
+  router.post("/preview/:workspaceId", async (c) => {
+    const workspaceId = c.req.param("workspaceId");
+    const plan = await queueService.computePlan([workspaceId]);
+    const preview = plan.conflictPreviews[0] ?? { workspaceId, hasConflicts: false, conflictingFiles: [], isStale: false };
+    return c.json({ ok: true, preview });
+  });
+
+  /**
    * POST /api/merge-queue
    *
    * body: { workspaceIds: string[], dryRun?: boolean, skipOnConflict?: boolean }
    *
-   * - dryRun: true  → returns JSON plan (sorted order + conflict matrix)
+   * - dryRun: true  → returns JSON plan (sorted order + conflict matrix + per-workspace conflictPreviews)
    * - dryRun: false → streams SSE events while executing the queue
    */
   router.post("/", async (c) => {
