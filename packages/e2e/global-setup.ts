@@ -1,11 +1,77 @@
 import { request } from "@playwright/test";
-import { resolve } from "node:path";
+import type { APIRequestContext } from "@playwright/test";
+import { normalize, resolve } from "node:path";
 import { execSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
 
 export const E2E_STATE_FILE = resolve(import.meta.dirname, ".e2e-run-state.json");
 
 const serverPort = Number(process.env.SERVER_PORT) || 3001;
+
+export interface Project {
+  id: string;
+  name: string;
+  repoPath: string;
+}
+
+export interface E2EProjectSetupResult {
+  project: Project;
+  created: boolean;
+}
+
+function normalizeRepoPath(repoPath: string): string {
+  const normalized = normalize(repoPath);
+  return process.platform === "win32" ? normalized.toLowerCase() : normalized;
+}
+
+async function findProjectByRepoPath(
+  apiContext: APIRequestContext,
+  repoPath: string,
+): Promise<Project | null> {
+  const projectsRes = await apiContext.get("/api/projects");
+  if (!projectsRes.ok()) {
+    throw new Error(`Failed to list projects after duplicate registration: ${projectsRes.status()}`);
+  }
+
+  const projects: Project[] = await projectsRes.json();
+  const targetPath = normalizeRepoPath(repoPath);
+  return projects.find((project) => normalizeRepoPath(project.repoPath) === targetPath) ?? null;
+}
+
+export async function ensureE2EProject(
+  apiContext: APIRequestContext,
+  repoPath: string,
+  runId = Date.now().toString(36),
+): Promise<E2EProjectSetupResult> {
+  const registerRes = await apiContext.post("/api/projects", {
+    data: {
+      name: `E2E Test Project ${runId}`,
+      repoPath,
+    },
+  });
+
+  if (registerRes.status() === 201) {
+    const project: Project = await registerRes.json();
+    await apiContext.put("/api/preferences/active-project", {
+      data: { projectId: project.id },
+    });
+    return { project, created: true };
+  }
+
+  if (registerRes.status() === 409) {
+    const existingProject = await findProjectByRepoPath(apiContext, repoPath);
+    if (!existingProject) {
+      throw new Error("Project registration reported a duplicate path, but the existing project was not found");
+    }
+
+    await apiContext.put("/api/preferences/active-project", {
+      data: { projectId: existingProject.id },
+    });
+    return { project: existingProject, created: false };
+  }
+
+  throw new Error(`Failed to create E2E test project: ${registerRes.status()} ${await registerRes.text()}`);
+}
 
 async function globalSetup() {
   const apiContext = await request.newContext({ baseURL: `http://127.0.0.1:${serverPort}` });
@@ -34,25 +100,18 @@ async function globalSetup() {
     // ignore — no active project set yet
   }
 
-  // Always create a fresh, dedicated E2E project for this test run.
-  // Never reuse an existing project (it might be a real production project).
-  const runId = Date.now().toString(36);
-  const registerRes = await apiContext.post("/api/projects", {
-    data: {
-      name: `E2E Test Project ${runId}`,
-      repoPath,
-    },
-  });
-
-  if (registerRes.status() !== 201) {
-    console.error("[global-setup] Failed to create E2E test project:", await registerRes.text());
+  let projectSetup: E2EProjectSetupResult;
+  try {
+    projectSetup = await ensureE2EProject(apiContext, repoPath);
+  } catch (err) {
+    console.error("[global-setup] Failed to prepare E2E test project:", err);
     await apiContext.dispose();
     return;
   }
 
-  const project = await registerRes.json();
+  const project = projectSetup.project;
 
-  // Create default statuses for the E2E project.
+  // Create default statuses for newly-created E2E projects.
   const statuses = [
     { name: "Todo", sortOrder: 0 },
     { name: "In Progress", sortOrder: 1 },
@@ -61,26 +120,23 @@ async function globalSetup() {
     { name: "Done", sortOrder: 4 },
     { name: "Cancelled", sortOrder: 5 },
   ];
-  for (const status of statuses) {
-    await apiContext.post(`/api/projects/${project.id}/statuses`, {
-      data: status,
-    });
+  if (projectSetup.created) {
+    for (const status of statuses) {
+      await apiContext.post(`/api/projects/${project.id}/statuses`, {
+        data: status,
+      });
+    }
   }
-
-  // Set as the active project so all tests that read the active-project preference
-  // automatically use this isolated project.
-  await apiContext.put("/api/preferences/active-project", {
-    data: { projectId: project.id },
-  });
 
   // Persist the run state so global-teardown can clean up reliably.
   writeFileSync(
     E2E_STATE_FILE,
-    JSON.stringify({ e2eProjectId: project.id, previousActiveProjectId }),
+    JSON.stringify({ e2eProjectId: project.id, previousActiveProjectId, createdE2EProject: projectSetup.created }),
     "utf8",
   );
 
-  console.log(`[global-setup] Created E2E project "${project.name}" (${project.id})`);
+  const action = projectSetup.created ? "Created" : "Reused";
+  console.log(`[global-setup] ${action} E2E project "${project.name}" (${project.id})`);
 
   await apiContext.dispose();
 }
