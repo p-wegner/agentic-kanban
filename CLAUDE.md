@@ -106,7 +106,7 @@ When a test in the table below fails and you haven't touched the relevant code, 
 | `packages/server/src/__tests__/git.service.test.ts` | All | Real filesystem + git operations; Windows file-locking on temp dirs; no per-test timeout | **Only run when touching `packages/shared/src/lib/git-service.ts`**; add `test.setTimeout(30000)`. Excluded by `pnpm test:mine`. |
 | `packages/server/src/__tests__/cli.test.ts` | All | Spawn-based CLI integration test; in a worktree `packages/shared/dist` isn't built and the inline migration list is stale → `ERR_MODULE_NOT_FOUND` / "Failed query" | Pre-existing-broken in worktrees — don't debug if you didn't touch the CLI. Excluded by `pnpm test:mine`. |
 | `packages/server/src/__tests__/cli-butler.test.ts` | All | Spawn-based CLI integration test; same worktree root causes as `cli.test.ts` | Pre-existing-broken in worktrees. Excluded by `pnpm test:mine`. |
-| `packages/mcp-server/src/__tests__/mcp-tools.test.ts` | All | Spawn-based MCP integration test; stale inline `MIGRATION_FILES` (0000–0024 only) + worktree DB resolution → "Failed query" / missing "Default Project" | Run the in-process unit tests in `packages/mcp-server/src/__tests__/tools/` instead. Excluded by `pnpm test:mine`. |
+| `packages/mcp-server/src/__tests__/mcp-tools.test.ts` | All | Spawn-based MCP integration test; reads migrations dynamically from journal (fixed #266), but still spawn-based so depends on `packages/shared/dist` being built | Run the in-process unit tests in `packages/mcp-server/src/__tests__/tools/` instead. Excluded by `pnpm test:mine`. |
 
 **Recurring root causes to watch for:**
 - `page.waitForTimeout()` / `setTimeout(r, N)` fixed sleeps — replace with explicit condition waits or retry loops
