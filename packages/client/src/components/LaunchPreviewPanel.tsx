@@ -1,6 +1,17 @@
 import { useEffect, useState, useRef } from "react";
 import { apiFetch } from "../lib/api.js";
 
+export type BudgetRisk = "low" | "medium" | "high";
+
+export interface BudgetEstimate {
+  risk: BudgetRisk;
+  estimatedTokens: number | null;
+  avgTokensFromHistory: number | null;
+  sessionCount: number;
+  descriptionTokens: number;
+  reason: string;
+}
+
 export interface LaunchPreviewData {
   branch: string | null;
   baseBranch: string | null;
@@ -14,6 +25,7 @@ export interface LaunchPreviewData {
   profile: string | null;
   model: string | null;
   warnings: string[];
+  budgetEstimate?: BudgetEstimate;
 }
 
 interface LaunchPreviewPanelProps {
@@ -44,6 +56,56 @@ function providerLabel(provider: string): string {
 function modelLabel(model: string | null): string {
   if (!model) return "Default";
   return model.charAt(0).toUpperCase() + model.slice(1);
+}
+
+const RISK_CONFIG: Record<BudgetRisk, { label: string; color: string; dot: string }> = {
+  low: {
+    label: "Low",
+    color: "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300",
+    dot: "bg-green-500",
+  },
+  medium: {
+    label: "Medium",
+    color: "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300",
+    dot: "bg-amber-500",
+  },
+  high: {
+    label: "High",
+    color: "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300",
+    dot: "bg-red-500",
+  },
+};
+
+function BudgetRiskBadge({ estimate }: { estimate: BudgetEstimate }) {
+  const cfg = RISK_CONFIG[estimate.risk];
+  return (
+    <div className="flex flex-col gap-0.5">
+      <div className="flex justify-between items-center gap-2 text-xs">
+        <span className="text-gray-500 dark:text-gray-400 shrink-0">Budget risk</span>
+        <span
+          className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium ${cfg.color}`}
+          title={estimate.reason}
+        >
+          <span className={`h-1.5 w-1.5 rounded-full ${cfg.dot}`} />
+          {cfg.label}
+          {estimate.estimatedTokens !== null && (
+            <span className="opacity-70">
+              {" "}~{formatTokenCount(estimate.estimatedTokens)}
+            </span>
+          )}
+        </span>
+      </div>
+      <p className="text-[10px] text-gray-400 dark:text-gray-500 text-right leading-tight">
+        {estimate.reason}
+      </p>
+    </div>
+  );
+}
+
+function formatTokenCount(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M tok`;
+  if (n >= 1_000) return `${Math.round(n / 1_000)}k tok`;
+  return `${n} tok`;
 }
 
 function PreviewRow({ label, value, muted }: { label: string; value: React.ReactNode; muted?: boolean }) {
@@ -214,6 +276,10 @@ export function LaunchPreviewPanel({
               </span>
             )}
           </div>
+
+          {preview.budgetEstimate && (
+            <BudgetRiskBadge estimate={preview.budgetEstimate} />
+          )}
 
           {preview.warnings.length > 0 && (
             <div className="space-y-1 pt-1">
