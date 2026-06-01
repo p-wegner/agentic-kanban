@@ -49,6 +49,30 @@ Worktrees live at C:\andrena\.worktrees\.
 5. Run: git -C C:\andrena\agentic-kanban worktree prune
 6. Report: N removed, N pruned, N kept.
 
+### TASK 1b — Orphaned worktree DIRECTORIES git no longer tracks (Windows EBUSY residue)
+
+CRITICAL: steps 2–5 above only see worktrees git still tracks. On Windows, `git worktree
+remove` routinely prunes its admin entry but the subsequent `rmdir` FAILS on a locked
+`node_modules`, leaving the **directory** behind. git no longer lists it, so `git worktree
+list` / `git worktree prune` — and therefore steps 2–5 — are blind to it. These orphans
+accumulate fast: each carries a ~300–500 MB `node_modules`, and a busy board can leave
+300+ of them (~74 GB) silently filling the disk until the server crashes with ENOSPC.
+
+Detect: count `C:\andrena\.worktrees\feature_ak-*` dirs and compare to `git worktree list`
+(it'll show ~8 while disk has hundreds). The gap is the orphan set.
+
+Sweep them with the dedicated, idempotent, triple-guarded script (re-derives the active set
+from git at runtime, so it can never delete a live worktree):
+
+```powershell
+powershell -NoProfile -File C:\andrena\agentic-kanban\scripts\cleanup-orphan-worktrees.ps1
+```
+
+The script's guards (all must hold to delete a dir): name matches `feature_ak-*`, NOT in the
+live `git worktree list`, and has NO `.git` entry. It uses `cmd /c rd /s /q` — *vastly* faster
+than `Remove-Item -Recurse` over node_modules' tens of thousands of tiny files. Re-run it later
+to sweep dirs that were locked by a live process at delete time (it's safe to re-run).
+
 ## TASK 2 — Stale Claude Code chat sessions [always run unless --worktrees or --e2e only]
 
 Session dirs: C:\Users\pwegner\.claude\projects\
