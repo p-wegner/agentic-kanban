@@ -34,6 +34,7 @@ export function SavedBoardViews({
   const [selectedViewId, setSelectedViewId] = useState("");
   const [viewName, setViewName] = useState("");
   const [saving, setSaving] = useState(false);
+  const [showSaving, setShowSaving] = useState(false);
   const settingsKey = useMemo(() => boardSavedViewsKey(projectId), [projectId]);
   const selectedView = views.find((view) => view.id === selectedViewId);
 
@@ -111,6 +112,8 @@ export function SavedBoardViews({
     if (deleted) setSelectedViewId("");
   }
 
+  const hasViews = views.length > 0;
+
   return (
     <div className="flex shrink-0 flex-wrap items-center gap-1.5 rounded-md border border-black/[0.07] bg-surface-raised px-2 py-1.5 text-xs dark:border-white/10 dark:bg-surface-raised-dark">
       <select
@@ -146,62 +149,86 @@ export function SavedBoardViews({
           <option key={tag.id} value={tag.id}>{tag.name}</option>
         ))}
       </select>
-      <select
-        value={selectedViewId}
-        onChange={(event) => void applyView(event.target.value)}
-        className="max-w-[170px] rounded border border-gray-300 bg-white px-2 py-1 text-gray-700 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200"
-        aria-label="Saved board view"
-        title="Apply saved board view"
-      >
-        <option value="">Saved views...</option>
-        {views.map((view) => (
-          <option key={view.id} value={view.id}>{view.name}</option>
-        ))}
-      </select>
-      <input
-        value={viewName}
-        onChange={(event) => setViewName(event.target.value)}
-        onKeyDown={(event) => {
-          if (event.key === "Enter") void saveCurrentView();
-        }}
-        placeholder="View name"
-        className="w-28 rounded border border-gray-300 bg-white px-2 py-1 text-gray-700 placeholder:text-gray-400 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200"
-        aria-label="Saved view name"
-      />
       <button
         type="button"
-        onClick={() => void saveCurrentView()}
-        disabled={saving || !viewName.trim()}
-        className="rounded border border-black/[0.07] px-2 py-1 font-medium text-ink-soft hover:bg-surface-sunken disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/10 dark:text-gray-300 dark:hover:bg-gray-800"
-        title="Save current board filters as a named view"
-      >
-        Save
-      </button>
-      <button
-        type="button"
-        onClick={() => void renameSelectedView()}
-        disabled={saving || !selectedView}
-        className="rounded p-1 text-ink-soft hover:bg-surface-sunken disabled:cursor-not-allowed disabled:opacity-40 dark:text-gray-300 dark:hover:bg-gray-800"
-        aria-label="Rename saved view"
-        title="Rename saved view"
+        onClick={() => setShowSaving((v) => !v)}
+        className={`flex items-center gap-1 rounded px-1.5 py-1 text-ink-soft hover:bg-surface-sunken dark:text-gray-300 dark:hover:bg-gray-800 ${showSaving ? "bg-surface-sunken dark:bg-gray-800" : ""}`}
+        aria-label={showSaving ? "Hide saved views" : "Show saved views"}
+        title={showSaving ? "Hide saved views" : "Manage saved views"}
       >
         <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-          <path strokeLinecap="round" strokeLinejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Z" />
-          <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 7.125 16.875 4.5" />
+          <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5" />
+          <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3" />
+        </svg>
+        {hasViews && (
+          <span className="rounded-full bg-violet-100 px-1.5 text-[10px] font-medium leading-none text-violet-700 dark:bg-violet-900/40 dark:text-violet-300">
+            {views.length}
+          </span>
+        )}
+        <svg className={`h-2.5 w-2.5 transition-transform ${showSaving ? "rotate-180" : ""}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <path strokeLinecap="round" strokeLinejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
         </svg>
       </button>
-      <button
-        type="button"
-        onClick={() => void deleteSelectedView()}
-        disabled={saving || !selectedView}
-        className="rounded p-1 text-ink-soft hover:bg-surface-sunken disabled:cursor-not-allowed disabled:opacity-40 dark:text-gray-300 dark:hover:bg-gray-800"
-        aria-label="Delete saved view"
-        title="Delete saved view"
-      >
-        <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-          <path strokeLinecap="round" strokeLinejoin="round" d="M19 7 18.133 19.142A2 2 0 0 1 16.138 21H7.862A2 2 0 0 1 5.867 19.142L5 7m5 4v6m4-6v6M9 7V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v3M4 7h16" />
-        </svg>
-      </button>
+      {showSaving && (
+        <>
+          <select
+            value={selectedViewId}
+            onChange={(event) => void applyView(event.target.value)}
+            className="max-w-[170px] rounded border border-gray-300 bg-white px-2 py-1 text-gray-700 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200"
+            aria-label="Saved board view"
+            title="Apply saved board view"
+          >
+            <option value="">Saved views...</option>
+            {views.map((view) => (
+              <option key={view.id} value={view.id}>{view.name}</option>
+            ))}
+          </select>
+          <input
+            value={viewName}
+            onChange={(event) => setViewName(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") void saveCurrentView();
+            }}
+            placeholder="View name"
+            className="w-28 rounded border border-gray-300 bg-white px-2 py-1 text-gray-700 placeholder:text-gray-400 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200"
+            aria-label="Saved view name"
+          />
+          <button
+            type="button"
+            onClick={() => void saveCurrentView()}
+            disabled={saving || !viewName.trim()}
+            className="rounded border border-black/[0.07] px-2 py-1 font-medium text-ink-soft hover:bg-surface-sunken disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/10 dark:text-gray-300 dark:hover:bg-gray-800"
+            title="Save current board filters as a named view"
+          >
+            Save
+          </button>
+          <button
+            type="button"
+            onClick={() => void renameSelectedView()}
+            disabled={saving || !selectedView}
+            className="rounded p-1 text-ink-soft hover:bg-surface-sunken disabled:cursor-not-allowed disabled:opacity-40 dark:text-gray-300 dark:hover:bg-gray-800"
+            aria-label="Rename saved view"
+            title="Rename saved view"
+          >
+            <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path strokeLinecap="round" strokeLinejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Z" />
+              <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 7.125 16.875 4.5" />
+            </svg>
+          </button>
+          <button
+            type="button"
+            onClick={() => void deleteSelectedView()}
+            disabled={saving || !selectedView}
+            className="rounded p-1 text-ink-soft hover:bg-surface-sunken disabled:cursor-not-allowed disabled:opacity-40 dark:text-gray-300 dark:hover:bg-gray-800"
+            aria-label="Delete saved view"
+            title="Delete saved view"
+          >
+            <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M19 7 18.133 19.142A2 2 0 0 1 16.138 21H7.862A2 2 0 0 1 5.867 19.142L5 7m5 4v6m4-6v6M9 7V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v3M4 7h16" />
+            </svg>
+          </button>
+        </>
+      )}
     </div>
   );
 }
