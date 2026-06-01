@@ -96,7 +96,8 @@ The app's built-in monitor handles: idle→relaunch, reviewing→merge, active+s
 
 Get the board:
 ```powershell
-$proj = "<active-project-id>"  # read from GET /api/preferences/active-project if unknown
+$proj = (Invoke-RestMethod "http://127.0.0.1:3001/api/preferences/active-project" -TimeoutSec 10).projectId
+if (-not $proj) { throw "Active project is not set" }
 $board = Invoke-RestMethod "http://127.0.0.1:3001/api/projects/$proj/board" -TimeoutSec 10
 ```
 
