@@ -1,6 +1,73 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type APIRequestContext } from "@playwright/test";
 import { SERVER_URL } from "../helpers/port.js";
 import { getE2EProjectId } from "../helpers/e2e-project.js";
+
+type BoardIssue = {
+  id: string;
+  title: string;
+};
+
+type BoardColumn = {
+  name: string;
+  issues: BoardIssue[];
+};
+
+async function findIssueColumn(
+  request: APIRequestContext,
+  projectId: string,
+  title: string,
+): Promise<string | null> {
+  const boardRes = await request.get(
+    `${SERVER_URL}/api/projects/${projectId}/board`,
+  );
+  const board: BoardColumn[] = await boardRes.json();
+  const column = board.find((status) =>
+    status.issues.some((issue) => issue.title === title),
+  );
+  return column?.name ?? null;
+}
+
+async function waitForIssueInColumn(
+  request: APIRequestContext,
+  projectId: string,
+  title: string,
+  expectedColumn: string,
+) {
+  let currentColumn: string | null = null;
+  let lastReadError: unknown = null;
+
+  try {
+    await expect
+      .poll(
+        async () => {
+          try {
+            currentColumn = await findIssueColumn(request, projectId, title);
+            lastReadError = null;
+          } catch (error) {
+            lastReadError = error;
+          }
+          return currentColumn;
+        },
+        {
+          intervals: [100, 250, 500, 1000],
+          timeout: 10000,
+          message: `Wait for issue "${title}" to appear in "${expectedColumn}"`,
+        },
+      )
+      .toBe(expectedColumn);
+  } catch (error) {
+    currentColumn = await findIssueColumn(request, projectId, title).catch(
+      () => currentColumn,
+    );
+    const readErrorMessage =
+      lastReadError instanceof Error
+        ? `Last board read error: ${lastReadError.message}\n`
+        : "";
+    throw new Error(
+      `Timed out waiting for issue "${title}" to move to "${expectedColumn}". Current column: ${currentColumn ?? "not found"}.\n${readErrorMessage}${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+}
 
 test.describe("Board UI", () => {
   test("shows kanban columns with expected names", async ({ page }) => {
@@ -265,16 +332,8 @@ test.describe("Board interactions", () => {
           sourceStatusId: srcId,
         };
 
-        const columns = document.querySelectorAll(".bg-gray-100.rounded-lg");
-        let targetCol: Element | null = null;
-        for (const col of columns) {
-          const h2 = col.querySelector("h2");
-          if (h2 && h2.textContent?.includes("In Progress")) {
-            targetCol = col;
-            break;
-          }
-        }
-        if (!targetCol) throw new Error("In Progress column not found");
+        const targetCol = document.getElementById(`column-${tgtId}`);
+        if (!targetCol) throw new Error(`In Progress column ${tgtId} not found`);
 
         const dropEvent = new DragEvent("drop", {
           bubbles: true,
@@ -288,17 +347,7 @@ test.describe("Board interactions", () => {
       { iid: issueId, srcId: todoStatusId, tgtId: inProgressStatusId },
     );
 
-    await page.waitForTimeout(1000);
-
-    const boardRes = await request.get(
-      `${SERVER_URL}/api/projects/${projectId}/board`,
-    );
-    const board = await boardRes.json();
-    const inProgressColumn = board.find((s: { name: string }) => s.name === "In Progress");
-    const movedIssue = inProgressColumn.issues.find(
-      (i: { title: string }) => i.title === title,
-    );
-    expect(movedIssue).toBeDefined();
+    await waitForIssueInColumn(request, projectId, title, "In Progress");
   });
 
   test("expand button cycles panel through modal and fullscreen modes", async ({
