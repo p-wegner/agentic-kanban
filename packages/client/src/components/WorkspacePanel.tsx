@@ -2107,7 +2107,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                       );
                     })()}
 
-                    {(viewMode === "output" || (isRunning && viewMode !== "preview")) && (selectedHistoryId ? historyMessages : (activeSession || completedMessages.length > 0)) ? (
+                    {(viewMode === "output" || (isRunning && viewMode !== "preview" && viewMode !== "artifacts")) && (selectedHistoryId ? historyMessages : (activeSession || completedMessages.length > 0)) ? (
                       <TerminalView
                         messages={selectedHistoryId ? historyMessages : (activeSession ? messages : completedMessages)}
                         connectionState={selectedHistoryId ? "closed" : (activeSession ? wsState : "closed")}

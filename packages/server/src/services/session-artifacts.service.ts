@@ -1,5 +1,5 @@
-import { readdir, stat, readFile } from "node:fs/promises";
-import { join, resolve, extname, relative, sep } from "node:path";
+import { readdir, stat, readFile, realpath } from "node:fs/promises";
+import { join, resolve, extname, relative, isAbsolute } from "node:path";
 import type { Database } from "../db/index.js";
 import { workspaces } from "@agentic-kanban/shared/schema";
 import { eq } from "drizzle-orm";
@@ -36,11 +36,27 @@ export function resolveSafePath(workingDir: string, requestedPath: string): stri
   const target = resolve(base, requestedPath);
 
   // Must be inside workingDir (prevent traversal with .. or absolute paths)
-  // Use platform-native sep (\ on Windows, / on POSIX)
-  if (!target.startsWith(base + sep) && target !== base) {
+  if (!isPathInside(base, target)) {
     throw new Error("Path is outside the workspace directory");
   }
   return target;
+}
+
+function isPathInside(baseDir: string, targetPath: string): boolean {
+  const rel = relative(baseDir, targetPath);
+  return rel === "" || (!!rel && !rel.startsWith("..") && !isAbsolute(rel));
+}
+
+async function resolveSafeExistingPath(workingDir: string, requestedPath: string): Promise<string> {
+  const lexicalTarget = resolveSafePath(workingDir, requestedPath);
+  const [realBase, realTarget] = await Promise.all([
+    realpath(workingDir),
+    realpath(lexicalTarget),
+  ]);
+  if (!isPathInside(realBase, realTarget)) {
+    throw new Error("Path is outside the workspace directory");
+  }
+  return realTarget;
 }
 
 /**
@@ -150,11 +166,11 @@ export function createSessionArtifactsService(deps: { database: Database }) {
    */
   async function readTextArtifact(workspaceId: string, artifactPath: string): Promise<{ content: string; path: string }> {
     const workingDir = await getWorkspaceDir(workspaceId);
-    const fullPath = resolveSafePath(workingDir, artifactPath);
+    const fullPath = await resolveSafeExistingPath(workingDir, artifactPath);
 
     const ext = extname(fullPath).toLowerCase();
     if (!TEXT_EXTENSIONS.has(ext)) {
-      throw new Error(`Cannot read .${ext} file as text`);
+      throw new Error(`Cannot read ${ext || "extensionless"} file as text`);
     }
 
     const content = await readFile(fullPath, "utf-8");
@@ -170,11 +186,11 @@ export function createSessionArtifactsService(deps: { database: Database }) {
    */
   async function readImageArtifact(workspaceId: string, artifactPath: string): Promise<{ buffer: Buffer; mimeType: string; path: string }> {
     const workingDir = await getWorkspaceDir(workspaceId);
-    const fullPath = resolveSafePath(workingDir, artifactPath);
+    const fullPath = await resolveSafeExistingPath(workingDir, artifactPath);
 
     const ext = extname(fullPath).toLowerCase();
     if (!IMAGE_EXTENSIONS.has(ext)) {
-      throw new Error(`Cannot read .${ext} file as image`);
+      throw new Error(`Cannot read ${ext || "extensionless"} file as image`);
     }
 
     const MIME_MAP: Record<string, string> = {
