@@ -24,12 +24,6 @@ function mockAgentCommand(profile: string, delayMs = 100): string {
   return `node --import "file://${TSX_LOADER}" "${MOCK_AGENT_SCRIPT}" --profile ${profile} --delay-ms ${delayMs}`;
 }
 
-const RETRY_INTERVALS_MS = [500, 1000, 1500];
-
-async function delay(ms: number) {
-  await new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 async function describeResponse(response: APIResponse) {
   let body = "";
   try {
@@ -53,23 +47,36 @@ async function expectJson<T>(response: APIResponse, label: string): Promise<T> {
   return (await response.json()) as T;
 }
 
-async function retry<T>(label: string, action: () => Promise<T>): Promise<T> {
+async function retryApiAction<T>(
+  label: string,
+  action: () => Promise<T>,
+  timeoutMs = 10000,
+): Promise<T> {
   let lastError: unknown;
+  let result: T | undefined;
+  let didSucceed = false;
 
-  for (let attempt = 0; attempt < RETRY_INTERVALS_MS.length + 1; attempt += 1) {
-    try {
-      return await action();
-    } catch (error) {
-      lastError = error;
-      if (attempt < RETRY_INTERVALS_MS.length) {
-        await delay(RETRY_INTERVALS_MS[attempt]);
+  try {
+    await expect(async () => {
+      try {
+        result = await action();
+        didSucceed = true;
+        lastError = undefined;
+      } catch (error) {
+        lastError = error;
+        throw error;
       }
-    }
+    }).toPass({ timeout: timeoutMs, intervals: [250, 500, 1000] });
+  } catch {
+    const message =
+      lastError instanceof Error ? lastError.message : String(lastError);
+    throw new Error(`${label} failed after retries. Last error: ${message}`);
+  }
+  if (!didSucceed) {
+    throw new Error(`${label} failed after retries with no result`);
   }
 
-  const message =
-    lastError instanceof Error ? lastError.message : String(lastError);
-  throw new Error(`${label} failed after retries. Last error: ${message}`);
+  return result as T;
 }
 
 test.describe("Workspace Panel Chat Input", () => {
@@ -126,7 +133,7 @@ test.describe("Workspace Panel Chat Input", () => {
     const issueTitle = `ChatInputTest ${suffix}`;
     const branchName = `feature/chat-input-${suffix}`;
 
-    const issue = await retry(`create issue "${issueTitle}"`, async () => {
+    const issue = await retryApiAction(`create issue "${issueTitle}"`, async () => {
       const issueRes = await request.post(`${SERVER_URL}/api/issues`, {
         data: { title: issueTitle, statusId, projectId },
       });
@@ -135,15 +142,18 @@ test.describe("Workspace Panel Chat Input", () => {
     const issueId = issue.id;
     createdIssueIds.push(issueId);
 
-    const workspace = await retry(`create workspace "${branchName}"`, async () => {
-      const wsRes = await request.post(`${SERVER_URL}/api/workspaces`, {
-        data: { issueId, branch: branchName },
-      });
-      return await expectJson<{ id: string }>(
-        wsRes,
-        "POST /api/workspaces",
-      );
-    });
+    const workspace = await retryApiAction(
+      `create workspace "${branchName}"`,
+      async () => {
+        const wsRes = await request.post(`${SERVER_URL}/api/workspaces`, {
+          data: { issueId, branch: branchName },
+        });
+        return await expectJson<{ id: string }>(
+          wsRes,
+          "POST /api/workspaces",
+        );
+      },
+    );
     const workspaceId = workspace.id;
     createdWorkspaceIds.push(workspaceId);
 
@@ -182,15 +192,27 @@ test.describe("Workspace Panel Chat Input", () => {
     });
   }
 
-  function workspaceCard(page: Page, branchName: string) {
-    const panel = page.locator("[data-panel]").last();
+  function workspacePanel(page: Page, issueTitle: string) {
+    return page
+      .locator("[data-panel]", {
+        has: page.locator("h2", { hasText: issueTitle }),
+      })
+      .last();
+  }
+
+  function workspaceCard(page: Page, issueTitle: string, branchName: string) {
+    const panel = workspacePanel(page, issueTitle);
     return panel.locator("div.border.rounded", { hasText: branchName }).first();
   }
 
-  async function ensureWorkspaceChatMounted(page: Page, branchName: string) {
-    const panel = page.locator("[data-panel]").last();
-    const card = workspaceCard(page, branchName);
-    await expect(card).toBeVisible({ timeout: 5000 });
+  async function ensureWorkspaceChatMounted(
+    page: Page,
+    issueTitle: string,
+    branchName: string,
+  ) {
+    const panel = workspacePanel(page, issueTitle);
+    const card = workspaceCard(page, issueTitle, branchName);
+    await expect(card).toBeVisible({ timeout: 15000 });
 
     const chatSurface = panel
       .locator("textarea")
@@ -220,14 +242,36 @@ test.describe("Workspace Panel Chat Input", () => {
   async function setupWorkspaceWithRetry(
     request: APIRequestContext,
     workspaceId: string,
+    timeoutMs = 10000,
   ) {
-    await retry(`setup workspace ${workspaceId}`, async () => {
-      const setupRes = await request.post(
-        `${SERVER_URL}/api/workspaces/${workspaceId}/setup`,
-        { data: {} },
-      );
-      await expectOkResponse(setupRes, "POST workspace setup");
-    });
+    await retryApiAction(
+      `setup workspace ${workspaceId}`,
+      async () => {
+        const setupRes = await request.post(
+          `${SERVER_URL}/api/workspaces/${workspaceId}/setup`,
+          { data: {} },
+        );
+        await expectOkResponse(setupRes, "POST workspace setup");
+      },
+      timeoutMs,
+    );
+
+    await expect
+      .poll(
+        async () => {
+          const workspaceRes = await request.get(
+            `${SERVER_URL}/api/workspaces/${workspaceId}`,
+          );
+          if (!workspaceRes.ok()) {
+            return `workspace-${await describeResponse(workspaceRes)}`;
+          }
+
+          const workspace = await workspaceRes.json();
+          return workspace?.workingDir ? "ready" : "missing-working-dir";
+        },
+        { timeout: timeoutMs, intervals: [250, 500, 1000] },
+      )
+      .toBe("ready");
   }
 
   async function waitForWorkspaceStatus(
@@ -293,7 +337,7 @@ test.describe("Workspace Panel Chat Input", () => {
     workspaceId: string,
     data: Record<string, unknown>,
   ) {
-    return await retry(`launch workspace ${workspaceId}`, async () => {
+    return await retryApiAction(`launch workspace ${workspaceId}`, async () => {
       const launchRes = await request.post(
         `${SERVER_URL}/api/workspaces/${workspaceId}/launch`,
         { data },
@@ -396,7 +440,7 @@ test.describe("Workspace Panel Chat Input", () => {
     await page.waitForSelector("h2");
 
     await openWorkspacePanel(page, issueTitle, branchName);
-    await ensureWorkspaceChatMounted(page, branchName);
+    await ensureWorkspaceChatMounted(page, issueTitle, branchName);
 
     // Chat textarea and Send button should be visible in the idle state
     const textarea = page.locator('textarea[placeholder*="Message agent"]').first();
@@ -407,6 +451,12 @@ test.describe("Workspace Panel Chat Input", () => {
 
     // Send button disabled when textarea is empty
     await expect(sendButton).toBeDisabled();
+  });
+
+  test("workspace setup failures include API details", async ({ request }) => {
+    await expect(
+      setupWorkspaceWithRetry(request, "missing-workspace-chat-setup", 1000),
+    ).rejects.toThrow(/POST workspace setup failed: 404.*Workspace not found/s);
   });
 
   test("Stop button appears while agent is processing", async ({
@@ -434,7 +484,7 @@ test.describe("Workspace Panel Chat Input", () => {
     await page.waitForSelector("h2");
 
     await openWorkspacePanel(page, issueTitle, branchName);
-    await ensureWorkspaceChatMounted(page, branchName);
+    await ensureWorkspaceChatMounted(page, issueTitle, branchName);
 
     // While agent is processing, Stop button should appear
     const stopButton = page.locator('button:has-text("Stop")').first();
@@ -475,7 +525,7 @@ test.describe("Workspace Panel Chat Input", () => {
     await page.waitForSelector("h2");
 
     await openWorkspacePanel(page, issueTitle, branchName);
-    await ensureWorkspaceChatMounted(page, branchName);
+    await ensureWorkspaceChatMounted(page, issueTitle, branchName);
 
     // Wait for agent to complete — "Completed" shows in TerminalView result event
     const completed = page.locator("text=Completed").first();
@@ -507,7 +557,7 @@ test.describe("Workspace Panel Chat Input", () => {
     await page.waitForSelector("h2");
 
     await openWorkspacePanel(page, issueTitle, branchName);
-    await ensureWorkspaceChatMounted(page, branchName);
+    await ensureWorkspaceChatMounted(page, issueTitle, branchName);
 
     // Type a message in the chat input
     const textarea = page.locator('textarea[placeholder*="Message agent"]').first();
@@ -545,7 +595,7 @@ test.describe("Workspace Panel Chat Input", () => {
     await page.waitForSelector("h2");
 
     await openWorkspacePanel(page, issueTitle, branchName);
-    await ensureWorkspaceChatMounted(page, branchName);
+    await ensureWorkspaceChatMounted(page, issueTitle, branchName);
 
     // Type a message
     const textarea = page.locator('textarea[placeholder*="Message agent"]').first();
@@ -586,7 +636,7 @@ test.describe("Workspace Panel Chat Input", () => {
     await page.waitForSelector("h2");
 
     await openWorkspacePanel(page, issueTitle, branchName);
-    await ensureWorkspaceChatMounted(page, branchName);
+    await ensureWorkspaceChatMounted(page, issueTitle, branchName);
 
     // Wait for the first session to complete — "Completed" appears in terminal
     await expect(page.locator("text=Completed").first()).toBeVisible({
