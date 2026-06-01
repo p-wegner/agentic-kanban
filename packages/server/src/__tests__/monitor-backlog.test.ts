@@ -100,7 +100,7 @@ describe("runBacklogEmptyStrategy — generation", () => {
     const calls = vi.mocked(fetch).mock.calls;
     expect(calls.length).toBe(1);
     const [url, init] = calls[0];
-    expect(String(url)).toContain("/api/workspaces");
+    expect(String(url)).toBe("http://127.0.0.1:3001/api/workspaces");
     const body = JSON.parse((init as RequestInit).body as string);
     expect(body.issueId).toBe("host-issue-1");
     expect(body.skillName).toBe("architecture-improvement");

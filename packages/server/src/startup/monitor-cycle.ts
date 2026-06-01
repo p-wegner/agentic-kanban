@@ -113,11 +113,11 @@ export async function processWorkspaceCandidates(candidates: WorkspaceCandidate[
             continue;
           }
           if (!canStartMerge(ws)) continue;
-          const mergeRes = await fetch(`http://localhost:${deps.serverPort}/api/workspaces/${ws.wsId}/merge`, { method: "POST" }).catch(() => null);
+          const mergeRes = await fetch(`http://127.0.0.1:${deps.serverPort}/api/workspaces/${ws.wsId}/merge`, { method: "POST" }).catch(() => null);
           if (!mergeRes || !mergeRes.ok) {
             const body = mergeRes ? await mergeRes.json().catch(() => ({})) : {};
             const mergeError = (body as Record<string, string>)?.message || "merge failed";
-            await fetch(`http://localhost:${deps.serverPort}/api/workspaces/${ws.wsId}/fix-and-merge`, {
+            await fetch(`http://127.0.0.1:${deps.serverPort}/api/workspaces/${ws.wsId}/fix-and-merge`, {
               method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mergeError }),
             }).catch(() => {});
             console.log(`[monitor] Merge conflict for idle+readyForMerge workspace ${ws.wsId}  triggered fix-and-merge`);
@@ -144,11 +144,11 @@ export async function processWorkspaceCandidates(candidates: WorkspaceCandidate[
         } else if (ws.issueStatusName === "In Review") {
           if (deps.autoMergeEnabled && deps.autoMergeInReview) {
             if (!canStartMerge(ws)) continue;
-            const mergeRes = await fetch(`http://localhost:${deps.serverPort}/api/workspaces/${ws.wsId}/merge`, { method: "POST" }).catch(() => null);
+            const mergeRes = await fetch(`http://127.0.0.1:${deps.serverPort}/api/workspaces/${ws.wsId}/merge`, { method: "POST" }).catch(() => null);
             if (!mergeRes || !mergeRes.ok) {
               const body = mergeRes ? await mergeRes.json().catch(() => ({})) : {};
               const mergeError = (body as Record<string, string>)?.message || "merge failed";
-              await fetch(`http://localhost:${deps.serverPort}/api/workspaces/${ws.wsId}/fix-and-merge`, {
+              await fetch(`http://127.0.0.1:${deps.serverPort}/api/workspaces/${ws.wsId}/fix-and-merge`, {
                 method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mergeError }),
               }).catch(() => {});
               console.log(`[monitor] Merge conflict for idle In-Review workspace ${ws.wsId} (auto_merge_in_review)  triggered fix-and-merge`);
@@ -163,7 +163,7 @@ export async function processWorkspaceCandidates(candidates: WorkspaceCandidate[
           }
         } else {
           if (!canStartRelaunch(ws)) continue;
-          await fetch(`http://localhost:${deps.serverPort}/api/workspaces/${ws.wsId}/launch`, { method: "POST" }).catch(() => {});
+          await fetch(`http://127.0.0.1:${deps.serverPort}/api/workspaces/${ws.wsId}/launch`, { method: "POST" }).catch(() => {});
           stats.relaunched++;
           logAction("relaunch", ws.wsId, ws.issueId);
           console.log(`[monitor] Relaunched idle workspace ${ws.wsId}`);
@@ -176,7 +176,7 @@ export async function processWorkspaceCandidates(candidates: WorkspaceCandidate[
         }
         if (!ws.workingDir) {
           console.log(`[monitor] Ghost workspace ${ws.wsId} (workingDir empty)  deleting and resetting issue to In Progress`);
-          await fetch(`http://localhost:${deps.serverPort}/api/workspaces/${ws.wsId}`, { method: "DELETE" }).catch(() => {});
+          await fetch(`http://127.0.0.1:${deps.serverPort}/api/workspaces/${ws.wsId}`, { method: "DELETE" }).catch(() => {});
           const inProgressSt = await db.select({ id: projectStatuses.id }).from(projectStatuses).where(sql`${projectStatuses.name} = 'In Progress' AND ${projectStatuses.projectId} = ${ws.projectId}`).limit(1);
           if (inProgressSt.length > 0) await db.update(issues).set({ statusId: inProgressSt[0].id }).where(eq(issues.id, ws.issueId)).catch(() => {});
           logAction("mark_idle", ws.wsId, ws.issueId);
@@ -187,7 +187,7 @@ export async function processWorkspaceCandidates(candidates: WorkspaceCandidate[
             continue;
           }
           if (!canStartMerge(ws)) continue;
-          await fetch(`http://localhost:${deps.serverPort}/api/workspaces/${ws.wsId}/merge`, { method: "POST" }).catch(() => {});
+          await fetch(`http://127.0.0.1:${deps.serverPort}/api/workspaces/${ws.wsId}/merge`, { method: "POST" }).catch(() => {});
           stats.merged++;
           logAction("merge", ws.wsId, ws.issueId);
           console.log(`[monitor] Triggered merge for reviewing workspace ${ws.wsId}`);

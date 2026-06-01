@@ -92,6 +92,7 @@ describe("processWorkspaceCandidates — idle + readyForMerge", () => {
     const calls = vi.mocked(fetch).mock.calls;
     expect(calls.some(([url]) => String(url).includes("/merge"))).toBe(true);
     expect(calls.every(([url]) => !String(url).includes("/launch"))).toBe(true);
+    expect(calls.every(([url]) => String(url).startsWith("http://127.0.0.1:3001/"))).toBe(true);
     expect(vi.mocked(deps.boardEvents.broadcast)).toHaveBeenCalledWith("proj-1", "board_changed");
     expect(vi.mocked(deps.logMonitorAction)).toHaveBeenCalledWith(
       expect.anything(), "merge", "ws-1", "issue-1"
@@ -159,6 +160,7 @@ describe("processWorkspaceCandidates — idle + readyForMerge=false", () => {
     expect(stats.merged).toBe(0);
     const calls = vi.mocked(fetch).mock.calls;
     expect(calls.some(([url]) => String(url).includes("/launch"))).toBe(true);
+    expect(calls.every(([url]) => String(url).startsWith("http://127.0.0.1:3001/"))).toBe(true);
   });
 
   it("caps idle workspace relaunches per monitor cycle", async () => {
