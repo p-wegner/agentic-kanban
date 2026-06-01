@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   isAncestor: vi.fn(),
   autoRenumberMigrations: vi.fn(),
   abortRebase: vi.fn(),
+  detectConflicts: vi.fn(),
 }));
 
 vi.mock("../services/git.service.js", () => ({
@@ -22,6 +23,7 @@ vi.mock("../services/git.service.js", () => ({
   isAncestor: mocks.isAncestor,
   autoRenumberMigrations: mocks.autoRenumberMigrations,
   abortRebase: mocks.abortRebase,
+  detectConflicts: mocks.detectConflicts,
 }));
 
 vi.mock("../services/workspace-merge.service.js", () => ({
@@ -109,6 +111,7 @@ describe("merge queue service", () => {
     mocks.isAncestor.mockReset().mockResolvedValue(true);
     mocks.autoRenumberMigrations.mockReset().mockResolvedValue({ renumbered: false, renames: [] });
     mocks.abortRebase.mockReset().mockResolvedValue(undefined);
+    mocks.detectConflicts.mockReset().mockResolvedValue({ hasConflicts: false, conflictingFiles: [] });
   });
 
   it("reports migration-number collisions across queued workspaces", async () => {
@@ -222,6 +225,94 @@ describe("merge queue service", () => {
     expect(mocks.autoRenumberMigrations.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.rebaseOntoBase.mock.invocationCallOrder[0],
     );
+  });
+
+  it("computePlan includes conflict preview for each workspace", async () => {
+    const { db } = createTestDb();
+    const { projectId, statusId } = await seedProject(db);
+    const a = await seedWorkspace(db, {
+      projectId,
+      statusId,
+      issueNumber: 51,
+      issueTitle: "Workspace with conflicts",
+      workingDir: "/repo/.worktrees/conflict-a",
+      branch: "feature/conflict-a",
+    });
+    const b = await seedWorkspace(db, {
+      projectId,
+      statusId,
+      issueNumber: 52,
+      issueTitle: "Clean workspace",
+      workingDir: "/repo/.worktrees/clean-b",
+      branch: "feature/clean-b",
+    });
+
+    mocks.detectConflicts
+      .mockResolvedValueOnce({ hasConflicts: true, conflictingFiles: ["src/app.ts", "src/utils.ts"] })
+      .mockResolvedValueOnce({ hasConflicts: false, conflictingFiles: [] });
+
+    const service = createMergeQueueService({ database: db });
+    const plan = await service.computePlan([a.workspaceId, b.workspaceId]);
+
+    expect(plan.conflictPreviews).toHaveLength(2);
+    expect(plan.conflictPreviews).toContainEqual(expect.objectContaining({
+      workspaceId: a.workspaceId,
+      hasConflicts: true,
+      conflictingFiles: expect.arrayContaining(["src/app.ts", "src/utils.ts"]),
+    }));
+    expect(plan.conflictPreviews).toContainEqual(expect.objectContaining({
+      workspaceId: b.workspaceId,
+      hasConflicts: false,
+      conflictingFiles: [],
+    }));
+  });
+
+  it("computePlan marks workspace as stale when baseBranch is not ancestor of HEAD", async () => {
+    const { db } = createTestDb();
+    const { projectId, statusId } = await seedProject(db);
+    const { workspaceId } = await seedWorkspace(db, {
+      projectId,
+      statusId,
+      issueNumber: 53,
+      issueTitle: "Stale workspace",
+      workingDir: "/repo/.worktrees/stale",
+      branch: "feature/stale",
+    });
+
+    // isAncestor returns false → baseBranch has moved past the worktree's merge base → stale
+    mocks.isAncestor.mockResolvedValue(false);
+
+    const service = createMergeQueueService({ database: db });
+    const plan = await service.computePlan([workspaceId]);
+
+    expect(plan.conflictPreviews).toContainEqual(expect.objectContaining({
+      workspaceId,
+      isStale: true,
+    }));
+  });
+
+  it("computePlan surfaces error in conflict preview when detectConflicts throws", async () => {
+    const { db } = createTestDb();
+    const { projectId, statusId } = await seedProject(db);
+    const { workspaceId } = await seedWorkspace(db, {
+      projectId,
+      statusId,
+      issueNumber: 54,
+      issueTitle: "Error workspace",
+      workingDir: "/repo/.worktrees/error",
+      branch: "feature/error",
+    });
+
+    mocks.detectConflicts.mockRejectedValue(new Error("git merge-tree failed"));
+
+    const service = createMergeQueueService({ database: db });
+    const plan = await service.computePlan([workspaceId]);
+
+    expect(plan.conflictPreviews).toContainEqual(expect.objectContaining({
+      workspaceId,
+      hasConflicts: false,
+      error: expect.stringContaining("git merge-tree failed"),
+    }));
   });
 
   it("aborts a skipped rebase conflict so the worktree is not left mid-rebase", async () => {
