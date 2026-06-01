@@ -96,6 +96,69 @@ describe("board-status", () => {
     });
   });
 
+  it("keeps idle In Review workspaces with null diff stats visible as needs attention", async () => {
+    const { db } = createTestDb();
+    const now = new Date().toISOString();
+    const projectId = randomUUID();
+    const statusId = randomUUID();
+    const issueId = randomUUID();
+    const workspaceId = randomUUID();
+
+    await db.insert(projects).values({
+      id: projectId,
+      name: "Null Diff Project",
+      repoPath: "/tmp/null-diff-project",
+      repoName: "null-diff-project",
+      defaultBranch: null,
+      createdAt: now,
+      updatedAt: now,
+    });
+    await db.insert(projectStatuses).values({
+      id: statusId,
+      projectId,
+      name: "In Review",
+      sortOrder: 0,
+      isDefault: true,
+      createdAt: now,
+    });
+    await db.insert(issues).values({
+      id: issueId,
+      issueNumber: 197,
+      title: "Stale review with missing diff base",
+      statusId,
+      projectId,
+      createdAt: now,
+      updatedAt: now,
+    });
+    await db.insert(workspaces).values({
+      id: workspaceId,
+      issueId,
+      branch: "feature/stale-review",
+      workingDir: "/tmp/null-diff-project/.worktrees/stale-review",
+      baseBranch: null,
+      status: "idle",
+      readyForMerge: false,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const status = await getBoardStatus({ projectId }, db);
+
+    expect(status.issues).toHaveLength(1);
+    expect(status.issues[0]).toMatchObject({
+      issueNumber: 197,
+      title: "Stale review with missing diff base",
+      statusName: "In Review",
+      workspace: { status: "idle", readyForMerge: false },
+      diffStats: null,
+      attention: {
+        bucket: "needs_attention",
+        reason: "stale-in-review",
+      },
+    });
+    expect(getDiffShortstat).not.toHaveBeenCalled();
+  });
+
   it("leaves ready-for-merge In Review workspaces unflagged", async () => {
     const { db } = createTestDb();
     const now = new Date().toISOString();
