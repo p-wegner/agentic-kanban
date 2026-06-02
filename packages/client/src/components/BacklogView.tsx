@@ -600,6 +600,9 @@ export function BacklogView({
           </div>
         )}
 
+      </div>
+
+      <div className="max-h-64 overflow-y-auto border-b border-black/[0.07] px-4 py-3 dark:border-white/10">
         <DependencyWavePanel
           plan={wavePlan}
           loading={waveLoading}
