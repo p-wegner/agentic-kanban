@@ -11,6 +11,7 @@ import type { BoardEvents } from "./board-events.js";
 import { loadAgentSettings, toExecutorProvider } from "./agent-settings.service.js";
 import {
   getWorkspaceById,
+  moveIssueToInProgress,
   resolveProjectId,
   resolveProjectRepo,
   updateWorkspaceStatus,
@@ -254,6 +255,22 @@ export function createWorkspaceSessionService(deps: {
     return { stopped };
   }
 
+  async function quarantineWorkspace(id: string): Promise<{ stopped: boolean }> {
+    const ws = await getWorkspaceById(id, database);
+    if (!ws) throw new WorkspaceError("Workspace not found", "NOT_FOUND");
+
+    const result = await stopWorkspace(id);
+
+    const projectId = await resolveProjectId(id, database);
+    if (projectId) {
+      const now = new Date().toISOString();
+      await moveIssueToInProgress(ws.issueId, projectId, now, database);
+      boardEvents?.broadcast(projectId, "board_changed");
+    }
+
+    return result;
+  }
+
   async function implementPlan(id: string, updatedPlanContent?: string): Promise<{ sessionId: string }> {
     const ws0 = await getWorkspaceById(id, database);
     if (!ws0) throw new WorkspaceError("Workspace not found", "NOT_FOUND");
@@ -395,5 +412,5 @@ export function createWorkspaceSessionService(deps: {
     return result.map(s => ({ ...s, skillName }));
   }
 
-  return { launchSession, sendTurn, stopWorkspace, implementPlan, rejectPlan, getPlanContent, openTerminal, openEditor, getSessions };
+  return { launchSession, sendTurn, stopWorkspace, quarantineWorkspace, implementPlan, rejectPlan, getPlanContent, openTerminal, openEditor, getSessions };
 }
