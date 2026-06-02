@@ -895,6 +895,31 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
     }
   }
 
+  async function handleExportHandoffBundle(wsId: string) {
+    setActionLoading(true);
+    setError(null);
+    try {
+      const url = `/api/workspaces/${wsId}/handoff-bundle?format=markdown`;
+      const res = await fetch(url);
+      if (!res.ok) {
+        const data = await res.json() as { error?: string };
+        throw new Error(data.error ?? `HTTP ${res.status}`);
+      }
+      const text = await res.text();
+      const blob = new Blob([text], { type: "text/markdown" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = `handoff-${wsId.slice(0, 8)}.md`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+      showToast("Handoff bundle downloaded", "success");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to export handoff bundle");
+    } finally {
+      setActionLoading(false);
+    }
+  }
+
   async function handleUpdateBase(wsId: string, mode: "rebase" | "merge") {
     setActionLoading(true);
     setError(null);
@@ -1975,6 +2000,16 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                               </span>
                             )}
                           </div>
+                          <div className="flex flex-col gap-0.5">
+                            <button
+                              onClick={(e) => { e.stopPropagation(); void handleExportHandoffBundle(ws.id); }}
+                              disabled={actionLoading}
+                              className="text-[10px] font-medium px-2 py-0.5 rounded bg-amber-100 text-amber-700 hover:bg-amber-200 dark:bg-amber-900/40 dark:text-amber-300 disabled:opacity-50"
+                              title="Download a Markdown handoff bundle for this workspace"
+                            >
+                              Export Handoff
+                            </button>
+                          </div>
                           {availableSkills.map((skill) => {
                             const lastSkill = completedSessions.filter(s => s.triggerType === `skill:${skill.name}`).at(-1);
                             return (
@@ -2697,6 +2732,14 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                             title="Generate a local GitHub PR or release-note draft and save it as an issue artifact"
                           >
                             Generate GitHub Draft
+                          </button>
+                          <button
+                            onClick={() => void handleExportHandoffBundle(ws.id)}
+                            disabled={actionLoading}
+                            className="text-sm bg-amber-600 text-white px-3 py-1.5 rounded hover:bg-amber-700 disabled:opacity-50"
+                            title="Download a Markdown handoff bundle for this workspace"
+                          >
+                            Export Handoff
                           </button>
                           <button
                             onClick={() => handleDeleteWorkspace(ws.id)}
