@@ -743,6 +743,112 @@ describe("Board API", () => {
     const res = await app.request(`/api/projects/${randomUUID()}/board`);
     expect(res.status).toBe(404);
   });
+
+  it("GET /api/projects/:id/board tolerates Done issue with null/stale workspace summary data (AK-324)", async () => {
+    const p = await createProjectDirectly(database, { name: "AK-324 Null Summary Project" });
+    const doneStatusId = await createStatusDirectly(database, p, "Done", 1);
+    const now = new Date().toISOString();
+    const issueId = randomUUID();
+    const workspaceId = randomUUID();
+    const sessionId = randomUUID();
+
+    await database.insert(schema.issues).values({
+      id: issueId,
+      projectId: p,
+      statusId: doneStatusId,
+      issueNumber: 324,
+      title: "Reconciled after dropped merge",
+      priority: "medium",
+      issueType: "bug",
+      sortOrder: 0,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    // Closed workspace with stale/null conflictCacheFiles — mirrors a dropped-merge reconciliation
+    await database.insert(schema.workspaces).values({
+      id: workspaceId,
+      issueId,
+      branch: "feature/ak-324-null-summary",
+      status: "closed",
+      // conflictCacheFiles stored as JSON-encoded null ("null") — the bug scenario
+      conflictCacheHasConflicts: false,
+      conflictCacheFiles: "null",
+      conflictCacheCheckedAt: now,
+      // diffStat all zeros/null
+      diffStatCacheCheckedAt: now,
+      diffStatCacheFilesChanged: 0,
+      diffStatCacheInsertions: null,
+      diffStatCacheDeletions: null,
+      // scorecardScore null
+      scorecardScore: null,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    // Session with stats stored as JSON-encoded null
+    await database.insert(schema.sessions).values({
+      id: sessionId,
+      workspaceId,
+      executor: "claude",
+      status: "stopped",
+      startedAt: now,
+      endedAt: now,
+      stats: "null",
+    });
+
+    const res = await app.request(`/api/projects/${p}/board`);
+    expect(res.status).toBe(200);
+    const body = await res.json() as any;
+
+    const allIssues = body.flatMap((column: any) => column.issues);
+    const issue = allIssues.find((i: any) => i.id === issueId);
+    expect(issue).toBeDefined();
+    // workspaceSummary must be present and not crash
+    expect(issue.workspaceSummary).toBeDefined();
+    expect(issue.workspaceSummary.total).toBe(1);
+    // main workspace summary must have safe conflict data (array, not null)
+    expect(issue.workspaceSummary.main).toBeDefined();
+  });
+
+  it("GET /api/issues tolerates Done issue with null/stale workspace summary data (AK-324)", async () => {
+    const p = await createProjectDirectly(database, { name: "AK-324 Issues Null Summary Project" });
+    const doneStatusId = await createStatusDirectly(database, p, "Done", 1);
+    const now = new Date().toISOString();
+    const issueId = randomUUID();
+    const workspaceId = randomUUID();
+
+    await database.insert(schema.issues).values({
+      id: issueId,
+      projectId: p,
+      statusId: doneStatusId,
+      issueNumber: 324,
+      title: "Reconciled issue list check",
+      priority: "medium",
+      issueType: "bug",
+      sortOrder: 0,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    await database.insert(schema.workspaces).values({
+      id: workspaceId,
+      issueId,
+      branch: "feature/ak-324-null-summary-list",
+      status: "closed",
+      conflictCacheHasConflicts: null,
+      conflictCacheFiles: null,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const res = await app.request(`/api/issues?projectId=${p}&issueNumber=324`);
+    expect(res.status).toBe(200);
+    const body = await res.json() as any;
+    expect(Array.isArray(body)).toBe(true);
+    expect(body.length).toBe(1);
+    expect(body[0].id).toBe(issueId);
+  });
 });
 
 describe("Workspaces API", () => {
