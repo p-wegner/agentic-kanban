@@ -35,6 +35,7 @@ function isAllowedDynamicKey(key: string): boolean {
     /^backlog_filter_presets_[0-9a-f-]+$/.test(key) ||
     /^board_saved_views_[0-9a-f-]+$/.test(key) ||
     /^launch_templates_[0-9a-f-]+$/.test(key) ||
+    /^monitor_policy_presets_[0-9a-f-]+$/.test(key) ||
     isBoardStrategyKey(key);
 }
 
