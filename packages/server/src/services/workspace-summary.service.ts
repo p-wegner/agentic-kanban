@@ -69,6 +69,17 @@ export type WorkspaceSummary = {
   };
 };
 
+function safeParseStringArray(raw: string | null | undefined): string[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((v): v is string => typeof v === "string");
+  } catch {
+    return [];
+  }
+}
+
 function extractAssistantMessage(data: string): string | null {
   for (const line of data.split("\n")) {
     const trimmed = line.trim();
@@ -333,14 +344,14 @@ export async function buildWorkspaceSummaryMap(
           if (mainWs.conflictCacheHasConflicts !== null) {
             mainRef.conflicts = {
               hasConflicts: mainWs.conflictCacheHasConflicts ?? false,
-              conflictingFiles: mainWs.conflictCacheFiles ? JSON.parse(mainWs.conflictCacheFiles) : [],
+              conflictingFiles: safeParseStringArray(mainWs.conflictCacheFiles),
             };
           }
         } else {
           if (mainWs.conflictCacheCheckedAt && mainWs.conflictCacheHasConflicts !== null) {
             mainRef.conflicts = {
               hasConflicts: mainWs.conflictCacheHasConflicts ?? false,
-              conflictingFiles: mainWs.conflictCacheFiles ? JSON.parse(mainWs.conflictCacheFiles) : [],
+              conflictingFiles: safeParseStringArray(mainWs.conflictCacheFiles),
             };
           }
           // For fixing workspaces, don't run background conflict detection (agent is resolving them);
@@ -497,11 +508,14 @@ export async function buildWorkspaceSummaryMap(
       summary.main.lastSessionTriggerType = sess.triggerType;
       if (sess.stats) {
         try {
-          const p = JSON.parse(sess.stats) as Record<string, unknown>;
-          const explicitContextTokens = (p.contextTokens as number) ?? 0;
-          const inputTokens = (p.inputTokens as number) ?? 0;
-          const cachedTokens = (p.cacheReadTokens as number) ?? 0;
-          summary.main.contextTokens = explicitContextTokens || inputTokens + cachedTokens || null;
+          const p = JSON.parse(sess.stats);
+          if (p !== null && typeof p === "object") {
+            const typed = p as Record<string, unknown>;
+            const explicitContextTokens = (typed.contextTokens as number) ?? 0;
+            const inputTokens = (typed.inputTokens as number) ?? 0;
+            const cachedTokens = (typed.cacheReadTokens as number) ?? 0;
+            summary.main.contextTokens = explicitContextTokens || inputTokens + cachedTokens || null;
+          }
         } catch { /* ignore */ }
       }
       summary.main.lastTool = lastToolBySession.get(sess.id) ?? null;
