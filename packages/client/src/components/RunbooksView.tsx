@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import ReactMarkdown from "react-markdown";
 import { apiFetch } from "../lib/api.js";
 
 interface RunbookEntry {
@@ -212,9 +213,9 @@ export function RunbooksView({ projectId }: RunbooksViewProps) {
               )}
 
               {!contentLoading && !contentError && content !== null && (
-                <pre className="whitespace-pre-wrap font-mono text-sm text-gray-800 dark:text-gray-200 leading-relaxed">
-                  {content.content}
-                </pre>
+                <div className="markdown-body">
+                  <ReactMarkdown>{content.content}</ReactMarkdown>
+                </div>
               )}
             </div>
           </>
