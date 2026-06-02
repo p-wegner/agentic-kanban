@@ -1,5 +1,5 @@
 import { sessions, workspaces, sessionMessages } from "@agentic-kanban/shared/schema";
-import { eq, desc, and } from "drizzle-orm";
+import { eq, desc, and, inArray } from "drizzle-orm";
 import type { Database } from "../db/index.js";
 import type { WorkspaceTimelineEvent, WorkspaceTimelineResponse, WorkspaceTimelineEventType } from "@agentic-kanban/shared";
 
@@ -26,22 +26,10 @@ function parseStats(stats: string | null): { inputTokens?: number; outputTokens?
   }
 }
 
-async function getLastAssistantMessage(database: Database, sessionId: string): Promise<string | null> {
-  const rows = await database
-    .select({ type: sessionMessages.type, data: sessionMessages.data })
-    .from(sessionMessages)
-    .where(and(
-      eq(sessionMessages.sessionId, sessionId),
-      eq(sessionMessages.type, "assistant"),
-    ))
-    .orderBy(desc(sessionMessages.createdAt))
-    .limit(1);
-
-  if (rows.length === 0) return null;
-  const row = rows[0];
-  if (!row.data) return null;
+function extractMessageText(data: string | null): string | null {
+  if (!data) return null;
   try {
-    const parsed = JSON.parse(row.data) as Record<string, unknown>;
+    const parsed = JSON.parse(data) as Record<string, unknown>;
     if (typeof parsed.text === "string") return parsed.text.slice(0, 500).trim() || null;
     if (typeof parsed.message === "string") return parsed.message.slice(0, 500).trim() || null;
     if (Array.isArray(parsed.content)) {
@@ -49,8 +37,34 @@ async function getLastAssistantMessage(database: Database, sessionId: string): P
       if (textBlock?.text) return textBlock.text.slice(0, 500).trim() || null;
     }
   } catch { /* ignore */ }
-  if (typeof row.data === "string") return row.data.slice(0, 500).trim() || null;
-  return null;
+  return data.slice(0, 500).trim() || null;
+}
+
+async function getLastAssistantMessagesBatch(
+  database: Database,
+  sessionIds: string[],
+): Promise<Map<string, string | null>> {
+  if (sessionIds.length === 0) return new Map();
+  const rows = await database
+    .select({ sessionId: sessionMessages.sessionId, data: sessionMessages.data, createdAt: sessionMessages.createdAt })
+    .from(sessionMessages)
+    .where(and(
+      inArray(sessionMessages.sessionId, sessionIds),
+      eq(sessionMessages.type, "assistant"),
+    ))
+    .orderBy(desc(sessionMessages.createdAt));
+
+  // Pick the most recent message per session (rows ordered desc, so first seen = latest)
+  const result = new Map<string, string | null>();
+  for (const row of rows) {
+    if (!result.has(row.sessionId)) {
+      result.set(row.sessionId, extractMessageText(row.data));
+    }
+  }
+  for (const id of sessionIds) {
+    if (!result.has(id)) result.set(id, null);
+  }
+  return result;
 }
 
 export async function getWorkspaceTimeline(
@@ -110,6 +124,15 @@ export async function getWorkspaceTimeline(
     }
   }
 
+  // Pre-determine which ended sessions need last-assistant-message (non-completed ones)
+  const sessionsNeedingMessage = sessionRows.filter(s =>
+    s.endedAt && (isZeroOutputSession(s) || s.status === "stopped")
+  );
+  const lastMessages = await getLastAssistantMessagesBatch(
+    database,
+    sessionsNeedingMessage.map(s => s.id),
+  );
+
   // Session events (most recent first in DB, but we'll sort all at the end)
   for (const session of sessionRows) {
     const stats = parseStats(session.stats);
@@ -156,9 +179,8 @@ export async function getWorkspaceTimeline(
         severity = "warning";
       }
 
-      // Fetch last assistant message for stopped/failed sessions
       if (eventType !== "session_completed") {
-        detail = await getLastAssistantMessage(database, session.id);
+        detail = lastMessages.get(session.id) ?? null;
       }
 
       events.push({
