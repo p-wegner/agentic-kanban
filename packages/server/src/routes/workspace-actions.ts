@@ -64,6 +64,12 @@ export function createWorkspaceActionsRoute(
     return c.json(await workspaceService.stopWorkspace(id));
   });
 
+  // POST /api/workspaces/:id/quarantine — stop session + move issue back to In Progress
+  router.post("/:id/quarantine", async (c) => {
+    const id = c.req.param("id");
+    return c.json(await workspaceService.quarantineWorkspace(id));
+  });
+
   // POST /api/workspaces/:id/implement-plan
   router.post("/:id/implement-plan", async (c) => {
     const id = c.req.param("id");
