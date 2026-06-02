@@ -17,7 +17,7 @@ export {
   type GitService,
 } from "./workspace-internals.js";
 
-export type { StaleWorktreeEntry } from "./workspace-crud.service.js";
+export type { StaleWorktreeEntry, CleanupWarningEntry } from "./workspace-crud.service.js";
 
 export function createWorkspaceService(deps: {
   database: Database;
@@ -83,6 +83,8 @@ export function createWorkspaceService(deps: {
     }),
     listStaleWorktrees: crud.listStaleWorktrees,
     removeStaleWorktree: crud.removeStaleWorktree,
+    listCleanupWarnings: crud.listCleanupWarnings,
+    retryCleanup: crud.retryCleanup,
     computeLaunchPreview: crud.computeLaunchPreview,
     getLatestGithubHandoffDraft: (workspaceId: string) => getLatestGithubHandoffDraft({
       workspaceId,

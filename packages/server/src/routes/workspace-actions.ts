@@ -244,6 +244,16 @@ export function createWorkspaceActionsRoute(
     return c.json({ success: true });
   });
 
+  // POST /api/workspaces/:id/retry-cleanup — retry worktree cleanup for a workspace with a pending warning
+  router.post("/:id/retry-cleanup", async (c) => {
+    const id = c.req.param("id");
+    const result = await workspaceService.retryCleanup(id);
+    if (!result.success) {
+      return c.json({ error: result.error }, 400);
+    }
+    return c.json({ success: true });
+  });
+
   // GET /api/workspaces/:id/artifacts — list recognized artifacts in workspace directory
   router.get("/:id/artifacts", async (c) => {
     const id = c.req.param("id");
