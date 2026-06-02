@@ -94,9 +94,8 @@ describe("processWorkspaceCandidates — idle + readyForMerge", () => {
     expect(calls.every(([url]) => !String(url).includes("/launch"))).toBe(true);
     expect(calls.every(([url]) => String(url).startsWith("http://127.0.0.1:3001/"))).toBe(true);
     expect(vi.mocked(deps.boardEvents.broadcast)).toHaveBeenCalledWith("proj-1", "board_changed");
-    expect(vi.mocked(deps.logMonitorAction)).toHaveBeenCalledWith(
-      expect.anything(), "merge", "ws-1", "issue-1"
-    );
+    const logCalls = vi.mocked(deps.logMonitorAction).mock.calls;
+    expect(logCalls.some(([, action, wsId, issueId]) => action === "merge" && wsId === "ws-1" && issueId === "issue-1")).toBe(true);
   });
 
   it("calls fix-and-merge when the merge endpoint returns a non-ok response", async () => {
@@ -232,7 +231,8 @@ describe("processWorkspaceCandidates — auto_merge_in_review (not-ready In Revi
     expect(stats.merged).toBe(0);
     expect(stats.relaunched).toBe(0);
     expect(vi.mocked(fetch)).toHaveBeenCalledWith(expect.stringContaining("/api/workspaces/ws-1"), { method: "DELETE" });
-    expect(vi.mocked(deps.logMonitorAction)).toHaveBeenCalledWith(expect.anything(), "mark_idle", "ws-1", "issue-1");
+    const logCalls2 = vi.mocked(deps.logMonitorAction).mock.calls;
+    expect(logCalls2.some(([, action, wsId, issueId]) => action === "mark_idle" && wsId === "ws-1" && issueId === "issue-1")).toBe(true);
   });
 
   it("merges an idle In-Review workspace with readyForMerge=false when auto_merge_in_review is on", async () => {
@@ -247,7 +247,8 @@ describe("processWorkspaceCandidates — auto_merge_in_review (not-ready In Revi
     const calls = vi.mocked(fetch).mock.calls;
     expect(calls.some(([url]) => String(url).includes("/merge"))).toBe(true);
     expect(calls.every(([url]) => !String(url).includes("/launch"))).toBe(true);
-    expect(vi.mocked(deps.logMonitorAction)).toHaveBeenCalledWith(expect.anything(), "merge", "ws-1", "issue-1");
+    const logCalls3 = vi.mocked(deps.logMonitorAction).mock.calls;
+    expect(logCalls3.some(([, action, wsId, issueId]) => action === "merge" && wsId === "ws-1" && issueId === "issue-1")).toBe(true);
   });
 
   it("falls back to fix-and-merge on conflict when auto_merge_in_review is on", async () => {

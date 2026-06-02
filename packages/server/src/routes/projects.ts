@@ -6,7 +6,7 @@ import { createRouter } from "../middleware/create-router.js";
 import { wrapAiOperation } from "../middleware/ai-operation.js";
 import { checkIssueOverlap } from "../services/issue-ai.service.js";
 import { getFileContention } from "../services/file-contention.service.js";
-import { listBoardHealthEvents, type BoardHealthEventType, type BoardHealthEventCategory } from "../repositories/board-health-events.repository.js";
+import { listBoardHealthEvents, getBoardHealthEvent, type BoardHealthEventType, type BoardHealthEventCategory } from "../repositories/board-health-events.repository.js";
 import { buildDependencyWavePlan, startNextDependencyWave } from "../services/dependency-wave.service.js";
 import { buildSprintCapacityPlan } from "../services/sprint-capacity.service.js";
 import { generateBoardRiskDigest } from "../services/board-risk-digest.service.js";
@@ -170,6 +170,29 @@ export function createProjectsRoute(database: Database = db, options?: { boardEv
       summary: event.summary,
       details: compactBoardHealthEventDetails(event.details),
     })));
+  });
+
+  // GET /api/projects/:id/board-health-events/:eventId — full event details (not compacted)
+  router.get("/:id/board-health-events/:eventId", async (c) => {
+    const projectId = c.req.param("id");
+    const eventId = c.req.param("eventId");
+    const event = await getBoardHealthEvent(eventId, database);
+    if (!event || event.projectId !== projectId) return c.json({ error: "not found" }, 404);
+    let parsedDetails: unknown = null;
+    if (event.details) {
+      try { parsedDetails = JSON.parse(event.details); } catch { parsedDetails = event.details; }
+    }
+    return c.json({
+      id: event.id,
+      cycleId: event.cycleId,
+      timestamp: event.createdAt,
+      level: event.eventType === "error" ? "error" : "info",
+      type: event.eventType,
+      category: event.category ?? null,
+      issueNumber: event.issueNumber ?? null,
+      summary: event.summary,
+      details: parsedDetails,
+    });
   });
 
   // GET /api/projects/:id/worktrees
