@@ -32,6 +32,7 @@ import { IssueDetailPanel } from "../components/IssueDetailPanel.js";
 import { WorkspacePanel } from "../components/WorkspacePanel.js";
 import { WorktreeOverview } from "../components/WorktreeOverview.js";
 import { AllWorkspacesPanel } from "../components/AllWorkspacesPanel.js";
+import { CleanupQueuePanel } from "../components/CleanupQueuePanel.js";
 import { FileContentionPanel } from "../components/FileContentionPanel.js";
 import { SettingsPanel } from "../components/SettingsPanel.js";
 import { SkeletonBoard } from "../components/SkeletonBoard.js";
@@ -119,6 +120,7 @@ export function BoardPage() {
   const [showCodemod, setShowCodemod] = useState(false);
   const [showWorktreeOverview, setShowWorktreeOverview] = useState(false);
   const [showAllWorkspaces, setShowAllWorkspaces] = useState(false);
+  const [showCleanupQueue, setShowCleanupQueue] = useState(false);
   const [showFileContention, setShowFileContention] = useState(false);
   const [showTranscriptSearch, setShowTranscriptSearch] = useState(false);
   const [showCommandPalette, setShowCommandPalette] = useState(false);
@@ -1207,6 +1209,10 @@ export function BoardPage() {
           setShowAllWorkspaces(false);
           return;
         }
+        if (showCleanupQueue) {
+          setShowCleanupQueue(false);
+          return;
+        }
         if (showFileContention) {
           setShowFileContention(false);
           return;
@@ -1329,7 +1335,7 @@ export function BoardPage() {
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [searchQuery, showCommandPalette, showAllWorkspaces, showFileContention, showTranscriptSearch, showWorktreeOverview, showShortcutHelp, showQuickTasks, showRunQueueForecast, showCodemod, filteredColumns, columns, handleViewModeChange, setShowQuickTasks, setShowSettings]);
+  }, [searchQuery, showCommandPalette, showAllWorkspaces, showCleanupQueue, showFileContention, showTranscriptSearch, showWorktreeOverview, showShortcutHelp, showQuickTasks, showRunQueueForecast, showCodemod, filteredColumns, columns, handleViewModeChange, setShowQuickTasks, setShowSettings]);
 
   // Register command palette actions
   useEffect(() => {
@@ -1397,6 +1403,15 @@ export function BoardPage() {
       icon: "⊞",
       category: "navigation",
       handler: () => setShowAllWorkspaces(true),
+    }));
+
+    unregisters.push(registerAction({
+      id: "view-cleanup-queue",
+      label: "Cleanup Queue",
+      description: "View closed workspaces with failed worktree cleanup warnings",
+      icon: "🧹",
+      category: "navigation",
+      handler: () => setShowCleanupQueue(true),
     }));
 
     unregisters.push(registerAction({
@@ -2082,6 +2097,12 @@ export function BoardPage() {
             setShowAllWorkspaces(false);
           }}
           onRefresh={() => refetchBoard()}
+        />
+      )}
+      {showCleanupQueue && (
+        <CleanupQueuePanel
+          projectId={activeProjectId ?? null}
+          onClose={() => setShowCleanupQueue(false)}
         />
       )}
       {showFileContention && (
