@@ -19,6 +19,7 @@ import { FlakyTestsPanel } from "../components/FlakyTestsPanel.js";
 import { MonitorCycleHistoryPanel } from "../components/MonitorCycleHistoryPanel.js";
 import { BoardHealthNotificationCenter } from "../components/BoardHealthNotificationCenter.js";
 import { RunbooksView } from "../components/RunbooksView.js";
+import { SprintCapacityPlanner } from "../components/SprintCapacityPlanner.js";
 import { useAgentQuestionsCount } from "../components/AgentQuestionsPanel.js";
 import { BoardErrorBoundary } from "../components/BoardErrorBoundary.js";
 import { BacklogView } from "../components/BacklogView.js";
@@ -1953,6 +1954,11 @@ export function BoardPage() {
                 }
               }}
             />
+          </BoardErrorBoundary>
+        )}
+        {viewMode === "capacity" && activeProjectId && (
+          <BoardErrorBoundary columnName="Sprint Capacity Planner">
+            <SprintCapacityPlanner projectId={activeProjectId} />
           </BoardErrorBoundary>
         )}
         {viewMode === "backlog" && (
