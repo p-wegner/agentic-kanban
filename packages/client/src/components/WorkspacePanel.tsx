@@ -98,6 +98,7 @@ interface WorkspacePanelProps {
 const STATUS_COLORS: Record<string, string> = {
   active: "bg-green-100 text-green-700",
   reviewing: "bg-accent-50 text-accent-700 dark:bg-accent-900/40 dark:text-accent-300",
+  fixing: "bg-orange-100 text-orange-700",
   idle: "bg-yellow-100 text-yellow-700",
   "awaiting-plan-approval": "bg-amber-100 text-amber-700",
   error: "bg-red-100 text-red-700",
@@ -162,6 +163,7 @@ const TRIGGER_TYPE_LABELS: Record<string, { label: string; className: string }> 
   review: { label: "AI Review", className: "bg-accent-50 text-accent-700 dark:bg-accent-900/40 dark:text-accent-300" },
   merge: { label: "AI Merge", className: "bg-emerald-100 text-emerald-700" },
   "fix-conflicts": { label: "Fix Conflicts", className: "bg-orange-100 text-orange-700" },
+  "fix-and-merge": { label: "Fix & Merge", className: "bg-orange-100 text-orange-700" },
   bisect: { label: "Auto-bisect", className: "bg-rose-100 text-rose-700" },
   learning: { label: "Learning", className: "bg-teal-100 text-teal-700" },
   "auto-start": { label: "Auto-start", className: "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400" },
@@ -1677,6 +1679,70 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                     </div>
                   </div>
                 )}
+
+                {isSelected && ws.status === "fixing" && (() => {
+                  const fixSession = sessions.find(s => s.triggerType === "fix-and-merge" && s.status === "running")
+                    ?? sessions.filter(s => s.triggerType === "fix-and-merge").at(-1);
+                  const conflictFiles = ws.conflicts?.conflictingFiles ?? [];
+                  return (
+                    <div className="mt-2 p-2 bg-orange-50 dark:bg-orange-950 border border-orange-200 dark:border-orange-800 rounded space-y-1.5" onClick={(e) => e.stopPropagation()}>
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium text-orange-700 dark:text-orange-400 animate-pulse">AI Fixing Conflicts</span>
+                        {ws.baseBranch && (
+                          <span className="text-xs px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 font-medium">
+                            target: {ws.baseBranch}
+                          </span>
+                        )}
+                      </div>
+                      {conflictFiles.length > 0 && (
+                        <div>
+                          <div className="text-[10px] font-semibold text-orange-600 dark:text-orange-400 uppercase tracking-wide mb-0.5">
+                            {conflictFiles.length} conflicting file{conflictFiles.length !== 1 ? "s" : ""}
+                          </div>
+                          <ul className="text-xs text-orange-700 dark:text-orange-300 space-y-0.5">
+                            {conflictFiles.map(f => (
+                              <li key={f} className="font-mono truncate">{f}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                      {fixSession && (
+                        <button
+                          onClick={() => handleViewHistory(fixSession.id)}
+                          className="text-xs text-orange-600 dark:text-orange-400 hover:text-orange-800 dark:hover:text-orange-200 underline"
+                        >
+                          View fix session output
+                        </button>
+                      )}
+                    </div>
+                  );
+                })()}
+
+                {isSelected && ws.status === "idle" && (() => {
+                  const lastFixAndMerge = completedSessions.filter(s => s.triggerType === "fix-and-merge").at(-1);
+                  if (!lastFixAndMerge) return null;
+                  const succeeded = lastFixAndMerge.status === "completed";
+                  return (
+                    <div className={`mt-2 p-2 rounded border ${succeeded ? "bg-green-50 dark:bg-green-950 border-green-200 dark:border-green-800" : "bg-yellow-50 dark:bg-yellow-950 border-yellow-200 dark:border-yellow-800"}`} onClick={(e) => e.stopPropagation()}>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className={`text-xs font-medium ${succeeded ? "text-green-700 dark:text-green-400" : "text-yellow-700 dark:text-yellow-400"}`}>
+                          {succeeded ? "Fix & Merge completed" : "Fix & Merge stopped"}
+                        </span>
+                        <button
+                          onClick={() => handleViewHistory(lastFixAndMerge.id)}
+                          className={`text-xs underline ${succeeded ? "text-green-600 dark:text-green-400 hover:text-green-800" : "text-yellow-600 dark:text-yellow-400 hover:text-yellow-800"}`}
+                        >
+                          View session output
+                        </button>
+                      </div>
+                      {succeeded && latestCommits[ws.id] && (
+                        <div className="mt-1 text-xs font-mono text-gray-500 dark:text-gray-400 truncate" title={latestCommits[ws.id]!.message}>
+                          {latestCommits[ws.id]!.sha} {latestCommits[ws.id]!.message}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
 
                 {isSelected && (
                   <div className="space-y-2 pt-2 border-t border-gray-200 dark:border-gray-700" onClick={(e) => e.stopPropagation()}>

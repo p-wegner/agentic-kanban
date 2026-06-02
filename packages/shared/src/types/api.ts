@@ -455,6 +455,7 @@ export interface WorkspaceResponse {
   contextTokens?: number | null;
   lastTool?: string | null;
   latestCommit?: { sha: string; message: string } | null;
+  conflicts?: { hasConflicts: boolean; conflictingFiles: string[] } | null;
   latestSetup?: WorkspaceSetupRun | null;
   latestSymlink?: WorkspaceSymlinkRun | null;
 }
