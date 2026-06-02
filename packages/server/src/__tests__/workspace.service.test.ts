@@ -76,6 +76,63 @@ async function seedProjectAndIssue(
 }
 
 /**
+ * Seed a project with the full status pipeline (Todo → In Progress → In Review → Done)
+ * and place the issue in "In Review" — mirroring the board state just before a merge.
+ */
+async function seedProjectAndIssueInReview(
+  db: TestDb,
+): Promise<{ projectId: string; issueId: string; statusIds: Record<string, string> }> {
+  const now = new Date().toISOString();
+  const projectId = randomUUID();
+  const issueId = randomUUID();
+
+  await db.insert(projects).values({
+    id: projectId,
+    name: "Test Project",
+    repoPath: "/tmp/test-repo",
+    repoName: "test-repo",
+    defaultBranch: "main",
+    createdAt: now,
+    updatedAt: now,
+  });
+
+  const statusDefs = [
+    { name: "Todo", sortOrder: 0, isDefault: true },
+    { name: "In Progress", sortOrder: 1, isDefault: false },
+    { name: "In Review", sortOrder: 2, isDefault: false },
+    { name: "Done", sortOrder: 3, isDefault: false },
+  ];
+  const statusIds: Record<string, string> = {};
+  for (const s of statusDefs) {
+    const id = randomUUID();
+    statusIds[s.name] = id;
+    await db.insert(projectStatuses).values({
+      id,
+      projectId,
+      name: s.name,
+      sortOrder: s.sortOrder,
+      isDefault: s.isDefault,
+      createdAt: now,
+    });
+  }
+
+  await db.insert(issues).values({
+    id: issueId,
+    issueNumber: 1,
+    title: "Implement feature",
+    description: "Do the thing",
+    priority: "medium",
+    sortOrder: 0,
+    statusId: statusIds["In Review"],
+    projectId,
+    createdAt: now,
+    updatedAt: now,
+  });
+
+  return { projectId, issueId, statusIds };
+}
+
+/**
  * Build a fake git service. Only the methods exercised by the tested paths need
  * real behavior; the rest are no-op vi.fn()s. Overrides let each test customize.
  */
@@ -639,6 +696,205 @@ describe("workspace.service", () => {
       expect(activeMerges.has("/tmp/test-repo")).toBe(false);
     });
 
+  });
+
+  describe("dropped-merge-response reconciliation", () => {
+    // These tests cover the scenario described in AK-332: the git plumbing merge
+    // completes and mergedAt is written to DB, but the HTTP response is dropped
+    // before returning to the client. The issue remains in "In Review". A retry
+    // of the merge endpoint must reconcile without requiring manual intervention.
+
+    it("moves the issue from In Review to Done when mergedAt is already set (dropped-response reconciliation)", { timeout: 30000 }, async () => {
+      const { issueId } = await seedProjectAndIssueInReview(db);
+      const now = new Date().toISOString();
+      const wsId = randomUUID();
+      const mergedAt = new Date(Date.now() - 5_000).toISOString();
+
+      // mergedAt is set (the merge landed in git + DB) but issue is still In Review
+      // because the response dropped before returning.
+      await db.insert(workspaces).values({
+        id: wsId,
+        issueId,
+        branch: "feature/ak-1-reconcile",
+        workingDir: null,
+        baseBranch: "main",
+        isDirect: false,
+        status: "closed",
+        provider: "claude",
+        mergedAt,
+        createdAt: now,
+        updatedAt: now,
+      });
+
+      const gitService = createFakeGitService({
+        deleteBranch: vi.fn(async () => {}),
+      });
+
+      const service = createWorkspaceService({
+        database: db,
+        gitService,
+        createBackup: vi.fn(async () => ({})),
+        processKiller: vi.fn(async () => 0),
+      });
+
+      const result = await service.mergeWorkspace(wsId);
+
+      expect(result.mergeOutput).toContain("already marked as merged");
+      expect(gitService.mergeBranch).not.toHaveBeenCalled();
+
+      // Issue must be moved out of In Review to Done
+      const issueRow = await db.select().from(issues).where(eq(issues.id, issueId));
+      const statusRow = await db.select().from(projectStatuses).where(eq(projectStatuses.id, issueRow[0].statusId));
+      expect(statusRow[0].name).toBe("Done");
+
+      // Workspace must be fully closed
+      const wsRows = await db.select().from(workspaces).where(eq(workspaces.id, wsId));
+      expect(wsRows[0].status).toBe("closed");
+      expect(wsRows[0].mergedAt).toBe(mergedAt);
+      expect(wsRows[0].closedAt).toBeTruthy();
+
+      // Reconciliation is recorded in the audit trail
+      const events = await db.select().from(issueComments).where(eq(issueComments.issueId, issueId));
+      const alreadyMergedEvent = events.find((e) => JSON.parse(e.payload ?? "{}").eventType === "already-merged");
+      expect(alreadyMergedEvent).toBeDefined();
+      expect(alreadyMergedEvent?.body).toContain("Reconciled");
+    });
+
+    it("moves issue from In Review to Done when git reports branch already merged (no mergedAt in DB yet)", { timeout: 30000 }, async () => {
+      // Scenario: git merge completed, master advanced, but the DB update was dropped.
+      // mergedAt is null, issue is in In Review. git's mergeBranch returns "already merged".
+      const { projectId, issueId, statusIds } = await seedProjectAndIssueInReview(db);
+      const now = new Date().toISOString();
+      const wsId = randomUUID();
+
+      await db.insert(workspaces).values({
+        id: wsId,
+        issueId,
+        branch: "feature/ak-1-already-on-master",
+        workingDir: "/tmp/test-repo/.worktrees/feature-1",
+        baseBranch: "main",
+        isDirect: false,
+        status: "active",
+        provider: "claude",
+        createdAt: now,
+        updatedAt: now,
+      });
+
+      const gitService = createFakeGitService({
+        mergeBranch: vi.fn(async () => "Branch 'feature/ak-1-already-on-master' is already merged into main (plumbing-merge: abc123)"),
+      });
+
+      const service = createWorkspaceService({
+        database: db,
+        gitService,
+        createBackup: vi.fn(async () => ({})),
+        processKiller: vi.fn(async () => 0),
+      });
+
+      const result = await service.mergeWorkspace(wsId);
+
+      expect(result.mergeOutput).toContain("already merged");
+
+      // Issue must leave In Review
+      const issueRow = await db.select().from(issues).where(eq(issues.id, issueId));
+      const statusRow = await db.select().from(projectStatuses).where(eq(projectStatuses.id, issueRow[0].statusId));
+      expect(statusRow[0].name).toBe("Done");
+
+      const wsRows = await db.select().from(workspaces).where(eq(workspaces.id, wsId));
+      expect(wsRows[0].status).toBe("closed");
+      expect(wsRows[0].mergedAt).toBeTruthy();
+    });
+
+    it("preserves real conflict detection — conflicts still throw 409, not silently reconciled", { timeout: 30000 }, async () => {
+      // Regression guard: the reconciliation path must not swallow genuine conflicts.
+      const { projectId, issueId } = await seedProjectAndIssueInReview(db);
+      const now = new Date().toISOString();
+      const wsId = randomUUID();
+
+      await db.insert(workspaces).values({
+        id: wsId,
+        issueId,
+        branch: "feature/ak-1-with-conflicts",
+        workingDir: "/tmp/test-repo/.worktrees/feature-1",
+        baseBranch: "main",
+        isDirect: false,
+        status: "active",
+        provider: "claude",
+        createdAt: now,
+        updatedAt: now,
+      });
+
+      const gitService = createFakeGitService({
+        detectConflicts: vi.fn(async () => ({
+          hasConflicts: true,
+          conflictingFiles: ["src/index.ts", "src/routes.ts"],
+        })),
+      });
+
+      const service = createWorkspaceService({ database: db, gitService, processKiller: vi.fn(async () => 0) });
+
+      await expect(service.mergeWorkspace(wsId)).rejects.toMatchObject({
+        code: "BAD_REQUEST",
+        data: { conflictingFiles: ["src/index.ts", "src/routes.ts"] },
+      });
+
+      // Issue must still be in In Review — not silently moved to Done
+      const issueRow = await db.select().from(issues).where(eq(issues.id, issueId));
+      const statusRow = await db.select().from(projectStatuses).where(eq(projectStatuses.id, issueRow[0].statusId));
+      expect(statusRow[0].name).toBe("In Review");
+
+      // Workspace stays active
+      const wsRows = await db.select().from(workspaces).where(eq(workspaces.id, wsId));
+      expect(wsRows[0].status).toBe("active");
+
+      // Conflict recorded in audit trail
+      const events = await db.select().from(issueComments).where(eq(issueComments.issueId, issueId));
+      expect(events).toEqual([
+        expect.objectContaining({
+          kind: "merge-attempt",
+          body: expect.stringContaining("Merge attempt blocked by conflicts"),
+        }),
+      ]);
+    });
+
+    it("broadcasts workspace_merged when reconciling a dropped response", { timeout: 30000 }, async () => {
+      const { issueId } = await seedProjectAndIssueInReview(db);
+      const now = new Date().toISOString();
+      const wsId = randomUUID();
+      const mergedAt = new Date(Date.now() - 3_000).toISOString();
+
+      await db.insert(workspaces).values({
+        id: wsId,
+        issueId,
+        branch: "feature/ak-1-broadcast",
+        workingDir: null,
+        baseBranch: "main",
+        isDirect: false,
+        status: "closed",
+        provider: "claude",
+        mergedAt,
+        createdAt: now,
+        updatedAt: now,
+      });
+
+      const broadcastSpy = vi.fn();
+      const boardEvents = { broadcast: broadcastSpy };
+
+      const service = createWorkspaceService({
+        database: db,
+        gitService: createFakeGitService({ deleteBranch: vi.fn(async () => {}) }),
+        boardEvents: boardEvents as never,
+        createBackup: vi.fn(async () => ({})),
+        processKiller: vi.fn(async () => 0),
+      });
+
+      await service.mergeWorkspace(wsId);
+
+      expect(broadcastSpy).toHaveBeenCalledWith(
+        expect.any(String),
+        "workspace_merged",
+      );
+    });
   });
 
   describe("updateBase with HEAD guard", () => {
