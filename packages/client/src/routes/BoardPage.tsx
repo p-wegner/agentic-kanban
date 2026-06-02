@@ -54,6 +54,7 @@ import { MergeQueuePanel } from "../components/MergeQueuePanel.js";
 import { RunQueueForecastPanel, buildRunQueueForecast } from "../components/RunQueueForecastPanel.js";
 import { CodemodPanel } from "../components/CodemodPanel.js";
 import { TranscriptSearchPanel } from "../components/TranscriptSearchPanel.js";
+import { WorkspaceLaunchFailuresPanel } from "../components/WorkspaceLaunchFailuresPanel.js";
 import type { MonitorStatus } from "../components/MonitorPopover.js";
 import type { BoardViewState, SavedViewReference } from "../lib/boardSavedViews.js";
 import type {
@@ -121,6 +122,7 @@ export function BoardPage() {
   const [showCodemod, setShowCodemod] = useState(false);
   const [showWorktreeOverview, setShowWorktreeOverview] = useState(false);
   const [showAllWorkspaces, setShowAllWorkspaces] = useState(false);
+  const [showLaunchFailures, setShowLaunchFailures] = useState(false);
   const [showCleanupQueue, setShowCleanupQueue] = useState(false);
   const [showFileContention, setShowFileContention] = useState(false);
   const [showTranscriptSearch, setShowTranscriptSearch] = useState(false);
@@ -1210,6 +1212,10 @@ export function BoardPage() {
           setShowAllWorkspaces(false);
           return;
         }
+        if (showLaunchFailures) {
+          setShowLaunchFailures(false);
+          return;
+        }
         if (showCleanupQueue) {
           setShowCleanupQueue(false);
           return;
@@ -1336,7 +1342,7 @@ export function BoardPage() {
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [searchQuery, showCommandPalette, showAllWorkspaces, showCleanupQueue, showFileContention, showTranscriptSearch, showWorktreeOverview, showShortcutHelp, showQuickTasks, showRunQueueForecast, showCodemod, filteredColumns, columns, handleViewModeChange, setShowQuickTasks, setShowSettings]);
+  }, [searchQuery, showCommandPalette, showAllWorkspaces, showLaunchFailures, showCleanupQueue, showFileContention, showTranscriptSearch, showWorktreeOverview, showShortcutHelp, showQuickTasks, showRunQueueForecast, showCodemod, filteredColumns, columns, handleViewModeChange, setShowQuickTasks, setShowSettings]);
 
   // Register command palette actions
   useEffect(() => {
@@ -1607,6 +1613,7 @@ export function BoardPage() {
       onCreateProject={handleCreateProject}
       onSettingsClick={() => setShowSettings(true)}
       onAllWorkspacesClick={() => setShowAllWorkspaces(true)}
+      onLaunchFailuresClick={() => setShowLaunchFailures(true)}
       onWorktreeOverviewClick={() => setShowWorktreeOverview(true)}
       isDark={isDark}
       onThemeToggle={() => setTheme(isDark ? "light" : "dark")}
@@ -2103,6 +2110,19 @@ export function BoardPage() {
             setShowAllWorkspaces(false);
           }}
           onRefresh={() => refetchBoard()}
+        />
+      )}
+      {showLaunchFailures && (
+        <WorkspaceLaunchFailuresPanel
+          projectId={activeProjectId ?? null}
+          onClose={() => setShowLaunchFailures(false)}
+          onIssueClick={(issueId) => {
+            const issue = columns.flatMap((c) => c.issues).find((i) => i.id === issueId);
+            if (issue) {
+              setSelectedIssue(issue);
+              setShowLaunchFailures(false);
+            }
+          }}
         />
       )}
       {showCleanupQueue && (
