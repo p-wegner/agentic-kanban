@@ -27,6 +27,14 @@ export function createWorkspacesRoute(
     return c.json(staleWorktrees);
   });
 
+  // GET /api/workspaces/cleanup-warnings — list closed workspaces with pending cleanup warnings
+  // Must be registered BEFORE /:id to avoid being matched as an ID param
+  router.get("/cleanup-warnings", async (c) => {
+    const projectId = c.req.query("projectId") || undefined;
+    const warnings = await workspaceService.listCleanupWarnings(projectId);
+    return c.json(warnings);
+  });
+
   // POST /api/workspaces/preview — dry-run preview (read-only, no side effects)
   // Must be registered BEFORE /:id to avoid being matched as an ID param
   router.post("/preview", async (c) => {

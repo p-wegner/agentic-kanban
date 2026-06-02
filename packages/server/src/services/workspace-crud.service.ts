@@ -26,6 +26,20 @@ export interface StaleWorktreeEntry {
   projectId: string;
   repoPath: string;
 }
+export interface CleanupWarningEntry {
+  id: string;
+  branch: string;
+  workingDir: string | null;
+  cleanupWarning: string;
+  closedAt: string | null;
+  mergedAt: string | null;
+  updatedAt: string | null;
+  issueId: string;
+  issueNumber: number;
+  issueTitle: string;
+  projectId: string;
+}
+
 import type { ProviderName } from "./agent-provider.js";
 import * as realGitService from "./git.service.js";
 import { estimateBudget } from "./budget-estimator.service.js";
@@ -1439,6 +1453,80 @@ exit 1
     };
   }
 
+  /**
+   * List closed workspaces that have a pending cleanup warning (worktree removal failed post-merge).
+   */
+  async function listCleanupWarnings(projectId?: string): Promise<CleanupWarningEntry[]> {
+    const conditions = [eq(workspaces.status, "closed")];
+    if (projectId) {
+      conditions.push(eq(issues.projectId, projectId));
+    }
+    const whereClause = conditions.length === 1 ? conditions[0] : and(...conditions);
+
+    const rows = await database
+      .select({
+        id: workspaces.id,
+        branch: workspaces.branch,
+        workingDir: workspaces.workingDir,
+        cleanupWarning: workspaces.cleanupWarning,
+        closedAt: workspaces.closedAt,
+        mergedAt: workspaces.mergedAt,
+        updatedAt: workspaces.updatedAt,
+        issueId: workspaces.issueId,
+        issueNumber: issues.issueNumber,
+        issueTitle: issues.title,
+        projectId: issues.projectId,
+      })
+      .from(workspaces)
+      .innerJoin(issues, eq(workspaces.issueId, issues.id))
+      .where(whereClause);
+
+    return rows
+      .filter((row) => row.cleanupWarning != null && row.cleanupWarning !== "")
+      .map((row) => ({
+        id: row.id,
+        branch: row.branch,
+        workingDir: row.workingDir,
+        cleanupWarning: row.cleanupWarning as string,
+        closedAt: row.closedAt,
+        mergedAt: row.mergedAt,
+        updatedAt: row.updatedAt,
+        issueId: row.issueId,
+        issueNumber: row.issueNumber ?? 0,
+        issueTitle: row.issueTitle ?? "",
+        projectId: row.projectId ?? "",
+      }));
+  }
+
+  /**
+   * Retry cleanup for a workspace with a pending cleanup warning. Runs the safe worktree
+   * removal logic and clears the warning on success.
+   */
+  async function retryCleanup(workspaceId: string): Promise<{ success: boolean; error?: string }> {
+    const workspace = await getWorkspaceById(workspaceId, database);
+    if (!workspace) {
+      return { success: false, error: "Workspace not found" };
+    }
+    if (workspace.status !== "closed") {
+      return { success: false, error: "Workspace is not closed" };
+    }
+    if (!workspace.cleanupWarning) {
+      return { success: false, error: "No pending cleanup warning for this workspace" };
+    }
+
+    // Reuse the safe stale-worktree removal logic which validates path safety.
+    const result = await removeStaleWorktree(workspaceId);
+
+    if (result.success) {
+      // Clear the warning now that cleanup succeeded.
+      await database.update(workspaces)
+        .set({ cleanupWarning: null, updatedAt: new Date().toISOString() })
+        .where(eq(workspaces.id, workspaceId));
+    }
+
+    return result;
+  }
+
   return {
     createWorkspace,
     deleteWorkspace,
@@ -1449,6 +1537,8 @@ exit 1
     getWorkspace,
     listStaleWorktrees,
     removeStaleWorktree,
+    listCleanupWarnings,
+    retryCleanup,
     computeLaunchPreview,
   };
 }
