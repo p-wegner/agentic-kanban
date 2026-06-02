@@ -32,7 +32,8 @@ export type ViewMode =
   | "digest"
   | "strategy"
   | "focus"
-  | "runbooks";
+  | "runbooks"
+  | "capacity";
 
 export interface ViewDescriptor {
   /** Stable view id — matches BoardPage's `viewMode` state. */
@@ -185,6 +186,12 @@ const ICON = {
   runbooks: (
     <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+    </svg>
+  ),
+  capacity: (
+    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M3 12h4v7H3zM10 8h4v11h-4zM17 4h4v15h-4z" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M3 19h18" />
     </svg>
   ),
 } as const;
@@ -412,6 +419,17 @@ export const VIEW_REGISTRY: ViewDescriptor[] = [
     paletteIcon: "📖",
     paletteDescription: "Browse project docs: CLAUDE.md, learnings, decisions, board-monitor runbook",
     shortcut: "j",
+    group: "secondary",
+  },
+  {
+    id: "capacity",
+    toolbarLabel: "Capacity",
+    label: "Sprint Capacity Planner",
+    tooltip: "Sprint Capacity Planner — agent slots, backlog health, next cycle preview",
+    icon: ICON.capacity,
+    paletteIcon: "⬡",
+    paletteDescription: "Show agent capacity, open slots, and next issues to launch",
+    shortcut: "c",
     group: "secondary",
   },
 ];
