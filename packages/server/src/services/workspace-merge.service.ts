@@ -1,3 +1,4 @@
+import { eq } from "drizzle-orm";
 import { preferences, projects, workspaces } from "@agentic-kanban/shared/schema";
 import { applyOpenSpecDeltas, OPENSPEC_CHANGES_DIR, OPENSPEC_SPECS_DIR, validateOpenSpecChange } from "@agentic-kanban/shared/lib/openspec";
 import type { Database } from "../db/index.js";
@@ -423,7 +424,20 @@ export function createWorkspaceMergeService(deps: {
     // Kill any agent-spawned processes (e.g. leaked dev.mjs) before removing the worktree.
     if (workspace.workingDir) {
       await killWorktreeProcesses(workspace.workingDir, "merge:post");
-      try { await gitService.removeWorktree(repoPath, workspace.workingDir); } catch (err) { addRecoverableWarning(warnings, "remove-worktree", err); }
+      try {
+        await gitService.removeWorktree(repoPath, workspace.workingDir);
+      } catch (err) {
+        addRecoverableWarning(warnings, "remove-worktree", err);
+        // Persist the cleanup warning so the UI can surface it for retry.
+        const warningMsg = err instanceof Error ? err.message : String(err);
+        try {
+          await database.update(workspaces)
+            .set({ cleanupWarning: warningMsg, workingDir: workspace.workingDir, updatedAt: new Date().toISOString() })
+            .where(eq(workspaces.id, id));
+        } catch (dbErr) {
+          console.warn("[workspace-merge] failed to persist cleanup warning:", dbErr instanceof Error ? dbErr.message : String(dbErr));
+        }
+      }
     }
 
     try {

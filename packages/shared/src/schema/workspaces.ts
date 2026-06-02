@@ -72,6 +72,8 @@ export const workspaces = sqliteTable("workspaces", {
   latestSymlinkError: text("latest_symlink_error"),
   /** Context primer assembled by the context-packer at workspace creation. Injected into CLAUDE.local.md. */
   contextPrimer: text("context_primer"),
+  /** Set when worktree removal fails post-merge (e.g. EBUSY). Cleared on successful retry cleanup. */
+  cleanupWarning: text("cleanup_warning"),
 }, (table) => ({
   issueIdIdx: index("idx_workspaces_issue_id").on(table.issueId),
   statusIdx: index("idx_workspaces_status").on(table.status),
