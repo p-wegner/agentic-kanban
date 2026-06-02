@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdirSync, writeFileSync, chmodSync } from "node:fs";
 import { join } from "node:path";
-import { eq, inArray, and } from "drizzle-orm";
+import { eq, inArray, and, isNotNull, ne } from "drizzle-orm";
 import { existsSync } from "node:fs";
 import { resolve as pathResolve, dirname, parse as pathParse, relative, sep } from "node:path";
 import {
@@ -1457,11 +1457,15 @@ exit 1
    * List closed workspaces that have a pending cleanup warning (worktree removal failed post-merge).
    */
   async function listCleanupWarnings(projectId?: string): Promise<CleanupWarningEntry[]> {
-    const conditions = [eq(workspaces.status, "closed")];
+    const conditions = [
+      eq(workspaces.status, "closed"),
+      isNotNull(workspaces.cleanupWarning),
+      ne(workspaces.cleanupWarning, ""),
+    ];
     if (projectId) {
       conditions.push(eq(issues.projectId, projectId));
     }
-    const whereClause = conditions.length === 1 ? conditions[0] : and(...conditions);
+    const whereClause = and(...conditions);
 
     const rows = await database
       .select({
@@ -1481,9 +1485,7 @@ exit 1
       .innerJoin(issues, eq(workspaces.issueId, issues.id))
       .where(whereClause);
 
-    return rows
-      .filter((row) => row.cleanupWarning != null && row.cleanupWarning !== "")
-      .map((row) => ({
+    return rows.map((row) => ({
         id: row.id,
         branch: row.branch,
         workingDir: row.workingDir,
