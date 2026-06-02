@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 import { apiFetch } from "../lib/api.js";
-import type { IssueWithStatus } from "@agentic-kanban/shared";
 
 interface SprintCapacityPolicy {
   activeAgentsTarget: number;
@@ -29,7 +28,6 @@ interface SprintCapacityPlan {
 
 interface SprintCapacityPlannerProps {
   projectId: string;
-  onIssueClick?: (issue: IssueWithStatus) => void;
 }
 
 function CapacityBar({ current, target, label }: { current: number; target: number; label: string }) {
