@@ -24,6 +24,7 @@ import { createMergeQueueRoute } from "./merge-queue.js";
 import { createShowdownsRoute } from "./showdowns.js";
 import { createCodemodsRoute } from "./codemods.js";
 import { createBoardMonitorRoute } from "./board-monitor.js";
+import { createRunbooksRoute } from "./runbooks.js";
 import { createWorkflowForkService } from "../services/workflow-fork.service.js";
 import type { Database } from "../db/index.js";
 import type { SessionManager } from "../services/session.manager.js";
@@ -68,6 +69,7 @@ export function createRoutes(database: Database, getSessionManager: () => Sessio
   routes.route("/flaky-tests", createFlakyTestsRoute(database));
   routes.route("/projects", createQualityMetricsRoute(database));
   routes.route("/projects", createBoardMonitorRoute(database));
+  routes.route("/projects", createRunbooksRoute(database));
   routes.route("/codemods", createCodemodsRoute(database));
   routes.route("/workflows", createWorkflowsRoute(database, { ...options, onWorkflowAdvanced }));
   routes.route("/scheduled-runs", createScheduledRunsRoute(database, getSessionManager, options?.boardEvents));
