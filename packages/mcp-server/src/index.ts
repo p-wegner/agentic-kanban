@@ -68,6 +68,7 @@ import {
   registerValidateChange,
 } from "./tools/openspec.js";
 import { registerGetBoardRiskDigest } from "./tools/get-board-risk-digest.js";
+import { registerExportHandoffBundle } from "./tools/export-handoff-bundle.js";
 
 const TOOL_REGISTRARS: Record<string, (server: McpServer) => void> = {
   get_context: registerGetContext,
@@ -130,6 +131,7 @@ const TOOL_REGISTRARS: Record<string, (server: McpServer) => void> = {
   show_spec: registerShowSpec,
   validate_change: registerValidateChange,
   get_board_risk_digest: registerGetBoardRiskDigest,
+  export_handoff_bundle: registerExportHandoffBundle,
 };
 
 async function getDisabledTools(): Promise<Set<string>> {
