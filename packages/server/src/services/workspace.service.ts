@@ -65,6 +65,7 @@ export function createWorkspaceService(deps: {
     launchSession: session.launchSession,
     sendTurn: session.sendTurn,
     stopWorkspace: session.stopWorkspace,
+    quarantineWorkspace: session.quarantineWorkspace,
     implementPlan: session.implementPlan,
     rejectPlan: session.rejectPlan,
     getPlanContent: session.getPlanContent,

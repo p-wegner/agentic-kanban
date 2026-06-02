@@ -27,12 +27,14 @@ function FailureRow({
   failure,
   onResume,
   onStop,
+  onQuarantine,
   onOpenIssue,
   actionLoading,
 }: {
   failure: WorkspaceLaunchFailure;
   onResume: (f: WorkspaceLaunchFailure) => void;
   onStop: (f: WorkspaceLaunchFailure) => void;
+  onQuarantine: (f: WorkspaceLaunchFailure) => void;
   onOpenIssue?: (issueId: string) => void;
   actionLoading: string | null;
 }) {
@@ -58,9 +60,16 @@ function FailureRow({
             {failure.issueTitle}
           </span>
         </div>
-        <span className={`text-xs font-medium px-1.5 py-0.5 rounded flex-shrink-0 ${CATEGORY_COLORS[failure.failureCategory] ?? "bg-gray-100 text-gray-600"}`}>
-          {CATEGORY_LABELS[failure.failureCategory] ?? failure.failureCategory}
-        </span>
+        <div className="flex items-center gap-1.5 flex-shrink-0">
+          {failure.recentFailureCount > 1 && (
+            <span className="text-xs font-medium px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400" title={`${failure.recentFailureCount} recent failures`}>
+              ×{failure.recentFailureCount}
+            </span>
+          )}
+          <span className={`text-xs font-medium px-1.5 py-0.5 rounded ${CATEGORY_COLORS[failure.failureCategory] ?? "bg-gray-100 text-gray-600"}`}>
+            {CATEGORY_LABELS[failure.failureCategory] ?? failure.failureCategory}
+          </span>
+        </div>
       </div>
 
       <div className="flex items-center gap-3 text-xs text-gray-500 dark:text-gray-400">
@@ -98,6 +107,14 @@ function FailureRow({
             {isActing ? "Stopping…" : "Stop"}
           </button>
         )}
+        <button
+          disabled={isActing}
+          onClick={() => onQuarantine(failure)}
+          className="text-xs px-2.5 py-1 rounded border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          title="Stop session and move issue back to In Progress"
+        >
+          {isActing ? "Working…" : "Reset to In Progress"}
+        </button>
         {onOpenIssue && (
           <button
             onClick={() => onOpenIssue(failure.issueId)}
@@ -151,6 +168,19 @@ export function WorkspaceLaunchFailuresPanel({ projectId, onClose, onIssueClick 
     setActionErrors((prev) => { const next = { ...prev }; delete next[failure.workspaceId]; return next; });
     try {
       await apiFetch(`/api/sessions/${failure.sessionId}/stop`, { method: "POST" });
+      fetchFailures();
+    } catch (err) {
+      setActionErrors((prev) => ({ ...prev, [failure.workspaceId]: err instanceof Error ? err.message : String(err) }));
+    } finally {
+      setActionLoading(null);
+    }
+  }
+
+  async function handleQuarantine(failure: WorkspaceLaunchFailure) {
+    setActionLoading(failure.workspaceId);
+    setActionErrors((prev) => { const next = { ...prev }; delete next[failure.workspaceId]; return next; });
+    try {
+      await apiFetch(`/api/workspaces/${failure.workspaceId}/quarantine`, { method: "POST" });
       fetchFailures();
     } catch (err) {
       setActionErrors((prev) => ({ ...prev, [failure.workspaceId]: err instanceof Error ? err.message : String(err) }));
@@ -242,6 +272,7 @@ export function WorkspaceLaunchFailuresPanel({ projectId, onClose, onIssueClick 
                       failure={f}
                       onResume={handleResume}
                       onStop={handleStop}
+                      onQuarantine={handleQuarantine}
                       onOpenIssue={onIssueClick}
                       actionLoading={actionLoading}
                     />

@@ -731,6 +731,7 @@ export interface WorkspaceLaunchFailure {
   failureCategory: LaunchFailureCategory;
   lastMessage: string | null;
   failedAt: string;
+  recentFailureCount: number;
 }
 
 export interface WorkspaceLaunchFailuresResponse {
