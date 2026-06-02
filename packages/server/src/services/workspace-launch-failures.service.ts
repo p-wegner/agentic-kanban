@@ -28,6 +28,7 @@ export interface WorkspaceLaunchFailure {
   lastMessage: string | null;
   /** ISO timestamp of when the failure occurred (session end or workspace update) */
   failedAt: string;
+  recentFailureCount: number;
 }
 
 export interface WorkspaceLaunchFailuresResponse {
@@ -125,10 +126,23 @@ export async function getWorkspaceLaunchFailures(
 
   // Group sessions by workspaceId (most recent first, excluding analytics noise)
   const latestSessionByWs = new Map<string, typeof sessionRows[0]>();
+  const allSessionsByWs = new Map<string, typeof sessionRows>();
   for (const session of sessionRows) {
-    if (!latestSessionByWs.has(session.workspaceId) && !isAnalyticsNoise(session)) {
+    if (isAnalyticsNoise(session)) continue;
+    if (!latestSessionByWs.has(session.workspaceId)) {
       latestSessionByWs.set(session.workspaceId, session);
     }
+    const arr = allSessionsByWs.get(session.workspaceId) ?? [];
+    arr.push(session);
+    allSessionsByWs.set(session.workspaceId, arr);
+  }
+
+  function countRecentFailures(wsId: string): number {
+    const wsessions = allSessionsByWs.get(wsId) ?? [];
+    return wsessions.filter(s =>
+      (s.endedAt && isZeroOutputSession(s)) ||
+      (s.status === "stopped" && s.exitCode !== null && s.exitCode !== "0"),
+    ).length;
   }
 
   const failures: WorkspaceLaunchFailure[] = [];
@@ -160,6 +174,7 @@ export async function getWorkspaceLaunchFailures(
         failureCategory: "missing-worktree",
         lastMessage: extractFailureMessage(latestSession, null),
         failedAt: ws.updatedAt,
+        recentFailureCount: countRecentFailures(ws.id),
       });
       continue;
     }
@@ -184,6 +199,7 @@ export async function getWorkspaceLaunchFailures(
         failureCategory: "setup-failed",
         lastMessage: extractFailureMessage(null, ws.latestSetupStderrTail),
         failedAt: ws.latestSetupEndedAt ?? ws.updatedAt,
+        recentFailureCount: countRecentFailures(ws.id),
       });
       continue;
     }
@@ -210,6 +226,7 @@ export async function getWorkspaceLaunchFailures(
         failureCategory: "zero-output",
         lastMessage: extractFailureMessage(latestSession, null),
         failedAt: latestSession.endedAt ?? latestSession.startedAt,
+        recentFailureCount: countRecentFailures(ws.id),
       });
       continue;
     }
@@ -238,6 +255,7 @@ export async function getWorkspaceLaunchFailures(
         failureCategory: "session-error",
         lastMessage: extractFailureMessage(latestSession, null),
         failedAt: latestSession.endedAt ?? latestSession.startedAt,
+        recentFailureCount: countRecentFailures(ws.id),
       });
     }
   }

@@ -311,6 +311,36 @@ describe("getWorkspaceLaunchFailures", () => {
     expect(result.failures.filter(f => f.failureCategory === "missing-worktree")).toHaveLength(0);
   });
 
+  it("counts recent failures across multiple sessions for the same workspace", async () => {
+    const { db } = createTestDb();
+    const now = new Date().toISOString();
+    const projectId = randomUUID();
+    const statusId = randomUUID();
+    const issueId = randomUUID();
+    const wsId = randomUUID();
+
+    await db.insert(projects).values(baseProject(projectId, now));
+    await db.insert(projectStatuses).values(baseStatus(statusId, projectId, "In Progress", now));
+    await db.insert(issues).values(baseIssue(issueId, projectId, statusId, now));
+    await db.insert(workspaces).values(baseWorkspace(wsId, issueId, now));
+
+    // 3 zero-output sessions
+    const t0 = new Date(Date.now() - 3 * 60 * 60 * 1000);
+    for (let i = 0; i < 3; i++) {
+      const start = new Date(t0.getTime() + i * 10_000);
+      const end = new Date(start.getTime() + 500); // 500ms = zero-output
+      await db.insert(sessions).values(baseSession(randomUUID(), wsId, now, {
+        startedAt: start.toISOString(),
+        endedAt: end.toISOString(),
+        exitCode: "1",
+      }));
+    }
+
+    const result = await getWorkspaceLaunchFailures(projectId, db);
+    expect(result.failures).toHaveLength(1);
+    expect(result.failures[0].recentFailureCount).toBe(3);
+  });
+
   it("returns failures sorted by failedAt descending", async () => {
     const { db } = createTestDb();
     const now = new Date().toISOString();
