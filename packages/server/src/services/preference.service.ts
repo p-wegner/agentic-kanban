@@ -23,6 +23,7 @@ export const SETTINGS_KEYS = [
   "butler_event_feed", "butler_event_feed_min_interval_ms",
   "butler_auto_answer", "butler_auto_answer_min_confidence",
   "monitor_butler_enabled", "monitor_butler_interval_min",
+  "monitor_maintenance_window_enabled", "monitor_maintenance_window_end",
   "backlog_empty_strategy", "backlog_empty_skill", "backlog_empty_cooldown_min",
   "backlog_empty_last_run",
   ...allHarnessSettingKeys(),

@@ -42,6 +42,8 @@ interface Settings {
   auto_monitor_interval?: string;
   nudge_auto_start?: string;
   nudge_wip_limit?: string;
+  monitor_maintenance_window_enabled?: string;
+  monitor_maintenance_window_end?: string;
   backlog_empty_strategy?: string;
   backlog_empty_skill?: string;
   backlog_empty_cooldown_min?: string;
@@ -89,6 +91,8 @@ const DEFAULT_SETTINGS: Settings = {
   auto_monitor: "false",
   auto_monitor_interval: "4",
   nudge_auto_start: "false",
+  monitor_maintenance_window_enabled: "false",
+  monitor_maintenance_window_end: "",
   backlog_empty_strategy: "skip",
   backlog_empty_skill: "architecture-improvement",
   backlog_empty_cooldown_min: "120",
@@ -630,6 +634,8 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
     lastRun: string | null;
     nextRunAt: string | null;
     recentActions: string[];
+    maintenanceActive?: boolean;
+    maintenanceEnd?: string | null;
   } | null>(null);
 
   const disabledTools = new Set((settings.disabled_mcp_tools || "").split(",").filter(Boolean));
@@ -1251,10 +1257,18 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                       <div className="flex items-center gap-2">
                         <div className="text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wide">Board Monitor</div>
                         {monitorStatus && (
-                          <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium ${monitorStatus.active ? "bg-green-100 text-green-700" : "bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400"}`}>
-                            <span className={`w-1.5 h-1.5 rounded-full ${monitorStatus.active ? "bg-green-500 animate-pulse" : "bg-gray-400"}`} />
-                            {monitorStatus.active ? "Active" : "Idle"}
-                          </span>
+                          <>
+                            <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium ${monitorStatus.active ? "bg-green-100 text-green-700" : "bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400"}`}>
+                              <span className={`w-1.5 h-1.5 rounded-full ${monitorStatus.active ? "bg-green-500 animate-pulse" : "bg-gray-400"}`} />
+                              {monitorStatus.active ? "Active" : "Idle"}
+                            </span>
+                            {monitorStatus.maintenanceActive && (
+                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">
+                                <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                                Maintenance
+                              </span>
+                            )}
+                          </>
                         )}
                       </div>
                       <button
@@ -1342,6 +1356,38 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                         )}
                       </div>
                     )}
+                    <div className="mt-3">
+                      <Toggle
+                        checked={settings.monitor_maintenance_window_enabled === "true"}
+                        onChange={setBool("monitor_maintenance_window_enabled")}
+                        label="Maintenance window"
+                        hint="Pause disruptive board actions (merges, relaunches, auto-start) while keeping health checks running. Enable before deployments, migrations, or manual board work."
+                      />
+                      {settings.monitor_maintenance_window_enabled === "true" && (
+                        <div className="mt-2 pl-5 space-y-2">
+                          <div className="flex items-center gap-2">
+                            <label className="text-xs text-gray-600 dark:text-gray-400">End time</label>
+                            <input
+                              type="datetime-local"
+                              value={settings.monitor_maintenance_window_end
+                                ? new Date(new Date(settings.monitor_maintenance_window_end).getTime() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16)
+                                : ""}
+                              onChange={(e) => set("monitor_maintenance_window_end")(e.target.value ? new Date(e.target.value).toISOString() : "")}
+                              className="px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-1 focus:ring-brand-500 bg-white dark:bg-gray-900"
+                            />
+                            <span className="text-xs text-gray-500 dark:text-gray-400">(leave blank = indefinite)</span>
+                          </div>
+                          {monitorStatus?.maintenanceActive && (
+                            <p className="text-xs text-amber-600 dark:text-amber-400 font-medium">
+                              Maintenance window active{monitorStatus.maintenanceEnd ? ` — ends ${new Date(monitorStatus.maintenanceEnd).toLocaleString("en-US")}` : " (indefinite)"}
+                            </p>
+                          )}
+                          {settings.monitor_maintenance_window_enabled === "true" && !monitorStatus?.maintenanceActive && settings.monitor_maintenance_window_end && new Date(settings.monitor_maintenance_window_end).getTime() <= Date.now() && (
+                            <p className="text-xs text-gray-500 dark:text-gray-400 italic">Window has expired — disable the toggle to clear it.</p>
+                          )}
+                        </div>
+                      )}
+                    </div>
                     {monitorStatus && (
                       <div className="mt-3 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
                         <div className="flex items-center justify-between px-3 py-2 bg-gray-50 dark:bg-gray-950 border-b border-gray-200 dark:border-gray-700">
