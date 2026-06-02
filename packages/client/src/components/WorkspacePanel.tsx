@@ -1495,7 +1495,14 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                 className={`border rounded p-3 space-y-2 cursor-pointer transition-colors ${
                   isSelected ? "border-blue-400 bg-blue-50 dark:bg-blue-950" : "border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600"
                 }`}
-                onClick={() => { setSelectedWorkspace(isSelected ? null : ws.id); setSelectedHistoryId(null); setHistoryMessages([]); setViewMode("output"); }}
+                onClick={() => {
+                  const nextId = isSelected ? null : ws.id;
+                  setSelectedWorkspace(nextId);
+                  setSelectedHistoryId(null);
+                  setHistoryMessages([]);
+                  const hasSessions = sessions.length > 0 || runningSession;
+                  setViewMode(hasSessions || ws.workingDir ? "output" : "timeline");
+                }}
               >
                 <div className="flex items-center justify-between">
                   <span className="text-sm font-medium text-gray-900 dark:text-gray-100">
@@ -1928,7 +1935,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                       );
                     })()}
 
-                    {((selectedHistoryId ? historyMessages : (activeSession || completedMessages.length > 0)) || ws.workingDir || true) && (
+                    {((selectedHistoryId ? historyMessages : (activeSession || completedMessages.length > 0)) || ws.workingDir || true /* always show tab bar for Timeline */) && (
                       <div className="flex border-b border-gray-200 dark:border-gray-700">
                         {((selectedHistoryId ? historyMessages : (activeSession || completedMessages.length > 0)) || ws.workingDir) && (
                           <button
