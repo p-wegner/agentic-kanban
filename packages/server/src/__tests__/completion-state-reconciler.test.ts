@@ -105,7 +105,7 @@ describe("reconcileCompletionStates", () => {
     expect(workspace.status).toBe("idle");
   });
 
-  it("marks session stopped and workspace idle when PID is dead (pid not null but process gone)", async () => {
+  it("marks session stopped and workspace idle when PID is dead and workspace has committed changes", async () => {
     const { sessionId, workspaceId } = await setupScenario(db, {
       issueStatusName: "In Review",
       workspaceStatus: "active",
@@ -114,7 +114,7 @@ describe("reconcileCompletionStates", () => {
 
     const count = await reconcileCompletionStates(db, {
       checkPid: (_pid) => false,
-      checkCommits: async () => false,
+      checkCommits: async () => true,
     });
 
     expect(count).toBe(1);
@@ -124,6 +124,27 @@ describe("reconcileCompletionStates", () => {
 
     const [workspace] = await db.select().from(workspaces).where(eq(workspaces.id, workspaceId)).limit(1);
     expect(workspace.status).toBe("idle");
+  });
+
+  it("does NOT reconcile a dead-PID session when workspace has no committed changes (protects in-flight work)", async () => {
+    const { sessionId, workspaceId } = await setupScenario(db, {
+      issueStatusName: "In Progress",
+      workspaceStatus: "active",
+      sessionPid: 99999,
+    });
+
+    const count = await reconcileCompletionStates(db, {
+      checkPid: (_pid) => false,
+      checkCommits: async () => false,
+    });
+
+    expect(count).toBe(0);
+
+    const [session] = await db.select().from(sessions).where(eq(sessions.id, sessionId)).limit(1);
+    expect(session.status).toBe("running");
+
+    const [workspace] = await db.select().from(workspaces).where(eq(workspaces.id, workspaceId)).limit(1);
+    expect(workspace.status).toBe("active");
   });
 
   it("reconciles hung agent: PID alive but issue is in Review and workspace stuck >30min", async () => {
