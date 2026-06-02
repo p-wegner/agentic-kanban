@@ -6,6 +6,7 @@ import type { BoardEvents } from "../services/board-events.js";
 import { createMergeQueueService } from "../services/merge-queue.service.js";
 import type { SessionManager } from "../services/session.manager.js";
 import { resolveMergeStrategy } from "./merge-strategy.js";
+import { reconcileCompletionStates } from "./completion-state-reconciler.js";
 
 const DEFAULT_INTERVAL_MS = 30_000;
 const MERGEABLE_STATUS_NAMES = ["In Review", "AI Reviewed"] as const;
@@ -101,6 +102,11 @@ export function createAutoMergeOrchestrator(deps: {
     state.lastSkipped = 0;
 
     try {
+      const reconciled = await reconcileCompletionStates(database);
+      if (reconciled > 0) {
+        console.log(`[auto-merge] reconcileCompletionStates: unblocked ${reconciled} stuck workspace(s)`);
+      }
+
       const workspaceIds = await findCompletedWorkspaceIds();
       if (workspaceIds.length === 0) return state;
 
