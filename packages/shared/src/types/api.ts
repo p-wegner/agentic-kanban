@@ -737,3 +737,46 @@ export interface WorkspaceLaunchFailuresResponse {
   generatedAt: string;
   failures: WorkspaceLaunchFailure[];
 }
+
+export type WorkspaceTimelineEventType =
+  | "workspace_created"
+  | "setup_started"
+  | "setup_completed"
+  | "setup_failed"
+  | "session_launched"
+  | "session_stopped"
+  | "session_zero_output"
+  | "session_completed"
+  | "nudge"
+  | "review_started"
+  | "merge_started"
+  | "fix_and_merge_started"
+  | "workspace_merged"
+  | "workspace_closed"
+  | "ready_for_merge";
+
+export interface WorkspaceTimelineEvent {
+  id: string;
+  type: WorkspaceTimelineEventType;
+  timestamp: string;
+  /** Brief human-readable description of the event. */
+  label: string;
+  /** Optional detail: last assistant message, failure reason, monitor decision, etc. */
+  detail?: string | null;
+  /** Highlight level for the event. */
+  severity?: "info" | "warning" | "error" | "success";
+  /** Session ID associated with this event, if any. */
+  sessionId?: string | null;
+  /** Trigger type label (launch, review, fix-conflicts, etc.) */
+  triggerType?: string | null;
+  /** Token counts when relevant (zero-output detection). */
+  tokenCounts?: { inputTokens: number; outputTokens: number } | null;
+  /** Exit code for session stop events. */
+  exitCode?: string | null;
+}
+
+export interface WorkspaceTimelineResponse {
+  workspaceId: string;
+  generatedAt: string;
+  events: WorkspaceTimelineEvent[];
+}

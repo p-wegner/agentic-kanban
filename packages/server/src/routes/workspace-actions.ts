@@ -4,6 +4,7 @@ import type { Database } from "../db/index.js";
 import { createWorkspaceService } from "../services/workspace.service.js";
 import { createBisectService, type BisectScope } from "../services/bisect.service.js";
 import { createSessionArtifactsService } from "../services/session-artifacts.service.js";
+import { getWorkspaceTimeline } from "../services/workspace-timeline.service.js";
 import { createRouter } from "../middleware/create-router.js";
 import { parseJsonBody, parseOptionalJsonBody } from "../middleware/parse-body.js";
 
@@ -299,6 +300,19 @@ export function createWorkspaceActionsRoute(
       if (message.includes("not found") || message.includes("ENOENT")) {
         return c.json({ error: "Artifact file not found" }, 404);
       }
+      return c.json({ error: message }, 500);
+    }
+  });
+
+  // GET /api/workspaces/:id/timeline — session failure timeline with restart decisions
+  router.get("/:id/timeline", async (c) => {
+    const id = c.req.param("id");
+    try {
+      const timeline = await getWorkspaceTimeline(id, database);
+      return c.json(timeline);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Failed to build timeline";
+      if (message.includes("not found")) return c.json({ error: message }, 404);
       return c.json({ error: message }, 500);
     }
   });
