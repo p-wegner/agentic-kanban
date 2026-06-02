@@ -11,6 +11,7 @@ import { WorkspaceDiffPanel } from "./WorkspaceDiffPanel.js";
 import { WorkspacePreviewPanel } from "./WorkspacePreviewPanel.js";
 import { WorkspaceArtifactsBrowser } from "./WorkspaceArtifactsBrowser.js";
 import { WorkspaceDiagnosticsPanel } from "./WorkspaceDiagnosticsPanel.js";
+import { WorkspaceTimelinePanel } from "./WorkspaceTimelinePanel.js";
 import { FailurePatternHint } from "./FailurePatternHint.js";
 import TicketMentionInput from "./TicketMentionInput.js";
 import { useWorkspaceSession } from "../hooks/useWorkspaceSession.js";
@@ -1494,7 +1495,14 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                 className={`border rounded p-3 space-y-2 cursor-pointer transition-colors ${
                   isSelected ? "border-blue-400 bg-blue-50 dark:bg-blue-950" : "border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600"
                 }`}
-                onClick={() => { setSelectedWorkspace(isSelected ? null : ws.id); setSelectedHistoryId(null); setHistoryMessages([]); setViewMode("output"); }}
+                onClick={() => {
+                  const nextId = isSelected ? null : ws.id;
+                  setSelectedWorkspace(nextId);
+                  setSelectedHistoryId(null);
+                  setHistoryMessages([]);
+                  const hasSessions = sessions.length > 0 || runningSession;
+                  setViewMode(hasSessions || ws.workingDir ? "output" : "timeline");
+                }}
               >
                 <div className="flex items-center justify-between">
                   <span className="text-sm font-medium text-gray-900 dark:text-gray-100">
@@ -1927,18 +1935,20 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                       );
                     })()}
 
-                    {((selectedHistoryId ? historyMessages : (activeSession || completedMessages.length > 0)) || ws.workingDir) && (
+                    {((selectedHistoryId ? historyMessages : (activeSession || completedMessages.length > 0)) || ws.workingDir || true /* always show tab bar for Timeline */) && (
                       <div className="flex border-b border-gray-200 dark:border-gray-700">
-                        <button
-                          onClick={() => { setViewMode("output"); }}
-                          className={`flex-1 text-xs py-1.5 text-center font-medium ${
-                            viewMode === "output"
-                              ? "text-blue-700 border-b-2 border-blue-600"
-                              : "text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"
-                          }`}
-                        >
-                          Output
-                        </button>
+                        {((selectedHistoryId ? historyMessages : (activeSession || completedMessages.length > 0)) || ws.workingDir) && (
+                          <button
+                            onClick={() => { setViewMode("output"); }}
+                            className={`flex-1 text-xs py-1.5 text-center font-medium ${
+                              viewMode === "output"
+                                ? "text-blue-700 border-b-2 border-blue-600"
+                                : "text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"
+                            }`}
+                          >
+                            Output
+                          </button>
+                        )}
                         {(selectedHistoryId ? historyMessages : (activeSession || completedMessages.length > 0)) && (
                           <button
                             onClick={() => {
@@ -1988,6 +1998,16 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                           }`}
                         >
                           Diagnostics
+                        </button>
+                        <button
+                          onClick={() => { setViewMode("timeline"); }}
+                          className={`flex-1 text-xs py-1.5 text-center font-medium ${
+                            viewMode === "timeline"
+                              ? "text-blue-700 border-b-2 border-blue-600"
+                              : "text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"
+                          }`}
+                        >
+                          Timeline
                         </button>
                       </div>
                     )}
@@ -2206,6 +2226,10 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
 
                     {viewMode === "diagnostics" && (
                       <WorkspaceDiagnosticsPanel workspace={ws} project={project} />
+                    )}
+
+                    {viewMode === "timeline" && (
+                      <WorkspaceTimelinePanel workspaceId={ws.id} />
                     )}
 
                     {!isRunning && viewMode === "output" && (
