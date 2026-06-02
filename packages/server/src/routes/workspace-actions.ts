@@ -304,6 +304,29 @@ export function createWorkspaceActionsRoute(
     }
   });
 
+  // GET /api/workspaces/:id/handoff-bundle — export a compact handoff bundle (JSON or Markdown)
+  router.get("/:id/handoff-bundle", async (c) => {
+    const id = c.req.param("id");
+    const format = c.req.query("format");
+    try {
+      const bundle = await workspaceService.exportHandoffBundle(id);
+      if (format === "markdown") {
+        const md = workspaceService.renderHandoffBundleAsMarkdown(bundle);
+        return new Response(md, {
+          headers: {
+            "Content-Type": "text/markdown; charset=utf-8",
+            "Content-Disposition": `attachment; filename="handoff-${id.slice(0, 8)}.md"`,
+          },
+        });
+      }
+      return c.json(bundle);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Failed to export handoff bundle";
+      if (message.includes("not found")) return c.json({ error: message }, 404);
+      return c.json({ error: message }, 500);
+    }
+  });
+
   // GET /api/workspaces/:id/timeline — session failure timeline with restart decisions
   router.get("/:id/timeline", async (c) => {
     const id = c.req.param("id");
