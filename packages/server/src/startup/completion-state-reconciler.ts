@@ -1,4 +1,4 @@
-import { and, eq, inArray, lt } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { sessions, workspaces, issues, projectStatuses } from "@agentic-kanban/shared/schema";
 import type { Database } from "../db/index.js";
 
@@ -21,7 +21,16 @@ async function workspaceHasCommittedChanges(
 ): Promise<boolean> {
   const { execFile } = await import("node:child_process");
   return new Promise<boolean>((resolve) => {
-    execFile("git", ["diff", "--quiet", baseBranch], { cwd: workingDir }, (err) => resolve(!!err));
+    // Count commits on HEAD that are not on baseBranch — non-zero means the agent committed work.
+    execFile(
+      "git",
+      ["rev-list", "--count", `${baseBranch}..HEAD`],
+      { cwd: workingDir },
+      (err, stdout) => {
+        if (err) resolve(false);
+        else resolve(parseInt(stdout.trim(), 10) > 0);
+      },
+    );
   });
 }
 
@@ -88,6 +97,14 @@ export async function reconcileCompletionStates(
     let reason = "";
 
     if (!pid || !isPidAliveCheck(checkPid, pid)) {
+      // For a dead PID (not null), verify the agent committed work before marking stopped.
+      // This prevents false positives from transient PID-check failures (e.g. reused PIDs,
+      // EPERM edge cases) from killing sessions that are actually still producing output.
+      // If workingDir or baseBranch is missing we can't verify — skip to be safe.
+      if (pid && c.workingDir && c.baseBranch) {
+        const hasCommits = await checkCommits(c.workingDir, c.baseBranch).catch(() => false);
+        if (!hasCommits) continue;
+      }
       shouldReconcile = true;
       reason = pid ? `pid=${pid} is dead` : "pid=null (no process was tracked)";
     } else {
