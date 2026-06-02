@@ -37,6 +37,13 @@ interface RenderContext {
 const SCROLL_THRESHOLD = 50;
 const FILE_PATH_PATTERN = /(?:[A-Za-z]:[\\/]|\.{1,2}[\\/]|[\w.-]+[\\/])[\w .@()[\]{}+=,;!#$%&'-]+(?:[\\/][\w .@()[\]{}+=,;!#$%&'-]+)*|\b[\w.-]+\.(?:ts|tsx|js|jsx|json|md|css|scss|html|sql|py|rs|go|java|cs|yml|yaml|toml)\b/i;
 
+export const MAX_DISPLAY_EVENTS = 2000;
+
+export function truncateEventsForDisplay(events: DisplayEvent[]): { events: DisplayEvent[]; truncated: boolean } {
+  if (events.length <= MAX_DISPLAY_EVENTS) return { events, truncated: false };
+  return { events: events.slice(0, MAX_DISPLAY_EVENTS), truncated: true };
+}
+
 const SEARCH_FILTERS = [
   { id: "assistant", label: "Assistant" },
   { id: "tool_call", label: "Tools" },
@@ -329,10 +336,15 @@ export function TerminalView({ messages, connectionState, parseOutput = "minimal
     setShowScrollButton(false);
   };
 
+  const { events: visibleEvents, truncated: isTranscriptTruncated } = useMemo(
+    () => truncateEventsForDisplay(displayEvents),
+    [displayEvents],
+  );
+
   const hasSearch = searchQuery.trim().length > 0 || searchFilters.size > 0;
   const searchEntries = useMemo(
-    () => buildTranscriptSearchEntries(displayEvents, searchQuery, searchFilters),
-    [displayEvents, searchQuery, searchFilters],
+    () => buildTranscriptSearchEntries(visibleEvents, searchQuery, searchFilters),
+    [visibleEvents, searchQuery, searchFilters],
   );
   const activeSearchEventIdx = hasSearch && searchEntries.length > 0 ? searchEntries[activeSearchIdx]?.idx : undefined;
 
@@ -403,7 +415,7 @@ export function TerminalView({ messages, connectionState, parseOutput = "minimal
     error: "Connection Error",
   };
 
-  const isParsed = parseOutput !== "false" && displayEvents.some((e) => e.kind !== "raw");
+  const isParsed = parseOutput !== "false" && visibleEvents.some((e) => e.kind !== "raw");
 
   const toggleMaximize = () => setIsMaximized((v) => !v);
 
@@ -412,7 +424,7 @@ export function TerminalView({ messages, connectionState, parseOutput = "minimal
   const activeSubagentToolUseIds = (() => {
     const startedIds = new Set<string>();
     const completedIds = new Set<string>();
-    for (const ev of displayEvents) {
+    for (const ev of visibleEvents) {
       if (ev.kind === "task_started" && ev.toolUseId) {
         startedIds.add(ev.toolUseId);
       }
@@ -439,8 +451,8 @@ export function TerminalView({ messages, connectionState, parseOutput = "minimal
     const groups = new Map<string, { startIdx: number; endIdx: number; description: string; subagentType: string }>();
     const openAgents = new Map<string, { idx: number; description: string; subagentType: string }>();
 
-    for (let i = 0; i < displayEvents.length; i++) {
-      const ev = displayEvents[i];
+    for (let i = 0; i < visibleEvents.length; i++) {
+      const ev = visibleEvents[i];
       if (ev.kind === "tool_use" && ev.name === "Agent" && ev.id) {
         openAgents.set(ev.id, {
           idx: i,
@@ -463,7 +475,7 @@ export function TerminalView({ messages, connectionState, parseOutput = "minimal
     for (const [id, opener] of openAgents) {
       groups.set(id, {
         startIdx: opener.idx,
-        endIdx: displayEvents.length - 1,
+        endIdx: visibleEvents.length - 1,
         description: opener.description,
         subagentType: opener.subagentType,
       });
@@ -494,8 +506,8 @@ export function TerminalView({ messages, connectionState, parseOutput = "minimal
     searchQuery,
   };
 
-  const renderedEvents = hasSearch ? searchEntries.map((entry) => entry.event) : displayEvents;
-  const renderedIndexes = hasSearch ? searchEntries.map((entry) => entry.idx) : displayEvents.map((_, idx) => idx);
+  const renderedEvents = hasSearch ? searchEntries.map((entry) => entry.event) : visibleEvents;
+  const renderedIndexes = hasSearch ? searchEntries.map((entry) => entry.idx) : visibleEvents.map((_, idx) => idx);
 
   const content = (
     <>
@@ -517,10 +529,15 @@ export function TerminalView({ messages, connectionState, parseOutput = "minimal
           No transcript matches found.
         </div>
       )}
-      {displayEvents.length === 0 && connectionState === "connecting" && (
+      {isTranscriptTruncated && (
+        <div className="text-yellow-500 text-xs py-2 border-t border-gray-700 mt-2">
+          Transcript too large — showing first {MAX_DISPLAY_EVENTS} events. Download the full session for complete output.
+        </div>
+      )}
+      {visibleEvents.length === 0 && connectionState === "connecting" && (
         <span className="text-gray-500 animate-pulse">Starting agent...</span>
       )}
-      {displayEvents.length === 0 && connectionState === "open" && (
+      {visibleEvents.length === 0 && connectionState === "open" && (
         <span className="text-gray-500">Waiting for output...</span>
       )}
     </>
@@ -575,8 +592,8 @@ export function TerminalView({ messages, connectionState, parseOutput = "minimal
         >
           v
         </button>
-        <span className="min-w-[52px] text-center">
-          {hasSearch ? (searchEntries.length > 0 ? `${activeSearchIdx + 1}/${searchEntries.length}` : "0/0") : `${displayEvents.length}`}
+        <span className="min-w-[52px] text-center" title={isTranscriptTruncated ? `Showing first ${MAX_DISPLAY_EVENTS} of ${displayEvents.length} events` : undefined}>
+          {hasSearch ? (searchEntries.length > 0 ? `${activeSearchIdx + 1}/${searchEntries.length}` : "0/0") : `${visibleEvents.length}${isTranscriptTruncated ? "+" : ""}`}
         </span>
       </div>
       <div className="flex flex-wrap items-center gap-1">
@@ -627,7 +644,7 @@ export function TerminalView({ messages, connectionState, parseOutput = "minimal
 
     children.forEach((el) => {
       const idx = Number((el as HTMLElement).dataset.eventIdx);
-      const event = displayEvents[idx];
+      const event = visibleEvents[idx];
       if (!event || event.kind === "raw") return;
 
       let color: string;
@@ -649,7 +666,7 @@ export function TerminalView({ messages, connectionState, parseOutput = "minimal
     });
 
     setMarkers(newMarkers);
-  }, [displayEvents, isParsed, expandedSections]);
+  }, [visibleEvents, isParsed, expandedSections]);
 
   const scrollIndicator = isParsed && markers.length > 0 && (
     <div className="absolute top-0 right-0 bottom-0 w-3 z-10">
