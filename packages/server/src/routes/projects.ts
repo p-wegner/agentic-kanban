@@ -7,6 +7,7 @@ import { wrapAiOperation } from "../middleware/ai-operation.js";
 import { checkIssueOverlap } from "../services/issue-ai.service.js";
 import { getFileContention } from "../services/file-contention.service.js";
 import { listBoardHealthEvents, getBoardHealthEvent, type BoardHealthEventType, type BoardHealthEventCategory } from "../repositories/board-health-events.repository.js";
+import { listMonitorCycles } from "../services/monitor-cycle-health.service.js";
 import { buildDependencyWavePlan, startNextDependencyWave } from "../services/dependency-wave.service.js";
 import { buildSprintCapacityPlan } from "../services/sprint-capacity.service.js";
 import { generateBoardRiskDigest } from "../services/board-risk-digest.service.js";
@@ -170,6 +171,16 @@ export function createProjectsRoute(database: Database = db, options?: { boardEv
       summary: event.summary,
       details: compactBoardHealthEventDetails(event.details),
     })));
+  });
+
+  // GET /api/projects/:id/monitor-cycles — aggregated cycle summaries
+  router.get("/:id/monitor-cycles", async (c) => {
+    const projectId = c.req.param("id");
+    const rawLimit = c.req.query("limit");
+    const parsed = Number.parseInt(rawLimit ?? "", 10);
+    const limit = Number.isFinite(parsed) ? Math.min(50, Math.max(1, parsed)) : 20;
+    const cycles = await listMonitorCycles(projectId, { limit }, database);
+    return c.json(cycles);
   });
 
   // GET /api/projects/:id/board-health-events/:eventId — full event details (not compacted)
