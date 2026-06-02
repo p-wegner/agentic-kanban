@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import { apiFetch } from "../lib/api.js";
+import { formatRelativeTime } from "../lib/formatRelativeTime.js";
 
 interface ArtifactEntry {
   path: string;
@@ -199,7 +200,7 @@ export function WorkspaceArtifactsBrowser({ workspaceId }: WorkspaceArtifactsBro
                         {a.path}
                       </div>
                       <div className="text-[10px] text-gray-400 dark:text-gray-500">
-                        {formatSize(a.size)}
+                        {formatSize(a.size)} &middot; {formatRelativeTime(a.modified)}
                       </div>
                     </div>
                     <span className="text-[10px] text-gray-400 dark:text-gray-500 uppercase shrink-0">{a.ext}</span>
