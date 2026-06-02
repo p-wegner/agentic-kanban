@@ -709,3 +709,31 @@ export interface BoardStatusResponse {
   totals: { totalIssues: number; inProgress: number; activeWorkspaces: number; runningSessions: number };
   issues: BoardStatusIssue[];
 }
+
+export type LaunchFailureCategory = "zero-output" | "setup-failed" | "missing-worktree" | "session-error";
+
+export interface WorkspaceLaunchFailure {
+  workspaceId: string;
+  workspaceBranch: string;
+  workspaceStatus: string;
+  workingDir: string | null;
+  issueId: string;
+  issueNumber: number | null;
+  issueTitle: string;
+  issueStatusName: string;
+  provider: string | null;
+  profile: string | null;
+  sessionId: string | null;
+  sessionStatus: string | null;
+  sessionStartedAt: string | null;
+  sessionEndedAt: string | null;
+  failureCategory: LaunchFailureCategory;
+  lastMessage: string | null;
+  failedAt: string;
+}
+
+export interface WorkspaceLaunchFailuresResponse {
+  projectId: string;
+  generatedAt: string;
+  failures: WorkspaceLaunchFailure[];
+}

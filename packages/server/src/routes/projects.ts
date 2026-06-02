@@ -9,6 +9,7 @@ import { getFileContention } from "../services/file-contention.service.js";
 import { listBoardHealthEvents, type BoardHealthEventType, type BoardHealthEventCategory } from "../repositories/board-health-events.repository.js";
 import { buildDependencyWavePlan, startNextDependencyWave } from "../services/dependency-wave.service.js";
 import { generateBoardRiskDigest } from "../services/board-risk-digest.service.js";
+import { getWorkspaceLaunchFailures } from "../services/workspace-launch-failures.service.js";
 import type { BoardEvents } from "../services/board-events.js";
 import type { SessionManager } from "../services/session.manager.js";
 
@@ -207,6 +208,19 @@ export function createProjectsRoute(database: Database = db, options?: { boardEv
     const projectId = c.req.param("id");
     const result = await projectService.getBoard(projectId);
     return c.json(result);
+  });
+
+  // GET /api/projects/:id/workspace-launch-failures
+  router.get("/:id/workspace-launch-failures", async (c) => {
+    const projectId = c.req.param("id");
+    try {
+      const result = await getWorkspaceLaunchFailures(projectId, database);
+      return c.json(result);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.includes("not found")) return c.json({ error: msg }, 404);
+      return c.json({ error: msg }, 500);
+    }
   });
 
   // GET /api/projects/:id/board-risk-digest
