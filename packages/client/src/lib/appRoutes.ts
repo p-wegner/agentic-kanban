@@ -19,6 +19,7 @@ const VIEW_ROUTE_PATHS: Record<ViewMode, string> = {
   digest: "/digest",
   strategy: "/strategy",
   focus: "/focus",
+  runbooks: "/runbooks",
 };
 
 const ROUTE_ALIASES: Record<string, ViewMode> = {
