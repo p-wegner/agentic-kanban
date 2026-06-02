@@ -64,7 +64,10 @@ export function setupMonitorRoutes(app: Hono, monitorState: MonitorState, runMon
   app.get("/api/internal/monitor-status", async (c) => {
     const prefRows = await db.select().from(preferences);
     const prefMap = new Map(prefRows.map((r) => [r.key, r.value]));
-    return c.json({ enabled: prefMap.get("auto_monitor") === "true", intervalMin: parseInt(prefMap.get("auto_monitor_interval") || "4", 10), active: monitorState.timer !== null, lastRun: monitorState.lastRun, nextRunAt: monitorState.nextRunAt, recentActions: monitorState.recentActions, resourceSnapshot: monitorState.lastResourceSnapshot, warnings: monitorState.warnings, lastHealthCheckAt: monitorState.lastHealthCheckAt });
+    const maintenanceEnabled = prefMap.get("monitor_maintenance_window_enabled") === "true";
+    const maintenanceEnd = prefMap.get("monitor_maintenance_window_end") || null;
+    const maintenanceActive = maintenanceEnabled && (!maintenanceEnd || new Date(maintenanceEnd).getTime() > Date.now());
+    return c.json({ enabled: prefMap.get("auto_monitor") === "true", intervalMin: parseInt(prefMap.get("auto_monitor_interval") || "4", 10), active: monitorState.timer !== null, lastRun: monitorState.lastRun, nextRunAt: monitorState.nextRunAt, recentActions: monitorState.recentActions, resourceSnapshot: monitorState.lastResourceSnapshot, warnings: monitorState.warnings, lastHealthCheckAt: monitorState.lastHealthCheckAt, maintenanceActive, maintenanceEnd });
   });
 }
 
@@ -87,6 +90,13 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort }: 
     return warnings;
   }
 
+  function isInMaintenanceWindow(prefMap: Map<string, string>): boolean {
+    if (prefMap.get("monitor_maintenance_window_enabled") !== "true") return false;
+    const endTime = prefMap.get("monitor_maintenance_window_end");
+    if (!endTime) return true;
+    return new Date(endTime).getTime() > Date.now();
+  }
+
   async function runMonitorCycle(force = false) {
     const cycleStats = { relaunched: 0, merged: 0, nudged: 0 };
     let resourceSummary: MonitorResourceSummary | null = null;
@@ -95,6 +105,12 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort }: 
       const prefRows = await db.select().from(preferences);
       const prefMap = new Map(prefRows.map((r) => [r.key, r.value]));
       if (!force && prefMap.get("auto_monitor") !== "true") return;
+      if (isInMaintenanceWindow(prefMap)) {
+        warningCount = (await refreshDirtyMainCheckoutWarnings()).length;
+        const endTime = prefMap.get("monitor_maintenance_window_end");
+        console.log(`[monitor] Maintenance window active — skipping disruptive actions${endTime ? ` until ${endTime}` : ""}`);
+        return;
+      }
       const mergeStrategy = resolveMergeStrategy(prefMap);
       warningCount = (await refreshDirtyMainCheckoutWarnings()).length;
       const resourceSnapshot = await snapshotAndCleanStaleDevProcesses(db);
