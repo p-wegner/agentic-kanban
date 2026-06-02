@@ -8,6 +8,7 @@ import { showToast } from "./Toast.js";
 import { MoveToDoneDialog } from "./MoveToDoneDialog.js";
 import { WorkflowProgress } from "./WorkflowProgress.js";
 import { isSpecPlanningPhase, SpecPhasePanel } from "./SpecPhasePanel.js";
+import { WorkspaceArtifactsBrowser } from "./WorkspaceArtifactsBrowser.js";
 import { EpicDecomposerModal } from "./EpicDecomposerModal.js";
 import { ShowdownDialog } from "./ShowdownDialog.js";
 import { ShowdownPanel } from "./ShowdownPanel.js";
@@ -1838,6 +1839,20 @@ export function IssueDetailPanel({
               onCopy={handleCopyArtifact}
               onDelete={handleDeleteArtifact}
             />
+          )}
+
+          {/* Workspace Files section — browses the latest workspace's working directory */}
+          {!editing && (
+            <div className="pt-2 border-t border-gray-100 dark:border-gray-800">
+              <label className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-2">
+                Workspace Files
+              </label>
+              {issue.workspaceSummary?.main ? (
+                <WorkspaceArtifactsBrowser workspaceId={issue.workspaceSummary.main.id} />
+              ) : (
+                <p className="text-xs text-gray-400 dark:text-gray-500">No workspace yet. Start a workspace to see generated files.</p>
+              )}
+            </div>
           )}
 
           {/* Comments / activity thread (preflight clarifications + agent questions) */}
