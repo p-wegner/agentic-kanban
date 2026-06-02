@@ -3,10 +3,29 @@ import { desc, eq } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { MonitorActionName } from "../services/monitor-nudge.js";
 
-export type MonitorAction = { at: string; action: MonitorActionName; workspaceId: string; issueId: string };
+export type MonitorAction = {
+  at: string;
+  action: MonitorActionName;
+  workspaceId: string;
+  issueId: string;
+  /** HTTP endpoint called for this action, e.g. /api/workspaces/:id/merge */
+  endpoint?: string;
+  /** HTTP response status code, e.g. 200, 409 */
+  httpStatus?: number;
+  /** Truncated response body summary (max 200 chars) */
+  responseSummary?: string;
+  /** Post-action verification: did the state change as expected? */
+  verificationResult?: "ok" | "failed" | "skipped";
+};
 
-export function logMonitorAction(recentActions: MonitorAction[], action: MonitorActionName, workspaceId: string, issueId: string) {
-  recentActions.unshift({ at: new Date().toISOString(), action, workspaceId, issueId });
+export function logMonitorAction(
+  recentActions: MonitorAction[],
+  action: MonitorActionName,
+  workspaceId: string,
+  issueId: string,
+  extra?: Pick<MonitorAction, "endpoint" | "httpStatus" | "responseSummary" | "verificationResult">,
+) {
+  recentActions.unshift({ at: new Date().toISOString(), action, workspaceId, issueId, ...extra });
   if (recentActions.length > 30) recentActions.splice(30);
 }
 

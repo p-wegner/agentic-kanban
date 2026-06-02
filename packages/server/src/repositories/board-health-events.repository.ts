@@ -51,6 +51,19 @@ export async function logBoardHealthEvent(
   return id;
 }
 
+/** Fetch a single board health event by id, or null if not found. */
+export async function getBoardHealthEvent(
+  id: string,
+  database: Database = db,
+) {
+  const rows = await database
+    .select()
+    .from(boardHealthEvents)
+    .where(eq(boardHealthEvents.id, id))
+    .limit(1);
+  return rows[0] ?? null;
+}
+
 /** Most-recent-first events for a project, optionally filtered by cycle, event types, or categories, capped by limit. */
 export async function listBoardHealthEvents(
   opts: {
