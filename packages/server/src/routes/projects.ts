@@ -8,6 +8,7 @@ import { checkIssueOverlap } from "../services/issue-ai.service.js";
 import { getFileContention } from "../services/file-contention.service.js";
 import { listBoardHealthEvents, type BoardHealthEventType, type BoardHealthEventCategory } from "../repositories/board-health-events.repository.js";
 import { buildDependencyWavePlan, startNextDependencyWave } from "../services/dependency-wave.service.js";
+import { generateBoardRiskDigest } from "../services/board-risk-digest.service.js";
 import type { BoardEvents } from "../services/board-events.js";
 import type { SessionManager } from "../services/session.manager.js";
 
@@ -206,6 +207,19 @@ export function createProjectsRoute(database: Database = db, options?: { boardEv
     const projectId = c.req.param("id");
     const result = await projectService.getBoard(projectId);
     return c.json(result);
+  });
+
+  // GET /api/projects/:id/board-risk-digest
+  router.get("/:id/board-risk-digest", async (c) => {
+    const projectId = c.req.param("id");
+    try {
+      const digest = await generateBoardRiskDigest(projectId, database);
+      return c.json(digest);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.includes("not found")) return c.json({ error: msg }, 404);
+      return c.json({ error: msg }, 500);
+    }
   });
 
   // POST /api/projects/:id/check-overlap — check for file overlap between issues using cached predictions
