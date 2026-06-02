@@ -325,7 +325,7 @@ export async function buildWorkspaceSummaryMap(
         );
       }
 
-      if (!mainWs.isDirect && mainWs.status === "idle") {
+      if (!mainWs.isDirect && (mainWs.status === "idle" || mainWs.status === "fixing")) {
         const conflictCacheAge = mainWs.conflictCacheCheckedAt
           ? Date.now() - new Date(mainWs.conflictCacheCheckedAt).getTime()
           : Infinity;
@@ -343,21 +343,25 @@ export async function buildWorkspaceSummaryMap(
               conflictingFiles: mainWs.conflictCacheFiles ? JSON.parse(mainWs.conflictCacheFiles) : [],
             };
           }
-          const wsId = mainWs.id;
-          const baseBranch = mainWs.baseBranch || defaultBranch;
-          if (!baseBranch) continue;
-          const workingDir = mainWs.workingDir;
-          runBgGit(() =>
-            detectConflicts(workingDir, baseBranch)
-              .then(result => {
-                database.update(workspaces).set({
-                  conflictCacheCheckedAt: new Date().toISOString(),
-                  conflictCacheHasConflicts: result.hasConflicts,
-                  conflictCacheFiles: JSON.stringify(result.conflictingFiles),
-                }).where(eq(workspaces.id, wsId)).catch(() => {});
-              })
-              .catch(() => {})
-          );
+          // For fixing workspaces, don't run background conflict detection (agent is resolving them);
+          // serve cached data only.
+          if (mainWs.status === "idle") {
+            const wsId = mainWs.id;
+            const baseBranch = mainWs.baseBranch || defaultBranch;
+            if (!baseBranch) continue;
+            const workingDir = mainWs.workingDir;
+            runBgGit(() =>
+              detectConflicts(workingDir, baseBranch)
+                .then(result => {
+                  database.update(workspaces).set({
+                    conflictCacheCheckedAt: new Date().toISOString(),
+                    conflictCacheHasConflicts: result.hasConflicts,
+                    conflictCacheFiles: JSON.stringify(result.conflictingFiles),
+                  }).where(eq(workspaces.id, wsId)).catch(() => {});
+                })
+                .catch(() => {})
+            );
+          }
         }
       }
     }
