@@ -198,6 +198,40 @@ function providerDisplayName(provider: AgentProvider): string {
   return "Claude";
 }
 
+export type CapabilityKey = "planMode" | "resume" | "mcpTools" | "visualVerify" | "permissionPrompts";
+
+interface ProviderCapabilityDef {
+  key: CapabilityKey;
+  label: string;
+  tooltip: string;
+}
+
+export const CAPABILITY_DEFS: ProviderCapabilityDef[] = [
+  { key: "planMode", label: "Plan mode", tooltip: "Supports a read-only planning pass before executing changes." },
+  { key: "resume", label: "Resume", tooltip: "Can resume a previous session using its session ID." },
+  { key: "mcpTools", label: "MCP tools", tooltip: "Can load and invoke external MCP server tools." },
+  { key: "visualVerify", label: "Visual verify", tooltip: "Supports visual verification via browser control." },
+  { key: "permissionPrompts", label: "Permission prompts", tooltip: "Supports interactive tool-use permission prompts." },
+];
+
+export type CapabilityMatrix = Record<CapabilityKey, boolean>;
+
+export function getProviderCapabilities(provider: AgentProvider, profileName: string, flags: string[]): CapabilityMatrix {
+  const isMock = provider === "claude" && profileName === "mock";
+  if (isMock) {
+    return { planMode: true, resume: true, mcpTools: true, visualVerify: true, permissionPrompts: false };
+  }
+  if (provider === "codex") {
+    return { planMode: true, resume: true, mcpTools: true, visualVerify: true, permissionPrompts: false };
+  }
+  if (provider === "copilot") {
+    return { planMode: true, resume: true, mcpTools: true, visualVerify: true, permissionPrompts: false };
+  }
+  // claude
+  const hasPermissionPromptTool = flags.some((f) => f.startsWith("--permission-prompt-tool"));
+  return { planMode: true, resume: true, mcpTools: true, visualVerify: true, permissionPrompts: hasPermissionPromptTool };
+}
+
 function statusClasses(status: AgentProfileHealth["status"]): string {
   if (status === "error") return "bg-red-50 text-red-700 border-red-200";
   if (status === "warning") return "bg-amber-50 text-amber-700 border-amber-200";
@@ -276,6 +310,30 @@ function CollapsibleSection({ title, configured, defaultOpen, children }: {
           {children}
         </div>
       )}
+    </div>
+  );
+}
+
+export function CapabilityMatrixTable({ provider, profileName, flags }: {
+  provider: AgentProvider;
+  profileName: string;
+  flags: string[];
+}) {
+  const caps = getProviderCapabilities(provider, profileName, flags);
+  return (
+    <div className="mt-1 border border-gray-100 dark:border-gray-800 rounded overflow-hidden" data-testid="capability-matrix">
+      <div className="grid grid-cols-5 divide-x divide-gray-100 dark:divide-gray-800 bg-gray-50 dark:bg-gray-900">
+        {CAPABILITY_DEFS.map((def) => (
+          <div key={def.key} title={def.tooltip} className="px-1.5 py-1 text-center">
+            <div className="text-[10px] text-gray-500 dark:text-gray-400 leading-tight mb-0.5">{def.label}</div>
+            {caps[def.key] ? (
+              <span className="text-[11px] text-green-600 dark:text-green-400">&#10003;</span>
+            ) : (
+              <span className="text-[11px] text-gray-400 dark:text-gray-600">&#8211;</span>
+            )}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -916,6 +974,7 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                                 <span key={flag} className="text-[11px] font-mono px-1.5 py-0.5 rounded bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300">{flag}</span>
                               ))}
                             </div>
+                            <CapabilityMatrixTable provider={profile.provider} profileName={profile.profileName} flags={profile.preflight.flags} />
                             {(profile.preflight.errors.length > 0 || profile.preflight.warnings.length > 0) && (
                               <div className="space-y-1">
                                 {profile.preflight.errors.map((error) => (
