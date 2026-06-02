@@ -22,6 +22,7 @@ function getLastSessionBadge(triggerType: string | null | undefined): { label: s
     review: { label: "AI Review", className: "bg-accent-50 text-accent-700 dark:bg-accent-900/40 dark:text-accent-300" },
     merge: { label: "AI Merge", className: "bg-emerald-100 text-emerald-700" },
     "fix-conflicts": { label: "Fix Conflicts", className: "bg-orange-100 text-orange-700" },
+    "fix-and-merge": { label: "Fix & Merge", className: "bg-orange-100 text-orange-700" },
     learning: { label: "Learning", className: "bg-teal-100 text-teal-700" },
     "auto-start": { label: "Auto-start", className: "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400" },
   };

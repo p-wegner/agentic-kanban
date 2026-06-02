@@ -519,8 +519,9 @@ export function AllWorkspacesPanel({ columns, activeProjectId, onClose, onIssueC
 
                           {/* Conflicts */}
                           {main.conflicts?.hasConflicts && (
-                            <span className="text-xs bg-red-100 text-red-600 px-1.5 py-0.5 rounded">
+                            <span className={`text-xs px-1.5 py-0.5 rounded ${main.status === "fixing" ? "bg-orange-100 text-orange-600" : "bg-red-100 text-red-600"}`}>
                               {main.conflicts.conflictingFiles.length} conflict{main.conflicts.conflictingFiles.length !== 1 ? "s" : ""}
+                              {main.status === "fixing" ? " (fixing)" : ""}
                             </span>
                           )}
 
@@ -530,6 +531,7 @@ export function AllWorkspacesPanel({ columns, activeProjectId, onClose, onIssueC
                               review: { label: "AI Review", className: "bg-accent-50 text-accent-700 dark:bg-accent-900/40 dark:text-accent-300" },
                               merge: { label: "AI Merge", className: "bg-emerald-100 text-emerald-700" },
                               "fix-conflicts": { label: "Fix Conflicts", className: "bg-orange-100 text-orange-700" },
+                              "fix-and-merge": { label: "Fix & Merge", className: "bg-orange-100 text-orange-700" },
                               learning: { label: "Learning", className: "bg-teal-100 text-teal-700" },
                               "auto-start": { label: "Auto-start", className: "bg-gray-100 text-gray-600" },
                             };

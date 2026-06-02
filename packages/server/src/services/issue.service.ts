@@ -619,10 +619,19 @@ export function createIssueService(deps: {
         latestSymlinkSkipped,
         latestSymlinkFailed,
         latestSymlinkError,
+        conflictCacheHasConflicts,
+        conflictCacheFiles,
         ...workspace
       } = w;
+      const conflicts = conflictCacheHasConflicts !== null && conflictCacheHasConflicts !== undefined
+        ? {
+            hasConflicts: conflictCacheHasConflicts,
+            conflictingFiles: parseJsonArray<string>(conflictCacheFiles, []),
+          }
+        : null;
       return {
         ...workspace,
+        conflicts,
         latestSetup: latestSetupState ? {
           command: latestSetupCommand,
           state: latestSetupState,
