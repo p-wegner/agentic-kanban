@@ -88,18 +88,6 @@ export function deriveCycleHealthState(
   return "healthy";
 }
 
-/** Count category occurrences in a comma-joined string from GROUP_CONCAT. */
-function countCategory(categoriesStr: string, category: string): number {
-  if (!categoriesStr) return 0;
-  return categoriesStr.split(",").filter((c) => c.trim() === category).length;
-}
-
-/** Count event types. */
-function countEventType(eventTypesStr: string, type: string): number {
-  if (!eventTypesStr) return 0;
-  return eventTypesStr.split(",").filter((t) => t.trim() === type).length;
-}
-
 /** Parse issue numbers from comma-joined string (may contain nulls as empty strings). */
 function parseIssueNumbers(rawStr: string): number[] {
   if (!rawStr) return [];
@@ -140,8 +128,8 @@ export async function listMonitorCycles(
       cycleId: boardHealthEvents.cycleId,
       minCreatedAt: sql<string>`min(${boardHealthEvents.createdAt})`,
       maxCreatedAt: sql<string>`max(${boardHealthEvents.createdAt})`,
-      eventTypes: sql<string>`group_concat(${boardHealthEvents.eventType})`,
-      categories: sql<string>`group_concat(coalesce(${boardHealthEvents.category}, ''))`,
+      eventTypes: sql<string>`group_concat(${boardHealthEvents.eventType}, '||')`,
+      categories: sql<string>`group_concat(coalesce(${boardHealthEvents.category}, ''), '||')`,
       summaries: sql<string>`group_concat(${boardHealthEvents.summary}, '||')`,
       issueNumbers: sql<string>`group_concat(coalesce(${boardHealthEvents.issueNumber}, ''))`,
     })
@@ -153,17 +141,17 @@ export async function listMonitorCycles(
 
   return cycleRows.map((row) => {
     const summaries = (row.summaries ?? "").split("||").map((s) => s.trim()).filter(Boolean);
-    const categories = (row.categories ?? "").split(",").map((s) => s.trim());
-    const eventTypes = (row.eventTypes ?? "").split(",").map((s) => s.trim());
+    const categories = (row.categories ?? "").split("||").map((s) => s.trim());
+    const eventTypes = (row.eventTypes ?? "").split("||").map((s) => s.trim());
 
-    const mergedCount = countCategory(row.categories, "merge");
-    const startedCount = countCategory(row.categories, "launch");
-    const refillCount = countCategory(row.categories, "refill");
+    const mergedCount = categories.filter((c) => c === "merge").length;
+    const startedCount = categories.filter((c) => c === "launch").length;
+    const refillCount = categories.filter((c) => c === "refill").length;
 
     // "needs attention" = observation events or error events that mention attention
     const attentionCount = summaries.filter((s) =>
       /needs attention|attention needed|stuck|no file changes/.test(s.toLowerCase()),
-    ).length + countEventType(row.eventTypes, "error");
+    ).length + eventTypes.filter((t) => t === "error").length;
 
     const { apiRestarted, smokeCheckFailed } = classifyCycleFailures(summaries, categories, eventTypes);
     const healthState = deriveCycleHealthState(eventTypes, apiRestarted, smokeCheckFailed, attentionCount);
