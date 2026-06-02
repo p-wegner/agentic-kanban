@@ -8,6 +8,7 @@ import { checkIssueOverlap } from "../services/issue-ai.service.js";
 import { getFileContention } from "../services/file-contention.service.js";
 import { listBoardHealthEvents, type BoardHealthEventType, type BoardHealthEventCategory } from "../repositories/board-health-events.repository.js";
 import { buildDependencyWavePlan, startNextDependencyWave } from "../services/dependency-wave.service.js";
+import { buildSprintCapacityPlan } from "../services/sprint-capacity.service.js";
 import { generateBoardRiskDigest } from "../services/board-risk-digest.service.js";
 import { getWorkspaceLaunchFailures } from "../services/workspace-launch-failures.service.js";
 import type { BoardEvents } from "../services/board-events.js";
@@ -277,6 +278,18 @@ export function createProjectsRoute(database: Database = db, options?: { boardEv
     const projectId = c.req.param("id");
     const result = await startNextDependencyWave(database, projectId, options);
     return c.json(result);
+  });
+
+  // GET /api/projects/:id/sprint-capacity
+  router.get("/:id/sprint-capacity", async (c) => {
+    const projectId = c.req.param("id");
+    try {
+      const result = await buildSprintCapacityPlan(database, projectId);
+      return c.json(result);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return c.json({ error: msg }, 500);
+    }
   });
 
   return router;
