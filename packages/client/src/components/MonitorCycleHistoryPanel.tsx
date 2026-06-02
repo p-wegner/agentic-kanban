@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { apiFetch } from "../lib/api.js";
 import { MonitorActionReplayDrawer, type ReplayTarget } from "./MonitorActionReplayDrawer.js";
+import { MonitorCycleTimeline } from "./MonitorCycleTimeline.js";
 
 /** Shape returned by GET /api/projects/:id/board-health-events */
 interface BoardHealthEvent {
@@ -15,6 +16,8 @@ interface BoardHealthEvent {
 type EventTypeFilter = "all" | "action" | "error" | "observation" | "cycle_start" | "cycle_end";
 type SortKey = "timestamp" | "type";
 type SortDir = "asc" | "desc";
+
+type PanelView = "timeline" | "events";
 
 interface MonitorCycleHistoryPanelProps {
   projectId: string | null;
@@ -47,6 +50,7 @@ const TYPE_LABELS: Record<string, string> = {
 };
 
 export function MonitorCycleHistoryPanel({ projectId }: MonitorCycleHistoryPanelProps) {
+  const [view, setView] = useState<PanelView>("timeline");
   const [events, setEvents] = useState<BoardHealthEvent[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -139,6 +143,10 @@ export function MonitorCycleHistoryPanel({ projectId }: MonitorCycleHistoryPanel
     </th>
   );
 
+  if (view === "timeline") {
+    return <MonitorCycleTimeline projectId={projectId} onSwitchToEvents={() => setView("events")} />;
+  }
+
   return (
     <div className="flex flex-col h-full overflow-hidden bg-white dark:bg-gray-950">
       {/* Header */}
@@ -167,6 +175,21 @@ export function MonitorCycleHistoryPanel({ projectId }: MonitorCycleHistoryPanel
           )}
         </div>
         <div className="flex items-center gap-2">
+          {/* View toggle */}
+          <div className="flex items-center gap-1">
+            <button
+              className="px-2 py-1 text-xs rounded text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800"
+              onClick={() => setView("timeline")}
+            >
+              Timeline
+            </button>
+            <button
+              className="px-2 py-1 text-xs rounded bg-indigo-100 dark:bg-indigo-900 text-indigo-700 dark:text-indigo-300 font-medium"
+              disabled
+            >
+              Events
+            </button>
+          </div>
           <select
             value={typeFilter}
             onChange={(e) => setTypeFilter(e.target.value as EventTypeFilter)}
