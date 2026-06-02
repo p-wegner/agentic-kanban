@@ -3,12 +3,21 @@ import { createPortal } from "react-dom";
 import type { StatusWithIssues } from "@agentic-kanban/shared";
 import { apiFetch } from "../lib/api.js";
 import type { OrchestratorStatus } from "../hooks/useOrchestrator.js";
+import { MonitorActionReplayDrawer, type ReplayTarget } from "./MonitorActionReplayDrawer.js";
 
 export type MonitorAction = {
   at: string;
-  action: "relaunch" | "merge" | "nudge" | "mark_idle" | "mark_dead" | "auto_start";
+  action: "relaunch" | "merge" | "nudge" | "mark_idle" | "mark_dead" | "auto_start" | "generate_tickets";
   workspaceId: string;
   issueId: string;
+  /** HTTP endpoint called for this action, e.g. /api/workspaces/:id/merge */
+  endpoint?: string;
+  /** HTTP response status code */
+  httpStatus?: number;
+  /** Truncated response body summary */
+  responseSummary?: string;
+  /** Post-action verification result */
+  verificationResult?: "ok" | "failed" | "skipped";
 };
 
 export type MonitorStatus = {
@@ -61,12 +70,13 @@ export type BoardHealthEvent = {
 };
 
 const ACTION_LABELS: Record<MonitorAction["action"], { label: string; color: string }> = {
-  relaunch:   { label: "Relaunched agent",   color: "text-blue-600" },
-  merge:      { label: "Triggered merge",    color: "text-brand-600 dark:text-brand-400" },
-  nudge:      { label: "Nudged agent",       color: "text-amber-600" },
-  mark_idle:  { label: "Marked idle",        color: "text-gray-500 dark:text-gray-400" },
-  mark_dead:  { label: "Marked dead",        color: "text-red-500" },
-  auto_start: { label: "Auto-started issue", color: "text-green-600" },
+  relaunch:         { label: "Relaunched agent",   color: "text-blue-600" },
+  merge:            { label: "Triggered merge",    color: "text-brand-600 dark:text-brand-400" },
+  nudge:            { label: "Nudged agent",       color: "text-amber-600" },
+  mark_idle:        { label: "Marked idle",        color: "text-gray-500 dark:text-gray-400" },
+  mark_dead:        { label: "Marked dead",        color: "text-red-500" },
+  auto_start:       { label: "Auto-started issue", color: "text-green-600" },
+  generate_tickets: { label: "Generated tickets",  color: "text-violet-600 dark:text-violet-400" },
 };
 
 interface MonitorPopoverProps {
@@ -115,6 +125,7 @@ export function MonitorPopover({
   const [healthEvents, setHealthEvents] = useState<BoardHealthEvent[]>([]);
   const [healthEventsLoading, setHealthEventsLoading] = useState(false);
   const [healthEventsError, setHealthEventsError] = useState<string | null>(null);
+  const [replayTarget, setReplayTarget] = useState<ReplayTarget | null>(null);
 
   async function loadHealthEvents() {
     if (!projectId) {
@@ -393,12 +404,15 @@ export function MonitorPopover({
                   return (
                     <div
                       key={i}
-                      className="flex items-center gap-2 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-md px-1.5 -mx-1.5 py-1 transition-colors"
-                      onClick={() => { onOpenWorkspace(a.workspaceId, a.issueId); onClose(); }}
+                      className="flex items-center gap-2 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-md px-1.5 -mx-1.5 py-1 transition-colors group"
+                      onClick={() => setReplayTarget({ kind: "action", action: a, issueNumber: issue?.issueNumber })}
                     >
                       <span className={`${meta.color} font-medium truncate flex-1 text-[11px]`}>{meta.label}</span>
                       {issue && <span className="text-gray-500 dark:text-gray-400 shrink-0 text-[11px]">#{issue.issueNumber}</span>}
                       <span className="text-gray-400 dark:text-gray-500 shrink-0 text-[10px] font-mono">{formatAge(a.at)}</span>
+                      <svg className="w-2.5 h-2.5 text-gray-300 dark:text-gray-600 group-hover:text-gray-500 dark:group-hover:text-gray-400 shrink-0 transition-colors" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 010 1.972l-11.54 6.347a1.125 1.125 0 01-1.667-.986V5.653z" />
+                      </svg>
                     </div>
                   );
                 })}
@@ -412,6 +426,8 @@ export function MonitorPopover({
             error={healthEventsError}
             formatAge={formatAge}
             onViewAll={onViewAllHealthEvents}
+            projectId={projectId}
+            onOpenReplay={(event) => setReplayTarget({ kind: "event", event, projectId: projectId! })}
           />
 
           {/* Settings */}
@@ -461,6 +477,13 @@ export function MonitorPopover({
           </div>
         </div>
       </div>
+    {replayTarget && (
+      <MonitorActionReplayDrawer
+        target={replayTarget}
+        onClose={() => setReplayTarget(null)}
+        onOpenWorkspace={onOpenWorkspace}
+      />
+    )}
     </>,
     document.body
   );
@@ -558,12 +581,16 @@ export function RecentBoardHealthEventsSection({
   error,
   formatAge,
   onViewAll,
+  projectId,
+  onOpenReplay,
 }: {
   events: BoardHealthEvent[];
   loading: boolean;
   error: string | null;
   formatAge: (isoStr: string) => string;
   onViewAll?: () => void;
+  projectId?: string | null;
+  onOpenReplay?: (event: BoardHealthEvent) => void;
 }) {
   return (
     <div className="px-3 py-2.5 border-b border-gray-100 dark:border-gray-800">
@@ -587,7 +614,11 @@ export function RecentBoardHealthEventsSection({
       ) : (
         <div className="space-y-1.5">
           {events.map((event) => (
-            <div key={event.id} className="flex items-start gap-2">
+            <div
+              key={event.id}
+              className={`flex items-start gap-2 group ${projectId && onOpenReplay ? "cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-md px-1 -mx-1 py-0.5 transition-colors" : ""}`}
+              onClick={projectId && onOpenReplay ? () => onOpenReplay(event) : undefined}
+            >
               <span
                 className={`mt-1.5 h-1.5 w-1.5 rounded-full shrink-0 ${event.level === "error" ? "bg-red-500" : "bg-sky-400"}`}
                 title={event.type}
@@ -604,6 +635,11 @@ export function RecentBoardHealthEventsSection({
                   <div className="text-gray-400 dark:text-gray-500 text-[10px] leading-snug truncate" title={event.details}>{event.details}</div>
                 )}
               </div>
+              {projectId && onOpenReplay && (
+                <svg className="w-2.5 h-2.5 text-gray-300 dark:text-gray-600 group-hover:text-gray-500 dark:group-hover:text-gray-400 shrink-0 mt-1 transition-colors" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 010 1.972l-11.54 6.347a1.125 1.125 0 01-1.667-.986V5.653z" />
+                </svg>
+              )}
             </div>
           ))}
         </div>

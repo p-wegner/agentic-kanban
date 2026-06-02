@@ -52,7 +52,7 @@ export interface ProcessWorkspaceDeps {
    */
   autoMergeInReview: boolean;
   monitorRecentActions: MonitorAction[];
-  logMonitorAction: (recentActions: MonitorAction[], action: MonitorActionName, workspaceId: string, issueId: string) => void;
+  logMonitorAction: (recentActions: MonitorAction[], action: MonitorActionName, workspaceId: string, issueId: string, extra?: Pick<MonitorAction, "endpoint" | "httpStatus" | "responseSummary" | "verificationResult">) => void;
   buildMonitorNudgePrompt: (projectId: string) => Promise<string>;
   getRecentAgentExcerpts: (sessionId: string, count?: number) => Promise<string[]>;
   shouldSkipNudge: (excerpts: string[]) => boolean;
@@ -64,7 +64,7 @@ export async function processWorkspaceCandidates(candidates: WorkspaceCandidate[
   const stats = { relaunched: 0, merged: 0, nudged: 0 };
   const maxRelaunches = deps.maxRelaunchesPerCycle ?? MAX_MONITOR_RELAUNCHES_PER_CYCLE;
   const maxMerges = deps.maxMergesPerCycle ?? MAX_MONITOR_MERGES_PER_CYCLE;
-  const logAction = (action: MonitorActionName, workspaceId: string, issueId: string) => deps.logMonitorAction(deps.monitorRecentActions, action, workspaceId, issueId);
+  const logAction = (action: MonitorActionName, workspaceId: string, issueId: string, extra?: Pick<MonitorAction, "endpoint" | "httpStatus" | "responseSummary" | "verificationResult">) => deps.logMonitorAction(deps.monitorRecentActions, action, workspaceId, issueId, extra);
   const canStartRelaunch = (ws: WorkspaceCandidate) => {
     if (stats.relaunched < maxRelaunches) return true;
     console.log(`[monitor] Relaunch cap reached (${maxRelaunches}/cycle)  leaving workspace ${ws.wsId} idle until the next monitor run`);
@@ -104,7 +104,7 @@ export async function processWorkspaceCandidates(candidates: WorkspaceCandidate[
           await db.update(workspaces).set({ status: "closed", workingDir: null, updatedAt: now }).where(eq(workspaces.id, ws.wsId)).catch(() => {});
           const doneStatusRow = await db.select({ id: projectStatuses.id }).from(projectStatuses).where(sql`${projectStatuses.name} = 'Done' AND ${projectStatuses.projectId} = ${ws.projectId}`).limit(1);
           if (doneStatusRow.length > 0) await db.update(issues).set({ statusId: doneStatusRow[0].id, updatedAt: now }).where(eq(issues.id, ws.issueId)).catch(() => {});
-          logAction("merge", ws.wsId, ws.issueId);
+          logAction("merge", ws.wsId, ws.issueId, { verificationResult: "ok" });
           console.log(`[monitor] Closed stale direct workspace ${ws.wsId}  issue moved to Done`);
           deps.boardEvents.broadcast(ws.projectId, "board_changed");
         } else if (ws.readyForMerge) {
@@ -113,19 +113,31 @@ export async function processWorkspaceCandidates(candidates: WorkspaceCandidate[
             continue;
           }
           if (!canStartMerge(ws)) continue;
-          const mergeRes = await fetch(`http://127.0.0.1:${deps.serverPort}/api/workspaces/${ws.wsId}/merge`, { method: "POST" }).catch(() => null);
+          const mergeEndpoint = `/api/workspaces/${ws.wsId}/merge`;
+          const mergeRes = await fetch(`http://127.0.0.1:${deps.serverPort}${mergeEndpoint}`, { method: "POST" }).catch(() => null);
           if (!mergeRes || !mergeRes.ok) {
             const body = mergeRes ? await mergeRes.json().catch(() => ({})) : {};
             const mergeError = (body as Record<string, string>)?.message || "merge failed";
-            await fetch(`http://127.0.0.1:${deps.serverPort}/api/workspaces/${ws.wsId}/fix-and-merge`, {
+            const fixEndpoint = `/api/workspaces/${ws.wsId}/fix-and-merge`;
+            const fixRes = await fetch(`http://127.0.0.1:${deps.serverPort}${fixEndpoint}`, {
               method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mergeError }),
-            }).catch(() => {});
+            }).catch(() => null);
             console.log(`[monitor] Merge conflict for idle+readyForMerge workspace ${ws.wsId}  triggered fix-and-merge`);
+            logAction("merge", ws.wsId, ws.issueId, {
+              endpoint: fixEndpoint,
+              httpStatus: fixRes?.status,
+              responseSummary: mergeError.slice(0, 200),
+              verificationResult: fixRes?.ok ? "ok" : "failed",
+            });
           } else {
             console.log(`[monitor] Triggered merge for idle+readyForMerge workspace ${ws.wsId}`);
+            logAction("merge", ws.wsId, ws.issueId, {
+              endpoint: mergeEndpoint,
+              httpStatus: mergeRes.status,
+              verificationResult: "ok",
+            });
           }
           stats.merged++;
-          logAction("merge", ws.wsId, ws.issueId);
           deps.boardEvents.broadcast(ws.projectId, "board_changed");
         } else if (sessionCount >= MAX_SESSIONS) {
           const needsReviewSt = await db.select({ id: projectStatuses.id }).from(projectStatuses).where(sql`${projectStatuses.name} = 'Needs Review' AND ${projectStatuses.projectId} = ${ws.projectId}`).limit(1);
@@ -133,39 +145,56 @@ export async function processWorkspaceCandidates(candidates: WorkspaceCandidate[
           const fallbackSt = needsReviewSt[0] ?? inReviewSt[0];
           if (fallbackSt) await db.update(issues).set({ statusId: fallbackSt.id }).where(eq(issues.id, ws.issueId)).catch(() => {});
           await db.update(workspaces).set({ status: "closed", updatedAt: new Date().toISOString() }).where(eq(workspaces.id, ws.wsId)).catch(() => {});
-          logAction("mark_idle", ws.wsId, ws.issueId);
+          logAction("mark_idle", ws.wsId, ws.issueId, { responseSummary: `${sessionCount} sessions — flagged stuck`, verificationResult: "ok" });
           console.log(`[monitor] Workspace ${ws.wsId} has ${sessionCount} sessions  flagged as stuck, closing`);
           deps.boardEvents.broadcast(ws.projectId, "board_changed");
         } else if (sessionCount >= 5 && ws.issueStatusName === "In Review") {
           await db.update(workspaces).set({ status: "closed", updatedAt: new Date().toISOString() }).where(eq(workspaces.id, ws.wsId)).catch(() => {});
-          logAction("mark_idle", ws.wsId, ws.issueId);
+          logAction("mark_idle", ws.wsId, ws.issueId, { responseSummary: "Closed to break review loop", verificationResult: "ok" });
           console.log(`[monitor] Workspace ${ws.wsId} has ${sessionCount} sessions with issue in review  closing to break review loop (merge or create new workspace)`);
           deps.boardEvents.broadcast(ws.projectId, "board_changed");
         } else if (ws.issueStatusName === "In Review") {
           if (deps.autoMergeEnabled && deps.autoMergeInReview) {
             if (!canStartMerge(ws)) continue;
-            const mergeRes = await fetch(`http://127.0.0.1:${deps.serverPort}/api/workspaces/${ws.wsId}/merge`, { method: "POST" }).catch(() => null);
+            const mergeEndpoint = `/api/workspaces/${ws.wsId}/merge`;
+            const mergeRes = await fetch(`http://127.0.0.1:${deps.serverPort}${mergeEndpoint}`, { method: "POST" }).catch(() => null);
             if (!mergeRes || !mergeRes.ok) {
               const body = mergeRes ? await mergeRes.json().catch(() => ({})) : {};
               const mergeError = (body as Record<string, string>)?.message || "merge failed";
-              await fetch(`http://127.0.0.1:${deps.serverPort}/api/workspaces/${ws.wsId}/fix-and-merge`, {
+              const fixEndpoint = `/api/workspaces/${ws.wsId}/fix-and-merge`;
+              const fixRes = await fetch(`http://127.0.0.1:${deps.serverPort}${fixEndpoint}`, {
                 method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mergeError }),
-              }).catch(() => {});
+              }).catch(() => null);
               console.log(`[monitor] Merge conflict for idle In-Review workspace ${ws.wsId} (auto_merge_in_review)  triggered fix-and-merge`);
+              logAction("merge", ws.wsId, ws.issueId, {
+                endpoint: fixEndpoint,
+                httpStatus: fixRes?.status,
+                responseSummary: mergeError.slice(0, 200),
+                verificationResult: fixRes?.ok ? "ok" : "failed",
+              });
             } else {
               console.log(`[monitor] Auto-merged idle In-Review workspace ${ws.wsId} (auto_merge_in_review, not marked ready)`);
+              logAction("merge", ws.wsId, ws.issueId, {
+                endpoint: mergeEndpoint,
+                httpStatus: mergeRes.status,
+                verificationResult: "ok",
+              });
             }
             stats.merged++;
-            logAction("merge", ws.wsId, ws.issueId);
             deps.boardEvents.broadcast(ws.projectId, "board_changed");
           } else {
             console.log(`[monitor] Skipping relaunch for idle workspace ${ws.wsId}  issue #${ws.issueNumber} is in review (committed work awaiting merge; enable auto_merge_in_review to land it)`);
           }
         } else {
           if (!canStartRelaunch(ws)) continue;
-          await fetch(`http://127.0.0.1:${deps.serverPort}/api/workspaces/${ws.wsId}/launch`, { method: "POST" }).catch(() => {});
+          const launchEndpoint = `/api/workspaces/${ws.wsId}/launch`;
+          const launchRes = await fetch(`http://127.0.0.1:${deps.serverPort}${launchEndpoint}`, { method: "POST" }).catch(() => null);
           stats.relaunched++;
-          logAction("relaunch", ws.wsId, ws.issueId);
+          logAction("relaunch", ws.wsId, ws.issueId, {
+            endpoint: launchEndpoint,
+            httpStatus: launchRes?.status,
+            verificationResult: launchRes?.ok ? "ok" : "failed",
+          });
           console.log(`[monitor] Relaunched idle workspace ${ws.wsId}`);
           deps.boardEvents.broadcast(ws.projectId, "board_changed");
         }
@@ -176,10 +205,16 @@ export async function processWorkspaceCandidates(candidates: WorkspaceCandidate[
         }
         if (!ws.workingDir) {
           console.log(`[monitor] Ghost workspace ${ws.wsId} (workingDir empty)  deleting and resetting issue to In Progress`);
-          await fetch(`http://127.0.0.1:${deps.serverPort}/api/workspaces/${ws.wsId}`, { method: "DELETE" }).catch(() => {});
+          const deleteEndpoint = `/api/workspaces/${ws.wsId}`;
+          const deleteRes = await fetch(`http://127.0.0.1:${deps.serverPort}${deleteEndpoint}`, { method: "DELETE" }).catch(() => null);
           const inProgressSt = await db.select({ id: projectStatuses.id }).from(projectStatuses).where(sql`${projectStatuses.name} = 'In Progress' AND ${projectStatuses.projectId} = ${ws.projectId}`).limit(1);
           if (inProgressSt.length > 0) await db.update(issues).set({ statusId: inProgressSt[0].id }).where(eq(issues.id, ws.issueId)).catch(() => {});
-          logAction("mark_idle", ws.wsId, ws.issueId);
+          logAction("mark_idle", ws.wsId, ws.issueId, {
+            endpoint: deleteEndpoint,
+            httpStatus: deleteRes?.status,
+            responseSummary: "Ghost workspace deleted",
+            verificationResult: "ok",
+          });
           deps.boardEvents.broadcast(ws.projectId, "board_changed");
         } else if (sess?.status === "stopped") {
           if (!deps.autoMergeEnabled) {
@@ -187,9 +222,14 @@ export async function processWorkspaceCandidates(candidates: WorkspaceCandidate[
             continue;
           }
           if (!canStartMerge(ws)) continue;
-          await fetch(`http://127.0.0.1:${deps.serverPort}/api/workspaces/${ws.wsId}/merge`, { method: "POST" }).catch(() => {});
+          const mergeEndpoint = `/api/workspaces/${ws.wsId}/merge`;
+          const mergeRes = await fetch(`http://127.0.0.1:${deps.serverPort}${mergeEndpoint}`, { method: "POST" }).catch(() => null);
           stats.merged++;
-          logAction("merge", ws.wsId, ws.issueId);
+          logAction("merge", ws.wsId, ws.issueId, {
+            endpoint: mergeEndpoint,
+            httpStatus: mergeRes?.status,
+            verificationResult: mergeRes?.ok ? "ok" : "failed",
+          });
           console.log(`[monitor] Triggered merge for reviewing workspace ${ws.wsId}`);
           deps.boardEvents.broadcast(ws.projectId, "board_changed");
         }
@@ -199,11 +239,11 @@ export async function processWorkspaceCandidates(candidates: WorkspaceCandidate[
           await db.update(workspaces).set({ status: "closed", workingDir: null, updatedAt: now }).where(eq(workspaces.id, ws.wsId)).catch(() => {});
           const doneStatusRow = await db.select({ id: projectStatuses.id }).from(projectStatuses).where(sql`${projectStatuses.name} = 'Done' AND ${projectStatuses.projectId} = ${ws.projectId}`).limit(1);
           if (doneStatusRow.length > 0) await db.update(issues).set({ statusId: doneStatusRow[0].id, updatedAt: now }).where(eq(issues.id, ws.issueId)).catch(() => {});
-          logAction("merge", ws.wsId, ws.issueId);
+          logAction("merge", ws.wsId, ws.issueId, { verificationResult: "ok" });
           console.log(`[monitor] Direct active workspace ${ws.wsId} has stopped session  closing`);
         } else {
           await db.update(workspaces).set({ status: "idle" }).where(eq(workspaces.id, ws.wsId)).catch(() => {});
-          logAction("mark_idle", ws.wsId, ws.issueId);
+          logAction("mark_idle", ws.wsId, ws.issueId, { verificationResult: "ok" });
           console.log(`[monitor] Active workspace ${ws.wsId} has stopped session  marking idle for relaunch`);
         }
         deps.boardEvents.broadcast(ws.projectId, "board_changed");
@@ -211,7 +251,7 @@ export async function processWorkspaceCandidates(candidates: WorkspaceCandidate[
         if (!deps.sessionManager.isProcessAlive(sess.id)) {
           await db.update(workspaces).set({ status: "idle" }).where(eq(workspaces.id, ws.wsId)).catch(() => {});
           await db.update(sessions).set({ status: "stopped", endedAt: new Date().toISOString() }).where(eq(sessions.id, sess.id)).catch(() => {});
-          logAction("mark_dead", ws.wsId, ws.issueId);
+          logAction("mark_dead", ws.wsId, ws.issueId, { verificationResult: "ok" });
           console.log(`[monitor] Workspace ${ws.wsId} process dead  marking idle`);
           deps.boardEvents.broadcast(ws.projectId, "board_changed");
         } else if (Date.now() - new Date(sess.startedAt).getTime() > 5 * 60 * 1000) {
