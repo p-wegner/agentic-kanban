@@ -73,6 +73,9 @@ export function BoardToolbar({
   const [showMonitorPopover, setShowMonitorPopover] = useState(false);
   const [showMoreViews, setShowMoreViews] = useState(false);
   const moreViewsRef = useRef<HTMLDivElement>(null);
+  // Below sm the action cluster (Tasks/Scripts/Queue/Capacity/Voice/Monitor) is
+  // hidden behind a ⋯ toggle so the default phone view is just pulse + view + filter.
+  const [showActions, setShowActions] = useState(false);
   // Below sm the 7-tab view switcher collapses to a single dropdown listing ALL views
   // (it overflowed/clipped on phone widths). Tabs + "More" still render on sm+.
   const [showAllViews, setShowAllViews] = useState(false);
@@ -125,6 +128,23 @@ export function BoardToolbar({
 
   return (
     <div className="flex items-start gap-2 flex-wrap">
+      {/* < sm : toggle to reveal the action cluster (collapsed by default for room) */}
+      <button
+        onClick={() => setShowActions((v) => !v)}
+        aria-haspopup="true"
+        aria-expanded={showActions}
+        title="Board actions"
+        className={`sm:hidden shrink-0 flex items-center justify-center w-8 h-8 rounded-md border transition-colors ${
+          showActions
+            ? "bg-surface-sunken dark:bg-gray-800 border-black/[0.07] dark:border-white/10 text-ink dark:text-gray-200"
+            : "bg-surface-raised dark:bg-surface-raised-dark border-black/[0.07] dark:border-white/10 text-ink-soft dark:text-gray-400 hover:bg-surface-sunken dark:hover:bg-gray-800"
+        }`}
+      >
+        <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+          <circle cx="5" cy="12" r="2" /><circle cx="12" cy="12" r="2" /><circle cx="19" cy="12" r="2" />
+        </svg>
+      </button>
+      <div className={`${showActions ? "flex" : "hidden"} sm:flex items-start gap-2 flex-wrap`}>
       <button
         onClick={onShowQuickTasks}
         title="Quick Tasks - run a skill directly on the current checkout (q)"
@@ -230,6 +250,7 @@ export function BoardToolbar({
             } : undefined}
           />
         )}
+      </div>
       </div>
       {/* < sm : a single dropdown listing ALL views (the tab strip clips on phones). */}
       <div className="relative shrink-0 sm:hidden" ref={allViewsRef}>
