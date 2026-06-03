@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { projects } from "@agentic-kanban/shared/schema";
 import { createButlerRoute } from "../routes/butler.js";
 import { setPreference } from "../repositories/preferences.repository.js";
-import { ensureButlerSession, sendButlerTurn, stopButlerSession } from "../services/butler-sdk.service.js";
+import { ensureButlerSession, sendButlerTurn, stopButlerSession, isInvalidThinkingSignatureError } from "../services/butler-sdk.service.js";
 import { MOCK_AGENT_COMMAND } from "../services/agent-settings.service.js";
 import { createTestApp as _createTestApp } from "./helpers/test-app.js";
 import { createMockSessionManager } from "./helpers/mocks.js";
@@ -92,6 +92,15 @@ describe("Butler provider selection", () => {
     expect(active.model).toBeUndefined();
 
     stopButlerSession(projectId);
+  });
+
+  it("classifies the Anthropic invalid-thinking-signature 400 as recoverable", () => {
+    // The real API error a resumed transcript with an unverifiable thinking block produces.
+    expect(isInvalidThinkingSignatureError("messages.1.content.0: Invalid signature in thinking block")).toBe(true);
+    expect(isInvalidThinkingSignatureError("400 messages.1.content.0: Invalid signature in thinking block")).toBe(true);
+    // Unrelated errors must NOT be swallowed as resume failures.
+    expect(isInvalidThinkingSignatureError("No conversation found with session ID: abc")).toBe(false);
+    expect(isInvalidThinkingSignatureError("overloaded_error")).toBe(false);
   });
 
   it("rejects overlapping Codex Butler turns instead of enqueueing ambiguous prompts", () => {

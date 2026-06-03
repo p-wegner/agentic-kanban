@@ -513,6 +513,20 @@ function isStaleResumeError(message: string): boolean {
   return /no conversation found/i.test(message);
 }
 
+/**
+ * Check if an error indicates a resumed transcript whose thinking block can't be
+ * verified. The API surfaces this as a 400:
+ *   "messages.N.content.0: Invalid signature in thinking block"
+ * Thinking-block signatures are bound to the org/endpoint that produced them, so a
+ * session resumed under a different Claude profile (e.g. the global `claude_profile`
+ * flipped to `mock` and back, or a profile change that didn't clear the resume id)
+ * makes the persisted transcript permanently un-sendable. Like a stale resume id, the
+ * only recovery is to drop the resume and start a fresh conversation.
+ */
+export function isInvalidThinkingSignatureError(message: string): boolean {
+  return /invalid signature in thinking block/i.test(message);
+}
+
 async function runLoop(session: ButlerSession, input: Pushable<SDKUserMessage>, options: Options): Promise<void> {
   let retrying = false;
   try {
@@ -570,14 +584,30 @@ async function runLoop(session: ButlerSession, input: Pushable<SDKUserMessage>, 
       // Don't propagate or surface as a hard error — the dev loop must keep running and
       // the next ensureButlerSession() call will reopen a warm connection.
       console.warn(`[butler-sdk] transient network error (ignored): project=${session.projectId} ${message}`);
-    } else if ((options as Record<string, unknown>).resume && isStaleResumeError(message)) {
-      // The persisted session no longer exists (server restart, cache eviction, etc.).
-      // Drop the stale resume id and start a fresh conversation — no user-facing error.
-      console.warn(`[butler-sdk] resume session ${(options as Record<string, unknown>).resume} not found, starting fresh: project=${session.projectId}`);
+    } else if (
+      (options as Record<string, unknown>).resume &&
+      (isStaleResumeError(message) || isInvalidThinkingSignatureError(message))
+    ) {
+      // The persisted session can't be resumed: either it no longer exists (server
+      // restart, cache eviction) or its transcript has an unverifiable thinking-block
+      // signature (profile/endpoint changed under it). Either way the only recovery is
+      // to drop the resume id and start a fresh conversation — no user-facing error.
+      const reason = isStaleResumeError(message) ? "not found" : "had an invalid thinking-block signature";
+      console.warn(`[butler-sdk] resume session ${(options as Record<string, unknown>).resume} ${reason}, starting fresh: project=${session.projectId}`);
       delete (options as Record<string, unknown>).resume;
       session.sessionId = undefined;
+      // If a turn was in flight when the resumed transcript was rejected (the signature
+      // error only fires once a request is made), re-send it on the fresh session so the
+      // user's message isn't silently dropped. The fresh session has no prior thinking
+      // blocks, so it cannot hit the same signature error.
+      const pendingTurn = session.busy
+        ? [...session.transcript].reverse().find((t) => t.role === "user")?.text
+        : undefined;
       retrying = true;
       void runLoop(session, input, options);
+      if (pendingTurn) {
+        input.push({ type: "user", message: { role: "user", content: pendingTurn }, parent_tool_use_id: null });
+      }
     } else {
       console.error(`[butler-sdk] session error: project=${session.projectId} ${message}`);
       broadcast(session, { type: "error", message });
