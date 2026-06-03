@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, Fragment } from "react";
+import React, { useState, useRef, useEffect, Fragment } from "react";
 import type { DiffComment, CreateDiffCommentRequest } from "@agentic-kanban/shared";
 
 interface DiffViewerProps {
@@ -249,6 +249,46 @@ function CommentInput({
   );
 }
 
+const CONTEXT_LINES = 3;
+
+interface CollapsibleRegion {
+  startIdx: number;
+  endIdx: number; // exclusive
+  collapsedCount: number;
+}
+
+function computeCollapsibleRegions(lines: DiffLine[]): CollapsibleRegion[] {
+  const regions: CollapsibleRegion[] = [];
+  let i = 0;
+  while (i < lines.length) {
+    if (lines[i].type === "context") {
+      const start = i;
+      while (i < lines.length && lines[i].type === "context") i++;
+      const len = i - start;
+      if (len > CONTEXT_LINES * 2) {
+        regions.push({ startIdx: start + CONTEXT_LINES, endIdx: i - CONTEXT_LINES, collapsedCount: len - CONTEXT_LINES * 2 });
+      }
+    } else {
+      i++;
+    }
+  }
+  return regions;
+}
+
+function CollapsedHunk({ count, onExpand }: { count: number; onExpand: () => void }) {
+  return (
+    <div
+      className="flex items-center gap-2 px-3 py-1 bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 cursor-pointer hover:bg-blue-50 dark:hover:bg-blue-950 hover:text-blue-600 dark:hover:text-blue-400 select-none transition-colors text-xs"
+      onClick={onExpand}
+    >
+      <svg className="w-3 h-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M5 12h14M12 5l7 7-7 7" />
+      </svg>
+      <span>... {count} unchanged line{count !== 1 ? "s" : ""}</span>
+    </div>
+  );
+}
+
 function UnifiedFileView({
   file,
   commentMap,
@@ -265,80 +305,115 @@ function UnifiedFileView({
   onResolveComment?: (id: string, resolved: boolean) => void;
 }) {
   const [inputLineIdx, setInputLineIdx] = useState<number | null>(null);
+  const [expandedRegions, setExpandedRegions] = useState<Set<number>>(new Set());
+  const regions = computeCollapsibleRegions(file.lines);
+
+  const collapsedRanges = new Map<number, CollapsibleRegion>();
+  for (const region of regions) {
+    if (!expandedRegions.has(region.startIdx)) {
+      for (let idx = region.startIdx; idx < region.endIdx; idx++) {
+        collapsedRanges.set(idx, region);
+      }
+    }
+  }
+
+  const elements: React.ReactNode[] = [];
+  const seenRegions = new Set<number>();
+  let li = 0;
+  for (const line of file.lines) {
+    const collapsed = collapsedRanges.get(li);
+    if (collapsed) {
+      if (!seenRegions.has(collapsed.startIdx)) {
+        seenRegions.add(collapsed.startIdx);
+        const regionStart = collapsed.startIdx;
+        elements.push(
+          <CollapsedHunk
+            key={`collapsed-${regionStart}`}
+            count={collapsed.collapsedCount}
+            onExpand={() => setExpandedRegions(prev => { const n = new Set(prev); n.add(regionStart); return n; })}
+          />
+        );
+      }
+      li++;
+      continue;
+    }
+
+    const isCommentable = line.type !== "header" && line.type !== "hunk";
+    const side = line.type === "delete" ? "old" : "new";
+    const cKey = isCommentable
+      ? commentKey(file.filePath, line.lineNumOld, line.lineNumNew, side)
+      : "";
+    const lineComments = isCommentable ? (commentMap.get(cKey) ?? []) : [];
+    const isInputOpen = inputLineIdx === li;
+
+    let className = "px-2 relative group/line ";
+    if (line.type === "hunk") {
+      className += "bg-blue-50 text-blue-700";
+    } else if (line.type === "add") {
+      className += "bg-green-50 text-green-800";
+    } else if (line.type === "delete") {
+      className += "bg-red-50 text-red-800";
+    } else {
+      className += "text-gray-700 dark:text-gray-300";
+    }
+
+    const currentLi = li;
+    elements.push(
+      <Fragment key={li}>
+        <div
+          className={className}
+          onClick={() => {
+            if (isCommentable && onCreateComment) setInputLineIdx(currentLi);
+          }}
+        >
+          {line.type === "add" ? "+" : line.type === "delete" ? "-" : " "}
+          {line.type === "hunk" ? line.content : line.content || " "}
+          {isCommentable && onCreateComment && lineComments.length === 0 && !isInputOpen && (
+            <span className="absolute right-1 top-1/2 -translate-y-1/2 opacity-0 group-hover/line:opacity-100 transition-opacity cursor-pointer select-none w-5 h-5 flex items-center justify-center rounded-full bg-gray-200 dark:bg-gray-700 hover:bg-brand-200 text-gray-500 dark:text-gray-400 hover:text-brand-600 text-sm leading-none">
+              +
+            </span>
+          )}
+          {lineComments.length > 0 && (() => {
+            const unresolved = lineComments.filter((c) => c.resolvedAt == null).length;
+            const allResolved = unresolved === 0;
+            return (
+              <span
+                className={`absolute right-1 top-1/2 -translate-y-1/2 w-5 h-5 flex items-center justify-center rounded-full text-xs font-medium select-none ${
+                  allResolved ? "bg-gray-200 dark:bg-gray-700 text-gray-500 dark:text-gray-400" : "bg-yellow-200 text-yellow-700"
+                }`}
+                title={allResolved ? "All comments resolved" : `${unresolved} unresolved comment${unresolved !== 1 ? "s" : ""}`}
+              >
+                {allResolved ? lineComments.length : unresolved}
+              </span>
+            );
+          })()}
+        </div>
+        {lineComments.map((c) => (
+          <CommentBlock key={c.id} comment={c} onEdit={onEditComment} onDelete={onDeleteComment} onResolve={onResolveComment} />
+        ))}
+        {isInputOpen && (
+          <CommentInput
+            onSubmit={(body) => {
+              onCreateComment?.({
+                filePath: file.filePath,
+                lineNumOld: line.lineNumOld ?? null,
+                lineNumNew: line.lineNumNew ?? null,
+                side,
+                body,
+              });
+              setInputLineIdx(null);
+            }}
+            onCancel={() => setInputLineIdx(null)}
+          />
+        )}
+      </Fragment>
+    );
+    li++;
+  }
 
   return (
     <div className="overflow-auto max-h-80 bg-gray-50 dark:bg-gray-950 font-mono text-xs">
-      {file.lines.map((line, li) => {
-        const isCommentable = line.type !== "header" && line.type !== "hunk";
-        const side = line.type === "delete" ? "old" : "new";
-        const cKey = isCommentable
-          ? commentKey(file.filePath, line.lineNumOld, line.lineNumNew, side)
-          : "";
-        const lineComments = isCommentable ? (commentMap.get(cKey) ?? []) : [];
-        const isInputOpen = inputLineIdx === li;
-
-        let className = "px-2 relative group/line ";
-        if (line.type === "hunk") {
-          className += "bg-blue-50 text-blue-700";
-        } else if (line.type === "add") {
-          className += "bg-green-50 text-green-800";
-        } else if (line.type === "delete") {
-          className += "bg-red-50 text-red-800";
-        } else {
-          className += "text-gray-700 dark:text-gray-300";
-        }
-
-        return (
-          <Fragment key={li}>
-            <div
-              className={className}
-              onClick={() => {
-                if (isCommentable && onCreateComment) setInputLineIdx(li);
-              }}
-            >
-              {line.type === "add" ? "+" : line.type === "delete" ? "-" : " "}
-              {line.type === "hunk" ? line.content : line.content || " "}
-              {isCommentable && onCreateComment && lineComments.length === 0 && !isInputOpen && (
-                <span className="absolute right-1 top-1/2 -translate-y-1/2 opacity-0 group-hover/line:opacity-100 transition-opacity cursor-pointer select-none w-5 h-5 flex items-center justify-center rounded-full bg-gray-200 dark:bg-gray-700 hover:bg-brand-200 text-gray-500 dark:text-gray-400 hover:text-brand-600 text-sm leading-none">
-                  +
-                </span>
-              )}
-              {lineComments.length > 0 && (() => {
-                const unresolved = lineComments.filter((c) => c.resolvedAt == null).length;
-                const allResolved = unresolved === 0;
-                return (
-                  <span
-                    className={`absolute right-1 top-1/2 -translate-y-1/2 w-5 h-5 flex items-center justify-center rounded-full text-xs font-medium select-none ${
-                      allResolved ? "bg-gray-200 dark:bg-gray-700 text-gray-500 dark:text-gray-400" : "bg-yellow-200 text-yellow-700"
-                    }`}
-                    title={allResolved ? "All comments resolved" : `${unresolved} unresolved comment${unresolved !== 1 ? "s" : ""}`}
-                  >
-                    {allResolved ? lineComments.length : unresolved}
-                  </span>
-                );
-              })()}
-            </div>
-            {lineComments.map((c) => (
-              <CommentBlock key={c.id} comment={c} onEdit={onEditComment} onDelete={onDeleteComment} onResolve={onResolveComment} />
-            ))}
-            {isInputOpen && (
-              <CommentInput
-                onSubmit={(body) => {
-                  onCreateComment?.({
-                    filePath: file.filePath,
-                    lineNumOld: line.lineNumOld ?? null,
-                    lineNumNew: line.lineNumNew ?? null,
-                    side,
-                    body,
-                  });
-                  setInputLineIdx(null);
-                }}
-                onCancel={() => setInputLineIdx(null)}
-              />
-            )}
-          </Fragment>
-        );
-      })}
+      {elements}
     </div>
   );
 }
@@ -359,6 +434,17 @@ function SplitFileView({
   onResolveComment?: (id: string, resolved: boolean) => void;
 }) {
   const [inputLineIdx, setInputLineIdx] = useState<number | null>(null);
+  const [expandedRegions, setExpandedRegions] = useState<Set<number>>(new Set());
+  const regions = computeCollapsibleRegions(file.lines);
+
+  const collapsedRanges = new Map<number, CollapsibleRegion>();
+  for (const region of regions) {
+    if (!expandedRegions.has(region.startIdx)) {
+      for (let idx = region.startIdx; idx < region.endIdx; idx++) {
+        collapsedRanges.set(idx, region);
+      }
+    }
+  }
 
   const pairs: { left: DiffLine | null; right: DiffLine | null; lineIdx: number }[] = [];
   let i = 0;
@@ -379,11 +465,32 @@ function SplitFileView({
     }
   }
 
+  const seenRegions = new Set<number>();
+
   return (
     <div className="overflow-auto max-h-80 bg-gray-50 dark:bg-gray-950 font-mono text-xs">
       <table className="w-full border-collapse">
         <tbody>
           {pairs.map((pair) => {
+            const collapsed = collapsedRanges.get(pair.lineIdx);
+            if (collapsed) {
+              if (!seenRegions.has(collapsed.startIdx)) {
+                seenRegions.add(collapsed.startIdx);
+                const regionStart = collapsed.startIdx;
+                return (
+                  <tr key={`collapsed-${regionStart}`}>
+                    <td colSpan={4} className="p-0">
+                      <CollapsedHunk
+                        count={collapsed.collapsedCount}
+                        onExpand={() => setExpandedRegions(prev => { const n = new Set(prev); n.add(regionStart); return n; })}
+                      />
+                    </td>
+                  </tr>
+                );
+              }
+              return null;
+            }
+
             const isHeader = pair.left?.type === "hunk";
 
             if (isHeader && pair.left) {

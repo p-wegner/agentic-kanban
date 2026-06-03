@@ -62,6 +62,53 @@ describe("DiffViewer", () => {
     expect(html).toContain("No changes to show");
   });
 
+  it("collapses unchanged context beyond 3 lines", () => {
+    const manyContextLines = [
+      " line1", " line2", " line3", " line4", " line5", " line6", " line7",
+    ].join("\n");
+    const largeDiff = `diff --git a/src/foo.ts b/src/foo.ts
+--- a/src/foo.ts
++++ b/src/foo.ts
+@@ -1,10 +1,10 @@
+ context1
+ context2
+ context3
+ context4
+ context5
+ context6
+ context7
+-old
++new
+ context8
+ context9
+`;
+    const html = renderToStaticMarkup(
+      <DiffViewer diff={largeDiff} stats={STATS} />
+    );
+    expect(html).toContain("unchanged line");
+    // Should NOT render all 7 context lines (only 3+3 kept, 1 collapsed)
+    expect(html).not.toContain("context4");
+  });
+
+  it("does not collapse when context is within threshold", () => {
+    const smallContextDiff = `diff --git a/src/foo.ts b/src/foo.ts
+--- a/src/foo.ts
++++ b/src/foo.ts
+@@ -1,5 +1,5 @@
+ ctx1
+ ctx2
+ ctx3
+-old
++new
+ ctx4
+`;
+    const html = renderToStaticMarkup(
+      <DiffViewer diff={smallContextDiff} stats={STATS} />
+    );
+    // No collapsed affordance for small context
+    expect(html).not.toContain("unchanged line");
+  });
+
   it("renders expand/collapse toggle when multiple files present", () => {
     const multiFileDiff = `diff --git a/src/a.ts b/src/a.ts
 --- a/src/a.ts
