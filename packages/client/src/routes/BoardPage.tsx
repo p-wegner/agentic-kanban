@@ -723,12 +723,14 @@ export function BoardPage() {
   }
 
   function applyOptimisticIssueUpdate(issueId: string, updater: (issue: IssueWithStatus) => IssueWithStatus) {
-    setColumns((prev) =>
-      prev.map((col) => ({
+    setColumns((prev) => {
+      const next = prev.map((col) => ({
         ...col,
         issues: col.issues.map((iss) => (iss.id === issueId ? updater(iss) : iss)),
-      }))
-    );
+      }));
+      columnsRef.current = next;
+      return next;
+    });
   }
 
   async function handleQuickPriorityChange(issueId: string, priority: string) {
