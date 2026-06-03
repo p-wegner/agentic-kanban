@@ -1,7 +1,12 @@
-import { useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useMemo } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
 import { CompletedCard } from "./CompletedCard.js";
 import { useIsNarrow } from "../hooks/useMediaQuery.js";
+
+const CARD_MIN_WIDTH = 220;
+const CARD_GAP = 8;
+const ESTIMATED_ROW_HEIGHT = 90;
 
 interface CompletedGridProps {
   columns: StatusWithIssues[];
@@ -109,28 +114,28 @@ export function CompletedGrid({
     if (doneStatusId) onDrop(doneStatusId);
   }
 
-  const cardsGrid = (
-    <div
-      className="grid gap-2"
-      style={{ gridTemplateColumns: "repeat(auto-fill, minmax(min(220px, 100%), 1fr))" }}
-    >
-      {allIssues.map((issue) => (
-        <CompletedCard
-          key={issue.id}
-          issue={issue}
-          onClick={onIssueClick}
-          onDragStart={onDragStart}
-          searchQuery={searchQuery}
-          isSelected={selectedIssueIds?.has(issue.id)}
-        />
-      ))}
-    </div>
-  );
-
   // On phones the completed list opens as a bottom-sheet overlay rather than an
   // inline block, so it never competes with the board for vertical room: the
   // thin collapsed bar stays in-flow, and the sheet floats above when expanded.
   if (isNarrow) {
+    const cardsGrid = (
+      <div
+        className="grid gap-2"
+        style={{ gridTemplateColumns: "repeat(auto-fill, minmax(min(220px, 100%), 1fr))" }}
+      >
+        {allIssues.map((issue) => (
+          <CompletedCard
+            key={issue.id}
+            issue={issue}
+            onClick={onIssueClick}
+            onDragStart={onDragStart}
+            searchQuery={searchQuery}
+            isSelected={selectedIssueIds?.has(issue.id)}
+          />
+        ))}
+      </div>
+    );
+
     return (
       <>
         {collapsedBar}
@@ -165,10 +170,95 @@ export function CompletedGrid({
   }
 
   return (
-    <div className="shrink-0 max-h-[50vh] sm:max-h-[40vh] overflow-y-auto scrollbar-hide">
+    <VirtualizedCompletedGrid
+      allIssues={allIssues}
+      dragOver={dragOver}
+      onToggle={onToggle}
+      onIssueClick={onIssueClick}
+      onDragStart={onDragStart}
+      onDragEnter={handleDragEnter}
+      onDragLeave={handleDragLeave}
+      onDragOver={handleDragOver}
+      onDrop={handleDrop}
+      searchQuery={searchQuery}
+      selectedIssueIds={selectedIssueIds}
+      totalIssues={totalIssues}
+    />
+  );
+}
+
+interface VirtualizedGridProps {
+  allIssues: IssueWithStatus[];
+  dragOver: boolean;
+  totalIssues: number;
+  onToggle: () => void;
+  onIssueClick: (issue: IssueWithStatus, event: React.MouseEvent) => void;
+  onDragStart: (e: React.DragEvent, issue: IssueWithStatus) => void;
+  onDragEnter: (e: React.DragEvent) => void;
+  onDragLeave: () => void;
+  onDragOver: (e: React.DragEvent) => void;
+  onDrop: (e: React.DragEvent) => void;
+  searchQuery?: string;
+  selectedIssueIds?: Set<string>;
+}
+
+function VirtualizedCompletedGrid({
+  allIssues,
+  dragOver,
+  totalIssues,
+  onToggle,
+  onIssueClick,
+  onDragStart,
+  onDragEnter,
+  onDragLeave,
+  onDragOver,
+  onDrop,
+  searchQuery,
+  selectedIssueIds,
+}: VirtualizedGridProps) {
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const innerRef = useRef<HTMLDivElement>(null);
+  const [containerWidth, setContainerWidth] = useState(0);
+
+  useEffect(() => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (entry) setContainerWidth(entry.contentRect.width);
+    });
+    observer.observe(el);
+    setContainerWidth(el.clientWidth);
+    return () => observer.disconnect();
+  }, []);
+
+  const columnsPerRow = containerWidth > 0
+    ? Math.max(1, Math.floor((containerWidth + CARD_GAP) / (CARD_MIN_WIDTH + CARD_GAP)))
+    : 1;
+
+  const rows = useMemo(() => {
+    const result: IssueWithStatus[][] = [];
+    for (let i = 0; i < allIssues.length; i += columnsPerRow) {
+      result.push(allIssues.slice(i, i + columnsPerRow));
+    }
+    return result;
+  }, [allIssues, columnsPerRow]);
+
+  const virtualizer = useVirtualizer({
+    count: rows.length,
+    getScrollElement: () => scrollContainerRef.current,
+    estimateSize: useCallback(() => ESTIMATED_ROW_HEIGHT + CARD_GAP, []),
+    overscan: 3,
+  });
+
+  const virtualRows = virtualizer.getVirtualItems();
+  const totalHeight = virtualizer.getTotalSize();
+
+  return (
+    <div className="shrink-0 max-h-[50vh] sm:max-h-[40vh] overflow-hidden flex flex-col">
       <button
         onClick={onToggle}
-        className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 mb-2 transition-colors"
+        className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 mb-2 transition-colors shrink-0"
       >
         <svg
           className="w-4 h-4"
@@ -184,17 +274,53 @@ export function CompletedGrid({
       </button>
 
       <div
-        className={`rounded-lg p-3 transition-all ${
+        ref={scrollContainerRef}
+        className={`rounded-lg p-3 flex-1 overflow-y-auto scrollbar-hide transition-all ${
           dragOver ? "ring-2 ring-brand-400 ring-offset-1 bg-brand-50/30" : "bg-gray-50/50 dark:bg-gray-950/50"
         }`}
-        onDragEnter={handleDragEnter}
-        onDragLeave={handleDragLeave}
-        onDragOver={handleDragOver}
-        onDrop={handleDrop}
+        onDragEnter={onDragEnter}
+        onDragLeave={onDragLeave}
+        onDragOver={onDragOver}
+        onDrop={onDrop}
       >
-        {cardsGrid}
         {allIssues.length === 0 && !dragOver && (
           <p className="text-xs text-gray-400 dark:text-gray-500 text-center py-4">No completed issues</p>
+        )}
+        {allIssues.length > 0 && (
+          <div ref={innerRef} style={{ height: totalHeight, position: "relative" }}>
+            {virtualRows.map((virtualRow) => {
+              const rowItems = rows[virtualRow.index];
+              return (
+                <div
+                  key={virtualRow.key}
+                  style={{
+                    position: "absolute",
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    transform: `translateY(${virtualRow.start}px)`,
+                    display: "grid",
+                    gridTemplateColumns: `repeat(${columnsPerRow}, 1fr)`,
+                    gap: `${CARD_GAP}px`,
+                    paddingBottom: `${CARD_GAP}px`,
+                  }}
+                  data-index={virtualRow.index}
+                  ref={virtualizer.measureElement}
+                >
+                  {rowItems.map((issue) => (
+                    <CompletedCard
+                      key={issue.id}
+                      issue={issue}
+                      onClick={onIssueClick}
+                      onDragStart={onDragStart}
+                      searchQuery={searchQuery}
+                      isSelected={selectedIssueIds?.has(issue.id)}
+                    />
+                  ))}
+                </div>
+              );
+            })}
+          </div>
         )}
       </div>
     </div>
