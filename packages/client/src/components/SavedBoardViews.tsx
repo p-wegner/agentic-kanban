@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   boardSavedViewsKey,
   deleteSavedBoardView,
@@ -35,6 +35,10 @@ export function SavedBoardViews({
   const [viewName, setViewName] = useState("");
   const [saving, setSaving] = useState(false);
   const [showSaving, setShowSaving] = useState(false);
+  // Below md the whole filter row collapses behind a single "Filter" trigger to
+  // save a header row on small screens; inline on md+.
+  const [showMobileFilters, setShowMobileFilters] = useState(false);
+  const mobileFiltersRef = useRef<HTMLDivElement>(null);
   const settingsKey = useMemo(() => boardSavedViewsKey(projectId), [projectId]);
   const selectedView = views.find((view) => view.id === selectedViewId);
 
@@ -113,9 +117,29 @@ export function SavedBoardViews({
   }
 
   const hasViews = views.length > 0;
+  const activeFilterCount = (currentState.statusId ? 1 : 0) + (currentState.tagId ? 1 : 0);
 
-  return (
-    <div className="flex shrink-0 flex-wrap items-center gap-1.5 rounded-md border border-black/[0.07] bg-surface-raised px-2 py-1.5 text-xs dark:border-white/10 dark:bg-surface-raised-dark">
+  // Close the mobile filter popover on outside click / Escape.
+  useEffect(() => {
+    if (!showMobileFilters) return;
+    function handleClick(e: MouseEvent) {
+      if (mobileFiltersRef.current && !mobileFiltersRef.current.contains(e.target as Node)) setShowMobileFilters(false);
+    }
+    function handleKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setShowMobileFilters(false);
+    }
+    document.addEventListener("mousedown", handleClick);
+    document.addEventListener("keydown", handleKey);
+    return () => {
+      document.removeEventListener("mousedown", handleClick);
+      document.removeEventListener("keydown", handleKey);
+    };
+  }, [showMobileFilters]);
+
+  // The filter + saved-view controls, shared between the inline (md+) row and the
+  // collapsed mobile popover so the handlers/state stay in one place.
+  const controls = (
+    <>
       <select
         value={currentState.statusId ?? ""}
         onChange={(event) => {
@@ -229,6 +253,51 @@ export function SavedBoardViews({
           </button>
         </>
       )}
-    </div>
+    </>
+  );
+
+  return (
+    <>
+      {/* md+ : inline filter row (unchanged) */}
+      <div className="hidden shrink-0 flex-wrap items-center gap-1.5 rounded-md border border-black/[0.07] bg-surface-raised px-2 py-1.5 text-xs dark:border-white/10 dark:bg-surface-raised-dark md:flex">
+        {controls}
+      </div>
+      {/* < md : collapse to a single Filter trigger + popover */}
+      <div className="relative shrink-0 md:hidden" ref={mobileFiltersRef}>
+        <button
+          type="button"
+          onClick={() => setShowMobileFilters((v) => !v)}
+          aria-haspopup="dialog"
+          aria-expanded={showMobileFilters}
+          title="Filter and saved views"
+          className={`flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs font-medium transition-colors ${
+            activeFilterCount > 0
+              ? "border-brand-300 bg-brand-50 text-brand-700 dark:border-brand-700 dark:bg-brand-900/40 dark:text-brand-300"
+              : "border-black/[0.07] bg-surface-raised text-ink-soft hover:bg-surface-sunken dark:border-white/10 dark:bg-surface-raised-dark dark:text-gray-400 dark:hover:bg-gray-800"
+          }`}
+        >
+          <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M3 4.5h18l-7 8v6l-4 2v-8z" />
+          </svg>
+          Filter
+          {activeFilterCount > 0 && (
+            <span className="inline-flex h-4 min-w-[16px] items-center justify-center rounded-full bg-brand-500 px-1 text-[10px] font-semibold leading-none text-white">
+              {activeFilterCount}
+            </span>
+          )}
+          <svg className={`h-2.5 w-2.5 transition-transform ${showMobileFilters ? "rotate-180" : ""}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
+          </svg>
+        </button>
+        {showMobileFilters && (
+          <div
+            role="dialog"
+            className="absolute left-0 top-full z-30 mt-1 flex w-64 max-w-[calc(100vw-2rem)] flex-col gap-2 rounded-lg border border-gray-200 bg-white p-2 text-xs shadow-lg dark:border-gray-700 dark:bg-gray-900"
+          >
+            {controls}
+          </div>
+        )}
+      </div>
+    </>
   );
 }

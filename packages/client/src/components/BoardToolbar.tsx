@@ -3,7 +3,7 @@ import { MonitorPopover, type MonitorStatus } from "./MonitorPopover.js";
 import { useOrchestrator } from "../hooks/useOrchestrator.js";
 import { VoiceInboxButton } from "./VoiceInboxButton.js";
 import { ProjectScriptsMenu } from "./ProjectScriptsMenu.js";
-import { PRIMARY_VIEWS, SECONDARY_VIEWS } from "../lib/viewRegistry.js";
+import { PRIMARY_VIEWS, SECONDARY_VIEWS, VIEW_REGISTRY } from "../lib/viewRegistry.js";
 import type { StatusWithIssues } from "@agentic-kanban/shared";
 
 // Re-exported from the canonical view registry (#116). Kept here for back-compat
@@ -73,6 +73,11 @@ export function BoardToolbar({
   const [showMonitorPopover, setShowMonitorPopover] = useState(false);
   const [showMoreViews, setShowMoreViews] = useState(false);
   const moreViewsRef = useRef<HTMLDivElement>(null);
+  // Below sm the 7-tab view switcher collapses to a single dropdown listing ALL views
+  // (it overflowed/clipped on phone widths). Tabs + "More" still render on sm+.
+  const [showAllViews, setShowAllViews] = useState(false);
+  const allViewsRef = useRef<HTMLDivElement>(null);
+  const activeView = VIEW_REGISTRY.find((v) => v.id === viewMode);
   const boardActivitySummary = formatBoardActivitySummary(activeColumns);
   const hasMonitorWarnings = (monitorStatus?.warnings?.length ?? 0) > 0;
   // Dogfooding orchestrator loop status + opt-in notifications (hidden when no loop).
@@ -97,6 +102,25 @@ export function BoardToolbar({
     };
   }, [showMoreViews]);
 
+  // Same outside-click/Escape handling for the mobile all-views dropdown.
+  useEffect(() => {
+    if (!showAllViews) return;
+    function handleClick(e: MouseEvent) {
+      if (allViewsRef.current && !allViewsRef.current.contains(e.target as Node)) {
+        setShowAllViews(false);
+      }
+    }
+    function handleKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setShowAllViews(false);
+    }
+    document.addEventListener("mousedown", handleClick);
+    document.addEventListener("keydown", handleKey);
+    return () => {
+      document.removeEventListener("mousedown", handleClick);
+      document.removeEventListener("keydown", handleKey);
+    };
+  }, [showAllViews]);
+
   const activeSecondaryView = SECONDARY_VIEWS.find((v) => v.id === viewMode);
 
   return (
@@ -109,7 +133,7 @@ export function BoardToolbar({
         <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
           <polygon points="5,3 19,12 5,21" />
         </svg>
-        Tasks
+        <span className="hidden sm:inline">Tasks</span>
       </button>
       <ProjectScriptsMenu projectId={projectId} />
       {onShowMergeQueue && (
@@ -122,7 +146,7 @@ export function BoardToolbar({
             <path strokeLinecap="round" strokeLinejoin="round" d="M3 7h18M3 12h12M3 17h6" />
             <path strokeLinecap="round" strokeLinejoin="round" d="M17 14l3 3-3 3" />
           </svg>
-          Queue
+          <span className="hidden sm:inline">Queue</span>
           {mergeQueueCount > 0 && (
             <span className="ml-0.5 inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-brand-500 text-white text-[10px] font-semibold leading-none">
               {mergeQueueCount > 99 ? "99+" : mergeQueueCount}
@@ -139,7 +163,7 @@ export function BoardToolbar({
           <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M4 18V6m4 12V9m4 9v-5m4 5V4m4 14v-7" />
           </svg>
-          Capacity
+          <span className="hidden sm:inline">Capacity</span>
           {runQueueOpenSlots > 0 && (
             <span className="ml-0.5 inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-sky-500 text-white text-[10px] font-semibold leading-none">
               {runQueueOpenSlots > 99 ? "99+" : runQueueOpenSlots}
@@ -165,7 +189,7 @@ export function BoardToolbar({
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v4m0 4h.01M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z" />
             </svg>
           ) : autoMonitor && <span className="w-2 h-2 rounded-full bg-accent-500 animate-pulse" />}
-          Monitor
+          <span className="hidden sm:inline">Monitor</span>
         </button>
         <button
           onClick={onMonitorRunNow}
@@ -207,7 +231,58 @@ export function BoardToolbar({
           />
         )}
       </div>
-      <div className="flex items-center gap-1 border border-black/[0.07] dark:border-white/10 rounded-md p-0.5 bg-surface-raised dark:bg-surface-raised-dark shrink-0">
+      {/* < sm : a single dropdown listing ALL views (the tab strip clips on phones). */}
+      <div className="relative shrink-0 sm:hidden" ref={allViewsRef}>
+        <button
+          onClick={() => setShowAllViews((v) => !v)}
+          aria-haspopup="menu"
+          aria-expanded={showAllViews}
+          className={`relative flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs font-medium transition-colors ${activeView?.activeClass ?? ACTIVE_DEFAULT}`}
+          title={activeView ? `${activeView.tooltip} — switch view` : "Switch view"}
+        >
+          {activeView?.icon}
+          <span>{activeView?.toolbarLabel ?? "View"}</span>
+          {butlerBadgeCount > 0 && (
+            <span className="ml-0.5 inline-flex h-4 min-w-[16px] items-center justify-center rounded-full bg-amber-500 px-1 text-[10px] font-semibold leading-none text-white" aria-label={`${butlerBadgeCount} pending agent questions`}>
+              {butlerBadgeCount > 99 ? "99+" : butlerBadgeCount}
+            </span>
+          )}
+          <svg className={`h-3 w-3 transition-transform ${showAllViews ? "rotate-180" : ""}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M6 9l6 6 6-6" />
+          </svg>
+        </button>
+        {showAllViews && (
+          <div role="menu" className="absolute left-0 top-full z-30 mt-1 max-h-[70vh] w-52 overflow-y-auto rounded-md border border-gray-200 bg-white p-1 shadow-lg dark:border-gray-700 dark:bg-gray-900">
+            {VIEW_REGISTRY.map((view) => {
+              const isActive = viewMode === view.id;
+              const activeClass = view.activeClass ?? ACTIVE_DEFAULT;
+              const showBadge = view.badge === "butler" && butlerBadgeCount > 0;
+              return (
+                <button
+                  key={view.id}
+                  role="menuitem"
+                  onClick={() => {
+                    onViewModeChange(view.id);
+                    setShowAllViews(false);
+                  }}
+                  className={`flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left text-xs transition-colors ${isActive ? activeClass : INACTIVE}`}
+                  title={view.tooltip}
+                >
+                  {view.icon}
+                  <span className="flex-1">{view.label}</span>
+                  {showBadge && (
+                    <span className="inline-flex h-4 min-w-[16px] items-center justify-center rounded-full bg-amber-500 px-1 text-[10px] font-semibold leading-none text-white">
+                      {butlerBadgeCount > 99 ? "99+" : butlerBadgeCount}
+                    </span>
+                  )}
+                  {view.shortcut && <kbd className="font-mono text-[10px] opacity-60">{view.shortcut}</kbd>}
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+      <div className="hidden sm:flex items-center gap-1 border border-black/[0.07] dark:border-white/10 rounded-md p-0.5 bg-surface-raised dark:bg-surface-raised-dark shrink-0">
         {PRIMARY_VIEWS.map((view) => {
           const isActive = viewMode === view.id;
           const activeClass = view.activeClass ?? ACTIVE_DEFAULT;
