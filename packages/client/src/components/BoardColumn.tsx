@@ -3,6 +3,7 @@ import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
 import type { LiveSessionStats, TodoItem } from "../lib/useBoardEvents.js";
 import { IssueCard, type ProjectTag, type QuickUpdateCallbacks } from "./IssueCard.js";
 import { evaluateWipLimit } from "../lib/wipLimits.js";
+import { computeDropSortOrder } from "../lib/reorderIssues.js";
 
 const ESTIMATE_POINTS: Record<string, number> = { XS: 1, S: 2, M: 3, L: 5, XL: 8 };
 
@@ -180,13 +181,10 @@ export function BoardColumn({
   }
 
   function computeGapSortOrder(beforeIndex: number): number {
-    // Uses displayedIssues so gap positions match visual order
-    if (beforeIndex === 0) {
-      return displayedIssues[0].sortOrder - 100;
-    }
-    const before = displayedIssues[beforeIndex - 1].sortOrder;
-    const after = displayedIssues[beforeIndex].sortOrder;
-    return Math.round((before + after) / 2);
+    return computeDropSortOrder(
+      displayedIssues.map((i) => i.sortOrder),
+      beforeIndex,
+    );
   }
 
   function toggleSort() {
@@ -358,10 +356,9 @@ export function BoardColumn({
           {dragOver && displayedIssues.length > 0 && (
             <DropGap
               visible={true}
-              onDrop={(e) => {
-                const lastSort = column.issues[column.issues.length - 1].sortOrder;
-                handleDropGap(e, lastSort + 100);
-              }}
+              onDrop={(e) =>
+                handleDropGap(e, computeGapSortOrder(displayedIssues.length))
+              }
             />
           )}
           {isCreating && children}
