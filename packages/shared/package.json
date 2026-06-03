@@ -11,6 +11,7 @@
     "./types": { "types": "./dist/types/index.d.ts", "import": "./dist/types/index.js", "default": "./src/types/index.ts" },
     "./lib": { "types": "./dist/lib/index.d.ts", "import": "./dist/lib/index.js", "default": "./src/lib/index.ts" },
     "./lib/agent-skill-files": { "types": "./dist/lib/agent-skill-files.d.ts", "import": "./dist/lib/agent-skill-files.js", "default": "./src/lib/agent-skill-files.ts" },
+    "./lib/branch": { "types": "./dist/lib/branch.d.ts", "import": "./dist/lib/branch.js", "default": "./src/lib/branch.ts" },
     "./lib/git-service": { "types": "./dist/lib/git-service.d.ts", "import": "./dist/lib/git-service.js", "default": "./src/lib/git-service.ts" },
     "./lib/openspec": { "types": "./dist/lib/openspec.d.ts", "import": "./dist/lib/openspec.js", "default": "./src/lib/openspec.ts" },
     "./lib/session-output": { "types": "./dist/lib/session-output.d.ts", "import": "./dist/lib/session-output.js", "default": "./src/lib/session-output.ts" },
