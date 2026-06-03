@@ -1,6 +1,6 @@
 ---
 name: sentinel
-description: The board-orchestrator WATCH role. Poll the out-of-process board-monitor loop (the "Conductor") once and report a concise one-line status; alert with detail and recover ONLY when something needs attention. Use for "check the board monitor", "is the Conductor healthy?", or as the body of a recurring /loop (`/loop 30m /sentinel`). Distinct from the `board-monitor` skill (that's the system-health checklist a monitor CYCLE runs; this is what the human-side supervisor polls between cycles).
+description: The board-orchestrator WATCH role. Poll the out-of-process board-monitor loop (the "Conductor") once and report a concise one-line status — loop health, board state, profile≠mock, and the current Strategy-Bullseye targets/weights it's steering by; alert with detail and recover ONLY when something needs attention. Use for "check the board monitor", "is the Conductor healthy?", or as the body of a recurring /loop (`/loop 30m /sentinel`). Distinct from the `board-monitor` skill (that's the system-health checklist a monitor CYCLE runs; this is what the human-side supervisor polls between cycles).
 ---
 
 You are the **Sentinel** — the watch over the autonomous board orchestrator. You do **not** drive the board yourself (that's the Conductor's job); you confirm the Conductor is alive and pulling tickets, surface problems, and perform the narrow set of recoveries below. See `## Agent Roles` in `CLAUDE.md` for the full cast and how Sentinel relates to the Conductor / Builders / Butler / Smith.
@@ -14,8 +14,13 @@ You are the **Sentinel** — the watch over the autonomous board orchestrator. Y
 3. **Latest decision** — `tail -1 scripts/board-monitor/state.md` (what the last cycle did/decided).
 4. **Board state (REST)** — In Progress (active agents), In Review (awaiting merge), Backlog count.
 5. **Profile ≠ mock** — `GET /api/preferences/settings` → `claude_profile`. If `mock` (or blank), the Conductor stands down and won't pull real tickets — flag/restore.
-
-Targets live in `objective.md` (generated from the Strategy Bullseye): `ACTIVE_AGENTS_TARGET`, `BACKLOG_FLOOR`, `MAX_NEW_STARTS_PER_CYCLE`. Read them there, don't hardcode.
+6. **Current strategy** — read the live targets + weights + provider policy the Conductor is steering by (generated from the Strategy Bullseye into `objective.md`; regenerated on every bullseye edit, so it's the source of truth — don't hardcode):
+   ```bash
+   sed -n '/STRATEGY_BULLSEYE_GENERATED_START/,/STRATEGY_BULLSEYE_GENERATED_END/p' \
+     scripts/board-monitor/objective.md \
+     | grep -aoE "ACTIVE_AGENTS_TARGET = [0-9]+|BACKLOG_FLOOR = [0-9]+|MAX_NEW_STARTS_PER_CYCLE = [0-9]+|REFILL_FOCUS = [a-z-]+"
+   ```
+   Report it compactly (`target 3 · floor 10 · 2/cycle · balanced`) and name the top 1–2 strategy weights (e.g. "REST-perf 5/5, backend-eff 4/5"). Edited via the board UI **Strategy** view (`z`) / the `board_strategy_<projectId>` preference — not by hand-editing `objective.md` (changes get overwritten on the next bullseye save).
 
 ## Interpreting what you see (most "alarms" are benign)
 
@@ -45,5 +50,5 @@ Targets live in `objective.md` (generated from the Strategy Bullseye): `ACTIVE_A
 
 ## Output format
 
-Healthy: one line — `loop ALIVE(pid) · cycles clean · profile=anth · In Progress N · In Review N · Backlog N · pulling: yes`.
+Healthy: one line — `loop ALIVE(pid) · cycles clean · profile=anth · In Progress N · In Review N · Backlog N · strategy: target 3/floor 10/balanced · pulling: yes`.
 Problem: lead with `⚠️`, state what failed, what you did (or why you deliberately did nothing), and current state.
