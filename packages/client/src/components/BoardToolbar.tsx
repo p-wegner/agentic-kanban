@@ -3,6 +3,7 @@ import { MonitorPopover, type MonitorStatus } from "./MonitorPopover.js";
 import { useOrchestrator } from "../hooks/useOrchestrator.js";
 import { VoiceInboxButton } from "./VoiceInboxButton.js";
 import { ProjectScriptsMenu } from "./ProjectScriptsMenu.js";
+import { ExportImportMenu } from "./ExportImportMenu.js";
 import { PRIMARY_VIEWS, SECONDARY_VIEWS, VIEW_REGISTRY } from "../lib/viewRegistry.js";
 import type { StatusWithIssues } from "@agentic-kanban/shared";
 
@@ -178,6 +179,7 @@ export function BoardToolbar({
         <span className="hidden sm:inline">Tasks</span>
       </button>
       <ProjectScriptsMenu projectId={projectId} />
+      <ExportImportMenu projectId={projectId} />
       {onShowMergeQueue && (
         <button
           onClick={onShowMergeQueue}
