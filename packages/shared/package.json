@@ -14,6 +14,7 @@
     "./lib/git-service": { "types": "./dist/lib/git-service.d.ts", "import": "./dist/lib/git-service.js", "default": "./src/lib/git-service.ts" },
     "./lib/openspec": { "types": "./dist/lib/openspec.d.ts", "import": "./dist/lib/openspec.js", "default": "./src/lib/openspec.ts" },
     "./lib/session-output": { "types": "./dist/lib/session-output.d.ts", "import": "./dist/lib/session-output.js", "default": "./src/lib/session-output.ts" },
+    "./lib/status-view": { "types": "./dist/lib/status-view.d.ts", "import": "./dist/lib/status-view.js", "default": "./src/lib/status-view.ts" },
     "./lib/setup-script": { "types": "./dist/lib/setup-script.d.ts", "import": "./dist/lib/setup-script.js", "default": "./src/lib/setup-script.ts" },
     "./lib/ticket-context": { "types": "./dist/lib/ticket-context.d.ts", "import": "./dist/lib/ticket-context.js", "default": "./src/lib/ticket-context.ts" },
     "./lib/cron-utils": { "types": "./dist/lib/cron-utils.d.ts", "import": "./dist/lib/cron-utils.js", "default": "./src/lib/cron-utils.ts" },
