@@ -17,6 +17,7 @@ import { wrapAiOperation } from "../middleware/ai-operation.js";
 import { runTicketPreflight, formatClarificationsBlock, type PreflightClarification } from "../services/ticket-preflight.service.js";
 import { WorkspaceError } from "../services/workspace-internals.js";
 import { getIssueActivity } from "../services/issue-activity.service.js";
+import { getIssueCycleTime } from "../services/cycle-time.service.js";
 
 export function createIssuesRoute(database: Database = db, options?: { boardEvents?: BoardEvents; getSessionManager?: () => SessionManager }) {
   const router = createRouter();
@@ -241,6 +242,14 @@ export function createIssuesRoute(database: Database = db, options?: { boardEven
     }
 
     return c.json({ ...result, clarificationsBlock });
+  });
+
+  // GET /api/issues/:id/cycle-time — per-status time aggregation derived from workflow transitions
+  router.get("/:id/cycle-time", async (c) => {
+    const issueId = c.req.param("id");
+    const result = await getIssueCycleTime(issueId, database);
+    if (!result) return c.json({ error: "Issue not found" }, 404);
+    return c.json(result);
   });
 
   // GET /api/issues/:id/activity — chronological audit feed aggregated from workspaces/sessions/comments
