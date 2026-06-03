@@ -163,7 +163,6 @@ export function useActivityNotifications(projectId: string | null) {
     const now = new Date().toISOString();
     setLastReadAt(now);
     writeLastRead(projectId, now);
-    setIsOpen(false);
   }, [projectId]);
 
   const openDropdown = useCallback(() => {
