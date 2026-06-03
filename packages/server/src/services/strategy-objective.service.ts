@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import type { QuotaUsageResult } from "./quota-usage.service.js";
 
 export type StrategySegmentKind = "work-type" | "provider" | "area" | "custom";
 
@@ -38,6 +39,13 @@ export interface ProviderProfilePolicy {
   headroomPct: number;
   /** Informational note shown in the UI and emitted into objective.md */
   notes: string;
+  /**
+   * Optional ID of the corresponding quota provider from the tampermonkey-direct
+   * `/api/usage` response. When set and live quota data is available, the orchestrator
+   * checks real usage against headroomPct (throttle) or max-out (fill) before
+   * selecting this policy. Leave blank to skip usage-based gating for this policy.
+   */
+  quotaProviderId?: string;
 }
 
 export interface StrategyBullseyeConfig {
@@ -117,6 +125,7 @@ function parseProviderPolicies(raw: unknown): ProviderProfilePolicy[] {
       mode: (VALID_MODES.includes(p.mode) ? p.mode : "throttle") as ProviderPolicyMode,
       headroomPct: clampInt(p.headroomPct, 20, 0, 100),
       notes: typeof p.notes === "string" ? p.notes : "",
+      quotaProviderId: typeof p.quotaProviderId === "string" && p.quotaProviderId.trim() ? p.quotaProviderId.trim() : undefined,
     }));
 }
 
@@ -187,8 +196,9 @@ export function renderGeneratedStrategyBlock(config: StrategyBullseyeConfig): st
     ? ["- No provider policies configured. Workspace launches use the globally-selected provider."]
     : policies.map((p) => {
         const headroom = p.mode === "throttle" ? `, headroom ${p.headroomPct}%` : "";
+        const quotaId = p.quotaProviderId ? `, quota-id: ${p.quotaProviderId}` : "";
         const notes = p.notes ? ` (${p.notes})` : "";
-        return `- **${p.label}** [${p.provider}:${p.profileName}]: ${MODE_DESCRIPTIONS[p.mode]}${headroom}${notes}`;
+        return `- **${p.label}** [${p.provider}:${p.profileName}]: ${MODE_DESCRIPTIONS[p.mode]}${headroom}${quotaId}${notes}`;
       });
 
   const providerStrategyNote = policies.length > 0 ? [
@@ -338,6 +348,44 @@ export function projectIdFromBoardStrategyKey(key: string): string | null {
 }
 
 /**
+ * Given a policy and live quota data, determine whether this policy is currently
+ * blocked by its quota limit.
+ *
+ * - "fill": blocked only when the provider's usage is at or above 100% (fully exhausted).
+ * - "throttle": blocked when current usage >= (100 - headroomPct)% — i.e. the headroom
+ *   buffer has been consumed.
+ * - "fallback-only": never blocked by quota (it's already last-resort; let it through if
+ *   the caller is asking for fallbacks).
+ *
+ * Returns false (not blocked) when quota data is unavailable or the policy has no
+ * `quotaProviderId`, so missing telemetry degrades gracefully to the static priority order.
+ */
+export function isPolicyBlockedByQuota(
+  policy: ProviderProfilePolicy,
+  quota: QuotaUsageResult | null,
+): boolean {
+  if (!quota || !policy.quotaProviderId) return false;
+  if (policy.mode === "fallback-only") return false;
+
+  const entry = quota.providers.find((p) => p.id === policy.quotaProviderId);
+  if (!entry || entry.status !== "ok" || !entry.metrics || entry.metrics.length === 0) return false;
+
+  // Use the highest percent across all metrics for the provider (e.g. messages vs tokens).
+  const maxPercent = entry.metrics.reduce((max, m) => {
+    if (m.percent == null) return max;
+    return m.percent > max ? m.percent : max;
+  }, 0);
+
+  if (policy.mode === "fill") {
+    return maxPercent >= 100;
+  }
+
+  // throttle: block if usage >= capacity threshold
+  const threshold = 100 - policy.headroomPct;
+  return maxPercent >= threshold;
+}
+
+/**
  * Select the best provider+profile for a new workspace based on the strategy config.
  *
  * Priority order:
@@ -345,24 +393,29 @@ export function projectIdFromBoardStrategyKey(key: string): string | null {
  * 2. "throttle" profiles — preferred for main work
  * 3. "fallback-only" profiles — last resort
  *
+ * When `quota` is provided, each policy's live usage is checked against its headroom
+ * before selection. A policy blocked by quota is skipped and the next priority level
+ * is tried (falling through to fallback-only when all non-fallback options are blocked).
+ *
  * Returns `null` if no policies are configured (caller should use the globally-selected provider).
- * Returns the policy with the highest priority that is not "fallback-only" by default;
  * "fallback-only" profiles are only returned if `allowFallback` is true and there are no
- * other options.
+ * other viable options.
  */
 export function selectProviderFromStrategy(
   config: StrategyBullseyeConfig,
-  options: { allowFallback?: boolean } = {},
+  options: { allowFallback?: boolean; quota?: QuotaUsageResult | null } = {},
 ): { provider: "claude" | "codex" | "copilot"; profileName: string; policy: ProviderProfilePolicy } | null {
   const policies = config.providerPolicies ?? [];
   if (policies.length === 0) return null;
 
-  const fill = policies.filter((p) => p.mode === "fill");
+  const quota = options.quota ?? null;
+
+  const fill = policies.filter((p) => p.mode === "fill" && !isPolicyBlockedByQuota(p, quota));
   if (fill.length > 0) {
     return { provider: fill[0].provider, profileName: fill[0].profileName, policy: fill[0] };
   }
 
-  const throttle = policies.filter((p) => p.mode === "throttle");
+  const throttle = policies.filter((p) => p.mode === "throttle" && !isPolicyBlockedByQuota(p, quota));
   if (throttle.length > 0) {
     return { provider: throttle[0].provider, profileName: throttle[0].profileName, policy: throttle[0] };
   }
