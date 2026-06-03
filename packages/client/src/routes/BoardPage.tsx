@@ -54,6 +54,7 @@ import { MoveToDoneDialog } from "../components/MoveToDoneDialog.js";
 import { DependencyImpactDialog } from "../components/DependencyImpactDialog.js";
 import { sendDesktopNotification } from "../lib/desktop.js";
 import { registerAction } from "../lib/actions.js";
+import { useActivityNotifications, type NotificationEvent } from "../hooks/useActivityNotifications.js";
 import { getAppRouteView, getViewRoutePath } from "../lib/appRoutes.js";
 import { QuickTasksPanel } from "../components/QuickTasksPanel.js";
 import { MergeQueuePanel } from "../components/MergeQueuePanel.js";
@@ -113,6 +114,8 @@ export function BoardPage() {
   const [loading, setLoading] = useState(true);
   const [projects, setProjects] = useState<Project[]>([]);
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
+  const notifications = useActivityNotifications(activeProjectId);
+  const { addBoardEvent: addNotificationBoardEvent, addApprovalEvent: addNotificationApprovalEvent } = notifications;
   const [creatingInColumnId, setCreatingInColumnId] = useState<string | null>(null);
   const [selectedIssue, setSelectedIssue] = useState<IssueWithStatus | null>(null);
   const ticketTrail = useTicketTrail();
@@ -349,13 +352,37 @@ export function BoardPage() {
     } else if (reason === "workspace_merged") {
       sendDesktopNotification("Agentic Kanban", "Workspace merged successfully");
     }
+
+    // Activity notification bell — capture issue context from current board snapshot
+    const relevantReasons = new Set(["workspace_merged", "session_completed", "workflow_error"]);
+    if (relevantReasons.has(reason)) {
+      // Find the most recently active workspace in the current columns snapshot
+      let bestIssue: { id: string; issueNumber?: number; title?: string; workspaceId?: string } | undefined;
+      for (const col of columnsRef.current) {
+        for (const iss of col.issues) {
+          const ws = iss.workspaceSummary?.main;
+          if (ws) {
+            bestIssue = {
+              id: iss.id,
+              issueNumber: iss.issueNumber ?? undefined,
+              title: iss.title,
+              workspaceId: ws.id,
+            };
+            break;
+          }
+        }
+        if (bestIssue) break;
+      }
+      addNotificationBoardEvent(reason, bestIssue);
+    }
+
     if (creatingInColumnId) {
       // Don't refresh while create form is open — batch the update
       pendingBoardRefreshRef.current = true;
       return;
     }
     refetchBoard();
-  }, [refetchBoard, creatingInColumnId]), useCallback((issueId: string, sessionId: string, activity: string) => {
+  }, [refetchBoard, creatingInColumnId, addNotificationBoardEvent]), useCallback((issueId: string, sessionId: string, activity: string) => {
     const isActive = columnsRef.current.some(col =>
       col.issues.some(iss => iss.id === issueId && (iss.workspaceSummary?.main?.status === "active" || iss.workspaceSummary?.main?.status === "fixing"))
     );
@@ -411,7 +438,19 @@ export function BoardPage() {
     setSessionTodos((prev) => ({ ...prev, [issueId]: todos }));
   }, []), useCallback((req: ApprovalRequest) => {
     setApprovalRequests((prev) => [...prev, req]);
-  }, []));
+    // Find the issue corresponding to this workspace for the notification
+    let approvalIssue: { id: string; issueNumber?: number; title?: string } | undefined;
+    if (req.workspaceId) {
+      for (const col of columnsRef.current) {
+        const iss = col.issues.find((i) => i.workspaceSummary?.main?.id === req.workspaceId);
+        if (iss) {
+          approvalIssue = { id: iss.id, issueNumber: iss.issueNumber ?? undefined, title: iss.title };
+          break;
+        }
+      }
+    }
+    addNotificationApprovalEvent(req.workspaceId ?? req.sessionId, approvalIssue);
+  }, [addNotificationApprovalEvent]));
 
   // Process pending board refresh when create form closes
   useEffect(() => {
@@ -1919,6 +1958,23 @@ export function BoardPage() {
   const activeProject = projects.find((p) => p.id === activeProjectId);
   const canStartWorkspace = !!activeProject?.repoPath;
 
+  function handleNotificationEventClick(event: NotificationEvent) {
+    if (event.issueId) {
+      const found = columns.flatMap((col) => col.issues).find((iss) => iss.id === event.issueId);
+      if (found) {
+        setSelectedIssue(null);
+        if (event.workspaceId) {
+          setWorkspaceIssue(found);
+        } else {
+          setSelectedIssue(found);
+        }
+        return;
+      }
+    }
+    // Fallback: show all workspaces panel
+    setShowAllWorkspaces(true);
+  }
+
   return (
     <MentionProvider value={{ issues: allMentionIssues, onMentionClick: handleMentionClick }}>
     <Layout
@@ -1937,6 +1993,13 @@ export function BoardPage() {
       onProjectHealthClick={() => setShowProjectHealth(true)}
       isDark={isDark}
       onThemeToggle={() => setTheme(isDark ? "light" : "dark")}
+      notificationEvents={notifications.events}
+      notificationUnreadCount={notifications.unreadCount}
+      notificationOpen={notifications.isOpen}
+      onNotificationOpen={notifications.openDropdown}
+      onNotificationClose={notifications.closeDropdown}
+      onNotificationMarkRead={notifications.markRead}
+      onNotificationEventClick={handleNotificationEventClick}
     >
       {error && (
         <div className="mx-6 mt-4 p-3 bg-red-50 border border-red-200 rounded-md flex items-center justify-between">
