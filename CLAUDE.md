@@ -40,6 +40,13 @@ All git operations live in `packages/shared/src/lib/git-service.ts`. `packages/s
 - **Codex hook parity**: `.codex/hooks.json` routes Codex `PreToolUse` shell checks through `.claude/hooks/smart-hooks-runner.js` and patch/write tools through `prevent-cross-worktree-writes.js`. New Claude safety hooks must also handle Codex hook input (`tool_name`, `tool_input.command`, patch/write, `cwd`) — don't duplicate logic.
 - **Git tests on Windows**: use `.trim()` for content assertions (CRLF vs LF); test git output for keywords, not exact strings.
 
+### PowerShell tool (top failure modes — measured)
+Fleet analysis found PowerShell is the most-failing tool (~14% of calls). Avoid the recurring footguns:
+- **Never name a variable `$pid`** (nor `$host`/`$home`/`$true`/`$null`/`$pshome`) — these are read-only *automatic* variables. Assigning throws and silently keeps the built-in value (so REST calls hit the WRONG id). Use `$procId` / `$projectId`. (The `validate-command-safety` hook now blocks this.)
+- **Don't pipe native-exe stderr with `2>&1`** (e.g. `taskkill ... 2>&1`, `pnpm ... 2>&1`): in PS 5.1 it wraps stderr lines as ErrorRecords and flips `$?`/exit to failure even on success. stderr is already captured — just drop the `2>&1`.
+- **Prefer `try { ... -ErrorAction Stop } catch {}` over a blanket `$ErrorActionPreference='SilentlyContinue'`** — the latter hides the real error yet the cmdlet still exits 1, so the failure looks mysterious.
+- This is **PS 5.1** (Windows PowerShell): no `&&`/`||`, no ternary/`??`, default UTF-16 file encoding (pass `-Encoding utf8`). Unix `head`/`tail`/`which`/`touch`/`grep` don't exist — use the dedicated Read/Grep/Glob tools or PS equivalents.
+
 ### Worktrees (read before testing/typechecking in one)
 - **No `node_modules`** — only the main checkout has them. `tsc --noEmit` / `pnpm build` in a worktree gives bogus `Cannot find module 'react'` / JSX errors that are **not your fault**. Validate via the running dev server + Playwright, or `pnpm install` once in the worktree.
 - **Run vitest FROM the worktree** — new/changed test files exist only on your branch; running from the main checkout gives a misleading "No test files found". **Opposite rule for `pnpm cli --`: run it from the MAIN checkout** (worktrees lack `packages/shared/dist` → `ERR_MODULE_NOT_FOUND`; use MCP/REST from a worktree instead). `--related` is broken in vitest 4 — use `pnpm exec vitest related <file>` from inside the package, or `pnpm test:mine -- --changed HEAD`.

@@ -111,6 +111,25 @@ function usesBrokenRelatedFlag(command) {
   return /\bvitest\b/i.test(command) || /\btest:mine\b/i.test(command) || /\bpnpm\b[^\n]*(?:\btest\b|\bexec\s+vitest\b)/i.test(command);
 }
 
+// Assignment to a read-only / constant PowerShell *automatic* variable. These
+// always throw "cannot overwrite ... read-only or constant" AND silently keep
+// the built-in value (e.g. $pid stays the real process ID), so the command both
+// fails ($? = false → exit 1) and, if it uses the variable, hits the WRONG value.
+// `$pid` for a project/process id is by far the most common collision in this repo.
+//
+// Precise by construction: a `$`-prefixed name on the LHS of `=` is PowerShell
+// syntax (Bash assignment has no `$`), and `\b` ensures `$pid_`/`$pidx` (valid,
+// distinct names) are NOT matched.
+const RESERVED_PS_VARS = "pid|host|home|pshome|true|false|null|psversiontable|executioncontext|shellid";
+function usesReadOnlyPsVar(command) {
+  // Assignment LHS: `$pid = ...` / `$pid=...` (not `==`, not `-eq`).
+  const assign = new RegExp(`(?:^|[;&|({\\s])\\$(${RESERVED_PS_VARS})\\b\\s*=(?!=)`, "i");
+  // foreach loop binding: `foreach ($pid in ...)` — also fails (read-only loop var).
+  const loop = new RegExp(`\\bforeach\\s*\\(\\s*\\$(${RESERVED_PS_VARS})\\b`, "i");
+  const m = command.match(assign) || command.match(loop);
+  return m ? m[1].toLowerCase() : null;
+}
+
 function commandMovesToMainCheckout(command) {
   return /\b(?:cd|Set-Location|Push-Location)\s+["']?C:[\/\\]andrena[\/\\]agentic-kanban\b/i.test(command);
 }
@@ -178,6 +197,19 @@ function isMainBoardPortKill(command) {
 }
 
 function getBlockedNonDbReason(command) {
+  const roVar = usesReadOnlyPsVar(command);
+  if (roVar) {
+    const suggestion = roVar === "pid"
+      ? "Rename it — use $procId for a process id or $projectId for a project id."
+      : `Rename it — $${roVar} is a built-in. Use e.g. $my${roVar.charAt(0).toUpperCase()}${roVar.slice(1)}.`;
+    return (
+      `$${roVar} is a read-only PowerShell automatic variable — assigning to it throws ` +
+      `"cannot overwrite ... read-only or constant", and the variable silently keeps its ` +
+      `built-in value, so the command fails (exit 1) and any later use reads the WRONG value.\n\n` +
+      suggestion
+    );
+  }
+
   if (isBroadNodeKill(command)) {
     return (
       "Broad Node/dev-server process kills are blocked. They can take down the main board server " +
