@@ -365,6 +365,9 @@ export function IssueDetailPanel({
   const [activeShowdownId, setActiveShowdownId] = useState<string | null>(null);
   const [availableSkills, setAvailableSkills] = useState<{ id: string; name: string; description: string }[]>([]);
   const [comments, setComments] = useState<IssueComment[]>([]);
+  const [newNoteBody, setNewNoteBody] = useState("");
+  const [submittingNote, setSubmittingNote] = useState(false);
+  const [deletingCommentId, setDeletingCommentId] = useState<string | null>(null);
   const [artifacts, setArtifacts] = useState<IssueArtifact[]>([]);
   const [artifactsLoading, setArtifactsLoading] = useState(true);
   const [expandedArtifactId, setExpandedArtifactId] = useState<string | null>(null);
@@ -627,6 +630,52 @@ export function IssueDetailPanel({
       showToast(err instanceof Error ? err.message : "Failed to delete artifact", "error");
     } finally {
       setDeletingArtifactId(null);
+    }
+  }
+
+  async function handleAddNote() {
+    const body = newNoteBody.trim();
+    if (!body || submittingNote) return;
+    const optimisticId = `optimistic-${Date.now()}`;
+    const optimistic: IssueComment = {
+      id: optimisticId,
+      issueId: issue.id,
+      workspaceId: null,
+      kind: "note",
+      author: "user",
+      body,
+      payload: null,
+      createdAt: new Date().toISOString(),
+    };
+    setComments((prev) => [...prev, optimistic]);
+    setNewNoteBody("");
+    setSubmittingNote(true);
+    try {
+      const created = await apiFetch<IssueComment>(`/api/issues/${issue.id}/comments`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ body, kind: "note", author: "user" }),
+      });
+      setComments((prev) => prev.map((c) => c.id === optimisticId ? created : c));
+    } catch (err) {
+      setComments((prev) => prev.filter((c) => c.id !== optimisticId));
+      setNewNoteBody(body);
+      showToast(err instanceof Error ? err.message : "Failed to add comment", "error");
+    } finally {
+      setSubmittingNote(false);
+    }
+  }
+
+  async function handleDeleteComment(commentId: string) {
+    if (deletingCommentId) return;
+    setDeletingCommentId(commentId);
+    try {
+      await apiFetch(`/api/issues/${issue.id}/comments/${commentId}`, { method: "DELETE" });
+      setComments((prev) => prev.filter((c) => c.id !== commentId));
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Failed to delete comment", "error");
+    } finally {
+      setDeletingCommentId(null);
     }
   }
 
@@ -1958,14 +2007,14 @@ export function IssueDetailPanel({
             </div>
           )}
 
-          {/* Comments / activity thread (preflight clarifications + agent questions) */}
-          {!editing && comments.length > 0 && (
+          {/* System comments: preflight clarifications, agent questions, merge attempts */}
+          {!editing && comments.filter((c) => c.kind !== "note").length > 0 && (
             <div className="pt-2 border-t border-gray-100 dark:border-gray-800">
               <label className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-2">
                 Clarifications &amp; activity
               </label>
               <ul className="space-y-2">
-                {comments.map((cmt) => (
+                {comments.filter((c) => c.kind !== "note").map((cmt) => (
                   <li
                     key={cmt.id}
                     className="border border-gray-200 dark:border-gray-700 rounded px-2.5 py-2 bg-gray-50 dark:bg-gray-800/50"
@@ -2012,6 +2061,67 @@ export function IssueDetailPanel({
                   </li>
                 ))}
               </ul>
+            </div>
+          )}
+
+          {/* Discussion: user-authored notes with markdown rendering and input */}
+          {!editing && (
+            <div className="pt-2 border-t border-gray-100 dark:border-gray-800">
+              <label className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-2">
+                Discussion
+              </label>
+              {comments.filter((c) => c.kind === "note").length > 0 && (
+                <ul className="space-y-2 mb-3">
+                  {comments.filter((c) => c.kind === "note").map((cmt) => (
+                    <li
+                      key={cmt.id}
+                      className="border border-gray-200 dark:border-gray-700 rounded px-2.5 py-2 bg-gray-50 dark:bg-gray-800/50 group"
+                    >
+                      <div className="flex items-center gap-2 mb-1 text-[11px]">
+                        <span className="text-gray-500 dark:text-gray-400 capitalize font-medium">{cmt.author}</span>
+                        <span className="text-gray-400 dark:text-gray-500 ml-auto">{formatRelativeTime(cmt.createdAt)}</span>
+                        <button
+                          type="button"
+                          disabled={deletingCommentId === cmt.id}
+                          onClick={() => handleDeleteComment(cmt.id)}
+                          className="opacity-0 group-hover:opacity-100 text-gray-400 hover:text-red-500 dark:hover:text-red-400 transition-opacity disabled:opacity-30"
+                          aria-label="Delete comment"
+                        >
+                          <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
+                            <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
+                          </svg>
+                        </button>
+                      </div>
+                      <div className="markdown-body text-sm">
+                        <ReactMarkdown>{normalizeMarkdown(cmt.body)}</ReactMarkdown>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <div className="flex flex-col gap-1.5">
+                <textarea
+                  value={newNoteBody}
+                  onChange={(e) => setNewNoteBody(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+                      e.preventDefault();
+                      handleAddNote();
+                    }
+                  }}
+                  placeholder="Add a note… (Markdown supported, Ctrl+Enter to submit)"
+                  rows={3}
+                  className="w-full text-sm px-2.5 py-2 rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-200 placeholder-gray-400 dark:placeholder-gray-600 resize-none focus:outline-none focus:ring-1 focus:ring-brand-500"
+                />
+                <button
+                  type="button"
+                  disabled={!newNoteBody.trim() || submittingNote}
+                  onClick={handleAddNote}
+                  className="self-end text-xs px-3 py-1.5 rounded bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-40"
+                >
+                  {submittingNote ? "Adding…" : "Add note"}
+                </button>
+              </div>
             </div>
           )}
 
