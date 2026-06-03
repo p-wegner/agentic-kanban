@@ -11,7 +11,7 @@ Safely start, stop, and health-check the agentic-kanban dev server. This encodes
 
 - **NEVER kill ALL node processes.** Other agents run dev servers in separate worktrees on different ports. A blanket `Stop-Process -Name node` kills their work. Always kill by *process signature* (command-line match) — see STOP below.
 - **NEVER use `Start-Process`.** It flashes terminal windows on Windows. Use the Bash tool (`nohup`/`disown`), `Invoke-Expression`, or `&` instead. When spawning processes in Node.js, always pass `windowsHide: true`.
-- **NEVER poll with `Get-NetTCPConnection` (or `netstat | findstr`) in a loop.** Each iteration spawns a subprocess that flashes a terminal window. Use a *single fixed delay + one check*.
+- **NEVER poll with `Get-NetTCPConnection` (or `netstat | findstr`) in a loop.** Each iteration spawns a subprocess that flashes a terminal window. Use one snapshot for port checks. (Waiting for the server to *bind* is the exception: poll the HTTP endpoint with `Invoke-RestMethod` — an in-process call, no window — until it answers. See Step 3b. This is the ban on *port-scan* loops, not HTTP-health loops.)
 - **NEVER use `curl`** for health checks — it's an alias for `Invoke-WebRequest` and breaks JSON. Use `Invoke-RestMethod`.
 
 ## Step 1 — Determine ports
@@ -50,18 +50,24 @@ echo "Started PID: $!"
 
 Use `nohup` + `disown` so the process survives the Bash session exiting (a plain `&` gets SIGHUP when the shell exits and the server dies).
 
-**Step 3b — PowerShell tool (`run_in_background: true`): single fixed delay, then one HTTP check.**
+**Step 3b — PowerShell tool (`run_in_background: true`): poll the HTTP endpoint until it binds.**
 
 ```powershell
-Start-Sleep -Seconds 15
-try { $r = Invoke-RestMethod "http://127.0.0.1:3001/api/projects" -TimeoutSec 10; Write-Host "API OK: $($r.Count) projects" } catch { Write-Host "API FAILED: $_" }
+$ok = $false
+foreach ($i in 1..20) {
+  Start-Sleep -Seconds 2
+  try { $r = Invoke-RestMethod "http://127.0.0.1:3001/api/projects" -TimeoutSec 3; Write-Host "API OK after $($i*2)s: $($r.Count) projects"; $ok = $true; break } catch {}
+}
+if (-not $ok) { Write-Host "API FAILED to bind within 40s" }
 ```
 
 (Substitute `$serverPort` for `3001` when in a worktree.)
 
+**HTTP polling is fine — port-scan polling is not.** The "single fixed delay, no loop" rule above (and line 14) is specifically about `Get-NetTCPConnection` / `netstat` / `Start-Process` loops: each iteration spawns a subprocess that flashes a terminal window. An `Invoke-RestMethod` loop is an in-process .NET HTTP call — no subprocess, no window — so looping it is safe **and** correct here: a cold start binds slower than any constant sleep, so a blind `Start-Sleep 15` then "check once" races the bind and makes every subsequent REST call fail with connection-refused (`Es kann keine Verbindung … hergestellt werden`). Poll `/health`/`/api/projects` until it answers instead.
+
 Why **not** `Start-Job`: when PowerShell exits, the job and all its children die. Why **not** `Start-Process`: flashes terminal windows. The `nohup`/`disown` Bash launch is the only reliable detach.
 
-If the server isn't up after the single check, report it and let the user retry. Do **not** add a retry loop.
+If the endpoint never answers within the poll window, report it and read `/tmp/kanban-dev.log` — do not fall back to a port-scan loop.
 
 ## Step 4 — Stop (kill only this checkout's ports)
 

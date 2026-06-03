@@ -35,10 +35,18 @@ try { Invoke-RestMethod "http://127.0.0.1:3001/health" -TimeoutSec 5 | Out-Null;
 
 **If DOWN:**
 1. Restart via Bash: `cd packages/server && pnpm dev > /tmp/kanban-monitor-srv.log 2>&1 &`
-2. Wait 15s, recheck
-3. If still down: read `/tmp/kanban-monitor-srv.log`, report error, skip Sections 3 and 4
+2. **Poll `/health` until UP — never assume-up after a fixed sleep.** A cold start binds slower than any constant sleep, so a fixed `Start-Sleep` then "recheck once" races the bind and makes every REST call in this cycle fail with connection-refused (`Es kann keine Verbindung … hergestellt werden`). Poll instead:
+   ```powershell
+   $up = $false
+   foreach ($i in 1..20) {
+     Start-Sleep -Seconds 2
+     try { Invoke-RestMethod "http://127.0.0.1:3001/health" -TimeoutSec 3 | Out-Null; $up = $true; break } catch {}
+   }
+   if ($up) { "UP after $($i*2)s" } else { "STILL DOWN after 40s" }
+   ```
+3. **Only proceed when `$up` is true.** If still down after the poll: read `/tmp/kanban-monitor-srv.log`, report the error, and **skip Sections 3 and 4** — do not fire board REST calls against a server that never bound.
 
-**If UP but `$conflictsFixed = $true`:** wait 5s and recheck — tsx watcher may be restarting after file changes.
+**If UP but `$conflictsFixed = $true`:** the tsx watcher may be restarting after the file changes — re-poll the same loop above (it returns immediately once `/health` answers) instead of a blind `Start-Sleep 5`, then continue.
 
 ---
 
