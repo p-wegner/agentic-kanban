@@ -21,6 +21,7 @@ import { SetupStatusPanel } from "./SetupStatusPanel.js";
 import { showToast } from "./Toast.js";
 import type {
   AgentOutputMessage,
+  IssueArtifact,
   IssueWithStatus,
   WorkspaceResponse,
   DiffResponse,
@@ -339,6 +340,8 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
 
   const [monitorRunning, setMonitorRunning] = useState(false);
   const [requiresReview, setRequiresReview] = useState(false);
+  const [visualProofArtifacts, setVisualProofArtifacts] = useState<IssueArtifact[]>([]);
+  const [visualProofLoading, setVisualProofLoading] = useState(false);
   const [prompt, setPrompt] = useState("");
   const [prefs, setPrefs] = useState<Record<string, string>>({});
   const [availableProfileOptions, setAvailableProfileOptions] = useState<ProfileOption[]>([
@@ -394,6 +397,16 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
     setLastSessionPerWorkspace((prev) => ({ ...prev, [selectedWorkspace]: initialSessionId }));
     void handleViewHistory(initialSessionId);
   }, [initialSessionId, selectedWorkspace, workspaceSessions, setActiveSession, setLastSessionPerWorkspace, handleViewHistory]);
+
+  useEffect(() => {
+    if (!selectedWorkspace) { setVisualProofArtifacts([]); return; }
+    let cancelled = false;
+    setVisualProofLoading(true);
+    apiFetch<IssueArtifact[]>(`/api/workspaces/${selectedWorkspace}/visual-proof`)
+      .then((rows) => { if (!cancelled) { setVisualProofArtifacts(rows); setVisualProofLoading(false); } })
+      .catch(() => { if (!cancelled) { setVisualProofArtifacts([]); setVisualProofLoading(false); } });
+    return () => { cancelled = true; };
+  }, [selectedWorkspace]);
 
   const isRunning = activeSession !== null && !messages.some(m => m.type === "exit");
   const isSessionAlive = activeSession !== null && isRunning;
@@ -2087,7 +2100,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                                 : "text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"
                             }`}
                           >
-                            Artifacts
+                            Artifacts{visualProofArtifacts.length > 0 ? ` (${visualProofArtifacts.length})` : ws.includeVisualProof ? " ·" : ""}
                           </button>
                         )}
                         <button
@@ -2322,7 +2335,45 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                     )}
 
                     {viewMode === "artifacts" && ws.workingDir && (
-                      <WorkspaceArtifactsBrowser workspaceId={ws.id} />
+                      <div className="space-y-3">
+                        {visualProofArtifacts.length > 0 && (
+                          <div className="border border-amber-200 dark:border-amber-800 rounded overflow-hidden">
+                            <div className="px-3 py-1.5 bg-amber-50 dark:bg-amber-900/30 border-b border-amber-200 dark:border-amber-800 text-[10px] font-semibold text-amber-700 dark:text-amber-400 uppercase tracking-wide">
+                              Visual Proof ({visualProofArtifacts.length})
+                            </div>
+                            <div className="divide-y divide-amber-100 dark:divide-amber-900">
+                              {visualProofArtifacts.map((a) => (
+                                <div key={a.id} className="p-3 space-y-2">
+                                  {a.caption && (
+                                    <p className="text-xs text-gray-600 dark:text-gray-400 font-medium">{a.caption}</p>
+                                  )}
+                                  {a.type === "image" && (
+                                    <img
+                                      src={a.content}
+                                      alt={a.caption ?? "visual proof"}
+                                      className="max-w-full rounded border border-gray-200 dark:border-gray-700 cursor-pointer hover:opacity-90"
+                                      onClick={() => window.open(a.content, "_blank")}
+                                    />
+                                  )}
+                                  {a.type === "link" && (
+                                    <a href={a.content} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 dark:text-blue-400 underline break-all">{a.content}</a>
+                                  )}
+                                  {a.type === "text" && (
+                                    <pre className="text-[11px] font-mono text-gray-800 dark:text-gray-200 bg-gray-50 dark:bg-gray-900 rounded p-2 overflow-auto max-h-40 whitespace-pre-wrap break-all">{a.content}</pre>
+                                  )}
+                                  <p className="text-[10px] text-gray-400 dark:text-gray-500">{new Date(a.createdAt).toLocaleString("en-US")}</p>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                        {!visualProofLoading && visualProofArtifacts.length === 0 && ws.includeVisualProof && (
+                          <div className="text-xs text-amber-600 dark:text-amber-400 border border-amber-200 dark:border-amber-800 rounded p-3 bg-amber-50 dark:bg-amber-900/20">
+                            Visual proof requested — agent has not attached proof yet.
+                          </div>
+                        )}
+                        <WorkspaceArtifactsBrowser workspaceId={ws.id} />
+                      </div>
                     )}
 
                     {viewMode === "diagnostics" && (
