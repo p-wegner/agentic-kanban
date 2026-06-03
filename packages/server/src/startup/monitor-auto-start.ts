@@ -4,6 +4,7 @@ import { eq, sql, inArray } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { createBoardEvents } from "../services/board-events.js";
 import type { MonitorActionName } from "../services/monitor-nudge.js";
+import { resolveMonitorTunables } from "../services/strategy-objective.service.js";
 
 export interface AutoStartDeps {
   serverPort: number;
@@ -14,11 +15,25 @@ export interface AutoStartDeps {
 export async function runAutoStart(prefMap: Map<string, string>, { serverPort, boardEvents, logMonitorAction }: AutoStartDeps) {
   if (prefMap.get("nudge_auto_start") !== "true") return;
   const baseUrl = `http://127.0.0.1:${serverPort}`;
-  const wipLimit = parseInt(prefMap.get("nudge_wip_limit") || "5", 10);
   const inProgressStatuses = await db.select({ id: projectStatuses.id, projectId: projectStatuses.projectId }).from(projectStatuses)
     .where(sql`${projectStatuses.name} = 'In Progress'`);
 
+  // Per-project effective tunables (Strategy Bullseye when configured, else legacy
+  // nudge prefs). `activeAgentsTarget` is the WIP target; `maxNewStartsPerCycle`
+  // caps how many NEW workspaces a single cycle launches — counted across BOTH the
+  // In-Progress backfill loop and the Todo→sprint pull loop below.
+  const tunablesCache = new Map<string, ReturnType<typeof resolveMonitorTunables>["tunables"]>();
+  const tunablesFor = (projectId: string) => {
+    let t = tunablesCache.get(projectId);
+    if (!t) { t = resolveMonitorTunables(prefMap, projectId).tunables; tunablesCache.set(projectId, t); }
+    return t;
+  };
+  const startedByProject = new Map<string, number>();
+  const startsRemaining = (projectId: string) => tunablesFor(projectId).maxNewStartsPerCycle - (startedByProject.get(projectId) ?? 0);
+  const noteStart = (projectId: string) => startedByProject.set(projectId, (startedByProject.get(projectId) ?? 0) + 1);
+
   for (const inProgressSt of inProgressStatuses) {
+    const wipLimit = tunablesFor(inProgressSt.projectId).activeAgentsTarget;
     const activeWipRows = await db.select({ count: sql<number>`count(distinct ${issues.id})` }).from(issues)
       .innerJoin(workspaces, eq(workspaces.issueId, issues.id))
       .where(sql`${issues.statusId} = ${inProgressSt.id} AND ${workspaces.status} != 'closed'`);
@@ -29,6 +44,7 @@ export async function runAutoStart(prefMap: Map<string, string>, { serverPort, b
       .where(eq(issues.statusId, inProgressSt.id));
     for (const issue of inProgressIssues) {
       if (currentWip >= wipLimit) break;
+      if (startsRemaining(inProgressSt.projectId) <= 0) break;
       const openWs = await db.select({ id: workspaces.id }).from(workspaces)
         .where(sql`${workspaces.issueId} = ${issue.id} AND ${workspaces.status} != 'closed'`).limit(1);
       if (openWs.length > 0) continue;
@@ -37,6 +53,7 @@ export async function runAutoStart(prefMap: Map<string, string>, { serverPort, b
       const prompt = issue.description ? `${issue.title}\n\n${issue.description}` : issue.title;
       await fetch(`${baseUrl}/api/workspaces`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ issueId: issue.id, branch, customPrompt: prompt }) }).catch(() => {});
       currentWip++;
+      noteStart(inProgressSt.projectId);
       logMonitorAction("auto_start", "", issue.id);
       boardEvents.broadcast(inProgressSt.projectId, "board_changed");
       console.log(`[monitor] Auto-started workspace for In Progress issue #${issue.issueNumber} (no open workspace)`);
@@ -44,6 +61,7 @@ export async function runAutoStart(prefMap: Map<string, string>, { serverPort, b
   }
 
   for (const inProgressSt of inProgressStatuses) {
+    const wipLimit = tunablesFor(inProgressSt.projectId).activeAgentsTarget;
     const inProgressCount = await db.select({ count: sql<number>`count(distinct ${issues.id})` }).from(issues)
       .innerJoin(workspaces, eq(workspaces.issueId, issues.id))
       .where(sql`${issues.statusId} = ${inProgressSt.id} AND ${workspaces.status} != 'closed'`);
@@ -56,7 +74,7 @@ export async function runAutoStart(prefMap: Map<string, string>, { serverPort, b
 
     const slotsAvailable = wipLimit - currentWip;
     const todoIssues = await db.select({ id: issues.id, title: issues.title, projectId: issues.projectId, issueNumber: issues.issueNumber }).from(issues)
-      .where(eq(issues.statusId, todoStatus[0].id)).limit(slotsAvailable * 3);
+      .where(eq(issues.statusId, todoStatus[0].id)).limit(Math.max(1, Math.min(slotsAvailable, startsRemaining(inProgressSt.projectId))) * 3);
     const doneStatuses = await db.select({ id: projectStatuses.id }).from(projectStatuses)
       .where(sql`${projectStatuses.name} IN ('Done', 'Cancelled')`);
     const doneStatusIds = new Set(doneStatuses.map((s) => s.id));
@@ -64,6 +82,7 @@ export async function runAutoStart(prefMap: Map<string, string>, { serverPort, b
     let started = 0;
     for (const issue of todoIssues) {
       if (started >= slotsAvailable) break;
+      if (startsRemaining(inProgressSt.projectId) <= 0) break;
       const existingWs = await db.select({ id: workspaces.id }).from(workspaces)
         .where(sql`${workspaces.issueId} = ${issue.id} AND ${workspaces.status} != 'closed'`).limit(1);
       if (existingWs.length > 0) continue;
@@ -95,6 +114,7 @@ export async function runAutoStart(prefMap: Map<string, string>, { serverPort, b
         console.log(`[monitor] Auto-started workspace for unblocked issue "${issue.title}" (${issue.id})`);
         boardEvents.broadcast(issue.projectId, "board_changed");
         started++;
+        noteStart(inProgressSt.projectId);
       }
     }
   }

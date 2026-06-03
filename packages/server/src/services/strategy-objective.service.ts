@@ -249,6 +249,48 @@ export function writeStrategyObjective(repoPath: string, rawConfig: string): voi
   }
 }
 
+/**
+ * Resolve the effective monitor tunables for a project, used by the deterministic
+ * in-process monitor (mechanism 2: `runAutoStart` / `runBacklogEmptyStrategy`).
+ *
+ * Priority:
+ * 1. If a `board_strategy_<projectId>` preference exists, derive the tunables from
+ *    the Strategy Bullseye — the SAME values the external loop and Monitor Butler
+ *    read out of `objective.md`. This is what wires the strategic targets into the
+ *    shipped in-process monitor.
+ * 2. Otherwise fall back to the legacy `nudge_*` prefs so projects that never opened
+ *    the Strategy Bullseye keep their exact prior behavior:
+ *    - `activeAgentsTarget` ← `nudge_wip_limit` (default 5)
+ *    - `backlogFloor` = 1 (legacy: refill only when the backlog is truly empty)
+ *    - `maxNewStartsPerCycle` = +Infinity (legacy: no separate per-cycle start cap)
+ *    - `refillFocus` = "balanced"
+ *
+ * `source` lets callers log/telemetry which control surface actually drove a cycle.
+ */
+export function resolveMonitorTunables(
+  prefMap: Map<string, string>,
+  projectId: string,
+): { tunables: MonitorTunables; source: "strategy" | "prefs" } {
+  const raw = prefMap.get(`board_strategy_${projectId}`);
+  if (raw) {
+    try {
+      return { tunables: deriveMonitorTunables(parseStrategyBullseyeConfig(raw)), source: "strategy" };
+    } catch {
+      /* malformed strategy JSON — fall through to legacy prefs */
+    }
+  }
+  const wipLimit = parseInt(prefMap.get("nudge_wip_limit") || "5", 10);
+  return {
+    tunables: {
+      activeAgentsTarget: Number.isFinite(wipLimit) ? wipLimit : 5,
+      backlogFloor: 1,
+      maxNewStartsPerCycle: Number.POSITIVE_INFINITY,
+      refillFocus: "balanced",
+    },
+    source: "prefs",
+  };
+}
+
 export function isBoardStrategyKey(key: string): boolean {
   return /^board_strategy_[0-9a-f-]+$/.test(normalizeText(key));
 }
