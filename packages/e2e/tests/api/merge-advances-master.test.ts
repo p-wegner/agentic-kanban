@@ -145,12 +145,14 @@ test.describe("merge endpoint advances master and moves issue to Done", () => {
     const mergeStatus = mergeRes.status();
     expect(mergeStatus, `POST /merge must not return 5xx`).toBeLessThan(500);
 
-    // (a) Verify master now includes the branch commit — poll git log in the main checkout.
+    // (a) Verify master now includes the branch commit — poll git in the main checkout.
+    // git merge-base --is-ancestor <sha> <branch> exits 0 only when sha IS reachable
+    // from branch, and exits 1 when it is not. git branch --contains does NOT do this —
+    // it exits 0 regardless of whether the sha is found.
     await pollUntil(
       async () => {
         try {
-          // git branch --contains <sha> <branch> exits 0 if sha is reachable from branch.
-          execSync(`git branch --contains ${branchCommitSha} ${defaultBranch}`, {
+          execSync(`git merge-base --is-ancestor ${branchCommitSha} ${defaultBranch}`, {
             cwd: projectRepoPath,
             stdio: "pipe",
           });
