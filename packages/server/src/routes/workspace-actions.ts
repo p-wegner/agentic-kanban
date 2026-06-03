@@ -7,6 +7,8 @@ import { createSessionArtifactsService } from "../services/session-artifacts.ser
 import { getWorkspaceTimeline } from "../services/workspace-timeline.service.js";
 import { createRouter } from "../middleware/create-router.js";
 import { parseJsonBody, parseOptionalJsonBody } from "../middleware/parse-body.js";
+import { eq, and } from "drizzle-orm";
+import { issueArtifacts, workspaces } from "@agentic-kanban/shared/schema";
 
 export function createWorkspaceActionsRoute(
   getSessionManager: () => SessionManager,
@@ -271,6 +273,18 @@ export function createWorkspaceActionsRoute(
       return c.json({ error: result.error }, 400);
     }
     return c.json({ success: true });
+  });
+
+  // GET /api/workspaces/:id/visual-proof — list DB artifacts (visual proof) scoped to this workspace
+  router.get("/:id/visual-proof", async (c) => {
+    const id = c.req.param("id");
+    // Verify workspace exists
+    const ws = await database.select({ id: workspaces.id }).from(workspaces).where(eq(workspaces.id, id)).limit(1);
+    if (!ws[0]) return c.json({ error: "Workspace not found" }, 404);
+    const rows = await database.select().from(issueArtifacts)
+      .where(and(eq(issueArtifacts.workspaceId, id)))
+      .orderBy(issueArtifacts.createdAt);
+    return c.json(rows);
   });
 
   // GET /api/workspaces/:id/artifacts — list recognized artifacts in workspace directory
