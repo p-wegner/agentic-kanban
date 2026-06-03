@@ -1072,22 +1072,16 @@ export function BoardPage() {
     if (ids.length === 0) return;
     setBoardBulkUpdating(true);
     try {
-      const results = await Promise.allSettled(ids.map((id) =>
-        apiFetch(`/api/issues/${id}`, {
-          method: "PATCH",
-          body: JSON.stringify(updates),
-        })
-      ));
-      const failed = results.filter((result) => result.status === "rejected").length;
-      const succeeded = ids.length - failed;
-      if (failed === 0) {
-        showToast(`${successLabel} for ${succeeded} issue${succeeded !== 1 ? "s" : ""}`, "success");
-      } else {
-        showToast(`${successLabel} for ${succeeded} issue${succeeded !== 1 ? "s" : ""}; ${failed} failed`, "error");
-      }
+      await apiFetch("/api/issues/bulk", {
+        method: "PATCH",
+        body: JSON.stringify({ issueIds: ids, updates }),
+      });
+      showToast(`${successLabel} for ${ids.length} issue${ids.length !== 1 ? "s" : ""}`, "success");
       setSelectedBoardIssueIds(new Set());
       setLastSelectedBoardIssueId(null);
       await refetchBoard();
+    } catch {
+      showToast(`${successLabel} failed`, "error");
     } finally {
       setBoardBulkUpdating(false);
     }
@@ -1112,6 +1106,57 @@ export function BoardPage() {
         showToast(`Added tag "${tag.name}" to ${succeeded} issue${succeeded !== 1 ? "s" : ""}`, "success");
       } else {
         showToast(`Added tag to ${succeeded} issue${succeeded !== 1 ? "s" : ""}; ${failed} failed`, "error");
+      }
+      setSelectedBoardIssueIds(new Set());
+      setLastSelectedBoardIssueId(null);
+      await refetchBoard();
+    } finally {
+      setBoardBulkUpdating(false);
+    }
+  }
+
+  async function handleBoardBulkRemoveTag(tagId: string) {
+    if (hasArchivedBoardSelection) return;
+    const tag = allTags.find((candidate) => candidate.id === tagId);
+    const ids = selectedBoardIssues
+      .filter((issue) => issue.tags?.some((t) => t.id === tagId))
+      .map((issue) => issue.id);
+    if (!tag || ids.length === 0) return;
+    setBoardBulkUpdating(true);
+    try {
+      const results = await Promise.allSettled(ids.map((id) =>
+        apiFetch(`/api/issues/${id}/tags/${tagId}`, { method: "DELETE" })
+      ));
+      const failed = results.filter((result) => result.status === "rejected").length;
+      const succeeded = ids.length - failed;
+      if (failed === 0) {
+        showToast(`Removed tag "${tag.name}" from ${succeeded} issue${succeeded !== 1 ? "s" : ""}`, "success");
+      } else {
+        showToast(`Removed tag from ${succeeded} issue${succeeded !== 1 ? "s" : ""}; ${failed} failed`, "error");
+      }
+      setSelectedBoardIssueIds(new Set());
+      setLastSelectedBoardIssueId(null);
+      await refetchBoard();
+    } finally {
+      setBoardBulkUpdating(false);
+    }
+  }
+
+  async function handleBoardBulkDelete() {
+    const ids = selectedBoardIssues.map((issue) => issue.id);
+    if (ids.length === 0) return;
+    if (!window.confirm(`Delete ${ids.length} issue${ids.length !== 1 ? "s" : ""}? This cannot be undone.`)) return;
+    setBoardBulkUpdating(true);
+    try {
+      const results = await Promise.allSettled(ids.map((id) =>
+        apiFetch(`/api/issues/${id}`, { method: "DELETE" })
+      ));
+      const failed = results.filter((result) => result.status === "rejected").length;
+      const succeeded = ids.length - failed;
+      if (failed === 0) {
+        showToast(`Deleted ${succeeded} issue${succeeded !== 1 ? "s" : ""}`, "success");
+      } else {
+        showToast(`Deleted ${succeeded} issue${succeeded !== 1 ? "s" : ""}; ${failed} failed`, "error");
       }
       setSelectedBoardIssueIds(new Set());
       setLastSelectedBoardIssueId(null);
@@ -2061,6 +2106,40 @@ export function BoardPage() {
                 <option key={tag.id} value={tag.id}>{tag.name}</option>
               ))}
             </select>
+            {(() => {
+              const tagsOnSelection = allTags.filter((tag) =>
+                selectedBoardIssues.some((issue) => issue.tags?.some((t) => t.id === tag.id))
+              );
+              return tagsOnSelection.length > 0 ? (
+                <select
+                  defaultValue=""
+                  disabled={boardBulkUpdating || hasArchivedBoardSelection}
+                  onFocus={() => void loadTags()}
+                  onChange={(event) => {
+                    const tagId = event.target.value;
+                    event.currentTarget.value = "";
+                    if (tagId) void handleBoardBulkRemoveTag(tagId);
+                  }}
+                  className="rounded border border-gray-300 bg-white px-2 py-1 text-gray-700 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200"
+                  aria-label="Bulk remove tag"
+                  title={hasArchivedBoardSelection ? "Clear archived selections before bulk editing" : "Remove a tag from selected cards"}
+                >
+                  <option value="">Remove tag...</option>
+                  {tagsOnSelection.map((tag) => (
+                    <option key={tag.id} value={tag.id}>{tag.name}</option>
+                  ))}
+                </select>
+              ) : null;
+            })()}
+            <button
+              type="button"
+              disabled={boardBulkUpdating}
+              onClick={() => void handleBoardBulkDelete()}
+              className="rounded px-2 py-1 text-red-600 hover:bg-red-50 hover:text-red-700 dark:text-red-400 dark:hover:bg-red-950/40 disabled:opacity-50 transition-colors"
+              title="Delete selected issues"
+            >
+              Delete
+            </button>
             <button
               type="button"
               onClick={() => {
