@@ -57,6 +57,7 @@ import { CodemodPanel } from "../components/CodemodPanel.js";
 import { TranscriptSearchPanel } from "../components/TranscriptSearchPanel.js";
 import { WorkspaceLaunchFailuresPanel } from "../components/WorkspaceLaunchFailuresPanel.js";
 import { ProjectHealthOverview } from "../components/ProjectHealthOverview.js";
+import { AgentStartDryRunModal } from "../components/AgentStartDryRunModal.js";
 import type { MonitorStatus } from "../components/MonitorPopover.js";
 import type { BoardViewState, SavedViewReference } from "../lib/boardSavedViews.js";
 import type {
@@ -121,6 +122,7 @@ export function BoardPage() {
   const [showQuickTasks, setShowQuickTasks] = useState(false);
   const [showMergeQueue, setShowMergeQueue] = useState(false);
   const [showRunQueueForecast, setShowRunQueueForecast] = useState(false);
+  const [dryRunIssue, setDryRunIssue] = useState<IssueWithStatus | null>(null);
   const [showCodemod, setShowCodemod] = useState(false);
   const [showWorktreeOverview, setShowWorktreeOverview] = useState(false);
   const [showAllWorkspaces, setShowAllWorkspaces] = useState(false);
@@ -2007,6 +2009,7 @@ export function BoardPage() {
               onIssueClick={handleIssueClick}
               onWorkspaceClick={handleManageWorkspaces}
               onStartWorkspace={handleStartWorkspace}
+              onDryRun={setDryRunIssue}
               onDragStart={handleBoardDragStart}
               onDrop={handleDrop}
               onPromoteToTodo={handlePromoteBacklogIssue}
@@ -2038,6 +2041,7 @@ export function BoardPage() {
             onIssueClick={handleBoardIssueClick}
             onWorkspaceClick={handleManageWorkspaces}
             onStartWorkspace={handleStartWorkspace}
+            onDryRun={setDryRunIssue}
             onDragStart={handleBoardDragStart}
             onDrop={handleDrop}
             onMoveToNext={handleMoveToNext}
@@ -2212,6 +2216,20 @@ export function BoardPage() {
           onIssueClick={(issue) => {
             setSelectedIssue(issue);
             setShowRunQueueForecast(false);
+          }}
+          onDryRun={(issue) => {
+            setShowRunQueueForecast(false);
+            setDryRunIssue(issue);
+          }}
+        />
+      )}
+      {dryRunIssue && (
+        <AgentStartDryRunModal
+          issue={dryRunIssue}
+          onClose={() => setDryRunIssue(null)}
+          onStartWorkspace={(issue) => {
+            setDryRunIssue(null);
+            handleStartWorkspace(issue);
           }}
         />
       )}

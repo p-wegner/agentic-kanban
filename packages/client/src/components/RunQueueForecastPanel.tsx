@@ -31,6 +31,7 @@ interface RunQueueForecastPanelProps {
   activeTarget: string | number;
   onClose: () => void;
   onIssueClick: (issue: IssueWithStatus) => void;
+  onDryRun?: (issue: IssueWithStatus) => void;
 }
 
 const PRIORITY_RANK: Record<string, number> = {
@@ -164,7 +165,7 @@ function CountTile({ label, value, tone }: { label: string; value: number; tone:
   );
 }
 
-export function RunQueueForecastPanel({ columns, activeTarget, onClose, onIssueClick }: RunQueueForecastPanelProps) {
+export function RunQueueForecastPanel({ columns, activeTarget, onClose, onIssueClick, onDryRun }: RunQueueForecastPanelProps) {
   const forecast = buildRunQueueForecast(columns, activeTarget);
 
   return (
@@ -214,30 +215,48 @@ export function RunQueueForecastPanel({ columns, activeTarget, onClose, onIssueC
             ) : (
               <div className="divide-y divide-gray-100 dark:divide-gray-800 rounded border border-gray-200 dark:border-gray-700 overflow-hidden">
                 {forecast.nextStarts.map((start, index) => (
-                  <button
-                    key={start.issue.id}
-                    type="button"
-                    onClick={() => {
-                      onIssueClick(start.issue);
-                      onClose();
-                    }}
-                    className="w-full px-3 py-3 text-left hover:bg-gray-50 dark:hover:bg-gray-800"
-                  >
-                    <div className="flex items-start gap-2">
-                      <span className="text-xs font-mono text-gray-400 dark:text-gray-500 mt-0.5 shrink-0">{index + 1}</span>
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2 min-w-0">
-                          <span className="text-xs font-mono text-gray-400 dark:text-gray-500 shrink-0">#{start.issue.issueNumber}</span>
-                          <span className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">{start.issue.title}</span>
-                        </div>
-                        <div className="mt-1 flex items-center gap-2 flex-wrap">
-                          <span className="text-xs px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300">{start.issue.statusName}</span>
-                          <span className="text-xs px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300">{start.issue.priority}</span>
-                          <span className="text-xs text-gray-500 dark:text-gray-400">{start.slotLabel}</span>
+                  <div key={start.issue.id} className="flex items-stretch">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onIssueClick(start.issue);
+                        onClose();
+                      }}
+                      className="flex-1 px-3 py-3 text-left hover:bg-gray-50 dark:hover:bg-gray-800 min-w-0"
+                    >
+                      <div className="flex items-start gap-2">
+                        <span className="text-xs font-mono text-gray-400 dark:text-gray-500 mt-0.5 shrink-0">{index + 1}</span>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <span className="text-xs font-mono text-gray-400 dark:text-gray-500 shrink-0">#{start.issue.issueNumber}</span>
+                            <span className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">{start.issue.title}</span>
+                          </div>
+                          <div className="mt-1 flex items-center gap-2 flex-wrap">
+                            <span className="text-xs px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300">{start.issue.statusName}</span>
+                            <span className="text-xs px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300">{start.issue.priority}</span>
+                            <span className="text-xs text-gray-500 dark:text-gray-400">{start.slotLabel}</span>
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  </button>
+                    </button>
+                    {onDryRun && (
+                      <button
+                        type="button"
+                        title="Preview launch without creating a workspace"
+                        aria-label={`Dry run preview for ${start.issue.title}`}
+                        onClick={() => {
+                          onDryRun(start.issue);
+                          onClose();
+                        }}
+                        className="shrink-0 px-3 border-l border-gray-100 dark:border-gray-800 text-gray-400 dark:text-gray-500 hover:text-brand-600 dark:hover:text-brand-400 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors flex items-center"
+                      >
+                        <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7Z" />
+                        </svg>
+                      </button>
+                    )}
+                  </div>
                 ))}
               </div>
             )}
