@@ -12,6 +12,7 @@ import { buildDependencyWavePlan, startNextDependencyWave } from "../services/de
 import { buildSprintCapacityPlan } from "../services/sprint-capacity.service.js";
 import { generateBoardRiskDigest } from "../services/board-risk-digest.service.js";
 import { getWorkspaceLaunchFailures } from "../services/workspace-launch-failures.service.js";
+import { getWorkspaceRisk } from "../services/workspace-risk.service.js";
 import type { BoardEvents } from "../services/board-events.js";
 import type { SessionManager } from "../services/session.manager.js";
 
@@ -264,6 +265,19 @@ export function createProjectsRoute(database: Database = db, options?: { boardEv
     try {
       const digest = await generateBoardRiskDigest(projectId, database);
       return c.json(digest);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.includes("not found")) return c.json({ error: msg }, 404);
+      return c.json({ error: msg }, 500);
+    }
+  });
+
+  // GET /api/projects/:id/workspace-risk — risk heatmap for active/review workspaces
+  router.get("/:id/workspace-risk", async (c) => {
+    const projectId = c.req.param("id");
+    try {
+      const result = await getWorkspaceRisk(projectId, database);
+      return c.json(result);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       if (msg.includes("not found")) return c.json({ error: msg }, 404);
