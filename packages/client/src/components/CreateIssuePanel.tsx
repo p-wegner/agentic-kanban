@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
-import type { CreateIssueRequest, ProfileSelection } from "@agentic-kanban/shared";
+import type { CreateIssueRequest, IssueEstimate, ProfileSelection } from "@agentic-kanban/shared";
 import { CLAUDE_MODEL_OPTIONS } from "@agentic-kanban/shared";
 import type { CreateIssueFormState } from "./CreateIssueForm.js";
 import { apiFetch } from "../lib/api.js";
@@ -69,6 +69,7 @@ export function CreateIssuePanel({
   const [title, setTitle] = useState(initialState?.title ?? "");
   const [description, setDescription] = useState(initialState?.description ?? "");
   const [issueType, setIssueType] = useState<CreateIssueRequest["issueType"]>(initialState?.issueType ?? "task");
+  const [estimate, setEstimate] = useState<IssueEstimate | "">(initialState?.estimate ?? "");
   const [startWorkspace, setStartWorkspace] = useState(initialState?.startWorkspace ?? false);
   const [planMode, setPlanMode] = useState(initialState?.planMode ?? false);
   const [skipAutoReview, setSkipAutoReview] = useState(initialState?.skipAutoReview ?? false);
@@ -167,6 +168,7 @@ export function CreateIssuePanel({
         title: title.trim(),
         description: description.trim() || undefined,
         issueType,
+        estimate: estimate || undefined,
         statusId: selectedStatusId,
         projectId,
         startWorkspace: startWorkspace || undefined,
@@ -262,18 +264,35 @@ export function CreateIssuePanel({
             )}
           </div>
 
-          <div className="flex flex-col gap-1.5">
-            <label className="text-xs font-medium text-gray-600 dark:text-gray-400">Type</label>
-            <select
-              value={issueType}
-              onChange={(e) => setIssueType(e.target.value as CreateIssueRequest["issueType"])}
-              className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded px-3 py-2 focus:outline-none focus:ring-1 focus:ring-brand-500 dark:bg-gray-900 dark:text-gray-100"
-            >
-              <option value="task">Task</option>
-              <option value="bug">Bug</option>
-              <option value="feature">Feature</option>
-              <option value="chore">Chore</option>
-            </select>
+          <div className="flex gap-3">
+            <div className="flex flex-col gap-1.5 flex-1">
+              <label className="text-xs font-medium text-gray-600 dark:text-gray-400">Type</label>
+              <select
+                value={issueType}
+                onChange={(e) => setIssueType(e.target.value as CreateIssueRequest["issueType"])}
+                className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded px-3 py-2 focus:outline-none focus:ring-1 focus:ring-brand-500 dark:bg-gray-900 dark:text-gray-100"
+              >
+                <option value="task">Task</option>
+                <option value="bug">Bug</option>
+                <option value="feature">Feature</option>
+                <option value="chore">Chore</option>
+              </select>
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-medium text-gray-600 dark:text-gray-400">Estimate</label>
+              <select
+                value={estimate}
+                onChange={(e) => setEstimate(e.target.value as IssueEstimate | "")}
+                className="text-sm border border-gray-300 dark:border-gray-600 rounded px-3 py-2 focus:outline-none focus:ring-1 focus:ring-brand-500 dark:bg-gray-900 dark:text-gray-100"
+              >
+                <option value="">None</option>
+                <option value="XS">XS</option>
+                <option value="S">S</option>
+                <option value="M">M</option>
+                <option value="L">L</option>
+                <option value="XL">XL</option>
+              </select>
+            </div>
           </div>
 
           {availableStatuses && availableStatuses.length > 1 && (
