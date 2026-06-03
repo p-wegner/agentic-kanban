@@ -29,6 +29,7 @@ export interface BoardKanbanViewProps {
   onIssueClick: (issue: IssueWithStatus, event: React.MouseEvent) => void;
   onWorkspaceClick: (issue: IssueWithStatus, workspaceId?: string) => void;
   onStartWorkspace: (issue: IssueWithStatus) => void;
+  onDryRun?: (issue: IssueWithStatus) => void;
   onDragStart: (e: React.DragEvent, issue: IssueWithStatus) => void;
   onDrop: (statusId: string, sortOrder?: number) => void;
   onMoveToNext: (issue: IssueWithStatus, nextStatusId: string) => void;
@@ -61,6 +62,7 @@ export function BoardKanbanView({
   onIssueClick,
   onWorkspaceClick,
   onStartWorkspace,
+  onDryRun,
   onDragStart,
   onDrop,
   onMoveToNext,
@@ -118,6 +120,7 @@ export function BoardKanbanView({
               onIssueClick={onIssueClick}
               onWorkspaceClick={onWorkspaceClick}
               onStartWorkspace={onStartWorkspace}
+              onDryRun={onDryRun}
               onDragStart={onDragStart}
               onDrop={onDrop}
               onMoveToNext={onMoveToNext}

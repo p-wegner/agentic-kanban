@@ -202,6 +202,7 @@ interface IssueCardProps {
   onClick: (issue: IssueWithStatus, event: React.MouseEvent) => void;
   onWorkspaceClick?: (issue: IssueWithStatus, workspaceId?: string) => void;
   onStartWorkspace?: (issue: IssueWithStatus) => void;
+  onDryRun?: (issue: IssueWithStatus) => void;
   onDragStart: (e: React.DragEvent, issue: IssueWithStatus) => void;
   onMoveToNext?: (issue: IssueWithStatus) => void;
   nextStatusName?: string;
@@ -235,7 +236,7 @@ function HighlightedText({ text, query }: { text: string; query: string }) {
   );
 }
 
-export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, onDragStart, onMoveToNext, nextStatusName, tags, searchQuery, liveActivity, liveStats, todos, isPendingIssue, isPendingWorkspace, isSelected }: IssueCardProps) {
+export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, onDryRun, onDragStart, onMoveToNext, nextStatusName, tags, searchQuery, liveActivity, liveStats, todos, isPendingIssue, isPendingWorkspace, isSelected }: IssueCardProps) {
   const typeBadgeColor = issue.issueType ? (issueTypeColors[issue.issueType] ?? null) : null;
   const priorityBadgeColor = issue.priority && issue.priority !== "medium" ? (priorityColors[issue.priority] ?? null) : null;
   const ws = issue.workspaceSummary;
@@ -250,8 +251,9 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
   const showActionRow = !isPendingIssue && issue.statusName !== "Done" && issue.statusName !== "Cancelled";
   const showResume = showActionRow && hasActiveWorkspace && !!onWorkspaceClick;
   const showStartWorkspace = showActionRow && !hasActiveWorkspace && !!onStartWorkspace;
+  const showDryRun = showActionRow && !hasActiveWorkspace && !!onDryRun;
   const showMoveToNext = showActionRow && !!onMoveToNext && !!nextStatusName;
-  const hasAnyAction = showResume || showStartWorkspace || showMoveToNext;
+  const hasAnyAction = showResume || showStartWorkspace || showDryRun || showMoveToNext;
 
   useEffect(() => {
     if (!contextMenu) return;
@@ -435,6 +437,20 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
                 <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
               </svg>
               <span className="truncate">Start Workspace</span>
+            </button>
+          )}
+          {showDryRun && (
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => runContextAction(() => onDryRun!(issue))}
+              className="flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left text-xs text-gray-700 hover:bg-gray-50 focus:bg-gray-50 focus:outline-none dark:text-gray-200 dark:hover:bg-gray-800 dark:focus:bg-gray-800"
+            >
+              <svg className="h-3.5 w-3.5 shrink-0 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7Z" />
+              </svg>
+              <span className="truncate">Dry Run Preview</span>
             </button>
           )}
           {showMoveToNext && (
@@ -766,6 +782,19 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
                 <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
               </svg>
               Start Workspace
+            </button>
+          )}
+          {showDryRun && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onDryRun!(issue); }}
+              className="flex items-center justify-center gap-1 text-xs text-gray-500 dark:text-gray-400 hover:text-brand-600 dark:hover:text-brand-400 border border-gray-200 dark:border-gray-700 hover:border-brand-300 rounded px-2 py-1 transition-colors"
+              title="Preview launch without creating a workspace"
+            >
+              <svg className="w-3 h-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7Z" />
+              </svg>
+              Dry Run
             </button>
           )}
           {showMoveToNext && (
