@@ -9,6 +9,8 @@ interface BoardHealthEvent {
   timestamp: string;
   level: "info" | "error";
   type: "cycle_start" | "cycle_end" | "observation" | "action" | "error";
+  category: string | null;
+  issueNumber: number | null;
   summary: string;
   details: string | null;
 }

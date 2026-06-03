@@ -23,7 +23,7 @@ export function ShortcutHelp({ onClose, currentView }: ShortcutHelpProps) {
       cat,
       SHORTCUT_REGISTRY.filter((s) => s.category === cat),
     ]),
-  ) as Record<ShortcutCategory, Shortcut[]>;
+  ) as unknown as Record<ShortcutCategory, Shortcut[]>;
 
   // View shortcuts derived from VIEW_REGISTRY — single source of truth (#116)
   const viewSwitchShortcuts: Shortcut[] = VIEW_REGISTRY.filter((v) => v.shortcut).map((v) => ({
