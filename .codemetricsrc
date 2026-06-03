@@ -1,0 +1,54 @@
+# Code-metrics config for agentic-kanban.
+# Merged with the tool's built-in excludes (node_modules, dist, migrations/meta,
+# lock/binary files, etc.). These patterns add the repo-specific noise.
+
+[exclude]
+patterns = [
+  # Git worktrees — 25 full package-tree copies under packages/.worktrees/
+  # that otherwise dominate the "root" bucket and double-count every file.
+  "**/.worktrees/**",
+  # Generated Drizzle SQL migrations (built-in only drops drizzle/meta).
+  "**/drizzle/**",
+  # Logs (incl. multi-MB dev.log at the repo root — *.log needed for root files).
+  "*.log",
+  "**/*.log",
+  # Tooling / scratch / agent dirs and test artifacts.
+  ".tmp/**",
+  ".llm/**",
+  ".playwright/**",
+  "**/test-results/**",
+  "**/playwright-report/**",
+  # Prose/spec dirs — churn here is doc activity, not code health.
+  "docs/**",
+  "openspec/**",
+  ".changeset/**",
+]
+
+[analysis]
+lizard_processes = 4
+git_days = 90
+top_findings = 30
+
+[[modules]]
+name = "client"
+path = "packages/client/src"
+
+[[modules]]
+name = "server"
+path = "packages/server/src"
+
+[[modules]]
+name = "shared"
+path = "packages/shared/src"
+
+[[modules]]
+name = "mcp-server"
+path = "packages/mcp-server/src"
+
+[[modules]]
+name = "e2e"
+path = "packages/e2e"
+
+[[modules]]
+name = "desktop"
+path = "packages/desktop/src-tauri"
