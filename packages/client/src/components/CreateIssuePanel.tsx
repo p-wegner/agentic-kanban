@@ -7,6 +7,7 @@ import { apiFetch } from "../lib/api.js";
 import { showToast } from "./Toast.js";
 import TicketMentionInput from "./TicketMentionInput.js";
 import TicketMentionRenderer from "./TicketMentionRenderer.js";
+import { MarkdownToolbar } from "./MarkdownToolbar.js";
 
 interface Skill {
   id: string;
@@ -85,6 +86,7 @@ export function CreateIssuePanel({
   const [enhancing, setEnhancing] = useState(false);
   const [preEnhanceSnapshot, setPreEnhanceSnapshot] = useState<{ title: string; description: string } | null>(null);
   const titleRef = useRef<HTMLInputElement>(null);
+  const descriptionRef = useRef<HTMLTextAreaElement>(null);
 
   async function handleEnhance() {
     if (!title.trim() || enhancing) return;
@@ -247,12 +249,16 @@ export function CreateIssuePanel({
                 <p className="text-sm text-gray-400 dark:text-gray-500 italic flex-1 min-h-[200px] border border-gray-200 dark:border-gray-700 rounded px-3 py-2">Nothing to preview.</p>
               )
             ) : (
-              <textarea
-                placeholder="Describe the issue, agent instructions, acceptance criteria…"
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                className="w-full flex-1 min-h-[200px] text-sm border border-gray-300 dark:border-gray-600 rounded px-3 py-2 focus:outline-none focus:ring-1 focus:ring-brand-500 resize-none dark:bg-gray-900 dark:text-gray-100"
-              />
+              <>
+                <MarkdownToolbar textareaRef={descriptionRef} value={description} onChange={setDescription} />
+                <textarea
+                  ref={descriptionRef}
+                  placeholder="Describe the issue, agent instructions, acceptance criteria…"
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  className="w-full flex-1 min-h-[200px] text-sm border border-gray-300 dark:border-gray-600 rounded-b rounded-t-none px-3 py-2 focus:outline-none focus:ring-1 focus:ring-brand-500 resize-none dark:bg-gray-900 dark:text-gray-100"
+                />
+              </>
             )}
           </div>
 
