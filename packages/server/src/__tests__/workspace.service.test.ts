@@ -339,6 +339,52 @@ describe("workspace.service", () => {
       expect(result.planMode).toBe(true);
       expect(sessionManager.startSession).not.toHaveBeenCalled();
     });
+
+    it("auto-generates branch name from issue when branch is omitted", async () => {
+      const { issueId } = await seedProjectAndIssue(db);
+      const gitService = createFakeGitService();
+      const sessionManager = createMockSessionManager();
+
+      const service = createWorkspaceService({
+        database: db,
+        getSessionManager: () => sessionManager,
+        gitService,
+      });
+
+      // No branch provided — should derive from issue number (1) and title ("Implement feature")
+      const result = await service.createWorkspace({ issueId });
+
+      expect(result.error).toBeUndefined();
+      expect(result.branch).toMatch(/^feature\/ak-1-/);
+      expect(result.branch).toBe("feature/ak-1-implement-feature");
+      expect(gitService.createWorktree).toHaveBeenCalledWith(
+        "/tmp/test-repo",
+        "feature/ak-1-implement-feature",
+        "main",
+      );
+    });
+
+    it("uses the explicit branch when provided, regardless of issue title", async () => {
+      const { issueId } = await seedProjectAndIssue(db);
+      const gitService = createFakeGitService();
+      const sessionManager = createMockSessionManager();
+
+      const service = createWorkspaceService({
+        database: db,
+        getSessionManager: () => sessionManager,
+        gitService,
+      });
+
+      const result = await service.createWorkspace({ issueId, branch: "feature/my-custom-branch" });
+
+      expect(result.error).toBeUndefined();
+      expect(result.branch).toBe("feature/my-custom-branch");
+      expect(gitService.createWorktree).toHaveBeenCalledWith(
+        "/tmp/test-repo",
+        "feature/my-custom-branch",
+        "main",
+      );
+    });
   });
 
   describe("mergeWorkspace", () => {
