@@ -12,6 +12,7 @@ import {
 const baseState: BoardViewState = {
   searchQuery: "review",
   showBlocked: true,
+  showStaleOnly: false,
   statusId: "status-review",
   statusName: "In Review",
   tagId: "tag-visual",
