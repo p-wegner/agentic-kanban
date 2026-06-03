@@ -7,6 +7,7 @@ import { formatRelativeTime } from "../lib/formatRelativeTime.js";
 import { IssueActivitySection, type ActivityEvent } from "./IssueActivitySection.js";
 import { showToast } from "./Toast.js";
 import { MoveToDoneDialog } from "./MoveToDoneDialog.js";
+import { DependencyImpactDialog } from "./DependencyImpactDialog.js";
 import { WorkflowProgress } from "./WorkflowProgress.js";
 import { isSpecPlanningPhase, SpecPhasePanel } from "./SpecPhasePanel.js";
 import { WorkspaceArtifactsBrowser } from "./WorkspaceArtifactsBrowser.js";
@@ -337,6 +338,11 @@ export function IssueDetailPanel({
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [togglingVisualVerify, setTogglingVisualVerify] = useState(false);
   const [moveToDonePending, setMoveToDonePending] = useState<{ confirm: () => Promise<void> } | null>(null);
+  const [dependencyImpactPending, setDependencyImpactPending] = useState<{
+    toStatusId: string;
+    toStatusName: string;
+    confirm: () => Promise<void>;
+  } | null>(null);
   const [workspaceCount, setWorkspaceCount] = useState(0);
   const [issueTags, setIssueTags] = useState<{ id: string; name: string; color: string | null }[]>([]);
   const [allTags, setAllTags] = useState<{ id: string; name: string; color: string | null }[]>([]);
@@ -711,22 +717,40 @@ export function IssueDetailPanel({
   async function handleStatusChange(newStatusId: string) {
     if (newStatusId === issue.statusId) return;
     const targetStatus = statuses.find((s) => s.id === newStatusId);
-    const isArchive = targetStatus && ["Done", "Cancelled"].includes(targetStatus.name);
-    const ws = issue.workspaceSummary?.main;
-    if (isArchive && ws && ws.status !== "closed") {
-      setMoveToDonePending({
+    const hasDeps = dependencies.dependencies.length > 0;
+
+    const doMove = async () => {
+      const isArchive = targetStatus && ["Done", "Cancelled"].includes(targetStatus.name);
+      const ws = issue.workspaceSummary?.main;
+      if (isArchive && ws && ws.status !== "closed") {
+        setMoveToDonePending({
+          confirm: async () => {
+            await onUpdate(issue.id, { statusId: newStatusId });
+            setMoveToDonePending(null);
+          },
+        });
+        return;
+      }
+      try {
+        await onUpdate(issue.id, { statusId: newStatusId });
+      } catch {
+        showToast("Failed to change status", "error");
+      }
+    };
+
+    if (hasDeps && targetStatus) {
+      setDependencyImpactPending({
+        toStatusId: newStatusId,
+        toStatusName: targetStatus.name,
         confirm: async () => {
-          await onUpdate(issue.id, { statusId: newStatusId });
-          setMoveToDonePending(null);
+          setDependencyImpactPending(null);
+          await doMove();
         },
       });
       return;
     }
-    try {
-      await onUpdate(issue.id, { statusId: newStatusId });
-    } catch {
-      showToast("Failed to change status", "error");
-    }
+
+    await doMove();
   }
 
   async function handleDelete() {
@@ -2032,6 +2056,16 @@ export function IssueDetailPanel({
           issue={issue}
           onConfirm={moveToDonePending.confirm}
           onCancel={() => setMoveToDonePending(null)}
+        />
+      )}
+      {dependencyImpactPending && (
+        <DependencyImpactDialog
+          issueId={issue.id}
+          fromStatusName={statuses.find((s) => s.id === issue.statusId)?.name ?? ""}
+          toStatusName={dependencyImpactPending.toStatusName}
+          dependencies={dependencies.dependencies}
+          onConfirm={dependencyImpactPending.confirm}
+          onCancel={() => setDependencyImpactPending(null)}
         />
       )}
       {showDecomposeModal && (
