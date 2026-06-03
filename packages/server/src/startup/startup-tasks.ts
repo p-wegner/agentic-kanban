@@ -1,11 +1,14 @@
 import { db, rawClient } from "../db/index.js";
 import { workspaces, issues, projects, preferences, sessions } from "@agentic-kanban/shared/schema";
-import { eq } from "drizzle-orm";
+import { and, eq, isNotNull, ne } from "drizzle-orm";
 import { applyMigrations } from "../db/manual-migrate.js";
 import { deduplicateProjects } from "../services/project-registration.js";
 import type * as agentServiceType from "../services/agent.service.js";
 import * as agentService from "../services/agent.service.js";import * as gitService from "../services/git.service.js";
 import type { SessionManager } from "../services/session.manager.js";
+import type { Database } from "../db/index.js";
+import { moveIssueToDone, updateWorkspaceStatus } from "../repositories/workspace.repository.js";
+import { logBoardHealthEvent } from "../repositories/board-health-events.repository.js";
 
 /** Kill orphaned tsx server processes from previous hot-reload cycles (Windows only). */
 export function shouldKillOrphanedServerProcess(input: {
@@ -306,6 +309,69 @@ export async function checkMainCheckoutHeads(): Promise<void> {
   }
 }
 
+/**
+ * Reconcile workspaces whose branch was merged (mergedAt IS NOT NULL) but whose
+ * status was reset to something other than "closed" — e.g. when cleanupStaleSessions()
+ * marked a dead session's workspace as "idle" after the server died mid-merge-response.
+ *
+ * Must run AFTER cleanupStaleSessions() so it can override any incorrect status reset.
+ */
+export async function reconcileSilentlyMergedWorkspaces(database: Database = db): Promise<void> {
+  try {
+    const stale = await database
+      .select({
+        id: workspaces.id,
+        issueId: workspaces.issueId,
+        mergedAt: workspaces.mergedAt,
+        closedAt: workspaces.closedAt,
+        branch: workspaces.branch,
+        issueNumber: issues.issueNumber,
+        projectId: issues.projectId,
+      })
+      .from(workspaces)
+      .innerJoin(issues, eq(workspaces.issueId, issues.id))
+      .where(
+        // mergedAt is set (git merge already landed) but workspace is not closed
+        and(isNotNull(workspaces.mergedAt), ne(workspaces.status, "closed")),
+      );
+
+    if (stale.length === 0) return;
+
+    console.log(`[startup] Reconciling ${stale.length} silently-merged workspace(s) left open by a dropped HTTP response`);
+    const now = new Date().toISOString();
+
+    for (const ws of stale) {
+      try {
+        await updateWorkspaceStatus(ws.id, "closed", {
+          closedAt: ws.closedAt ?? now,
+          mergedAt: ws.mergedAt!,
+          readyForMerge: false,
+          workingDir: null,
+        }, database);
+        await moveIssueToDone(ws.id, ws.issueId, now, database);
+
+        try {
+          await logBoardHealthEvent({
+            projectId: ws.projectId,
+            cycleId: `startup-reconcile-${ws.id}`,
+            eventType: "action",
+            category: "merge",
+            issueNumber: ws.issueNumber ?? undefined,
+            summary: `Startup reconciliation: workspace ${ws.branch} was already merged at ${ws.mergedAt} but left open by a dropped HTTP response. Closed workspace and moved issue to Done.`,
+            details: { workspaceId: ws.id, mergedAt: ws.mergedAt, reconciledAt: now },
+          }, database);
+        } catch { /* health event logging is non-fatal */ }
+
+        console.log(`[startup] reconciled workspace ${ws.id} (issue #${ws.issueNumber ?? ws.issueId}, mergedAt=${ws.mergedAt})`);
+      } catch (err) {
+        console.warn(`[startup] reconcileSilentlyMergedWorkspaces: failed for workspace ${ws.id}:`, err instanceof Error ? err.message : String(err));
+      }
+    }
+  } catch (err) {
+    console.warn("[startup] reconcileSilentlyMergedWorkspaces failed (non-fatal):", err instanceof Error ? err.message : String(err));
+  }
+}
+
 /** Combined startup sequence: kill orphans, migrate, seed, dedup, abort stale merges, clean sessions/worktrees. */
 export async function runStartupTasks(sessionManager: SessionManager, _deps?: { agentService?: typeof agentServiceType }): Promise<void> {
   await killOrphanedServers();
@@ -313,6 +379,7 @@ export async function runStartupTasks(sessionManager: SessionManager, _deps?: { 
   await abortStaleMerges();
   await abortStaleRebases();
   await cleanupStaleSessions(sessionManager);
+  await reconcileSilentlyMergedWorkspaces();
   await pruneStaleWorktrees();
   await checkMainCheckoutHeads();
 }
