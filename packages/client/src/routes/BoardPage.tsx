@@ -20,6 +20,7 @@ import { MonitorCycleHistoryPanel } from "../components/MonitorCycleHistoryPanel
 import { BoardHealthNotificationCenter } from "../components/BoardHealthNotificationCenter.js";
 import { RunbooksView } from "../components/RunbooksView.js";
 import { SprintCapacityPlanner } from "../components/SprintCapacityPlanner.js";
+import { ConstellationView } from "../components/ConstellationView.js";
 import { useAgentQuestionsCount } from "../components/AgentQuestionsPanel.js";
 import { BoardErrorBoundary } from "../components/BoardErrorBoundary.js";
 import { BacklogView } from "../components/BacklogView.js";
@@ -2166,6 +2167,15 @@ export function BoardPage() {
         {viewMode === "capacity" && activeProjectId && (
           <BoardErrorBoundary columnName="Sprint Capacity Planner">
             <SprintCapacityPlanner projectId={activeProjectId} />
+          </BoardErrorBoundary>
+        )}
+        {viewMode === "constellation" && (
+          <BoardErrorBoundary columnName="Constellation View">
+            <ConstellationView
+              columns={columns}
+              onIssueClick={handleIssueClick}
+              searchQuery={searchQuery}
+            />
           </BoardErrorBoundary>
         )}
         {viewMode === "backlog" && (
