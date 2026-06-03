@@ -8,6 +8,7 @@ import { IssueActivitySection, type ActivityEvent } from "./IssueActivitySection
 import { showToast } from "./Toast.js";
 import { MoveToDoneDialog } from "./MoveToDoneDialog.js";
 import { DependencyImpactDialog } from "./DependencyImpactDialog.js";
+import { MarkdownToolbar } from "./MarkdownToolbar.js";
 import { WorkflowProgress } from "./WorkflowProgress.js";
 import { isSpecPlanningPhase, SpecPhasePanel } from "./SpecPhasePanel.js";
 import { WorkspaceArtifactsBrowser } from "./WorkspaceArtifactsBrowser.js";
@@ -335,6 +336,7 @@ export function IssueDetailPanel({
   const [depHighlightIdx, setDepHighlightIdx] = useState(0);
   const depComboRef = useRef<HTMLDivElement>(null);
   const depInputRef = useRef<HTMLInputElement>(null);
+  const descriptionRef = useRef<HTMLTextAreaElement>(null);
   const [enhancing, setEnhancing] = useState(false);
   const [preEnhanceSnapshot, setPreEnhanceSnapshot] = useState<{ title: string; description: string } | null>(null);
   const [estimating, setEstimating] = useState(false);
@@ -1132,11 +1134,13 @@ export function IssueDetailPanel({
                 )
               ) : (
               <>
+              <MarkdownToolbar textareaRef={descriptionRef} value={description} onChange={setDescription} />
               <textarea
+                ref={descriptionRef}
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
                 rows={panelMode !== "sidebar" ? 16 : 10}
-                className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500 resize-none"
+                className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded-b rounded-t-none px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500 resize-none"
                 placeholder="Add a description... (paste screenshots with Ctrl+V)"
                 onPaste={(e) => {
                   const items = e.clipboardData?.items;
