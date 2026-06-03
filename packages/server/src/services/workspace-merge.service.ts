@@ -702,5 +702,176 @@ export function createWorkspaceMergeService(deps: {
     return { sessionId };
   }
 
-  return { mergeWorkspace, updateBase, abortRebase, resolveConflicts, fixAndMerge };
+  /**
+   * Check whether a workspace's branch is already fully merged into the default branch:
+   * no diff against the base branch AND the branch's HEAD commit is reachable from it.
+   * Returns a summary the operator can review before confirming reconciliation.
+   */
+  async function checkAlreadyMerged(id: string): Promise<{
+    isAlreadyMerged: boolean;
+    branch: string;
+    baseBranch: string;
+    mergeCommitSha: string | null;
+    issueNumber: number | null;
+    reason?: string;
+  }> {
+    const workspace = await getWorkspaceById(id, database);
+    if (!workspace) throw new WorkspaceError("Workspace not found", "NOT_FOUND");
+    if (workspace.isDirect) throw new WorkspaceError("Not applicable to direct workspaces", "BAD_REQUEST");
+    if (!workspace.branch) throw new WorkspaceError("Workspace has no branch", "BAD_REQUEST");
+
+    const { repoPath, defaultBranch } = await resolveProjectRepo(id, database);
+    const baseBranch = requireBaseBranch(workspace.baseBranch || defaultBranch);
+
+    // Resolve issue number for the confirmation summary
+    const { issues: issuesTable } = await import("@agentic-kanban/shared/schema");
+    const issueRows = await database
+      .select({ issueNumber: issuesTable.issueNumber })
+      .from(issuesTable)
+      .where(eq(issuesTable.id, workspace.issueId))
+      .limit(1);
+    const issueNumber = issueRows[0]?.issueNumber ?? null;
+
+    // Check working-dir exists for accurate diff
+    let diffOutput = "";
+    let diffFromWorktree = false;
+    if (workspace.workingDir) {
+      try {
+        diffOutput = await gitService.getDiff(workspace.workingDir, baseBranch);
+        diffFromWorktree = true;
+      } catch {
+        // worktree gone — fall through to repo-level diff
+      }
+    }
+    if (!diffFromWorktree) {
+      diffOutput = await gitService.getDiffFromRepo(repoPath, workspace.branch, baseBranch);
+    }
+
+    if (diffOutput.trim() !== "") {
+      return {
+        isAlreadyMerged: false,
+        branch: workspace.branch,
+        baseBranch,
+        mergeCommitSha: null,
+        issueNumber,
+        reason: "Branch still has a diff against " + baseBranch,
+      };
+    }
+
+    // Resolve branch HEAD to verify reachability
+    let branchSha: string;
+    try {
+      branchSha = await gitService.revParse(repoPath, workspace.branch);
+    } catch {
+      // Branch ref doesn't exist in the main repo — check worktree
+      if (workspace.workingDir) {
+        try {
+          branchSha = await gitService.revParse(workspace.workingDir, "HEAD");
+        } catch {
+          return {
+            isAlreadyMerged: false,
+            branch: workspace.branch,
+            baseBranch,
+            mergeCommitSha: null,
+            issueNumber,
+            reason: "Could not resolve branch HEAD",
+          };
+        }
+      } else {
+        return {
+          isAlreadyMerged: false,
+          branch: workspace.branch,
+          baseBranch,
+          mergeCommitSha: null,
+          issueNumber,
+          reason: "Branch ref not found and no worktree available",
+        };
+      }
+    }
+
+    const reachable = await gitService.isAncestor(repoPath, branchSha, baseBranch);
+    if (!reachable) {
+      return {
+        isAlreadyMerged: false,
+        branch: workspace.branch,
+        baseBranch,
+        mergeCommitSha: null,
+        issueNumber,
+        reason: "Branch commit is not reachable from " + baseBranch,
+      };
+    }
+
+    // Find the merge commit: the commit on baseBranch that first introduced this SHA
+    let mergeCommitSha: string | null = null;
+    try {
+      mergeCommitSha = (await gitService.revParse(repoPath, baseBranch)).trim() || null;
+    } catch { /* non-fatal */ }
+
+    return {
+      isAlreadyMerged: true,
+      branch: workspace.branch,
+      baseBranch,
+      mergeCommitSha,
+      issueNumber,
+    };
+  }
+
+  /**
+   * Reconcile an already-merged workspace as Done without running git merge:
+   * close the workspace and move the issue to Done.
+   */
+  async function reconcileAlreadyMerged(id: string) {
+    const workspace = await getWorkspaceById(id, database);
+    if (!workspace) throw new WorkspaceError("Workspace not found", "NOT_FOUND");
+    if (workspace.status === "closed") throw new WorkspaceError("Workspace is already closed", "BAD_REQUEST");
+
+    const check = await checkAlreadyMerged(id);
+    if (!check.isAlreadyMerged) {
+      throw new WorkspaceError(
+        check.reason ?? "Branch is not fully merged into " + check.baseBranch,
+        "BAD_REQUEST",
+        { reason: check.reason },
+      );
+    }
+
+    const { repoPath } = await resolveProjectRepo(id, database);
+    const now = new Date().toISOString();
+
+    await updateWorkspaceStatus(id, "closed", {
+      closedAt: workspace.closedAt ?? now,
+      mergedAt: workspace.mergedAt ?? now,
+      readyForMerge: false,
+      workingDir: null,
+    }, database);
+    await moveIssueToDone(id, workspace.issueId, now, database);
+
+    // Best-effort worktree cleanup
+    if (workspace.workingDir && !workspace.isDirect) {
+      try { await gitService.removeWorktree(repoPath, workspace.workingDir); } catch { /* non-fatal */ }
+    }
+
+    try {
+      await recordMergeAttempt(
+        workspace,
+        "already-merged",
+        `Reconciled as Done: branch ${workspace.branch} was already merged into ${check.baseBranch} (commit ${check.mergeCommitSha ?? "unknown"}).`,
+        { baseBranch: check.baseBranch, mergeCommitSha: check.mergeCommitSha, reconciledAt: now },
+        now,
+      );
+    } catch { /* non-fatal */ }
+
+    const projectId = await resolveProjectId(id, database);
+    if (projectId) boardEvents?.broadcast(projectId, "workspace_merged");
+
+    return {
+      id,
+      branch: check.branch,
+      baseBranch: check.baseBranch,
+      mergeCommitSha: check.mergeCommitSha,
+      issueNumber: check.issueNumber,
+      reconciledAt: now,
+    };
+  }
+
+  return { mergeWorkspace, updateBase, abortRebase, resolveConflicts, fixAndMerge, checkAlreadyMerged, reconcileAlreadyMerged };
 }
