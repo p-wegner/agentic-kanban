@@ -1,4 +1,4 @@
-import { type ReactNode, useRef, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { useTheme, type Theme } from "../hooks/useTheme.js";
 import { ProjectTabs } from "./ProjectTabs.js";
 
@@ -68,6 +68,25 @@ export function Layout({
   const [createError, setCreateError] = useState<string | null>(null);
   const createNameInvalid = /[/\\<>:"|?*\x00]/.test(createName);
   const inputRef = useRef<HTMLInputElement>(null);
+  // Below sm the utility icons (workspaces/failures/worktrees/theme/settings)
+  // collapse into a single ⋯ menu so the header fits on one row.
+  const [showUtilMenu, setShowUtilMenu] = useState(false);
+  const utilMenuRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!showUtilMenu) return;
+    function handleClick(e: MouseEvent) {
+      if (utilMenuRef.current && !utilMenuRef.current.contains(e.target as Node)) setShowUtilMenu(false);
+    }
+    function handleKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setShowUtilMenu(false);
+    }
+    document.addEventListener("mousedown", handleClick);
+    document.addEventListener("keydown", handleKey);
+    return () => {
+      document.removeEventListener("mousedown", handleClick);
+      document.removeEventListener("keydown", handleKey);
+    };
+  }, [showUtilMenu]);
 
   async function handleRegisterSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -128,17 +147,20 @@ export function Layout({
 
   return (
     <div className="h-screen flex flex-col bg-surface dark:bg-surface-dark">
-      <header className="bg-surface-raised dark:bg-surface-raised-dark border-b border-black/[0.07] dark:border-white/10 px-4 py-2.5 shrink-0">
-        <div className="flex items-center justify-between gap-4 flex-wrap">
+      <header className="bg-surface-raised dark:bg-surface-raised-dark border-b border-black/[0.07] dark:border-white/10 px-3 py-1.5 sm:px-4 sm:py-2.5 shrink-0">
+        <div className="flex items-center justify-between gap-2 sm:gap-4 flex-wrap">
           <div className="flex items-center gap-2 min-w-0">
-            <h1 className="wordmark text-xl font-semibold text-ink dark:text-stone-100 shrink-0">
+            <h1 className="wordmark hidden sm:block text-xl font-semibold text-ink dark:text-stone-100 shrink-0">
               Agentic Kanban
             </h1>
-            <ProjectTabs
-              projects={projects}
-              activeProjectId={activeProjectId ?? null}
-              onProjectChange={onProjectChange}
-            />
+            {/* Pinned-project chips are redundant with the select below on phones. */}
+            <div className="hidden sm:contents">
+              <ProjectTabs
+                projects={projects}
+                activeProjectId={activeProjectId ?? null}
+                onProjectChange={onProjectChange}
+              />
+            </div>
             {projects.length > 1 && (
               <div className="flex items-center gap-2">
                 <select
@@ -168,7 +190,7 @@ export function Layout({
               </div>
             )}
             {projects.length === 1 && (
-              <div className="flex items-center gap-2">
+              <div className="hidden sm:flex items-center gap-2">
                 <span className="text-sm text-gray-500 dark:text-gray-400">{projects[0].name}</span>
                 {projects[0].color && (
                   <div
@@ -232,6 +254,7 @@ export function Layout({
                 </button>
               )}
             </div>
+            <div className="hidden sm:flex items-center gap-2 sm:gap-3">
             <button
               onClick={onAllWorkspacesClick}
               className="p-1.5 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700"
@@ -293,6 +316,41 @@ export function Layout({
                 <circle cx="12" cy="12" r="3" />
               </svg>
             </button>
+            </div>
+            {/* < sm : all utility actions fold into one ⋯ menu */}
+            <div className="relative sm:hidden" ref={utilMenuRef}>
+              <button
+                onClick={() => setShowUtilMenu((v) => !v)}
+                aria-haspopup="menu"
+                aria-expanded={showUtilMenu}
+                className="p-1.5 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700"
+                title="More"
+              >
+                <svg className="h-5 w-5" viewBox="0 0 24 24" fill="currentColor">
+                  <circle cx="5" cy="12" r="2" /><circle cx="12" cy="12" r="2" /><circle cx="19" cy="12" r="2" />
+                </svg>
+              </button>
+              {showUtilMenu && (
+                <div role="menu" className="absolute right-0 top-full z-40 mt-1 w-48 rounded-md border border-gray-200 bg-white p-1 shadow-lg dark:border-gray-700 dark:bg-gray-900">
+                  {[
+                    { label: "All Workspaces", onClick: onAllWorkspacesClick },
+                    { label: "Launch Failures", onClick: onLaunchFailuresClick },
+                    { label: "Worktrees", onClick: onWorktreeOverviewClick },
+                    { label: isDark ? "Light mode" : "Dark mode", onClick: onThemeToggle },
+                    { label: "Settings", onClick: onSettingsClick },
+                  ].map((item) => (
+                    <button
+                      key={item.label}
+                      role="menuitem"
+                      onClick={() => { setShowUtilMenu(false); item.onClick?.(); }}
+                      className="flex w-full items-center rounded px-2.5 py-1.5 text-left text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-800"
+                    >
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </header>

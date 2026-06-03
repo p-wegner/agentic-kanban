@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState } from "react";
 import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
 import { CompletedCard } from "./CompletedCard.js";
+import { useIsNarrow } from "../hooks/useMediaQuery.js";
 
 interface CompletedGridProps {
   columns: StatusWithIssues[];
@@ -25,6 +26,7 @@ export function CompletedGrid({
 }: CompletedGridProps) {
   const [dragOver, setDragOver] = useState(false);
   const dragCounterRef = useRef(0);
+  const isNarrow = useIsNarrow();
 
   const totalIssues = useMemo(
     () => columns.reduce((sum, col) => sum + col.issues.length, 0),
@@ -51,8 +53,7 @@ export function CompletedGrid({
 
   if (columns.length === 0 || totalIssues === 0) return null;
 
-  if (collapsed) {
-    return (
+  const collapsedBar = (
       <button
         onClick={onToggle}
         className="shrink-0 w-full bg-gray-50 dark:bg-gray-950 border border-gray-200 dark:border-gray-700 rounded-lg px-4 py-3 flex items-center gap-3 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors text-left"
@@ -82,8 +83,9 @@ export function CompletedGrid({
           )}
         </span>
       </button>
-    );
-  }
+  );
+
+  if (collapsed) return collapsedBar;
 
   function handleDragEnter(e: React.DragEvent) {
     e.preventDefault();
@@ -105,6 +107,61 @@ export function CompletedGrid({
     dragCounterRef.current = 0;
     setDragOver(false);
     if (doneStatusId) onDrop(doneStatusId);
+  }
+
+  const cardsGrid = (
+    <div
+      className="grid gap-2"
+      style={{ gridTemplateColumns: "repeat(auto-fill, minmax(min(220px, 100%), 1fr))" }}
+    >
+      {allIssues.map((issue) => (
+        <CompletedCard
+          key={issue.id}
+          issue={issue}
+          onClick={onIssueClick}
+          onDragStart={onDragStart}
+          searchQuery={searchQuery}
+          isSelected={selectedIssueIds?.has(issue.id)}
+        />
+      ))}
+    </div>
+  );
+
+  // On phones the completed list opens as a bottom-sheet overlay rather than an
+  // inline block, so it never competes with the board for vertical room: the
+  // thin collapsed bar stays in-flow, and the sheet floats above when expanded.
+  if (isNarrow) {
+    return (
+      <>
+        {collapsedBar}
+        <div className="fixed inset-0 z-40 bg-black/40" onClick={onToggle}>
+          <div
+            className="absolute inset-x-0 bottom-0 flex max-h-[85vh] flex-col rounded-t-2xl border-t border-gray-200 bg-white shadow-2xl dark:border-gray-700 dark:bg-gray-900"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-gray-100 px-4 py-3 dark:border-gray-800">
+              <div className="flex items-center gap-2 min-w-0">
+                <span className="text-sm font-semibold text-gray-700 dark:text-gray-200">Completed</span>
+                <span className="rounded-full bg-gray-200 px-1.5 py-0.5 text-xs text-gray-500 dark:bg-gray-700 dark:text-gray-400 shrink-0">{totalIssues}</span>
+                {breakdown.done > 0 && breakdown.cancelled > 0 && (
+                  <span className="truncate text-xs text-gray-400 dark:text-gray-500">{breakdown.done} done · {breakdown.cancelled} cancelled</span>
+                )}
+              </div>
+              <button
+                onClick={onToggle}
+                aria-label="Close completed"
+                className="shrink-0 rounded-md p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-800 dark:hover:text-gray-300"
+              >
+                <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <div className="overflow-y-auto p-3">{cardsGrid}</div>
+          </div>
+        </div>
+      </>
+    );
   }
 
   return (
@@ -135,21 +192,7 @@ export function CompletedGrid({
         onDragOver={handleDragOver}
         onDrop={handleDrop}
       >
-        <div
-          className="grid gap-2"
-          style={{ gridTemplateColumns: "repeat(auto-fill, minmax(min(220px, 100%), 1fr))" }}
-        >
-          {allIssues.map((issue) => (
-            <CompletedCard
-              key={issue.id}
-              issue={issue}
-              onClick={onIssueClick}
-              onDragStart={onDragStart}
-              searchQuery={searchQuery}
-              isSelected={selectedIssueIds?.has(issue.id)}
-            />
-          ))}
-        </div>
+        {cardsGrid}
         {allIssues.length === 0 && !dragOver && (
           <p className="text-xs text-gray-400 dark:text-gray-500 text-center py-4">No completed issues</p>
         )}
