@@ -89,6 +89,33 @@ interface InsightsData {
   };
 }
 
+interface QuotaMetric {
+  label: string;
+  percent: number | null;
+  detail: string | null;
+  resetInSeconds: number | null;
+  expectedPercent?: number;
+  pace?: number;
+  projectedAtReset?: number;
+}
+
+interface QuotaProviderEntry {
+  id: string;
+  label: string;
+  accent: string;
+  loginUrl: string;
+  hasCreds: boolean;
+  status: "ok" | "auth" | "error";
+  plan?: string;
+  metrics?: QuotaMetric[];
+  error?: string;
+}
+
+interface QuotaUsageResult {
+  providers: QuotaProviderEntry[];
+  scrapedAt: string;
+}
+
 interface InsightsPanelProps {
   projectId: string | null;
   onSessionClick: (sessionId: string, workspaceId: string, issueId: string) => void;
@@ -145,6 +172,27 @@ function formatStartedAt(value: string) {
   return Number.isNaN(date.getTime())
     ? value
     : date.toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+}
+
+function formatClockTime(value: string) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime())
+    ? value
+    : date.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+}
+
+function formatCountdown(seconds: number | null) {
+  if (seconds == null || seconds <= 0) return "now";
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  if (hours >= 24) {
+    const days = Math.floor(hours / 24);
+    const remHours = hours % 24;
+    return remHours > 0 ? `${days}d ${remHours}h` : `${days}d`;
+  }
+  if (hours > 0) return minutes > 0 ? `${hours}h ${minutes}m` : `${hours}h`;
+  if (minutes > 0) return `${minutes}m`;
+  return "<1m";
 }
 
 function getAvgCost(row: MetricRowBase) {
@@ -529,6 +577,175 @@ function ProviderProfileLedger({
   );
 }
 
+function QuotaMetricRow({ metric, accent }: { metric: QuotaMetric; accent: string }) {
+  const percent = metric.percent ?? 0;
+  const clamped = Math.max(0, Math.min(100, percent));
+  const expected = metric.expectedPercent;
+  const overPace = metric.pace != null && metric.pace > 1.05;
+  const underPace = metric.pace != null && metric.pace < 0.95;
+  const paceClass = overPace
+    ? "text-amber-600 dark:text-amber-400"
+    : underPace
+      ? "text-emerald-600 dark:text-emerald-400"
+      : "text-gray-500 dark:text-gray-400";
+
+  return (
+    <div className="space-y-1">
+      <div className="flex items-baseline justify-between gap-2 text-xs">
+        <span className="text-gray-600 dark:text-gray-400">{metric.label}</span>
+        <span className="font-semibold text-gray-900 dark:text-gray-100 tabular-nums">
+          {metric.percent == null ? "—" : `${Math.round(percent)}%`}
+        </span>
+      </div>
+      <div className="relative h-2 rounded-full bg-gray-100 dark:bg-gray-800 overflow-hidden">
+        <div className="absolute inset-y-0 left-0 rounded-full" style={{ width: `${clamped}%`, backgroundColor: accent }} />
+        {expected != null && (
+          <div
+            className="absolute inset-y-0 w-px bg-gray-500/70 dark:bg-gray-300/60"
+            style={{ left: `${Math.max(0, Math.min(100, expected))}%` }}
+            title={`On an even burn you'd be at ~${Math.round(expected)}% by now`}
+          />
+        )}
+      </div>
+      <div className="flex items-center justify-between gap-2 text-[11px]">
+        <span className="text-gray-500 dark:text-gray-400">
+          {[
+            metric.detail || null,
+            metric.resetInSeconds != null ? `resets in ${formatCountdown(metric.resetInSeconds)}` : null,
+          ]
+            .filter(Boolean)
+            .join(" · ")}
+        </span>
+        {(metric.pace != null || metric.projectedAtReset != null) && (
+          <span className={paceClass}>
+            {metric.pace != null && (overPace ? "ahead of pace" : underPace ? "on track" : "on pace")}
+            {metric.projectedAtReset != null && ` · →${Math.round(metric.projectedAtReset)}% by reset`}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function QuotaProviderCard({ provider }: { provider: QuotaProviderEntry }) {
+  const metrics = provider.metrics ?? [];
+  return (
+    <div className="rounded-lg border border-gray-200 dark:border-gray-800 bg-gray-50/60 dark:bg-gray-950/40 p-3">
+      <div className="flex items-center justify-between gap-2 mb-2">
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: provider.accent }} />
+          <span className="text-sm font-semibold text-gray-900 dark:text-gray-100 truncate">{provider.label}</span>
+          {provider.plan && (
+            <span className="text-[10px] uppercase tracking-wide rounded-full px-1.5 py-0.5 bg-gray-200/70 dark:bg-gray-800 text-gray-600 dark:text-gray-400">
+              {provider.plan}
+            </span>
+          )}
+        </div>
+        {provider.status === "auth" && (
+          <a
+            href={provider.loginUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="text-xs text-brand-600 dark:text-brand-400 hover:underline whitespace-nowrap"
+          >
+            Sign in ↗
+          </a>
+        )}
+      </div>
+      {provider.status === "ok" && metrics.length > 0 ? (
+        <div className="space-y-2.5">
+          {metrics.map((metric) => (
+            <QuotaMetricRow key={metric.label} metric={metric} accent={provider.accent} />
+          ))}
+        </div>
+      ) : (
+        <p className="text-xs text-gray-500 dark:text-gray-400">
+          {provider.status === "auth"
+            ? "Sign in to this provider to see live quota."
+            : provider.status === "error"
+              ? provider.error ?? "Quota unavailable for this provider."
+              : "No quota metrics reported."}
+        </p>
+      )}
+    </div>
+  );
+}
+
+function QuotaUsageBlock() {
+  const [result, setResult] = useState<QuotaUsageResult | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [refreshTick, setRefreshTick] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    apiFetch<QuotaUsageResult>("/api/preferences/quota-usage")
+      .then((res) => {
+        if (cancelled) return;
+        setResult(res);
+        setError(null);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setError(err instanceof Error ? err.message : "Live quota source unavailable");
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [refreshTick]);
+
+  const providers = result?.providers ?? [];
+
+  return (
+    <div className="rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 shadow-sm overflow-hidden">
+      <div className="border-b border-gray-200 dark:border-gray-800 px-4 py-3 flex items-center justify-between gap-3">
+        <div>
+          <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Live Quota Usage</h3>
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+            Remaining plan budget per provider, scraped live.
+            {result?.scrapedAt && !error ? ` Updated ${formatClockTime(result.scrapedAt)}.` : ""}
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => setRefreshTick((tick) => tick + 1)}
+          disabled={loading}
+          title="Refresh quota"
+          className="flex items-center justify-center w-7 h-7 rounded-md border border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-40 transition-colors"
+        >
+          <svg className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h5M20 20v-5h-5M20 9a8 8 0 0 0-14.9-2M4 15a8 8 0 0 0 14.9 2" />
+          </svg>
+        </button>
+      </div>
+      <div className="p-4">
+        {loading && !result && (
+          <p className="text-sm text-gray-500 dark:text-gray-400">Loading quota…</p>
+        )}
+        {error && !result && (
+          <p className="text-sm text-gray-500 dark:text-gray-400">
+            Live quota source unavailable. Start the tampermonkey-direct service (port 8742) to see plan usage.
+          </p>
+        )}
+        {providers.length > 0 && (
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+            {providers.map((provider) => (
+              <QuotaProviderCard key={provider.id} provider={provider} />
+            ))}
+          </div>
+        )}
+        {result && providers.length === 0 && !loading && (
+          <p className="text-sm text-gray-500 dark:text-gray-400">No quota providers configured.</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function InsightsPanel({ projectId, onSessionClick }: InsightsPanelProps) {
   const [range, setRange] = useState<InsightsRange>("30d");
   const [data, setData] = useState<InsightsData | null>(null);
@@ -620,6 +837,8 @@ export function InsightsPanel({ projectId, onSessionClick }: InsightsPanelProps)
             ))}
           </div>
         </div>
+
+        <QuotaUsageBlock />
 
         {loading && (
           <div className="rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-6 text-sm text-gray-500 dark:text-gray-400 shadow-sm">
