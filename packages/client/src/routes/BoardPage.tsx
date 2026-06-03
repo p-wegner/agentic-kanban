@@ -48,6 +48,7 @@ import { apiFetch } from "../lib/api.js";
 import { useBoardEvents, type LiveSessionStats, type TodoItem, type ApprovalRequest } from "../lib/useBoardEvents.js";
 import { ApprovalDialog } from "../components/ApprovalDialog.js";
 import { MoveToDoneDialog } from "../components/MoveToDoneDialog.js";
+import { DependencyImpactDialog } from "../components/DependencyImpactDialog.js";
 import { sendDesktopNotification } from "../lib/desktop.js";
 import { registerAction } from "../lib/actions.js";
 import { getAppRouteView, getViewRoutePath } from "../lib/appRoutes.js";
@@ -63,6 +64,7 @@ import type { MonitorStatus } from "../components/MonitorPopover.js";
 import type { BoardViewState, SavedViewReference } from "../lib/boardSavedViews.js";
 import type {
   CreateIssueRequest,
+  DependencyInfo,
   IssueWithStatus,
   ProfileSelection,
   StatusWithIssues,
@@ -237,6 +239,13 @@ export function BoardPage() {
   const [monitorStatus, setMonitorStatus] = useState<MonitorStatus | null>(null);
   const [monitorRunning, setMonitorRunning] = useState(false);
   const [moveToDonePending, setMoveToDonePending] = useState<{ issue: IssueWithStatus; confirm: () => Promise<void> } | null>(null);
+  const [dependencyImpactPending, setDependencyImpactPending] = useState<{
+    issue: IssueWithStatus;
+    toStatusId: string;
+    toStatusName: string;
+    dependencies: DependencyInfo["dependencies"];
+    confirm: () => Promise<void>;
+  } | null>(null);
   const [pendingIssueIds, setPendingIssueIds] = useState<Set<string>>(new Set());
   const [pendingWorkspaceIssueIds, setPendingWorkspaceIssueIds] = useState<Set<string>>(new Set());
   const [selectedBoardIssueIds, setSelectedBoardIssueIds] = useState<Set<string>>(new Set());
@@ -856,28 +865,52 @@ export function BoardPage() {
   }
 
   async function handleMoveToNext(issue: IssueWithStatus, nextStatusId: string) {
-    try {
-      const targetColumn = columns.find((col) => col.id === nextStatusId);
-      const isArchiveTarget = targetColumn && ARCHIVE_STATUS_NAMES.has(targetColumn.name);
-      if (isArchiveTarget) {
-        const ws = issue.workspaceSummary?.main;
-        if (ws && ws.status !== "closed") {
-          setMoveToDonePending({
-            issue,
-            confirm: async () => {
-              await apiFetch(`/api/issues/${issue.id}`, { method: "PATCH", body: JSON.stringify({ statusId: nextStatusId }) });
-              await refetchBoard();
-              setMoveToDonePending(null);
-            },
-          });
-          return;
+    const targetColumn = columns.find((col) => col.id === nextStatusId);
+
+    const doMove = async () => {
+      try {
+        const isArchiveTarget = targetColumn && ARCHIVE_STATUS_NAMES.has(targetColumn.name);
+        if (isArchiveTarget) {
+          const ws = issue.workspaceSummary?.main;
+          if (ws && ws.status !== "closed") {
+            setMoveToDonePending({
+              issue,
+              confirm: async () => {
+                await apiFetch(`/api/issues/${issue.id}`, { method: "PATCH", body: JSON.stringify({ statusId: nextStatusId }) });
+                await refetchBoard();
+                setMoveToDonePending(null);
+              },
+            });
+            return;
+          }
         }
+        await apiFetch(`/api/issues/${issue.id}`, { method: "PATCH", body: JSON.stringify({ statusId: nextStatusId }) });
+        await refetchBoard();
+      } catch {
+        showToast("Failed to move issue", "error");
       }
-      await apiFetch(`/api/issues/${issue.id}`, { method: "PATCH", body: JSON.stringify({ statusId: nextStatusId }) });
-      await refetchBoard();
+    };
+
+    try {
+      const depInfo = await apiFetch<DependencyInfo>(`/api/issues/${issue.id}/dependencies`);
+      if (depInfo.dependencies.length > 0 && targetColumn) {
+        setDependencyImpactPending({
+          issue,
+          toStatusId: nextStatusId,
+          toStatusName: targetColumn.name,
+          dependencies: depInfo.dependencies,
+          confirm: async () => {
+            setDependencyImpactPending(null);
+            await doMove();
+          },
+        });
+        return;
+      }
     } catch {
-      showToast("Failed to move issue", "error");
+      // If dependency fetch fails, proceed without the preview
     }
+
+    await doMove();
   }
 
   function moveIssueLocally(issue: IssueWithStatus, targetStatus: StatusWithIssues) {
@@ -2248,6 +2281,16 @@ export function BoardPage() {
           issue={moveToDonePending.issue}
           onConfirm={moveToDonePending.confirm}
           onCancel={() => setMoveToDonePending(null)}
+        />
+      )}
+      {dependencyImpactPending && (
+        <DependencyImpactDialog
+          issueId={dependencyImpactPending.issue.id}
+          fromStatusName={dependencyImpactPending.issue.statusName ?? ""}
+          toStatusName={dependencyImpactPending.toStatusName}
+          dependencies={dependencyImpactPending.dependencies}
+          onConfirm={dependencyImpactPending.confirm}
+          onCancel={() => setDependencyImpactPending(null)}
         />
       )}
       <ToastContainer />
