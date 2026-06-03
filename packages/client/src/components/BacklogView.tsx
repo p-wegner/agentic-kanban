@@ -118,6 +118,7 @@ export interface BacklogViewProps {
   onIssueClick: (issue: IssueWithStatus) => void;
   onWorkspaceClick: (issue: IssueWithStatus, workspaceId?: string) => void;
   onStartWorkspace: (issue: IssueWithStatus) => void;
+  onDryRun?: (issue: IssueWithStatus) => void;
   onDragStart: (e: React.DragEvent, issue: IssueWithStatus) => void;
   onDrop: (statusId: string, sortOrder?: number) => void;
   onPromoteToTodo: (issue: IssueWithStatus, targetStatus: StatusWithIssues) => Promise<void>;
@@ -140,6 +141,7 @@ export function BacklogView({
   onIssueClick,
   onWorkspaceClick,
   onStartWorkspace,
+  onDryRun,
   onDragStart,
   onDrop,
   onPromoteToTodo,
@@ -654,6 +656,7 @@ export function BacklogView({
                           onClick={onIssueClick}
                           onWorkspaceClick={onWorkspaceClick}
                           onStartWorkspace={onStartWorkspace}
+                          onDryRun={onDryRun}
                           onDragStart={onDragStart}
                           onMoveToNext={defaultTargetStatus ? (iss) => promoteIssue(iss, defaultTargetStatus) : undefined}
                           nextStatusName={defaultTargetStatus?.name}
