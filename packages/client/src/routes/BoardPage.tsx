@@ -1656,7 +1656,7 @@ export function BoardPage() {
           </div>
         </div>
       )}
-      <div className="flex flex-col gap-2 p-4 h-full overflow-hidden">
+      <div className="flex flex-col gap-2 p-2 sm:p-4 h-full overflow-hidden">
         {/* One responsive control row: the board pulse, filters, and toolbar pack
             together (a single line on desktop, wrapping on small screens) instead of
             stacking as three separate full-width rows. */}

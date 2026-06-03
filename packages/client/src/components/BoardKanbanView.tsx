@@ -86,39 +86,11 @@ export function BoardKanbanView({
     onCreateClick(statusId);
   }
 
-  const archiveIssueCount = archiveColumns.reduce((s, c) => s + c.issues.length, 0);
-
   return (
     <>
-      {(activeColumns.length > 1 || archiveIssueCount > 0) && (
-        <div className="flex sm:hidden gap-1 overflow-x-auto scrollbar-hide shrink-0">
-          {activeColumns.map((col) => (
-            <button
-              key={col.id}
-              onClick={() => {
-                document.getElementById(`column-${col.id}`)?.scrollIntoView({ behavior: "smooth", block: "start", inline: "nearest" });
-              }}
-              className="shrink-0 px-3 py-1 text-xs rounded-full border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-600 dark:text-gray-400 hover:bg-brand-50 dark:hover:bg-brand-950 hover:border-brand-300 hover:text-brand-700 transition-colors"
-            >
-              {col.name}
-              <span className="ml-1 text-gray-400 dark:text-gray-500">{col.issues.length}</span>
-            </button>
-          ))}
-          {archiveIssueCount > 0 && (
-            <button
-              onClick={onToggleArchive}
-              className={`shrink-0 px-3 py-1 text-xs rounded-full border transition-colors ${
-                !collapsedArchive
-                  ? "border-green-300 dark:border-green-700 bg-green-50 dark:bg-green-950 text-green-700 dark:text-green-400"
-                  : "border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-600 dark:text-gray-400 hover:bg-green-50 dark:hover:bg-green-950 hover:border-green-300 hover:text-green-700 dark:hover:text-green-400"
-              }`}
-            >
-              ✓ Done
-              <span className="ml-1 text-gray-400 dark:text-gray-500">{archiveIssueCount}</span>
-            </button>
-          )}
-        </div>
-      )}
+      {/* The mobile column quick-jump strip was removed: with columns stacked
+          vertically each header is visible inline and the pulse shows live counts,
+          so the strip was redundant chrome eating a row. */}
       <div className={`flex flex-1 min-h-0 board-columns-scroll ${isNarrow ? "flex-col gap-2 overflow-y-auto" : "gap-0 overflow-x-auto"}`}>
         {activeColumns.map((col, colIdx) => (
           <BoardErrorBoundary key={col.id} columnName={col.name}>
