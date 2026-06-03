@@ -14,6 +14,8 @@ import { EpicDecomposerModal } from "./EpicDecomposerModal.js";
 import { ShowdownDialog } from "./ShowdownDialog.js";
 import { ShowdownPanel } from "./ShowdownPanel.js";
 import { usePanelLayout } from "../hooks/usePanelLayout.js";
+import type { TrailEntry } from "../hooks/useTicketTrail.js";
+import { TicketTrailStrip } from "./TicketTrailStrip.js";
 
 // Some issues were created via MCP/CLI calls whose JSON descriptions ended up
 // with literal `\n` / `\t` sequences rather than real newlines. Unescape when
@@ -224,6 +226,20 @@ interface IssueDetailPanelProps {
   onStartWorkspace?: (issue: IssueWithStatus) => void;
   onIssueUpdate: (issue: IssueWithStatus) => void;
   onNavigateToIssue?: (issueId: string) => void;
+  /** Multi-ticket navigation trail (#383). Rendered as a breadcrumb strip in the header. */
+  trail?: TicketTrailControls;
+}
+
+/** The subset of `useTicketTrail` the panel needs to render & drive its trail strip. */
+export interface TicketTrailControls {
+  entries: TrailEntry[];
+  activeId: string | null;
+  canGoBack: boolean;
+  canGoForward: boolean;
+  onBack: () => void;
+  onForward: () => void;
+  onSelect: (id: string) => void;
+  onRemove: (id: string) => void;
 }
 
 const issueTypeColors: Record<string, string> = {
@@ -276,6 +292,7 @@ export function IssueDetailPanel({
   onStartWorkspace,
   onIssueUpdate,
   onNavigateToIssue,
+  trail,
 }: IssueDetailPanelProps) {
   const [editing, setEditing] = useState(false);
   const [descriptionMode, setDescriptionMode] = useState<"edit" | "preview">("edit");
@@ -426,11 +443,19 @@ export function IssueDetailPanel({
         } else {
           onClose();
         }
+        return;
+      }
+      // Browser-like back/forward across the multi-ticket trail (#383). Skip
+      // while editing so it can't yank you off a half-written description.
+      if (!editing && trail && e.altKey && (e.key === "ArrowLeft" || e.key === "ArrowRight")) {
+        e.preventDefault();
+        if (e.key === "ArrowLeft") trail.onBack();
+        else trail.onForward();
       }
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [editing, hasChanges, issue, onClose]);
+  }, [editing, hasChanges, issue, onClose, trail]);
 
   // Reset delete confirmation on outside click
   useEffect(() => {
@@ -971,6 +996,19 @@ export function IssueDetailPanel({
             </button>
           </div>
         </div>
+
+        {trail && (
+          <TicketTrailStrip
+            entries={trail.entries}
+            activeId={trail.activeId}
+            canGoBack={trail.canGoBack}
+            canGoForward={trail.canGoForward}
+            onBack={trail.onBack}
+            onForward={trail.onForward}
+            onSelect={trail.onSelect}
+            onRemove={trail.onRemove}
+          />
+        )}
 
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
           {/* Blocked banner — shown when issue has unresolved blocking dependencies */}
