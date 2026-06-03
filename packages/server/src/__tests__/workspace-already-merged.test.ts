@@ -178,7 +178,12 @@ describe("doMerge ancestry check", () => {
       detectConflicts,
     };
 
-    const svc = createWorkspaceMergeService({ database: db, gitService: git as never, createBackup: async () => {} });
+    const svc = createWorkspaceMergeService({
+      database: db,
+      gitService: git as never,
+      createBackup: async () => {},
+      processKiller: async () => 0,
+    });
     const result = await svc.mergeWorkspace(workspaceId);
 
     expect(result.mergeOutput).toMatch(/already.*merged|no-op/i);
@@ -196,7 +201,12 @@ describe("doMerge ancestry check", () => {
       detectConflicts,
     };
 
-    const svc = createWorkspaceMergeService({ database: db, gitService: git as never, createBackup: async () => {} });
+    const svc = createWorkspaceMergeService({
+      database: db,
+      gitService: git as never,
+      createBackup: async () => {},
+      processKiller: async () => 0,
+    });
     await expect(svc.mergeWorkspace(workspaceId)).rejects.toMatchObject({
       message: "Merge conflicts detected",
       code: "BAD_REQUEST",
