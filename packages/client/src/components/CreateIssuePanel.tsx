@@ -8,6 +8,7 @@ import { showToast } from "./Toast.js";
 import TicketMentionInput from "./TicketMentionInput.js";
 import TicketMentionRenderer from "./TicketMentionRenderer.js";
 import { MarkdownToolbar } from "./MarkdownToolbar.js";
+import { useIssueTemplates } from "../hooks/useIssueTemplates.js";
 
 interface Skill {
   id: string;
@@ -86,6 +87,7 @@ export function CreateIssuePanel({
   const [submitting, setSubmitting] = useState(false);
   const [enhancing, setEnhancing] = useState(false);
   const [preEnhanceSnapshot, setPreEnhanceSnapshot] = useState<{ title: string; description: string } | null>(null);
+  const { templates: issueTemplates } = useIssueTemplates();
   const titleRef = useRef<HTMLInputElement>(null);
   const descriptionRef = useRef<HTMLTextAreaElement>(null);
 
@@ -225,6 +227,25 @@ export function CreateIssuePanel({
           <div className="flex flex-col gap-1.5 flex-1">
             <div className="flex items-center justify-between">
               <label className="text-xs font-medium text-gray-600 dark:text-gray-400">Description</label>
+              {issueTemplates.length > 0 && (
+                <select
+                  value=""
+                  onChange={(e) => {
+                    const tpl = issueTemplates.find((t) => t.id === e.target.value);
+                    if (!tpl) return;
+                    if (description.trim() && !window.confirm("Replace current description with the template?")) return;
+                    setDescription(tpl.body);
+                    setDescriptionMode("edit");
+                  }}
+                  className="text-xs border border-gray-300 dark:border-gray-600 rounded px-2 py-0.5 focus:outline-none focus:ring-1 focus:ring-brand-500 dark:bg-gray-900 dark:text-gray-100"
+                  title="Apply a template to the description"
+                >
+                  <option value="">Template...</option>
+                  {issueTemplates.map((t) => (
+                    <option key={t.id} value={t.id}>{t.name}</option>
+                  ))}
+                </select>
+              )}
               <div className="flex border border-gray-300 dark:border-gray-600 rounded overflow-hidden">
                 <button
                   type="button"
