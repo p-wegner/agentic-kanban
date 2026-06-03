@@ -813,6 +813,13 @@ exit 1
         }
       }
 
+      // Fall back to the project-level default skill so Insights "By Skill" can
+      // attribute sessions even when no explicit skill was chosen and the issue has
+      // no workflow that provides one.
+      if (!effectiveSkillId && !effectiveDiskSkill && project.defaultSkillId) {
+        effectiveSkillId = project.defaultSkillId;
+      }
+
       const skillName = worktreePath
         ? await resolveSkillFile(effectiveSkillId, effectiveDiskSkill, worktreePath, project.repoPath)
         : null;
