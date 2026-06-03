@@ -329,14 +329,17 @@ export function createInsightsRoute(database: Database = db) {
 
     // Pre-build a map from provider/profile key to active workspace IDs so the
     // ledger shows currently-running workspace counts separately from session history.
-    const activeWorkspaceByKey = new Map<string, Set<string>>();
+    const activeWorkspaceByKey = new Map<string, { wsIds: Set<string>; provider: string; profile: string }>();
     for (const ws of activeWorkspaceRows) {
       const provider = ws.provider ?? "unknown";
       const profile = ws.claudeProfile ?? "";
       const key = `${provider}::${profile}`;
-      const existing = activeWorkspaceByKey.get(key) ?? new Set<string>();
-      existing.add(ws.id);
-      activeWorkspaceByKey.set(key, existing);
+      const existing = activeWorkspaceByKey.get(key);
+      if (existing) {
+        existing.wsIds.add(ws.id);
+      } else {
+        activeWorkspaceByKey.set(key, { wsIds: new Set([ws.id]), provider, profile });
+      }
     }
 
     let totalCostUsd = 0;
@@ -478,15 +481,14 @@ export function createInsightsRoute(database: Database = db) {
 
     // Merge active workspace IDs into buckets. Also ensure buckets exist for
     // provider/profile combos with active workspaces but no sessions in the range.
-    for (const [key, wsIds] of activeWorkspaceByKey) {
+    for (const [key, { wsIds, provider, profile }] of activeWorkspaceByKey) {
       const existing = byProviderProfile.get(key);
       if (existing) {
         for (const id of wsIds) existing.activeWorkspaceIds.add(id);
       } else {
-        const [provider, profile] = key.split("::");
         byProviderProfile.set(key, {
-          provider: provider ?? "unknown",
-          profile: profile ?? "",
+          provider,
+          profile,
           activeWorkspaceIds: wsIds,
           ...createAggregateBucket(),
         });
