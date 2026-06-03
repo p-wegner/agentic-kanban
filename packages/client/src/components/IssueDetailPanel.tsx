@@ -17,6 +17,7 @@ import { ShowdownPanel } from "./ShowdownPanel.js";
 import { usePanelLayout } from "../hooks/usePanelLayout.js";
 import type { TrailEntry } from "../hooks/useTicketTrail.js";
 import { TicketTrailStrip } from "./TicketTrailStrip.js";
+import { IssueCycleTimeBadge } from "./IssueCycleTimeBadge.js";
 
 // Some issues were created via MCP/CLI calls whose JSON descriptions ended up
 // with literal `\n` / `\t` sequences rather than real newlines. Unescape when
@@ -1377,6 +1378,9 @@ export function IssueDetailPanel({
               </div>
             </div>
           )}
+
+          {/* Cycle time badge — only shown in view mode */}
+          {!editing && <IssueCycleTimeBadge issueId={issue.id} />}
 
           {/* Workspaces section — placed directly below status/metadata for contextual proximity */}
           {!editing && (
