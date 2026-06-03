@@ -71,6 +71,7 @@ import type {
   StatusWithIssues,
   UpdateIssueRequest,
 } from "@agentic-kanban/shared";
+import { isIssueInFlight } from "@agentic-kanban/shared";
 
 interface Project {
   id: string;
@@ -119,6 +120,9 @@ export function BoardPage() {
   const [workspaceInitial, setWorkspaceInitial] = useState<{ workspaceId: string; sessionId: string } | null>(null);
   const [workspaceOpenCreate, setWorkspaceOpenCreate] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [focusMode, setFocusMode] = useState(() => {
+    try { return sessionStorage.getItem("board-focus-mode") === "1"; } catch { return false; }
+  });
   const [statusFilterId, setStatusFilterId] = useState<string | null>(null);
   const [tagFilterId, setTagFilterId] = useState<string | null>(null);
   const [createdDateFilter, setCreatedDateFilter] = useState<string | null>(null);
@@ -1160,6 +1164,9 @@ export function BoardPage() {
       columns.map((col) => ({
         ...col,
         issues: col.issues.filter((issue) => {
+          if (focusMode && !isIssueInFlight(issue.workspaceSummary)) {
+            return false;
+          }
           if (statusFilterId && issue.statusId !== statusFilterId) {
             return false;
           }
@@ -1183,7 +1190,7 @@ export function BoardPage() {
           return true;
         }),
       })),
-    [columns, searchQuery, showBlocked, showStaleOnly, statusFilterId, tagFilterId],
+    [columns, focusMode, searchQuery, showBlocked, showStaleOnly, statusFilterId, tagFilterId],
   );
 
   // "AI Reviewed" = tickets needing human attention (manual merge).
@@ -1518,6 +1525,17 @@ export function BoardPage() {
         if (isTextEntryTarget(e.target)) return;
         e.preventDefault();
         window.dispatchEvent(new CustomEvent("voice-inbox-trigger"));
+        return;
+      }
+      // "f" to toggle focus mode
+      if (e.key === "f" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        if (isTextEntryTarget(e.target)) return;
+        e.preventDefault();
+        setFocusMode((v) => {
+          const next = !v;
+          try { sessionStorage.setItem("board-focus-mode", next ? "1" : "0"); } catch { /* ignore */ }
+          return next;
+        });
         return;
       }
       // "c" to create issue, "w" to create issue + workspace
@@ -1890,6 +1908,11 @@ export function BoardPage() {
         )}
         <BoardToolbar
           activeColumns={activeColumns}
+          focusMode={focusMode}
+          onFocusModeChange={(v) => {
+            setFocusMode(v);
+            try { sessionStorage.setItem("board-focus-mode", v ? "1" : "0"); } catch { /* ignore */ }
+          }}
           onShowQuickTasks={() => setShowQuickTasks(true)}
           autoMonitor={autoMonitor}
           monitorRunning={monitorRunning}
@@ -2212,6 +2235,7 @@ export function BoardPage() {
             activeColumns={activeColumns}
             archiveColumns={archiveColumns}
             allColumns={columns}
+            focusMode={focusMode}
             projectId={activeProjectId}
             columnWidths={columnWidths}
             dynamicColumnScaling={dynamicColumnScaling}

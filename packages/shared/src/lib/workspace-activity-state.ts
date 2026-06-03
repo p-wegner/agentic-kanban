@@ -159,3 +159,15 @@ export const ACTIVE_WORKSPACE_STATUSES = new Set<string>([
   "reviewing",
   "awaiting-plan-approval",
 ]);
+
+/**
+ * Returns true when an issue's workspaceSummary indicates in-flight work
+ * (active, fixing, or in-review session). Used by the operator focus filter.
+ */
+export function isIssueInFlight(workspaceSummary: {
+  main?: { status?: string } | null;
+} | null | undefined): boolean {
+  const mainStatus = workspaceSummary?.main?.status;
+  if (!mainStatus) return false;
+  return ACTIVE_WORKSPACE_STATUSES.has(mainStatus) || mainStatus === "in-review-idle";
+}

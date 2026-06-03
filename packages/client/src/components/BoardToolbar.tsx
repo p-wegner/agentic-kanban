@@ -17,6 +17,8 @@ const BOARD_ACTIVITY_STATUS_ORDER = ["In Progress", "In Review", "AI Reviewed", 
 
 interface BoardToolbarProps {
   activeColumns: StatusWithIssues[];
+  focusMode?: boolean;
+  onFocusModeChange?: (v: boolean) => void;
   onShowQuickTasks: () => void;
   autoMonitor: boolean;
   monitorRunning: boolean;
@@ -45,6 +47,8 @@ interface BoardToolbarProps {
 
 export function BoardToolbar({
   activeColumns,
+  focusMode = false,
+  onFocusModeChange,
   onShowQuickTasks,
   autoMonitor,
   monitorRunning,
@@ -145,6 +149,24 @@ export function BoardToolbar({
         </svg>
       </button>
       <div className={`${showActions ? "flex" : "hidden"} sm:flex items-start gap-2 flex-wrap`}>
+      {onFocusModeChange && (
+        <button
+          onClick={() => onFocusModeChange(!focusMode)}
+          title={focusMode ? "Focus mode on — showing only in-flight issues. Click to show all." : "Focus mode — show only issues with an active or fixing workspace (f)"}
+          aria-pressed={focusMode}
+          className={`shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium border transition-colors ${
+            focusMode
+              ? "bg-brand-600 text-white border-brand-600 hover:bg-brand-700"
+              : "bg-surface-raised dark:bg-surface-raised-dark border-black/[0.07] dark:border-white/10 text-ink-soft dark:text-gray-400 hover:bg-surface-sunken dark:hover:bg-gray-800"
+          }`}
+        >
+          <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+            <circle cx="12" cy="12" r="3" />
+            <path strokeLinecap="round" d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" />
+          </svg>
+          <span className="hidden sm:inline">Focus</span>
+        </button>
+      )}
       <button
         onClick={onShowQuickTasks}
         title="Quick Tasks - run a skill directly on the current checkout (q)"
