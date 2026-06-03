@@ -59,6 +59,22 @@ Inject an optional `now?: string` (`nowOverride`) into any service that calls `n
 ### In-flight workspace recovery
 Don't resume many stale/idle workspaces at once — start one, then at most two more once the server stays healthy. A provider transcript showing a ~1 s run with zero tokens/output is a launch-failed/stale session: stop it and rebuild the branch instead of polling.
 
+## Agent Roles (the cast & DSL)
+
+Several distinct AI roles operate on this board. Use these names as shared vocabulary ("the Conductor stalled", "spin up a Builder for #N", "run a Sentinel check", "ask the Butler", "do a Smith pass"). Each maps to one concrete mechanism — don't conflate them.
+
+| Name | Role | Mechanism | Lifecycle | Trigger |
+|---|---|---|---|---|
+| **Conductor** | Out-of-process board orchestrator — the active control plane that drives THIS board (merge, unstick, start, refill) | `scripts/board-monitor/loop.sh` + `objective.md`; fresh Claude/codex session each cycle | long-lived loop, ~30-min cycles | `nohup bash scripts/board-monitor/loop.sh` |
+| **Autopilot** | In-process **deterministic** monitor (shipped default for *other* projects; off here) | `runMonitorCycle`, `auto_monitor` pref | runs inside the server process | Settings → Workflow → Board Monitoring |
+| **Steward** | In-process **LLM** monitor (off by default; reads the same `objective.md`) | `monitor-butler.ts`, `monitor_butler_enabled` | runs inside the server process | the `monitor_butler_enabled` pref |
+| **Builder** | Per-ticket implementer working in a git worktree (writes the actual code) | `POST /api/workspaces` → Claude/codex/copilot in a worktree | per-task, disposable | New Workspace / Conductor starts it |
+| **Butler** | Warm, conversational per-project assistant; answers questions & can orchestrate board work | Claude Agent SDK, in-process, one warm session per project | persistent per project | Butler view (`i`), `ask_butler`, `pnpm cli -- butler ask` |
+| **Sentinel** | The human-side **watch** — polls the Conductor's health each cycle, reports one line, alerts+recovers only on failure. Does NOT drive the board | interactive Claude session + `/loop` + cron | session-scoped | `/sentinel` (or `/loop 30m /sentinel`) — see the `sentinel` skill |
+| **Smith** | **Compounding-engineering** session — analyzes the fleet of past agent runs and forges durable improvements (skills, hooks, helper scripts, deterministic board changes, doc edits) | interactive Claude session + `fleet-analysis` / `session-inspector` / `learning-step` / `distill-learnings` | ad-hoc, session-scoped | those skills |
+
+The three monitors (**Conductor / Autopilot / Steward**) are detailed below; the **Sentinel** poll checklist + recovery playbook lives in the `sentinel` skill; **Smith** tooling is the `fleet-analysis` family.
+
 ## Board-Monitor Orchestrator (this dev board)
 The control plane that keeps **this** board moving is the **out-of-process loop** `scripts/board-monitor/` — `loop.sh` spawns a fresh short-lived agent session every ~30 min (`MONITOR_SLEEP`), each reading `objective.md`, running Claude Code unless `MONITOR_AGENT=codex`. This is distinct from the **in-process monitor** inside the server (deterministic `runMonitorCycle` + LLM Monitor Butler), which is off by default on this board but is the shipped default for other projects.
 
