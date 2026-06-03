@@ -23,22 +23,24 @@ export function createButlerDefinitionsRoute(database: Database) {
     return c.json({ butlers, max: MAX_BUTLERS });
   });
 
-  // POST /api/butler-definitions — create a named butler { name, model? }.
+  // POST /api/butler-definitions — create a named butler { name, model?, provider? }.
   router.post("/", async (c) => {
-    const body = await parseJsonBody<{ name?: string; model?: string }>(c);
+    const body = await parseJsonBody<{ name?: string; model?: string; provider?: string }>(c);
+    const provider = body.provider === "codex" ? "codex" : body.provider === "claude" ? "claude" : undefined;
     try {
-      const butler = await createButlerDefinition(database, { name: body.name ?? "", model: body.model });
+      const butler = await createButlerDefinition(database, { name: body.name ?? "", model: body.model, provider });
       return c.json({ butler }, 201);
     } catch (err) {
       return c.json({ error: err instanceof Error ? err.message : "Failed to create butler" }, 400);
     }
   });
 
-  // PUT /api/butler-definitions/:bid — update name and/or model.
+  // PUT /api/butler-definitions/:bid — update name, model, and/or provider.
   router.put("/:bid", async (c) => {
-    const body = await parseJsonBody<{ name?: string; model?: string }>(c);
+    const body = await parseJsonBody<{ name?: string; model?: string; provider?: string | null }>(c);
+    const provider = body.provider === "codex" ? "codex" : body.provider === "claude" ? "claude" : body.provider === null ? null : undefined;
     try {
-      const butler = await updateButlerDefinition(database, c.req.param("bid"), { name: body.name, model: body.model });
+      const butler = await updateButlerDefinition(database, c.req.param("bid"), { name: body.name, model: body.model, provider });
       return c.json({ butler });
     } catch (err) {
       return c.json({ error: err instanceof Error ? err.message : "Failed to update butler" }, 400);
