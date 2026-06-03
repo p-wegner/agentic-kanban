@@ -404,7 +404,7 @@ export function createProjectService(deps: { database: Database }) {
     return { commitCount, recentCommits, issueCounts, detectedBranch, codeMetrics, history, hotspots };
   }
 
-  async function getBoard(projectId: string) {
+  async function getBoard(projectId: string, nowOverride?: string) {
     const project = await getProjectById(projectId, database);
     if (!project) throw new ProjectError("Project not found", "NOT_FOUND");
 
@@ -442,11 +442,17 @@ export function createProjectService(deps: { database: Database }) {
     const issueIds = projectIssues.map((i) => i.id);
     const defaultBranch = project.defaultBranch;
 
-    const [workspaceSummaryMap, blockedMap, issueTagMap] = await Promise.all([
+    const [workspaceSummaryMap, blockedMap, issueTagMap, staleDaysRow] = await Promise.all([
       buildWorkspaceSummaryMap(issueIds, defaultBranch, database),
       buildBlockedMap(issueIds, database),
       buildTagMap(issueIds, database),
+      database.select({ value: preferences.value }).from(preferences).where(eq(preferences.key, "backlog_stale_days")).limit(1),
     ]);
+
+    const staleDays = parseInt(staleDaysRow[0]?.value ?? "14", 10) || 14;
+    const now = new Date(nowOverride ?? new Date().toISOString()).getTime();
+    const staleMs = staleDays * 24 * 60 * 60 * 1000;
+    const backlogStatusNames = new Set(statuses.filter((s) => s.name.toLowerCase() === "backlog").map((s) => s.id));
 
     const statusByName = new Map(statuses.map((status) => [status.name.toLowerCase(), status]));
     const issuesWithBlocked = projectIssues.map((issue) => {
@@ -458,11 +464,24 @@ export function createProjectService(deps: { database: Database }) {
       const workflowStatus = workflowStatusName
         ? statusByName.get(workflowStatusName.toLowerCase())
         : null;
+      const effectiveStatusId = workflowStatus ? workflowStatus.id : issue.statusId;
+      const isInBacklog = backlogStatusNames.has(effectiveStatusId);
+      let isStale: boolean | undefined;
+      let staleDaysActual: number | undefined;
+      if (isInBacklog) {
+        const lastActivity = new Date(issue.statusChangedAt ?? issue.updatedAt).getTime();
+        const elapsed = now - lastActivity;
+        if (elapsed >= staleMs) {
+          isStale = true;
+          staleDaysActual = Math.floor(elapsed / (24 * 60 * 60 * 1000));
+        }
+      }
       return {
         ...issue,
         ...(workflowStatus ? { statusId: workflowStatus.id, statusName: workflowStatus.name } : {}),
         ...(wsSummary ? { workspaceSummary: wsSummary } : {}),
         ...(blocked ? { isBlocked: blocked.isBlocked, dependencyCount: blocked.dependencyCount } : {}),
+        ...(isStale ? { isStale: true, staleDays: staleDaysActual } : {}),
       };
     });
 

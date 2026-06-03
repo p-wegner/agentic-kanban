@@ -44,6 +44,7 @@ interface Settings {
   nudge_wip_limit?: string;
   monitor_maintenance_window_enabled?: string;
   monitor_maintenance_window_end?: string;
+  backlog_stale_days?: string;
   backlog_empty_strategy?: string;
   backlog_empty_skill?: string;
   backlog_empty_cooldown_min?: string;
@@ -93,6 +94,7 @@ const DEFAULT_SETTINGS: Settings = {
   nudge_auto_start: "false",
   monitor_maintenance_window_enabled: "false",
   monitor_maintenance_window_end: "",
+  backlog_stale_days: "14",
   backlog_empty_strategy: "skip",
   backlog_empty_skill: "architecture-improvement",
   backlog_empty_cooldown_min: "120",
@@ -1307,6 +1309,22 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                         <span className="text-xs text-gray-500 dark:text-gray-400">min</span>
                       </div>
                     )}
+                    <div className="mt-3 pl-5">
+                      <div className="flex items-center gap-2">
+                        <label className="text-xs text-gray-600 dark:text-gray-400">Stale backlog threshold</label>
+                        <input
+                          type="number"
+                          min="1"
+                          value={settings.backlog_stale_days || "14"}
+                          onChange={(e) => set("backlog_stale_days")(e.target.value)}
+                          className="w-16 px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-1 focus:ring-brand-500"
+                        />
+                        <span className="text-xs text-gray-500 dark:text-gray-400">days</span>
+                      </div>
+                      <p className="mt-1 text-[11px] text-gray-400 dark:text-gray-500 leading-snug">
+                        Backlog issues with no activity for this many days are flagged as Stale on the board.
+                      </p>
+                    </div>
                     {settings.auto_monitor === "true" && (
                       <div className="mt-3 pl-5">
                         <div className="flex items-center gap-2">
