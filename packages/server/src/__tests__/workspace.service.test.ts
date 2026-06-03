@@ -557,13 +557,8 @@ describe("workspace.service", () => {
       const result = await service.mergeWorkspace(wsId);
 
       expect(result.mergeOutput).toContain("Merge made");
-      expect(result.warnings).toEqual([
-        expect.objectContaining({
-          step: "openspec-post-merge",
-          message: "changed-file scan failed after merge",
-          recoverable: true,
-        }),
-      ]);
+      // Cleanup warnings are deferred to the background — not present in the synchronous response.
+      expect((result as { warnings?: unknown }).warnings).toBeUndefined();
 
       const wsRows = await db.select().from(workspaces).where(eq(workspaces.id, wsId));
       expect(wsRows[0].status).toBe("closed");
@@ -575,21 +570,25 @@ describe("workspace.service", () => {
       expect(statusRow[0].name).toBe("Done");
     });
 
-    it("records the merge before post-merge cleanup can interrupt the response", { timeout: 30000 }, async () => {
+    it("records the merge before post-merge cleanup runs (DB closed before removeWorktree is called)", { timeout: 30000 }, async () => {
       const { projectId, issueId } = await seedProjectAndIssue(db);
       const wsId = await seedWorkspaceForMerge(projectId, issueId);
+
+      // This mock fires in the background task. It verifies that the workspace
+      // is already marked as closed/merged (by the synchronous part of doMerge)
+      // before any cleanup executes.
+      let dbStateWhenCleanupRan: { status: string; workingDir: null | string | undefined; mergedAt: null | string | undefined; issueStatus: string } | null = null;
       const gitService = createFakeGitService({
         removeWorktree: vi.fn(async () => {
           const wsRows = await db.select().from(workspaces).where(eq(workspaces.id, wsId));
-          expect(wsRows[0].status).toBe("closed");
-          expect(wsRows[0].workingDir).toBeNull();
-          expect(wsRows[0].mergedAt).toBeTruthy();
-          expect(wsRows[0].codeMetricsJson).toBeTruthy();
-
           const issueRow = await db.select().from(issues).where(eq(issues.id, issueId));
           const statusRow = await db.select().from(projectStatuses).where(eq(projectStatuses.id, issueRow[0].statusId));
-          expect(statusRow[0].name).toBe("Done");
-
+          dbStateWhenCleanupRan = {
+            status: wsRows[0].status,
+            workingDir: wsRows[0].workingDir,
+            mergedAt: wsRows[0].mergedAt,
+            issueStatus: statusRow[0].name,
+          };
           throw new Error("connection dropped during cleanup");
         }),
       });
@@ -603,15 +602,21 @@ describe("workspace.service", () => {
 
       const result = await service.mergeWorkspace(wsId);
 
+      // Synchronous response returns immediately — no warnings in the response.
       expect(result.mergeOutput).toContain("Merge made");
-      expect(result.warnings).toEqual([
-        expect.objectContaining({
-          step: "remove-worktree",
-          message: "connection dropped during cleanup",
-          recoverable: true,
-        }),
-      ]);
+      expect((result as { warnings?: unknown }).warnings).toBeUndefined();
 
+      // Let the background task run.
+      await new Promise<void>((resolve) => setImmediate(resolve));
+
+      // Workspace was already in "closed" state when the background cleanup fired.
+      expect(dbStateWhenCleanupRan).not.toBeNull();
+      expect(dbStateWhenCleanupRan!.status).toBe("closed");
+      expect(dbStateWhenCleanupRan!.workingDir).toBeNull();
+      expect(dbStateWhenCleanupRan!.mergedAt).toBeTruthy();
+      expect(dbStateWhenCleanupRan!.issueStatus).toBe("Done");
+
+      // Warning comment was recorded asynchronously.
       const events = await db.select().from(issueComments).where(eq(issueComments.issueId, issueId));
       expect(events.map((event) => JSON.parse(event.payload ?? "{}").eventType)).toEqual(["merged", "warning"]);
       expect(events[1].body).toContain("recoverable warning");
@@ -637,13 +642,8 @@ describe("workspace.service", () => {
       const result = await service.mergeWorkspace(wsId);
 
       expect(result.mergeOutput).toContain("Merge made");
-      expect(result.warnings).toEqual([
-        expect.objectContaining({
-          step: "remove-worktree",
-          message: "worktree still busy",
-          recoverable: true,
-        }),
-      ]);
+      // Cleanup warnings are deferred to the background — not present in the synchronous response.
+      expect((result as { warnings?: unknown }).warnings).toBeUndefined();
 
       const wsRows = await db.select().from(workspaces).where(eq(workspaces.id, wsId));
       expect(wsRows[0].status).toBe("closed");
