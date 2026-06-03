@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   deriveWorkspaceActivityState,
   isFailedLaunchSession,
+  isIssueInFlight,
   workspaceStatusPriority,
   ACTIVE_WORKSPACE_STATUSES,
   type WorkspaceActivityInput,
@@ -171,5 +172,57 @@ describe("ACTIVE_WORKSPACE_STATUSES", () => {
     expect(ACTIVE_WORKSPACE_STATUSES.has("idle")).toBe(false);
     expect(ACTIVE_WORKSPACE_STATUSES.has("closed")).toBe(false);
     expect(ACTIVE_WORKSPACE_STATUSES.has("error")).toBe(false);
+  });
+});
+
+// ─── isIssueInFlight ──────────────────────────────────────────────────────────
+
+describe("isIssueInFlight", () => {
+  it("returns true for active main workspace", () => {
+    expect(isIssueInFlight({ main: { status: "active" } })).toBe(true);
+  });
+
+  it("returns true for fixing main workspace", () => {
+    expect(isIssueInFlight({ main: { status: "fixing" } })).toBe(true);
+  });
+
+  it("returns true for reviewing main workspace", () => {
+    expect(isIssueInFlight({ main: { status: "reviewing" } })).toBe(true);
+  });
+
+  it("returns true for awaiting-plan-approval main workspace", () => {
+    expect(isIssueInFlight({ main: { status: "awaiting-plan-approval" } })).toBe(true);
+  });
+
+  it("returns true for in-review-idle (auto-merge eligible)", () => {
+    expect(isIssueInFlight({ main: { status: "in-review-idle" } })).toBe(true);
+  });
+
+  it("returns false for idle main workspace", () => {
+    expect(isIssueInFlight({ main: { status: "idle" } })).toBe(false);
+  });
+
+  it("returns false for closed main workspace", () => {
+    expect(isIssueInFlight({ main: { status: "closed" } })).toBe(false);
+  });
+
+  it("returns false for error main workspace", () => {
+    expect(isIssueInFlight({ main: { status: "error" } })).toBe(false);
+  });
+
+  it("returns false when workspaceSummary is null", () => {
+    expect(isIssueInFlight(null)).toBe(false);
+  });
+
+  it("returns false when workspaceSummary is undefined", () => {
+    expect(isIssueInFlight(undefined)).toBe(false);
+  });
+
+  it("returns false when main is null", () => {
+    expect(isIssueInFlight({ main: null })).toBe(false);
+  });
+
+  it("returns false when main has no status", () => {
+    expect(isIssueInFlight({ main: {} })).toBe(false);
   });
 });
