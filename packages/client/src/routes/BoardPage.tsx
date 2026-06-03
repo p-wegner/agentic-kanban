@@ -722,6 +722,72 @@ export function BoardPage() {
     }
   }
 
+  function applyOptimisticIssueUpdate(issueId: string, updater: (issue: IssueWithStatus) => IssueWithStatus) {
+    setColumns((prev) =>
+      prev.map((col) => ({
+        ...col,
+        issues: col.issues.map((iss) => (iss.id === issueId ? updater(iss) : iss)),
+      }))
+    );
+  }
+
+  async function handleQuickPriorityChange(issueId: string, priority: string) {
+    const prev = columnsRef.current.flatMap((c) => c.issues).find((i) => i.id === issueId);
+    applyOptimisticIssueUpdate(issueId, (iss) => ({ ...iss, priority }));
+    try {
+      await apiFetch(`/api/issues/${issueId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ priority }),
+      });
+      await refetchBoard();
+    } catch {
+      if (prev) applyOptimisticIssueUpdate(issueId, () => prev);
+      showToast("Failed to update priority", "error");
+    }
+  }
+
+  async function handleQuickAddTag(issueId: string, tagId: string) {
+    const tag = allTags.find((t) => t.id === tagId);
+    if (!tag) return;
+    applyOptimisticIssueUpdate(issueId, (iss) => ({
+      ...iss,
+      tags: [...(iss.tags ?? []), tag],
+    }));
+    try {
+      await apiFetch(`/api/issues/${issueId}/tags`, {
+        method: "POST",
+        body: JSON.stringify({ tagId }),
+      });
+      await refetchBoard();
+    } catch {
+      applyOptimisticIssueUpdate(issueId, (iss) => ({
+        ...iss,
+        tags: (iss.tags ?? []).filter((t) => t.id !== tagId),
+      }));
+      showToast("Failed to add tag", "error");
+    }
+  }
+
+  async function handleQuickRemoveTag(issueId: string, tagId: string) {
+    applyOptimisticIssueUpdate(issueId, (iss) => ({
+      ...iss,
+      tags: (iss.tags ?? []).filter((t) => t.id !== tagId),
+    }));
+    try {
+      await apiFetch(`/api/issues/${issueId}/tags/${tagId}`, { method: "DELETE" });
+      await refetchBoard();
+    } catch {
+      const tag = allTags.find((t) => t.id === tagId);
+      if (tag) {
+        applyOptimisticIssueUpdate(issueId, (iss) => ({
+          ...iss,
+          tags: [...(iss.tags ?? []), tag],
+        }));
+      }
+      showToast("Failed to remove tag", "error");
+    }
+  }
+
   function handleDragStart(e: React.DragEvent, issue: IssueWithStatus) {
     e.dataTransfer.setData("application/json", JSON.stringify({
       issueId: issue.id,
@@ -1031,6 +1097,13 @@ export function BoardPage() {
       setTagFilterId(null);
     }
   }, [allTags, tagFilterId, tagsLoaded]);
+
+  useEffect(() => {
+    if (!activeProjectId || tagsLoaded) return;
+    apiFetch<Tag[]>("/api/tags")
+      .then((tags) => { setAllTags(tags); setTagsLoaded(true); })
+      .catch(() => {});
+  }, [activeProjectId, tagsLoaded]);
 
   const applyBoardViewState = useCallback((state: BoardViewState) => {
     setSearchQuery(state.searchQuery);
@@ -2123,6 +2196,12 @@ export function BoardPage() {
             onCreateIssue={handleCreateIssue}
             onExpandCreate={(statusId, statusName, state) => setExpandedCreatePanel({ statusId, statusName, state })}
             selectedIssueIds={selectedBoardIssueIds}
+            allProjectTags={allTags}
+            quickUpdate={{
+              onPriorityChange: handleQuickPriorityChange,
+              onAddTag: handleQuickAddTag,
+              onRemoveTag: handleQuickRemoveTag,
+            }}
           />
         )}
       </div>
