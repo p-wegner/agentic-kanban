@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "../lib/api.js";
+import type { OrchestratorStatus } from "../hooks/useOrchestrator.js";
 
 export interface MonitorCycleSummary {
   cycleId: string;
@@ -15,6 +16,8 @@ export interface MonitorCycleSummary {
   issueNumbers: number[];
   label: string;
 }
+
+type TimelineTab = "in-app" | "orchestrator";
 
 interface MonitorCycleTimelineProps {
   projectId: string | null;
@@ -76,12 +79,26 @@ function CountPill({ value, label, color }: { value: number; label: string; colo
   );
 }
 
+function parseCycleLine(line: string): { age: string | null; text: string } {
+  const m = line.match(/^(\S+)\s*\|\s*(.*)/s);
+  if (!m) return { age: null, text: line };
+  const candidate = m[1];
+  const d = new Date(candidate);
+  if (Number.isNaN(d.getTime())) return { age: null, text: line };
+  return { age: candidate, text: m[2].trim() };
+}
+
 export function MonitorCycleTimeline({ projectId, onSelectIssue, onSwitchToEvents }: MonitorCycleTimelineProps) {
+  const [tab, setTab] = useState<TimelineTab>("in-app");
   const [cycles, setCycles] = useState<MonitorCycleSummary[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [limit, setLimit] = useState(15);
   const [expandedCycle, setExpandedCycle] = useState<string | null>(null);
+
+  const [orchestrator, setOrchestrator] = useState<OrchestratorStatus | null>(null);
+  const [orchLoading, setOrchLoading] = useState(false);
+  const [orchError, setOrchError] = useState<string | null>(null);
 
   const fetchCycles = useCallback(async () => {
     if (!projectId) return;
@@ -99,11 +116,35 @@ export function MonitorCycleTimeline({ projectId, onSelectIssue, onSwitchToEvent
     }
   }, [projectId, limit]);
 
+  const fetchOrchestrator = useCallback(async () => {
+    if (!projectId) return;
+    setOrchLoading(true);
+    setOrchError(null);
+    try {
+      const data = await apiFetch<OrchestratorStatus>(`/api/projects/${projectId}/orchestrator`);
+      setOrchestrator(data);
+    } catch (e) {
+      setOrchError(e instanceof Error ? e.message : "Failed to load orchestrator status");
+    } finally {
+      setOrchLoading(false);
+    }
+  }, [projectId]);
+
   useEffect(() => {
     fetchCycles();
   }, [fetchCycles]);
 
+  useEffect(() => {
+    if (tab === "orchestrator") {
+      fetchOrchestrator();
+    }
+  }, [tab, fetchOrchestrator]);
+
   if (!projectId) return null;
+
+  const isOrchestratorTab = tab === "orchestrator";
+  const currentLoading = isOrchestratorTab ? orchLoading : loading;
+  const currentRefresh = isOrchestratorTab ? fetchOrchestrator : fetchCycles;
 
   return (
     <div className="flex flex-col h-full overflow-hidden bg-white dark:bg-gray-950">
@@ -114,13 +155,30 @@ export function MonitorCycleTimeline({ projectId, onSelectIssue, onSwitchToEvent
             <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 3v11.25A2.25 2.25 0 006 16.5h2.25M3.75 3h-1.5m1.5 0h16.5m0 0h1.5m-1.5 0v11.25A2.25 2.25 0 0118 16.5h-2.25m-7.5 0h7.5m-7.5 0l-1 3m8.5-3l1 3m0 0l.5 1.5m-.5-1.5h-9.5m0 0l-.5 1.5" />
           </svg>
           <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Cycle Health Timeline</h2>
-          {cycles.length > 0 && (
+          {!isOrchestratorTab && cycles.length > 0 && (
             <span className="text-xs bg-indigo-100 dark:bg-indigo-900 text-indigo-700 dark:text-indigo-300 px-2 py-0.5 rounded-full font-medium">
               {cycles.length}
             </span>
           )}
         </div>
         <div className="flex items-center gap-2">
+          {/* Tab switcher: In-App / Orchestrator */}
+          <div className="flex items-center gap-1 border border-gray-200 dark:border-gray-700 rounded overflow-hidden">
+            <button
+              className={`px-2 py-1 text-xs ${tab === "in-app" ? "bg-indigo-100 dark:bg-indigo-900 text-indigo-700 dark:text-indigo-300 font-medium" : "text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800"}`}
+              onClick={() => setTab("in-app")}
+              title="In-app monitor cycles (database-backed)"
+            >
+              In-app
+            </button>
+            <button
+              className={`px-2 py-1 text-xs ${tab === "orchestrator" ? "bg-indigo-100 dark:bg-indigo-900 text-indigo-700 dark:text-indigo-300 font-medium" : "text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800"}`}
+              onClick={() => setTab("orchestrator")}
+              title="Out-of-process orchestrator loop (state.md)"
+            >
+              Orchestrator
+            </button>
+          </div>
           {onSwitchToEvents && (
             <div className="flex items-center gap-1">
               <button
@@ -137,22 +195,24 @@ export function MonitorCycleTimeline({ projectId, onSelectIssue, onSwitchToEvent
               </button>
             </div>
           )}
-          <select
-            value={limit}
-            onChange={(e) => setLimit(Number(e.target.value))}
-            className="text-xs border border-gray-200 dark:border-gray-700 rounded px-2 py-1 bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-300"
-          >
-            <option value={10}>Last 10</option>
-            <option value={15}>Last 15</option>
-            <option value={25}>Last 25</option>
-          </select>
+          {!isOrchestratorTab && (
+            <select
+              value={limit}
+              onChange={(e) => setLimit(Number(e.target.value))}
+              className="text-xs border border-gray-200 dark:border-gray-700 rounded px-2 py-1 bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-300"
+            >
+              <option value={10}>Last 10</option>
+              <option value={15}>Last 15</option>
+              <option value={25}>Last 25</option>
+            </select>
+          )}
           <button
-            onClick={fetchCycles}
-            disabled={loading}
+            onClick={() => void currentRefresh()}
+            disabled={currentLoading}
             className="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500 dark:text-gray-400 disabled:opacity-40"
             title="Refresh"
           >
-            <svg className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+            <svg className={`w-3.5 h-3.5 ${currentLoading ? "animate-spin" : ""}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
             </svg>
           </button>
@@ -161,13 +221,23 @@ export function MonitorCycleTimeline({ projectId, onSelectIssue, onSwitchToEvent
 
       {/* Content */}
       <div className="flex-1 overflow-auto">
-        {error && (
+        {/* Orchestrator tab */}
+        {isOrchestratorTab && (
+          <OrchestratorCycleList
+            orchestrator={orchestrator}
+            loading={orchLoading}
+            error={orchError}
+          />
+        )}
+
+        {/* In-app tab */}
+        {!isOrchestratorTab && error && (
           <div className="m-4 p-3 bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 rounded text-sm text-red-700 dark:text-red-300">
             {error}
           </div>
         )}
 
-        {!loading && !error && cycles.length === 0 && (
+        {!isOrchestratorTab && !loading && !error && cycles.length === 0 && (
           <div className="flex flex-col items-center justify-center h-48 text-gray-400 dark:text-gray-600 text-sm gap-2">
             <svg className="w-8 h-8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 3v11.25A2.25 2.25 0 006 16.5h2.25M3.75 3h-1.5m1.5 0h16.5m0 0h1.5m-1.5 0v11.25A2.25 2.25 0 0118 16.5h-2.25m-7.5 0h7.5m-7.5 0l-1 3m8.5-3l1 3m0 0l.5 1.5m-.5-1.5h-9.5m0 0l-.5 1.5" />
@@ -179,7 +249,7 @@ export function MonitorCycleTimeline({ projectId, onSelectIssue, onSwitchToEvent
           </div>
         )}
 
-        {cycles.length > 0 && (
+        {!isOrchestratorTab && cycles.length > 0 && (
           <div className="divide-y divide-gray-100 dark:divide-gray-800">
             {cycles.map((cycle) => {
               const cfg = HEALTH_STATE_CONFIG[cycle.healthState];
@@ -311,12 +381,121 @@ export function MonitorCycleTimeline({ projectId, onSelectIssue, onSwitchToEvent
 
       {/* Footer */}
       <div className="px-4 py-2 border-t border-gray-200 dark:border-gray-800 shrink-0">
-        <p className="text-xs text-gray-400 dark:text-gray-600">
-          {cycles.length} cycle{cycles.length !== 1 ? "s" : ""}
-          {" · "}
-          <code className="font-mono">/api/projects/:id/monitor-cycles</code>
+        {isOrchestratorTab ? (
+          <p className="text-xs text-gray-400 dark:text-gray-600">
+            {orchestrator?.available
+              ? `${orchestrator.recentCycles.length} cycle${orchestrator.recentCycles.length !== 1 ? "s" : ""} · state.md (last 40)`
+              : "Out-of-process orchestrator not available for this project"}
+            {" · "}
+            <code className="font-mono">/api/projects/:id/orchestrator</code>
+          </p>
+        ) : (
+          <p className="text-xs text-gray-400 dark:text-gray-600">
+            {cycles.length} cycle{cycles.length !== 1 ? "s" : ""}
+            {" · "}
+            <code className="font-mono">/api/projects/:id/monitor-cycles</code>
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function OrchestratorCycleList({
+  orchestrator,
+  loading,
+  error,
+}: {
+  orchestrator: OrchestratorStatus | null;
+  loading: boolean;
+  error: string | null;
+}) {
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-24 text-gray-400 dark:text-gray-600 text-sm">
+        Loading orchestrator status…
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="m-4 p-3 bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 rounded text-sm text-red-700 dark:text-red-300">
+        {error}
+      </div>
+    );
+  }
+
+  if (!orchestrator || !orchestrator.available) {
+    return (
+      <div className="flex flex-col items-center justify-center h-48 text-gray-400 dark:text-gray-600 text-sm gap-2">
+        <svg className="w-8 h-8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 3v1.5M4.5 8.25H3m18 0h-1.5M4.5 12H3m18 0h-1.5m-15 3.75H3m18 0h-1.5M8.25 19.5V21M12 3v1.5m0 15V21m3.75-18v1.5m0 15V21m-9-1.5h10.5a2.25 2.25 0 002.25-2.25V6.75a2.25 2.25 0 00-2.25-2.25H6.75A2.25 2.25 0 004.5 6.75v10.5a2.25 2.25 0 002.25 2.25zm.75-12h9v9h-9v-9z" />
+        </svg>
+        <p>No orchestrator loop detected</p>
+        <p className="text-xs text-center max-w-xs">
+          The out-of-process board monitor (scripts/board-monitor/loop.sh) is not present for this project. Only projects with this dogfooding setup show orchestrator cycles here.
         </p>
       </div>
+    );
+  }
+
+  const cycles = [...orchestrator.recentCycles].reverse();
+  const dead = !orchestrator.alive;
+
+  return (
+    <div>
+      {/* Orchestrator status bar */}
+      <div className="px-4 py-2.5 border-b border-gray-100 dark:border-gray-800 bg-indigo-50/40 dark:bg-indigo-950/20 flex items-center gap-2.5">
+        <span
+          className={`w-2 h-2 rounded-full shrink-0 ${dead ? "bg-red-500" : orchestrator.phase === "running" ? "bg-green-500 animate-pulse" : "bg-emerald-400"}`}
+          title={dead ? "Loop not running" : orchestrator.phase === "running" ? "Cycle in progress" : "Idle between cycles"}
+        />
+        <span className={`text-xs font-medium ${dead ? "text-red-600 dark:text-red-400" : "text-gray-700 dark:text-gray-300"}`}>
+          {dead
+            ? "Not running"
+            : orchestrator.phase === "running"
+              ? `Cycle ${orchestrator.iteration ?? "?"} running`
+              : `Idle (after cycle ${orchestrator.iteration ?? "?"})`}
+        </span>
+        {orchestrator.lastLogAt && (
+          <span className="text-gray-400 dark:text-gray-500 font-mono text-[11px]">
+            · {formatAge(orchestrator.lastLogAt)}
+          </span>
+        )}
+        {orchestrator.lastExit === 124 && (
+          <span className="ml-auto px-1.5 py-0.5 rounded-full bg-amber-50 dark:bg-amber-950 text-amber-700 dark:text-amber-300 text-[10px] font-medium" title="Last cycle hit the 30-minute cap">
+            hit 30m cap
+          </span>
+        )}
+      </div>
+
+      {/* Cycle lines from state.md */}
+      {cycles.length === 0 ? (
+        <div className="flex flex-col items-center justify-center h-32 text-gray-400 dark:text-gray-600 text-sm gap-1">
+          <p>No cycles recorded yet</p>
+          <p className="text-xs">state.md is empty or has no content lines</p>
+        </div>
+      ) : (
+        <div className="divide-y divide-gray-100 dark:divide-gray-800">
+          {cycles.map((line, i) => {
+            const { age, text } = parseCycleLine(line);
+            return (
+              <div key={i} className="px-4 py-2.5 hover:bg-gray-50 dark:hover:bg-gray-900 flex items-start gap-3">
+                <span className="mt-1.5 h-1.5 w-1.5 rounded-full bg-indigo-400 shrink-0" />
+                <div className="min-w-0 flex-1">
+                  <div className="text-xs text-gray-800 dark:text-gray-200 leading-snug">{text}</div>
+                  {age && (
+                    <div className="text-[11px] font-mono text-gray-400 dark:text-gray-500 mt-0.5">
+                      {formatAge(age)}
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
