@@ -21,6 +21,7 @@ import { BoardHealthNotificationCenter } from "../components/BoardHealthNotifica
 import { RunbooksView } from "../components/RunbooksView.js";
 import { SprintCapacityPlanner } from "../components/SprintCapacityPlanner.js";
 import { ConstellationView } from "../components/ConstellationView.js";
+import { MomentumView } from "../components/MomentumView.js";
 import { useAgentQuestionsCount } from "../components/AgentQuestionsPanel.js";
 import { BoardErrorBoundary } from "../components/BoardErrorBoundary.js";
 import { BacklogView } from "../components/BacklogView.js";
@@ -2225,6 +2226,15 @@ export function BoardPage() {
         {viewMode === "constellation" && (
           <BoardErrorBoundary columnName="Constellation View">
             <ConstellationView
+              columns={columns}
+              onIssueClick={handleIssueClick}
+              searchQuery={searchQuery}
+            />
+          </BoardErrorBoundary>
+        )}
+        {viewMode === "momentum" && (
+          <BoardErrorBoundary columnName="Momentum View">
+            <MomentumView
               columns={columns}
               onIssueClick={handleIssueClick}
               searchQuery={searchQuery}
