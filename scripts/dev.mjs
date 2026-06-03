@@ -23,7 +23,7 @@ import {
 } from "./dev-supervisor.mjs";
 import { resolveDevPorts } from "./dev-port-plan.mjs";
 import { buildDevPortEnv } from "./dev-env.mjs";
-import { planPortOwnerKill } from "./dev-port-guard.mjs";
+import { planPortOwnerKill, parseNetstatListeners } from "./dev-port-guard.mjs";
 import { writeProcessAudit } from "./process-audit.mjs";
 
 function run(cmd) {
@@ -78,12 +78,10 @@ async function freePort(port, label) {
     // Works on Windows (netstat) and Unix (lsof)
     const isWin = process.platform === "win32";
     if (isWin) {
-      const out = execSync(`netstat -ano | findstr ":${port} "`, { encoding: "utf8", stdio: ["pipe","pipe","pipe"], windowsHide: true });
-      const pids = [...new Set(
-        out.split("\n")
-          .map(l => l.trim().split(/\s+/).at(-1))
-          .filter(p => /^\d+$/.test(p) && p !== "0")
-      )];
+      const out = execSync(`netstat -ano`, { encoding: "utf8", stdio: ["pipe","pipe","pipe"], windowsHide: true });
+      // parseNetstatListeners only returns PIDs for LISTENING rows, so established
+      // connections to the port (e.g. the Vite client proxying to the server) are excluded.
+      const pids = parseNetstatListeners(out, port);
       for (const pid of pids) {
         const decision = planPortOwnerKill({
           pid,
@@ -107,7 +105,9 @@ async function freePort(port, label) {
         }
       }
     } else {
-      const out = execSync(`lsof -ti :${port}`, { encoding: "utf8", stdio: ["pipe", "pipe", "pipe"] });
+      // -sTCP:LISTEN limits to actual listeners; omitting it would also return
+      // processes with established connections to the port (e.g. the Vite client).
+      const out = execSync(`lsof -ti :${port} -sTCP:LISTEN`, { encoding: "utf8", stdio: ["pipe", "pipe", "pipe"] });
       const pids = [...new Set(out.split("\n").map((p) => p.trim()).filter(Boolean))];
       for (const pid of pids) {
         const decision = planPortOwnerKill({
