@@ -90,3 +90,31 @@ export function createDependencyRecoveryState(initialSnapshot) {
     },
   };
 }
+
+// Matches ERR_MODULE_NOT_FOUND errors that reference packages/shared/dist.
+// The server child emits these to stderr before exiting with code 1 when the
+// shared package has not been built (or is stale after a merge).
+const STALE_SHARED_DIST_RE = /Cannot find (?:module|package) '.*packages[/\\]shared[/\\]dist/;
+
+export function isStaleSharedDistError(output) {
+  return STALE_SHARED_DIST_RE.test(output);
+}
+
+export const MAX_SHARED_DIST_REBUILDS = 2;
+
+export function createSharedDistRecoveryState() {
+  let rebuilds = 0;
+
+  return {
+    get rebuilds() {
+      return rebuilds;
+    },
+    canRebuild() {
+      return rebuilds < MAX_SHARED_DIST_REBUILDS;
+    },
+    markRebuilt() {
+      rebuilds++;
+      return rebuilds;
+    },
+  };
+}
