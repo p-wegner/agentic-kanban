@@ -225,6 +225,21 @@ export function createIssuesRoute(database: Database = db, options?: { boardEven
     const result = await wrapAiOperation("preflight", () =>
       runTicketPreflight(issueId, body.projectId, database, answered.length > 0 ? answered : undefined),
     );
+
+    // Persist the verdict as a durable audit comment (only for the initial check, not re-checks with clarifications)
+    if (answered.length === 0) {
+      const verdictBody = result.summary
+        ? `Preflight verdict: **${result.verdict}** — ${result.summary}`
+        : `Preflight verdict: **${result.verdict}**`;
+      await issueCommentsService.addComment({
+        issueId,
+        kind: "preflight-verdict",
+        author: "preflight",
+        body: verdictBody,
+        payload: { verdict: result.verdict, looksComplex: result.looksComplex, questionsCount: result.questions.length },
+      });
+    }
+
     return c.json({ ...result, clarificationsBlock });
   });
 
