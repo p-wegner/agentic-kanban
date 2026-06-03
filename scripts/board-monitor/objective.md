@@ -10,7 +10,7 @@ This is a FRESH session every run — you have NO memory of previous runs. The k
 ## TUNABLE TARGETS - generated from Strategy Bullseye
 <!-- STRATEGY_BULLSEYE_GENERATED_START -->
 > The loop re-reads this file at the START of every iteration, so changes here take effect on the next cycle with **NO restart**. This block is generated from the Strategy Bullseye preference; edit the bullseye in the board UI instead of hand-editing these values.
-- **ACTIVE_AGENTS_TARGET = 3** - keep this many workspaces actively In Progress at all times.
+- **ACTIVE_AGENTS_TARGET = 5** - keep this many workspaces actively In Progress at all times.
 - **BACKLOG_FLOOR = 10** - never let the backlog drop below this; refill before it does.
 - **MAX_NEW_STARTS_PER_CYCLE = 2** - cap on how many NEW workspaces to launch in a single cycle.
 - **REFILL_FOCUS = balanced** - derived from work-type marker weights; `bugfix-only` emphasizes reproducible bugs, `balanced` allows feature/quality mix.
