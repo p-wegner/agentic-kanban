@@ -30,42 +30,26 @@ import { BoardStats } from "../components/BoardStats.js";
 import { BoardToolbar } from "../components/BoardToolbar.js";
 import { SavedBoardViews } from "../components/SavedBoardViews.js";
 import { VIEW_REGISTRY, VIEW_IDS, SHORTCUT_TO_VIEW, type ViewMode } from "../lib/viewRegistry.js";
-import { CreateIssuePanel } from "../components/CreateIssuePanel.js";
 import type { CreateIssueFormState } from "../components/CreateIssueForm.js";
 import { IssueDetailPanel } from "../components/IssueDetailPanel.js";
-import { useTicketTrail } from "../hooks/useTicketTrail.js";
 import { WorkspacePanel } from "../components/WorkspacePanel.js";
-import { WorktreeOverview } from "../components/WorktreeOverview.js";
-import { AllWorkspacesPanel } from "../components/AllWorkspacesPanel.js";
-import { CleanupQueuePanel } from "../components/CleanupQueuePanel.js";
-import { FileContentionPanel } from "../components/FileContentionPanel.js";
-import { SettingsPanel } from "../components/SettingsPanel.js";
 import { SkeletonBoard } from "../components/SkeletonBoard.js";
 import { ToastContainer, showToast } from "../components/Toast.js";
 import { suggestBranchName } from "../lib/branch.js";
 import { MentionProvider } from "../lib/MentionContext.js";
-import { CommandPalette } from "../components/CommandPalette.js";
-import { ShortcutHelp } from "../components/ShortcutHelp.js";
 import { apiFetch } from "../lib/api.js";
-import { wipLimitKey, getWipLimit } from "../lib/wipLimits.js";
 import { useBoardEvents, type LiveSessionStats, type TodoItem, type ApprovalRequest } from "../lib/useBoardEvents.js";
-import { ApprovalDialog } from "../components/ApprovalDialog.js";
-import { MoveToDoneDialog } from "../components/MoveToDoneDialog.js";
-import { DependencyImpactDialog } from "../components/DependencyImpactDialog.js";
 import { sendDesktopNotification } from "../lib/desktop.js";
 import { registerAction } from "../lib/actions.js";
 import { useActivityNotifications, type NotificationEvent } from "../hooks/useActivityNotifications.js";
 import { getAppRouteView, getViewRoutePath } from "../lib/appRoutes.js";
-import { QuickTasksPanel } from "../components/QuickTasksPanel.js";
-import { MergeQueuePanel } from "../components/MergeQueuePanel.js";
-import { RunQueueForecastPanel, buildRunQueueForecast } from "../components/RunQueueForecastPanel.js";
-import { CodemodPanel } from "../components/CodemodPanel.js";
-import { TranscriptSearchPanel } from "../components/TranscriptSearchPanel.js";
-import { WorkspaceLaunchFailuresPanel } from "../components/WorkspaceLaunchFailuresPanel.js";
-import { ProjectHealthOverview } from "../components/ProjectHealthOverview.js";
-import { AgentStartDryRunModal } from "../components/AgentStartDryRunModal.js";
-import type { MonitorStatus } from "../components/MonitorPopover.js";
-import type { BoardViewState, SavedViewReference } from "../lib/boardSavedViews.js";
+import { buildRunQueueForecast } from "../components/RunQueueForecastPanel.js";
+import { useBoardPreferences } from "../hooks/useBoardPreferences.js";
+import { useBoardPanels } from "../hooks/useBoardPanels.js";
+import { useBoardNavigation } from "../hooks/useBoardNavigation.js";
+import { useBoardBulkSelection } from "../hooks/useBoardBulkSelection.js";
+import { BoardBulkActionBar } from "../components/BoardBulkActionBar.js";
+import { BoardOverlayPanels } from "../components/BoardOverlayPanels.js";
 import type {
   CreateIssueRequest,
   DependencyInfo,
@@ -75,6 +59,7 @@ import type {
   UpdateIssueRequest,
 } from "@agentic-kanban/shared";
 import { isIssueInFlight } from "@agentic-kanban/shared";
+import type { BoardViewState, SavedViewReference } from "../lib/boardSavedViews.js";
 
 interface Project {
   id: string;
@@ -98,17 +83,9 @@ interface Tag {
 
 const ARCHIVE_STATUS_NAMES = new Set(["Done", "Cancelled"]);
 const BACKLOG_STATUS_NAME = "Backlog";
-const PRIORITY_OPTIONS = ["critical", "high", "medium", "low"] as const;
-const PRIORITY_LABEL: Record<(typeof PRIORITY_OPTIONS)[number], string> = {
-  critical: "Critical",
-  high: "High",
-  medium: "Medium",
-  low: "Low",
-};
-
 
 export function BoardPage() {
-  const { theme, setTheme, isDark } = useTheme();
+  const { theme: _theme, setTheme, isDark } = useTheme();
   const [columns, setColumns] = useState<StatusWithIssues[]>([]);
   const columnsRef = useRef<StatusWithIssues[]>([]);
   const [loading, setLoading] = useState(true);
@@ -118,7 +95,6 @@ export function BoardPage() {
   const { addBoardEvent: addNotificationBoardEvent, addApprovalEvent: addNotificationApprovalEvent } = notifications;
   const [creatingInColumnId, setCreatingInColumnId] = useState<string | null>(null);
   const [selectedIssue, setSelectedIssue] = useState<IssueWithStatus | null>(null);
-  const ticketTrail = useTicketTrail();
   const [error, setError] = useState<string | null>(null);
   const [mutating, setMutating] = useState(false);
   const [workspaceIssue, setWorkspaceIssue] = useState<IssueWithStatus | null>(null);
@@ -131,23 +107,6 @@ export function BoardPage() {
   const [statusFilterId, setStatusFilterId] = useState<string | null>(null);
   const [tagFilterId, setTagFilterId] = useState<string | null>(null);
   const [createdDateFilter, setCreatedDateFilter] = useState<string | null>(null);
-  const [showBlocked, setShowBlocked] = useState(false);
-  const [showStaleOnly, setShowStaleOnly] = useState(false);
-  const [showSettings, setShowSettings] = useState(false);
-  const [showQuickTasks, setShowQuickTasks] = useState(false);
-  const [showMergeQueue, setShowMergeQueue] = useState(false);
-  const [showRunQueueForecast, setShowRunQueueForecast] = useState(false);
-  const [dryRunIssue, setDryRunIssue] = useState<IssueWithStatus | null>(null);
-  const [showCodemod, setShowCodemod] = useState(false);
-  const [showWorktreeOverview, setShowWorktreeOverview] = useState(false);
-  const [showAllWorkspaces, setShowAllWorkspaces] = useState(false);
-  const [showLaunchFailures, setShowLaunchFailures] = useState(false);
-  const [showCleanupQueue, setShowCleanupQueue] = useState(false);
-  const [showFileContention, setShowFileContention] = useState(false);
-  const [showTranscriptSearch, setShowTranscriptSearch] = useState(false);
-  const [showProjectHealth, setShowProjectHealth] = useState(false);
-  const [showCommandPalette, setShowCommandPalette] = useState(false);
-  const [showShortcutHelp, setShowShortcutHelp] = useState(false);
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(
     new Set(["archive"]),
   );
@@ -168,19 +127,14 @@ export function BoardPage() {
   const pendingGRef = useRef(false);
   const pendingGTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [expandedCreatePanel, setExpandedCreatePanel] = useState<{ statusId: string; statusName: string; state: Partial<CreateIssueFormState> } | null>(null);
+
   const [viewMode, setViewMode] = useState<ViewMode>(() => {
     const routeView = getAppRouteView(window.location.pathname);
     if (routeView) return routeView;
     const stored = localStorage.getItem("kanban-board-view");
     return VIEW_IDS.includes(stored as ViewMode) ? (stored as ViewMode) : "kanban";
   });
-  const [dynamicColumnScaling, setDynamicColumnScaling] = useState(false);
   const [graphFocusIssueId, setGraphFocusIssueId] = useState<string | undefined>(undefined);
-  const agentQuestionsCount = useAgentQuestionsCount(activeProjectId);
-  const [columnWidths, setColumnWidths] = useState<Record<string, number>>(() => {
-    try { return JSON.parse(localStorage.getItem("kanban-column-widths") ?? "{}"); } catch { return {}; }
-  });
-  const resizingRef = useRef<{ colId: string; startX: number; startWidth: number } | null>(null);
 
   const navigateToViewRoute = useCallback((mode: ViewMode, replace = false) => {
     const nextPath = getViewRoutePath(mode);
@@ -207,49 +161,19 @@ export function BoardPage() {
       setViewMode(routeView);
       localStorage.setItem("kanban-board-view", routeView);
     }
-
     window.addEventListener("popstate", handlePopState);
     return () => window.removeEventListener("popstate", handlePopState);
   }, []);
 
-  const handleCreatedDateDrilldown = useCallback((dateKey: string) => {
-    setCreatedDateFilter(dateKey);
-    handleViewModeChange("table");
-  }, [handleViewModeChange]);
+  // Extracted hooks
+  const prefs = useBoardPreferences();
+  const panels = useBoardPanels();
+  const agentQuestionsCount = useAgentQuestionsCount(activeProjectId);
+  const [columnWidths, setColumnWidths] = useState<Record<string, number>>(() => {
+    try { return JSON.parse(localStorage.getItem("kanban-column-widths") ?? "{}"); } catch { return {}; }
+  });
+  const resizingRef = useRef<{ colId: string; startX: number; startWidth: number } | null>(null);
 
-  const handleColumnResizeStart = useCallback((colId: string, e: React.MouseEvent) => {
-    e.preventDefault();
-    const colEl = document.getElementById(`column-${colId}`);
-    const startWidth = colEl ? colEl.getBoundingClientRect().width : (columnWidths[colId] ?? 288);
-    resizingRef.current = { colId, startX: e.clientX, startWidth };
-
-    const onMouseMove = (ev: MouseEvent) => {
-      if (!resizingRef.current) return;
-      const delta = ev.clientX - resizingRef.current.startX;
-      const newWidth = Math.max(160, Math.min(800, resizingRef.current.startWidth + delta));
-      setColumnWidths((prev) => ({ ...prev, [resizingRef.current!.colId]: newWidth }));
-    };
-    const onMouseUp = () => {
-      setColumnWidths((prev) => {
-        try { localStorage.setItem("kanban-column-widths", JSON.stringify(prev)); } catch {}
-        return prev;
-      });
-      resizingRef.current = null;
-      window.removeEventListener("mousemove", onMouseMove);
-      window.removeEventListener("mouseup", onMouseUp);
-    };
-    window.addEventListener("mousemove", onMouseMove);
-    window.addEventListener("mouseup", onMouseUp);
-  }, [columnWidths]);
-
-  const [autoReview, setAutoReview] = useState(true);
-  const [autoMerge, setAutoMerge] = useState(true);
-  const [autoMonitor, setAutoMonitor] = useState(false);
-  const [autoMonitorInterval, setAutoMonitorInterval] = useState("4");
-  const [nudgeAutoStart, setNudgeAutoStart] = useState(false);
-  const [nudgeWipLimit, setNudgeWipLimit] = useState("5");
-  const [monitorStatus, setMonitorStatus] = useState<MonitorStatus | null>(null);
-  const [monitorRunning, setMonitorRunning] = useState(false);
   const [moveToDonePending, setMoveToDonePending] = useState<{ issue: IssueWithStatus; confirm: () => Promise<void> } | null>(null);
   const [dependencyImpactPending, setDependencyImpactPending] = useState<{
     issue: IssueWithStatus;
@@ -260,12 +184,8 @@ export function BoardPage() {
   } | null>(null);
   const [pendingIssueIds, setPendingIssueIds] = useState<Set<string>>(new Set());
   const [pendingWorkspaceIssueIds, setPendingWorkspaceIssueIds] = useState<Set<string>>(new Set());
-  const [selectedBoardIssueIds, setSelectedBoardIssueIds] = useState<Set<string>>(new Set());
-  const [lastSelectedBoardIssueId, setLastSelectedBoardIssueId] = useState<string | null>(null);
-  const [boardBulkUpdating, setBoardBulkUpdating] = useState(false);
   const [allTags, setAllTags] = useState<Tag[]>([]);
   const [tagsLoaded, setTagsLoaded] = useState(false);
-  const [wipLimits, setWipLimits] = useState<Record<string, number | null>>({});
 
   const refetchBoard = useCallback(async (projectId?: string) => {
     const pid = projectId || activeProjectId;
@@ -275,7 +195,6 @@ export function BoardPage() {
     );
     setColumns(board);
     columnsRef.current = board;
-    // Clear stale live data for issues whose agent is no longer running
     const inactiveIssueIds = new Set<string>();
     for (const col of board) {
       for (const issue of col.issues) {
@@ -285,7 +204,6 @@ export function BoardPage() {
         }
       }
     }
-    // Clear pending workspace indicator for issues that now have an active workspace
     setPendingWorkspaceIssueIds((prev) => {
       if (prev.size === 0) return prev;
       const next = new Set(prev);
@@ -324,7 +242,6 @@ export function BoardPage() {
     for (const col of columns) {
       const found = col.issues.find((i) => i.id === selectedIssue.id);
       if (found) {
-        // Only update if data actually changed to avoid unnecessary re-renders
         if (found.title !== selectedIssue.title ||
             found.description !== selectedIssue.description ||
             found.issueType !== selectedIssue.issueType ||
@@ -339,14 +256,11 @@ export function BoardPage() {
         return;
       }
     }
-    // Issue was deleted — close panel
     setSelectedIssue(null);
   }, [columns, selectedIssue]);
 
-  // Real-time board updates via WebSocket (debounced while create form is open)
+  // Real-time board updates via WebSocket
   useBoardEvents(activeProjectId, useCallback((reason: string) => {
-    console.log(`[board-events] board changed: ${reason}`);
-    // Desktop notification for agent events
     if (reason === "session_completed") {
       sendDesktopNotification("Agentic Kanban", "Agent session completed");
     } else if (reason === "workspace_merged") {
@@ -377,7 +291,6 @@ export function BoardPage() {
     }
 
     if (creatingInColumnId) {
-      // Don't refresh while create form is open — batch the update
       pendingBoardRefreshRef.current = true;
       return;
     }
@@ -387,7 +300,6 @@ export function BoardPage() {
       col.issues.some(iss => iss.id === issueId && (iss.workspaceSummary?.main?.status === "active" || iss.workspaceSummary?.main?.status === "fixing"))
     );
     if (!isActive) {
-      // Workspace no longer active — clear any stale live data immediately
       setSessionActivityRaw((prev) => {
         if (!(issueId in prev)) return prev;
         const next = { ...prev };
@@ -413,7 +325,6 @@ export function BoardPage() {
       if (Object.keys(sessions).length === 0) {
         const next = { ...prev };
         delete next[issueId];
-        // Also clear liveStats since the agent has finished its turn
         setLiveStats((prev) => {
           if (!(issueId in prev)) return prev;
           const next = { ...prev };
@@ -425,7 +336,6 @@ export function BoardPage() {
       return { ...prev, [issueId]: sessions };
     });
   }, []), useCallback((issueId: string, stats: LiveSessionStats) => {
-    // Ignore stats for workspaces that are no longer active (agent finished)
     const isActive = columnsRef.current.some(col =>
       col.issues.some(iss => iss.id === issueId && (iss.workspaceSummary?.main?.status === "active" || iss.workspaceSummary?.main?.status === "fixing"))
     );
@@ -464,8 +374,6 @@ export function BoardPage() {
     const projs = await apiFetch<Project[]>("/api/projects");
     setProjects(projs);
     if (projs.length === 0) return;
-
-    // Get active project preference
     try {
       const pref = await apiFetch<{ projectId: string | null }>("/api/preferences/active-project");
       if (pref.projectId && projs.some((p) => p.id === pref.projectId)) {
@@ -473,10 +381,8 @@ export function BoardPage() {
         return pref.projectId;
       }
     } catch {
-      // Ignore — fall back to first project
+      // fall back to first project
     }
-
-    // Fallback to first project
     const firstId = projs[0].id;
     setActiveProjectId(firstId);
     return firstId;
@@ -496,101 +402,10 @@ export function BoardPage() {
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to load board");
       }
-      // Load preferences independently so they work even if board fails
-      try {
-        const s = await apiFetch<Record<string, string>>("/api/preferences/settings");
-        setDynamicColumnScaling(s.dynamic_column_scaling === "true");
-        setAutoReview(s.auto_review !== "false");
-        setAutoMerge(s.auto_merge !== "false");
-        setAutoMonitor(s.auto_monitor === "true");
-        setAutoMonitorInterval(s.auto_monitor_interval ?? "4");
-        setNudgeAutoStart(s.nudge_auto_start === "true");
-        setNudgeWipLimit(s.nudge_wip_limit ?? "5");
-        const loadedWipLimits: Record<string, number | null> = {};
-        for (const key of Object.keys(s)) {
-          if (key.startsWith("wip_limit_")) {
-            const statusId = key.slice("wip_limit_".length);
-            const limit = getWipLimit(s, statusId);
-            if (limit !== null) loadedWipLimits[statusId] = limit;
-          }
-        }
-        setWipLimits(loadedWipLimits);
-        apiFetch<MonitorStatus>("/api/internal/monitor-status")
-          .then((r) => setMonitorStatus(r))
-          .catch(() => {});
-      } catch {
-        // ignore
-      }
       setLoading(false);
     }
     load();
   }, [loadProjects]);
-
-  useEffect(() => {
-    const t = setInterval(() => {
-      apiFetch<MonitorStatus>("/api/internal/monitor-status")
-        .then((r) => setMonitorStatus(r))
-        .catch(() => {});
-    }, 30_000);
-    return () => clearInterval(t);
-  }, []);
-
-  async function toggleAutoMonitor() {
-    const next = !autoMonitor;
-    setAutoMonitor(next);
-    try {
-      await apiFetch("/api/preferences/settings", {
-        method: "PUT",
-        body: JSON.stringify({ auto_monitor: String(next) }),
-      });
-      const status = await apiFetch<MonitorStatus>("/api/internal/monitor-status");
-      setMonitorStatus(status);
-    } catch {
-      setAutoMonitor(!next);
-    }
-  }
-
-  async function handleMonitorRunNow() {
-    setMonitorRunning(true);
-    try {
-      await apiFetch("/api/internal/monitor-run", { method: "POST" });
-      const s = await apiFetch<MonitorStatus>("/api/internal/monitor-status");
-      setMonitorStatus(s);
-    } finally {
-      setMonitorRunning(false);
-    }
-  }
-
-  async function handleIntervalChange(v: string) {
-    setAutoMonitorInterval(v);
-    await apiFetch("/api/preferences/settings", { method: "PUT", body: JSON.stringify({ auto_monitor_interval: v }) }).catch(() => {});
-  }
-
-  async function handleNudgeAutoStartChange(v: boolean) {
-    setNudgeAutoStart(v);
-    await apiFetch("/api/preferences/settings", { method: "PUT", body: JSON.stringify({ nudge_auto_start: String(v) }) }).catch(() => {});
-  }
-
-  async function handleNudgeWipLimitChange(v: string) {
-    setNudgeWipLimit(v);
-    await apiFetch("/api/preferences/settings", { method: "PUT", body: JSON.stringify({ nudge_wip_limit: v }) }).catch(() => {});
-  }
-
-  async function handleSetWipLimit(statusId: string, limit: number | null) {
-    setWipLimits((prev) => {
-      const next = { ...prev };
-      if (limit === null) {
-        delete next[statusId];
-      } else {
-        next[statusId] = limit;
-      }
-      return next;
-    });
-    await apiFetch("/api/preferences/settings", {
-      method: "PUT",
-      body: JSON.stringify({ [wipLimitKey(statusId)]: limit != null ? String(limit) : "" }),
-    }).catch(() => {});
-  }
 
   async function handleProjectChange(id: string) {
     setActiveProjectId(id);
@@ -600,7 +415,7 @@ export function BoardPage() {
         body: JSON.stringify({ projectId: id }),
       });
       await refetchBoard(id);
-    } catch (err) {
+    } catch {
       showToast("Failed to switch project", "error");
     }
   }
@@ -726,7 +541,7 @@ export function BoardPage() {
             launchedBoard = await refetchBoard();
             pendingBoardRefreshRef.current = false;
           } catch {
-            // The workspace was created; a later realtime/poll refresh can reconcile the card.
+            // workspace created; later realtime/poll refresh reconciles the card
           }
           for (const col of launchedBoard ?? board ?? columns) {
             const found = col.issues.find((i) => i.id === created.id);
@@ -750,7 +565,7 @@ export function BoardPage() {
       } else {
         showToast("Issue created", "success");
       }
-    } catch (err) {
+    } catch {
       setColumns((prev) => {
         const next = prev.map((col) => ({ ...col, issues: col.issues.filter((issue) => issue.id !== tempIssueId) }));
         columnsRef.current = next;
@@ -780,10 +595,9 @@ export function BoardPage() {
         method: "PATCH",
         body: JSON.stringify(data),
       });
-      const board = await refetchBoard();
-      void board;
+      await refetchBoard();
       showToast("Issue updated", "success");
-    } catch (err) {
+    } catch {
       showToast("Failed to update issue", "error");
     } finally {
       setMutating(false);
@@ -798,7 +612,7 @@ export function BoardPage() {
       setSelectedIssue(null);
       await refetchBoard();
       showToast("Issue deleted", "success");
-    } catch (err) {
+    } catch {
       showToast("Failed to delete issue", "error");
     } finally {
       setMutating(false);
@@ -925,8 +739,6 @@ export function BoardPage() {
     }
 
     const isReorder = sourceStatusId === targetStatusId && sortOrder !== undefined;
-
-    // Optimistic update for in-column reordering
     const snapshotColumns = columns;
     if (isReorder) {
       const capturedIssueId = issueId;
@@ -949,13 +761,12 @@ export function BoardPage() {
     try {
       const body: UpdateIssueRequest = { statusId: targetStatusId };
       if (sortOrder !== undefined) body.sortOrder = sortOrder;
-
       await apiFetch(`/api/issues/${issueId}`, {
         method: "PATCH",
         body: JSON.stringify(body),
       });
       await refetchBoard();
-    } catch (err) {
+    } catch {
       if (isReorder) {
         setColumns(snapshotColumns);
       }
@@ -1070,141 +881,6 @@ export function BoardPage() {
     setSelectedIssue(issue);
   }
 
-  function handleBoardIssueClick(issue: IssueWithStatus, event: React.MouseEvent) {
-    if (pendingIssueIds.has(issue.id)) return;
-    if (event.ctrlKey || event.metaKey || event.shiftKey) {
-      event.preventDefault();
-      setSelectedIssue(null);
-      setSelectedBoardIssueIds((prev) => {
-        const next = new Set(prev);
-        if (event.shiftKey) {
-          const ids = visibleKanbanIssues.map((item) => item.id);
-          const anchorIndex = lastSelectedBoardIssueId ? ids.indexOf(lastSelectedBoardIssueId) : -1;
-          const currentIndex = ids.indexOf(issue.id);
-          if (anchorIndex >= 0 && currentIndex >= 0) {
-            const [start, end] = anchorIndex < currentIndex ? [anchorIndex, currentIndex] : [currentIndex, anchorIndex];
-            for (const id of ids.slice(start, end + 1)) next.add(id);
-          } else {
-            next.add(issue.id);
-          }
-        } else if (next.has(issue.id)) {
-          next.delete(issue.id);
-        } else {
-          next.add(issue.id);
-        }
-        return next;
-      });
-      setLastSelectedBoardIssueId(issue.id);
-      return;
-    }
-
-    if (selectedBoardIssueIds.size > 0) {
-      setSelectedBoardIssueIds(new Set());
-      setLastSelectedBoardIssueId(null);
-    }
-    handleIssueClick(issue);
-  }
-
-  async function handleBoardBulkUpdate(updates: UpdateIssueRequest, successLabel: string) {
-    if (hasArchivedBoardSelection) return;
-    const ids = selectedBoardIssues.map((issue) => issue.id);
-    if (ids.length === 0) return;
-    setBoardBulkUpdating(true);
-    try {
-      await apiFetch("/api/issues/bulk", {
-        method: "PATCH",
-        body: JSON.stringify({ issueIds: ids, updates }),
-      });
-      showToast(`${successLabel} for ${ids.length} issue${ids.length !== 1 ? "s" : ""}`, "success");
-      setSelectedBoardIssueIds(new Set());
-      setLastSelectedBoardIssueId(null);
-      await refetchBoard();
-    } catch {
-      showToast(`${successLabel} failed`, "error");
-    } finally {
-      setBoardBulkUpdating(false);
-    }
-  }
-
-  async function handleBoardBulkAddTag(tagId: string) {
-    if (hasArchivedBoardSelection) return;
-    const tag = allTags.find((candidate) => candidate.id === tagId);
-    const ids = selectedBoardIssues.map((issue) => issue.id);
-    if (!tag || ids.length === 0) return;
-    setBoardBulkUpdating(true);
-    try {
-      const results = await Promise.allSettled(ids.map((id) =>
-        apiFetch(`/api/issues/${id}/tags`, {
-          method: "POST",
-          body: JSON.stringify({ tagId }),
-        })
-      ));
-      const failed = results.filter((result) => result.status === "rejected").length;
-      const succeeded = ids.length - failed;
-      if (failed === 0) {
-        showToast(`Added tag "${tag.name}" to ${succeeded} issue${succeeded !== 1 ? "s" : ""}`, "success");
-      } else {
-        showToast(`Added tag to ${succeeded} issue${succeeded !== 1 ? "s" : ""}; ${failed} failed`, "error");
-      }
-      setSelectedBoardIssueIds(new Set());
-      setLastSelectedBoardIssueId(null);
-      await refetchBoard();
-    } finally {
-      setBoardBulkUpdating(false);
-    }
-  }
-
-  async function handleBoardBulkRemoveTag(tagId: string) {
-    if (hasArchivedBoardSelection) return;
-    const tag = allTags.find((candidate) => candidate.id === tagId);
-    const ids = selectedBoardIssues
-      .filter((issue) => issue.tags?.some((t) => t.id === tagId))
-      .map((issue) => issue.id);
-    if (!tag || ids.length === 0) return;
-    setBoardBulkUpdating(true);
-    try {
-      const results = await Promise.allSettled(ids.map((id) =>
-        apiFetch(`/api/issues/${id}/tags/${tagId}`, { method: "DELETE" })
-      ));
-      const failed = results.filter((result) => result.status === "rejected").length;
-      const succeeded = ids.length - failed;
-      if (failed === 0) {
-        showToast(`Removed tag "${tag.name}" from ${succeeded} issue${succeeded !== 1 ? "s" : ""}`, "success");
-      } else {
-        showToast(`Removed tag from ${succeeded} issue${succeeded !== 1 ? "s" : ""}; ${failed} failed`, "error");
-      }
-      setSelectedBoardIssueIds(new Set());
-      setLastSelectedBoardIssueId(null);
-      await refetchBoard();
-    } finally {
-      setBoardBulkUpdating(false);
-    }
-  }
-
-  async function handleBoardBulkDelete() {
-    const ids = selectedBoardIssues.map((issue) => issue.id);
-    if (ids.length === 0) return;
-    if (!window.confirm(`Delete ${ids.length} issue${ids.length !== 1 ? "s" : ""}? This cannot be undone.`)) return;
-    setBoardBulkUpdating(true);
-    try {
-      const results = await Promise.allSettled(ids.map((id) =>
-        apiFetch(`/api/issues/${id}`, { method: "DELETE" })
-      ));
-      const failed = results.filter((result) => result.status === "rejected").length;
-      const succeeded = ids.length - failed;
-      if (failed === 0) {
-        showToast(`Deleted ${succeeded} issue${succeeded !== 1 ? "s" : ""}`, "success");
-      } else {
-        showToast(`Deleted ${succeeded} issue${succeeded !== 1 ? "s" : ""}; ${failed} failed`, "error");
-      }
-      setSelectedBoardIssueIds(new Set());
-      setLastSelectedBoardIssueId(null);
-      await refetchBoard();
-    } finally {
-      setBoardBulkUpdating(false);
-    }
-  }
-
   function handleManageWorkspaces(issue: IssueWithStatus, workspaceId?: string, sessionId = "") {
     setSelectedIssue(null);
     setWorkspaceIssue(issue);
@@ -1236,6 +912,34 @@ export function BoardPage() {
     setWorkspaceInitial(null);
     setWorkspaceOpenCreate(true);
   }
+
+  const handleColumnResizeStart = useCallback((colId: string, e: React.MouseEvent) => {
+    e.preventDefault();
+    const colEl = document.getElementById(`column-${colId}`);
+    const startWidth = colEl ? colEl.getBoundingClientRect().width : (columnWidths[colId] ?? 288);
+    resizingRef.current = { colId, startX: e.clientX, startWidth };
+
+    const onMouseMove = (ev: MouseEvent) => {
+      if (!resizingRef.current) return;
+      const delta = ev.clientX - resizingRef.current.startX;
+      const newWidth = Math.max(160, Math.min(800, resizingRef.current.startWidth + delta));
+      setColumnWidths((prev) => ({ ...prev, [resizingRef.current!.colId]: newWidth }));
+    };
+    const onMouseUp = () => {
+      setColumnWidths((prev) => {
+        try { localStorage.setItem("kanban-column-widths", JSON.stringify(prev)); } catch {}
+        return prev;
+      });
+      resizingRef.current = null;
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+    };
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
+  }, [columnWidths]);
+
+  const [showBlocked, setShowBlocked] = useState(false);
+  const [showStaleOnly, setShowStaleOnly] = useState(false);
 
   const statusFilter = useMemo(
     () => columns.find((col) => col.id === statusFilterId) ?? null,
@@ -1295,7 +999,6 @@ export function BoardPage() {
     }
   }, [handleViewModeChange]);
 
-  // Filter columns by search query and saved-view filters.
   const filteredColumns = useMemo(
     () =>
       columns.map((col) => ({
@@ -1330,14 +1033,11 @@ export function BoardPage() {
     [columns, focusMode, searchQuery, showBlocked, showStaleOnly, statusFilterId, tagFilterId],
   );
 
-  // "AI Reviewed" = tickets needing human attention (manual merge).
-  // Hide the column when no tickets are there AND the workflow won't produce them
-  // (auto_review off, or auto_merge on means review goes straight to Done).
   const showAiReviewedColumn = useMemo(
     () =>
       columns.some((col) => col.name === "AI Reviewed" && col.issues.length > 0) ||
-      (autoReview && !autoMerge),
-    [columns, autoReview, autoMerge],
+      (prefs.autoReview && !prefs.autoMerge),
+    [columns, prefs.autoReview, prefs.autoMerge],
   );
 
   const backlogColumn = useMemo(
@@ -1367,20 +1067,8 @@ export function BoardPage() {
     ],
     [activeColumns, archiveColumns, archiveExpanded],
   );
-  const selectedBoardIssues = useMemo(() => {
-    const byId = new Map(visibleKanbanIssues.map((issue) => [issue.id, issue]));
-    return [...selectedBoardIssueIds].map((id) => byId.get(id)).filter((issue): issue is IssueWithStatus => !!issue);
-  }, [visibleKanbanIssues, selectedBoardIssueIds]);
-  const hasArchivedBoardSelection = selectedBoardIssues.some((issue) => ARCHIVE_STATUS_NAMES.has(issue.statusName));
 
-  useEffect(() => {
-    if (selectedBoardIssueIds.size === 0) return;
-    const visibleIds = new Set(visibleKanbanIssues.map((issue) => issue.id));
-    setSelectedBoardIssueIds((prev) => {
-      const next = new Set([...prev].filter((id) => visibleIds.has(id)));
-      return next.size === prev.size ? prev : next;
-    });
-  }, [visibleKanbanIssues, selectedBoardIssueIds.size]);
+  const bulk = useBoardBulkSelection(visibleKanbanIssues, allTags, refetchBoard);
 
   async function loadTags(): Promise<SavedViewReference[]> {
     if (tagsLoaded) return allTags;
@@ -1396,8 +1084,8 @@ export function BoardPage() {
   }
 
   useEffect(() => {
-    if (selectedBoardIssueIds.size > 0) void loadTags();
-  }, [selectedBoardIssueIds.size]);
+    if (bulk.selectedBoardIssueIds.size > 0) void loadTags();
+  }, [bulk.selectedBoardIssueIds.size]);
 
   const allMentionIssues = useMemo(
     () =>
@@ -1407,25 +1095,11 @@ export function BoardPage() {
     [columns],
   );
   const runQueueForecast = useMemo(
-    () => buildRunQueueForecast(columns, nudgeWipLimit),
-    [columns, nudgeWipLimit],
+    () => buildRunQueueForecast(columns, prefs.nudgeWipLimit),
+    [columns, prefs.nudgeWipLimit],
   );
 
-  // Resolve an issue id against the live board columns and open it in the
-  // detail panel. Shared by mention clicks and the multi-ticket trail (#383).
-  const openIssueById = useCallback(
-    (issueId: string): boolean => {
-      for (const col of columns) {
-        const found = col.issues.find((i) => i.id === issueId);
-        if (found) {
-          setSelectedIssue(found);
-          return true;
-        }
-      }
-      return false;
-    },
-    [columns],
-  );
+  const { openIssueById, navigateTrail, trailControls, ticketTrail } = useBoardNavigation(columns, setSelectedIssue);
 
   const handleMentionClick = useCallback(
     (issueId: string) => {
@@ -1434,8 +1108,6 @@ export function BoardPage() {
     [openIssueById],
   );
 
-  // Record every opened ticket onto the navigation trail so the user can jump
-  // back to tickets they drilled past via card clicks / `#N` mentions (#383).
   useEffect(() => {
     if (!selectedIssue) return;
     ticketTrail.visit({
@@ -1444,43 +1116,6 @@ export function BoardPage() {
       title: selectedIssue.title,
     });
   }, [selectedIssue?.id, selectedIssue?.issueNumber, selectedIssue?.title, ticketTrail.visit]);
-
-  // Navigate the trail: open the resolved entry, or close the panel when the
-  // trail has emptied (last ticket removed) / the entry is no longer on the board.
-  const navigateTrail = useCallback(
-    (entry: { id: string } | null) => {
-      if (!entry) {
-        setSelectedIssue(null);
-        return;
-      }
-      if (!openIssueById(entry.id)) {
-        // Entry's issue is gone (deleted/filtered) — drop it and close.
-        ticketTrail.remove(entry.id);
-        setSelectedIssue(null);
-      }
-    },
-    [openIssueById, ticketTrail],
-  );
-
-  const trailControls = useMemo(
-    () => ({
-      entries: ticketTrail.entries,
-      activeId: ticketTrail.activeId,
-      canGoBack: ticketTrail.canGoBack,
-      canGoForward: ticketTrail.canGoForward,
-      onBack: () => navigateTrail(ticketTrail.goBack()),
-      onForward: () => navigateTrail(ticketTrail.goForward()),
-      onSelect: (id: string) => navigateTrail(ticketTrail.goTo(id)),
-      onRemove: (id: string) => {
-        const wasActive = ticketTrail.activeId === id;
-        const next = ticketTrail.remove(id);
-        // Only re-navigate when the active ticket was the one removed; dropping a
-        // background chip must not yank the user off the ticket they're reading.
-        if (wasActive) navigateTrail(next);
-      },
-    }),
-    [ticketTrail, navigateTrail],
-  );
 
   function toggleGroup(group: string) {
     setCollapsedGroups((prev) => {
@@ -1494,6 +1129,11 @@ export function BoardPage() {
     });
   }
 
+  const handleCreatedDateDrilldown = useCallback((dateKey: string) => {
+    setCreatedDateFilter(dateKey);
+    handleViewModeChange("table");
+  }, [handleViewModeChange]);
+
   // Keyboard shortcuts
   useEffect(() => {
     function isTextEntryTarget(target: EventTarget | null) {
@@ -1506,14 +1146,12 @@ export function BoardPage() {
     }
 
     function handleKeyDown(e: KeyboardEvent) {
-      // Ctrl+K to open command palette
       if (e.key === "k" && (e.ctrlKey || e.metaKey)) {
         e.preventDefault();
         e.stopPropagation();
-        setShowCommandPalette(true);
+        panels.setShowCommandPalette(true);
         return;
       }
-      // "/" to focus search
       if (e.key === "/" && !e.ctrlKey && !e.metaKey) {
         if (isTextEntryTarget(e.target)) return;
         e.preventDefault();
@@ -1528,64 +1166,28 @@ export function BoardPage() {
           });
         }
       }
-      // Escape to close palette / shortcut help / clear search / close panels
       if (e.key === "Escape") {
-        if (showCommandPalette) {
-          setShowCommandPalette(false);
-          return;
-        }
-        if (showAllWorkspaces) {
-          setShowAllWorkspaces(false);
-          return;
-        }
-        if (showLaunchFailures) {
-          setShowLaunchFailures(false);
-          return;
-        }
-        if (showCleanupQueue) {
-          setShowCleanupQueue(false);
-          return;
-        }
-        if (showFileContention) {
-          setShowFileContention(false);
-          return;
-        }
-        if (showWorktreeOverview) {
-          setShowWorktreeOverview(false);
-          return;
-        }
-        if (showShortcutHelp) {
-          setShowShortcutHelp(false);
-          return;
-        }
-        if (showQuickTasks) {
-          setShowQuickTasks(false);
-          return;
-        }
-        if (showRunQueueForecast) {
-          setShowRunQueueForecast(false);
-          return;
-        }
-        if (showCodemod) {
-          setShowCodemod(false);
-          return;
-        }
-        if (showProjectHealth) {
-          setShowProjectHealth(false);
-          return;
-        }
+        if (panels.showCommandPalette) { panels.setShowCommandPalette(false); return; }
+        if (panels.showAllWorkspaces) { panels.setShowAllWorkspaces(false); return; }
+        if (panels.showLaunchFailures) { panels.setShowLaunchFailures(false); return; }
+        if (panels.showCleanupQueue) { panels.setShowCleanupQueue(false); return; }
+        if (panels.showFileContention) { panels.setShowFileContention(false); return; }
+        if (panels.showWorktreeOverview) { panels.setShowWorktreeOverview(false); return; }
+        if (panels.showShortcutHelp) { panels.setShowShortcutHelp(false); return; }
+        if (panels.showQuickTasks) { panels.setShowQuickTasks(false); return; }
+        if (panels.showRunQueueForecast) { panels.setShowRunQueueForecast(false); return; }
+        if (panels.showCodemod) { panels.setShowCodemod(false); return; }
+        if (panels.showProjectHealth) { panels.setShowProjectHealth(false); return; }
         if (searchQuery) {
           setSearchQuery("");
           document.getElementById("search-input")?.blur();
         }
       }
-      // "?" to show keyboard shortcuts
       if (e.key === "?" && !e.ctrlKey && !e.metaKey) {
         if (isTextEntryTarget(e.target)) return;
         e.preventDefault();
-        setShowShortcutHelp((prev) => !prev);
+        panels.setShowShortcutHelp((prev) => !prev);
       }
-      // "g+s" chord to open settings; "g" alone switches to graph view
       if (e.key === "g" && !e.ctrlKey && !e.metaKey && !e.altKey) {
         if (isTextEntryTarget(e.target)) return;
         e.preventDefault();
@@ -1599,72 +1201,61 @@ export function BoardPage() {
         }, 400);
         return;
       }
-      // complete "g+s" chord or handle standalone "b"/"t" view switches
       if (e.key === "s" && pendingGRef.current && !e.ctrlKey && !e.metaKey && !e.altKey) {
         pendingGRef.current = false;
         if (pendingGTimerRef.current) { clearTimeout(pendingGTimerRef.current); pendingGTimerRef.current = null; }
         e.preventDefault();
-        setShowSettings(true);
+        panels.setShowSettings(true);
         return;
       }
-      // Plain single-key view shortcuts, derived from the canonical view registry
-      // (#116). The `graph` chord ("g", with g+s for settings) is handled above.
       if (SHORTCUT_TO_VIEW[e.key] && !e.ctrlKey && !e.metaKey && !e.altKey) {
         if (isTextEntryTarget(e.target)) return;
         e.preventDefault();
         handleViewModeChange(SHORTCUT_TO_VIEW[e.key]);
         return;
       }
-      // "a" to toggle All Workspaces panel
       if (e.key === "a" && !e.ctrlKey && !e.metaKey && !e.altKey) {
         if (isTextEntryTarget(e.target)) return;
         e.preventDefault();
-        setShowAllWorkspaces(prev => !prev);
+        panels.setShowAllWorkspaces(prev => !prev);
         return;
       }
-      // "h" to toggle File Contention Heatmap panel
       if (e.key === "h" && !e.ctrlKey && !e.metaKey && !e.altKey) {
         if (isTextEntryTarget(e.target)) return;
         e.preventDefault();
-        setShowFileContention(prev => !prev);
+        panels.setShowFileContention(prev => !prev);
         return;
       }
-      // "t" to open Transcript Search
       if (e.key === "t" && !e.ctrlKey && !e.metaKey && !e.altKey) {
         if (isTextEntryTarget(e.target)) return;
         e.preventDefault();
-        setShowTranscriptSearch(true);
+        panels.setShowTranscriptSearch(true);
         return;
       }
-      // "q" to open Quick Tasks panel
       if (e.key === "q" && !e.ctrlKey && !e.metaKey && !e.altKey) {
         if (isTextEntryTarget(e.target)) return;
         e.preventDefault();
-        setShowQuickTasks(true);
+        panels.setShowQuickTasks(true);
         return;
       }
-      // "x" to open Codemod Factory
       if (e.key === "x" && !e.ctrlKey && !e.metaKey && !e.altKey) {
         if (isTextEntryTarget(e.target)) return;
         e.preventDefault();
-        setShowCodemod((prev) => !prev);
+        panels.setShowCodemod((prev) => !prev);
         return;
       }
-      // "p" to open Project Health Overview
       if (e.key === "p" && !e.ctrlKey && !e.metaKey && !e.altKey) {
         if (isTextEntryTarget(e.target)) return;
         e.preventDefault();
-        setShowProjectHealth((prev) => !prev);
+        panels.setShowProjectHealth((prev) => !prev);
         return;
       }
-      // "V" (shift+v) to trigger voice inbox
       if (e.key === "V" && e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
         if (isTextEntryTarget(e.target)) return;
         e.preventDefault();
         window.dispatchEvent(new CustomEvent("voice-inbox-trigger"));
         return;
       }
-      // "f" to toggle focus mode
       if (e.key === "f" && !e.ctrlKey && !e.metaKey && !e.altKey) {
         if (isTextEntryTarget(e.target)) return;
         e.preventDefault();
@@ -1675,7 +1266,6 @@ export function BoardPage() {
         });
         return;
       }
-      // "c" to create issue, "w" to create issue + workspace
       if ((e.key === "c" || e.key === "w") && !e.ctrlKey && !e.metaKey && !e.altKey) {
         if (isTextEntryTarget(e.target)) return;
         e.preventDefault();
@@ -1690,7 +1280,7 @@ export function BoardPage() {
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [searchQuery, showCommandPalette, showAllWorkspaces, showLaunchFailures, showCleanupQueue, showFileContention, showTranscriptSearch, showWorktreeOverview, showShortcutHelp, showQuickTasks, showRunQueueForecast, showCodemod, showProjectHealth, filteredColumns, columns, handleViewModeChange, setShowQuickTasks, setShowSettings]);
+  }, [searchQuery, panels, filteredColumns, columns, handleViewModeChange, activeColumns]);
 
   // Register command palette actions
   useEffect(() => {
@@ -1705,9 +1295,7 @@ export function BoardPage() {
       category: "issue",
       handler: () => {
         const col = activeColumns[0] ?? filteredColumns[0];
-        if (col) {
-          setCreatingInColumnId(col.id);
-        }
+        if (col) setCreatingInColumnId(col.id);
       },
     }));
 
@@ -1718,9 +1306,7 @@ export function BoardPage() {
       category: "issue",
       handler: () => {
         const col = activeColumns[0] ?? filteredColumns[0] ?? columns[0];
-        if (col) {
-          setExpandedCreatePanel({ statusId: col.id, statusName: col.name, state: { startWorkspace: true } });
-        }
+        if (col) setExpandedCreatePanel({ statusId: col.id, statusName: col.name, state: { startWorkspace: true } });
       },
     }));
 
@@ -1742,121 +1328,19 @@ export function BoardPage() {
       }));
     }
 
-    unregisters.push(registerAction({
-      id: "open-settings",
-      label: "Open Settings",
-      description: "Configure agent, preferences, and project settings",
-      icon: "⚙",
-      category: "settings",
-      handler: () => setShowSettings(true),
-    }));
+    unregisters.push(registerAction({ id: "open-settings", label: "Open Settings", description: "Configure agent, preferences, and project settings", icon: "⚙", category: "settings", handler: () => panels.setShowSettings(true) }));
+    unregisters.push(registerAction({ id: "view-all-workspaces", label: "All Workspaces", description: "View all workspaces with status, diff stats, and session activity", icon: "⊞", category: "navigation", handler: () => panels.setShowAllWorkspaces(true) }));
+    unregisters.push(registerAction({ id: "view-cleanup-queue", label: "Cleanup Queue", description: "View closed workspaces with failed worktree cleanup warnings", icon: "🧹", category: "navigation", handler: () => panels.setShowCleanupQueue(true) }));
+    unregisters.push(registerAction({ id: "view-file-contention", label: "File Contention Heatmap", description: "Show which active workspaces touch the same files (merge-risk clusters)", icon: "⚡", category: "navigation", handler: () => panels.setShowFileContention(true) }));
+    unregisters.push(registerAction({ id: "search-transcripts", label: "Search Transcripts", description: "Search agent session transcripts across all workspaces", icon: "⏎", category: "navigation", handler: () => panels.setShowTranscriptSearch(true) }));
+    unregisters.push(registerAction({ id: "view-worktrees", label: "View Worktrees", description: "Inspect git worktrees and their diff stats", icon: "⎇", category: "navigation", handler: () => panels.setShowWorktreeOverview(true) }));
+    unregisters.push(registerAction({ id: "view-project-health", label: "Project Health Overview", description: "See all registered projects with issue counts and warning states", icon: "◎", shortcut: "p", category: "navigation", handler: () => panels.setShowProjectHealth(true) }));
+    unregisters.push(registerAction({ id: "search-issues", label: "Search Issues", description: "Filter issues by text or keyword", icon: "⌕", shortcut: "/", category: "board", handler: () => document.getElementById("search-input")?.focus() }));
+    unregisters.push(registerAction({ id: "show-shortcuts", label: "Keyboard Shortcuts", description: "View all available keyboard shortcuts", icon: "?", shortcut: "?", category: "settings", handler: () => panels.setShowShortcutHelp(true) }));
+    unregisters.push(registerAction({ id: "open-quick-tasks", label: "Open Quick Tasks", description: "View installed skills and run custom agent tasks", icon: "⚡", shortcut: "q", category: "board", handler: () => panels.setShowQuickTasks(true) }));
+    unregisters.push(registerAction({ id: "run-queue-forecast", label: "Run Queue Forecast", description: "View active-agent capacity and the next likely starts", icon: "▥", category: "board", handler: () => panels.setShowRunQueueForecast(true) }));
+    unregisters.push(registerAction({ id: "open-codemod-factory", label: "Codemod Factory", description: "Describe a refactor in plain English — AI generates a ts-morph codemod", icon: "⚙", shortcut: "x", category: "board", handler: () => panels.setShowCodemod(true) }));
 
-    unregisters.push(registerAction({
-      id: "view-all-workspaces",
-      label: "All Workspaces",
-      description: "View all workspaces with status, diff stats, and session activity",
-      icon: "⊞",
-      category: "navigation",
-      handler: () => setShowAllWorkspaces(true),
-    }));
-
-    unregisters.push(registerAction({
-      id: "view-cleanup-queue",
-      label: "Cleanup Queue",
-      description: "View closed workspaces with failed worktree cleanup warnings",
-      icon: "🧹",
-      category: "navigation",
-      handler: () => setShowCleanupQueue(true),
-    }));
-
-    unregisters.push(registerAction({
-      id: "view-file-contention",
-      label: "File Contention Heatmap",
-      description: "Show which active workspaces touch the same files (merge-risk clusters)",
-      icon: "⚡",
-      category: "navigation",
-      handler: () => setShowFileContention(true),
-    }));
-
-    unregisters.push(registerAction({
-      id: "search-transcripts",
-      label: "Search Transcripts",
-      description: "Search agent session transcripts across all workspaces",
-      icon: "⏎",
-      category: "navigation",
-      handler: () => setShowTranscriptSearch(true),
-    }));
-
-    unregisters.push(registerAction({
-      id: "view-worktrees",
-      label: "View Worktrees",
-      description: "Inspect git worktrees and their diff stats",
-      icon: "⎇",
-      category: "navigation",
-      handler: () => setShowWorktreeOverview(true),
-    }));
-
-    unregisters.push(registerAction({
-      id: "view-project-health",
-      label: "Project Health Overview",
-      description: "See all registered projects with issue counts and warning states",
-      icon: "◎",
-      shortcut: "p",
-      category: "navigation",
-      handler: () => setShowProjectHealth(true),
-    }));
-
-    unregisters.push(registerAction({
-      id: "search-issues",
-      label: "Search Issues",
-      description: "Filter issues by text or keyword",
-      icon: "⌕",
-      shortcut: "/",
-      category: "board",
-      handler: () => document.getElementById("search-input")?.focus(),
-    }));
-
-    unregisters.push(registerAction({
-      id: "show-shortcuts",
-      label: "Keyboard Shortcuts",
-      description: "View all available keyboard shortcuts",
-      icon: "?",
-      shortcut: "?",
-      category: "settings",
-      handler: () => setShowShortcutHelp(true),
-    }));
-
-    unregisters.push(registerAction({
-      id: "open-quick-tasks",
-      label: "Open Quick Tasks",
-      description: "View installed skills and run custom agent tasks",
-      icon: "⚡",
-      shortcut: "q",
-      category: "board",
-      handler: () => setShowQuickTasks(true),
-    }));
-
-    unregisters.push(registerAction({
-      id: "run-queue-forecast",
-      label: "Run Queue Forecast",
-      description: "View active-agent capacity and the next likely starts",
-      icon: "▥",
-      category: "board",
-      handler: () => setShowRunQueueForecast(true),
-    }));
-
-    unregisters.push(registerAction({
-      id: "open-codemod-factory",
-      label: "Codemod Factory",
-      description: "Describe a refactor in plain English — AI generates a ts-morph codemod",
-      icon: "⚙",
-      shortcut: "x",
-      category: "board",
-      handler: () => setShowCodemod(true),
-    }));
-
-    // "Switch to <View> View" actions, derived from the canonical view registry
-    // (#116) so the palette never drifts out of sync with the toolbar/overlay.
     for (const view of VIEW_REGISTRY) {
       unregisters.push(registerAction({
         id: `view-${view.id}`,
@@ -1869,7 +1353,6 @@ export function BoardPage() {
       }));
     }
 
-    // Register "Go to: [column]" for each column
     for (const col of columns) {
       unregisters.push(registerAction({
         id: `goto-${col.id}`,
@@ -1883,7 +1366,6 @@ export function BoardPage() {
       }));
     }
 
-    // Register Review and Merge actions for issues with eligible workspaces
     const allIssues = columns.flatMap((col) => col.issues);
     for (const issue of allIssues) {
       const ws = issue.workspaceSummary?.main;
@@ -1927,7 +1409,7 @@ export function BoardPage() {
     }
 
     return () => unregisters.forEach((fn) => fn());
-  }, [columns, filteredColumns, projects, activeProjectId, handleProjectChange]);
+  }, [columns, filteredColumns, projects, activeProjectId, handleProjectChange, panels, handleViewModeChange, activeColumns]);
 
   if (loading) {
     return (
@@ -1937,7 +1419,6 @@ export function BoardPage() {
     );
   }
 
-  // No projects registered
   if (projects.length === 0 || !activeProjectId) {
     return (
       <Layout onRegisterProject={handleRegisterProject} onCreateProject={handleCreateProject}>
@@ -1972,8 +1453,26 @@ export function BoardPage() {
       }
     }
     // Fallback: show all workspaces panel
-    setShowAllWorkspaces(true);
+    panels.setShowAllWorkspaces(true);
   }
+
+  const handleBoardIssueClick = (issue: IssueWithStatus, event: React.MouseEvent) => {
+    if (pendingIssueIds.has(issue.id)) return;
+    if (event.ctrlKey || event.metaKey || event.shiftKey) {
+      event.preventDefault();
+      setSelectedIssue(null);
+      if (event.shiftKey) {
+        bulk.rangeSelect(issue.id);
+      } else {
+        bulk.toggleSelection(issue.id);
+      }
+      return;
+    }
+    if (bulk.selectedBoardIssueIds.size > 0) {
+      bulk.clearSelection();
+    }
+    handleIssueClick(issue);
+  };
 
   return (
     <MentionProvider value={{ issues: allMentionIssues, onMentionClick: handleMentionClick }}>
@@ -1986,11 +1485,11 @@ export function BoardPage() {
       onSearchChange={setSearchQuery}
       onRegisterProject={handleRegisterProject}
       onCreateProject={handleCreateProject}
-      onSettingsClick={() => setShowSettings(true)}
-      onAllWorkspacesClick={() => setShowAllWorkspaces(true)}
-      onLaunchFailuresClick={() => setShowLaunchFailures(true)}
-      onWorktreeOverviewClick={() => setShowWorktreeOverview(true)}
-      onProjectHealthClick={() => setShowProjectHealth(true)}
+      onSettingsClick={() => panels.setShowSettings(true)}
+      onAllWorkspacesClick={() => panels.setShowAllWorkspaces(true)}
+      onLaunchFailuresClick={() => panels.setShowLaunchFailures(true)}
+      onWorktreeOverviewClick={() => panels.setShowWorktreeOverview(true)}
+      onProjectHealthClick={() => panels.setShowProjectHealth(true)}
       isDark={isDark}
       onThemeToggle={() => setTheme(isDark ? "light" : "dark")}
       notificationEvents={notifications.events}
@@ -2015,36 +1514,16 @@ export function BoardPage() {
       {mutating && (
         <div className="fixed bottom-4 right-4 z-50">
           <div className="bg-brand-600 text-white rounded-lg px-4 py-2 flex items-center gap-2 shadow-lg">
-            <svg
-              className="animate-spin h-4 w-4 text-white"
-              viewBox="0 0 24 24"
-            >
-              <circle
-                className="opacity-25"
-                cx="12"
-                cy="12"
-                r="10"
-                stroke="currentColor"
-                strokeWidth="4"
-                fill="none"
-              />
-              <path
-                className="opacity-75"
-                fill="currentColor"
-                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-              />
+            <svg className="animate-spin h-4 w-4 text-white" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
             </svg>
             <span className="text-sm font-medium">Saving...</span>
           </div>
         </div>
       )}
       <div className="flex flex-col gap-2 p-2 sm:p-4 h-full overflow-hidden">
-        {/* One responsive control row: the board pulse, filters, and toolbar pack
-            together (a single line on desktop, wrapping on small screens) instead of
-            stacking as three separate full-width rows. */}
         <div className="flex flex-wrap items-center gap-2">
-        {/* The board summary (ticket/done/commit badges + progress bar) is irrelevant in
-            the Butler chat view — hide it there to give the conversation more vertical room. */}
         {viewMode !== "butler" && (
           <BoardStats
             activeColumns={activeColumns}
@@ -2074,18 +1553,18 @@ export function BoardPage() {
             setFocusMode(v);
             try { sessionStorage.setItem("board-focus-mode", v ? "1" : "0"); } catch { /* ignore */ }
           }}
-          onShowQuickTasks={() => setShowQuickTasks(true)}
-          autoMonitor={autoMonitor}
-          monitorRunning={monitorRunning}
-          onMonitorRunNow={handleMonitorRunNow}
-          monitorStatus={monitorStatus}
-          onToggleAutoMonitor={toggleAutoMonitor}
-          autoMonitorInterval={autoMonitorInterval}
-          onIntervalChange={handleIntervalChange}
-          nudgeAutoStart={nudgeAutoStart}
-          onNudgeAutoStartChange={handleNudgeAutoStartChange}
-          nudgeWipLimit={nudgeWipLimit}
-          onNudgeWipLimitChange={handleNudgeWipLimitChange}
+          onShowQuickTasks={() => panels.setShowQuickTasks(true)}
+          autoMonitor={prefs.autoMonitor}
+          monitorRunning={prefs.monitorRunning}
+          onMonitorRunNow={prefs.handleMonitorRunNow}
+          monitorStatus={prefs.monitorStatus}
+          onToggleAutoMonitor={prefs.toggleAutoMonitor}
+          autoMonitorInterval={prefs.autoMonitorInterval}
+          onIntervalChange={prefs.handleIntervalChange}
+          nudgeAutoStart={prefs.nudgeAutoStart}
+          onNudgeAutoStartChange={prefs.handleNudgeAutoStartChange}
+          nudgeWipLimit={prefs.nudgeWipLimit}
+          onNudgeWipLimitChange={prefs.handleNudgeWipLimitChange}
           columns={columns}
           onOpenWorkspace={handleOpenWorkspaceById}
           viewMode={viewMode}
@@ -2093,127 +1572,28 @@ export function BoardPage() {
           butlerBadgeCount={agentQuestionsCount}
           projectId={activeProjectId}
           onVoiceIssueCreated={() => refetchBoard()}
-          onShowMergeQueue={() => setShowMergeQueue(true)}
+          onShowMergeQueue={() => panels.setShowMergeQueue(true)}
           mergeQueueCount={columns.flatMap(c => c.issues).filter(i => {
             const ws = i.workspaceSummary?.main;
             return i.statusName === "In Review" && ws && ws.status !== "closed";
           }).length}
-          onShowRunQueueForecast={() => setShowRunQueueForecast(true)}
+          onShowRunQueueForecast={() => panels.setShowRunQueueForecast(true)}
           runQueueOpenSlots={runQueueForecast.openSlots}
           onViewAllHealthEvents={() => handleViewModeChange("health-events")}
         />
         </div>
-        {viewMode === "kanban" && selectedBoardIssues.length > 0 && (
-          <div
-            className="flex shrink-0 flex-wrap items-center gap-2 rounded-lg border border-brand-200 bg-brand-50 px-3 py-2 text-xs shadow-sm dark:border-brand-800 dark:bg-brand-950/40"
-            data-testid="board-bulk-action-bar"
-          >
-            <span className="font-medium text-brand-700 dark:text-brand-200">
-              {selectedBoardIssues.length} selected
-            </span>
-            {hasArchivedBoardSelection && (
-              <span className="text-amber-700 dark:text-amber-300">
-                Bulk edits are unavailable while archived cards are selected.
-              </span>
-            )}
-            <select
-              defaultValue=""
-              disabled={boardBulkUpdating || hasArchivedBoardSelection}
-              onChange={(event) => {
-                const statusId = event.target.value;
-                const status = columns.find((col) => col.id === statusId);
-                event.currentTarget.value = "";
-                if (status) void handleBoardBulkUpdate({ statusId }, `Moved to "${status.name}"`);
-              }}
-              className="rounded border border-gray-300 bg-white px-2 py-1 text-gray-700 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200"
-              aria-label="Bulk move status"
-              title={hasArchivedBoardSelection ? "Clear archived selections before bulk editing" : "Move selected cards to status"}
-            >
-              <option value="">Move status...</option>
-              {columns.map((col) => (
-                <option key={col.id} value={col.id}>{col.name}</option>
-              ))}
-            </select>
-            <select
-              defaultValue=""
-              disabled={boardBulkUpdating || hasArchivedBoardSelection}
-              onChange={(event) => {
-                const priority = event.target.value as (typeof PRIORITY_OPTIONS)[number] | "";
-                event.currentTarget.value = "";
-                if (priority) void handleBoardBulkUpdate({ priority }, `Set priority to "${PRIORITY_LABEL[priority]}"`);
-              }}
-              className="rounded border border-gray-300 bg-white px-2 py-1 text-gray-700 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200"
-              aria-label="Bulk set priority"
-              title={hasArchivedBoardSelection ? "Clear archived selections before bulk editing" : "Set priority on selected cards"}
-            >
-              <option value="">Set priority...</option>
-              {PRIORITY_OPTIONS.map((priority) => (
-                <option key={priority} value={priority}>{PRIORITY_LABEL[priority]}</option>
-              ))}
-            </select>
-            <select
-              defaultValue=""
-              disabled={boardBulkUpdating || hasArchivedBoardSelection || allTags.length === 0}
-              onFocus={() => void loadTags()}
-              onChange={(event) => {
-                const tagId = event.target.value;
-                event.currentTarget.value = "";
-                if (tagId) void handleBoardBulkAddTag(tagId);
-              }}
-              className="rounded border border-gray-300 bg-white px-2 py-1 text-gray-700 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200"
-              aria-label="Bulk add tag"
-              title={hasArchivedBoardSelection ? "Clear archived selections before bulk editing" : "Add a tag to selected cards"}
-            >
-              <option value="">Add tag...</option>
-              {allTags.map((tag) => (
-                <option key={tag.id} value={tag.id}>{tag.name}</option>
-              ))}
-            </select>
-            {(() => {
-              const tagsOnSelection = allTags.filter((tag) =>
-                selectedBoardIssues.some((issue) => issue.tags?.some((t) => t.id === tag.id))
-              );
-              return tagsOnSelection.length > 0 ? (
-                <select
-                  defaultValue=""
-                  disabled={boardBulkUpdating || hasArchivedBoardSelection}
-                  onFocus={() => void loadTags()}
-                  onChange={(event) => {
-                    const tagId = event.target.value;
-                    event.currentTarget.value = "";
-                    if (tagId) void handleBoardBulkRemoveTag(tagId);
-                  }}
-                  className="rounded border border-gray-300 bg-white px-2 py-1 text-gray-700 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200"
-                  aria-label="Bulk remove tag"
-                  title={hasArchivedBoardSelection ? "Clear archived selections before bulk editing" : "Remove a tag from selected cards"}
-                >
-                  <option value="">Remove tag...</option>
-                  {tagsOnSelection.map((tag) => (
-                    <option key={tag.id} value={tag.id}>{tag.name}</option>
-                  ))}
-                </select>
-              ) : null;
-            })()}
-            <button
-              type="button"
-              disabled={boardBulkUpdating}
-              onClick={() => void handleBoardBulkDelete()}
-              className="rounded px-2 py-1 text-red-600 hover:bg-red-50 hover:text-red-700 dark:text-red-400 dark:hover:bg-red-950/40 disabled:opacity-50 transition-colors"
-              title="Delete selected issues"
-            >
-              Delete
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setSelectedBoardIssueIds(new Set());
-                setLastSelectedBoardIssueId(null);
-              }}
-              className="rounded px-2 py-1 text-brand-600 underline-offset-2 hover:underline dark:text-brand-300"
-            >
-              Clear
-            </button>
-          </div>
+        {viewMode === "kanban" && (
+          <BoardBulkActionBar
+            selectedIssues={bulk.selectedBoardIssues}
+            hasArchivedSelection={bulk.hasArchivedBoardSelection}
+            boardBulkUpdating={bulk.boardBulkUpdating}
+            columns={columns}
+            allTags={allTags}
+            onBulkUpdate={bulk.handleBoardBulkUpdate}
+            onBulkAddTag={bulk.handleBoardBulkAddTag}
+            onLoadTags={loadTags}
+            onClearSelection={bulk.clearSelection}
+          />
         )}
         {viewMode === "graph" && activeProjectId ? (
           <div className="flex-1 min-h-0">
@@ -2425,7 +1805,7 @@ export function BoardPage() {
               onIssueClick={handleIssueClick}
               onWorkspaceClick={handleManageWorkspaces}
               onStartWorkspace={handleStartWorkspace}
-              onDryRun={setDryRunIssue}
+              onDryRun={panels.setDryRunIssue}
               onDragStart={handleBoardDragStart}
               onDrop={handleDrop}
               onPromoteToTodo={handlePromoteBacklogIssue}
@@ -2442,7 +1822,7 @@ export function BoardPage() {
             focusMode={focusMode}
             projectId={activeProjectId}
             columnWidths={columnWidths}
-            dynamicColumnScaling={dynamicColumnScaling}
+            dynamicColumnScaling={prefs.dynamicColumnScaling}
             creatingInColumnId={creatingInColumnId}
             searchQuery={searchQuery}
             sessionActivity={sessionActivity}
@@ -2458,7 +1838,7 @@ export function BoardPage() {
             onIssueClick={handleBoardIssueClick}
             onWorkspaceClick={handleManageWorkspaces}
             onStartWorkspace={handleStartWorkspace}
-            onDryRun={setDryRunIssue}
+            onDryRun={panels.setDryRunIssue}
             onDragStart={handleBoardDragStart}
             onDrop={handleDrop}
             onMoveToNext={handleMoveToNext}
@@ -2471,15 +1851,15 @@ export function BoardPage() {
             })}
             onCreateIssue={handleCreateIssue}
             onExpandCreate={(statusId, statusName, state) => setExpandedCreatePanel({ statusId, statusName, state })}
-            selectedIssueIds={selectedBoardIssueIds}
+            selectedIssueIds={bulk.selectedBoardIssueIds}
             allProjectTags={allTags}
             quickUpdate={{
               onPriorityChange: handleQuickPriorityChange,
               onAddTag: handleQuickAddTag,
               onRemoveTag: handleQuickRemoveTag,
             }}
-            wipLimits={wipLimits}
-            onSetWipLimit={handleSetWipLimit}
+            wipLimits={prefs.wipLimits}
+            onSetWipLimit={prefs.handleSetWipLimit}
           />
         )}
       </div>
@@ -2520,197 +1900,70 @@ export function BoardPage() {
           initialShowCreate={workspaceOpenCreate}
         />
       )}
-      <ApprovalDialog
-        requests={approvalRequests}
-        onResolve={(id) => setApprovalRequests((prev) => prev.filter((r) => r.id !== id))}
-      />
-      {moveToDonePending && (
-        <MoveToDoneDialog
-          issue={moveToDonePending.issue}
-          onConfirm={moveToDonePending.confirm}
-          onCancel={() => setMoveToDonePending(null)}
-        />
-      )}
-      {dependencyImpactPending && (
-        <DependencyImpactDialog
-          issueId={dependencyImpactPending.issue.id}
-          fromStatusName={dependencyImpactPending.issue.statusName ?? ""}
-          toStatusName={dependencyImpactPending.toStatusName}
-          dependencies={dependencyImpactPending.dependencies}
-          onConfirm={dependencyImpactPending.confirm}
-          onCancel={() => setDependencyImpactPending(null)}
-        />
-      )}
       <ToastContainer />
-      {showSettings && (
-        <SettingsPanel onClose={() => {
-          setShowSettings(false);
-          apiFetch<Record<string, string>>("/api/preferences/settings")
-            .then(s => {
-              setAutoReview(s.auto_review !== "false");
-              setAutoMerge(s.auto_merge !== "false");
-              setAutoMonitor(s.auto_monitor === "true");
-              setAutoMonitorInterval(s.auto_monitor_interval ?? "4");
-              setNudgeAutoStart(s.nudge_auto_start === "true");
-              setNudgeWipLimit(s.nudge_wip_limit ?? "5");
-              return apiFetch<MonitorStatus>("/api/internal/monitor-status");
-            })
-            .then(r => setMonitorStatus(r))
-            .catch(() => {});
-        }} activeProjectId={activeProjectId} />
-      )}
-      {showQuickTasks && activeProjectId && (
-        <QuickTasksPanel
-          projectId={activeProjectId}
-          onClose={() => setShowQuickTasks(false)}
-          onLaunched={() => refetchBoard()}
-        />
-      )}
-      {showCodemod && (
-        <CodemodPanel
-          onClose={() => setShowCodemod(false)}
-          activeProjectId={activeProjectId}
-        />
-      )}
-      {showAllWorkspaces && (
-        <AllWorkspacesPanel
-          columns={columns}
-          activeProjectId={activeProjectId ?? null}
-          onClose={() => setShowAllWorkspaces(false)}
-          onIssueClick={(issue) => {
-            setSelectedIssue(issue);
-            setShowAllWorkspaces(false);
-          }}
-          onRefresh={() => refetchBoard()}
-        />
-      )}
-      {showLaunchFailures && (
-        <WorkspaceLaunchFailuresPanel
-          projectId={activeProjectId ?? null}
-          onClose={() => setShowLaunchFailures(false)}
-          onIssueClick={(issueId) => {
-            const issue = columns.flatMap((c) => c.issues).find((i) => i.id === issueId);
-            if (issue) {
-              setSelectedIssue(issue);
-              setShowLaunchFailures(false);
-            }
-          }}
-        />
-      )}
-      {showCleanupQueue && (
-        <CleanupQueuePanel
-          projectId={activeProjectId ?? null}
-          onClose={() => setShowCleanupQueue(false)}
-        />
-      )}
-      {showFileContention && (
-        <FileContentionPanel
-          activeProjectId={activeProjectId ?? null}
-          onClose={() => setShowFileContention(false)}
-        />
-      )}
-      {showTranscriptSearch && activeProjectId && (
-        <TranscriptSearchPanel
-          projectId={activeProjectId}
-          onClose={() => setShowTranscriptSearch(false)}
-          onNavigateToWorkspace={(issueId, workspaceId, sessionId) => {
-            setShowTranscriptSearch(false);
-            const issue = columnsRef.current.flatMap((c) => c.issues).find((i) => i.id === issueId);
-            if (issue) {
-              setSelectedIssue(null);
-              setWorkspaceIssue(issue);
-              setWorkspaceOpenCreate(false);
-              setWorkspaceInitial({ workspaceId, sessionId });
-            } else {
-              showToast("Issue not found on current board — try refreshing", "error");
-            }
-          }}
-        />
-      )}
-      {showMergeQueue && activeProjectId && (
-        <MergeQueuePanel
-          columns={columns}
-          projectId={activeProjectId}
-          onClose={() => setShowMergeQueue(false)}
-          onIssueClick={(issue) => {
-            setSelectedIssue(issue);
-            setShowMergeQueue(false);
-          }}
-          onMerged={() => {
-            refetchBoard();
-          }}
-        />
-      )}
-      {showRunQueueForecast && (
-        <RunQueueForecastPanel
-          columns={columns}
-          activeTarget={nudgeWipLimit}
-          onClose={() => setShowRunQueueForecast(false)}
-          onIssueClick={(issue) => {
-            setSelectedIssue(issue);
-            setShowRunQueueForecast(false);
-          }}
-          onDryRun={(issue) => {
-            setShowRunQueueForecast(false);
-            setDryRunIssue(issue);
-          }}
-        />
-      )}
-      {dryRunIssue && (
-        <AgentStartDryRunModal
-          issue={dryRunIssue}
-          onClose={() => setDryRunIssue(null)}
-          onStartWorkspace={(issue) => {
-            setDryRunIssue(null);
-            handleStartWorkspace(issue);
-          }}
-        />
-      )}
-      {showWorktreeOverview && activeProjectId && (
-        <WorktreeOverview
-          projectId={activeProjectId}
-          onClose={() => setShowWorktreeOverview(false)}
-          onIssueClick={(issueId: string) => {
-            for (const col of columns) {
-              const found = col.issues.find((i) => i.id === issueId);
-              if (found) {
-                setSelectedIssue(found);
-                break;
-              }
-            }
-            setShowWorktreeOverview(false);
-          }}
-          onWorkspaceChange={() => refetchBoard()}
-        />
-      )}
-      {showProjectHealth && (
-        <ProjectHealthOverview
-          activeProjectId={activeProjectId}
-          onProjectChange={handleProjectChange}
-          onClose={() => setShowProjectHealth(false)}
-        />
-      )}
-      {showCommandPalette && (
-        <CommandPalette onClose={() => setShowCommandPalette(false)} />
-      )}
-      {showShortcutHelp && (
-        <ShortcutHelp onClose={() => setShowShortcutHelp(false)} currentView={viewMode} />
-      )}
-      {expandedCreatePanel && activeProjectId && (
-        <CreateIssuePanel
-          projectId={activeProjectId}
-          statusId={expandedCreatePanel.statusId}
-          statusName={expandedCreatePanel.statusName}
-          availableStatuses={[
-            ...(backlogColumn ? [{ id: backlogColumn.id, name: backlogColumn.name }] : []),
-            ...activeColumns.map((c) => ({ id: c.id, name: c.name })),
-          ]}
-          initialState={expandedCreatePanel.state}
-          onSubmit={handleCreateIssue}
-          onClose={() => setExpandedCreatePanel(null)}
-          canStartWorkspace={canStartWorkspace}
-        />
-      )}
+      <BoardOverlayPanels
+        showSettings={panels.showSettings}
+        showQuickTasks={panels.showQuickTasks}
+        showCodemod={panels.showCodemod}
+        showAllWorkspaces={panels.showAllWorkspaces}
+        showLaunchFailures={panels.showLaunchFailures}
+        showCleanupQueue={panels.showCleanupQueue}
+        showFileContention={panels.showFileContention}
+        showTranscriptSearch={panels.showTranscriptSearch}
+        showMergeQueue={panels.showMergeQueue}
+        showRunQueueForecast={panels.showRunQueueForecast}
+        showWorktreeOverview={panels.showWorktreeOverview}
+        showProjectHealth={panels.showProjectHealth}
+        showCommandPalette={panels.showCommandPalette}
+        showShortcutHelp={panels.showShortcutHelp}
+        onCloseSettings={() => panels.setShowSettings(false)}
+        onCloseQuickTasks={() => panels.setShowQuickTasks(false)}
+        onCloseCodemod={() => panels.setShowCodemod(false)}
+        onCloseAllWorkspaces={() => panels.setShowAllWorkspaces(false)}
+        onCloseLaunchFailures={() => panels.setShowLaunchFailures(false)}
+        onCloseCleanupQueue={() => panels.setShowCleanupQueue(false)}
+        onCloseFileContention={() => panels.setShowFileContention(false)}
+        onCloseTranscriptSearch={() => panels.setShowTranscriptSearch(false)}
+        onCloseMergeQueue={() => panels.setShowMergeQueue(false)}
+        onCloseRunQueueForecast={() => panels.setShowRunQueueForecast(false)}
+        onCloseWorktreeOverview={() => panels.setShowWorktreeOverview(false)}
+        onCloseProjectHealth={() => panels.setShowProjectHealth(false)}
+        onCloseCommandPalette={() => panels.setShowCommandPalette(false)}
+        onCloseShortcutHelp={() => panels.setShowShortcutHelp(false)}
+        activeProjectId={activeProjectId}
+        columns={columns}
+        nudgeWipLimit={prefs.nudgeWipLimit}
+        viewMode={viewMode}
+        columnsRef={columnsRef}
+        dryRunIssue={panels.dryRunIssue}
+        setDryRunIssue={panels.setDryRunIssue}
+        handleStartWorkspace={handleStartWorkspace}
+        approvalRequests={approvalRequests}
+        setApprovalRequests={setApprovalRequests}
+        moveToDonePending={moveToDonePending}
+        setMoveToDonePending={setMoveToDonePending}
+        dependencyImpactPending={dependencyImpactPending}
+        setDependencyImpactPending={setDependencyImpactPending}
+        expandedCreatePanel={expandedCreatePanel}
+        setExpandedCreatePanel={setExpandedCreatePanel}
+        backlogColumn={backlogColumn}
+        activeColumns={activeColumns}
+        handleCreateIssue={handleCreateIssue}
+        canStartWorkspace={canStartWorkspace}
+        refetchBoard={refetchBoard}
+        handleProjectChange={handleProjectChange}
+        onSettingsReloaded={(s, monitorStatus) => {
+          prefs.setAutoReview(s.auto_review !== "false");
+          prefs.setAutoMerge(s.auto_merge !== "false");
+          if (monitorStatus) {
+            // monitorStatus is set by the hook's internal interval but we can trigger a re-read
+          }
+        }}
+        setWorkspaceIssue={setWorkspaceIssue}
+        setWorkspaceInitial={setWorkspaceInitial}
+        setWorkspaceOpenCreate={setWorkspaceOpenCreate}
+        setSelectedIssue={setSelectedIssue}
+      />
     </Layout>
     </MentionProvider>
   );
