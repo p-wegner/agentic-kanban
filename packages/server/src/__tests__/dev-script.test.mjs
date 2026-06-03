@@ -7,8 +7,11 @@ import { resolveDevPorts } from "../../../../scripts/dev-port-plan.mjs";
 import {
   classifyProcessExit,
   createDependencyRecoveryState,
+  createSharedDistRecoveryState,
   dependencyManifestsChanged,
+  isStaleSharedDistError,
   listDependencyManifestFiles,
+  MAX_SHARED_DIST_REBUILDS,
   snapshotDependencyManifests,
 } from "../../../../scripts/dev-supervisor.mjs";
 import { commandLineBelongsToCheckout, planPortOwnerKill } from "../../../../scripts/dev-port-guard.mjs";
@@ -171,5 +174,53 @@ describe("dev launcher port guard", () => {
       pid: "4242",
       reason: "outside-checkout",
     }));
+  });
+});
+
+describe("stale shared dist detection and recovery", () => {
+  it("detects ERR_MODULE_NOT_FOUND referencing packages/shared/dist in stderr", () => {
+    const stderr =
+      "Error [ERR_MODULE_NOT_FOUND]: Cannot find module '/repo/packages/shared/dist/schema/index.js'\n" +
+      "    at Function.Module._resolveFilename (node:internal/modules/cjs/loader:1039:15)";
+    expect(isStaleSharedDistError(stderr)).toBe(true);
+  });
+
+  it("detects the dist/lib variant of the stale-shared-dist error", () => {
+    const stderr = "Cannot find module '/repo/packages/shared/dist/lib/index.js'";
+    expect(isStaleSharedDistError(stderr)).toBe(true);
+  });
+
+  it("detects errors with forward-slash path separators", () => {
+    expect(isStaleSharedDistError("Cannot find module 'packages/shared/dist/schema/index.js'")).toBe(true);
+  });
+
+  it("does not false-positive on unrelated module-not-found errors", () => {
+    expect(isStaleSharedDistError("Cannot find module 'react'")).toBe(false);
+    expect(isStaleSharedDistError("Cannot find module '/repo/packages/server/dist/index.js'")).toBe(false);
+    expect(isStaleSharedDistError("EADDRINUSE :::3001")).toBe(false);
+    expect(isStaleSharedDistError("")).toBe(false);
+  });
+
+  it("allows rebuilding up to MAX_SHARED_DIST_REBUILDS times then stops", () => {
+    const recovery = createSharedDistRecoveryState();
+
+    expect(recovery.rebuilds).toBe(0);
+    expect(recovery.canRebuild()).toBe(true);
+
+    for (let i = 0; i < MAX_SHARED_DIST_REBUILDS; i++) {
+      expect(recovery.canRebuild()).toBe(true);
+      recovery.markRebuilt();
+    }
+
+    expect(recovery.rebuilds).toBe(MAX_SHARED_DIST_REBUILDS);
+    expect(recovery.canRebuild()).toBe(false);
+  });
+
+  it("tracks rebuild count via markRebuilt", () => {
+    const recovery = createSharedDistRecoveryState();
+    expect(recovery.markRebuilt()).toBe(1);
+    expect(recovery.rebuilds).toBe(1);
+    expect(recovery.markRebuilt()).toBe(2);
+    expect(recovery.rebuilds).toBe(2);
   });
 });
