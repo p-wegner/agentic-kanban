@@ -851,41 +851,63 @@ export function BoardPage() {
   }, []);
 
   async function handleDrop(targetStatusId: string, sortOrder?: number) {
+    const raw = (window as unknown as Record<string, unknown>).__dragData;
+    let issueId: string | undefined;
+    let sourceStatusId: string | undefined;
+
+    if (raw && typeof raw === "object") {
+      const data = raw as { issueId: string; sourceStatusId: string };
+      issueId = data.issueId;
+      sourceStatusId = data.sourceStatusId;
+    }
+
+    if (!issueId) return;
+    if (sourceStatusId === targetStatusId && sortOrder === undefined) return;
+
+    const targetColumn = columns.find((col) => col.id === targetStatusId);
+    const isArchiveTarget = targetColumn && ARCHIVE_STATUS_NAMES.has(targetColumn.name);
+
+    if (isArchiveTarget) {
+      const issue = columns.flatMap((c) => c.issues).find((i) => i.id === issueId);
+      const ws = issue?.workspaceSummary?.main;
+      if (issue && ws && ws.status !== "closed") {
+        setMoveToDonePending({
+          issue,
+          confirm: async () => {
+            const body: UpdateIssueRequest = { statusId: targetStatusId };
+            if (sortOrder !== undefined) body.sortOrder = sortOrder;
+            await apiFetch(`/api/issues/${issueId}`, { method: "PATCH", body: JSON.stringify(body) });
+            await refetchBoard();
+            setMoveToDonePending(null);
+          },
+        });
+        return;
+      }
+    }
+
+    const isReorder = sourceStatusId === targetStatusId && sortOrder !== undefined;
+
+    // Optimistic update for in-column reordering
+    const snapshotColumns = columns;
+    if (isReorder) {
+      const capturedIssueId = issueId;
+      const capturedSortOrder = sortOrder;
+      setColumns((prev) =>
+        prev.map((col) => {
+          if (col.id !== targetStatusId) return col;
+          const reordered = col.issues
+            .map((issue) =>
+              issue.id === capturedIssueId
+                ? { ...issue, sortOrder: capturedSortOrder }
+                : issue,
+            )
+            .sort((a, b) => a.sortOrder - b.sortOrder);
+          return { ...col, issues: reordered };
+        }),
+      );
+    }
+
     try {
-      const raw = (window as unknown as Record<string, unknown>).__dragData;
-      let issueId: string | undefined;
-      let sourceStatusId: string | undefined;
-
-      if (raw && typeof raw === "object") {
-        const data = raw as { issueId: string; sourceStatusId: string };
-        issueId = data.issueId;
-        sourceStatusId = data.sourceStatusId;
-      }
-
-      if (!issueId) return;
-      if (sourceStatusId === targetStatusId && sortOrder === undefined) return;
-
-      const targetColumn = columns.find((col) => col.id === targetStatusId);
-      const isArchiveTarget = targetColumn && ARCHIVE_STATUS_NAMES.has(targetColumn.name);
-
-      if (isArchiveTarget) {
-        const issue = columns.flatMap((c) => c.issues).find((i) => i.id === issueId);
-        const ws = issue?.workspaceSummary?.main;
-        if (issue && ws && ws.status !== "closed") {
-          setMoveToDonePending({
-            issue,
-            confirm: async () => {
-              const body: UpdateIssueRequest = { statusId: targetStatusId };
-              if (sortOrder !== undefined) body.sortOrder = sortOrder;
-              await apiFetch(`/api/issues/${issueId}`, { method: "PATCH", body: JSON.stringify(body) });
-              await refetchBoard();
-              setMoveToDonePending(null);
-            },
-          });
-          return;
-        }
-      }
-
       const body: UpdateIssueRequest = { statusId: targetStatusId };
       if (sortOrder !== undefined) body.sortOrder = sortOrder;
 
@@ -893,8 +915,13 @@ export function BoardPage() {
         method: "PATCH",
         body: JSON.stringify(body),
       });
-      await refetchBoard();
+      if (!isReorder) {
+        await refetchBoard();
+      }
     } catch (err) {
+      if (isReorder) {
+        setColumns(snapshotColumns);
+      }
       showToast("Failed to move issue", "error");
     }
   }
