@@ -23,7 +23,7 @@ describe("quality-metrics-collector skill", () => {
 
     expect(skill).toBeDefined();
     expect(skill!.prompt).toContain("code-metrics");
-    expect(skill!.prompt).toContain("tools\\\\scc.exe");
+    expect(skill!.prompt).toContain("tools\\scc.exe");
     expect(skill!.prompt).toMatch(/bundled/i);
   });
 
