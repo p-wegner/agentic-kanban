@@ -34,7 +34,8 @@ export type ViewMode =
   | "focus"
   | "runbooks"
   | "capacity"
-  | "constellation";
+  | "constellation"
+  | "momentum";
 
 export interface ViewDescriptor {
   /** Stable view id — matches BoardPage's `viewMode` state. */
@@ -203,6 +204,14 @@ const ICON = {
       <circle cx="8" cy="14" r="1" fill="currentColor" stroke="none" />
       <circle cx="17" cy="16" r="1" fill="currentColor" stroke="none" />
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M5 5l7 14M5 5l14 3M19 8l-7 11M8 14l9 2" />
+    </svg>
+  ),
+  momentum: (
+    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M3 6h4M3 12h8M3 18h14" />
+      <circle cx="9" cy="6" r="1.5" fill="currentColor" stroke="none" />
+      <circle cx="13" cy="12" r="1.5" fill="currentColor" stroke="none" />
+      <circle cx="19" cy="18" r="1.5" fill="currentColor" stroke="none" />
     </svg>
   ),
 } as const;
@@ -441,6 +450,18 @@ export const VIEW_REGISTRY: ViewDescriptor[] = [
     paletteIcon: "⬡",
     paletteDescription: "Show agent capacity, open slots, and next issues to launch",
     shortcut: "c",
+    group: "secondary",
+  },
+  {
+    id: "momentum",
+    toolbarLabel: "Momentum",
+    label: "Momentum",
+    tooltip: "Momentum — priority-lane river view of your board",
+    icon: ICON.momentum,
+    paletteIcon: "≋",
+    paletteDescription: "Priority lanes × flowing issue cards sorted by workflow progress",
+    shortcut: "v",
+    activeClass: "bg-orange-500 text-white",
     group: "secondary",
   },
   {
