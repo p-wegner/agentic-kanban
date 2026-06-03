@@ -26,6 +26,7 @@ export const SETTINGS_KEYS = [
   "monitor_maintenance_window_enabled", "monitor_maintenance_window_end",
   "backlog_empty_strategy", "backlog_empty_skill", "backlog_empty_cooldown_min",
   "backlog_empty_last_run",
+  "backlog_stale_days",
   ...allHarnessSettingKeys(),
 ];
 

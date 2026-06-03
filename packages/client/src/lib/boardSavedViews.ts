@@ -7,6 +7,7 @@ export type BoardSortMode = "rank";
 export interface BoardViewState {
   searchQuery: string;
   showBlocked: boolean;
+  showStaleOnly: boolean;
   statusId: string | null;
   statusName: string | null;
   tagId: string | null;
@@ -70,6 +71,7 @@ export function sanitizeSavedBoardViews(raw: string | undefined): SavedBoardView
         state: {
           searchQuery: typeof state.searchQuery === "string" ? state.searchQuery : "",
           showBlocked: state.showBlocked === true,
+          showStaleOnly: state.showStaleOnly === true,
           statusId: optionalString(state.statusId),
           statusName: optionalString(state.statusName),
           tagId: optionalString(state.tagId),
