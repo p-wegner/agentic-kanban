@@ -46,6 +46,7 @@ import { MentionProvider } from "../lib/MentionContext.js";
 import { CommandPalette } from "../components/CommandPalette.js";
 import { ShortcutHelp } from "../components/ShortcutHelp.js";
 import { apiFetch } from "../lib/api.js";
+import { wipLimitKey, getWipLimit } from "../lib/wipLimits.js";
 import { useBoardEvents, type LiveSessionStats, type TodoItem, type ApprovalRequest } from "../lib/useBoardEvents.js";
 import { ApprovalDialog } from "../components/ApprovalDialog.js";
 import { MoveToDoneDialog } from "../components/MoveToDoneDialog.js";
@@ -260,6 +261,7 @@ export function BoardPage() {
   const [boardBulkUpdating, setBoardBulkUpdating] = useState(false);
   const [allTags, setAllTags] = useState<Tag[]>([]);
   const [tagsLoaded, setTagsLoaded] = useState(false);
+  const [wipLimits, setWipLimits] = useState<Record<string, number | null>>({});
 
   const refetchBoard = useCallback(async (projectId?: string) => {
     const pid = projectId || activeProjectId;
@@ -464,6 +466,15 @@ export function BoardPage() {
         setAutoMonitorInterval(s.auto_monitor_interval ?? "4");
         setNudgeAutoStart(s.nudge_auto_start === "true");
         setNudgeWipLimit(s.nudge_wip_limit ?? "5");
+        const loadedWipLimits: Record<string, number | null> = {};
+        for (const key of Object.keys(s)) {
+          if (key.startsWith("wip_limit_")) {
+            const statusId = key.slice("wip_limit_".length);
+            const limit = getWipLimit(s, statusId);
+            if (limit !== null) loadedWipLimits[statusId] = limit;
+          }
+        }
+        setWipLimits(loadedWipLimits);
         apiFetch<MonitorStatus>("/api/internal/monitor-status")
           .then((r) => setMonitorStatus(r))
           .catch(() => {});
@@ -523,6 +534,22 @@ export function BoardPage() {
   async function handleNudgeWipLimitChange(v: string) {
     setNudgeWipLimit(v);
     await apiFetch("/api/preferences/settings", { method: "PUT", body: JSON.stringify({ nudge_wip_limit: v }) }).catch(() => {});
+  }
+
+  async function handleSetWipLimit(statusId: string, limit: number | null) {
+    setWipLimits((prev) => {
+      const next = { ...prev };
+      if (limit === null) {
+        delete next[statusId];
+      } else {
+        next[statusId] = limit;
+      }
+      return next;
+    });
+    await apiFetch("/api/preferences/settings", {
+      method: "PUT",
+      body: JSON.stringify({ [wipLimitKey(statusId)]: limit != null ? String(limit) : "" }),
+    }).catch(() => {});
   }
 
   async function handleProjectChange(id: string) {
@@ -2274,6 +2301,8 @@ export function BoardPage() {
               onAddTag: handleQuickAddTag,
               onRemoveTag: handleQuickRemoveTag,
             }}
+            wipLimits={wipLimits}
+            onSetWipLimit={handleSetWipLimit}
           />
         )}
       </div>
