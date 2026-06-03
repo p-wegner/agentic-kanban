@@ -2,6 +2,7 @@ import { issues, preferences, projectStatuses, workspaces } from "@agentic-kanba
 import { and, eq, inArray, ne, sql } from "drizzle-orm";
 import type { Database } from "../db/index.js";
 import { deriveMonitorTunables, parseStrategyBullseyeConfig, type MonitorTunables } from "./strategy-objective.service.js";
+import { ACTIVE_WORKSPACE_STATUSES } from "@agentic-kanban/shared";
 
 export interface SprintCapacityPolicy {
   activeAgentsTarget: number;
@@ -49,15 +50,13 @@ async function loadMonitorTunables(database: Database, projectId: string): Promi
 }
 
 async function countActiveWorkspaces(database: Database, projectId: string): Promise<number> {
-  const ACTIVE_STATUSES = ["active", "reviewing", "fixing", "awaiting-plan-approval"] as const;
-
   const rows = await database
     .select({ count: sql<number>`count(distinct ${issues.id})` })
     .from(issues)
     .innerJoin(workspaces, eq(workspaces.issueId, issues.id))
     .where(and(
       eq(issues.projectId, projectId),
-      inArray(workspaces.status, ACTIVE_STATUSES as unknown as string[]),
+      inArray(workspaces.status, [...ACTIVE_WORKSPACE_STATUSES]),
     ));
 
   return Number(rows[0]?.count ?? 0);
