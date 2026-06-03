@@ -1,5 +1,5 @@
 import { useRef, useEffect, useState } from "react";
-import type { CreateIssueRequest } from "@agentic-kanban/shared";
+import type { CreateIssueRequest, IssueEstimate } from "@agentic-kanban/shared";
 import { apiFetch } from "../lib/api.js";
 import { isHttpUrl } from "../lib/url.js";
 import { showToast } from "./Toast.js";
@@ -22,6 +22,7 @@ export interface CreateIssueFormState {
   title: string;
   description: string;
   issueType: CreateIssueRequest["issueType"];
+  estimate?: IssueEstimate | "";
   startWorkspace: boolean;
   planMode: boolean;
   skipAutoReview: boolean;
@@ -50,6 +51,7 @@ export function CreateIssueForm({
   const [title, setTitle] = useState(initialState?.title ?? "");
   const [description, setDescription] = useState(initialState?.description ?? "");
   const [issueType, setIssueType] = useState<CreateIssueRequest["issueType"]>(initialState?.issueType ?? "task");
+  const [estimate, setEstimate] = useState<IssueEstimate | "">(initialState?.estimate ?? "");
   const [startWorkspace, setStartWorkspace] = useState(initialState?.startWorkspace ?? false);
   const [planMode, setPlanMode] = useState(initialState?.planMode ?? false);
   const [skipAutoReview, setSkipAutoReview] = useState(initialState?.skipAutoReview ?? false);
@@ -147,6 +149,7 @@ export function CreateIssueForm({
         title: title.trim(),
         description: description.trim() || undefined,
         issueType,
+        estimate: estimate || undefined,
         statusId,
         projectId,
         workflowTemplateId: workflowTemplateId || undefined,
@@ -216,16 +219,31 @@ export function CreateIssueForm({
         rows={2}
         className="w-full text-xs border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500 resize-none overflow-y-hidden dark:bg-gray-900 dark:text-gray-100"
       />
-      <select
-        value={issueType}
-        onChange={(e) => setIssueType(e.target.value as CreateIssueRequest["issueType"])}
-        className="w-full text-xs border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500 dark:bg-gray-900 dark:text-gray-100"
-      >
-        <option value="task">Task</option>
-        <option value="bug">Bug</option>
-        <option value="feature">Feature</option>
-        <option value="chore">Chore</option>
-      </select>
+      <div className="flex gap-2">
+        <select
+          value={issueType}
+          onChange={(e) => setIssueType(e.target.value as CreateIssueRequest["issueType"])}
+          className="flex-1 text-xs border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500 dark:bg-gray-900 dark:text-gray-100"
+        >
+          <option value="task">Task</option>
+          <option value="bug">Bug</option>
+          <option value="feature">Feature</option>
+          <option value="chore">Chore</option>
+        </select>
+        <select
+          value={estimate}
+          onChange={(e) => setEstimate(e.target.value as IssueEstimate | "")}
+          className="text-xs border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500 dark:bg-gray-900 dark:text-gray-100"
+          title="Effort estimate"
+        >
+          <option value="">Est.</option>
+          <option value="XS">XS</option>
+          <option value="S">S</option>
+          <option value="M">M</option>
+          <option value="L">L</option>
+          <option value="XL">XL</option>
+        </select>
+      </div>
       <div className="flex gap-2">
         <input
           type="text"
@@ -369,7 +387,7 @@ export function CreateIssueForm({
         {onExpand && (
           <button
             type="button"
-            onClick={() => onExpand({ title, description, issueType, startWorkspace, planMode, skipAutoReview, skillId })}
+            onClick={() => onExpand({ title, description, issueType, estimate, startWorkspace, planMode, skipAutoReview, skillId })}
             className="ml-auto text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 p-1 rounded"
             title="Expand form"
           >
