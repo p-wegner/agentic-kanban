@@ -1,7 +1,7 @@
 import { useCallback, useRef, useState } from "react";
 import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
 import type { LiveSessionStats, TodoItem } from "../lib/useBoardEvents.js";
-import { IssueCard } from "./IssueCard.js";
+import { IssueCard, type ProjectTag, type QuickUpdateCallbacks } from "./IssueCard.js";
 
 type SortMode = "default" | "type";
 
@@ -52,6 +52,8 @@ interface BoardColumnProps {
   pendingIssueIds?: Set<string>;
   pendingWorkspaceIssueIds?: Set<string>;
   selectedIssueIds?: Set<string>;
+  allProjectTags?: ProjectTag[];
+  quickUpdate?: QuickUpdateCallbacks;
   children?: React.ReactNode;
   style?: React.CSSProperties;
   width?: number;
@@ -85,6 +87,8 @@ export function BoardColumn({
   pendingIssueIds,
   pendingWorkspaceIssueIds,
   selectedIssueIds,
+  allProjectTags,
+  quickUpdate,
   children,
   style,
   width,
@@ -255,6 +259,9 @@ export function BoardColumn({
                 onDragStart={onDragStart}
                 onMoveToNext={nextStatus && onMoveToNext ? (iss) => onMoveToNext(iss, nextStatus.id) : undefined}
                 nextStatusName={nextStatus?.name}
+                tags={issue.tags}
+                allProjectTags={allProjectTags}
+                quickUpdate={quickUpdate}
                 searchQuery={searchQuery}
                 liveActivity={sessionActivity?.[issue.id]}
                 liveStats={liveStats?.[issue.id]}

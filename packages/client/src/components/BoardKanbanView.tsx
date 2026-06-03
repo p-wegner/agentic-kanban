@@ -1,6 +1,7 @@
 import type { IssueWithStatus, StatusWithIssues, CreateIssueRequest, ProfileSelection } from "@agentic-kanban/shared";
 import { BoardErrorBoundary } from "./BoardErrorBoundary.js";
 import { BoardColumn } from "./BoardColumn.js";
+import type { ProjectTag, QuickUpdateCallbacks } from "./IssueCard.js";
 import { CompletedGrid } from "./CompletedGrid.js";
 import { CreateIssueForm } from "./CreateIssueForm.js";
 import type { CreateIssueFormState } from "./CreateIssueForm.js";
@@ -38,6 +39,8 @@ export interface BoardKanbanViewProps {
   onCreateIssue: (data: CreateIssueRequest & { startWorkspace?: boolean; planMode?: boolean; skipAutoReview?: boolean; profile?: ProfileSelection; model?: string; isDirect?: boolean; skillId?: string }) => Promise<void>;
   onExpandCreate: (statusId: string, statusName: string, state: Partial<CreateIssueFormState>) => void;
   selectedIssueIds?: Set<string>;
+  allProjectTags?: ProjectTag[];
+  quickUpdate?: QuickUpdateCallbacks;
 }
 
 export function BoardKanbanView({
@@ -71,6 +74,8 @@ export function BoardKanbanView({
   onCreateIssue,
   onExpandCreate,
   selectedIssueIds,
+  allProjectTags,
+  quickUpdate,
 }: BoardKanbanViewProps) {
   // Below sm, columns stack vertically and the board scrolls down through them
   // (instead of a horizontal one-column-at-a-time swipe, where an empty column
@@ -132,6 +137,8 @@ export function BoardKanbanView({
               pendingIssueIds={pendingIssueIds}
               pendingWorkspaceIssueIds={pendingWorkspaceIssueIds}
               selectedIssueIds={selectedIssueIds}
+              allProjectTags={allProjectTags}
+              quickUpdate={quickUpdate}
             >
               <CreateIssueForm
                 projectId={projectId}
