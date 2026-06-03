@@ -44,6 +44,7 @@ interface Settings {
   nudge_wip_limit?: string;
   monitor_maintenance_window_enabled?: string;
   monitor_maintenance_window_end?: string;
+  auto_commit_strategy_objective?: string;
   backlog_stale_days?: string;
   backlog_empty_strategy?: string;
   backlog_empty_skill?: string;
@@ -94,6 +95,7 @@ const DEFAULT_SETTINGS: Settings = {
   nudge_auto_start: "false",
   monitor_maintenance_window_enabled: "false",
   monitor_maintenance_window_end: "",
+  auto_commit_strategy_objective: "true",
   backlog_stale_days: "14",
   backlog_empty_strategy: "skip",
   backlog_empty_skill: "architecture-improvement",
@@ -1405,6 +1407,14 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                           )}
                         </div>
                       )}
+                    </div>
+                    <div className="mt-3">
+                      <Toggle
+                        checked={settings.auto_commit_strategy_objective !== "false"}
+                        onChange={setBool("auto_commit_strategy_objective")}
+                        label="Auto-commit strategy objective.md"
+                        hint="When you save the Strategy Bullseye, the board regenerates the git-tracked scripts/board-monitor/objective.md. Commit it automatically (path-scoped) so the main checkout doesn't stay dirty and block the auto-merge queue. Disable to commit it yourself."
+                      />
                     </div>
                     {monitorStatus && (
                       <div className="mt-3 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">

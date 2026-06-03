@@ -5,7 +5,7 @@ import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { getPreference, setPreference, getAllPreferences, setPreferences } from "../repositories/preferences.repository.js";
 import { allHarnessSettingKeys } from "./harness-settings.js";
-import { isBoardStrategyKey, projectIdFromBoardStrategyKey, writeStrategyObjective } from "./strategy-objective.service.js";
+import { commitObjectiveFile, isBoardStrategyKey, projectIdFromBoardStrategyKey, writeStrategyObjective } from "./strategy-objective.service.js";
 import { projects } from "@agentic-kanban/shared/schema";
 import { eq } from "drizzle-orm";
 
@@ -27,6 +27,7 @@ export const SETTINGS_KEYS = [
   "backlog_empty_strategy", "backlog_empty_skill", "backlog_empty_cooldown_min",
   "backlog_empty_last_run",
   "backlog_stale_days",
+  "auto_commit_strategy_objective",
   ...allHarnessSettingKeys(),
 ];
 
@@ -72,6 +73,10 @@ export function createPreferenceService({ database }: { database: Database }) {
 
   async function updateStrategyObjectives(entries: Array<{ key: string; value: string }>) {
     const strategyEntries = entries.filter((entry) => isBoardStrategyKey(entry.key));
+    if (strategyEntries.length === 0) return;
+    // Default ON: a Bullseye save regenerates the git-tracked objective.md, and an
+    // uncommitted main checkout blocks the auto-merge queue. Opt out via the setting.
+    const autoCommit = (await getPreference("auto_commit_strategy_objective", database)) !== "false";
     for (const entry of strategyEntries) {
       const projectId = projectIdFromBoardStrategyKey(entry.key);
       if (!projectId) continue;
@@ -81,7 +86,9 @@ export function createPreferenceService({ database }: { database: Database }) {
         .where(eq(projects.id, projectId))
         .limit(1);
       const repoPath = projectRows[0]?.repoPath;
-      if (repoPath) writeStrategyObjective(repoPath, entry.value);
+      if (!repoPath) continue;
+      const changed = writeStrategyObjective(repoPath, entry.value);
+      if (changed && autoCommit) commitObjectiveFile(repoPath);
     }
   }
 

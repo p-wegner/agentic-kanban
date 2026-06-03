@@ -1,10 +1,30 @@
-import { describe, expect, it } from "vitest";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
+  commitObjectiveFile,
   deriveMonitorTunables,
   parseStrategyBullseyeConfig,
   resolveMonitorTunables,
   updateObjectiveWithStrategy,
+  writeStrategyObjective,
 } from "../services/strategy-objective.service.js";
+
+const OBJECTIVE_REL = "scripts/board-monitor/objective.md";
+const BASE_OBJECTIVE = [
+  "Intro prose",
+  "",
+  "## TUNABLE TARGETS - edit these live to steer the loop",
+  "- **ACTIVE_AGENTS_TARGET = 5** - old",
+  "",
+  "FIRST, READ YOUR RECENT MEMORY: keep this prose",
+].join("\n");
+
+function git(repo: string, args: string[]): string {
+  return execFileSync("git", args, { cwd: repo, encoding: "utf8", windowsHide: true }).trim();
+}
 
 describe("strategy objective translation", () => {
   it("maps bugfix-heavy bullseye weights to bugfix-only refill focus", () => {
@@ -58,6 +78,67 @@ describe("strategy objective translation", () => {
     expect(updated).toContain("FIRST, READ YOUR RECENT MEMORY: keep this prose");
     expect(updated).toContain("Each run, do work.");
     expect(updated).not.toContain("> old note");
+  });
+});
+
+describe("writeStrategyObjective + commitObjectiveFile — auto-commit hook", () => {
+  let repo: string;
+  const config = JSON.stringify({ segments: [{ id: "perf", label: "REST API Performance", kind: "area", weight: 5, keywords: "performance rest api" }] });
+
+  beforeEach(() => {
+    repo = mkdtempSync(join(tmpdir(), "strategy-objective-"));
+    git(repo, ["init", "-q"]);
+    git(repo, ["config", "user.email", "test@example.com"]);
+    git(repo, ["config", "user.name", "Test"]);
+    git(repo, ["config", "commit.gpgsign", "false"]);
+    mkdirSync(join(repo, "scripts", "board-monitor"), { recursive: true });
+    writeFileSync(join(repo, OBJECTIVE_REL), BASE_OBJECTIVE, "utf8");
+    git(repo, ["add", "-A"]);
+    git(repo, ["commit", "-q", "-m", "seed"]);
+  });
+
+  afterEach(() => {
+    rmSync(repo, { recursive: true, force: true });
+  });
+
+  it("returns true and rewrites the file when the bullseye changes the tunables", () => {
+    const changed = writeStrategyObjective(repo, config);
+    expect(changed).toBe(true);
+    const text = readFileSync(join(repo, OBJECTIVE_REL), "utf8");
+    expect(text).toContain("<!-- STRATEGY_BULLSEYE_GENERATED_START -->");
+    expect(text).toContain("REST API Performance: weight 5/5");
+    expect(text).toContain("FIRST, READ YOUR RECENT MEMORY: keep this prose");
+  });
+
+  it("returns false (no rewrite) when there is no objective.md", () => {
+    const empty = mkdtempSync(join(tmpdir(), "strategy-empty-"));
+    try {
+      expect(writeStrategyObjective(empty, config)).toBe(false);
+    } finally {
+      rmSync(empty, { recursive: true, force: true });
+    }
+  });
+
+  it("commits ONLY objective.md, leaving an unrelated dirty file untracked", () => {
+    writeStrategyObjective(repo, config);
+    // an unrelated working-tree change that must NOT be swept into the commit
+    writeFileSync(join(repo, "unrelated.txt"), "dirty", "utf8");
+
+    const committed = commitObjectiveFile(repo);
+    expect(committed).toBe(true);
+
+    // objective.md is now committed (clean), unrelated.txt is still untracked
+    const status = git(repo, ["status", "--porcelain"]);
+    expect(status).not.toContain(OBJECTIVE_REL);
+    expect(status).toContain("unrelated.txt");
+
+    // the latest commit touched only objective.md
+    const files = git(repo, ["show", "--name-only", "--pretty=format:", "HEAD"]).trim();
+    expect(files).toBe(OBJECTIVE_REL);
+  });
+
+  it("is a no-op (returns false) when objective.md has no uncommitted changes", () => {
+    expect(commitObjectiveFile(repo)).toBe(false);
   });
 });
 
