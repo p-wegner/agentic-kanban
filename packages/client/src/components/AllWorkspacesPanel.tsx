@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { formatRelativeTime } from "../lib/formatRelativeTime.js";
 import { apiFetch } from "../lib/api.js";
 import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
+import { WorkspaceRiskHeatmap } from "./WorkspaceRiskHeatmap.js";
 
 interface Project {
   id: string;
@@ -48,6 +49,7 @@ interface AllWorkspacesPanelProps {
   onRefresh?: () => void;
 }
 
+type ViewMode = "workspaces" | "risk";
 type WsStatusFilter = "all" | "active" | "running" | "idle" | "reviewing" | "fixing" | "closed" | "stale";
 
 const FILTER_CHIPS: { label: string; value: WsStatusFilter }[] = [
@@ -79,6 +81,7 @@ const ISSUE_STATUS_COLORS: Record<string, string> = {
 };
 
 export function AllWorkspacesPanel({ columns, activeProjectId, onClose, onIssueClick, onProjectSwitch, onRefresh }: AllWorkspacesPanelProps) {
+  const [viewMode, setViewMode] = useState<ViewMode>("workspaces");
   const [statusFilter, setStatusFilter] = useState<WsStatusFilter>("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [closingIdle, setClosingIdle] = useState(false);
@@ -309,8 +312,32 @@ export function AllWorkspacesPanel({ columns, activeProjectId, onClose, onIssueC
           </div>
         </div>
 
+        {/* View tabs */}
+        <div className="flex border-b border-gray-200 dark:border-gray-700">
+          <button
+            onClick={() => setViewMode("workspaces")}
+            className={`flex-1 text-xs font-medium px-4 py-2 transition-colors ${
+              viewMode === "workspaces"
+                ? "border-b-2 border-brand-600 text-brand-700 dark:text-brand-400 bg-brand-50/50 dark:bg-brand-900/10"
+                : "text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"
+            }`}
+          >
+            Workspaces
+          </button>
+          <button
+            onClick={() => setViewMode("risk")}
+            className={`flex-1 text-xs font-medium px-4 py-2 transition-colors ${
+              viewMode === "risk"
+                ? "border-b-2 border-red-500 text-red-700 dark:text-red-400 bg-red-50/50 dark:bg-red-900/10"
+                : "text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"
+            }`}
+          >
+            Risk Heatmap
+          </button>
+        </div>
+
         {/* Filters */}
-        <div className="px-4 py-2 border-b border-gray-100 dark:border-gray-800 space-y-2">
+        <div className={`px-4 py-2 border-b border-gray-100 dark:border-gray-800 space-y-2 ${viewMode === "risk" ? "hidden" : ""}`}>
           {/* Project filter */}
           <select
             value={projectFilter}
@@ -356,8 +383,16 @@ export function AllWorkspacesPanel({ columns, activeProjectId, onClose, onIssueC
         </div>
 
         {/* Content */}
-        <div className="flex-1 overflow-y-auto">
-          {showingStale ? (
+        <div className="flex-1 overflow-y-auto flex flex-col">
+          {viewMode === "risk" ? (
+            activeProjectId ? (
+              <WorkspaceRiskHeatmap projectId={activeProjectId} onIssueClick={onIssueClick} />
+            ) : (
+              <div className="px-4 py-12 text-center text-sm text-gray-500 dark:text-gray-400">
+                Select a project to view the risk heatmap.
+              </div>
+            )
+          ) : showingStale ? (
             // Stale worktrees view
             staleLoading ? (
               <div className="px-4 py-12 text-center text-sm text-gray-400 dark:text-gray-500">Loading stale worktrees…</div>
@@ -582,3 +617,4 @@ export function AllWorkspacesPanel({ columns, activeProjectId, onClose, onIssueC
     </div>
   );
 }
+
