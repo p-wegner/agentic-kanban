@@ -63,6 +63,8 @@ import {
 } from "@agentic-kanban/shared/lib/workflow-engine";
 import { resolveAgentSettings, toExecutorProvider } from "./agent-settings.service.js";
 import { parseStrategyBullseyeConfig, selectProviderFromStrategy } from "./strategy-objective.service.js";
+import { fetchLiveQuotaUsage } from "./quota-usage.service.js";
+import type { QuotaUsageResult } from "./quota-usage.service.js";
 import { preflightAgentProfile } from "./agent-profile-health.service.js";
 import { emitButlerSystemEvent } from "./butler-event-feed.js";
 import {
@@ -476,7 +478,16 @@ export function createWorkspaceCrudService(deps: {
       if (strategyRaw) {
         try {
           const strategyConfig = parseStrategyBullseyeConfig(strategyRaw);
-          const selected = selectProviderFromStrategy(strategyConfig);
+          // Fetch live quota data to enable usage-aware selection; non-fatal if unavailable.
+          let quota: QuotaUsageResult | null = null;
+          if (strategyConfig.providerPolicies?.some((p) => p.quotaProviderId)) {
+            try {
+              quota = await fetchLiveQuotaUsage();
+            } catch {
+              /* quota service unavailable — fall back to static priority */
+            }
+          }
+          const selected = selectProviderFromStrategy(strategyConfig, { quota });
           if (selected) {
             if (selected.provider === "codex") {
               if (selected.profileName) prefMap.set("codex_profile", selected.profileName);
@@ -488,7 +499,8 @@ export function createWorkspaceCrudService(deps: {
               if (selected.profileName) prefMap.set("claude_profile", selected.profileName);
               prefMap.set("provider", "claude");
             }
-            console.log(`[workspaces] strategy provider selection: ${selected.provider}:${selected.profileName} (mode=${selected.policy.mode})`);
+            const quotaNote = quota ? " (usage-aware)" : "";
+            console.log(`[workspaces] strategy provider selection: ${selected.provider}:${selected.profileName} (mode=${selected.policy.mode})${quotaNote}`);
           }
         } catch {
           /* non-fatal: fall through to global default */
