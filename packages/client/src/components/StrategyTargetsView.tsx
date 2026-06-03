@@ -555,6 +555,7 @@ function StrategyBoard({
 export function StrategyTargetsView({ columns, projectId, onIssueClick, searchQuery }: StrategyTargetsViewProps) {
   const allIssues = useMemo(() => columns.flatMap((column) => column.issues), [columns]);
   const [config, setConfig] = useState<StrategyConfig>(DEFAULT_CONFIG);
+  const [savedConfig, setSavedConfig] = useState<StrategyConfig>(DEFAULT_CONFIG);
   const [selectedId, setSelectedId] = useState<string | null>(DEFAULT_CONFIG.segments[0]?.id ?? null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -571,6 +572,7 @@ export function StrategyTargetsView({ columns, projectId, onIssueClick, searchQu
         const raw = settings[key];
         const next = raw ? normalizeConfig(JSON.parse(raw)) : DEFAULT_CONFIG;
         setConfig(next);
+        setSavedConfig(next);
         setSelectedId(next.segments[0]?.id ?? null);
         setDirty(false);
       })
@@ -666,6 +668,7 @@ export function StrategyTargetsView({ columns, projectId, onIssueClick, searchQu
         body: JSON.stringify({ [key]: JSON.stringify(payload) }),
       });
       setConfig(payload);
+      setSavedConfig(payload);
       setDirty(false);
       showToast("Strategy Bullseye saved", "success");
     } catch (err) {
@@ -673,6 +676,13 @@ export function StrategyTargetsView({ columns, projectId, onIssueClick, searchQu
     } finally {
       setSaving(false);
     }
+  }
+
+  function discardChanges() {
+    setConfig(savedConfig);
+    setSelectedId((prev) => (savedConfig.segments.some((s) => s.id === prev) ? prev : savedConfig.segments[0]?.id ?? null));
+    setDirty(false);
+    showToast("Unsaved changes discarded", "success");
   }
 
   async function applyPreset(preset: MonitorPolicyPreset) {
@@ -697,6 +707,7 @@ export function StrategyTargetsView({ columns, projectId, onIssueClick, searchQu
         body: JSON.stringify({ [key]: JSON.stringify(next) }),
       });
       setConfig(next);
+      setSavedConfig(next);
       setDirty(false);
       showToast(`Preset "${preset.name}" applied`, "success");
     } catch (err) {
@@ -1032,6 +1043,35 @@ export function StrategyTargetsView({ columns, projectId, onIssueClick, searchQu
           </div>
         </section>
       </div>
+
+      {dirty && (
+        <div className="sticky bottom-0 z-20 -mx-4 mt-4 border-t border-amber-200 bg-amber-50/95 px-4 py-3 backdrop-blur dark:border-amber-900 dark:bg-amber-950/90">
+          <div className="mx-auto flex max-w-7xl items-center justify-between gap-3">
+            <span className="flex items-center gap-2 text-sm font-medium text-amber-800 dark:text-amber-200">
+              <span className="h-2 w-2 shrink-0 rounded-full bg-amber-500" />
+              Unsaved changes
+            </span>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={discardChanges}
+                disabled={saving}
+                className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-semibold text-gray-600 transition-colors hover:bg-gray-50 disabled:opacity-50 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-800"
+              >
+                Discard
+              </button>
+              <button
+                type="button"
+                onClick={saveBullseye}
+                disabled={loading || saving}
+                className="rounded-md bg-brand-600 px-4 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {saving ? "Saving..." : "Save changes"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
