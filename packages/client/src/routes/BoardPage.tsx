@@ -915,9 +915,7 @@ export function BoardPage() {
         method: "PATCH",
         body: JSON.stringify(body),
       });
-      if (!isReorder) {
-        await refetchBoard();
-      }
+      await refetchBoard();
     } catch (err) {
       if (isReorder) {
         setColumns(snapshotColumns);

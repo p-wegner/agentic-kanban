@@ -12,7 +12,12 @@ export function computeDropSortOrder(
   if (sortOrders.length === 0) return 0;
   if (beforeIndex === 0) return sortOrders[0] - 100;
   if (beforeIndex >= sortOrders.length) return sortOrders[sortOrders.length - 1] + 100;
-  return Math.round((sortOrders[beforeIndex - 1] + sortOrders[beforeIndex]) / 2);
+  const prev = sortOrders[beforeIndex - 1];
+  const next = sortOrders[beforeIndex];
+  const mid = Math.round((prev + next) / 2);
+  // When no integer gap exists between neighbors, nudge one past the lower card
+  if (mid >= next) return prev + 1;
+  return mid;
 }
 
 /**
