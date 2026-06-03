@@ -12,6 +12,7 @@ export interface BoardKanbanViewProps {
   activeColumns: StatusWithIssues[];
   archiveColumns: StatusWithIssues[];
   allColumns: StatusWithIssues[];
+  focusMode?: boolean;
   projectId: string;
   columnWidths: Record<string, number>;
   dynamicColumnScaling: boolean;
@@ -47,6 +48,7 @@ export function BoardKanbanView({
   activeColumns,
   archiveColumns,
   allColumns,
+  focusMode = false,
   projectId,
   columnWidths,
   dynamicColumnScaling,
@@ -99,7 +101,21 @@ export function BoardKanbanView({
           vertically each header is visible inline and the pulse shows live counts,
           so the strip was redundant chrome eating a row. */}
       <div className={`flex flex-1 min-h-0 board-columns-scroll ${isNarrow ? "flex-col gap-2 overflow-y-auto" : "gap-0 overflow-x-auto"}`}>
-        {activeColumns.map((col, colIdx) => (
+        {activeColumns.map((col, colIdx) => {
+          if (focusMode && col.issues.length === 0) {
+            return (
+              <BoardErrorBoundary key={col.id} columnName={col.name}>
+                <div
+                  className={`shrink-0 ${isNarrow ? "w-full" : "w-8"} bg-surface-sunken dark:bg-surface-sunken-dark rounded-xl flex ${isNarrow ? "flex-row items-center gap-2 px-3 py-2" : "flex-col items-center py-3 gap-1"} opacity-40`}
+                  title={`${col.name} — no in-flight issues`}
+                >
+                  <span className={`font-semibold text-[10px] text-ink-faint dark:text-gray-500 tracking-tight ${isNarrow ? "" : "[writing-mode:vertical-rl] rotate-180"}`}>{col.name}</span>
+                  <span className="text-[10px] text-ink-faint dark:text-gray-500 font-medium">0</span>
+                </div>
+              </BoardErrorBoundary>
+            );
+          }
+          return (
           <BoardErrorBoundary key={col.id} columnName={col.name}>
             <BoardColumn
               column={col}
@@ -153,7 +169,8 @@ export function BoardKanbanView({
               />
             </BoardColumn>
           </BoardErrorBoundary>
-        ))}
+          );
+        })}
       </div>
       <BoardErrorBoundary columnName="Archive">
         <CompletedGrid
