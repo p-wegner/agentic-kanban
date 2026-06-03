@@ -59,6 +59,31 @@ If the repo has a fast, established command for coverage, lint, or typecheck and
 
 Do not run destructive setup, cleanup, database reset, or broad formatting commands.
 
+## scc resolution — prefer the code-metrics skill's bundled binary
+
+Rather than relying on `scc` being on PATH, prefer the bundled `scc.exe` that ships
+with the `code-metrics` skill (installed at `C:\Users\pwegner\.claude\skills\code-metrics`
+on this system, or equivalently `$HOME\.claude\skills\code-metrics`). Resolve in order:
+
+```powershell
+$sccCmd = $null
+$codeMetricsSkillRoot = "$HOME\.claude\skills\code-metrics"
+$bundledScc = Join-Path $codeMetricsSkillRoot "tools\scc.exe"
+if (Test-Path $bundledScc) {
+  $sccCmd = $bundledScc
+} elseif (Get-Command scc -ErrorAction SilentlyContinue) {
+  $sccCmd = "scc"
+}
+if (-not $sccCmd) {
+  Write-Warning "scc not found — LOC metrics will be skipped. Install via code-metrics skill: cd $codeMetricsSkillRoot; .\setup.ps1"
+}
+```
+
+If the `code-metrics` CLI itself is available (`$codeMetricsSkillRoot\.venv\Scripts\code-metrics.exe`),
+you may instead run `code-metrics analyze <repo>` and read `code-metrics-out/analysis.json`
+for richer per-module LOC data — but the direct `scc` call below is sufficient for
+standard quality-metrics collection.
+
 ## Reference Implementation
 
 This PowerShell sketch is acceptable to run from the repo root. If `scc` is unavailable, report that blocker and skip LOC metrics instead of inventing numbers.
@@ -76,19 +101,30 @@ if (-not $projectId -or $projectId -like "<*") {
   $projectId = $project.id
 }
 
-$metrics = @()
-$sccJson = scc packages/client/src packages/server/src packages/shared/src packages/mcp-server/src packages/e2e packages/desktop/src --include-ext ts,tsx,css --no-complexity --format json | ConvertFrom-Json
-$total = $sccJson | Where-Object { $_.Name -eq "Total" } | Select-Object -First 1
-$testRows = $sccJson | Where-Object { $_.Name -ne "Total" -and ($_.Location -match '(__tests__|\.test\.|\.spec\.|packages/e2e)') }
-$testLoc = ($testRows | Measure-Object -Property Code -Sum).Sum
-$allLoc = [double]$total.Code
-$prodLoc = [Math]::Max(0, $allLoc - [double]$testLoc)
-$testRatio = if (($prodLoc + [double]$testLoc) -gt 0) { ([double]$testLoc / ($prodLoc + [double]$testLoc)) * 100 } else { 0 }
+# Resolve scc — prefer code-metrics skill's bundled binary over PATH
+$sccCmd = $null
+$bundledScc = "$HOME\.claude\skills\code-metrics\tools\scc.exe"
+if (Test-Path $bundledScc) { $sccCmd = $bundledScc }
+elseif (Get-Command scc -ErrorAction SilentlyContinue) { $sccCmd = "scc" }
 
-$metrics += @{ metricKey = "code.production_loc"; value = $prodLoc; unit = "lines"; meta = @{ source = "scc" } }
-$metrics += @{ metricKey = "code.test_loc"; value = [double]$testLoc; unit = "lines"; meta = @{ source = "scc" } }
-$metrics += @{ metricKey = "code.test_ratio"; value = $testRatio; unit = "percent"; meta = @{ source = "scc" } }
-$metrics += @{ metricKey = "code.source_files"; value = [double]$total.Files; unit = "files"; meta = @{ source = "scc" } }
+$metrics = @()
+
+if ($sccCmd) {
+  $sccJson = & $sccCmd packages/client/src packages/server/src packages/shared/src packages/mcp-server/src packages/e2e packages/desktop/src --include-ext ts,tsx,css --no-complexity --format json | ConvertFrom-Json
+  $total = $sccJson | Where-Object { $_.Name -eq "Total" } | Select-Object -First 1
+  $testRows = $sccJson | Where-Object { $_.Name -ne "Total" -and ($_.Location -match '(__tests__|\.test\.|\.spec\.|packages/e2e)') }
+  $testLoc = ($testRows | Measure-Object -Property Code -Sum).Sum
+  $allLoc = [double]$total.Code
+  $prodLoc = [Math]::Max(0, $allLoc - [double]$testLoc)
+  $testRatio = if (($prodLoc + [double]$testLoc) -gt 0) { ([double]$testLoc / ($prodLoc + [double]$testLoc)) * 100 } else { 0 }
+
+  $metrics += @{ metricKey = "code.production_loc"; value = $prodLoc; unit = "lines"; meta = @{ source = "scc" } }
+  $metrics += @{ metricKey = "code.test_loc"; value = [double]$testLoc; unit = "lines"; meta = @{ source = "scc" } }
+  $metrics += @{ metricKey = "code.test_ratio"; value = $testRatio; unit = "percent"; meta = @{ source = "scc" } }
+  $metrics += @{ metricKey = "code.source_files"; value = [double]$total.Files; unit = "files"; meta = @{ source = "scc" } }
+} else {
+  Write-Warning "scc unavailable — skipping LOC metrics. Run setup.ps1 in the code-metrics skill to bundle it."
+}
 
 $changed = (git status --porcelain | Measure-Object).Count
 $metrics += @{ metricKey = "git.changed_files"; value = [double]$changed; unit = "files"; meta = @{ source = "git status --porcelain" } }

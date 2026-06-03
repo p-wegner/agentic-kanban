@@ -798,6 +798,14 @@ The issue description should include the target project id. Resolve the board AP
 
 Use \`http://127.0.0.1:<port>/api\`. Never use localhost.
 
+## scc resolution — prefer the code-metrics skill's bundled binary
+Rather than relying on \`scc\` being on PATH, prefer the bundled \`scc.exe\` from the
+\`code-metrics\` skill. Resolve in order:
+1. \`$HOME\\.claude\\skills\\code-metrics\\tools\\scc.exe\` (bundled by the skill's setup.ps1)
+2. \`scc\` on PATH as fallback
+
+If neither is available, skip LOC metrics and report the blocker.
+
 ## Metrics
 Use stable metric keys:
 - \`loc.total\` and \`loc.package.<name>\` from \`scc\` when available. Include language/package details in \`meta\`.
@@ -808,8 +816,9 @@ Use stable metric keys:
 ## Procedure
 1. Detect package manager and workspace layout from lockfiles and package metadata.
 2. Capture \`commitSha\` with \`git rev-parse HEAD\`.
-3. Run each collector independently. If a tool is missing or a command fails, keep the metrics that did succeed and record the failure in your final response.
-4. POST:
+3. Resolve \`scc\` using the code-metrics skill's bundled binary first (see above).
+4. Run each collector independently. If a tool is missing or a command fails, keep the metrics that did succeed and record the failure in your final response.
+5. POST:
 \`\`\`json
 {
   "commitSha": "<git sha or null>",
@@ -818,10 +827,11 @@ Use stable metric keys:
   ]
 }
 \`\`\`
-5. Do not fabricate unavailable metrics. If no metrics can be collected, explain what blocked collection instead of posting an empty batch.
+6. Do not fabricate unavailable metrics. If no metrics can be collected, explain what blocked collection instead of posting an empty batch.
 
 ## Useful commands
-- \`scc --format json .\`
+- Resolve scc: \`$bundledScc = "$HOME\\.claude\\skills\\code-metrics\\tools\\scc.exe"; $sccCmd = if (Test-Path $bundledScc) { $bundledScc } elseif (Get-Command scc -ErrorAction SilentlyContinue) { "scc" } else { $null }\`
+- \`& $sccCmd --format json .\`
 - \`pnpm exec vitest run --coverage\`
 - \`pnpm exec eslint . --format json\`
 - \`pnpm exec tsc -b --noEmit\`
