@@ -41,6 +41,7 @@ interface BoardColumnProps {
   onIssueClick: (issue: IssueWithStatus, event: React.MouseEvent) => void;
   onWorkspaceClick?: (issue: IssueWithStatus, workspaceId?: string) => void;
   onStartWorkspace?: (issue: IssueWithStatus) => void;
+  onDryRun?: (issue: IssueWithStatus) => void;
   onDragStart: (e: React.DragEvent, issue: IssueWithStatus) => void;
   onDrop: (statusId: string, sortOrder?: number) => void;
   onMoveToNext?: (issue: IssueWithStatus, nextStatusId: string) => void;
@@ -73,6 +74,7 @@ export function BoardColumn({
   onIssueClick,
   onWorkspaceClick,
   onStartWorkspace,
+  onDryRun,
   onDragStart,
   onDrop,
   onMoveToNext,
@@ -249,6 +251,7 @@ export function BoardColumn({
                 onClick={onIssueClick}
                 onWorkspaceClick={onWorkspaceClick}
                 onStartWorkspace={onStartWorkspace}
+                onDryRun={onDryRun}
                 onDragStart={onDragStart}
                 onMoveToNext={nextStatus && onMoveToNext ? (iss) => onMoveToNext(iss, nextStatus.id) : undefined}
                 nextStatusName={nextStatus?.name}
