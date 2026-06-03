@@ -61,6 +61,8 @@ export function createWorkspaceService(deps: {
     abortRebase: merge.abortRebase,
     resolveConflicts: merge.resolveConflicts,
     fixAndMerge: merge.fixAndMerge,
+    checkAlreadyMerged: merge.checkAlreadyMerged,
+    reconcileAlreadyMerged: merge.reconcileAlreadyMerged,
     // session
     launchSession: session.launchSession,
     sendTurn: session.sendTurn,
