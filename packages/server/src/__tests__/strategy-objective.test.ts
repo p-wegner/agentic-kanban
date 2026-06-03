@@ -2,9 +2,11 @@ import { describe, it, expect } from "vitest";
 import {
   parseStrategyBullseyeConfig,
   selectProviderFromStrategy,
+  isPolicyBlockedByQuota,
   renderGeneratedStrategyBlock,
   type ProviderProfilePolicy,
 } from "../services/strategy-objective.service.js";
+import type { QuotaUsageResult } from "../services/quota-usage.service.js";
 
 function makePolicy(overrides: Partial<ProviderProfilePolicy>): ProviderProfilePolicy {
   return {
@@ -116,6 +118,112 @@ describe("selectProviderFromStrategy", () => {
     }));
     const result = selectProviderFromStrategy(config, { allowFallback: true });
     expect(result?.policy.mode).toBe("fallback-only");
+  });
+});
+
+function makeQuota(providers: Array<{ id: string; percent: number; status?: "ok" | "auth" | "error" }>): QuotaUsageResult {
+  return {
+    scrapedAt: new Date().toISOString(),
+    providers: providers.map(({ id, percent, status = "ok" }) => ({
+      id,
+      label: id,
+      accent: "#000",
+      loginUrl: "",
+      transport: "browser" as const,
+      hasCreds: true,
+      status,
+      metrics: [{ label: "Messages", percent, detail: null, resetAt: null, resetIso: null, resetInSeconds: null }],
+    })),
+  };
+}
+
+describe("isPolicyBlockedByQuota", () => {
+  it("returns false when quota is null", () => {
+    const policy = makePolicy({ mode: "fill", quotaProviderId: "claude-pro" });
+    expect(isPolicyBlockedByQuota(policy, null)).toBe(false);
+  });
+
+  it("returns false when policy has no quotaProviderId", () => {
+    const policy = makePolicy({ mode: "fill" });
+    expect(isPolicyBlockedByQuota(policy, makeQuota([{ id: "claude-pro", percent: 100 }]))).toBe(false);
+  });
+
+  it("returns false for fallback-only regardless of usage", () => {
+    const policy = makePolicy({ mode: "fallback-only", quotaProviderId: "claude-pro" });
+    expect(isPolicyBlockedByQuota(policy, makeQuota([{ id: "claude-pro", percent: 100 }]))).toBe(false);
+  });
+
+  it("fill: not blocked below 100%", () => {
+    const policy = makePolicy({ mode: "fill", quotaProviderId: "claude-pro" });
+    expect(isPolicyBlockedByQuota(policy, makeQuota([{ id: "claude-pro", percent: 99 }]))).toBe(false);
+  });
+
+  it("fill: blocked at 100%", () => {
+    const policy = makePolicy({ mode: "fill", quotaProviderId: "claude-pro" });
+    expect(isPolicyBlockedByQuota(policy, makeQuota([{ id: "claude-pro", percent: 100 }]))).toBe(true);
+  });
+
+  it("throttle: blocked when usage reaches capacity threshold", () => {
+    const policy = makePolicy({ mode: "throttle", headroomPct: 20, quotaProviderId: "claude-pro" });
+    // threshold = 80%, so 80% usage is blocked
+    expect(isPolicyBlockedByQuota(policy, makeQuota([{ id: "claude-pro", percent: 80 }]))).toBe(true);
+  });
+
+  it("throttle: not blocked when usage is below threshold", () => {
+    const policy = makePolicy({ mode: "throttle", headroomPct: 20, quotaProviderId: "claude-pro" });
+    expect(isPolicyBlockedByQuota(policy, makeQuota([{ id: "claude-pro", percent: 79 }]))).toBe(false);
+  });
+
+  it("returns false when provider is not found in quota data", () => {
+    const policy = makePolicy({ mode: "fill", quotaProviderId: "unknown-provider" });
+    expect(isPolicyBlockedByQuota(policy, makeQuota([{ id: "claude-pro", percent: 100 }]))).toBe(false);
+  });
+
+  it("returns false when provider status is not ok", () => {
+    const policy = makePolicy({ mode: "fill", quotaProviderId: "claude-pro" });
+    expect(isPolicyBlockedByQuota(policy, makeQuota([{ id: "claude-pro", percent: 100, status: "auth" }]))).toBe(false);
+  });
+});
+
+describe("selectProviderFromStrategy - quota-aware", () => {
+  it("skips fill policy when quota is exhausted, falls back to throttle", () => {
+    const config = parseStrategyBullseyeConfig(JSON.stringify({
+      version: 1, segments: [],
+      providerPolicies: [
+        makePolicy({ id: "f", provider: "codex", profileName: "default", mode: "fill", quotaProviderId: "codex-sub" }),
+        makePolicy({ id: "t", provider: "claude", profileName: "anth", mode: "throttle", headroomPct: 20 }),
+      ],
+    }));
+    const quota = makeQuota([{ id: "codex-sub", percent: 100 }]);
+    const result = selectProviderFromStrategy(config, { quota });
+    expect(result?.provider).toBe("claude");
+    expect(result?.policy.mode).toBe("throttle");
+  });
+
+  it("skips throttle policy when headroom is consumed, falls to fallback-only with allowFallback", () => {
+    const config = parseStrategyBullseyeConfig(JSON.stringify({
+      version: 1, segments: [],
+      providerPolicies: [
+        makePolicy({ id: "t", provider: "claude", profileName: "anth", mode: "throttle", headroomPct: 20, quotaProviderId: "claude-pro" }),
+        makePolicy({ id: "fb", provider: "claude", profileName: "zai", mode: "fallback-only" }),
+      ],
+    }));
+    const quota = makeQuota([{ id: "claude-pro", percent: 85 }]);
+    const result = selectProviderFromStrategy(config, { quota, allowFallback: true });
+    expect(result?.policy.mode).toBe("fallback-only");
+    expect(result?.profileName).toBe("zai");
+  });
+
+  it("returns throttle when quota data is absent (graceful degradation)", () => {
+    const config = parseStrategyBullseyeConfig(JSON.stringify({
+      version: 1, segments: [],
+      providerPolicies: [
+        makePolicy({ id: "t", provider: "claude", profileName: "anth", mode: "throttle", headroomPct: 20, quotaProviderId: "claude-pro" }),
+      ],
+    }));
+    const result = selectProviderFromStrategy(config, { quota: null });
+    expect(result?.provider).toBe("claude");
+    expect(result?.policy.mode).toBe("throttle");
   });
 });
 
