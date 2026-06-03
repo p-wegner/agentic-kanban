@@ -223,14 +223,21 @@ export function createButlerRoute(
     const profileOverride = perProject && availableProfiles.includes(perProject) ? perProject : undefined;
     const globalProfile = settings.profile?.provider === provider ? settings.profile.name : "";
     const selectedProfile = profileOverride || globalProfile || undefined;
+    // `settings.agentCommand`/`agentArgs` are derived under the GLOBAL provider
+    // (e.g. Claude's `--dangerously-skip-permissions`). Forwarding them to a butler
+    // whose per-butler provider differs from the global one injects the wrong
+    // provider's command/flags — codex rejects `--dangerously-skip-permissions` and
+    // exits with code 2. Only forward when the providers match; otherwise let the
+    // butler's provider use its own defaults.
+    const matchesGlobalProvider = provider === globalProvider;
     return {
       provider,
       selectedProfile,
       globalProfile,
       claudeProfile: provider === "claude" ? selectedProfile : undefined,
       profile: selectedProfile ? { provider, name: selectedProfile } : undefined,
-      agentCommand: settings.agentCommand,
-      agentArgs: settings.agentArgs,
+      agentCommand: matchesGlobalProvider ? settings.agentCommand : undefined,
+      agentArgs: matchesGlobalProvider ? settings.agentArgs : undefined,
     };
   }
 

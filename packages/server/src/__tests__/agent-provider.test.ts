@@ -547,10 +547,12 @@ describe("CodexProvider", () => {
       profile: { provider: "codex", name: "fast" },
       providerSessionId: "thread-123",
     });
+    // `codex exec` options (--json/sandbox/--profile) must precede the `resume`
+    // subcommand — `codex exec resume` rejects --profile and exits with code 2.
     expect(config.args).toEqual([
-      "exec", "resume", "--json", "--dangerously-bypass-approvals-and-sandbox", "--dangerously-bypass-hook-trust",
+      "exec", "--json", "--dangerously-bypass-approvals-and-sandbox", "--dangerously-bypass-hook-trust",
       "--profile", "fast",
-      "thread-123",
+      "resume", "thread-123",
       "-",
     ]);
   });
@@ -586,7 +588,8 @@ describe("CodexProvider", () => {
   it("uses read-only sandbox on resume in plan mode", () => {
     const config = provider.buildLaunchConfig({ planMode: true, providerSessionId: "thread-9" });
     expect(config.args).toEqual([
-      "exec", "resume", "--json", "--sandbox", "read-only", "--dangerously-bypass-hook-trust", "thread-9",
+      "exec", "--json", "--sandbox", "read-only", "--dangerously-bypass-hook-trust",
+      "resume", "thread-9",
       "-",
     ]);
   });

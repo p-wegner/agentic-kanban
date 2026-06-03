@@ -50,23 +50,23 @@ export class CodexProvider implements AgentProvider {
       const sandboxFlags = planMode
         ? ["--sandbox", "read-only", ...hookTrustFlags]
         : ["--dangerously-bypass-approvals-and-sandbox", ...hookTrustFlags];
-      if (providerSessionId) {
-        args.push("exec", "resume", "--json", ...sandboxFlags);
-      } else {
-        args.push("exec", "--json", ...sandboxFlags);
-      }
       const profileName = profile?.provider === "codex" ? profile.name : undefined;
+      // All `codex exec` options (--json, sandbox, --profile, --model, extra args)
+      // MUST precede the `resume` subcommand. `codex exec resume` does not accept
+      // --profile/--model and exits with code 2 ("unexpected argument") if they
+      // appear after `resume`, so build the exec flags first, then the subcommand.
+      args.push("exec", "--json", ...sandboxFlags);
       if (profileName && profileName !== "default") {
         args.push("--profile", profileName);
       }
       if (model) {
         args.push("--model", model);
       }
-      if (providerSessionId) {
-        args.push(providerSessionId);
-      }
       if (agentArgs) {
         args.push(...splitArgs(agentArgs));
+      }
+      if (providerSessionId) {
+        args.push("resume", providerSessionId);
       }
       if (planMode) {
         promptPrefix = [
