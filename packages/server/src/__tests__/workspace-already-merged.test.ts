@@ -161,6 +161,50 @@ describe("checkAlreadyMerged", () => {
   });
 });
 
+describe("doMerge ancestry check", () => {
+  let db: ReturnType<typeof createTestDb>["db"];
+  beforeEach(() => {
+    ({ db } = createTestDb());
+  });
+
+  it("(a) already-merged branch tip => merge reports success, no 409", async () => {
+    const { workspaceId } = await seedScenario(db, { workspaceStatus: "idle" });
+    const detectConflicts = vi.fn(async () => ({ hasConflicts: true, conflictingFiles: ["Layout.tsx"] }));
+    const git = {
+      ...makeGitService({
+        revParse: async (_repo: string, ref: string) => ref === "feature/ak-42-test" ? "ancestor-sha" : "target-sha",
+        isAncestor: async () => true,
+      }),
+      detectConflicts,
+    };
+
+    const svc = createWorkspaceMergeService({ database: db, gitService: git as never, createBackup: async () => {} });
+    const result = await svc.mergeWorkspace(workspaceId);
+
+    expect(result.mergeOutput).toMatch(/already.*merged|no-op/i);
+    expect(detectConflicts).not.toHaveBeenCalled();
+  });
+
+  it("(b) truly conflicting unmerged branch => still 409", async () => {
+    const { workspaceId } = await seedScenario(db, { workspaceStatus: "idle" });
+    const detectConflicts = vi.fn(async () => ({ hasConflicts: true, conflictingFiles: ["Layout.tsx", "BoardStats.tsx"] }));
+    const git = {
+      ...makeGitService({
+        revParse: async (_repo: string, ref: string) => ref === "feature/ak-42-test" ? "feature-sha" : "target-sha",
+        isAncestor: async () => false,
+      }),
+      detectConflicts,
+    };
+
+    const svc = createWorkspaceMergeService({ database: db, gitService: git as never, createBackup: async () => {} });
+    await expect(svc.mergeWorkspace(workspaceId)).rejects.toMatchObject({
+      message: "Merge conflicts detected",
+      code: "BAD_REQUEST",
+    });
+    expect(detectConflicts).toHaveBeenCalled();
+  });
+});
+
 describe("reconcileAlreadyMerged", () => {
   let db: ReturnType<typeof createTestDb>["db"];
   beforeEach(() => {
