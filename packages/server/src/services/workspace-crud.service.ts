@@ -6,7 +6,10 @@ import { existsSync } from "node:fs";
 import { resolve as pathResolve, dirname, parse as pathParse, relative, sep } from "node:path";
 import {
   issues, projects, preferences, workspaces, sessions, sessionMessages, diffComments, agentSkills, projectStatuses,
+  issueDependencies, workflowNodes,
 } from "@agentic-kanban/shared/schema";
+import { isResolvedDependencyStatusView } from "@agentic-kanban/shared/lib/status-view";
+import { branchHash, BASE_SERVER_PORT, BASE_CLIENT_PORT } from "./worktree-ports.js";
 import type { Database } from "../db/index.js";
 import type { SessionManager } from "./session.manager.js";
 import type { BoardEvents } from "./board-events.js";
@@ -1331,6 +1334,8 @@ exit 1
     model: string | null;
     warnings: string[];
     budgetEstimate: BudgetEstimate;
+    ports: { serverPort: number; clientPort: number } | null;
+    blockedBy: { issueNumber: number; title: string }[];
   }> {
     const isDirect = input.isDirect === true;
     const warnings: string[] = [];
@@ -1424,7 +1429,54 @@ exit 1
       }
     }
 
-    // 12. Budget estimation (non-blocking — never throws)
+    // 11. Dependency blocking check
+    const BLOCKING_DEP_TYPES = ["depends_on", "blocked_by"] as const;
+    const depRows = await database
+      .select({
+        dependsOnId: issueDependencies.dependsOnId,
+        type: issueDependencies.type,
+      })
+      .from(issueDependencies)
+      .where(
+        and(
+          eq(issueDependencies.issueId, input.issueId),
+        ),
+      );
+
+    const blockerIds = depRows
+      .filter(d => BLOCKING_DEP_TYPES.includes(d.type as typeof BLOCKING_DEP_TYPES[number]))
+      .map(d => d.dependsOnId);
+
+    let blockedBy: { issueNumber: number; title: string }[] = [];
+    if (blockerIds.length > 0) {
+      const blockerIssues = await database
+        .select({
+          id: issues.id,
+          issueNumber: issues.issueNumber,
+          title: issues.title,
+          statusName: projectStatuses.name,
+          currentNodeId: issues.currentNodeId,
+          currentNodeType: workflowNodes.nodeType,
+        })
+        .from(issues)
+        .leftJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
+        .leftJoin(workflowNodes, eq(issues.currentNodeId, workflowNodes.id))
+        .where(inArray(issues.id, blockerIds));
+
+      blockedBy = blockerIssues
+        .filter(b => !isResolvedDependencyStatusView({ statusName: b.statusName, currentNodeId: b.currentNodeId, currentNodeType: b.currentNodeType }))
+        .map(b => ({ issueNumber: b.issueNumber!, title: b.title }));
+    }
+
+    // 12. Derive expected worktree ports from the branch name (null for direct workspaces)
+    let ports: { serverPort: number; clientPort: number } | null = null;
+    if (!isDirect && branch) {
+      const issueMatch = branch.match(/(?:^|[_/-])ak-(\d+)-/i) ?? branch.match(/^feature[_/-](\d+)-/i);
+      const offset = issueMatch ? Number(issueMatch[1]) : branchHash(branch);
+      ports = { serverPort: BASE_SERVER_PORT + offset, clientPort: BASE_CLIENT_PORT + offset };
+    }
+
+    // 13. Budget estimation (non-blocking — never throws)
     const budgetEstimate = await estimateBudget(database, input.issueId, agentConfig.resolvedProvider).catch(
       () => ({
         risk: "low" as const,
@@ -1450,6 +1502,8 @@ exit 1
       model: agentConfig.model ?? null,
       warnings,
       budgetEstimate,
+      ports,
+      blockedBy,
     };
   }
 
