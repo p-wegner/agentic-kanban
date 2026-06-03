@@ -16,10 +16,14 @@ const VIEW_ROUTE_PATHS: Record<ViewMode, string> = {
   swimlane: "/swimlane",
   "flaky-tests": "/flaky-tests",
   "monitor-history": "/monitor-history",
+  "health-events": "/health-events",
   digest: "/digest",
   strategy: "/strategy",
   focus: "/focus",
   runbooks: "/runbooks",
+  capacity: "/capacity",
+  constellation: "/constellation",
+  momentum: "/momentum",
 };
 
 const ROUTE_ALIASES: Record<string, ViewMode> = {
