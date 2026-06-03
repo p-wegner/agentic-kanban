@@ -9,7 +9,7 @@ export const issueComments = sqliteTable(
     id: text("id").primaryKey(),
     issueId: text("issue_id").notNull().references(() => issues.id),
     workspaceId: text("workspace_id").references(() => workspaces.id),
-    // 'preflight-clarification' | 'agent-question' | 'merge-attempt' | 'note'
+    // 'preflight-verdict' | 'preflight-clarification' | 'agent-question' | 'merge-attempt' | 'note'
     kind: text("kind").notNull(),
     // 'user' | 'butler' | 'agent' | 'preflight' | 'system'
     author: text("author").notNull(),

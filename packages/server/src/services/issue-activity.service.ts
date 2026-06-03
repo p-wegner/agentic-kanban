@@ -182,6 +182,7 @@ function commentSummary(kind: string, body: string): string {
   const preview = body.replace(/\s+/g, " ").trim().slice(0, 80);
   const suffix = body.length > 80 ? "..." : "";
   switch (kind) {
+    case "preflight-verdict": return preview + suffix;
     case "preflight-clarification": return `Preflight clarification: ${preview}${suffix}`;
     case "agent-question": return `Agent question: ${preview}${suffix}`;
     case "merge-attempt": return `Merge attempt: ${preview}${suffix}`;
