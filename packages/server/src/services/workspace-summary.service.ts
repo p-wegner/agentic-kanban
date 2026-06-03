@@ -6,6 +6,7 @@ import type { ProviderName } from "./agent-provider.js";
 import { isAnalyticsNoise } from "./session-filter.js";
 import { computeWorkspaceCodeMetrics, parseStoredWorkspaceCodeMetrics } from "./workspace-code-metrics.service.js";
 import type { WorkspaceCodeMetrics } from "@agentic-kanban/shared";
+import { ACTIVE_WORKSPACE_STATUSES, workspaceStatusPriority } from "@agentic-kanban/shared";
 
 // Limit concurrent background git operations to avoid hammering the filesystem
 let _bgGitRunning = 0;
@@ -159,7 +160,7 @@ export async function buildWorkspaceSummaryMap(
       workspaceSummaryMap.set(row.issueId, summary);
     }
     summary.total += row.count;
-    if (row.status === "active" || row.status === "reviewing" || row.status === "fixing" || row.status === "awaiting-plan-approval") {
+    if (ACTIVE_WORKSPACE_STATUSES.has(row.status)) {
       summary.active += row.count;
     } else if (row.status === "closed") {
       summary.closed += row.count;
@@ -231,14 +232,13 @@ export async function buildWorkspaceSummaryMap(
 
 
     // Pick main workspace per issue: active > awaiting-plan-approval > idle > closed, tie-break by updatedAt
-  const statusPriority = (s: string) => s === "active" || s === "reviewing" || s === "fixing" ? 0 : s === "awaiting-plan-approval" ? 1 : s === "idle" ? 2 : 3;
   type MainWs = typeof wsDetailRows[number];
   const mainWorkspaceMap = new Map<string, MainWs>();
   for (const row of wsDetailRows) {
     const existing = mainWorkspaceMap.get(row.issueId);
     if (!existing) { mainWorkspaceMap.set(row.issueId, row); continue; }
-    const existingP = statusPriority(existing.status);
-    const rowP = statusPriority(row.status);
+    const existingP = workspaceStatusPriority(existing.status);
+    const rowP = workspaceStatusPriority(row.status);
     if (rowP < existingP || (rowP === existingP && row.updatedAt > existing.updatedAt)) {
       mainWorkspaceMap.set(row.issueId, row);
     }
@@ -428,7 +428,7 @@ export async function buildWorkspaceSummaryMap(
       if (!currentNode) continue;
       const nextStages = nextStagesByNode.get(currentNode.id) ?? [];
       const isTerminal = currentNode.nodeType === "end" || nextStages.length === 0;
-      const isRunning = main.status === "active" || main.status === "reviewing" || main.status === "fixing";
+      const isRunning = ACTIVE_WORKSPACE_STATUSES.has(main.status);
       main.workflow = {
         currentNodeId: currentNode.id,
         currentNodeName: currentNode.name,
