@@ -388,7 +388,12 @@ export function createIssueService(deps: {
         createdAt: new Date().toISOString(),
       });
     } catch (err: any) {
-      if (err.message?.includes("UNIQUE constraint")) {
+      const isUnique =
+        err.message?.includes("UNIQUE constraint") ||
+        err.cause?.message?.includes("UNIQUE constraint") ||
+        err.code === "SQLITE_CONSTRAINT_UNIQUE" ||
+        err.cause?.code === "SQLITE_CONSTRAINT_UNIQUE";
+      if (isUnique) {
         throw new IssueError("This dependency already exists", "CONFLICT");
       }
       throw err;
