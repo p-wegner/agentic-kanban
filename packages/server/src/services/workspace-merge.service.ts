@@ -282,6 +282,35 @@ export function createWorkspaceMergeService(deps: {
         );
       }
 
+      // Before conflict detection: check whether the branch tip is already an ancestor
+      // of the target. If so, the branch was fully merged by a previous run that never
+      // updated the DB. Treat it as a successful no-op instead of reporting 409.
+      let branchSha = "";
+      let baseSha = "";
+      try {
+        branchSha = await gitService.revParse(repoPath, workspace.branch);
+        baseSha = await gitService.revParse(repoPath, baseBranch);
+      } catch { /* tolerate — fall through to normal path */ }
+      if (branchSha && baseSha && await gitService.isAncestor(repoPath, branchSha, baseSha)) {
+        console.log(`[workspace-merge] branch ${workspace.branch} tip (${branchSha}) is already an ancestor of ${baseBranch} — treating as successful no-op merge`);
+        const now = new Date().toISOString();
+        await updateWorkspaceStatus(id, "closed", { workingDir: null, closedAt: now, mergedAt: now, readyForMerge: false }, database);
+        await moveIssueToDone(id, workspace.issueId, now, database);
+        await recordMergeAttempt(
+          workspace,
+          "merged",
+          `Branch '${workspace.branch}' tip (${branchSha}) is already an ancestor of ${baseBranch} — reconciled as already-merged no-op.`,
+          { targetBranch: baseBranch, commitSha: branchSha, mergedAt: now },
+          now,
+        );
+        const projectId = await resolveProjectId(id, database);
+        if (projectId) boardEvents?.broadcast(projectId, "workspace_merged");
+        return {
+          id,
+          mergeOutput: `Branch '${workspace.branch}' was already fully merged into ${baseBranch} (tip ${branchSha} is an ancestor). Reconciled as successful no-op.`,
+        };
+      }
+
       const conflicts = await gitService.detectConflicts(workspace.workingDir, baseBranch);
       if (conflicts.hasConflicts) {
         await recordMergeAttempt(
