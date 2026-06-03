@@ -21,6 +21,8 @@ export const projects = sqliteTable("projects", {
   symlinkEnabled: integer("symlink_enabled", { mode: "boolean" }).notNull().default(false),
   /** JSON array of directory names to symlink (e.g. '["node_modules",".venv"]'). */
   symlinkDirs: text("symlink_dirs"),
+  /** Default skill applied to new workspaces when no explicit skill is chosen and no workflow provides one. */
+  defaultSkillId: text("default_skill_id"),
   createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
   updatedAt: text("updated_at").notNull().$defaultFn(() => new Date().toISOString()),
 });

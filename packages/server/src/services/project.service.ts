@@ -264,6 +264,9 @@ export function createProjectService(deps: { database: Database }) {
         updates.symlinkDirs = JSON.stringify(body.symlinkDirs.filter((d: unknown) => typeof d === "string"));
       }
     }
+    if (body.defaultSkillId !== undefined) {
+      updates.defaultSkillId = typeof body.defaultSkillId === "string" && body.defaultSkillId ? body.defaultSkillId : null;
+    }
     if (body.defaultBranch !== undefined) {
       const nextDefaultBranch = typeof body.defaultBranch === "string"
         ? body.defaultBranch.trim()

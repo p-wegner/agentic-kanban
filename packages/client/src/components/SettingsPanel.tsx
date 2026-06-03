@@ -582,7 +582,7 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
   const [tab, setTab] = useState<Tab>("agent");
 
   // Project-specific settings
-  const [projectSettings, setProjectSettings] = useState<{ defaultBranch: string; setupScript: string; setupBlocking: boolean; setupEnabled: boolean; teardownScript: string; color: string | null; symlinkEnabled: boolean; symlinkDirs: string }>({
+  const [projectSettings, setProjectSettings] = useState<{ defaultBranch: string; setupScript: string; setupBlocking: boolean; setupEnabled: boolean; teardownScript: string; color: string | null; symlinkEnabled: boolean; symlinkDirs: string; defaultSkillId: string | null }>({
     defaultBranch: "",
     setupScript: "",
     setupBlocking: true,
@@ -591,6 +591,7 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
     color: null,
     symlinkEnabled: false,
     symlinkDirs: "",
+    defaultSkillId: null,
   });
   const [projectBranches, setProjectBranches] = useState<{ local: string[]; remote: string[] } | null>(null);
   const [generatingScript, setGeneratingScript] = useState(false);
@@ -711,6 +712,7 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                 color: project.color || null,
                 symlinkEnabled: (project as any).symlinkEnabled === true,
                 symlinkDirs: (project as any).symlinkDirs || "",
+                defaultSkillId: (project as any).defaultSkillId || null,
               });
             }
             apiFetch<{ local: string[]; remote: string[] }>(`/api/projects/${activeProjectId}/branches`)
@@ -818,6 +820,7 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
               defaultBranch: projectSettings.defaultBranch.trim() || null,
               symlinkEnabled: projectSettings.symlinkEnabled,
               symlinkDirs: projectSettings.symlinkDirs.trim() || null,
+              defaultSkillId: projectSettings.defaultSkillId || null,
             }),
           }),
         );
@@ -1870,6 +1873,18 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                           )}
                         </button>
                       </CollapsibleSection>
+                      <Field label="Default Skill" hint="Skill applied to new workspaces when no explicit skill is chosen and the issue has no workflow. Fixes 'No Skill' in Insights.">
+                        <select
+                          value={projectSettings.defaultSkillId || ""}
+                          onChange={(e) => setProjectSettings(s => ({ ...s, defaultSkillId: e.target.value || null }))}
+                          className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                        >
+                          <option value="">— none —</option>
+                          {skills.map((skill) => (
+                            <option key={skill.id} value={skill.id}>{skill.name}</option>
+                          ))}
+                        </select>
+                      </Field>
                       <CollapsibleSection
                         title="Dependency Symlinks"
                         configured={projectSettings.symlinkEnabled}
