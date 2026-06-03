@@ -31,6 +31,7 @@ import { VIEW_REGISTRY, VIEW_IDS, SHORTCUT_TO_VIEW, type ViewMode } from "../lib
 import { CreateIssuePanel } from "../components/CreateIssuePanel.js";
 import type { CreateIssueFormState } from "../components/CreateIssueForm.js";
 import { IssueDetailPanel } from "../components/IssueDetailPanel.js";
+import { useTicketTrail } from "../hooks/useTicketTrail.js";
 import { WorkspacePanel } from "../components/WorkspacePanel.js";
 import { WorktreeOverview } from "../components/WorktreeOverview.js";
 import { AllWorkspacesPanel } from "../components/AllWorkspacesPanel.js";
@@ -108,6 +109,7 @@ export function BoardPage() {
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
   const [creatingInColumnId, setCreatingInColumnId] = useState<string | null>(null);
   const [selectedIssue, setSelectedIssue] = useState<IssueWithStatus | null>(null);
+  const ticketTrail = useTicketTrail();
   const [error, setError] = useState<string | null>(null);
   const [mutating, setMutating] = useState(false);
   const [workspaceIssue, setWorkspaceIssue] = useState<IssueWithStatus | null>(null);
@@ -1154,17 +1156,75 @@ export function BoardPage() {
     [columns, nudgeWipLimit],
   );
 
-  const handleMentionClick = useCallback(
-    (issueId: string) => {
+  // Resolve an issue id against the live board columns and open it in the
+  // detail panel. Shared by mention clicks and the multi-ticket trail (#383).
+  const openIssueById = useCallback(
+    (issueId: string): boolean => {
       for (const col of columns) {
         const found = col.issues.find((i) => i.id === issueId);
         if (found) {
           setSelectedIssue(found);
-          return;
+          return true;
         }
       }
+      return false;
     },
     [columns],
+  );
+
+  const handleMentionClick = useCallback(
+    (issueId: string) => {
+      openIssueById(issueId);
+    },
+    [openIssueById],
+  );
+
+  // Record every opened ticket onto the navigation trail so the user can jump
+  // back to tickets they drilled past via card clicks / `#N` mentions (#383).
+  useEffect(() => {
+    if (!selectedIssue) return;
+    ticketTrail.visit({
+      id: selectedIssue.id,
+      number: selectedIssue.issueNumber ?? null,
+      title: selectedIssue.title,
+    });
+  }, [selectedIssue?.id, selectedIssue?.issueNumber, selectedIssue?.title, ticketTrail.visit]);
+
+  // Navigate the trail: open the resolved entry, or close the panel when the
+  // trail has emptied (last ticket removed) / the entry is no longer on the board.
+  const navigateTrail = useCallback(
+    (entry: { id: string } | null) => {
+      if (!entry) {
+        setSelectedIssue(null);
+        return;
+      }
+      if (!openIssueById(entry.id)) {
+        // Entry's issue is gone (deleted/filtered) — drop it and close.
+        ticketTrail.remove(entry.id);
+        setSelectedIssue(null);
+      }
+    },
+    [openIssueById, ticketTrail],
+  );
+
+  const trailControls = useMemo(
+    () => ({
+      entries: ticketTrail.entries,
+      activeId: ticketTrail.activeId,
+      canGoBack: ticketTrail.canGoBack,
+      canGoForward: ticketTrail.canGoForward,
+      onBack: () => navigateTrail(ticketTrail.goBack()),
+      onForward: () => navigateTrail(ticketTrail.goForward()),
+      onSelect: (id: string) => navigateTrail(ticketTrail.goTo(id)),
+      onRemove: (id: string) => {
+        const wasActive = ticketTrail.activeId === id;
+        const next = ticketTrail.remove(id);
+        // Only re-navigate when the active ticket was the one removed; dropping a
+        // background chip must not yank the user off the ticket they're reading.
+        if (wasActive) navigateTrail(next);
+      },
+    }),
+    [ticketTrail, navigateTrail],
   );
 
   function toggleGroup(group: string) {
@@ -2076,15 +2136,8 @@ export function BoardPage() {
           onManageWorkspaces={handleManageWorkspaces}
           onStartWorkspace={handleStartWorkspace}
           onIssueUpdate={setSelectedIssue}
-          onNavigateToIssue={(issueId) => {
-            for (const col of columns) {
-              const found = col.issues.find((i) => i.id === issueId);
-              if (found) {
-                setSelectedIssue(found);
-                return;
-              }
-            }
-          }}
+          onNavigateToIssue={(issueId) => openIssueById(issueId)}
+          trail={trailControls}
         />
       )}
       {workspaceIssue && (
