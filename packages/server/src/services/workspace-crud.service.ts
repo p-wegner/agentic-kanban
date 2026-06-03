@@ -9,6 +9,7 @@ import {
   issueDependencies, workflowNodes,
 } from "@agentic-kanban/shared/schema";
 import { isResolvedDependencyStatusView } from "@agentic-kanban/shared/lib/status-view";
+import { suggestBranchName } from "@agentic-kanban/shared/lib/branch";
 import { branchHash, BASE_SERVER_PORT, BASE_CLIENT_PORT } from "./worktree-ports.js";
 import type { Database } from "../db/index.js";
 import type { SessionManager } from "./session.manager.js";
@@ -285,6 +286,7 @@ export function createWorkspaceCrudService(deps: {
     setupConfig: { setupScript: string | null; setupBlocking: boolean; setupEnabled: boolean },
     symlinkConfig: { enabled: boolean; dirs: string[] },
     workspaceId: string,
+    issue?: { issueNumber?: number | null; title: string },
   ): Promise<{
     branch: string;
     worktreePath: string;
@@ -313,7 +315,7 @@ export function createWorkspaceCrudService(deps: {
           "BAD_REQUEST",
         );
       }
-      branch = input.branch ?? "";
+      branch = input.branch || (issue ? suggestBranchName(issue) : "");
       baseCommitSha = await gitService.revParse(repoPath, baseBranch);
       worktreePath = await gitService.createWorktree(repoPath, branch, baseBranch);
     }
@@ -758,7 +760,7 @@ exit 1
       planMode = input.planMode !== undefined ? input.planMode === true : isHighPriority;
 
       ({ branch, worktreePath, baseBranch, baseCommitSha, latestSetup, setupCompletion, symlinkRun: latestSymlink } = await setupWorktree(
-        isDirect, project.repoPath, project.defaultBranch, input, setupConfig, symlinkConfig, id,
+        isDirect, project.repoPath, project.defaultBranch, input, setupConfig, symlinkConfig, id, issue,
       ));
 
       // Run context packer (best-effort: never blocks workspace creation).
@@ -1360,7 +1362,7 @@ exit 1
       }
       baseBranch = null;
     } else {
-      branch = input.branch ?? "";
+      branch = input.branch || suggestBranchName(issue);
       baseBranch = input.baseBranch || project.defaultBranch || null;
       if (!baseBranch) {
         warnings.push("No base branch configured — workspace creation will fail. Set a project default branch or choose a base branch.");
