@@ -319,7 +319,7 @@ export function VoiceInboxButton({ projectId, onIssueCreated }: VoiceInboxButton
             <line x1="8" y1="23" x2="16" y2="23" strokeLinecap="round" />
           </svg>
         )}
-        {isProcessing ? "Processing…" : isRecording ? "Stop" : "Voice"}
+        <span className="hidden sm:inline">{isProcessing ? "Processing…" : isRecording ? "Stop" : "Voice"}</span>
       </button>
 
       <select
@@ -328,7 +328,7 @@ export function VoiceInboxButton({ projectId, onIssueCreated }: VoiceInboxButton
         disabled={isLanguageDisabled}
         aria-label="Voice input language"
         title="Voice input language"
-        className="h-7 max-w-[116px] rounded-md border border-gray-200 dark:border-gray-700 bg-surface-raised dark:bg-surface-raised-dark px-1.5 text-xs text-gray-600 dark:text-gray-300 focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:opacity-40 disabled:cursor-not-allowed"
+        className="hidden sm:inline-block h-7 max-w-[116px] rounded-md border border-gray-200 dark:border-gray-700 bg-surface-raised dark:bg-surface-raised-dark px-1.5 text-xs text-gray-600 dark:text-gray-300 focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:opacity-40 disabled:cursor-not-allowed"
       >
         {VOICE_LANGUAGE_OPTIONS.map((option) => (
           <option key={option.label} value={option.value}>{option.label}</option>
