@@ -18,6 +18,8 @@ export interface ButlerDefinition {
   name: string;
   /** Provider-specific model alias ("" = profile/CLI default). */
   model: string;
+  /** Agent provider for this butler ("claude" | "codex"). When absent, inherits the global provider. */
+  provider?: "claude" | "codex";
 }
 
 const PREF_KEY = "butler_definitions";
@@ -42,7 +44,12 @@ export async function listButlerDefinitions(database: Database): Promise<ButlerD
       if (Array.isArray(arr)) {
         parsed = arr
           .filter((d): d is ButlerDefinition => !!d && typeof (d as ButlerDefinition).id === "string")
-          .map((d) => ({ id: d.id, name: String(d.name ?? d.id), model: String(d.model ?? "") }));
+          .map((d) => ({
+            id: d.id,
+            name: String(d.name ?? d.id),
+            model: String(d.model ?? ""),
+            ...(d.provider === "claude" || d.provider === "codex" ? { provider: d.provider } : {}),
+          }));
       }
     } catch {
       /* corrupt pref → fall back to just the default below */
@@ -64,7 +71,7 @@ async function persist(database: Database, defs: ButlerDefinition[]): Promise<vo
 /** Create a new named butler. Throws on cap/validation. Generates a unique slug from the name. */
 export async function createButlerDefinition(
   database: Database,
-  input: { name: string; model?: string },
+  input: { name: string; model?: string; provider?: "claude" | "codex" },
 ): Promise<ButlerDefinition> {
   const name = input.name.trim();
   if (!name) throw new Error("Butler name is required");
@@ -75,16 +82,21 @@ export async function createButlerDefinition(
   let n = 2;
   const taken = new Set(defs.map((d) => d.id));
   while (taken.has(id) || id === "default") id = `${base}-${n++}`;
-  const def: ButlerDefinition = { id, name, model: input.model ?? "" };
+  const def: ButlerDefinition = {
+    id,
+    name,
+    model: input.model ?? "",
+    ...(input.provider ? { provider: input.provider } : {}),
+  };
   await persist(database, [...defs, def]);
   return def;
 }
 
-/** Update a butler's name and/or model. The "default" butler can be renamed and re-modelled but never removed. */
+/** Update a butler's name, model, and/or provider. The "default" butler can be renamed and re-modelled but never removed. */
 export async function updateButlerDefinition(
   database: Database,
   id: string,
-  patch: { name?: string; model?: string },
+  patch: { name?: string; model?: string; provider?: "claude" | "codex" | null },
 ): Promise<ButlerDefinition> {
   const defs = await listButlerDefinitions(database);
   const idx = defs.findIndex((d) => d.id === id);
@@ -93,6 +105,7 @@ export async function updateButlerDefinition(
     ...defs[idx],
     ...(patch.name !== undefined ? { name: patch.name.trim() || defs[idx].name } : {}),
     ...(patch.model !== undefined ? { model: patch.model } : {}),
+    ...(patch.provider !== undefined ? (patch.provider ? { provider: patch.provider } : { provider: undefined }) : {}),
   };
   defs[idx] = next;
   await persist(database, defs);
