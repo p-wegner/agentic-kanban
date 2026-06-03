@@ -5,6 +5,7 @@ import { CompletedGrid } from "./CompletedGrid.js";
 import { CreateIssueForm } from "./CreateIssueForm.js";
 import type { CreateIssueFormState } from "./CreateIssueForm.js";
 import type { LiveSessionStats, TodoItem } from "../lib/useBoardEvents.js";
+import { useIsNarrow } from "../hooks/useMediaQuery.js";
 
 export interface BoardKanbanViewProps {
   activeColumns: StatusWithIssues[];
@@ -69,6 +70,11 @@ export function BoardKanbanView({
   onExpandCreate,
   selectedIssueIds,
 }: BoardKanbanViewProps) {
+  // Below sm, columns stack vertically and the board scrolls down through them
+  // (instead of a horizontal one-column-at-a-time swipe, where an empty column
+  // wastes the whole screen). Stacked columns are full-width and auto-height.
+  const isNarrow = useIsNarrow();
+
   function handleMobileCreateClick(statusId: string) {
     if (typeof window !== "undefined" && window.innerWidth < 640) {
       const col = activeColumns.find((c) => c.id === statusId);
@@ -90,7 +96,7 @@ export function BoardKanbanView({
             <button
               key={col.id}
               onClick={() => {
-                document.getElementById(`column-${col.id}`)?.scrollIntoView({ behavior: "smooth", inline: "start", block: "nearest" });
+                document.getElementById(`column-${col.id}`)?.scrollIntoView({ behavior: "smooth", block: "start", inline: "nearest" });
               }}
               className="shrink-0 px-3 py-1 text-xs rounded-full border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-600 dark:text-gray-400 hover:bg-brand-50 dark:hover:bg-brand-950 hover:border-brand-300 hover:text-brand-700 transition-colors"
             >
@@ -113,23 +119,26 @@ export function BoardKanbanView({
           )}
         </div>
       )}
-      <div className="flex gap-0 flex-1 min-h-0 overflow-x-auto board-columns-scroll">
+      <div className={`flex flex-1 min-h-0 board-columns-scroll ${isNarrow ? "flex-col gap-2 overflow-y-auto" : "gap-0 overflow-x-auto"}`}>
         {activeColumns.map((col, colIdx) => (
           <BoardErrorBoundary key={col.id} columnName={col.name}>
             <BoardColumn
               column={col}
+              stacked={isNarrow}
               style={
-                columnWidths[col.id]
+                isNarrow
                   ? undefined
-                  : dynamicColumnScaling
-                    ? { flexGrow: Math.max(1, col.issues.length) }
-                    : colIdx === activeColumns.length - 1 && Object.keys(columnWidths).length === 0
-                      ? { flexGrow: 1 }
-                      : undefined
+                  : columnWidths[col.id]
+                    ? undefined
+                    : dynamicColumnScaling
+                      ? { flexGrow: Math.max(1, col.issues.length) }
+                      : colIdx === activeColumns.length - 1 && Object.keys(columnWidths).length === 0
+                        ? { flexGrow: 1 }
+                        : undefined
               }
-              width={columnWidths[col.id]}
-              onResizeStart={colIdx < activeColumns.length - 1 ? (e) => onColumnResizeStart(col.id, e) : undefined}
-              onResizeReset={colIdx < activeColumns.length - 1 ? () => onColumnResizeReset(col.id) : undefined}
+              width={isNarrow ? undefined : columnWidths[col.id]}
+              onResizeStart={!isNarrow && colIdx < activeColumns.length - 1 ? (e) => onColumnResizeStart(col.id, e) : undefined}
+              onResizeReset={!isNarrow && colIdx < activeColumns.length - 1 ? () => onColumnResizeReset(col.id) : undefined}
               projectId={projectId}
               creatingInColumn={creatingInColumnId}
               onCreateClick={handleMobileCreateClick}
