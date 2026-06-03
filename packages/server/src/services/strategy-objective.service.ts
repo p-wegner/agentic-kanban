@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -238,14 +239,50 @@ export function updateObjectiveWithStrategy(objectiveText: string, config: Strat
   return `${objectiveText.trimEnd()}\n\n${block}\n`;
 }
 
-export function writeStrategyObjective(repoPath: string, rawConfig: string): void {
+/**
+ * Render the Strategy Bullseye into the repo's `objective.md` generated block.
+ * Returns `true` if the file existed and was actually rewritten (content changed),
+ * so callers can decide whether a follow-up auto-commit is warranted.
+ */
+export function writeStrategyObjective(repoPath: string, rawConfig: string): boolean {
   const config = parseStrategyBullseyeConfig(rawConfig);
   const objectivePath = join(repoPath, STRATEGY_RELATIVE_PATH);
-  if (!existsSync(objectivePath)) return;
+  if (!existsSync(objectivePath)) return false;
   const current = readFileSync(objectivePath, "utf8");
   const next = updateObjectiveWithStrategy(current, config);
   if (next !== current) {
     writeFileSync(objectivePath, next, "utf8");
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Commit ONLY `objective.md` (path-scoped, so it never sweeps unrelated staged or
+ * working-tree changes). A Strategy Bullseye save regenerates this git-tracked file;
+ * leaving it uncommitted dirties the main checkout and blocks the board's auto-merge
+ * queue. Best-effort: any failure (not a git repo, git hook rejects, file gitignored)
+ * is swallowed so a preference save never fails because of git. No-op when the file
+ * has no uncommitted changes.
+ */
+export function commitObjectiveFile(repoPath: string): boolean {
+  const objectivePath = join(repoPath, STRATEGY_RELATIVE_PATH);
+  if (!existsSync(objectivePath)) return false;
+  try {
+    const status = execFileSync("git", ["status", "--porcelain", "--", STRATEGY_RELATIVE_PATH], {
+      cwd: repoPath,
+      encoding: "utf8",
+      windowsHide: true,
+    }).trim();
+    if (!status) return false;
+    execFileSync(
+      "git",
+      ["commit", "-m", "chore(monitor): sync objective.md from Strategy Bullseye save", "--", STRATEGY_RELATIVE_PATH],
+      { cwd: repoPath, windowsHide: true },
+    );
+    return true;
+  } catch {
+    return false;
   }
 }
 
