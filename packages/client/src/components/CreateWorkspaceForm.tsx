@@ -74,6 +74,7 @@ export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCr
     issue.priority === "high" || issue.priority === "critical",
   );
   const [tddMode, setTddMode] = useState(prefs.tdd_mode === "true");
+  const [includeVisualProof, setIncludeVisualProof] = useState(false);
   const [skipSetup, setSkipSetup] = useState(false);
   const [skipContextPacker, setSkipContextPacker] = useState(false);
   const [branches, setBranches] = useState<{ local: string[]; remote: string[] } | null>(null);
@@ -172,7 +173,7 @@ export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCr
   async function handleSubmit() {
     if (!isDirect && !branchName.trim()) return;
 
-    const body: Record<string, unknown> = { issueId: issue.id, isDirect, requiresReview, planMode, tddMode, skipSetup, skipContextPacker };
+    const body: Record<string, unknown> = { issueId: issue.id, isDirect, requiresReview, planMode, tddMode, includeVisualProof, skipSetup, skipContextPacker };
     if (selectedSkillId) body.skillId = selectedSkillId;
     if (selectedProfile) {
       const colonIdx = selectedProfile.indexOf(":");
@@ -472,6 +473,16 @@ export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCr
           data-testid="tdd-mode-checkbox"
         />
         <span>TDD mode (write failing AC tests before implementing)</span>
+      </label>
+      <label className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400">
+        <input
+          type="checkbox"
+          checked={includeVisualProof}
+          onChange={(e) => setIncludeVisualProof(e.target.checked)}
+          className="rounded border-gray-300"
+          data-testid="include-visual-proof-checkbox"
+        />
+        <span>Require visual proof (agent screenshots the result and attaches it)</span>
       </label>
       {project?.setupScript && (
         <label className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400">

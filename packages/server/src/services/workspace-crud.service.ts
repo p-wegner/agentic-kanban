@@ -403,7 +403,7 @@ export function createWorkspaceCrudService(deps: {
       prompt = `${input.clarifications.trim()}\n\n${prompt}`;
     }
     if (input.includeVisualProof) {
-      prompt += `\n\nAfter completing the implementation, attach visual proof to this ticket. Use the playwright-cli skill to open the running app, take a screenshot of the working result, and call the MCP tool \`attach_artifact\` with { "issueId": "${issueId}", "type": "image", "mimeType": "image/png", "content": "<base64 data URL>", "caption": "Screenshot of the working result" }.`;
+      prompt += `\n\n## Visual Verification Required\n\nAfter completing the implementation, you MUST visually verify the result and attach proof:\n1. Start the dev server if not already running\n2. Use the \`playwright-cli\` skill to open the app in a browser\n3. Navigate to the feature and take a screenshot showing it working\n4. Encode the screenshot as a base64 data URL\n5. Call the MCP tool \`attach_artifact\` with:\n   - workspaceId: (your current workspace ID, available in CLAUDE.local.md)\n   - type: "image"\n   - mimeType: "image/png"\n   - content: the base64 data URL (e.g. "data:image/png;base64,...")\n   - caption: "visual-proof: <brief description of what is shown>"\n\nThis visual proof is required — do not skip it.`;
     }
     // Claude Code treats prompts that start with `/` as slash-command invocations
     // (e.g. ticket title "/merge endpoint ..." → "Unknown command: /merge", agent exits in 3s).
