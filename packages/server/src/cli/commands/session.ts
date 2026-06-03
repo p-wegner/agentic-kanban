@@ -1,8 +1,8 @@
 import type { Command } from "commander";
 import { db } from "../../db/index.js";
 import { issues, projectStatuses, workspaces, sessions, sessionMessages } from "@agentic-kanban/shared/schema";
-import { eq, inArray, desc } from "drizzle-orm";
-import { parseSessionSummary } from "@agentic-kanban/shared";
+import { eq, inArray, desc, gte, isNotNull, and } from "drizzle-orm";
+import { parseSessionSummary, computeFrictionStats } from "@agentic-kanban/shared";
 import { runMigrations } from "../shared.js";
 
 export function registerSessionCommand(program: Command) {
@@ -126,6 +126,65 @@ export function registerSessionCommand(program: Command) {
           workspace: { id: r.workspaceId, branch: r.branch, status: r.wsStatus },
           issue: { number: r.issueNumber, title: r.issueTitle },
         })), null, 2));
+        process.exit(0);
+      } catch (err) {
+        console.error("Error:", err instanceof Error ? err.message : String(err));
+        process.exit(1);
+      }
+    });
+
+  sessionCmd
+    .command("backfill-friction")
+    .description("Populate friction stats (tool failures, repeated commands, errors) for past sessions from their stored messages, so /api/insights friction covers history. Idempotent — skips sessions that already have friction.")
+    .option("--hours <n>", "Only backfill sessions started within the last N hours", "48")
+    .option("--all", "Backfill all sessions regardless of age (overrides --hours)")
+    .option("--force", "Recompute friction even for sessions that already have it")
+    .action(async (options: { hours?: string; all?: boolean; force?: boolean }) => {
+      try {
+        await runMigrations();
+
+        const whereClause = options.all
+          ? isNotNull(sessions.endedAt)
+          : and(
+              isNotNull(sessions.endedAt),
+              gte(
+                sessions.startedAt,
+                new Date(Date.now() - Math.max(1, parseInt(options.hours ?? "48", 10) || 48) * 60 * 60 * 1000).toISOString(),
+              ),
+            );
+
+        const candidates = await db
+          .select({ id: sessions.id, stats: sessions.stats })
+          .from(sessions)
+          .where(whereClause);
+
+        let scanned = 0, updated = 0, skipped = 0, empty = 0;
+        for (const s of candidates) {
+          scanned++;
+          let stats: Record<string, unknown> = {};
+          if (s.stats) {
+            try { stats = JSON.parse(s.stats) as Record<string, unknown>; } catch { stats = {}; }
+          }
+          if (stats.friction && !options.force) { skipped++; continue; }
+
+          const msgRows = await db
+            .select({ type: sessionMessages.type, data: sessionMessages.data })
+            .from(sessionMessages)
+            .where(eq(sessionMessages.sessionId, s.id))
+            .orderBy(sessionMessages.id);
+
+          const summary = parseSessionSummary(msgRows);
+          const friction = computeFrictionStats(summary);
+          if (friction.totalToolCalls === 0 && friction.errorCount === 0 && friction.repeatedCommands.length === 0) {
+            empty++;
+            continue;
+          }
+          stats.friction = friction;
+          await db.update(sessions).set({ stats: JSON.stringify(stats) }).where(eq(sessions.id, s.id));
+          updated++;
+        }
+
+        console.log(JSON.stringify({ scanned, updated, skipped, empty }, null, 2));
         process.exit(0);
       } catch (err) {
         console.error("Error:", err instanceof Error ? err.message : String(err));

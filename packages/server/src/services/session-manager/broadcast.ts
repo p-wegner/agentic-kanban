@@ -3,10 +3,50 @@ import { sessions, sessionMessages } from "@agentic-kanban/shared/schema";
 import { eq } from "drizzle-orm";
 import * as agentService from "../agent.service.js";
 import { getProvider } from "../agent-provider.js";
-import type { AgentOutputMessage } from "@agentic-kanban/shared";
+import { parseSessionSummary, computeFrictionStats } from "@agentic-kanban/shared";
+import type { AgentOutputMessage, SessionFrictionStats } from "@agentic-kanban/shared";
 import type { SessionManagerOptions, SessionState } from "./types.js";
 import { formatToolActivity, tasksToTodoItems } from "./utils.js";
 import type { TodoItem } from "../board-events.js";
+
+/**
+ * Compute compact friction metrics (tool failures, repeated commands, errors)
+ * from the in-memory message buffer. The buffer is complete and synchronous at
+ * the point we read it, so this is race-free — no transcript re-read needed.
+ * Returns null when the session had no tool/error activity (launch-failed/empty).
+ */
+function frictionFromBuffer(messages: AgentOutputMessage[]): SessionFrictionStats | null {
+  const summary = parseSessionSummary(messages.map((m) => ({ type: m.type, data: m.data ?? null })));
+  const friction = computeFrictionStats(summary);
+  if (friction.totalToolCalls === 0 && friction.errorCount === 0 && friction.repeatedCommands.length === 0) {
+    return null;
+  }
+  return friction;
+}
+
+/**
+ * Fallback persistence for sessions that never emit a result/stats event
+ * (e.g. codex/copilot launches). Only sets `friction` when it is not already
+ * present, so it can never clobber the cost/token stats written on the result
+ * event (which already include friction). Fire-and-forget.
+ */
+async function persistFrictionFallback(sessionId: string, messages: AgentOutputMessage[]) {
+  try {
+    const friction = frictionFromBuffer(messages);
+    if (!friction) return;
+    const rows = await db.select({ stats: sessions.stats }).from(sessions).where(eq(sessions.id, sessionId)).limit(1);
+    if (rows.length === 0) return;
+    let stats: Record<string, unknown> = {};
+    if (rows[0].stats) {
+      try { stats = JSON.parse(rows[0].stats) as Record<string, unknown>; } catch { stats = {}; }
+    }
+    if (stats.friction) return; // already persisted on the result-event write
+    stats.friction = friction;
+    await db.update(sessions).set({ stats: JSON.stringify(stats) }).where(eq(sessions.id, sessionId));
+  } catch (err) {
+    console.error("Failed to persist session friction (fallback):", err);
+  }
+}
 
 export function createBroadcaster(
   state: SessionState,
@@ -87,7 +127,15 @@ export function createBroadcaster(
           const lastTool = state.sessionLastTool.get(sessionId);
           const textParts = state.sessionTextParts.get(sessionId) ?? [];
           const fullAgentSummary = textParts.length > 0 ? textParts.join("\n\n---\n\n") : evt.stats.agentSummary;
-          const statsToSave = { ...evt.stats, agentSummary: fullAgentSummary, ...(lastTool ? { lastTool } : {}) };
+          // Fold in deterministic friction metrics so the insights endpoint can
+          // aggregate failures/repeated-commands without re-parsing transcripts.
+          const friction = frictionFromBuffer(state.messageBuffer.get(sessionId) ?? []);
+          const statsToSave = {
+            ...evt.stats,
+            agentSummary: fullAgentSummary,
+            ...(lastTool ? { lastTool } : {}),
+            ...(friction ? { friction } : {}),
+          };
           db.update(sessions)
             .set({ stats: JSON.stringify(statsToSave) })
             .where(eq(sessions.id, sessionId))
@@ -208,6 +256,11 @@ export function createBroadcaster(
       state.sessionFinalText.set(sessionId, (state.sessionTextParts.get(sessionId) ?? []).join("\n\n"));
       state.sessionTextParts.delete(sessionId);
       state.sessionExitPlanModeDenied.delete(sessionId);
+
+      // Fallback for sessions that never emitted a result/stats event (e.g.
+      // codex/copilot). Safe: only sets `friction` when absent, so it can't
+      // overwrite cost/token stats from the result-event path above.
+      void persistFrictionFallback(sessionId, state.messageBuffer.get(sessionId) ?? []);
     }
 
     // Deliver to WebSocket subscribers

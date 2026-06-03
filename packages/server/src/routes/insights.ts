@@ -1,5 +1,6 @@
 import { and, eq, gte, inArray } from "drizzle-orm";
 import { agentSkills, issues, sessions, workspaces } from "@agentic-kanban/shared/schema";
+import type { SessionFrictionStats } from "@agentic-kanban/shared";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { createRouter } from "../middleware/create-router.js";
@@ -22,6 +23,7 @@ interface ParsedSessionStats {
   success: boolean;
   agentSummary?: string;
   cacheReadTokens?: number;
+  friction?: SessionFrictionStats;
 }
 
 interface AggregateBucket {
@@ -32,6 +34,11 @@ interface AggregateBucket {
   totalOutputTokens: number;
   totalTurns: number;
   durations: number[];
+  // Friction roll-up (only from sessions that have persisted friction stats).
+  sessionsWithFriction: number;
+  totalToolCalls: number;
+  failedToolCalls: number;
+  errorCount: number;
 }
 
 interface SkillBucket extends AggregateBucket {
@@ -74,31 +81,29 @@ interface TimeSeriesBucket {
   totalCostUsd: number;
 }
 
+interface FinalizedAggregateFields {
+  sessionCount: number;
+  successCount: number;
+  totalCostUsd: number;
+  totalInputTokens: number;
+  totalOutputTokens: number;
+  totalTurns: number;
+  durationsMsP50: number;
+  durationsMsP95: number;
+  avgDurationMs: number;
+  sessionsWithFriction: number;
+  totalToolCalls: number;
+  failedToolCalls: number;
+  errorCount: number;
+}
+
 interface InsightsData {
-  bySkill: Array<{
+  bySkill: Array<FinalizedAggregateFields & {
     skillId: string | null;
     skillName: string;
-    sessionCount: number;
-    successCount: number;
-    totalCostUsd: number;
-    totalInputTokens: number;
-    totalOutputTokens: number;
-    totalTurns: number;
-    durationsMsP50: number;
-    durationsMsP95: number;
-    avgDurationMs: number;
   }>;
-  byModel: Array<{
+  byModel: Array<FinalizedAggregateFields & {
     model: string;
-    sessionCount: number;
-    successCount: number;
-    totalCostUsd: number;
-    totalInputTokens: number;
-    totalOutputTokens: number;
-    totalTurns: number;
-    durationsMsP50: number;
-    durationsMsP95: number;
-    avgDurationMs: number;
   }>;
   byIssueType: Array<{
     issueType: string;
@@ -137,20 +142,34 @@ interface InsightsData {
     success: boolean;
     startedAt: string;
   }>;
-  byProviderProfile: Array<{
+  byProviderProfile: Array<FinalizedAggregateFields & {
     provider: string;
     profile: string;
-    sessionCount: number;
-    successCount: number;
-    totalCostUsd: number;
-    totalInputTokens: number;
-    totalOutputTokens: number;
-    totalTurns: number;
-    durationsMsP50: number;
-    durationsMsP95: number;
-    avgDurationMs: number;
     activeWorkspaceCount: number;
   }>;
+  friction: {
+    /** Sessions in the window that have persisted friction stats. */
+    sessionsWithFriction: number;
+    /** Fraction of sessions covered by friction stats (0-1). Lower = more historical/backfill needed. */
+    coverage: number;
+    totalToolCalls: number;
+    failedToolCalls: number;
+    failPct: number;
+    errorTotal: number;
+    /** Per-tool call/failure leaderboard, sorted by failures then calls. */
+    byTool: Array<{ tool: string; calls: number; failed: number; failPct: number }>;
+    /** Commands repeated across sessions (summed counts), a wasted-turn signal. */
+    topRepeatedCommands: Array<{ command: string; count: number; sessions: number }>;
+    /** Skills ranked worst-first by success rate then turns-per-success. */
+    worstSkills: Array<{
+      skillName: string;
+      sessionCount: number;
+      successRate: number;
+      turnsPerSuccess: number;
+      failedToolCalls: number;
+      totalCostUsd: number;
+    }>;
+  };
   totals: {
     sessionCount: number;
     successCount: number;
@@ -183,6 +202,7 @@ function parseStats(raw: string | null): ParsedSessionStats | null {
       success: parsed.success === true,
       agentSummary: typeof parsed.agentSummary === "string" ? parsed.agentSummary : undefined,
       cacheReadTokens: Number(parsed.cacheReadTokens ?? 0),
+      friction: parsed.friction && typeof parsed.friction === "object" ? parsed.friction : undefined,
     };
   } catch {
     return null;
@@ -202,6 +222,10 @@ function createAggregateBucket(): AggregateBucket {
     totalOutputTokens: 0,
     totalTurns: 0,
     durations: [],
+    sessionsWithFriction: 0,
+    totalToolCalls: 0,
+    failedToolCalls: 0,
+    errorCount: 0,
   };
 }
 
@@ -215,6 +239,13 @@ function applyAggregate(bucket: AggregateBucket, stats: ParsedSessionStats | nul
   bucket.totalOutputTokens += stats.outputTokens;
   bucket.totalTurns += stats.numTurns;
   bucket.durations.push(stats.durationMs);
+
+  if (stats.friction) {
+    bucket.sessionsWithFriction += 1;
+    bucket.totalToolCalls += stats.friction.totalToolCalls;
+    bucket.failedToolCalls += stats.friction.failedToolCalls;
+    bucket.errorCount += stats.friction.errorCount;
+  }
 }
 
 function finalizeAggregate(bucket: AggregateBucket) {
@@ -235,6 +266,10 @@ function finalizeAggregate(bucket: AggregateBucket) {
     durationsMsP50: p50,
     durationsMsP95: p95,
     avgDurationMs,
+    sessionsWithFriction: bucket.sessionsWithFriction,
+    totalToolCalls: bucket.totalToolCalls,
+    failedToolCalls: bucket.failedToolCalls,
+    errorCount: bucket.errorCount,
   };
 }
 
@@ -265,12 +300,21 @@ export function createInsightsRoute(database: Database = db) {
     const projectId = c.req.query("projectId");
     if (!projectId) return c.json({ error: "projectId query parameter required" }, 400);
 
+    // `hours=N` gives an exact sub-day / arbitrary window (e.g. last 48h),
+    // taking precedence over the day-bucketed `range`. Used by the fleet-friction
+    // analysis workflow which is typically time-scoped to the last 1-2 days.
+    const hoursParam = c.req.query("hours");
+    const hours = hoursParam !== undefined ? Number(hoursParam) : NaN;
+    const useHours = Number.isFinite(hours) && hours > 0;
+
     const range = parseRange(c.req.query("range"));
     const now = new Date();
     const dateTo = now.toISOString();
-    const queryDateFrom = range === "all"
-      ? null
-      : startOfUtcDay(addUtcDays(now, -(RANGE_DAYS[range] - 1)));
+    const queryDateFrom = useHours
+      ? new Date(now.getTime() - hours * 60 * 60 * 1000)
+      : range === "all"
+        ? null
+        : startOfUtcDay(addUtcDays(now, -(RANGE_DAYS[range] - 1)));
 
     const whereClause = queryDateFrom
       ? and(
@@ -327,6 +371,14 @@ export function createInsightsRoute(database: Database = db) {
     const timeSeries = new Map<string, TimeSeriesBucket>();
     const topExpensive: InsightsData["topExpensive"] = [];
 
+    // Friction roll-up across the window (only from sessions with persisted friction).
+    const frictionByTool = new Map<string, { calls: number; failed: number }>();
+    const repeatedCommandAgg = new Map<string, { count: number; sessions: number }>();
+    let frictionTotalToolCalls = 0;
+    let frictionFailedToolCalls = 0;
+    let frictionErrorTotal = 0;
+    let sessionsWithFriction = 0;
+
     // Pre-build a map from provider/profile key to active workspace IDs so the
     // ledger shows currently-running workspace counts separately from session history.
     const activeWorkspaceByKey = new Map<string, { wsIds: Set<string>; provider: string; profile: string }>();
@@ -367,6 +419,25 @@ export function createInsightsRoute(database: Database = db) {
       if (success) successCount += 1;
       if (!earliestStartedAt || startedAtIso < earliestStartedAt) {
         earliestStartedAt = startedAtIso;
+      }
+
+      if (stats?.friction) {
+        sessionsWithFriction += 1;
+        frictionTotalToolCalls += stats.friction.totalToolCalls;
+        frictionFailedToolCalls += stats.friction.failedToolCalls;
+        frictionErrorTotal += stats.friction.errorCount;
+        for (const t of stats.friction.tools ?? []) {
+          const e = frictionByTool.get(t.tool) ?? { calls: 0, failed: 0 };
+          e.calls += t.count;
+          e.failed += t.failedCount;
+          frictionByTool.set(t.tool, e);
+        }
+        for (const rc of stats.friction.repeatedCommands ?? []) {
+          const e = repeatedCommandAgg.get(rc.command) ?? { count: 0, sessions: 0 };
+          e.count += rc.count;
+          e.sessions += 1;
+          repeatedCommandAgg.set(rc.command, e);
+        }
       }
 
       const skillBucket = bySkill.get(skillMapKey) ?? {
@@ -495,14 +566,54 @@ export function createInsightsRoute(database: Database = db) {
       }
     }
 
-    const response: InsightsData = {
-      bySkill: [...bySkill.values()]
-        .map((bucket) => ({
-          skillId: bucket.skillId,
-          skillName: bucket.skillName,
-          ...finalizeAggregate(bucket),
+    const bySkillFinalized = [...bySkill.values()]
+      .map((bucket) => ({
+        skillId: bucket.skillId,
+        skillName: bucket.skillName,
+        ...finalizeAggregate(bucket),
+      }))
+      .sort((a, b) => b.totalCostUsd - a.totalCostUsd || b.sessionCount - a.sessionCount || a.skillName.localeCompare(b.skillName));
+
+    // worstSkills: rank skills with enough volume worst-first by success rate,
+    // then by turns-per-success (more turns per landed change = more friction).
+    const worstSkills = bySkillFinalized
+      .filter((s) => s.sessionCount >= 2)
+      .map((s) => ({
+        skillName: s.skillName,
+        sessionCount: s.sessionCount,
+        successRate: s.sessionCount > 0 ? s.successCount / s.sessionCount : 0,
+        turnsPerSuccess: s.successCount > 0 ? s.totalTurns / s.successCount : s.totalTurns,
+        failedToolCalls: s.failedToolCalls,
+        totalCostUsd: s.totalCostUsd,
+      }))
+      .sort((a, b) => a.successRate - b.successRate || b.turnsPerSuccess - a.turnsPerSuccess)
+      .slice(0, 10);
+
+    const frictionBlock: InsightsData["friction"] = {
+      sessionsWithFriction,
+      coverage: sessionCount > 0 ? sessionsWithFriction / sessionCount : 0,
+      totalToolCalls: frictionTotalToolCalls,
+      failedToolCalls: frictionFailedToolCalls,
+      failPct: frictionTotalToolCalls > 0 ? Math.round((100 * frictionFailedToolCalls) / frictionTotalToolCalls) : 0,
+      errorTotal: frictionErrorTotal,
+      byTool: [...frictionByTool.entries()]
+        .map(([tool, { calls, failed }]) => ({
+          tool,
+          calls,
+          failed,
+          failPct: calls > 0 ? Math.round((100 * failed) / calls) : 0,
         }))
-        .sort((a, b) => b.totalCostUsd - a.totalCostUsd || b.sessionCount - a.sessionCount || a.skillName.localeCompare(b.skillName)),
+        .sort((a, b) => b.failed - a.failed || b.calls - a.calls || a.tool.localeCompare(b.tool))
+        .slice(0, 20),
+      topRepeatedCommands: [...repeatedCommandAgg.entries()]
+        .map(([command, { count, sessions: ses }]) => ({ command, count, sessions: ses }))
+        .sort((a, b) => b.count - a.count || b.sessions - a.sessions)
+        .slice(0, 15),
+      worstSkills,
+    };
+
+    const response: InsightsData = {
+      bySkill: bySkillFinalized,
       byModel: [...byModel.values()]
         .map((bucket) => ({
           model: bucket.model,
@@ -525,6 +636,7 @@ export function createInsightsRoute(database: Database = db) {
       topExpensive: topExpensive
         .sort((a, b) => b.totalCostUsd - a.totalCostUsd || b.totalTokens - a.totalTokens || a.startedAt.localeCompare(b.startedAt))
         .slice(0, 10),
+      friction: frictionBlock,
       totals: {
         sessionCount,
         successCount,
