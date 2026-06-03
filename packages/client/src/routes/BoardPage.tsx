@@ -165,6 +165,7 @@ export function BoardPage() {
     return VIEW_IDS.includes(stored as ViewMode) ? (stored as ViewMode) : "kanban";
   });
   const [dynamicColumnScaling, setDynamicColumnScaling] = useState(false);
+  const [graphFocusIssueId, setGraphFocusIssueId] = useState<string | undefined>(undefined);
   const agentQuestionsCount = useAgentQuestionsCount(activeProjectId);
   const [columnWidths, setColumnWidths] = useState<Record<string, number>>(() => {
     try { return JSON.parse(localStorage.getItem("kanban-column-widths") ?? "{}"); } catch { return {}; }
@@ -186,6 +187,7 @@ export function BoardPage() {
     setViewMode(mode);
     localStorage.setItem("kanban-board-view", mode);
     navigateToViewRoute(mode);
+    if (mode !== "graph") setGraphFocusIssueId(undefined);
   }, [navigateToViewRoute]);
 
   useEffect(() => {
@@ -2002,6 +2004,7 @@ export function BoardPage() {
                 projectId={activeProjectId}
                 onIssueClick={handleIssueClick}
                 searchQuery={searchQuery}
+                focusIssueId={graphFocusIssueId}
               />
             </BoardErrorBoundary>
           </div>
@@ -2251,6 +2254,11 @@ export function BoardPage() {
           onStartWorkspace={handleStartWorkspace}
           onIssueUpdate={setSelectedIssue}
           onNavigateToIssue={(issueId) => openIssueById(issueId)}
+          onViewInGraph={(issueId) => {
+            setGraphFocusIssueId(issueId);
+            handleViewModeChange("graph");
+            setSelectedIssue(null);
+          }}
           trail={trailControls}
         />
       )}

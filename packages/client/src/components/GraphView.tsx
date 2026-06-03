@@ -206,6 +206,8 @@ interface GraphViewProps {
   projectId: string;
   onIssueClick: (issue: IssueWithStatus) => void;
   searchQuery?: string;
+  /** When set, the graph scrolls to and highlights this issue on first render. */
+  focusIssueId?: string;
 }
 
 interface GraphFilterControlsProps {
@@ -663,7 +665,7 @@ function AddEdgePanel({ sourceIssue, allIssues, projectId: _projectId, onAdd, on
 // Main GraphView component
 // ---------------------------------------------------------------------------
 
-export function GraphView({ columns, projectId, onIssueClick, searchQuery }: GraphViewProps) {
+export function GraphView({ columns, projectId, onIssueClick, searchQuery, focusIssueId }: GraphViewProps) {
   const [graphData, setGraphData] = useState<GraphData | null>(null);
   const [loading, setLoading] = useState(true);
   const [statusFilters, setStatusFilters] = useState<string[]>(["active"]);
@@ -722,21 +724,38 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery }: Gra
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, columns]);
 
+  // IDs of nodes that participate in at least one edge (have ≥1 dependency).
+  const nodesWithDepsIds = useMemo(() => {
+    if (!graphData) return new Set<string>();
+    const ids = new Set<string>();
+    for (const e of graphData.edges) {
+      ids.add(e.issueId);
+      ids.add(e.dependsOnId);
+    }
+    return ids;
+  }, [graphData]);
+
   useLayoutEffect(() => {
     if (!graphData) return;
     const visibleStatuses = new Set(statusFilters);
-    const visibleNodes = graphData.nodes.filter((n) => {
+    const statusFiltered = graphData.nodes.filter((n) => {
       if (visibleStatuses.has("all")) return true;
       if (visibleStatuses.has("active")) return !DEFAULT_HIDDEN_STATUS_NAMES.has(n.statusName);
       return visibleStatuses.has(n.statusName);
     });
+    // When there are any edges in the project, only show nodes that participate
+    // in at least one dependency (the "dependency graph" view).
+    const hasAnyEdges = graphData.edges.length > 0;
+    const depFiltered = hasAnyEdges
+      ? statusFiltered.filter((n) => nodesWithDepsIds.has(n.id))
+      : statusFiltered;
     const filtered = searchQuery
-      ? visibleNodes.filter(
+      ? depFiltered.filter(
           (n) =>
             n.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
             n.description?.toLowerCase().includes(searchQuery.toLowerCase())
         )
-      : visibleNodes;
+      : depFiltered;
     const filteredIds = new Set(filtered.map((n) => n.id));
     const filteredEdges = graphData.edges.filter(
       (e) => filteredIds.has(e.issueId) && filteredIds.has(e.dependsOnId)
@@ -751,6 +770,20 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery }: Gra
       const cw = containerRef.current.clientWidth;
       const ch = containerRef.current.clientHeight;
       if (cw === 0 || ch === 0) return;
+
+      // If a focusIssueId is provided, center on that node instead of fitting all
+      if (focusIssueId) {
+        const focusNode = laid.find((n) => n.id === focusIssueId);
+        if (focusNode) {
+          const z = 1;
+          const px = cw / 2 - (focusNode.x + NODE_W / 2) * z;
+          const py = ch / 2 - (focusNode.y + NODE_H / 2) * z;
+          setZoom(z);
+          setPan({ x: px, y: py });
+          return;
+        }
+      }
+
       const minX = Math.min(...laid.map((n) => n.x));
       const minY = Math.min(...laid.map((n) => n.y));
       const maxX = Math.max(...laid.map((n) => n.x + NODE_W));
@@ -763,7 +796,7 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery }: Gra
       setZoom(z);
       setPan({ x: px, y: py });
     });
-  }, [graphData, searchQuery, statusFilters]);
+  }, [graphData, searchQuery, statusFilters, nodesWithDepsIds, focusIssueId]);
 
   const fitView = useCallback(() => {
     if (nodes.length === 0 || !containerRef.current) return;
@@ -954,6 +987,24 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery }: Gra
     );
   }
 
+  // Empty state: no dependencies defined in this project at all
+  if (graphData && graphData.edges.length === 0) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-4 bg-gray-50 dark:bg-gray-950 text-gray-500 dark:text-gray-400">
+        <svg className="w-12 h-12 opacity-30" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+          <circle cx="5" cy="12" r="2" />
+          <circle cx="19" cy="5" r="2" />
+          <circle cx="19" cy="19" r="2" />
+          <path d="M7 12h6M15 6.5l-4 4M15 17.5l-4-4" />
+        </svg>
+        <div className="text-center">
+          <p className="text-sm font-medium text-gray-600 dark:text-gray-400">No dependencies defined</p>
+          <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">Add dependencies between issues to visualize relationships here.</p>
+        </div>
+      </div>
+    );
+  }
+
   if (nodes.length === 0) {
     return (
       <div ref={containerRef} className="relative h-full w-full overflow-hidden bg-gray-50 dark:bg-gray-950 select-none">
@@ -966,7 +1017,7 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery }: Gra
           hasBlockingEdges={hasBlockingEdges}
         />
         <div className="flex h-full flex-col items-center justify-center gap-3 text-gray-500 dark:text-gray-400 text-sm">
-          <span>No issues to display</span>
+          <span>No issues match the current filter</span>
         </div>
       </div>
     );
@@ -1220,6 +1271,7 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery }: Gra
           {nodes.map((node) => {
             const color = STATUS_COLORS[node.issue.statusName] ?? "#6b7280";
             const isSelected = selectedNode === node.id;
+            const isFocused = focusIssueId === node.id;
             const isHighlighted = searchQuery
               ? node.issue.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
                 (node.issue.description?.toLowerCase().includes(searchQuery.toLowerCase()) ?? false)
@@ -1229,8 +1281,8 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery }: Gra
 
             // Critical-path mode visual overrides
             let nodeOpacity = isHighlighted ? 1 : 0.3;
-            let nodeStroke = isSelected ? BRAND : color;
-            let nodeStrokeWidth = isSelected ? 2 : 1.5;
+            let nodeStroke = isFocused ? BRAND : (isSelected ? BRAND : color);
+            let nodeStrokeWidth = isFocused ? 3 : (isSelected ? 2 : 1.5);
             let nodeStrokeDasharray: string | undefined;
             let isRootBlocker = false;
             let downstreamBadge: number | null = null;

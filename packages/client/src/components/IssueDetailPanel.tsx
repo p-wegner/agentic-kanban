@@ -227,6 +227,8 @@ interface IssueDetailPanelProps {
   onStartWorkspace?: (issue: IssueWithStatus) => void;
   onIssueUpdate: (issue: IssueWithStatus) => void;
   onNavigateToIssue?: (issueId: string) => void;
+  /** Navigate to the graph view and focus this issue. */
+  onViewInGraph?: (issueId: string) => void;
   /** Multi-ticket navigation trail (#383). Rendered as a breadcrumb strip in the header. */
   trail?: TicketTrailControls;
 }
@@ -293,6 +295,7 @@ export function IssueDetailPanel({
   onStartWorkspace,
   onIssueUpdate,
   onNavigateToIssue,
+  onViewInGraph,
   trail,
 }: IssueDetailPanelProps) {
   const [editing, setEditing] = useState(false);
@@ -1565,20 +1568,37 @@ export function IssueDetailPanel({
                 <label className="text-xs font-medium text-gray-600 dark:text-gray-400">
                   Dependencies
                 </label>
-                <button
-                  onClick={handleAnalyzeDeps}
-                  disabled={analyzingDeps}
-                  className="text-[10px] text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:hover:text-brand-300 font-medium px-1.5 py-0.5 rounded border border-brand-200 dark:border-brand-700 hover:bg-brand-50 dark:hover:bg-brand-900/40 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
-                  title="Analyze dependencies with AI"
-                >
-                  {analyzingDeps && (
-                    <svg className="animate-spin h-3 w-3" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
-                    </svg>
+                <div className="flex items-center gap-1">
+                  {onViewInGraph && dependencies.dependencies.length > 0 && (
+                    <button
+                      onClick={() => onViewInGraph(issue.id)}
+                      className="text-[10px] text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 font-medium px-1.5 py-0.5 rounded border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800 flex items-center gap-1"
+                      title="View in dependency graph"
+                    >
+                      <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <circle cx="5" cy="12" r="2" />
+                        <circle cx="19" cy="5" r="2" />
+                        <circle cx="19" cy="19" r="2" />
+                        <path d="M7 12h6M15 6.5l-4 4M15 17.5l-4-4" />
+                      </svg>
+                      Graph
+                    </button>
                   )}
-                  {analyzingDeps ? "Analyzing..." : "Analyze Deps"}
-                </button>
+                  <button
+                    onClick={handleAnalyzeDeps}
+                    disabled={analyzingDeps}
+                    className="text-[10px] text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:hover:text-brand-300 font-medium px-1.5 py-0.5 rounded border border-brand-200 dark:border-brand-700 hover:bg-brand-50 dark:hover:bg-brand-900/40 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
+                    title="Analyze dependencies with AI"
+                  >
+                    {analyzingDeps && (
+                      <svg className="animate-spin h-3 w-3" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+                      </svg>
+                    )}
+                    {analyzingDeps ? "Analyzing..." : "Analyze Deps"}
+                  </button>
+                </div>
               </div>
               {dependencies.dependencies.length > 0 ? (
                 <div className="space-y-1.5">
