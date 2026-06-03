@@ -368,7 +368,8 @@ export function createButlerRoute(
     const projectId = c.req.param("id");
     const butlerId = resolveButlerId(c);
     const body = await parseJsonBody<{ model?: string }>(c);
-    const backend = await resolveButlerBackend(projectId);
+    const def = await getButlerDefinition(database, butlerId);
+    const backend = await resolveButlerBackend(projectId, def?.provider);
     const state = getButlerSession(projectId, butlerId);
     const model = normalizeModelForBackend(body.model, state.active ? state.backend : backend.provider);
     try {
