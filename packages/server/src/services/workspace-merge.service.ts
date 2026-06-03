@@ -478,7 +478,23 @@ export function createWorkspaceMergeService(deps: {
       }
       if (appliedCount > 0) {
         const committed = await commitOpenSpecPaths(repoPath, branch);
-        mergeResult += `\nOpenSpec: applied ${appliedCount} domain delta(s)${committed ? " and committed living specs" : ""}.`;
+        const openSpecNote = `OpenSpec: applied ${appliedCount} domain delta(s)${committed ? " and committed living specs" : ""}.`;
+        mergeResult += `\n${openSpecNote}`;
+        // Persist the OpenSpec note as a follow-up comment since the "merged" comment
+        // was already written synchronously (before this background task ran).
+        try {
+          await insertIssueComment({
+            issueId,
+            workspaceId,
+            kind: "merge-attempt",
+            author: "system",
+            body: openSpecNote,
+            payload: { eventType: "openspec-applied", workspaceId, branch, appliedCount, committed },
+            createdAt: new Date().toISOString(),
+          }, database);
+        } catch (dbErr) {
+          console.warn("[workspace-merge] failed to record openspec note:", dbErr instanceof Error ? dbErr.message : String(dbErr));
+        }
       }
     } catch (err) {
       addRecoverableWarning(warnings, "openspec-post-merge", err);
