@@ -118,6 +118,7 @@ export function BoardPage() {
   const [tagFilterId, setTagFilterId] = useState<string | null>(null);
   const [createdDateFilter, setCreatedDateFilter] = useState<string | null>(null);
   const [showBlocked, setShowBlocked] = useState(false);
+  const [showStaleOnly, setShowStaleOnly] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showQuickTasks, setShowQuickTasks] = useState(false);
   const [showMergeQueue, setShowMergeQueue] = useState(false);
@@ -1000,13 +1001,14 @@ export function BoardPage() {
   const boardViewState: BoardViewState = useMemo(() => ({
     searchQuery,
     showBlocked,
+    showStaleOnly,
     statusId: statusFilter?.id ?? null,
     statusName: statusFilter?.name ?? null,
     tagId: tagFilter?.id ?? null,
     tagName: tagFilter?.name ?? null,
     sortMode: "rank",
     viewMode,
-  }), [searchQuery, showBlocked, statusFilter, tagFilter, viewMode]);
+  }), [searchQuery, showBlocked, showStaleOnly, statusFilter, tagFilter, viewMode]);
   const boardStatusOptions = useMemo(
     () => columns.map((col) => ({ id: col.id, name: col.name })),
     [columns],
@@ -1031,6 +1033,7 @@ export function BoardPage() {
   const applyBoardViewState = useCallback((state: BoardViewState) => {
     setSearchQuery(state.searchQuery);
     setShowBlocked(state.showBlocked);
+    setShowStaleOnly(state.showStaleOnly);
     setStatusFilterId(state.statusId);
     setTagFilterId(state.tagId);
     if (VIEW_IDS.includes(state.viewMode)) {
@@ -1053,6 +1056,9 @@ export function BoardPage() {
           if (showBlocked && !(issue as IssueWithStatus & { isBlocked?: boolean }).isBlocked) {
             return false;
           }
+          if (showStaleOnly && !issue.isStale) {
+            return false;
+          }
           if (searchQuery) {
             const q = searchQuery.toLowerCase();
             return (
@@ -1064,7 +1070,7 @@ export function BoardPage() {
           return true;
         }),
       })),
-    [columns, searchQuery, showBlocked, statusFilterId, tagFilterId],
+    [columns, searchQuery, showBlocked, showStaleOnly, statusFilterId, tagFilterId],
   );
 
   // "AI Reviewed" = tickets needing human attention (manual merge).
@@ -1697,6 +1703,8 @@ export function BoardPage() {
             projectId={activeProjectId}
             showBlocked={showBlocked}
             onToggleBlocked={() => setShowBlocked((v) => !v)}
+            showStaleOnly={showStaleOnly}
+            onToggleStaleOnly={() => setShowStaleOnly((v) => !v)}
           />
         )}
         {viewMode !== "butler" && (

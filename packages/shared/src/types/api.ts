@@ -396,6 +396,8 @@ export interface IssueWithStatus {
   statusName: string;
   workspaceSummary?: WorkspaceSummary;
   isBlocked?: boolean;
+  isStale?: boolean;
+  staleDays?: number;
   skipAutoReview?: boolean;
   estimate?: string | null;
   dueDate?: string | null;
