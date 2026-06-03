@@ -24,6 +24,26 @@ export function commandLineBelongsToCheckout(commandLine, checkoutRoot) {
   return false;
 }
 
+/**
+ * Parse Windows netstat -ano output and return PIDs that are LISTENING on `port`.
+ * Excludes processes with established connections TO the port (e.g. Vite proxying
+ * to the backend server), which is the root cause of the bug where freePort(3001)
+ * killed the Vite client process.
+ */
+export function parseNetstatListeners(netstatOutput, port) {
+  return [...new Set(
+    netstatOutput.split("\n")
+      .map(l => l.trim().split(/\s+/))
+      .filter(parts =>
+        parts[0]?.toLowerCase() === "tcp" &&
+        parts[3] === "LISTENING" &&
+        (parts[1]?.endsWith(`:${port}`) ?? false)
+      )
+      .map(parts => parts[4])
+      .filter(p => p && /^\d+$/.test(p) && p !== "0")
+  )];
+}
+
 export function planPortOwnerKill({ pid, port, checkoutRoot, getCommandLine, audit }) {
   const commandLine = getCommandLine(pid);
   if (!commandLine) {
