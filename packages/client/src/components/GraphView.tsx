@@ -845,15 +845,27 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery }: Gra
   }
 
   async function handleChangeEdgeType(edgeId: string, newType: DependencyType) {
-    // Remove the old edge, add a new one with the new type
+    // Remove the old edge, add a new one with the new type.
+    // If the POST fails, restore the original edge so nothing is silently lost.
     const edge = graphData?.edges.find((e) => e.id === edgeId);
     if (!edge) return;
     await apiFetch(`/api/issues/${edge.issueId}/dependencies/${edgeId}`, { method: "DELETE" });
-    await apiFetch(`/api/issues/${edge.issueId}/dependencies`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ dependsOnId: edge.dependsOnId, type: newType }),
-    });
+    try {
+      await apiFetch(`/api/issues/${edge.issueId}/dependencies`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dependsOnId: edge.dependsOnId, type: newType }),
+      });
+    } catch (err) {
+      // Rollback: restore the original edge so the graph is not left with a missing edge
+      await apiFetch(`/api/issues/${edge.issueId}/dependencies`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dependsOnId: edge.dependsOnId, type: edge.type }),
+      }).catch(() => {/* best-effort rollback */});
+      await reloadGraph();
+      throw err;
+    }
     // Update selectedEdge with new type so panel stays open and reflects change
     setSelectedEdge({ ...edge, type: newType });
     await reloadGraph();
