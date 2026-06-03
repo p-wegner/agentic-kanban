@@ -1,8 +1,12 @@
 import { readdir, stat, readFile, realpath } from "node:fs/promises";
 import { join, resolve, extname, relative, isAbsolute } from "node:path";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import type { Database } from "../db/index.js";
 import { workspaces } from "@agentic-kanban/shared/schema";
 import { eq } from "drizzle-orm";
+
+const execFileAsync = promisify(execFile);
 
 export interface ArtifactEntry {
   /** Relative path from the workspace workingDir */
@@ -125,39 +129,75 @@ async function scanDir(
 export function createSessionArtifactsService(deps: { database: Database }) {
   const { database } = deps;
 
-  async function getWorkspaceDir(workspaceId: string): Promise<string> {
+  interface WorkspaceInfo {
+    workingDir: string;
+    baseBranch: string | null;
+  }
+
+  async function getWorkspaceInfo(workspaceId: string): Promise<WorkspaceInfo> {
     const rows = await database
-      .select({ workingDir: workspaces.workingDir })
+      .select({ workingDir: workspaces.workingDir, baseBranch: workspaces.baseBranch })
       .from(workspaces)
       .where(eq(workspaces.id, workspaceId));
 
     if (rows.length === 0) {
       throw new Error("Workspace not found");
     }
-    const workingDir = rows[0].workingDir;
+    const { workingDir, baseBranch } = rows[0];
     if (!workingDir) {
       throw new Error("Workspace has no working directory");
     }
-    return workingDir;
+    return { workingDir, baseBranch };
+  }
+
+  async function getWorkspaceDir(workspaceId: string): Promise<string> {
+    return (await getWorkspaceInfo(workspaceId)).workingDir;
+  }
+
+  /** Get paths of files changed or added relative to baseBranch (git diff + untracked). */
+  async function getChangedPaths(workingDir: string, baseBranch: string | null): Promise<Set<string> | null> {
+    if (!baseBranch) return null;
+    try {
+      const [diffOut, untrackedOut] = await Promise.all([
+        execFileAsync("git", ["diff", "--name-only", `${baseBranch}...HEAD`], { cwd: workingDir })
+          .then((r) => r.stdout)
+          .catch(() => ""),
+        execFileAsync("git", ["ls-files", "--others", "--exclude-standard"], { cwd: workingDir })
+          .then((r) => r.stdout)
+          .catch(() => ""),
+      ]);
+      const paths = new Set<string>();
+      for (const line of (diffOut + "\n" + untrackedOut).split("\n")) {
+        const p = line.trim();
+        if (p) paths.add(p.split("\\").join("/"));
+      }
+      return paths;
+    } catch {
+      return null;
+    }
   }
 
   /**
-   * List all recognized artifacts in the workspace directory.
+   * List recognized artifacts in the workspace directory.
+   * When a baseBranch is available, only files changed or new relative to that branch are shown.
    */
   async function listArtifacts(workspaceId: string): Promise<ArtifactEntry[]> {
-    const workingDir = await getWorkspaceDir(workspaceId);
+    const { workingDir, baseBranch } = await getWorkspaceInfo(workspaceId);
+    const changedPaths = await getChangedPaths(workingDir, baseBranch);
     const results: ArtifactEntry[] = [];
     await scanDir(workingDir, workingDir, 0, results);
 
+    const filtered = changedPaths ? results.filter((a) => changedPaths.has(a.path)) : results;
+
     // Sort: images first, then text, then traces; within each group by path
     const typeOrder: Record<string, number> = { image: 0, text: 1, trace: 2 };
-    results.sort((a, b) => {
+    filtered.sort((a, b) => {
       const typeDiff = (typeOrder[a.type] ?? 3) - (typeOrder[b.type] ?? 3);
       if (typeDiff !== 0) return typeDiff;
       return a.path.localeCompare(b.path);
     });
 
-    return results;
+    return filtered;
   }
 
   /**
