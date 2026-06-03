@@ -140,7 +140,7 @@ export function ProjectScriptsMenu({ projectId }: ProjectScriptsMenuProps) {
             <path strokeLinecap="round" strokeLinejoin="round" d="M4 7h16M4 12h10M4 17h7" />
             <path strokeLinecap="round" strokeLinejoin="round" d="M17 14l3 3-3 3" />
           </svg>
-          Scripts
+          <span className="hidden sm:inline">Scripts</span>
         </button>
         {open && (
           <div
