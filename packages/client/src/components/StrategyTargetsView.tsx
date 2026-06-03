@@ -27,6 +27,8 @@ interface ProviderProfilePolicy {
   mode: ProviderPolicyMode;
   headroomPct: number;
   notes: string;
+  /** Optional quota provider ID from the tampermonkey-direct /api/usage response. When set, live usage gates this policy. */
+  quotaProviderId: string;
 }
 
 interface StrategyConfig {
@@ -138,6 +140,7 @@ function normalizeProviderPolicy(p: Partial<ProviderProfilePolicy>, index: numbe
     mode: (validModes.includes(p.mode as ProviderPolicyMode) ? p.mode : "throttle") as ProviderPolicyMode,
     headroomPct: clampPolicy(Number(p.headroomPct ?? 20), 20, 0, 100),
     notes: typeof p.notes === "string" ? p.notes : "",
+    quotaProviderId: typeof p.quotaProviderId === "string" ? p.quotaProviderId : "",
   };
 }
 
@@ -717,7 +720,7 @@ export function StrategyTargetsView({ columns, projectId, onIssueClick, searchQu
       ...prev,
       providerPolicies: [
         ...prev.providerPolicies,
-        { id, provider: "claude", profileName: "", label: "Claude: Default", mode: "throttle", headroomPct: 20, notes: "" },
+        { id, provider: "claude", profileName: "", label: "Claude: Default", mode: "throttle", headroomPct: 20, notes: "", quotaProviderId: "" },
       ],
     }));
   }
@@ -961,6 +964,16 @@ export function StrategyTargetsView({ columns, projectId, onIssueClick, searchQu
                             <span className="text-[10px] text-gray-400 dark:text-gray-500">Leave {policy.headroomPct}% of the rate-limit window unused (e.g. for other projects).</span>
                           </label>
                         )}
+                        <label className="block">
+                          <span className="mb-1 block text-[11px] font-medium text-gray-500 dark:text-gray-400">Quota provider ID (optional)</span>
+                          <input
+                            value={policy.quotaProviderId}
+                            onChange={(event) => updateProviderPolicy(policy.id, { quotaProviderId: event.target.value })}
+                            placeholder="e.g. claude-pro, codex-default"
+                            className="w-full rounded-md border border-gray-200 bg-white px-2 py-1 text-xs text-gray-800 outline-none focus:border-brand-400 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+                          />
+                          <span className="mt-0.5 block text-[10px] text-gray-400 dark:text-gray-500">ID from the quota usage panel (tampermonkey). When set, live usage gates this policy.</span>
+                        </label>
                         <label className="block">
                           <span className="mb-1 block text-[11px] font-medium text-gray-500 dark:text-gray-400">Notes (optional)</span>
                           <input
