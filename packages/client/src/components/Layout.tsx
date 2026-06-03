@@ -29,6 +29,7 @@ interface LayoutProps {
   onAllWorkspacesClick?: () => void;
   onLaunchFailuresClick?: () => void;
   onWorktreeOverviewClick?: () => void;
+  onProjectHealthClick?: () => void;
   onSettingsClick?: () => void;
   isDark?: boolean;
   onThemeToggle?: () => void;
@@ -49,6 +50,7 @@ export function Layout({
   onAllWorkspacesClick,
   onLaunchFailuresClick,
   onWorktreeOverviewClick,
+  onProjectHealthClick,
   onSettingsClick,
   isDark,
   onThemeToggle,
@@ -291,6 +293,15 @@ export function Layout({
               </svg>
             </button>
             <button
+              onClick={onProjectHealthClick}
+              className="p-1.5 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700"
+              title="Project Health (p)"
+            >
+              <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            </button>
+            <button
               onClick={onThemeToggle}
               className="p-1.5 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700"
               title={isDark ? "Switch to light mode" : "Switch to dark mode"}
@@ -336,6 +347,7 @@ export function Layout({
                     { label: "All Workspaces", onClick: onAllWorkspacesClick },
                     { label: "Launch Failures", onClick: onLaunchFailuresClick },
                     { label: "Worktrees", onClick: onWorktreeOverviewClick },
+                    { label: "Project Health", onClick: onProjectHealthClick },
                     { label: isDark ? "Light mode" : "Dark mode", onClick: onThemeToggle },
                     { label: "Settings", onClick: onSettingsClick },
                   ].map((item) => (

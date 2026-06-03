@@ -13,6 +13,7 @@ import { buildSprintCapacityPlan } from "../services/sprint-capacity.service.js"
 import { generateBoardRiskDigest } from "../services/board-risk-digest.service.js";
 import { getWorkspaceLaunchFailures } from "../services/workspace-launch-failures.service.js";
 import { getWorkspaceRisk } from "../services/workspace-risk.service.js";
+import { getProjectHealth } from "../services/project-health.service.js";
 import type { BoardEvents } from "../services/board-events.js";
 import type { SessionManager } from "../services/session.manager.js";
 
@@ -236,6 +237,12 @@ export function createProjectsRoute(database: Database = db, options?: { boardEv
   // GET /api/projects/all/workspaces — cross-project workspace summary (all projects)
   router.get("/all/workspaces", async (c) => {
     const result = await projectService.getCrossProjectWorkspaces();
+    return c.json(result);
+  });
+
+  // GET /api/projects/health — aggregated health overview for all registered projects
+  router.get("/health", async (c) => {
+    const result = await getProjectHealth(database);
     return c.json(result);
   });
 
