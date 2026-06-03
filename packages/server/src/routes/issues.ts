@@ -16,6 +16,7 @@ import { createRouter } from "../middleware/create-router.js";
 import { wrapAiOperation } from "../middleware/ai-operation.js";
 import { runTicketPreflight, formatClarificationsBlock, type PreflightClarification } from "../services/ticket-preflight.service.js";
 import { WorkspaceError } from "../services/workspace-internals.js";
+import { getIssueActivity } from "../services/issue-activity.service.js";
 
 export function createIssuesRoute(database: Database = db, options?: { boardEvents?: BoardEvents; getSessionManager?: () => SessionManager }) {
   const router = createRouter();
@@ -225,6 +226,14 @@ export function createIssuesRoute(database: Database = db, options?: { boardEven
       runTicketPreflight(issueId, body.projectId, database, answered.length > 0 ? answered : undefined),
     );
     return c.json({ ...result, clarificationsBlock });
+  });
+
+  // GET /api/issues/:id/activity — chronological audit feed aggregated from workspaces/sessions/comments
+  router.get("/:id/activity", async (c) => {
+    const issueId = c.req.param("id");
+    const result = await getIssueActivity(issueId, database);
+    if (!result) return c.json({ error: "Issue not found" }, 404);
+    return c.json(result);
   });
 
   // GET /api/issues/:id/summary

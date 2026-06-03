@@ -4,6 +4,7 @@ import type { IssueArtifact, IssueWithStatus, UpdateIssueRequest, DependencyInfo
 import { apiFetch } from "../lib/api.js";
 import { isHttpUrl } from "../lib/url.js";
 import { formatRelativeTime } from "../lib/formatRelativeTime.js";
+import { IssueActivitySection, type ActivityEvent } from "./IssueActivitySection.js";
 import { showToast } from "./Toast.js";
 import { MoveToDoneDialog } from "./MoveToDoneDialog.js";
 import { WorkflowProgress } from "./WorkflowProgress.js";
@@ -339,6 +340,8 @@ export function IssueDetailPanel({
   const [artifactsLoading, setArtifactsLoading] = useState(true);
   const [expandedArtifactId, setExpandedArtifactId] = useState<string | null>(null);
   const [deletingArtifactId, setDeletingArtifactId] = useState<string | null>(null);
+  const [activityEvents, setActivityEvents] = useState<ActivityEvent[]>([]);
+  const [activityLoading, setActivityLoading] = useState(true);
 
   // Track unsaved changes for warning
   const hasChanges = editing && (
@@ -355,10 +358,11 @@ export function IssueDetailPanel({
   useEffect(() => {
     async function loadData() {
       setArtifactsLoading(true);
+      setActivityLoading(true);
       setArtifacts([]);
       setExpandedArtifactId(null);
       try {
-        const [ws, tags, available, deps, issues, skills, commentsResp, artifactsResp] = await Promise.all([
+        const [ws, tags, available, deps, issues, skills, commentsResp, artifactsResp, activityResp] = await Promise.all([
           apiFetch<{ id: string }[]>(`/api/issues/${issue.id}/workspaces`),
           apiFetch<{ id: string; name: string; color: string | null }[]>(`/api/issues/${issue.id}/tags`),
           apiFetch<{ id: string; name: string; color: string | null }[]>(`/api/tags`),
@@ -367,6 +371,7 @@ export function IssueDetailPanel({
           apiFetch<{ id: string; name: string; description: string }[]>(`/api/agent-skills?projectId=${issue.projectId}`).catch(() => [] as { id: string; name: string; description: string }[]),
           apiFetch<{ comments: IssueComment[] }>(`/api/issues/${issue.id}/comments`).catch(() => ({ comments: [] as IssueComment[] })),
           apiFetch<IssueArtifact[]>(`/api/issues/${issue.id}/artifacts`).catch(() => [] as IssueArtifact[]),
+          apiFetch<{ events: ActivityEvent[] }>(`/api/issues/${issue.id}/activity`).catch(() => ({ events: [] })),
         ]);
         setWorkspaceCount(ws.length);
         setIssueTags(tags);
@@ -376,13 +381,16 @@ export function IssueDetailPanel({
         setAvailableSkills(skills);
         setComments(commentsResp.comments);
         setArtifacts(artifactsResp);
+        setActivityEvents(activityResp.events);
         setArtifactsLoading(false);
+        setActivityLoading(false);
         // Check for active showdown
         apiFetch<{ id: string }>(`/api/issues/${issue.id}/showdown`)
           .then(sd => setActiveShowdownId(sd.id))
           .catch(() => {});
       } catch {
         setArtifactsLoading(false);
+        setActivityLoading(false);
         // Ignore — non-critical
       }
       // Load cached touched-files prediction (non-blocking, best-effort)
@@ -1839,6 +1847,11 @@ export function IssueDetailPanel({
               onCopy={handleCopyArtifact}
               onDelete={handleDeleteArtifact}
             />
+          )}
+
+          {/* Activity feed */}
+          {!editing && (
+            <IssueActivitySection events={activityEvents} loading={activityLoading} />
           )}
 
           {/* Workspace Files section — browses the latest workspace's working directory */}
