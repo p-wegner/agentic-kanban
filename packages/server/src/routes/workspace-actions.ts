@@ -117,6 +117,18 @@ export function createWorkspaceActionsRoute(
     return c.json(await workspaceService.mergeWorkspace(id));
   });
 
+  // GET /api/workspaces/:id/already-merged-status — check if branch is already merged without modifying state
+  router.get("/:id/already-merged-status", async (c) => {
+    const id = c.req.param("id");
+    return c.json(await workspaceService.checkAlreadyMerged(id));
+  });
+
+  // POST /api/workspaces/:id/reconcile-as-done — close a workspace whose branch is already on master
+  router.post("/:id/reconcile-as-done", async (c) => {
+    const id = c.req.param("id");
+    return c.json(await workspaceService.reconcileAlreadyMerged(id), 200);
+  });
+
   // GET /api/workspaces/:id/github-handoff-draft
   router.get("/:id/github-handoff-draft", async (c) => {
     const id = c.req.param("id");
