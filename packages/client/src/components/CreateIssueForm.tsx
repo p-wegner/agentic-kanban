@@ -4,6 +4,7 @@ import { apiFetch } from "../lib/api.js";
 import { isHttpUrl } from "../lib/url.js";
 import { showToast } from "./Toast.js";
 import TicketMentionInput from "./TicketMentionInput.js";
+import { useIssueTemplates } from "../hooks/useIssueTemplates.js";
 
 interface Skill {
   id: string;
@@ -63,6 +64,7 @@ export function CreateIssueForm({
   const [templates, setTemplates] = useState<WorkflowTemplate[]>([]);
   const [workflowTemplateId, setWorkflowTemplateId] = useState<string>("");
   const [autoTemplateId, setAutoTemplateId] = useState<string>("");
+  const { templates: issueTemplates } = useIssueTemplates();
   const titleRef = useRef<HTMLTextAreaElement>(null);
   const descRef = useRef<HTMLTextAreaElement>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -219,6 +221,24 @@ export function CreateIssueForm({
         rows={2}
         className="w-full text-xs border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500 resize-none overflow-y-hidden dark:bg-gray-900 dark:text-gray-100"
       />
+      {issueTemplates.length > 0 && (
+        <select
+          value=""
+          onChange={(e) => {
+            const tpl = issueTemplates.find((t) => t.id === e.target.value);
+            if (!tpl) return;
+            if (description.trim() && !window.confirm("Replace current description with the template?")) return;
+            setDescription(tpl.body);
+          }}
+          className="w-full text-xs border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500 dark:bg-gray-900 dark:text-gray-100"
+          title="Apply a template to the description"
+        >
+          <option value="">Template...</option>
+          {issueTemplates.map((t) => (
+            <option key={t.id} value={t.id}>{t.name}</option>
+          ))}
+        </select>
+      )}
       <div className="flex gap-2">
         <select
           value={issueType}
