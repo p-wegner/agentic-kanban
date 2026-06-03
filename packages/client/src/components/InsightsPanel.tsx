@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import { apiFetch } from "../lib/api.js";
 import { PRIMARY_SERIES } from "../lib/chartColors";
 
+type ProviderFilter = "all" | string;
+
 type InsightsRange = "7d" | "30d" | "90d" | "all";
 type SortDirection = "asc" | "desc";
 type MetricSortKey = "label" | "sessionCount" | "successRate" | "avgCost" | "totalCostUsd" | "avgTokens" | "avgTurns" | "durationsMsP50" | "durationsMsP95";
@@ -62,6 +64,20 @@ interface InsightsData {
     durationMs: number;
     success: boolean;
     startedAt: string;
+  }>;
+  byProviderProfile: Array<{
+    provider: string;
+    profile: string;
+    sessionCount: number;
+    successCount: number;
+    totalCostUsd: number;
+    totalInputTokens: number;
+    totalOutputTokens: number;
+    totalTurns: number;
+    durationsMsP50: number;
+    durationsMsP95: number;
+    avgDurationMs: number;
+    activeWorkspaceCount: number;
   }>;
   totals: {
     sessionCount: number;
@@ -414,6 +430,105 @@ function CostSparkline({ series }: { series: InsightsData["timeSeries"] }) {
   );
 }
 
+function ProviderProfileLedger({
+  rows,
+  providerFilter,
+  onProviderFilterChange,
+}: {
+  rows: InsightsData["byProviderProfile"];
+  providerFilter: ProviderFilter;
+  onProviderFilterChange: (provider: ProviderFilter) => void;
+}) {
+  const providers = useMemo(() => {
+    const set = new Set(rows.map((r) => r.provider));
+    return ["all", ...Array.from(set).sort()];
+  }, [rows]);
+
+  const filtered = useMemo(() => {
+    if (providerFilter === "all") return rows;
+    return rows.filter((r) => r.provider === providerFilter);
+  }, [rows, providerFilter]);
+
+  return (
+    <div className="rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 shadow-sm overflow-hidden">
+      <div className="border-b border-gray-200 dark:border-gray-800 px-4 py-3 flex items-center justify-between gap-3">
+        <div>
+          <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Token Budget by Provider / Profile</h3>
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Aggregated across sessions in the selected time window. Active = currently running workspaces.</p>
+        </div>
+        {providers.length > 2 && (
+          <div className="inline-flex items-center gap-1 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 p-1">
+            {providers.map((p) => (
+              <button
+                key={p}
+                type="button"
+                onClick={() => onProviderFilterChange(p)}
+                className={`px-2.5 py-1 text-xs rounded-md transition-colors capitalize ${providerFilter === p ? "bg-brand-600 text-white" : "text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700"}`}
+              >
+                {p}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+      <div className="overflow-x-auto">
+        <table className="min-w-full text-sm">
+          <thead className="bg-gray-50 dark:bg-gray-950/60 text-gray-600 dark:text-gray-400">
+            <tr>
+              <th className="px-4 py-3 text-left font-medium whitespace-nowrap">Provider</th>
+              <th className="px-4 py-3 text-left font-medium whitespace-nowrap">Profile</th>
+              <th className="px-4 py-3 text-right font-medium whitespace-nowrap">Active</th>
+              <th className="px-4 py-3 text-right font-medium whitespace-nowrap">Sessions</th>
+              <th className="px-4 py-3 text-right font-medium whitespace-nowrap">Success%</th>
+              <th className="px-4 py-3 text-right font-medium whitespace-nowrap">Total Cost</th>
+              <th className="px-4 py-3 text-right font-medium whitespace-nowrap">Avg Cost</th>
+              <th className="px-4 py-3 text-right font-medium whitespace-nowrap">Input Tokens</th>
+              <th className="px-4 py-3 text-right font-medium whitespace-nowrap">Output Tokens</th>
+              <th className="px-4 py-3 text-right font-medium whitespace-nowrap">Avg Turns</th>
+              <th className="px-4 py-3 text-right font-medium whitespace-nowrap">P50 Duration</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.length === 0 ? (
+              <tr>
+                <td colSpan={11} className="px-4 py-8 text-center text-gray-500 dark:text-gray-400">No session data in this range.</td>
+              </tr>
+            ) : filtered.map((row) => {
+              const avgCost = row.sessionCount > 0 ? row.totalCostUsd / row.sessionCount : 0;
+              const avgTurns = row.sessionCount > 0 ? row.totalTurns / row.sessionCount : 0;
+              const profileLabel = row.profile || "(default)";
+              return (
+                <tr key={`${row.provider}::${row.profile}`} className="border-t border-gray-100 dark:border-gray-800/80 text-gray-700 dark:text-gray-300">
+                  <td className="px-4 py-3 font-medium text-left text-gray-900 dark:text-gray-100 capitalize">{row.provider}</td>
+                  <td className="px-4 py-3 text-left text-gray-600 dark:text-gray-400 font-mono text-xs">{profileLabel}</td>
+                  <td className="px-4 py-3 text-right">
+                    {row.activeWorkspaceCount > 0 ? (
+                      <span className="inline-flex items-center gap-1">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                        <span>{row.activeWorkspaceCount}</span>
+                      </span>
+                    ) : (
+                      <span className="text-gray-400 dark:text-gray-600">—</span>
+                    )}
+                  </td>
+                  <td className="px-4 py-3 text-right">{row.sessionCount}</td>
+                  <td className="px-4 py-3 text-right">{formatSuccessRate(row.successCount, row.sessionCount)}</td>
+                  <td className="px-4 py-3 text-right font-medium">{formatCurrency(row.totalCostUsd)}</td>
+                  <td className="px-4 py-3 text-right">{formatCurrency(avgCost)}</td>
+                  <td className="px-4 py-3 text-right">{formatTokens(row.totalInputTokens)}</td>
+                  <td className="px-4 py-3 text-right">{formatTokens(row.totalOutputTokens)}</td>
+                  <td className="px-4 py-3 text-right">{avgTurns.toFixed(1)}</td>
+                  <td className="px-4 py-3 text-right">{formatDuration(row.durationsMsP50)}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 export function InsightsPanel({ projectId, onSessionClick }: InsightsPanelProps) {
   const [range, setRange] = useState<InsightsRange>("30d");
   const [data, setData] = useState<InsightsData | null>(null);
@@ -421,6 +536,7 @@ export function InsightsPanel({ projectId, onSessionClick }: InsightsPanelProps)
   const [error, setError] = useState<string | null>(null);
   const [skillSort, setSkillSort] = useState<SortState>({ key: "totalCostUsd", direction: "desc" });
   const [modelSort, setModelSort] = useState<SortState>({ key: "totalCostUsd", direction: "desc" });
+  const [providerFilter, setProviderFilter] = useState<ProviderFilter>("all");
 
   useEffect(() => {
     if (!projectId) {
@@ -525,6 +641,12 @@ export function InsightsPanel({ projectId, onSessionClick }: InsightsPanelProps)
               <SummaryCard label="Total Cost" value={formatCurrency(data.totals.totalCostUsd)} />
               <SummaryCard label="Total Tokens" value={formatTokens(data.totals.totalTokens)} />
             </div>
+
+            <ProviderProfileLedger
+              rows={data.byProviderProfile ?? []}
+              providerFilter={providerFilter}
+              onProviderFilterChange={setProviderFilter}
+            />
 
             <SortableMetricTable
               title="By Skill"

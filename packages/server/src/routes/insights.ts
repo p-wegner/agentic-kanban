@@ -1,4 +1,4 @@
-import { and, eq, gte } from "drizzle-orm";
+import { and, eq, gte, inArray } from "drizzle-orm";
 import { agentSkills, issues, sessions, workspaces } from "@agentic-kanban/shared/schema";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
@@ -59,6 +59,12 @@ interface PriorityBucket {
   totalCostUsd: number;
   totalInputTokens: number;
   totalOutputTokens: number;
+}
+
+interface ProviderProfileBucket extends AggregateBucket {
+  provider: string;
+  profile: string;
+  activeWorkspaceIds: Set<string>;
 }
 
 interface TimeSeriesBucket {
@@ -130,6 +136,20 @@ interface InsightsData {
     durationMs: number;
     success: boolean;
     startedAt: string;
+  }>;
+  byProviderProfile: Array<{
+    provider: string;
+    profile: string;
+    sessionCount: number;
+    successCount: number;
+    totalCostUsd: number;
+    totalInputTokens: number;
+    totalOutputTokens: number;
+    totalTurns: number;
+    durationsMsP50: number;
+    durationsMsP95: number;
+    avgDurationMs: number;
+    activeWorkspaceCount: number;
   }>;
   totals: {
     sessionCount: number;
@@ -268,6 +288,8 @@ export function createInsightsRoute(database: Database = db) {
         exitCode: sessions.exitCode,
         wsModel: workspaces.model,
         wsSkillId: workspaces.skillId,
+        wsProvider: workspaces.provider,
+        wsClaudeProfile: workspaces.claudeProfile,
         sessionSkillId: sessions.skillId,
         sessionSkillName: sessions.skillName,
         issueType: issues.issueType,
@@ -283,12 +305,42 @@ export function createInsightsRoute(database: Database = db) {
       .leftJoin(agentSkills, eq(workspaces.skillId, agentSkills.id))
       .where(whereClause);
 
+    // Fetch active workspace IDs grouped by provider/profile for the ledger
+    const activeWorkspaceRows = await database
+      .select({
+        id: workspaces.id,
+        provider: workspaces.provider,
+        claudeProfile: workspaces.claudeProfile,
+      })
+      .from(workspaces)
+      .innerJoin(issues, eq(workspaces.issueId, issues.id))
+      .where(and(
+        eq(issues.projectId, projectId),
+        inArray(workspaces.status, ["active", "fixing"]),
+      ));
+
     const bySkill = new Map<string, SkillBucket>();
     const byModel = new Map<string, ModelBucket>();
     const byIssueType = new Map<string, IssueTypeBucket>();
     const byPriority = new Map<string, PriorityBucket>();
+    const byProviderProfile = new Map<string, ProviderProfileBucket>();
     const timeSeries = new Map<string, TimeSeriesBucket>();
     const topExpensive: InsightsData["topExpensive"] = [];
+
+    // Pre-build a map from provider/profile key to active workspace IDs so the
+    // ledger shows currently-running workspace counts separately from session history.
+    const activeWorkspaceByKey = new Map<string, { wsIds: Set<string>; provider: string; profile: string }>();
+    for (const ws of activeWorkspaceRows) {
+      const provider = ws.provider ?? "unknown";
+      const profile = ws.claudeProfile ?? "";
+      const key = `${provider}::${profile}`;
+      const existing = activeWorkspaceByKey.get(key);
+      if (existing) {
+        existing.wsIds.add(ws.id);
+      } else {
+        activeWorkspaceByKey.set(key, { wsIds: new Set([ws.id]), provider, profile });
+      }
+    }
 
     let totalCostUsd = 0;
     let totalTokens = 0;
@@ -366,6 +418,18 @@ export function createInsightsRoute(database: Database = db) {
       }
       byPriority.set(row.issuePriority, priorityBucket);
 
+      const provider = row.wsProvider ?? "unknown";
+      const profile = row.wsClaudeProfile ?? "";
+      const ppKey = `${provider}::${profile}`;
+      const ppBucket = byProviderProfile.get(ppKey) ?? {
+        provider,
+        profile,
+        activeWorkspaceIds: new Set<string>(),
+        ...createAggregateBucket(),
+      };
+      applyAggregate(ppBucket, stats, success);
+      byProviderProfile.set(ppKey, ppBucket);
+
       const timeSeriesBucket = timeSeries.get(dateKey) ?? {
         date: dateKey,
         sessionCount: 0,
@@ -415,6 +479,22 @@ export function createInsightsRoute(database: Database = db) {
       });
     }
 
+    // Merge active workspace IDs into buckets. Also ensure buckets exist for
+    // provider/profile combos with active workspaces but no sessions in the range.
+    for (const [key, { wsIds, provider, profile }] of activeWorkspaceByKey) {
+      const existing = byProviderProfile.get(key);
+      if (existing) {
+        for (const id of wsIds) existing.activeWorkspaceIds.add(id);
+      } else {
+        byProviderProfile.set(key, {
+          provider,
+          profile,
+          activeWorkspaceIds: wsIds,
+          ...createAggregateBucket(),
+        });
+      }
+    }
+
     const response: InsightsData = {
       bySkill: [...bySkill.values()]
         .map((bucket) => ({
@@ -433,6 +513,14 @@ export function createInsightsRoute(database: Database = db) {
         .sort((a, b) => b.totalCostUsd - a.totalCostUsd || b.sessionCount - a.sessionCount || a.issueType.localeCompare(b.issueType)),
       byPriority: [...byPriority.values()]
         .sort((a, b) => b.totalCostUsd - a.totalCostUsd || b.sessionCount - a.sessionCount || a.priority.localeCompare(b.priority)),
+      byProviderProfile: [...byProviderProfile.values()]
+        .map((bucket) => ({
+          provider: bucket.provider,
+          profile: bucket.profile,
+          activeWorkspaceCount: bucket.activeWorkspaceIds.size,
+          ...finalizeAggregate(bucket),
+        }))
+        .sort((a, b) => b.totalCostUsd - a.totalCostUsd || b.sessionCount - a.sessionCount || a.provider.localeCompare(b.provider) || a.profile.localeCompare(b.profile)),
       timeSeries: filledTimeSeries,
       topExpensive: topExpensive
         .sort((a, b) => b.totalCostUsd - a.totalCostUsd || b.totalTokens - a.totalTokens || a.startedAt.localeCompare(b.startedAt))
