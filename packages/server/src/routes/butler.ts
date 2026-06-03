@@ -204,8 +204,9 @@ export function createButlerRoute(
       .replace(/\{\{boardGuidePath}}/g, boardGuidePath);
   }
 
-  /** Resolve the Butler's backend/profile from the global agent provider, with a per-project profile override. */
-  async function resolveButlerBackend(projectId: string): Promise<{
+  /** Resolve the Butler's backend/profile from the global agent provider, with a per-project profile override.
+   *  If `butlerProvider` is set (from the butler definition), it overrides the global provider. */
+  async function resolveButlerBackend(projectId: string, butlerProvider?: "claude" | "codex"): Promise<{
     provider: Extract<ProviderName, "claude" | "codex">;
     selectedProfile: string | undefined;
     globalProfile: string;
@@ -216,7 +217,8 @@ export function createButlerRoute(
   }> {
     const settings = await loadAgentSettings(database);
     const perProject = await getPreference(butlerProfilePrefKey(projectId), database);
-    const provider = settings.provider === "codex" ? "codex" : "claude";
+    const globalProvider: "claude" | "codex" = settings.provider === "codex" ? "codex" : "claude";
+    const provider = butlerProvider ?? globalProvider;
     const availableProfiles = provider === "codex" ? preferenceService.listCodexProfiles() : preferenceService.listClaudeProfiles();
     const profileOverride = perProject && availableProfiles.includes(perProject) ? perProject : undefined;
     const globalProfile = settings.profile?.provider === provider ? settings.profile.name : "";
@@ -235,9 +237,10 @@ export function createButlerRoute(
   async function startSession(projectId: string, butlerId: string = "default") {
     const project = await resolveProject(projectId);
     if (!project) return null;
-    const backend = await resolveButlerBackend(projectId);
+    const def = await getButlerDefinition(database, butlerId);
+    const backend = await resolveButlerBackend(projectId, def?.provider);
     // Model is a property of the (global) butler definition, not a per-project pref.
-    const model = normalizeModelForBackend((await getButlerDefinition(database, butlerId))?.model, backend.provider) || undefined;
+    const model = normalizeModelForBackend(def?.model, backend.provider) || undefined;
     const resumeSessionId = (await getPreference(butlerSessionPrefKey(projectId, butlerId), database)) || undefined;
     const systemPromptAppend = await resolveButlerPrompt(projectId, project.name, project.repoPath);
     const wasActive = getButlerSession(projectId, butlerId).active;
@@ -273,10 +276,11 @@ export function createButlerRoute(
     const projectId = c.req.param("id");
     const defs = await listButlerDefinitions(database);
     const states = new Map(listProjectButlerStates(projectId).map((s) => [s.butlerId, s]));
-    const backend = await resolveButlerBackend(projectId);
-    const butlers = defs.map((d) => {
+    const globalBackend = await resolveButlerBackend(projectId);
+    const butlers = await Promise.all(defs.map(async (d) => {
       const st = states.get(d.id);
-      const itemBackend = st?.backend ?? backend.provider;
+      // Prefer: active session's backend → per-butler provider → global provider
+      const itemBackend = st?.backend ?? d.provider ?? globalBackend.provider;
       return {
         id: d.id,
         name: d.name,
@@ -288,8 +292,9 @@ export function createButlerRoute(
         sessionId: st?.sessionId ?? null,
         mcpConnected: st?.mcpConnected,
         backend: itemBackend,
+        provider: d.provider ?? null,
       };
-    });
+    }));
     return c.json({ butlers });
   });
 
@@ -299,10 +304,11 @@ export function createButlerRoute(
     const butlerId = resolveButlerId(c);
     const state = getButlerSession(projectId, butlerId);
     const persisted = (await getPreference(butlerSessionPrefKey(projectId, butlerId), database)) || null;
-    const backend = await resolveButlerBackend(projectId);
+    const def = await getButlerDefinition(database, butlerId);
+    const backend = await resolveButlerBackend(projectId, def?.provider);
     const effectiveBackend = state.active ? state.backend : backend.provider;
     // Model is sourced from the butler definition (global), profile from the project pref.
-    const selectedModel = normalizeModelForBackend((await getButlerDefinition(database, butlerId))?.model, effectiveBackend);
+    const selectedModel = normalizeModelForBackend(def?.model, effectiveBackend);
     return c.json({
       butlerId,
       backend: effectiveBackend,
@@ -343,11 +349,13 @@ export function createButlerRoute(
     return c.json({ commands });
   });
 
-  // GET /api/projects/:id/butler/profiles — available Claude profiles + the butler's
-  // current selection ("" = inherit the global claude_profile).
+  // GET /api/projects/:id/butler/profiles — available profiles + the butler's
+  // current selection ("" = inherit the global profile).
   router.get("/:id/butler/profiles", async (c) => {
     const projectId = c.req.param("id");
-    const backend = await resolveButlerBackend(projectId);
+    const butlerId = resolveButlerId(c);
+    const def = await getButlerDefinition(database, butlerId);
+    const backend = await resolveButlerBackend(projectId, def?.provider);
     const profiles = backend.provider === "codex" ? preferenceService.listCodexProfiles() : preferenceService.listClaudeProfiles();
     return c.json({ provider: backend.provider, profiles, selected: backend.selectedProfile ?? "", globalDefault: backend.globalProfile });
   });
