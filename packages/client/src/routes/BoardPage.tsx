@@ -56,6 +56,7 @@ import { RunQueueForecastPanel, buildRunQueueForecast } from "../components/RunQ
 import { CodemodPanel } from "../components/CodemodPanel.js";
 import { TranscriptSearchPanel } from "../components/TranscriptSearchPanel.js";
 import { WorkspaceLaunchFailuresPanel } from "../components/WorkspaceLaunchFailuresPanel.js";
+import { ProjectHealthOverview } from "../components/ProjectHealthOverview.js";
 import type { MonitorStatus } from "../components/MonitorPopover.js";
 import type { BoardViewState, SavedViewReference } from "../lib/boardSavedViews.js";
 import type {
@@ -127,6 +128,7 @@ export function BoardPage() {
   const [showCleanupQueue, setShowCleanupQueue] = useState(false);
   const [showFileContention, setShowFileContention] = useState(false);
   const [showTranscriptSearch, setShowTranscriptSearch] = useState(false);
+  const [showProjectHealth, setShowProjectHealth] = useState(false);
   const [showCommandPalette, setShowCommandPalette] = useState(false);
   const [showShortcutHelp, setShowShortcutHelp] = useState(false);
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(
@@ -1245,6 +1247,10 @@ export function BoardPage() {
           setShowCodemod(false);
           return;
         }
+        if (showProjectHealth) {
+          setShowProjectHealth(false);
+          return;
+        }
         if (searchQuery) {
           setSearchQuery("");
           document.getElementById("search-input")?.blur();
@@ -1321,6 +1327,13 @@ export function BoardPage() {
         setShowCodemod((prev) => !prev);
         return;
       }
+      // "p" to open Project Health Overview
+      if (e.key === "p" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        if (isTextEntryTarget(e.target)) return;
+        e.preventDefault();
+        setShowProjectHealth((prev) => !prev);
+        return;
+      }
       // "V" (shift+v) to trigger voice inbox
       if (e.key === "V" && e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
         if (isTextEntryTarget(e.target)) return;
@@ -1343,7 +1356,7 @@ export function BoardPage() {
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [searchQuery, showCommandPalette, showAllWorkspaces, showLaunchFailures, showCleanupQueue, showFileContention, showTranscriptSearch, showWorktreeOverview, showShortcutHelp, showQuickTasks, showRunQueueForecast, showCodemod, filteredColumns, columns, handleViewModeChange, setShowQuickTasks, setShowSettings]);
+  }, [searchQuery, showCommandPalette, showAllWorkspaces, showLaunchFailures, showCleanupQueue, showFileContention, showTranscriptSearch, showWorktreeOverview, showShortcutHelp, showQuickTasks, showRunQueueForecast, showCodemod, showProjectHealth, filteredColumns, columns, handleViewModeChange, setShowQuickTasks, setShowSettings]);
 
   // Register command palette actions
   useEffect(() => {
@@ -1447,6 +1460,16 @@ export function BoardPage() {
       icon: "⎇",
       category: "navigation",
       handler: () => setShowWorktreeOverview(true),
+    }));
+
+    unregisters.push(registerAction({
+      id: "view-project-health",
+      label: "Project Health Overview",
+      description: "See all registered projects with issue counts and warning states",
+      icon: "◎",
+      shortcut: "p",
+      category: "navigation",
+      handler: () => setShowProjectHealth(true),
     }));
 
     unregisters.push(registerAction({
@@ -1616,6 +1639,7 @@ export function BoardPage() {
       onAllWorkspacesClick={() => setShowAllWorkspaces(true)}
       onLaunchFailuresClick={() => setShowLaunchFailures(true)}
       onWorktreeOverviewClick={() => setShowWorktreeOverview(true)}
+      onProjectHealthClick={() => setShowProjectHealth(true)}
       isDark={isDark}
       onThemeToggle={() => setTheme(isDark ? "light" : "dark")}
     >
@@ -2206,6 +2230,13 @@ export function BoardPage() {
             setShowWorktreeOverview(false);
           }}
           onWorkspaceChange={() => refetchBoard()}
+        />
+      )}
+      {showProjectHealth && (
+        <ProjectHealthOverview
+          activeProjectId={activeProjectId}
+          onProjectChange={handleProjectChange}
+          onClose={() => setShowProjectHealth(false)}
         />
       )}
       {showCommandPalette && (
