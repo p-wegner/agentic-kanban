@@ -5,6 +5,18 @@ import { apiFetch } from "../lib/api.js";
 import type { OrchestratorStatus } from "../hooks/useOrchestrator.js";
 import { MonitorActionReplayDrawer, type ReplayTarget } from "./MonitorActionReplayDrawer.js";
 
+type MonitorTunables = {
+  activeAgentsTarget: number;
+  backlogFloor: number;
+  maxNewStartsPerCycle: number;
+  refillFocus: string;
+};
+
+type ResolvedTunables = {
+  tunables: MonitorTunables;
+  source: "strategy" | "prefs";
+};
+
 export type MonitorAction = {
   at: string;
   action: "relaunch" | "merge" | "nudge" | "mark_idle" | "mark_dead" | "auto_start" | "generate_tickets";
@@ -126,6 +138,7 @@ export function MonitorPopover({
   const [healthEventsLoading, setHealthEventsLoading] = useState(false);
   const [healthEventsError, setHealthEventsError] = useState<string | null>(null);
   const [replayTarget, setReplayTarget] = useState<ReplayTarget | null>(null);
+  const [resolvedTunables, setResolvedTunables] = useState<ResolvedTunables | null>(null);
 
   async function loadHealthEvents() {
     if (!projectId) {
@@ -163,6 +176,13 @@ export function MonitorPopover({
 
   useEffect(() => {
     loadHealthEvents();
+  }, [projectId]);
+
+  useEffect(() => {
+    if (!projectId) { setResolvedTunables(null); return; }
+    apiFetch<ResolvedTunables>(`/api/projects/${projectId}/monitor-tunables`)
+      .then((data) => setResolvedTunables(data))
+      .catch(() => setResolvedTunables(null));
   }, [projectId]);
 
   useEffect(() => {
@@ -430,6 +450,37 @@ export function MonitorPopover({
             onOpenReplay={(event) => setReplayTarget({ kind: "event", event, projectId: projectId! })}
           />
 
+          {/* Effective tunables (resolved source) */}
+          {resolvedTunables && (
+            <div className="px-3 py-2.5 border-b border-gray-100 dark:border-gray-800">
+              <div className="flex items-center justify-between mb-1.5">
+                <div className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">Effective targets</div>
+                <span
+                  className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ${resolvedTunables.source === "strategy" ? "bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300" : "bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400"}`}
+                  title={resolvedTunables.source === "strategy" ? "Values come from Strategy Bullseye" : "Values come from legacy WIP limit pref"}
+                >
+                  {resolvedTunables.source === "strategy" ? "Strategy Bullseye" : "Legacy prefs"}
+                </span>
+              </div>
+              <div className="grid grid-cols-3 gap-1.5">
+                <div className="rounded-md bg-gray-50 dark:bg-gray-800 px-2 py-1">
+                  <div className="text-[10px] text-gray-400 dark:text-gray-500">Agents target</div>
+                  <div className="font-semibold text-gray-700 dark:text-gray-300">{resolvedTunables.tunables.activeAgentsTarget}</div>
+                </div>
+                <div className="rounded-md bg-gray-50 dark:bg-gray-800 px-2 py-1">
+                  <div className="text-[10px] text-gray-400 dark:text-gray-500">Backlog floor</div>
+                  <div className="font-semibold text-gray-700 dark:text-gray-300">{resolvedTunables.tunables.backlogFloor}</div>
+                </div>
+                <div className="rounded-md bg-gray-50 dark:bg-gray-800 px-2 py-1">
+                  <div className="text-[10px] text-gray-400 dark:text-gray-500">Max starts</div>
+                  <div className="font-semibold text-gray-700 dark:text-gray-300">
+                    {Number.isFinite(resolvedTunables.tunables.maxNewStartsPerCycle) ? resolvedTunables.tunables.maxNewStartsPerCycle : "∞"}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Settings */}
           <div className="px-3 py-2.5 space-y-2.5 rounded-b-xl">
             <div className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">Settings</div>
@@ -459,19 +510,26 @@ export function MonitorPopover({
               </button>
             </div>
             {nudgeAutoStart && autoMonitor && (
-              <div className="flex items-center gap-2 pl-2.5 border-l-2 border-emerald-200 dark:border-green-800 ml-0.5">
-                <label className="text-gray-500 dark:text-gray-400 flex-1 text-[11px]">WIP limit</label>
-                <div className="flex items-center gap-1.5">
-                  <input
-                    type="number"
-                    min={1}
-                    max={20}
-                    value={nudgeWipLimit}
-                    onChange={(e) => onNudgeWipLimitChange(e.target.value)}
-                    className="w-12 border border-gray-200 dark:border-gray-700 rounded-md px-2 py-1 text-center text-[11px] focus:outline-none focus:ring-1 focus:ring-emerald-400"
-                  />
-                  <span className="text-gray-500 dark:text-gray-400 text-[11px]">in progress</span>
+              <div className="flex flex-col gap-1.5 pl-2.5 border-l-2 border-emerald-200 dark:border-green-800 ml-0.5">
+                <div className="flex items-center gap-2">
+                  <label className="text-gray-500 dark:text-gray-400 flex-1 text-[11px]">WIP limit</label>
+                  <div className="flex items-center gap-1.5">
+                    <input
+                      type="number"
+                      min={1}
+                      max={20}
+                      value={nudgeWipLimit}
+                      onChange={(e) => onNudgeWipLimitChange(e.target.value)}
+                      className={`w-12 border rounded-md px-2 py-1 text-center text-[11px] focus:outline-none focus:ring-1 focus:ring-emerald-400 ${resolvedTunables?.source === "strategy" ? "opacity-50 border-gray-200 dark:border-gray-700" : "border-gray-200 dark:border-gray-700"}`}
+                    />
+                    <span className="text-gray-500 dark:text-gray-400 text-[11px]">in progress</span>
+                  </div>
                 </div>
+                {resolvedTunables?.source === "strategy" && (
+                  <p className="text-[10px] text-indigo-600 dark:text-indigo-400 leading-snug">
+                    Overridden by Strategy Bullseye (effective: {resolvedTunables.tunables.activeAgentsTarget})
+                  </p>
+                )}
               </div>
             )}
           </div>
