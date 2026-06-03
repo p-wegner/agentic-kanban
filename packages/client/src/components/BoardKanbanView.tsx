@@ -42,6 +42,8 @@ export interface BoardKanbanViewProps {
   selectedIssueIds?: Set<string>;
   allProjectTags?: ProjectTag[];
   quickUpdate?: QuickUpdateCallbacks;
+  wipLimits?: Record<string, number | null>;
+  onSetWipLimit?: (statusId: string, limit: number | null) => void;
 }
 
 export function BoardKanbanView({
@@ -78,6 +80,8 @@ export function BoardKanbanView({
   selectedIssueIds,
   allProjectTags,
   quickUpdate,
+  wipLimits,
+  onSetWipLimit,
 }: BoardKanbanViewProps) {
   // Below sm, columns stack vertically and the board scrolls down through them
   // (instead of a horizontal one-column-at-a-time swipe, where an empty column
@@ -155,6 +159,8 @@ export function BoardKanbanView({
               selectedIssueIds={selectedIssueIds}
               allProjectTags={allProjectTags}
               quickUpdate={quickUpdate}
+              wipLimit={wipLimits?.[col.id]}
+              onSetWipLimit={onSetWipLimit}
             >
               <CreateIssueForm
                 projectId={projectId}
