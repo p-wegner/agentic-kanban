@@ -4,6 +4,21 @@ import type { LiveSessionStats, TodoItem } from "../lib/useBoardEvents.js";
 import { IssueCard, type ProjectTag, type QuickUpdateCallbacks } from "./IssueCard.js";
 import { evaluateWipLimit } from "../lib/wipLimits.js";
 
+const ESTIMATE_POINTS: Record<string, number> = { XS: 1, S: 2, M: 3, L: 5, XL: 8 };
+
+function computeColumnEstimate(issues: IssueWithStatus[]): { total: number; unestimated: number } {
+  let total = 0;
+  let unestimated = 0;
+  for (const issue of issues) {
+    if (issue.estimate && ESTIMATE_POINTS[issue.estimate] != null) {
+      total += ESTIMATE_POINTS[issue.estimate];
+    } else {
+      unestimated++;
+    }
+  }
+  return { total, unestimated };
+}
+
 type SortMode = "default" | "type";
 
 const ISSUE_TYPE_ORDER: Record<string, number> = {
@@ -212,6 +227,7 @@ export function BoardColumn({
   const isCreating = creatingInColumn === column.id;
   const displayedIssues = sortIssues(column.issues, sortMode);
   const wipStatus = evaluateWipLimit(column.issues.length, wipLimit ?? null);
+  const estimateRollup = computeColumnEstimate(column.issues);
 
   const columnStyle: React.CSSProperties = width != null
     ? { width, minWidth: 160, maxWidth: 800, flexShrink: 0, ...style }
@@ -260,6 +276,13 @@ export function BoardColumn({
           </h2>
           {column.name === "AI Reviewed" && (
             <span className="text-[10px] text-accent-700 dark:text-accent-300 font-medium">Awaiting manual merge</span>
+          )}
+          {column.issues.length > 0 && (
+            <span className="text-[10px] text-ink-faint dark:text-gray-500">
+              {estimateRollup.total > 0 ? `${estimateRollup.total} pts` : ""}
+              {estimateRollup.total > 0 && estimateRollup.unestimated > 0 ? " · " : ""}
+              {estimateRollup.unestimated > 0 ? `${estimateRollup.unestimated} unestimated` : ""}
+            </span>
           )}
         </div>
         <div className="flex items-center gap-1">
