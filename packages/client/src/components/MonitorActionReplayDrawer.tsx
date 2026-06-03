@@ -228,7 +228,7 @@ function EventView({ event, projectId, onClose }: {
       {loading && (
         <div className="text-xs text-gray-400 dark:text-gray-500">Loading details...</div>
       )}
-      {err && (
+      {err !== null && (
         <div className="text-xs text-red-600 dark:text-red-400">{err}</div>
       )}
 
