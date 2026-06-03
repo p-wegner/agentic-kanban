@@ -398,6 +398,14 @@ export function createIssuesRoute(database: Database = db, options?: { boardEven
     return c.json(comment, 201);
   });
 
+  // DELETE /api/issues/:id/comments/:commentId
+  router.delete("/:id/comments/:commentId", async (c) => {
+    const issueId = c.req.param("id");
+    const commentId = c.req.param("commentId");
+    await issueCommentsService.removeComment(issueId, commentId);
+    return c.json({ success: true });
+  });
+
   // POST /api/issues/:id/showdown — start a showdown with N contestants
   router.post("/:id/showdown", async (c) => {
     const issueId = c.req.param("id");

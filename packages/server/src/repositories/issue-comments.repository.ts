@@ -51,3 +51,10 @@ export async function getIssueComments(
     .where(eq(issueComments.issueId, issueId))
     .orderBy(issueComments.createdAt);
 }
+
+export async function deleteIssueComment(
+  commentId: string,
+  database: Database = db,
+): Promise<void> {
+  await database.delete(issueComments).where(eq(issueComments.id, commentId));
+}

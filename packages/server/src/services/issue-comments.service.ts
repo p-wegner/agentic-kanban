@@ -4,6 +4,7 @@ import { getIssueProjectId } from "../repositories/issue.repository.js";
 import {
   insertIssueComment,
   getIssueComments,
+  deleteIssueComment,
   type AddIssueCommentInput,
   type IssueCommentRow,
 } from "../repositories/issue-comments.repository.js";
@@ -55,7 +56,13 @@ export function createIssueCommentsService(deps: {
     return rows.map(toApiComment);
   }
 
-  return { addComment, listComments };
+  async function removeComment(issueId: string, commentId: string): Promise<void> {
+    await deleteIssueComment(commentId, database);
+    const projectId = await getIssueProjectId(issueId, database);
+    if (projectId) boardEvents?.broadcast(projectId, "issue_updated");
+  }
+
+  return { addComment, listComments, removeComment };
 }
 
 export type IssueCommentsService = ReturnType<typeof createIssueCommentsService>;
